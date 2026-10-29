@@ -1,0 +1,87 @@
+# Controls: which keys, mouse buttons and gamepad buttons do each action.
+#
+# Mods and players can change any line. Each action takes a list, so one
+# action can have several keys. An action left out has no key. A misspelt
+# action or key name stops the game with a message naming it.
+#
+# The keyboard and mouse defaults are the original PC game's
+# (GameData/System/DefaultCtrl.ini). Key names are Bevy's: KeyA..KeyZ,
+# Digit0..Digit9, F1..F12, Space, Enter, Escape, Tab, ShiftLeft, ControlLeft,
+# AltLeft, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Backspace, and so on.
+# Mouse names: Left, Right, Middle, Back, Forward, WheelUp, WheelDown.
+# Gamepad names: South (A / Cross), East (B / Circle), West (X / Square),
+# North (Y / Triangle), LeftTrigger (LB), LeftTrigger2 (LT), RightTrigger,
+# RightTrigger2, Select, Start, LeftThumb, RightThumb, DPadUp, DPadDown,
+# DPadLeft, DPadRight.
+
+[keyboard]
+move_forward = ["KeyW", "ArrowUp"]
+move_back = ["KeyS", "ArrowDown"]
+strafe_left = ["KeyA", "ArrowLeft"]
+strafe_right = ["KeyD", "ArrowRight"]
+jump = ["Space"]
+crouch = ["KeyC"]
+walk = ["ShiftLeft", "ShiftRight"]
+alt_fire = ["KeyE"]
+reload = ["KeyR"]
+next_grenade = ["KeyQ"]
+next_weapon = ["Slash"]
+zoom = ["KeyZ"]
+use = ["KeyF", "Enter"]
+squad_command = ["KeyF"]
+flashlight = ["KeyX"]
+squad_search_and_destroy = ["F1"]
+squad_form_up = ["F2"]
+squad_secure_position = ["F3"]
+squad_cancel = ["F4"]
+pause = ["Escape", "Pause"]
+menu_up = ["ArrowUp", "KeyW"]
+menu_down = ["ArrowDown", "KeyS"]
+menu_left = ["ArrowLeft", "KeyA"]
+menu_right = ["ArrowRight", "KeyD"]
+menu_accept = ["Enter", "Space"]
+menu_back = ["Escape", "Backspace"]
+
+[mouse]
+fire = ["Left"]
+throw_grenade = ["Right"]
+zoom = ["Middle"]
+next_weapon = ["WheelUp"]
+prev_weapon = ["WheelDown"]
+
+# Our own choice (the PC original had no gamepad layout), modelled on the
+# Xbox version's: triggers fire and throw, sticks move and look.
+[gamepad]
+fire = ["RightTrigger2"]
+throw_grenade = ["LeftTrigger2"]
+alt_fire = ["LeftTrigger"]
+melee = ["RightThumb"]
+jump = ["South"]
+crouch = ["LeftThumb"]
+reload = ["West"]
+use = ["West"]
+squad_command = ["West"]
+next_weapon = ["North"]
+next_grenade = ["RightTrigger"]
+zoom = ["East"]
+squad_search_and_destroy = ["DPadUp"]
+squad_form_up = ["DPadDown"]
+squad_secure_position = ["DPadRight"]
+squad_cancel = ["DPadLeft"]
+pause = ["Start"]
+menu_up = ["DPadUp"]
+menu_down = ["DPadDown"]
+menu_left = ["DPadLeft"]
+menu_right = ["DPadRight"]
+menu_accept = ["South"]
+menu_back = ["East"]
+
+# Sticks: "left" or "right" (or "none").
+[gamepad_sticks]
+move = "left"
+look = "right"
+
+# Touch screens (phones and tablets): drag on the left half of the screen to
+# move, drag on the right half to look, tap the right half to fire.
+[touch]
+enabled = true

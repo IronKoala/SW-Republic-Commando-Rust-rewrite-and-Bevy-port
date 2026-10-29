@@ -40,6 +40,8 @@ pub struct Batch {
     pub two_sided: bool,
     /// True for static mesh triangles, false for BSP ones.
     pub from_mesh: bool,
+    /// Part of the sky box (the sky zone), seen only through the sky camera.
+    pub sky: bool,
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
@@ -97,6 +99,42 @@ pub struct Stats {
     pub floor_test_meshes: FloorTest,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
+    /// Blocking volumes (invisible walls): read, stopping players, stopping
+    /// the AI, failed to read, and with a scale we don't apply.
+    pub blocking_volumes: usize,
+    pub volumes_block_players: usize,
+    pub volumes_block_actors: usize,
+    pub volume_failures: Vec<String>,
+    pub volumes_scaled: usize,
+    /// PathNodes and PlayerStarts inside a volume that stops players. The AI
+    /// walks between path points, so a correctly placed volume should hold
+    /// none (or almost none) of them.
+    pub path_points_in_volumes: usize,
+    /// Volumes with a path point within 512 units of their bounding box.
+    /// Invisible walls are put next to where people walk, so most should
+    /// be (about 63% across the game; 9% if they were left unplaced).
+    pub volumes_near_paths: usize,
+    /// Sky: BSP polygons and props in the sky zone, and "fake backdrop"
+    /// polygons left out so the sky shows through them.
+    /// Props with no model in the map that take their class's default model
+    /// (included in `mesh_actors`).
+    pub class_mesh_actors: usize,
+    pub sky_polygons: usize,
+    pub sky_props: usize,
+    pub backdrop_polygons: usize,
+}
+
+/// Where the sky camera stands: the map's `SkyZoneInfo`. Unreal 2 draws a
+/// level's sky by looking out from this point, inside a small box (the sky
+/// zone) somewhere far from the playing area, turned the same way as the
+/// player's view but never moving with them. That makes the sky look
+/// infinitely far away.
+pub struct Sky {
+    /// Bevy position.
+    pub position: [f32; 3],
+    /// The sky zone's number in the BSP.
+    pub zone: u8,
+    pub from: String,
 }
 
 pub struct Spawn {
@@ -115,6 +153,8 @@ pub struct Scene {
     pub lights: Vec<Light>,
     pub stats: Stats,
     pub spawn: Spawn,
+    /// `None` when the map has no `SkyZoneInfo`.
+    pub sky: Option<Sky>,
 }
 
 #[derive(Default)]
@@ -123,8 +163,9 @@ struct Builder {
     by_key: HashMap<BatchKey, usize>,
 }
 
-/// Material, translucent, two-sided, from a mesh, lightmap page, has colours.
-type BatchKey = (String, bool, bool, bool, Option<usize>, bool);
+/// Material, translucent, two-sided, from a mesh, lightmap page, has
+/// colours, in the sky.
+type BatchKey = (String, bool, bool, bool, Option<usize>, bool, bool);
 
 impl Builder {
     #[allow(clippy::too_many_arguments)]
@@ -137,6 +178,7 @@ impl Builder {
         from_mesh: bool,
         lightmap_page: Option<usize>,
         coloured: bool,
+        sky: bool,
     ) -> &mut Batch {
         let k = (
             key.to_string(),
@@ -145,6 +187,7 @@ impl Builder {
             from_mesh,
             lightmap_page,
             coloured,
+            sky,
         );
         let i = *self.by_key.entry(k).or_insert_with(|| {
             self.batches.push(Batch {
@@ -152,6 +195,7 @@ impl Builder {
                 translucent,
                 two_sided,
                 from_mesh,
+                sky,
                 lightmap_page,
                 ..Default::default()
             });
@@ -204,7 +248,7 @@ fn tex_size(p: &Option<Picture>) -> [f32; 2] {
     }
 }
 
-fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, ctx: &mut Ctx) {
+fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, sky_zone: Option<u8>, ctx: &mut Ctx) {
     for poly in bsp.polygons() {
         ctx.stats.bsp_polygons += 1;
         let w = Bsp::winding(&poly);
@@ -217,6 +261,16 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, ctx: &mut Ctx) {
             *ctx.stats.bsp_skipped.entry("portal").or_default() += 1;
             continue;
         }
+        // "Fake backdrop" surfaces are windows onto the sky: the game draws
+        // the sky zone there instead of the surface.
+        if poly.poly_flags & poly_flags::FAKE_BACKDROP != 0 {
+            ctx.stats.backdrop_polygons += 1;
+            *ctx.stats.bsp_skipped.entry("sky backdrop").or_default() += 1;
+            continue;
+        }
+        // A polygon belongs to the zone on its front side.
+        let sky = sky_zone.is_some_and(|z| bsp.nodes[poly.node].zone[1] == z);
+        ctx.stats.sky_polygons += sky as usize;
         let (key, pic) = picture(
             ctx.mats,
             &mut ctx.stats,
@@ -242,7 +296,7 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, ctx: &mut Ctx) {
         } else {
             ctx.stats.bsp_polygons_unlit += 1;
         }
-        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false);
+        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false, sky);
         let base = batch.positions.len() as u32;
         let n = dir_to_bevy(poly.normal);
         for (p, uv) in poly.points.iter().zip(&poly.uvs) {
@@ -285,12 +339,17 @@ type MeshResult = Result<Rc<(StaticMesh, Loaded)>, String>;
 fn load_mesh(
     mats: &mut Materials,
     cache: &mut HashMap<String, MeshResult>,
-    pkg: &Package,
     map: &Loaded,
     index: i32,
 ) -> MeshResult {
+    let pkg = &map.0;
     let path = object_path(pkg, index);
-    let key = path.join(".");
+    let key = match ObjectRef::from_index(index) {
+        // Objects inside the package itself: name the package too, as
+        // class meshes come from several packages.
+        ObjectRef::Export(_) => format!("({:p}){}", Rc::as_ptr(map), path.join(".")),
+        _ => path.join("."),
+    };
     if let Some(r) = cache.get(&key) {
         return r.clone();
     }
@@ -315,9 +374,11 @@ fn load_mesh(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_mesh_actor(
     b: &mut Builder,
     ctx: &mut Ctx,
+    sky: bool,
     p: &Placement,
     mesh: &StaticMesh,
     owner: &(Package, Vec<u8>),
@@ -352,7 +413,7 @@ fn add_mesh_actor(
                 )
             }
         };
-        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some());
+        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some(), sky);
         let first = sec.first_index as usize;
         let count = sec.num_faces as usize * 3;
         let Some(tris) = mesh.indices.get(first..first + count) else {
@@ -453,13 +514,27 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             }
         }
     }
-    add_bsp(&mut b, &bsp, &lightmaps, &mut ctx);
+    // The sky: the first SkyZoneInfo, and the zone it stands in.
+    let sky = level.actors.iter().flatten().find_map(|&a| {
+        if pkg.export_class_name(&pkg.exports[a]) != "SkyZoneInfo" {
+            return None;
+        }
+        let p = actors::read_placement(pkg, data, a).ok()?;
+        Some(Sky {
+            position: to_bevy(p.location),
+            zone: bsp.point_zone(p.location)?,
+            from: format!("{} at {:?}", p.name, p.location),
+        })
+    });
+    let sky_zone = sky.as_ref().map(|s| s.zone);
+    add_bsp(&mut b, &bsp, &lightmaps, sky_zone, &mut ctx);
 
     let mut lights = Vec::new();
 
     let mut spawn = None;
     let mut floor_points = Vec::new();
     let mut mesh_cache = HashMap::new();
+    let mut class_looks = rc_level::class_look::ClassLooks::new();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
@@ -494,15 +569,31 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 }
             }
         }
+        let mut p = p;
+        // Props and doors that take their model from their class.
+        let mut owner = map.clone();
         if p.static_mesh == 0 {
-            continue;
+            let mats = &mut *ctx.mats;
+            match rc_level::class_look::apply_class_look(
+                &mut class_looks,
+                pkg,
+                data,
+                &mut p,
+                &mut |n: &str| mats.package(n),
+            ) {
+                Some(o) => {
+                    owner = o;
+                    ctx.stats.class_mesh_actors += 1;
+                }
+                None => continue,
+            }
         }
         ctx.stats.mesh_actors += 1;
         if p.hidden {
             ctx.stats.hidden_actors += 1;
             continue;
         }
-        match load_mesh(ctx.mats, &mut mesh_cache, pkg, &map, p.static_mesh) {
+        match load_mesh(ctx.mats, &mut mesh_cache, &owner, p.static_mesh) {
             Ok(m) => {
                 ctx.stats.mesh_actors_drawn += 1;
                 let colours = if p.static_mesh_instance != 0 {
@@ -524,16 +615,50 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                         None
                     }
                 };
-                add_mesh_actor(&mut b, &mut ctx, &p, &m.0, &m.1, colours.as_deref());
+                let in_sky = sky_zone.is_some() && bsp.point_zone(p.location) == sky_zone;
+                ctx.stats.sky_props += in_sky as usize;
+                add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref());
                 placed.push((p, m));
             }
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
         }
     }
     let pairs: Vec<_> = placed.iter().map(|(p, m)| (p, &m.0)).collect();
-    ctx.stats.collision_triangles = rc_level::collision::collision_triangles(&bsp, &pairs)
-        .triangles
-        .len();
+    let mut collision = rc_level::collision::collision_triangles(&bsp, &pairs);
+    let volumes = rc_level::volumes::blocking_volumes(pkg, data, &level);
+    ctx.stats.volumes_block_players =
+        rc_level::collision::add_blocking_volumes(&mut collision, &volumes.volumes, true);
+    ctx.stats.volumes_block_actors = volumes.volumes.iter().filter(|v| v.block_actors).count();
+    ctx.stats.blocking_volumes = volumes.volumes.len();
+    ctx.stats.volume_failures = volumes.failures;
+    ctx.stats.volumes_scaled = volumes.scaled;
+    ctx.stats.path_points_in_volumes = floor_points
+        .iter()
+        .filter(|p| {
+            volumes
+                .volumes
+                .iter()
+                .any(|v| v.block_players && v.contains(**p))
+        })
+        .count();
+    ctx.stats.volumes_near_paths = volumes
+        .volumes
+        .iter()
+        .filter(|v| {
+            let mut lo = [f32::MAX; 3];
+            let mut hi = [f32::MIN; 3];
+            for q in v.polygons.iter().flatten() {
+                for c in 0..3 {
+                    lo[c] = lo[c].min(q[c]);
+                    hi[c] = hi[c].max(q[c]);
+                }
+            }
+            floor_points
+                .iter()
+                .any(|p| (0..3).all(|c| p[c] > lo[c] - 512.0 && p[c] < hi[c] + 512.0))
+        })
+        .count();
+    ctx.stats.collision_triangles = collision.triangles.len();
     ctx.stats.unique_meshes = mesh_cache.values().filter(|r| r.is_ok()).count();
 
     ctx.stats.floor_test = floor_test(b.batches.iter(), &floor_points);
@@ -542,7 +667,7 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
 
     let mut lo = [f32::MAX; 3];
     let mut hi = [f32::MIN; 3];
-    for batch in &b.batches {
+    for batch in b.batches.iter().filter(|b| !b.sky) {
         for p in &batch.positions {
             for c in 0..3 {
                 lo[c] = lo[c].min(p[c]);
@@ -567,6 +692,7 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         lights,
         stats: ctx.stats,
         spawn,
+        sky,
     })
 }
 

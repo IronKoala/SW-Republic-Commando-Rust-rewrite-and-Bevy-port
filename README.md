@@ -121,17 +121,56 @@ copy of the game.
   change the brightness without touching code (see `docs/DESIGN.md`,
   "Lighting in Bevy").
 
+- **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
+  `rc_level_check` loads every map in the game without a window and logs
+  each one: `79 of 79 maps loaded, 0 failed`. Lightmaps now read on 78 of
+  them (12 failed before a fix). Levels now have their sky (67 maps have
+  one), invisible walls (blocking volumes) are solid when you walk, and
+  about 3,460 props and double doors that take their model from their
+  type are now drawn and solid.
+
+- **The game program, with menus (tested in the cloud sandbox, not yet on
+  Windows).** `rc_game` is the one program the whole game is built into. It
+  opens on a main menu in the visor's amber, lists the campaigns and missions
+  with the names from the game's own files (`Extreme Prejudice`, `Into The
+  Hive`, ...), shows a loading screen with the mission text, and drops you
+  into the level with an on-screen display (shield, health, crosshair, ammo,
+  squad, messages). Escape pauses; the pause menu resumes, opens options or
+  quits to the main menu. It plays the game's own music (the main menu
+  theme, then each campaign's calm tracks). It reads a settings file
+  (`settings.toml`: game folder, mods, screen, volumes, mouse) and a controls
+  file (`data/input/bindings.toml`: the original PC keys, plus gamepad and
+  touch). `rc_game --script` drives itself through the menus and a level and
+  passed 17 of 17 checks, including two screenshots checked by colour. Until
+  the levels, weapons, enemies and squad parts plug in, levels are drawn and
+  walked the way `rc_walk --map` does it, with no weapons or enemies.
+
+  **The menus and on-screen display are placeholders.** The amber menus,
+  loading screen and HUD are our own stand-ins so the game can be started
+  and tested. The plan is to use the original game's own menus and HUD (its
+  layouts, textures, fonts and sounds, read from your install at run time)
+  as much as possible; see `docs/ORIGINAL_MENUS.md`.
+
+  Any screen shape works: the view is "Hor+" (wider screens see more at the
+  sides, the view up and down stays the original's), and the HUD stays in a
+  centred 16:9 area on ultrawides (`hud_max_aspect` in `settings.toml`).
+  Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
+  mouse and a gamepad work at the same time.
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Scripts are not decoded yet.
-- Sound: music (`.ogg` files in `GameData\Music`) isn't played yet, only
-  found. 13 "streamed" ambient loops for the RAS level name files that don't
+- Music: the menu and level tracks play, but the switch to battle music
+  waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
   No 3D (positional) sound yet.
-- Levels are drawn without sky, characters, effects or moving parts. No
-  collision: the camera flies through walls.
+- Levels are drawn without characters, effects or moving parts: doors and
+  lifts stand where the map puts them and don't open. The gunship isn't
+  solid. 9 maps have windows onto a sky but no sky box, so they show a flat
+  colour there. The level viewer's camera flies through walls (`rc_walk`
+  has collision).
 - Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
 - Weapons: no first-person arms, muzzle flash, grenades, melee or sniper
@@ -143,7 +182,12 @@ copy of the game.
   own choice. See `docs/DESIGN.md`.
 - Characters: only the first material slot, no blending between
   animations, no sounds or effects from animation events.
-- No game yet.
+- Android: the game compiles for Android phones but is not an app yet;
+  see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
+- The game (`rc_game`): no weapons, enemies or squad yet (other parts are
+  being built to plug into it). No saving or loading, no checkpoints, no
+  briefings or cut scenes. Options are a short list. Not tested on Windows,
+  with a gamepad, or with a touch screen.
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the
   real game side by side. Real-time lights use placeholder strengths and
@@ -156,6 +200,18 @@ copy of the game.
 ## How to run it
 
 You need Rust (install from <https://rustup.rs>). From this folder:
+
+```
+cargo run --release -p rc_game
+```
+
+This is the game. The first time, it writes `settings.toml` next to where
+you run it from; if your game isn't in a usual Steam folder, open that file
+and set `folder` under `[game]`. `--map geo_01a` skips the menus.
+`--script` plays itself through the menus and a level and checks each step
+(the log is `logs/rc_game.log`).
+
+The other programs test one piece each:
 
 ```
 cargo run --release -p rc_probe
@@ -279,6 +335,17 @@ look, make a file called `lighting.cfg` in this folder containing the line
 `baked_light = false` (delete it to go back).
 For another map, give its name, for example
 `cargo run --release -p rc_level_viewer -- ras_01a`.
+`--pitch 60` starts the camera looking 60 degrees up (to see the sky) and
+`--no-sky` leaves the sky out.
+
+To check every level at once:
+
+```
+cargo run --release -p rc_level_viewer --bin rc_level_check
+```
+
+It takes about 15 seconds after building, writes `logs\rc_level_check.log`,
+and ends with one line per map and `79 of 79 maps loaded, 0 failed`.
 
 To check every character and animation in the game:
 

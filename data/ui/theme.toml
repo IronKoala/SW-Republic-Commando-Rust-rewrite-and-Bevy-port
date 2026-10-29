@@ -1,0 +1,31 @@
+# Colours and sizes for the menus and the on-screen display.
+#
+# PLACEHOLDER: these are our own stand-in menus and HUD. The original game's
+# menus are to replace them (see docs/ORIGINAL_MENUS.md).
+#
+# Colours are "#RRGGBB" or "#RRGGBBAA" (AA is opacity, 00 clear to FF solid).
+# The look follows the original's commando visor: amber lines and text on
+# dark glass. Sizes are a share of the screen height (4.0 = 4%), or of its
+# width when that is smaller (a phone held upright), so the menus scale with
+# any screen, phone or monitor.
+
+[colours]
+text = "#F2B544"          # amber: normal text and lines
+text_dim = "#9C7A3C"      # unselected menu items, labels
+highlight = "#FFE7A6"     # the selected menu item
+background = "#05080BE6"  # menu screen behind the text
+panel = "#0B141ACC"       # boxes on the display
+shield = "#E8C547"        # shield bar
+health = "#D9472B"        # health bar
+crosshair = "#F2B544"
+crosshair_on_target = "#FF3B2A"
+squad_ok = "#7FD07A"
+squad_down = "#FF3B2A"
+warning = "#FF6A3A"       # error messages
+
+[sizes]
+title = 7.0
+heading = 4.0
+item = 3.4
+small = 2.4
+hud_number = 5.0

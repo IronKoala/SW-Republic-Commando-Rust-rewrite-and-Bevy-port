@@ -157,12 +157,14 @@ fn color(l: &Light) -> Color {
 }
 
 /// What `spawn_lights` did, for the log.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct SpawnReport {
     pub point: usize,
     pub spot: usize,
     pub directional: usize,
     pub skipped: usize,
+    /// The light entities spawned.
+    pub entities: Vec<Entity>,
 }
 
 pub fn spawn_lights(
@@ -186,7 +188,7 @@ pub fn spawn_lights(
         let at = settings.position(l.location);
         match l.kind {
             LightKind::Point => {
-                commands.spawn((
+                let e = commands.spawn((
                     PointLight {
                         color: color(l),
                         intensity: lumens,
@@ -196,13 +198,14 @@ pub fn spawn_lights(
                     },
                     Transform::from_translation(at),
                 ));
+                report.entities.push(e.id());
                 report.point += 1;
             }
             LightKind::Spot => {
                 // Guess: LightCone 0-255 spans 0-90 degrees from the centre
                 // line. Not checked against the game.
                 let outer = (l.cone as f32 / 255.0 * std::f32::consts::FRAC_PI_2).clamp(0.02, 1.55);
-                commands.spawn((
+                let e = commands.spawn((
                     SpotLight {
                         color: color(l),
                         intensity: lumens,
@@ -214,10 +217,11 @@ pub fn spawn_lights(
                     },
                     Transform::from_translation(at).looking_to(facing(l.rotation), Vec3::Y),
                 ));
+                report.entities.push(e.id());
                 report.spot += 1;
             }
             LightKind::Directional => {
-                commands.spawn((
+                let e = commands.spawn((
                     DirectionalLight {
                         color: color(l),
                         illuminance: settings.sun_lux_at_255 * l.brightness / 255.0,
@@ -226,6 +230,7 @@ pub fn spawn_lights(
                     },
                     Transform::default().looking_to(facing(l.rotation), Vec3::Y),
                 ));
+                report.entities.push(e.id());
                 report.directional += 1;
             }
         }

@@ -290,6 +290,25 @@ impl Bsp {
         })
     }
 
+    /// Which zone a point is in, by walking the tree from the root: at each
+    /// node go to the front child if the point is on the front of the
+    /// plane, else the back; where there is no child, the node's zone on
+    /// that side is the answer. Same walk as UE2's `UModel::PointRegion`
+    /// (public UE2 headers). `None` for an empty tree.
+    pub fn point_zone(&self, p: Vec3) -> Option<u8> {
+        let mut i = 0usize;
+        for _ in 0..self.nodes.len() {
+            let n = self.nodes.get(i)?;
+            let front = dot([n.plane[0], n.plane[1], n.plane[2]], p) - n.plane[3] >= 0.0;
+            let child = if front { n.front } else { n.back };
+            if child < 0 || child as usize >= self.nodes.len() {
+                return Some(n.zone[front as usize]);
+            }
+            i = child as usize;
+        }
+        None
+    }
+
     /// Every polygon in the BSP.
     pub fn polygons(&self) -> Vec<Polygon> {
         (0..self.nodes.len())

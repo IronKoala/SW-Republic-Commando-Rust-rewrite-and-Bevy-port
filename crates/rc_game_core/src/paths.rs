@@ -19,7 +19,10 @@ pub struct GamePaths {
 
 impl GamePaths {
     pub fn new(game_dir: impl Into<PathBuf>, data_dirs: Vec<PathBuf>) -> Self {
-        GamePaths { game_dir: game_dir.into(), data_dirs }
+        GamePaths {
+            game_dir: game_dir.into(),
+            data_dirs,
+        }
     }
 
     /// `<game>/GameData`, where all the packages are.

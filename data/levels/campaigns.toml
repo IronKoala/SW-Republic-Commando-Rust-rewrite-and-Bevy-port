@@ -1,0 +1,44 @@
+# The level select screen.
+#
+# Mission names, order and loading-screen text come from the original
+# game's own list (GameData/System/LevelLoadingInfo.int), read when the game
+# starts. This file only groups them into campaigns, in this order: each
+# campaign takes the game's maps whose names start with `prefix`.
+#
+# Mods: add your own maps with [[extra]] blocks (a mod's copy of this file
+# is read as well as this one, so you only need your own blocks).
+
+# Maps the game list names that aren't campaign levels (multiplayer and the
+# demo build), by name prefix.
+skip_prefixes = ["dm_", "ctf_", "geo_05b_demo"]
+
+# Show every other map file in GameData/Maps in an "Other maps" group, for
+# testing.
+show_other_maps = true
+
+[[campaign]]
+name = "Prologue"
+prefix = "pro"
+
+[[campaign]]
+name = "Geonosis"
+prefix = "geo_"
+
+[[campaign]]
+name = "Prosecutor"
+prefix = "ras_"
+
+[[campaign]]
+name = "Kashyyyk"
+prefix = "yyy"
+
+[[campaign]]
+name = "Epilogue"
+prefix = "epilogue"
+
+# Example for mods:
+# [[extra]]
+# campaign = "My campaign"
+# map = "my_map"            # GameData/Maps/my_map.ctm, or a full path
+# title = "My first map"
+# text = "Shown on the loading screen."
