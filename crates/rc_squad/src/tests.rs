@@ -47,6 +47,33 @@ fn distances(squad: &Squad, p: Vec3) -> Vec<f32> {
         .collect()
 }
 
+/// A battle droid standing at `feet` (80 uu half-height, eyes 60 above
+/// its middle, as in data/enemies/battle_droid.toml).
+fn threat(id: u64, feet: Vec3) -> Threat {
+    Threat {
+        id,
+        feet,
+        centre: feet + Vec3::new(0.0, 0.0, 80.0),
+        eye: feet + Vec3::new(0.0, 0.0, 140.0),
+    }
+}
+
+fn shots(events: &[SquadEvent]) -> Vec<(usize, Vec3, Vec3, u64)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            SquadEvent::Fire {
+                index,
+                origin,
+                direction,
+                target,
+                ..
+            } => Some((*index, *origin, *direction, *target)),
+            _ => None,
+        })
+        .collect()
+}
+
 fn all_idle(squad: &Squad) -> bool {
     squad.members.iter().all(|m| m.state == MemberState::Idle)
 }
@@ -266,7 +293,7 @@ fn search_and_destroy_closes_on_a_known_enemy() {
     }
     // Within reach (1024 uu) of the leader.
     let droid = Vec3::new(700.0, -500.0, 0.0);
-    squad.threats = vec![droid];
+    squad.threats = vec![threat(1, droid)];
     run(&mut squad, start, 5.0, &world);
     for d in distances(&squad, droid) {
         // Half the search radius, plus the stopping distance.
@@ -294,6 +321,8 @@ fn a_downed_member_stays_put_and_skips_orders() {
     let world = test_room();
     let start = leader_at(0.0, 0.0, 0.0);
     let mut squad = new_squad(&world, start);
+    // Nobody goes to revive him in this test.
+    squad.settings.revive.range = 0.0;
     run(&mut squad, start, 0.5, &world);
     let fell_at = squad.members[0].pawn.feet();
     let ev = squad.set_down(0, true);
@@ -317,4 +346,224 @@ fn a_downed_member_stays_put_and_skips_orders() {
     run(&mut squad, away, 6.0, &world);
     let d = distances(&squad, away.feet);
     assert!(d[0] < 300.0, "{d:?}");
+}
+
+#[test]
+fn squad_mates_shoot_a_droid_they_can_see() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    // A droid ahead and to the right, clear of the leader's line.
+    let droid = threat(7, Vec3::new(900.0, 600.0, 0.0));
+    squad.threats = vec![droid];
+    let mut events = Vec::new();
+    let mut first_shot = None;
+    let mut t = 0.0;
+    while t < 4.0 {
+        let ev = squad.update(DT, start, &world, &StraightLine);
+        t += DT;
+        if first_shot.is_none() && !shots(&ev).is_empty() {
+            first_shot = Some(t);
+        }
+        events.extend(ev);
+    }
+    let fired = shots(&events);
+    // Every member who isn't blocked by a friend shoots, and only at it.
+    let shooters: std::collections::HashSet<usize> = fired.iter().map(|s| s.0).collect();
+    assert!(shooters.len() >= 2, "shooters {shooters:?}");
+    assert!(fired.iter().all(|s| s.3 == 7));
+    // Not before the reaction time (plus up to one think).
+    let first = first_shot.unwrap();
+    assert!((0.5..0.85).contains(&first), "first shot at {first}");
+    // Bursts of 5 at 0.1 s, a 0.6-1.2 s rest: 4 s gives roughly 2-4 bursts each.
+    for i in &shooters {
+        let n = fired.iter().filter(|s| s.0 == *i).count();
+        assert!((8..=25).contains(&n), "member {i} fired {n}");
+    }
+    // Aimed at the droid's middle, off by at most (1 - 0.9) x 10 degrees.
+    for (_, origin, dir, _) in &fired {
+        let want = (droid.centre - *origin).normalize_or_zero();
+        let angle = want.dot(*dir).clamp(-1.0, 1.0).acos().to_degrees();
+        assert!(angle <= 1.0 * 1.2 + 0.1, "{angle} deg off");
+    }
+}
+
+#[test]
+fn squad_mates_ignore_enemies_out_of_sight_range() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.threats = vec![threat(1, Vec3::new(3900.0, 1900.0, 6000.0))];
+    let events = run(&mut squad, start, 2.0, &world);
+    assert!(shots(&events).is_empty());
+}
+
+#[test]
+fn nobody_shoots_through_the_player() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    // Scorch stands straight behind the leader; the droid is straight ahead.
+    let scorch = squad.members[2].pawn.feet();
+    assert!(scorch.y.abs() < 5.0 && scorch.x < -100.0, "{scorch:?}");
+    squad.threats = vec![threat(3, Vec3::new(1500.0, 0.0, 0.0))];
+    let events = run(&mut squad, start, 3.0, &world);
+    assert!(
+        shots(&events).iter().all(|s| s.0 != 2),
+        "Scorch fired through the player"
+    );
+    assert!(squad.members[2].fight.held_fire > 0);
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, SquadEvent::HeldFire { friend, .. } if friend == "the player")));
+}
+
+#[test]
+fn a_downed_squad_mate_is_revived_by_the_nearest_other() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    squad.set_down(0, true);
+    let mut done_at = None;
+    let mut reviver = String::new();
+    let mut t = 0.0;
+    while t < 10.0 && done_at.is_none() {
+        for e in squad.update(DT, start, &world, &StraightLine) {
+            match e {
+                SquadEvent::ReviveSetOff { member, .. } => reviver = member,
+                SquadEvent::ReviveDone {
+                    patient: Patient::Mate(0),
+                    member,
+                    ..
+                } => {
+                    assert_eq!(member, reviver);
+                    done_at = Some(t);
+                }
+                _ => {}
+            }
+        }
+        t += DT;
+    }
+    // Scorch stands 121 uu from Sev (Fixer 220): a short walk plus the 3 s
+    // revive.
+    assert_eq!(reviver, "Scorch");
+    let t = done_at.expect("Sev was never revived");
+    assert!((3.0..6.0).contains(&t), "revived after {t} s");
+    // The game gives the health back; then he's up and the reviver free.
+    assert!(matches!(
+        squad.set_down(0, false),
+        Some(SquadEvent::Revived { .. })
+    ));
+    run(&mut squad, start, 0.5, &world);
+    assert!(squad.members.iter().all(|m| m.revive.is_none()));
+}
+
+#[test]
+fn squad_mates_revive_the_player() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    squad.leader_down = true;
+    let mut events = Vec::new();
+    let mut t = 0.0;
+    while t < 6.0 {
+        let ev = squad.update(DT, start, &world, &StraightLine);
+        // The game gives the player's health back.
+        if ev.iter().any(|e| {
+            matches!(
+                e,
+                SquadEvent::ReviveDone {
+                    patient: Patient::Leader,
+                    ..
+                }
+            )
+        }) {
+            squad.leader_down = false;
+        }
+        events.extend(ev);
+        t += DT;
+    }
+    let done: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                SquadEvent::ReviveDone {
+                    patient: Patient::Leader,
+                    ..
+                }
+            )
+        })
+        .collect();
+    assert_eq!(done.len(), 1, "{events:?}");
+    // Only one goes.
+    let set_off = events
+        .iter()
+        .filter(|e| matches!(e, SquadEvent::ReviveSetOff { .. }))
+        .count();
+    assert_eq!(set_off, 1);
+}
+
+#[test]
+fn the_player_revives_a_squad_mate_by_holding_use() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.settings.revive.range = 0.0; // only the player revives here
+    run(&mut squad, start, 0.5, &world);
+    squad.set_down(2, true);
+    let body = squad.members[2].pawn.feet();
+    // Too far: nothing.
+    assert!(squad.player_use(1.0, start, true).is_empty());
+    let beside = Leader {
+        feet: body + Vec3::new(60.0, 0.0, 0.0),
+        yaw: 0.0,
+    };
+    // Let go after 1 s: it stops and starts over.
+    let mut ev = Vec::new();
+    for _ in 0..60 {
+        ev.extend(squad.player_use(DT, beside, true));
+    }
+    ev.extend(squad.player_use(DT, beside, false));
+    assert!(matches!(
+        ev.first(),
+        Some(SquadEvent::PlayerReviveStarted { .. })
+    ));
+    assert!(matches!(
+        ev.last(),
+        Some(SquadEvent::PlayerReviveStopped { .. })
+    ));
+    // Hold for the full 3 s.
+    let mut t = 0.0;
+    let mut done = None;
+    while t < 4.0 && done.is_none() {
+        for e in squad.player_use(DT, beside, true) {
+            if let SquadEvent::ReviveDone { patient, .. } = e {
+                done = Some((patient, t));
+            }
+        }
+        t += DT;
+    }
+    let (patient, t) = done.expect("not revived");
+    assert_eq!(patient, Patient::Mate(2));
+    assert!((2.9..3.1).contains(&t), "{t}");
+}
+
+#[test]
+fn revive_and_fight_settings_read_from_the_file() {
+    let s = SquadSettings::default()
+        .with_overrides("[revive]\ntime = 5\nrevive_player = \"no\"\n[fight]\nweapon = \"dc15s_pistol\"\nmax_aim_yaw = 30\n")
+        .unwrap();
+    assert_eq!(s.revive.time, 5.0);
+    assert!(!s.revive.revive_player);
+    assert_eq!(s.fight.weapon, "dc15s_pistol");
+    assert!((s.fight.max_aim_yaw - 30f32.to_radians()).abs() < 1e-6);
+    let e = SquadSettings::default()
+        .with_overrides("[revive]\nrevive_player = \"maybe\"\n")
+        .unwrap_err();
+    assert!(e.contains("line 2"), "{e}");
 }
