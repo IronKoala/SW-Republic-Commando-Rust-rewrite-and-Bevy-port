@@ -15,14 +15,16 @@
 //! compiled code, which we don't read, so that part is our own. No game
 //! code is copied.
 
+pub mod fight;
 pub mod map;
 pub mod nav;
 pub mod settings;
 pub mod squad;
 
+pub use fight::{FightState, Patient, Threat};
 pub use map::{MapSquadInfo, MarkerSpot, SquadFactory};
 pub use nav::{Navigator, StraightLine};
-pub use settings::{Spawn, SquadSettings, StanceSettings, Tether};
+pub use settings::{FightSettings, ReviveSettings, Spawn, SquadSettings, StanceSettings, Tether};
 pub use squad::{
     aimed_spot, Leader, MarkerState, MemberState, MemberStatus, Order, Squad, SquadEvent, Stance,
 };
