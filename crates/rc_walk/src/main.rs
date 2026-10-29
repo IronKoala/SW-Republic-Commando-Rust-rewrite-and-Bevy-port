@@ -10,8 +10,9 @@
 //!
 //! `--map` walks a real map instead of the test room: a map name from
 //! `GameData/Maps` (like `geo_01a`) or a path to a `.ctm` file. The game
-//! folder is RC_GAME_DIR or the default Steam path. Walls and floors are
-//! drawn plain grey for now (the level viewer draws them textured).
+//! folder is RC_GAME_DIR or the default Steam path. The map is drawn the
+//! level viewer's way (textures, baked light, real-time lights, read from
+//! `lighting.cfg` if there is one); collision comes from `level.rs`.
 //!
 //! `--settings` picks the movement settings file (default
 //! `data/movement/player_commando.toml`). `--script` replaces the keyboard
@@ -30,15 +31,21 @@ mod level;
 mod script;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::Exposure;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::render::view::Tonemapping;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use rc_level_viewer::draw::{self, BACKGROUND};
+use rc_level_viewer::lighting::LightingSettings;
+use rc_level_viewer::{materials, scene};
 use rc_movement::room::test_room;
 use rc_movement::{
     Brush, BrushWorld, Event, MoveInput, MoveParams, Pawn, TriangleWorld, Vec3 as UVec3, World,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::fs;
 use std::io::Write;
 use std::sync::Mutex;
@@ -116,6 +123,11 @@ enum Ground {
 #[derive(Resource)]
 struct TestWorld(Ground);
 
+/// A map's textured, lit look, built before the window opens and spawned
+/// once by `setup`.
+#[derive(Resource)]
+struct MapLook(Mutex<Option<(scene::Scene, LightingSettings)>>);
+
 impl TestWorld {
     fn world(&self) -> &dyn World {
         match &self.0 {
@@ -163,7 +175,9 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     world: Res<TestWorld>,
+    look: Option<Res<MapLook>>,
     log: Res<RunLog>,
 ) {
     let floor = materials.add(StandardMaterial {
@@ -186,18 +200,48 @@ fn setup(
                 "test room: {} solids; 1 Bevy unit = {UU_PER_UNIT} uu",
                 room.brushes.len()
             ));
+            add_room_lights(&mut commands);
         }
         Ground::Map(tw) => {
-            commands.spawn((
-                Mesh3d(meshes.add(triangles_mesh(&tw.triangles))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.6, 0.6, 0.58),
-                    perceptual_roughness: 0.9,
-                    double_sided: true,
-                    cull_mode: None,
-                    ..default()
-                })),
-            ));
+            let built = look.and_then(|l| l.0.lock().unwrap().take());
+            match built {
+                Some((sc, settings)) => {
+                    let r = draw::spawn_level(
+                        &mut commands,
+                        &mut meshes,
+                        &mut images,
+                        &mut materials,
+                        &sc,
+                        &settings,
+                    );
+                    log.line(format!(
+                        "map drawn: {} triangles, {} batches with a texture; {} with a lightmap, {} with baked corner colours, {} at full brightness; real-time lights: {} point, {} spot, {} sun",
+                        r.triangles,
+                        r.textured,
+                        r.lightmapped,
+                        r.coloured,
+                        r.full_bright,
+                        r.lights.point,
+                        r.lights.spot,
+                        r.lights.directional
+                    ));
+                }
+                None => {
+                    // The textured look couldn't be built: show the
+                    // collision triangles in grey instead.
+                    commands.spawn((
+                        Mesh3d(meshes.add(triangles_mesh(&tw.triangles))),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color: Color::srgb(0.6, 0.6, 0.58),
+                            perceptual_roughness: 0.9,
+                            double_sided: true,
+                            cull_mode: None,
+                            ..default()
+                        })),
+                    ));
+                    add_room_lights(&mut commands);
+                }
+            }
             let (lo, hi) = tw.bounds();
             log.line(format!(
                 "map: {} collision triangles, bounds ({:.0}, {:.0}, {:.0}) to ({:.0}, {:.0}, {:.0})",
@@ -211,6 +255,25 @@ fn setup(
             ));
         }
     }
+    // Same camera settings as the level viewer, which the baked light is
+    // matched to.
+    commands.spawn((
+        Camera3d::default(),
+        Tonemapping::None,
+        Exposure::default(),
+        Projection::Perspective(PerspectiveProjection {
+            near: 0.05,
+            far: 5000.0,
+            ..default()
+        }),
+        Transform::default(),
+        PlayerView,
+    ));
+}
+
+/// A sun and some ambient light, for the test room (it has no lights of
+/// its own).
+fn add_room_lights(commands: &mut Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 8000.0,
@@ -223,12 +286,49 @@ fn setup(
         brightness: 300.0,
         ..default()
     });
-    commands.spawn((
-        Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection { near: 0.05, ..default() }),
-        Transform::default(),
-        PlayerView,
-    ));
+}
+
+/// Build the map's look with the level viewer's code: textures, baked light
+/// and lights. `None` (logged) if that fails; the walk still works.
+fn build_look(
+    map_path: &Path,
+    game_data: &Path,
+    log: &RunLog,
+) -> Option<(scene::Scene, LightingSettings)> {
+    let t = Instant::now();
+    let lighting_path = Path::new("lighting.cfg");
+    let (settings, notes) = LightingSettings::load(lighting_path);
+    for n in notes {
+        log.line(format!("  lighting settings problem: {n}"));
+    }
+    let map = match fs::read(map_path)
+        .map_err(|e| e.to_string())
+        .and_then(|d| rc_package::Package::parse(&d).map(|p| (p, d)).map_err(|e| e.to_string()))
+    {
+        Ok(m) => Rc::new(m),
+        Err(e) => {
+            log.line(format!("map look not built ({e}); drawing collision in grey"));
+            return None;
+        }
+    };
+    let mut mats = materials::Materials::new(game_data);
+    match scene::build(map, &mut mats) {
+        Ok(sc) => {
+            log.line(format!(
+                "map look built in {:.0} ms ({} draw batches, {} lightmap pages, {} lights); lighting settings {}",
+                t.elapsed().as_secs_f64() * 1000.0,
+                sc.batches.len(),
+                sc.lightmap_pages.len(),
+                sc.lights.len(),
+                if lighting_path.exists() { "from lighting.cfg" } else { "default" }
+            ));
+            Some((sc, settings))
+        }
+        Err(e) => {
+            log.line(format!("map look not built ({e}); drawing collision in grey"));
+            None
+        }
+    }
 }
 
 /// One grey mesh for a map's collision triangles.
@@ -574,6 +674,7 @@ fn main() -> AppExit {
         log.line(format!("  {name} = {value}"));
     }
 
+    let mut look = None;
     let (ground, start, steps) = match &map_name {
         None => (Ground::Room(test_room()), None, script::steps()),
         Some(name) => {
@@ -620,6 +721,7 @@ fn main() -> AppExit {
                 start.0.z,
                 start.1.to_degrees()
             ));
+            look = build_look(&path, &game_data, &log);
             let lowest = tw.bounds().0.z;
             (Ground::Map(tw), Some(start), script::map_steps(start.0, start.1, lowest))
         }
@@ -628,12 +730,20 @@ fn main() -> AppExit {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
-            title: "Republic Commando: walk test room".into(),
+            title: match &map_name {
+                Some(m) => format!("Republic Commando: walk {m}"),
+                None => "Republic Commando: walk test room".into(),
+            },
             ..default()
         }),
         ..default()
     }))
-    .insert_resource(ClearColor(Color::srgb(0.35, 0.45, 0.6)))
+    .insert_resource(ClearColor(if look.is_some() {
+        Color::srgb_u8(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2])
+    } else {
+        Color::srgb(0.35, 0.45, 0.6)
+    }))
+    .insert_resource(MapLook(Mutex::new(look)))
     .insert_resource(TestWorld(ground))
     .init_resource::<StepTiming>()
     .insert_resource(ExitAfter(frames))

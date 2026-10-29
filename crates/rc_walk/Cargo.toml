@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 rc_level = { path = "../rc_level" }
+rc_level_viewer = { path = "../rc_level_viewer" }
 rc_movement = { path = "../rc_movement" }
 rc_package = { path = "../rc_package" }
 

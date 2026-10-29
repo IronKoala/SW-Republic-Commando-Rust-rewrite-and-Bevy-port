@@ -4133,6 +4133,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "rc_level",
+ "rc_level_viewer",
  "rc_movement",
  "rc_package",
 ]

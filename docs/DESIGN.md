@@ -16,9 +16,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
 | `rc_movement` | The player's walking, jumping, crouching and collision, with the game's own numbers. No Bevy. |
 | `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
-
-| `rc_level` | Reads maps: the level's own geometry (the BSP) and where every actor is placed. No Bevy. |
-| `rc_level_viewer` | Bevy program: loads one map and lets you fly around it. |
+| `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, and each prop's baked corner colours. No Bevy. |
+| `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`) that `rc_walk` uses to draw maps. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
@@ -253,22 +252,29 @@ were worked out when the level was built and saved into the map:
   red, alpha). It read correctly on all 1,267 instances in the four maps. A
   few bytes after the colours (4 + 6 x n) are not understood yet. Many of the
   colours are black (60-80%), so the game probably brightens them when
-  drawing (UE2 often doubled vertex light). Not checked.
-- **BSP geometry** (the level's brush-built walls and floors): not found yet.
-  The maps hold no separate lightmap texture objects, so it must be inside the
-  level's `Model` data, which the level thread is reading.
+  drawing (UE2 often doubled vertex light). The actor points to its instance
+  with a `StaticMeshInstance` property. In `geo_01a` all 355 drawn props have
+  one, with exactly one colour per mesh corner.
+- **BSP geometry** (the level's brush-built walls and floors): lightmaps
+  stored at the end of the level's `Model` object. See "Baked light on the
+  walls: lightmaps" under Levels.
 
-## Lighting in Bevy (`rc_viewer/src/lighting.rs`)
+## Lighting in Bevy (`rc_level_viewer/src/lighting.rs`)
 
 Bevy lights are physically based (lumens, lux), the game's are not, so the
 conversion has tunable factors. All of them sit in one `LightingSettings`
 resource, and a plain text file can change them (`key = value` lines, `#`
-comments) so modders can tweak lighting without touching code:
+comments) so modders can tweak lighting without touching code. The level
+viewer reads `lighting.cfg` from the folder it runs in, or the file given
+with `--lighting FILE`; every key is optional:
 
 ```
 # lighting.cfg
+baked_light = true              # false draws everything at full brightness
+lightmap_gain = 2               # walls: texture x lightmap x this
+vertex_colour_gain = 2          # props: texture x corner colour x this
 units_per_bevy = 50             # Unreal units per Bevy unit (project-wide rule)
-live_lights = all               # all, dynamic, or none
+live_lights = dynamic           # all, dynamic, or none
 lumens_per_range_squared = 2000 # point and spot light power
 sun_lux_at_255 = 10000          # Sunlight brightness
 ambient_at_255 = 2000           # zone ambient brightness
@@ -286,15 +292,45 @@ shadows = false
   per zone. For now we take the dimmest non-zero zone (the bright 192-255 ones
   are skies).
 
-The factors are placeholders. The plan to set them properly: compute what our
-lights would give at each static-mesh vertex and compare with the colours the
-game baked there, then adjust until they agree.
+**How baked light is drawn.**
+- Walls (BSP) use Bevy's own lightmap support: each lightmap page becomes
+  an image, each wall gets a second set of texture coordinates pointing into
+  its page (`ATTRIBUTE_UV_1`) and a `Lightmap` component. The material is
+  lit, so real-time lights add on top. The scene-wide ambient light is off,
+  because the baked light already contains each zone's ambient.
+- Props use their per-corner colours as Bevy vertex colours on an unlit
+  material, which multiplies texture and colour directly. Real-time lights
+  don't reach them yet (see below).
+- Surfaces without baked light (marked unlit by the level designer, skies,
+  and the 33-327 BSP polygons per map without a lightmap) are drawn at full
+  brightness, as before.
 
-**Plan for speed (and VR).** Once the baked light is shown, set `live_lights =
-dynamic`: the 91-98% of lights that are baked cost nothing at run time, and
-only a handful of real-time lights remain. That suits a later VR version,
-which has to draw everything twice (once per eye) at 90 frames per second or
-more.
+**Brightness.** The game multiplied texture by light on its own brightness
+curve (roughly "gamma 2.2") and, like other engines of its time, drew baked
+light at double strength, so a stored 128 means "normal". The pages fit
+that: in all four maps almost every texel is below 128 (the brightest few
+reach 133-255). Bevy multiplies in linear light, so doubling on the game's
+curve becomes x2^2.2 (about 4.6) in linear light; `LightingSettings::
+linear_gain` does that conversion, and the viewer also undoes the camera's
+exposure for lightmaps, so gain 1 shows a texture exactly as stored. The
+lightmaps and textures are both marked sRGB so Bevy's multiply on screen
+equals the game's. Gain 2 is the era's convention, not yet compared with the
+game running.
+
+The real-time light factors are still placeholders. The plan to set them
+properly: compute what our lights would give at each static-mesh vertex and
+compare with the colours the game baked there, then adjust until they agree.
+
+**Speed (and VR).** The viewer uses `live_lights = dynamic` by default: the
+91-98% of lights that are baked cost nothing at run time, and only a handful
+of real-time lights remain (2 in `geo_01a`, 19 in `pro`). That suits a later
+VR version, which has to draw everything twice (once per eye) at 90 frames
+per second or more.
+
+**Known gaps.** Real-time lights don't light props yet (their baked colours
+are on an unlit material). Shadow bitmaps for the dynamic lights are read
+past but not used. What the lightmap pages' alpha channel holds is unknown
+(it is ignored). Lightmaps are sampled with plain linear filtering.
 
 **Phones and other platforms.** Textures, bump maps included, are decoded to
 plain RGBA on the CPU before Bevy sees them, so no graphics card has to
@@ -523,7 +559,11 @@ leave it stuck inside a wall. A move that only grazes a surface (pushes into it 
 along a wall kept "hitting" the same wall, and a jump while pressing into a
 wall rose only 87 of its 103 units.
 
-`rc_walk --map NAME` builds a `TriangleWorld` from a map (`rc_walk/src/level.rs`):
+`rc_walk --map NAME` draws the map with the level viewer's own code
+(`rc_level_viewer` is also a library: `scene::build` makes the draw batches,
+`draw::spawn_level` turns them into Bevy meshes, materials and lights), so a
+level looks the same in both programs. For collision it builds a
+`TriangleWorld` from the same map (`rc_walk/src/level.rs`):
 the BSP's polygons plus every visible static mesh prop, cut into triangles by
 `rc_level::collision`, and puts the player at the first PlayerStart (its
 centre is the start point, so feet = start z - 84). Not yet solid:
@@ -705,14 +745,57 @@ arrays, in file order:
 The field names come from the public Unreal headers (read in the
 SWRC-Modding/CT repository, which has no licence, so nothing was copied); the
 exact Republic Commando layout was worked out from `geo_01a.ctm` and checked
-on 5 maps. Zones, leaves, lightmaps and render sections come after these
-arrays and aren't read yet.
+on 5 maps. Zones, leaves, render sections and lightmaps come after these
+arrays (next section).
 
 Texture coordinates come from the surface: U = (corner - origin) . U
 direction, same for V, in texels; the viewer divides by the texture's size.
 
 In Republic Commando most of a level is static meshes, not BSP: `geo_01a`
 has 249 BSP polygons but 355 placed props with 141,000 triangles.
+
+### Baked light on the walls: lightmaps
+
+When a level was built, the editor worked out how much light reached each
+spot on each BSP wall and saved it as a small picture per surface (a
+"lightmap"), packed with others onto 512x512 pages. `rc_level::lightmap`
+reads them from the end of the `Model` object, after the vertex pool:
+
+1. `NumSharedSides`, then the zones (count, then an actor, 16 bytes and 4
+   bytes each), the `Polys` object, `Bounds` (25 bytes each), `LeafHulls`
+   (whole numbers), `Leaves` (two indexes and 8 bytes each), `Lights` (actor
+   indexes), `RootOutside`, `Linked`.
+2. Render sections: per section, its vertices (40 bytes each: position,
+   texture position, lightmap position, normal), a node count, a material and
+   12 bytes.
+3. Lightmap rectangles: page, surface, zone, top-left corner and size on the
+   page (compact indexes), a 4x4 "world to lightmap" matrix and 9 more
+   decimals, then a "shadow bitmap" for each dynamic light that touches it
+   (the light, a byte array, 7 numbers), then 5 more indexes.
+4. Pages: the rectangles on it, 3 numbers, two sizes of pixels (each stored
+   as a "lazy array": the file position of its end, a length, the bytes),
+   then the pixel format (7 = DXT3 in every map so far), width, height and a
+   revision number.
+
+Each BSP node's last number (`light_map`) says which rectangle it uses. A
+corner's place on the page: multiply its position by the matrix (Unreal's
+row-vector order, translation in the last row) to get texels inside the
+rectangle, add the rectangle's corner, divide by the page size.
+
+How we know it is right, on `geo_01a`, `pro`, `ras_01a` and `yyy_01b`:
+every object reads exactly to its last byte; every lazy array ends where it
+says; every one of the polygon corners lands inside its own rectangle
+(within 0.6 of a texel); every lit node's rectangle names the node's own
+surface; every rectangle fits on its page. The names follow the public UE2
+headers (read in SWRC-Modding/CT; no licence, nothing copied); the byte
+layout was measured.
+
+| Map | Rectangles | Pages | BSP polygons with / without a lightmap |
+|---|---|---|---|
+| `geo_01a` | 126 | 2 | 211 / 33 |
+| `pro` | 81 | 2 | 142 / 94 |
+| `ras_01a` | 361 | 1 | 812 / 327 |
+| `yyy_01b` | 182 | 2 | 268 / 119 |
 
 ### Actors and where they are
 
@@ -768,6 +851,10 @@ It starts at the first `PlayerStart`, 64 units above it, facing its yaw.
   way put 14-20 points inside props, so the test notices wrong placements.
 - **On-screen check**: from the spawn point, more than half the window must
   be level (not background) with more than 100 different colours.
+  `--capture FILE.bmp` also saves that frame as a picture.
+- **Lightmap checks**: the ones listed under "Baked light on the walls". If
+  the lightmaps can't be read, the level still loads and draws unlit, and the
+  log says why.
 
 ## Sounds
 
