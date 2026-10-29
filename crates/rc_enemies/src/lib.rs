@@ -15,6 +15,7 @@
 //! Everything it does is logged to the game log with the prefix `enemies:`.
 
 pub mod look;
+pub mod save;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -24,6 +25,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, Target};
 use rc_combat::{CombatSet, Damage, Dead, Died, FireShot, Health, Hittable, ShotLanded, Team};
+use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LevelCollision, MusicMood,
@@ -45,6 +47,7 @@ pub struct EnemiesPlugin;
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Looks>()
+            .add_save_part::<save::EnemiesSave>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
@@ -83,6 +86,10 @@ pub struct Fight {
     pub entities: HashMap<u32, Entity>,
     pub stats: FightStats,
     next_summary: f32,
+    /// Droids put back from a save, made into bodies on the next frame
+    /// (see `save.rs`), and their health by id.
+    pub restored: Vec<BattleEvent>,
+    pub restored_health: HashMap<u32, f32>,
 }
 
 /// Counts for the log and for tests.
@@ -111,6 +118,8 @@ impl Fight {
             entities: HashMap::new(),
             stats: FightStats::default(),
             next_summary: 0.0,
+            restored: Vec::new(),
+            restored_health: HashMap::new(),
         }
     }
 }
@@ -341,7 +350,8 @@ fn think(
     let dt = time.delta_secs().min(0.1);
     let target = player_target(&player, &camera);
     let fight = &mut *fight;
-    let events = fight.battle.step(dt, &*collision.0, target);
+    let mut events = std::mem::take(&mut fight.restored);
+    events.extend(fight.battle.step(dt, &*collision.0, target));
     let now = fight.battle.time;
     let mut meshes = meshes;
     for e in events {
@@ -394,7 +404,13 @@ fn think(
                         last_fire: f32::NEG_INFINITY,
                         mesh: mesh.clone(),
                     },
-                    Health::new(p.combat.health),
+                    match fight.restored_health.remove(&id) {
+                        Some(h) => Health {
+                            current: h,
+                            max: p.combat.health,
+                        },
+                        None => Health::new(p.combat.health),
+                    },
                     Team::Separatist,
                     Hittable {
                         radius: p.movement.collision_radius,
