@@ -9,8 +9,8 @@ use crate::{Arsenal, Hittable};
 use bevy::audio::AudioSource;
 use bevy::prelude::*;
 use rc_game_core::{GameLog, GamePaths, Player};
-use rc_level_viewer::materials::Materials;
 use rc_package::sound::read_sound;
+use rc_package::Package;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -200,16 +200,26 @@ fn load_sounds(
             }
         }
     }
-    let mut packages = Materials::new(&paths.game_data());
     for (package, names) in wanted {
-        let Some(loaded) = packages.package(&package) else {
-            say(
-                log,
-                format!("weapons: sound package {package} not found, no sounds from it"),
-            );
-            continue;
+        let path = paths.game_file(&format!("GameData/Sounds/{package}.uax"));
+        let read = std::fs::read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|data| {
+                Package::parse(&data)
+                    .map(|p| (p, data))
+                    .map_err(|e| e.to_string())
+            });
+        let (pkg, data) = match read {
+            Ok(v) => v,
+            Err(e) => {
+                say(
+                    log,
+                    format!("weapons: no sounds from {}: {e}", path.display()),
+                );
+                continue;
+            }
         };
-        let (pkg, data) = (&loaded.0, &loaded.1);
+        let (pkg, data) = (&pkg, &data);
         for name in names {
             let export = pkg.exports.iter().find(|e| {
                 pkg.export_class_name(e) == "Sound"

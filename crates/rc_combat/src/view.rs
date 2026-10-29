@@ -142,14 +142,23 @@ pub(crate) fn show_weapon_model(
             &mut images,
         );
         let line = match &made {
-            Ok(parts) => format!("weapons: model {mesh_name} for {id}: {} parts", parts.len()),
+            Ok((parts, untextured)) if untextured.is_empty() => {
+                format!("weapons: model {mesh_name} for {id}: {} parts, all textured", parts.len())
+            }
+            Ok((parts, untextured)) => format!(
+                "weapons: model {mesh_name} for {id}: {} parts, {} drawn grey (no texture: {untextured:?})",
+                parts.len(),
+                untextured.len()
+            ),
             Err(e) => format!("weapons: model {mesh_name} for {id} not shown: {e}"),
         };
         match &log {
             Some(l) => l.line(line),
             None => println!("{line}"),
         }
-        cache.0.insert(id.clone(), made.unwrap_or_default());
+        cache
+            .0
+            .insert(id.clone(), made.map(|m| m.0).unwrap_or_default());
     }
     let parts = &cache.0[&id];
     // Forward, right, up in uu to camera space (forward is -Z, right +X,
@@ -179,7 +188,7 @@ fn load_model(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     images: &mut Assets<Image>,
-) -> Result<Vec<(Handle<Mesh>, Handle<StandardMaterial>)>, String> {
+) -> Result<(Vec<(Handle<Mesh>, Handle<StandardMaterial>)>, Vec<String>), String> {
     let mut mats = Materials::new(&paths.game_data());
     let loaded = mats
         .package(package)
@@ -199,6 +208,7 @@ fn load_model(
     let to_view_dir = |v: [f32; 3]| [v[1], v[2], -v[0]];
     let uvs = mesh.uv_sets.first().cloned().unwrap_or_default();
     let mut out = vec![];
+    let mut untextured = vec![];
     for (si, sec) in mesh.sections.iter().enumerate() {
         let first = sec.first_index as usize;
         let count = sec.num_faces as usize * 3;
@@ -230,17 +240,21 @@ fn load_model(
         .with_inserted_indices(Indices::U32(index));
         let material = match mats.resolve(pkg, data, mesh.materials.get(si).copied().unwrap_or(0)) {
             Ok(pic) => StandardMaterial {
+                base_color: Color::WHITE,
                 base_color_texture: Some(images.add(to_image(&pic))),
                 unlit: true,
                 ..default()
             },
-            Err(_) => StandardMaterial {
-                base_color: Color::srgb(0.6, 0.6, 0.6),
-                unlit: true,
-                ..default()
-            },
+            Err(e) => {
+                untextured.push(e);
+                StandardMaterial {
+                    base_color: Color::srgb(0.6, 0.6, 0.6),
+                    unlit: true,
+                    ..default()
+                }
+            }
         };
         out.push((meshes.add(m), materials.add(material)));
     }
-    Ok(out)
+    Ok((out, untextured))
 }

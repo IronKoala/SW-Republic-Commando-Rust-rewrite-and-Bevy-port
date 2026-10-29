@@ -177,3 +177,60 @@ bones, 848 points, 1,403 triangles, animation set `BattleDroidSet`
 CrouchBreathe, CrouchFire, Death and more, all 30 frames per second). Skin:
 `DroidTextures.BattleDroid_Shader`, whose picture `BattleDroid` is 512 x 512
 and averages R 79, G 74, B 70.
+
+## Weapons and damage
+
+Found on 2026-10-29 by reading the installed game's script packages, read
+only, with `rc_probe --class NAME` (see "Player movement" for how class
+default values are found). Only numbers are taken, and the rules are
+described in our own words. The values are in `data/weapons/*.toml` and
+`data/combat/player.toml`, each line naming the property it came from.
+
+**Where the numbers really live.** Each class's own defaults in
+`ctinventory.u`, `ctcharacters.u` and so on are only part of the story. The
+game also has `GameData/Properties/properties.u`, with a "...Defaults" class
+for most weapons, ammo, bolts and characters (`DC17mBlasterDefaults`,
+`PlayerCommandoDefaults`, ...). Its values replace the base class's: some
+values, like `MaxHealth`, exist only there, and the engine script sets health
+to `MaxHealth` when a character appears. So every number below is the base
+class's value with its "...Defaults" class on top.
+
+| Weapon | Fire | Ammo | Bolt | Damage | Sound |
+|---|---|---|---|---|---|
+| DC-17m rifle (`DC17mBlaster`) | automatic, 0.1 s between shots, aim error 15 | magazine 60, carries 300, starts with 120; reload 1.5 s (the first-person animation: 45 frames at 30 fps) | starts at rest, speeds up at 60000 uu/s² to 10000 uu/s | 20 | `wep_GEN_dc17Fire_02` |
+| DC-15s pistol (`DC15s`) | one shot per press, 0.2 s between shots, aim error 10 | 5 shots of charge, regains 1.5 a second, never reloads | 40000 uu/s² to 8000 uu/s | 55 | `wep_GEN_pistolFire_01` |
+| E-5 droid blaster (`BattleDroidBlaster`) | 0.55 s between shots, aim error 0 | | to 5000 uu/s | 24 | `wep_GEN_sbdGun_01` |
+| E-5, training mode (`BattleDroidBlasterTM`) | 0.1 s between shots | | to 5000 uu/s | 2 | |
+
+| Character | Health | Shield |
+|---|---|---|
+| Player (`PlayerCommando`) | 200 | 100, refills at 20 a second, 3 s after the last hit |
+| Battle droid (`BattleDroid`, `BattleDroidTM`) | 100 | none |
+
+Difficulty (`System/user.ini`): damage to the player is multiplied by 0.25 on
+Easy, 1 on Medium and 1.75 on Hard.
+
+**Rules from the script text:**
+
+- Fire modes: 0 is one shot per press, 1 is burst, 2 is automatic.
+- Laser bolts start with no speed and accelerate along their direction up to
+  their top speed (`Projectile`, when `bLaserBolt` is set).
+- Aim error: the point the shot would hit is moved by up to `AimError` uu for
+  every 1000 uu of distance, along the world's sideways and up axes (not the
+  view's).
+- The player's shots leave the muzzle (the weapon's `FPFireOffset` from the
+  eye) and fly to the point under the crosshair. If that point is behind or
+  far to the side of the muzzle, the shot just goes straight ahead.
+- When something is between the eye and the muzzle (standing against a wall
+  or a droid), the shot starts at the eye instead, so it still hits.
+- Damage goes to the shield first, then health. Any hit on the shield
+  restarts the wait before it refills.
+- Recharging weapons (`CTAmmoRecharging`) build up charge at their
+  `RechargeRate` and need a full 1 to fire.
+- Characters are upright cylinders for collision and hits (40 uu radius,
+  84 uu half-height for a commando).
+
+**What we don't know yet:** how the view kick (`WeaponKick`,
+`RecoilConstant`, `RecoilDampening`) settles back (it is in the compiled
+engine), the burst mode's details, hit-location and damage-type multipliers,
+grenades and melee.

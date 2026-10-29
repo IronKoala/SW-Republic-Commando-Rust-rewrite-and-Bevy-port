@@ -19,6 +19,9 @@
 //! Nothing here assumes a flat screen or a mouse: a shot is a start point
 //! and a direction, so a VR controller can be the gun later.
 
+// Bevy queries read best written out in place.
+#![allow(clippy::type_complexity)]
+
 mod damage;
 pub mod data;
 mod fire;
@@ -163,7 +166,7 @@ impl Plugin for WeaponsPlugin {
         app.add_message::<FireShot>()
             .add_message::<ShotLanded>()
             .add_message::<ViewKick>()
-            .insert_resource(fire::CombatRng(shot::Rng::new(0x5EED_D17)))
+            .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
                 Update,
                 (

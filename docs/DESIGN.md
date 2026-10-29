@@ -1095,3 +1095,91 @@ be black, washed out, magenta or a different tint). `cargo test -p
 rc_enemies` runs the plugin with the real combat plugin in a test room: a
 droid spawns, spots the player in under a second, fires bursts that
 sometimes hit, and dies to the player's DC-17.
+
+## Weapons, shots and damage (`rc_combat`, `rc_shoot`)
+
+`rc_combat` is the game's weapons and health, as a Bevy plugin
+(`CombatPlugin`) that the game program adds. It follows `docs/PLUGINS.md`:
+it reads input only from `ActionState` (fire, reload, next and previous
+weapon), the player from `Player` and `PlayerCamera`, the level from
+`LevelCollision`, and writes the display's `PlayerVitals` and
+`WeaponReadout`. The numbers are the original game's (see
+`docs/RESEARCH.md`, "Weapons and damage").
+
+### The pieces
+
+- `data.rs` reads our settings files (a small part of TOML). A misspelt
+  setting is an error that names the line, so a mod's typo is reported.
+- `weapon.rs`: a weapon's numbers (`WeaponParams`, read from
+  `data/weapons/<id>.toml`) and its state (`WeaponState`: magazine, spare
+  ammo, time to the next shot, reload). Firing adds the time between shots
+  instead of setting it, so 0.1 s is exactly 10 shots a second at any frame
+  rate.
+- `shot.rs`: where a shot starts, the aim error, how a bolt flies (exact
+  for any frame time), and whether a line hits a character's cylinder. This
+  is in the game's own units and axes.
+- `health.rs`: `Health`, `Shield`, `Team`, and the `Damage` and `Died`
+  messages. Damage goes to the shield first.
+- `fire.rs`: the player's trigger, `FireShot` from anyone, bolts in flight,
+  and the sounds. `damage.rs` applies `Damage`.
+- `view.rs`: the gun in the player's view (the game's own model and
+  textures) and the bolts' glow.
+
+### How other parts use it
+
+- To damage anything: send `Damage { target, amount, kind, instigator,
+  point, direction }`. Anything with `Health` (and optionally `Shield`) can
+  take it. `Died` is sent once at 0 health, and the entity gets `Dead`.
+- To fire a weapon (droids, squad mates): send `FireShot { shooter,
+  origin, direction, weapon }`. `weapon` is a file name from
+  `data/weapons`. The plugin adds the weapon's aim error, plays its sound,
+  flies the bolt and sends `ShotLanded` when it ends.
+- To be hit: add `Hittable` (the cylinder) and `Team`.
+- Recoil: each player shot sends `ViewKick { pitch, yaw }` (radians). The
+  player's view applies it; a VR mod can ignore it.
+
+### Modding
+
+Every weapon is one file in `data/weapons`. A mod folder's file with the
+same name replaces it, and a new file is a new weapon. The player's health,
+shield and starting weapons are in `data/combat/player.toml`.
+
+### `rc_shoot`: the firing range
+
+`rc_shoot` puts the player in the movement test room with three battle
+droids: one straight ahead, one to the right, and one far away that fires
+back every 2 seconds. Downed droids tip over and stand up again after 4
+seconds. The window title shows the weapon, ammo, health and shield. The
+keys are mapped to actions in `rc_shoot` itself; the real game reads them
+from `data/input/bindings.toml`.
+
+`rc_shoot --script` plays a fixed list of actions and checks 12 things: the
+files read, 5 rifle hits down the droid ahead, the magazine and spare counts
+before and after a 1.5 s reload, the pistol's two shots, the far droid's
+shots taking shield before health, and the picture. For the picture it
+captures the window and checks that the gun's corner has many colours and
+no magenta (magenta means a missing material), and that the middle of the
+view is the droid's colour.
+
+### Our choices (not from the game)
+
+- The DC-17m has no instant-hit setting in the game, so it fires bolts with
+  its bolt's damage.
+- How the view kick settles back is in the game's compiled engine. In
+  `rc_shoot` it fades at exp(-8 t).
+- The fire sound is full volume for the player and quieter with distance for
+  others; the game uses its 3D sound system.
+- Weapon switching is instant; the game plays holster and draw animations
+  (0.37 s and 0.67 s for the DC-17m).
+- The gun's place in view (`[model] offset`) and the bolt colour are ours.
+  The game draws the gun with first-person arms, which aren't done yet.
+
+### Fitting the long-term goals
+
+- **Modding:** all numbers are in text files, each line naming where in the
+  game the value came from.
+- **VR:** a shot is a start point and a direction, not a screen position, so
+  a tracked controller can be the gun later. The kick is a message the view
+  can ignore.
+- **Windows, Linux and Android:** plain Rust and Bevy, no operating-system
+  code. Tested on Linux in the cloud only.
