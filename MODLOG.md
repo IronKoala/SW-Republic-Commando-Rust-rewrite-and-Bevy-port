@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Doors and lifts run in the game (rc_movers_plugin)
+
+- **Changed:** New crate `crates/rc_movers_plugin` (`MoversPlugin`, `LevelMovers`, `MoverHappened`). `rc_level_plugin` now hands over the map's movers and their triangles as `LevelMoverData`. `rc_game` adds the plugin, its player movement calls `LevelMovers::step` before its own step, and the script checks that the map's movers run. Docs: DESIGN ("In the game"), PLUGINS (doors and lifts row), README.
+- **Why:** Level scripts open many doors, so the doors must be in the game first. Before this, `rc_game` left movers out of the collision altogether.
+- **Tested how:** `cargo test -p rc_movers_plugin` (1 test), then `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script` in the cloud sandbox with 264 game files copied read-only from the install.
+- **Result:** `SCRIPT DONE: 33 checks passed, 0 failed` (32 before, plus the new one: `geo_01a: 2 movers (2 solid), 42 triggers, clock 2.4 s`). The log lists both movers (`MoverDB_GEO2` and its slave, tag `D_Exit`, `TriggerControl`) and the 7 triggers we don't run yet (`OtherTriggerTurnsOn`/`Off`).
+- **Still broken / not tested:** Not tested on Windows. The script doesn't walk to a door, so opening one in `rc_game` isn't checked yet (the walker's tests cover the mover code). Droids and the squad use their own collision and don't see doors. Sounds still not played.
+- **Next:** Level scripts: the shared event and tag system, starting with geo_01a.
+
 ## 2026-10-29: All overnight parts merged; Delta Squad wired into the game
 
 - **Changed:** Merged into `main`, in order: CI (#15), game shell (#11), all levels (#14), weapons (#16), droids (#12), squad (#13), level plugin (#17), doors and lifts (#18), original main menu (#19). While merging: `rc_combat` now uses the shared `rc_game_core::ViewKick` instead of its own copy; `rc_probe` keeps both class tools (`--class` from weapons, `--classes`/`--fonts` from the menus, now in `class_scan.rs`); level collision indexes only package files, so `Engine.int` can't stand in for `Engine.u`. This change: `rc_game` adds `rc_squad_plugin::SquadPlugin`, and its player movement is in a new `player::PlayerMoveSet` ordered before `SquadSet`.

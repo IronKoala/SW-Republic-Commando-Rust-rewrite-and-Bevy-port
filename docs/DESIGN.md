@@ -1027,7 +1027,28 @@ where the map placed the mover; `rc_walk` sets their `Transform` each
 frame to the mover's move from there (Unreal to Bevy swaps Y and Z, so the
 turn's rows and columns swap the same way).
 
-### How we check movers without looking
+### In the game (`rc_movers_plugin`)
+
+The level part hands over the map's movers and their triangles
+(`LevelMoverData`) while loading. `MoversPlugin` builds the same
+`MoverSet` the walker uses, then swaps `LevelCollision` for "the level plus
+the movers where they are now", so everything that moves or shoots (the
+player, shots, later droids and the squad) runs into doors and stands on
+lifts without knowing about movers. The set sits behind a read-write lock
+inside the `LevelMovers` resource: sweeps read it, and stepping writes it.
+
+Each frame the player's movement calls `LevelMovers::step` just before its
+own step, as in the walker: movers move first (UE2 ticks movers before
+pawns), carrying or pushing the player, then the player moves among them.
+A `MoverSystems` set (in `GameSet::View`) then logs what happened
+(`movers: t=... MoverDB_GEO2 starts opening`), sends each as a
+`MoverHappened` message for sounds and level scripts, and moves the drawn
+`MoverPart`s.
+
+Other parts open a door the way the original's scripts do: by event name.
+`LevelMovers::send("D_Exit")` sets off every mover whose `Tag` is `D_Exit`.
+
+
 
 - **Unit tests** (`cargo test -p rc_movers`): a triggered door opens in its
   `MoveTime`, waits `StayOpenTime` and closes; the smooth curve is at 15.6%

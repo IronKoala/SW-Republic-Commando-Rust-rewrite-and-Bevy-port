@@ -267,6 +267,24 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
+        Check("the map's doors and lifts run", |w| {
+            let Some(m) = w.get_resource::<rc_movers_plugin::LevelMovers>() else {
+                return Err("no LevelMovers".into());
+            };
+            let set = m.read();
+            let got = format!(
+                "{} movers ({} solid), {} triggers, clock {:.1} s",
+                set.movers.len(),
+                set.movers.iter().filter(|m| m.collision.is_some()).count(),
+                set.active_triggers().count(),
+                set.time
+            );
+            if !set.movers.is_empty() && set.time > 0.5 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check("the sky camera turns with the player's camera", |w| {
             let sky = count::<rc_level_plugin::SkyCamera>(w);
             let mut q = w.query_filtered::<&Camera, (

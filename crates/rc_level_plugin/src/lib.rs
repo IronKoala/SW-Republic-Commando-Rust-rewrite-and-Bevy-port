@@ -10,7 +10,10 @@
 //!   (`rc_level_viewer::scene` and `draw`), and its sky
 //!   (`rc_level_viewer::sky`): a second camera inside the sky box that turns
 //!   with the player's camera;
-//! - `LevelInfo`: counts for the log and the self-tests.
+//! - `LevelInfo`: counts for the log and the self-tests;
+//! - `LevelMoverData`: the map's doors, lifts and their triggers, as read
+//!   from the map, for the movers part (`rc_movers_plugin`) to run. Their
+//!   triangles are not in `LevelCollision`; that part adds them.
 //!
 //! Everything it spawns is removed when the game leaves `InGame`.
 //!
@@ -83,6 +86,15 @@ pub struct LevelInfo {
     pub draw_ms: f64,
 }
 
+/// The map's doors, lifts and triggers as the map places them, and each
+/// mover's collision triangles by its export index. Present from the end of
+/// loading until the game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelMoverData {
+    pub movers: rc_level::movers::MapMovers,
+    pub triangles: std::collections::HashMap<usize, Vec<[[f32; 3]; 3]>>,
+}
+
 /// Frames to wait in the loading screen before the slow load, so the
 /// loading screen is drawn first.
 #[derive(Resource)]
@@ -95,6 +107,7 @@ fn begin(mut commands: Commands, mut gate: ResMut<LoadingGate>) {
 
 fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelInfo>();
+    commands.remove_resource::<LevelMoverData>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -172,6 +185,10 @@ fn load(world: &mut World) {
         yaw.to_degrees()
     ));
     world.insert_resource(PlayerStart { feet, yaw });
+    world.insert_resource(LevelMoverData {
+        movers: lvl.movers,
+        triangles: lvl.mover_triangles,
+    });
     world.insert_resource(LevelCollision(Arc::new(tw)));
 
     // The look. If it can't be built the level is still solid, just
