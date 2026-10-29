@@ -12,9 +12,12 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_package` | Reads Unreal Engine 2 packages from bytes it's given. Opens no files. No Bevy. |
 | `rc_image` | Turns raw pixel data (P8, DXT1/3/5, RGBA8, G16) into plain RGBA pictures and writes PNG files. Knows nothing about Unreal. No Bevy. |
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
+| `rc_viewer` | The first Bevy program: opens a window and shows one texture from the game. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
-Bevy will come in later as a separate crate that uses them.
+Only `rc_viewer` uses Bevy (version 0.20.1, MIT or Apache-2.0). It turns on
+only the parts of Bevy a 2D window needs (no audio, gamepads or UI yet), which
+keeps the build smaller.
 
 ## Finding the game
 
@@ -129,3 +132,49 @@ across the install: 1,916 of 2,003 textures differ by under 10; 17 by over 20.
 The 17 are mostly fine patterns (grates, noise, flickering screens). Their
 smaller copies fade toward flat grey, which suggests the artists made those
 mipmaps differently. That explanation is a guess and hasn't been checked by eye.
+
+## Showing a texture in Bevy (`rc_viewer`)
+
+Bevy is the game engine. A Bevy program is an "app" made of:
+
+- **Resources**: single pieces of shared data. `rc_viewer` keeps its log file,
+  the decoded texture and the frame counters as resources.
+- **Entities**: the things in the scene. Here there are two: a 2D camera, and a
+  "sprite" (a flat picture) using the texture.
+- **Systems**: plain Rust functions Bevy calls for us. `setup` runs once at the
+  start and creates the camera and the sprite. `count_frames` runs every frame.
+
+The order of a run:
+
+1. Before Bevy starts, `main` reads the package from the game folder and
+   decodes the texture's full-size mipmap with `rc_package` and `rc_image`
+   (the same code `rc_probe` uses). If that fails, it logs why and exits with
+   code 1 without opening a window.
+2. Bevy opens an 800x800 window with a dark grey background.
+3. `setup` hands the RGBA pixels to Bevy as an `Image` (format
+   `Rgba8UnormSrgb`: 4 bytes per pixel, colours in the usual sRGB scale) and
+   draws it as a sprite scaled to 90% of the window (720x720), keeping its shape.
+4. `count_frames` logs the window size on the first frame and the frame rate
+   about once a second. With `--frames N` it closes the window after N frames.
+
+### How we check the window without looking at it
+
+On frame 10, `rc_viewer` asks Bevy for a screenshot of the window, kept in
+memory, never saved. It then compares each screen pixel inside the sprite's
+square with the texture pixel it should show. See-through texture pixels are
+first mixed with the background colour, the same way the graphics card mixes
+them. The result is the average difference per colour channel, from 0 to 255.
+It also checks a corner pixel is the background colour.
+
+Results in the cloud sandbox (software rendering, no graphics card):
+- `DC15Blaster` (256x256 DXT1): 3.77. `WookieeMelee` (128x128 DXT1): 4.32.
+  `TDetonator` (128x128 DXT5, mostly see-through): 0.55. Under 10 passes.
+- The same check with the texture deliberately compared upside down gives
+  22.56, so the check does notice a wrong picture. The small leftover
+  difference on a correct picture comes from scaling: the screen blends
+  neighbouring texture pixels, the check doesn't.
+
+Known quirk: in the sandbox, the first screenshot is often completely black,
+because the window hadn't been drawn yet. The check then tries again 10 frames
+later, up to 5 times. On the user's Windows PC the first capture was fine
+(3.77, PASS).
