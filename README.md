@@ -50,15 +50,25 @@ copy of the game.
   screen: outline match 0.996 and colour difference 1.04 of 255, PASS. It also
   works for the DC-17m, the DC-15s pistol and the thermal detonator.
 
+- **Loading a whole level (tested in the cloud sandbox, not yet on Windows).**
+  `rc_level_viewer` loads a map with its walls, floors and every placed prop,
+  textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
+  level): 141,477 triangles, 55 of 56 materials textured. It checks itself by
+  numbers: props sit under the AI's path points where they should, and the
+  window is covered by the level. The level's geometry and actors were read
+  from 5 maps with no errors.
+
 ## What doesn't work yet
 
 - Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Animated models (`.ukx`), sounds, level geometry and scripts are not decoded yet.
+- Animated models (`.ukx`), sounds and scripts are not decoded yet.
+- Levels are drawn without lights, lightmaps, sky, characters, effects or
+  moving parts. No collision: the camera flies through walls.
 - Models are drawn without lighting, bump maps or transparency. Only a
   material's main colour texture is used.
-- No levels, no game yet.
+- No game yet.
 
 ## How to run it
 
@@ -120,6 +130,20 @@ models work too, for example
 `cargo run --release -p rc_viewer -- --mesh "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\StaticMeshes\weapons.usx" DC17mBlaster`.
 To check every static mesh: `cargo run --release -p rc_probe -- --meshes`
 (log in `logs\rc_meshes.log`).
+
+To load a level and fly around it:
+
+```
+cargo run --release -p rc_level_viewer
+```
+
+A window titled `Republic Commando level: geo_01a` opens at the player's start
+point. Controls: W A S D to move, E or Space up, Q or Ctrl down, hold Shift to
+go faster, hold the right mouse button and move the mouse to look around, the
+mouse wheel changes speed. The log goes to `logs\rc_level_viewer.log`. Look for
+`BSP checks: all passed`, the `floor test` lines and `on-screen check PASS`.
+For another map, give its name, for example
+`cargo run --release -p rc_level_viewer -- ras_01a`.
 
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.

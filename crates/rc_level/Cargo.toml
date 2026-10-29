@@ -1,0 +1,8 @@
+[package]
+name = "rc_level"
+version = "0.1.0"
+description = "Reads Republic Commando maps: level geometry (BSP) and placed actors"
+edition.workspace = true
+
+[dependencies]
+rc_package = { path = "../rc_package" }
