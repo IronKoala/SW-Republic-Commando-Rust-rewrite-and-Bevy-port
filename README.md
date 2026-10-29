@@ -39,14 +39,14 @@ copy of the game.
   passed first time (difference 3.77 of 255) and ran at a steady 144 frames
   per second.
 
-- **Reading and playing sounds (tested in the cloud sandbox, not yet on
-  Windows).** `rc_probe --sounds` reads every sound in the game's 23 sound
+- **Reading and playing sounds (tested on Windows).** `rc_probe --sounds` reads every sound in the game's 23 sound
   packages (`.uax`). Every sound inside them is a normal `.wav` file
   (uncompressed 16-bit): 7,974 sounds, about 4 hours 11 minutes in total, all
   decoded with no failures. `rc_probe --export-sounds` saves them as `.wav`
   files in the gitignored `extracted/sounds/` folder. `rc_soundtest` plays the
   DC-17 rifle firing over a looping battle ambience through Bevy's audio and
-  checks that Bevy decodes every sample exactly as our own reader does.
+  checks that Bevy decodes every sample exactly as our own reader does. On the
+  user's Windows PC it played and was heard, at exactly real-time speed.
 
 - **Reading 3D models (tested on every static mesh).** `rc_probe --meshes`
   reads every static mesh (the fixed models used for weapons, props and level
@@ -68,7 +68,7 @@ copy of the game.
 - Sound: music (`.ogg` files in `GameData\Music`) isn't played yet, only
   found. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
-  No 3D (positional) sound yet. Not tested on Windows.
+  No 3D (positional) sound yet.
 - Models are drawn without lighting, bump maps or transparency. Only a
   material's main colour texture is used.
 - No levels, no game yet.
