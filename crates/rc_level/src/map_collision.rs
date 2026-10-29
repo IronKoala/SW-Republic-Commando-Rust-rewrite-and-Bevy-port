@@ -42,8 +42,13 @@ fn index_packages(dir: &Path, out: &mut HashMap<String, PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             index_packages(&p, out);
-        } else if let Some(stem) = p.file_stem() {
-            out.entry(stem.to_string_lossy().to_ascii_lowercase()).or_insert(p);
+        } else if let (Some(stem), Some(ext)) = (p.file_stem(), p.extension()) {
+            // Only packages: `Engine.int` (text) sits next to `Engine.u`
+            // in GameData/System, and must not stand in for it.
+            let ext = ext.to_string_lossy().to_ascii_lowercase();
+            if ["u", "usx", "utx", "ukx", "uax", "ctm"].contains(&ext.as_str()) {
+                out.entry(stem.to_string_lossy().to_ascii_lowercase()).or_insert(p);
+            }
         }
     }
 }
