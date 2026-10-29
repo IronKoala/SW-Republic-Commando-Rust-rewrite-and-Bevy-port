@@ -14,6 +14,7 @@
 
 pub mod animation;
 pub mod class_defaults;
+pub mod class_library;
 pub mod light;
 pub mod properties;
 pub mod reader;

@@ -18,6 +18,8 @@ toml = "0.8"
 
 # PLUGINS FROM OTHER PARTS: add the crates of the level, weapons, enemies
 # and squad parts here (see docs/PLUGINS.md).
+rc_combat = { path = "../rc_combat" }
+rc_enemies = { path = "../rc_enemies" }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer, a window on
 # X11 or Wayland, menus and text (bevy_ui with Bevy's built-in font), audio

@@ -1,0 +1,10 @@
+[package]
+name = "rc_nav"
+version = "0.1.0"
+description = "The level's path network (path nodes and their links) and route finding for computer-controlled characters. No Bevy."
+edition.workspace = true
+
+[dependencies]
+rc_level = { path = "../rc_level" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }
