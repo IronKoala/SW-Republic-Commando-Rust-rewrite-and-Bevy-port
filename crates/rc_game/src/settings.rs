@@ -71,8 +71,15 @@ pub struct VideoSection {
     pub width: u32,
     pub height: u32,
     pub vsync: bool,
-    /// Field of view across the screen, degrees. The original's is 85.
+    /// Field of view across a 4:3 screen, degrees. The original's is 85.
+    /// Wider screens see more at the sides with the same view up and down
+    /// ("Hor+"), so nothing is cut off or stretched to fit.
     pub fov: f32,
+    /// The widest shape the on-screen display spreads to, as width over
+    /// height. On wider screens it stays in a centred area this shape, so
+    /// health and ammo aren't in the far corners of an ultrawide.
+    /// 0 lets it fill the screen.
+    pub hud_max_aspect: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -96,6 +103,9 @@ pub struct ControlsSection {
     pub invert_y: bool,
     /// Stick movement smaller than this is ignored (0 to 1).
     pub stick_dead_zone: f32,
+    /// Look-stick response: 1 is straight, 2 or more makes small pushes
+    /// gentler for fine aiming while full tilt still turns at full speed.
+    pub stick_look_curve: f32,
 }
 
 impl Default for Settings {
@@ -116,6 +126,7 @@ impl Default for Settings {
                 height: 720,
                 vsync: true,
                 fov: 85.0,
+                hud_max_aspect: 16.0 / 9.0,
             },
             audio: AudioSection {
                 master_volume: 1.0,
@@ -128,6 +139,7 @@ impl Default for Settings {
                 stick_look_speed: 2.5,
                 invert_y: false,
                 stick_dead_zone: 0.15,
+                stick_look_curve: 1.5,
             },
         }
     }
@@ -187,7 +199,12 @@ fullscreen = false
 width = 1280
 height = 720
 vsync = true
-fov = 85          # field of view across the screen, degrees (the original's)
+# Field of view across a 4:3 screen, degrees (the original's is 85). Wider
+# screens see more at the sides; the view up and down stays the same.
+fov = 85
+# Widest shape (width / height) the display spreads to; on an ultrawide it
+# stays in a centred area this shape. 1.7777778 is 16:9. 0 fills the screen.
+hud_max_aspect = 1.7777778
 
 [audio]
 master_volume = 1.0   # 0 is silent, 1 is full
@@ -200,6 +217,7 @@ mouse_sensitivity = 0.0025         # radians per mouse count
 stick_look_speed = 2.5             # radians per second at full stick
 invert_y = false
 stick_dead_zone = 0.15
+stick_look_curve = 1.5             # 1 is straight; higher is finer near the middle
 "#;
 
 impl Settings {

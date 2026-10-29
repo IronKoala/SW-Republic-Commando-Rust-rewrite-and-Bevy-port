@@ -139,6 +139,19 @@ pub struct ActionState {
     /// How far to turn this frame, radians: `x` turns right, `y` looks up.
     /// Already scaled by the sensitivity settings.
     pub look: Vec2,
+    /// The device the player touched most recently, so on-screen prompts
+    /// can show keys or pad buttons to match. Every device works at once;
+    /// this only says which one to show.
+    pub last_device: InputDevice,
+}
+
+/// A kind of input device, for on-screen prompts.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputDevice {
+    #[default]
+    KeyboardMouse,
+    Gamepad,
+    Touch,
 }
 
 impl ActionState {

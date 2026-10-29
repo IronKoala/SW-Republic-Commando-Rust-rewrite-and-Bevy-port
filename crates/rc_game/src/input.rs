@@ -9,7 +9,7 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::input::touch::Touches;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use rc_game_core::{Action, ActionState, GameSet, Play};
+use rc_game_core::{Action, ActionState, GameSet, InputDevice, Play};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
@@ -53,6 +53,9 @@ pub struct LookSettings {
     pub stick_look_speed: f32,
     pub invert_y: bool,
     pub dead_zone: f32,
+    /// Look-stick response curve: 1 is straight, higher is gentler near
+    /// the middle for fine aiming.
+    pub look_curve: f32,
 }
 
 #[derive(Deserialize)]
@@ -303,17 +306,25 @@ struct TouchTaps {
     started: Vec<(u64, f32)>,
 }
 
-fn stick(pad: &Gamepad, which: Stick, dead_zone: f32) -> Vec2 {
+fn stick(pad: &Gamepad, which: Stick, dead_zone: f32, curve: f32) -> Vec2 {
     let v = match which {
         Stick::Left => pad.left_stick(),
         Stick::Right => pad.right_stick(),
         Stick::None => Vec2::ZERO,
     };
-    if v.length() < dead_zone {
-        Vec2::ZERO
-    } else {
-        v
+    shape_stick(v, dead_zone, curve)
+}
+
+/// Ignore the dead zone in the middle, stretch the rest back to 0..1 so
+/// the stick doesn't jump from nothing to the dead zone's size, then apply
+/// the response curve.
+fn shape_stick(v: Vec2, dead_zone: f32, curve: f32) -> Vec2 {
+    let len = v.length();
+    if len <= dead_zone || len == 0.0 {
+        return Vec2::ZERO;
     }
+    let t = ((len - dead_zone) / (1.0 - dead_zone).max(1e-3)).min(1.0);
+    v / len * t.powf(curve.max(0.1))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -352,14 +363,26 @@ fn read_devices(
     let y_sign = if look.invert_y { -1.0 } else { 1.0 };
     let mut movement = Vec2::ZERO;
     let mut turn = Vec2::ZERO;
+    let mut device = None;
+    if keys.get_pressed().next().is_some()
+        || buttons.get_pressed().next().is_some()
+        || motion.delta != Vec2::ZERO
+    {
+        device = Some(InputDevice::KeyboardMouse);
+    }
     for pad in &pads {
         for (a, b) in &bindings.pad {
             if pad.pressed(*b) {
                 now.insert(*a);
             }
         }
-        movement += stick(pad, bindings.move_stick, look.dead_zone);
-        turn += stick(pad, bindings.look_stick, look.dead_zone) * look.stick_look_speed * dt;
+        let m = stick(pad, bindings.move_stick, look.dead_zone, 1.0);
+        let l = stick(pad, bindings.look_stick, look.dead_zone, look.look_curve);
+        if m != Vec2::ZERO || l != Vec2::ZERO || pad.get_pressed().next().is_some() {
+            device = Some(InputDevice::Gamepad);
+        }
+        movement += m;
+        turn += l * look.stick_look_speed * dt;
     }
     // Keys add full steps to the stick's movement.
     let axis = |plus: Action, minus: Action| {
@@ -386,6 +409,7 @@ fn read_devices(
                 taps.started.push((f.id(), t));
             }
             for f in touches.iter() {
+                device = Some(InputDevice::Touch);
                 if f.start_position().x < half {
                     movement += ((f.position() - f.start_position()) / TOUCH_MOVE_RADIUS)
                         .clamp_length_max(1.0)
@@ -411,6 +435,9 @@ fn read_devices(
     }
     turn.y *= y_sign;
     state.update(now, movement, turn);
+    if let Some(d) = device {
+        state.last_device = d;
+    }
 }
 
 fn grab_cursor(mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>) {
@@ -430,6 +457,19 @@ fn release_cursor(mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stick_dead_zone_and_curve() {
+        // Inside the dead zone: nothing. Just outside: a small value, not a
+        // jump to the dead zone's size. Full tilt stays full.
+        assert_eq!(shape_stick(Vec2::new(0.1, 0.0), 0.15, 1.0), Vec2::ZERO);
+        let small = shape_stick(Vec2::new(0.2, 0.0), 0.15, 1.0).x;
+        assert!((small - 0.0588).abs() < 0.001, "{small}");
+        assert!((shape_stick(Vec2::new(0.0, 1.0), 0.15, 2.0).y - 1.0).abs() < 1e-6);
+        // A curve of 2 halves a half-way push (after the dead zone).
+        let half = shape_stick(Vec2::new(0.575, 0.0), 0.15, 2.0).x;
+        assert!((half - 0.25).abs() < 0.001, "{half}");
+    }
 
     #[test]
     fn shipped_bindings_file_reads() {

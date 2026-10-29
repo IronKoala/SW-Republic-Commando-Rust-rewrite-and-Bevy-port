@@ -33,7 +33,7 @@ pub mod paths;
 mod state;
 pub mod units;
 
-pub use actions::{Action, ActionState};
+pub use actions::{Action, ActionState, InputDevice};
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };

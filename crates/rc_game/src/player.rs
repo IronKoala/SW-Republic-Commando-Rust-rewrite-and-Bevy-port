@@ -172,6 +172,8 @@ fn place_camera(
     fov: Res<FieldOfView>,
     body: Query<&Body, With<Player>>,
     window: Query<&Window>,
+    log: Res<GameLog>,
+    mut logged: Local<(f32, f32)>,
     mut view: Query<(&mut Transform, &mut Projection), With<PlayerCamera>>,
 ) {
     let (Ok(body), Ok((mut t, mut proj))) = (body.single(), view.single_mut()) else {
@@ -179,10 +181,54 @@ fn place_camera(
     };
     t.translation = to_bevy(body.pawn.eye());
     t.rotation = view_rotation(body.yaw, body.pitch);
-    // The game's field of view is across the screen; Bevy's is up and down.
-    if let (Some(w), Projection::Perspective(p)) = (window.iter().next(), &mut *proj) {
-        let aspect = w.width() / w.height().max(1.0);
-        let half = (fov.0.to_radians() / 2.0).tan();
-        p.fov = 2.0 * (half / aspect).atan();
+    // Bevy's field of view is up and down, and it widens the sides to fit
+    // the window's shape: that is "Hor+" as long as the up-and-down view
+    // doesn't change with the shape.
+    if let Projection::Perspective(p) = &mut *proj {
+        p.fov = vertical_fov(fov.0);
+        // Log the angles whenever the window's shape or the setting changes.
+        if let Some(w) = window.iter().next() {
+            let aspect = w.width() / w.height().max(1.0);
+            if (aspect, fov.0) != *logged {
+                *logged = (aspect, fov.0);
+                log.line(format!(
+                    "player: view {:.0}x{:.0} (aspect {aspect:.3}): {:.1} degrees across, {:.1} up and down",
+                    w.width(),
+                    w.height(),
+                    horizontal_fov(p.fov, aspect),
+                    p.fov.to_degrees()
+                ));
+            }
+        }
+    }
+}
+
+/// The setting is the original's: degrees across a 4:3 screen (the only
+/// shape the original's resolutions came in). Turn it into the up-and-down
+/// angle, radians, which then stays the same at every screen shape.
+pub fn vertical_fov(horizontal_4_3_degrees: f32) -> f32 {
+    let half = (horizontal_4_3_degrees.to_radians() / 2.0).tan();
+    2.0 * (half / (4.0 / 3.0)).atan()
+}
+
+/// The angle across a screen of this shape (width / height), degrees.
+pub fn horizontal_fov(vertical: f32, aspect: f32) -> f32 {
+    (2.0 * ((vertical / 2.0).tan() * aspect).atan()).to_degrees()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hor_plus_field_of_view() {
+        // 85 across 4:3 is 69.0 up and down, at every shape.
+        let v = vertical_fov(85.0);
+        assert!((v.to_degrees() - 69.0).abs() < 0.05, "{}", v.to_degrees());
+        assert!((horizontal_fov(v, 4.0 / 3.0) - 85.0).abs() < 0.01);
+        // Wider screens see more at the sides.
+        assert!((horizontal_fov(v, 16.0 / 9.0) - 101.4).abs() < 0.1);
+        assert!((horizontal_fov(v, 21.0 / 9.0) - 116.1).abs() < 0.1);
+        assert!((horizontal_fov(v, 32.0 / 9.0) - 135.5).abs() < 0.1);
     }
 }

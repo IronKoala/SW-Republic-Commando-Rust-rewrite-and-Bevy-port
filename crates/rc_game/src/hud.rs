@@ -1,3 +1,6 @@
+//! PLACEHOLDER: our own stand-in for the original's HUD, to be replaced by
+//! the original's look (see `docs/ORIGINAL_MENUS.md`).
+//!
 //! The on-screen display during play, styled after the commando's visor:
 //! amber corner brackets, the crosshair in the middle, shield and health at
 //! bottom left, ammunition at bottom right, the squad at top left, and short
@@ -6,6 +9,7 @@
 //! It only reads `PlayerVitals`, `WeaponReadout`, `SquadReadout` and
 //! `HudMessage`, so gameplay can change without touching it.
 
+use crate::settings::Settings;
 use crate::theme::Theme;
 use bevy::prelude::*;
 use rc_game_core::{
@@ -72,7 +76,7 @@ fn bar(
         .spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
-            column_gap: Val::Vh(1.0),
+            column_gap: Val::VMin(1.0),
             ..default()
         })
         .with_children(|row| {
@@ -81,14 +85,14 @@ fn bar(
                 theme.font(theme.small),
                 TextColor(theme.text_dim),
                 Node {
-                    width: Val::Vh(10.0),
+                    width: Val::VMin(10.0),
                     ..default()
                 },
             ));
             row.spawn((
                 Node {
-                    width: Val::Vh(22.0),
-                    height: Val::Vh(1.4),
+                    width: Val::VMin(22.0),
+                    height: Val::VMin(1.4),
                     border: UiRect::all(Val::Px(1.0)),
                     padding: UiRect::all(Val::Px(1.0)),
                     ..default()
@@ -114,8 +118,8 @@ fn bar(
 fn bracket(parent: &mut ChildSpawnerCommands, theme: &Theme, top: bool, left: bool) {
     let mut node = Node {
         position_type: PositionType::Absolute,
-        width: Val::Vh(6.0),
-        height: Val::Vh(6.0),
+        width: Val::VMin(6.0),
+        height: Val::VMin(6.0),
         border: UiRect {
             left: Val::Px(if left { 2.0 } else { 0.0 }),
             right: Val::Px(if left { 0.0 } else { 2.0 }),
@@ -124,7 +128,7 @@ fn bracket(parent: &mut ChildSpawnerCommands, theme: &Theme, top: bool, left: bo
         },
         ..default()
     };
-    let m = Val::Vh(2.5);
+    let m = Val::VMin(2.5);
     if top {
         node.top = m;
     } else {
@@ -138,12 +142,27 @@ fn bracket(parent: &mut ChildSpawnerCommands, theme: &Theme, top: bool, left: bo
     parent.spawn((node, BorderColor::all(theme.text.with_alpha(0.6))));
 }
 
-fn spawn_hud(mut commands: Commands, theme: Res<Theme>, log: Res<GameLog>) {
+fn spawn_hud(
+    mut commands: Commands,
+    theme: Res<Theme>,
+    settings: Res<Settings>,
+    log: Res<GameLog>,
+) {
+    // Everything is placed from the edges of this area and sized by the
+    // screen's height (or width, if narrower), so it fits any shape. On a
+    // screen wider than `hud_max_aspect` the area is centred and no wider.
+    let max = settings.video.hud_max_aspect;
     commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
+                max_width: if max > 0.0 {
+                    Val::Vh(100.0 * max)
+                } else {
+                    Val::Auto
+                },
+                margin: UiRect::horizontal(Val::Auto),
                 ..default()
             },
             DespawnOnExit(GameState::InGame),
@@ -165,9 +184,9 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, log: Res<GameLog>) {
             .with_children(|c| {
                 for dir in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
                     let (w, h) = if dir.x != 0.0 {
-                        (Val::Vh(CROSS_LEN), Val::Px(2.0))
+                        (Val::VMin(CROSS_LEN), Val::Px(2.0))
                     } else {
-                        (Val::Px(2.0), Val::Vh(CROSS_LEN))
+                        (Val::Px(2.0), Val::VMin(CROSS_LEN))
                     };
                     c.spawn((
                         CrossBar(dir),
@@ -184,10 +203,10 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, log: Res<GameLog>) {
             // Shield and health, bottom left.
             root.spawn(Node {
                 position_type: PositionType::Absolute,
-                left: Val::Vh(5.0),
-                bottom: Val::Vh(5.0),
+                left: Val::VMin(5.0),
+                bottom: Val::VMin(5.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Vh(0.8),
+                row_gap: Val::VMin(0.8),
                 ..default()
             })
             .with_children(|p| {
@@ -197,8 +216,8 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, log: Res<GameLog>) {
             // Weapon and ammunition, bottom right.
             root.spawn(Node {
                 position_type: PositionType::Absolute,
-                right: Val::Vh(5.0),
-                bottom: Val::Vh(5.0),
+                right: Val::VMin(5.0),
+                bottom: Val::VMin(5.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::FlexEnd,
                 ..default()
@@ -228,10 +247,10 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, log: Res<GameLog>) {
                 SquadPanel,
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Vh(5.0),
-                    top: Val::Vh(5.0),
+                    left: Val::VMin(5.0),
+                    top: Val::VMin(5.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Vh(0.6),
+                    row_gap: Val::VMin(0.6),
                     ..default()
                 },
             ));
@@ -240,7 +259,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, log: Res<GameLog>) {
                 MessageList,
                 Node {
                     position_type: PositionType::Absolute,
-                    top: Val::Vh(5.0),
+                    top: Val::VMin(5.0),
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
@@ -292,10 +311,10 @@ fn update_crosshair(
             -(gap + CROSS_LEN)
         };
         if b.0.x != 0.0 {
-            n.left = Val::Vh(near);
+            n.left = Val::VMin(near);
             n.top = Val::Px(-1.0);
         } else {
-            n.top = Val::Vh(near);
+            n.top = Val::VMin(near);
             n.left = Val::Px(-1.0);
         }
     }
@@ -355,7 +374,7 @@ fn update_squad(
             let down = m.status == SquadStatus::Incapacitated;
             p.spawn(Node {
                 flex_direction: FlexDirection::Row,
-                column_gap: Val::Vh(1.0),
+                column_gap: Val::VMin(1.0),
                 align_items: AlignItems::Center,
                 ..default()
             })
@@ -365,14 +384,14 @@ fn update_squad(
                     theme.font(theme.small),
                     TextColor(if down { theme.squad_down } else { theme.text }),
                     Node {
-                        width: Val::Vh(14.0),
+                        width: Val::VMin(14.0),
                         ..default()
                     },
                 ));
                 row.spawn((
                     Node {
-                        width: Val::Vh(10.0),
-                        height: Val::Vh(0.9),
+                        width: Val::VMin(10.0),
+                        height: Val::VMin(0.9),
                         ..default()
                     },
                     BackgroundColor(theme.panel),
