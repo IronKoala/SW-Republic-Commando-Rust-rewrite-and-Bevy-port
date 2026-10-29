@@ -3,7 +3,7 @@
 # them, so they can be built and tested on their own.
 [workspace]
 resolver = "2"
-members = ["crates/rc_image", "crates/rc_package", "crates/rc_probe", "crates/rc_viewer"]
+members = ["crates/rc_audio", "crates/rc_image", "crates/rc_package", "crates/rc_probe", "crates/rc_soundtest", "crates/rc_viewer"]
 
 [workspace.package]
 edition = "2021"

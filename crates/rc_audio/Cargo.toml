@@ -1,0 +1,7 @@
+[package]
+name = "rc_audio"
+version = "0.1.0"
+description = "Reads .wav sound files into samples and measures them"
+edition.workspace = true
+
+[dependencies]

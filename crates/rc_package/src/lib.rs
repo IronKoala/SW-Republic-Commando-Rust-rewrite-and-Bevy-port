@@ -14,6 +14,7 @@
 
 pub mod properties;
 pub mod reader;
+pub mod sound;
 pub mod static_mesh;
 pub mod texture;
 
