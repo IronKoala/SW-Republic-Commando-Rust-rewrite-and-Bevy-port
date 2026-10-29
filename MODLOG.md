@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Light a real level with its baked lightmaps and prop colours
+
+- **Changed:** New `crates/rc_level/src/lightmap.rs` reads everything after the BSP vertex pool (zones, leaves, render sections, lightmap rectangles with their world-to-lightmap matrix, and the 512x512 lightmap pages) and works out each wall corner's place on its page; it has its own checks. `rc_level/src/actors.rs`: placements now carry the `StaticMeshInstance` reference, and `read_vertex_colours` reads a prop's baked corner colours. `rc_level_viewer`: walls get a second set of texture coordinates and Bevy's `Lightmap`; props get their corner colours; the map's dynamic lights are added; new `--lighting FILE` and `--capture FILE.bmp` options. `lighting.rs` moved from `rc_viewer` (where nothing used it) to `rc_level_viewer`, with new settings `baked_light`, `lightmap_gain`, `vertex_colour_gain`, and `live_lights` now defaulting to `dynamic`. DESIGN, README updated.
+- **Why:** Roadmap step 2: light a real level.
+- **Tested how:** Copied `geo_01a`'s 5 static-mesh packages from the install (read-only) into the cloud sandbox, next to the 4 maps and textures copied before. Ran the reader and the viewer (Xvfb, software rendering) on `geo_01a`, `pro`, `ras_01a` and `yyy_01b`, and saved the checked frame to look at. All unit tests pass (`cargo test -p rc_level -p rc_level_viewer -p rc_viewer -p rc_package -p rc_image`); clippy is clean for the changed crates.
+- **Result:** All 4 maps: `lightmap checks: all passed` (every model object read to its last byte; every polygon corner inside its own lightmap rectangle; every lit node's rectangle names its own surface). Rectangles / pages: 126/2, 81/2, 361/1, 182/2. `geo_01a`: `prop baked light: 355 drawn props have corner colours, 0 have none, 0 have a colour list of the wrong length`; 8 lightmapped batches, 50 coloured, 3 full-bright; 2 real-time lights, 29 left to the baked light. On-screen check PASS on all 4 maps. Average screen colour on `geo_01a` R 57 G 59 B 54 lit vs R 111 G 102 B 89 with `baked_light = false`; the captures show shaded rocks, dark cave ceilings and patches of light on `ras_01a`'s walls.
+- **Still broken / not tested:** Not tested on Windows. Brightness gain 2 is the era's convention, not compared with the real game. Real-time lights use placeholder strengths and don't reach props. Shadow bitmaps and the pages' alpha channel are read past, not used. Only `geo_01a`'s props were checked (the other maps' mesh packages weren't copied).
+- **Next:** Run it on the user's PC; then compare brightness with the real game, and light props with real-time lights.
+
 ## 2026-10-29: Level viewer passes on Windows
 
 - **Changed:** No code changes. Updated `README.md` with the result.

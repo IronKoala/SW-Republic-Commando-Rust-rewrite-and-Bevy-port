@@ -100,7 +100,7 @@ fn find_files(dir: &Path, out: &mut HashMap<String, PathBuf>) {
     }
 }
 
-fn pixel_format(format: u8) -> Option<PixelFormat> {
+pub fn pixel_format(format: u8) -> Option<PixelFormat> {
     Some(match format {
         0 => PixelFormat::P8,
         3 => PixelFormat::Dxt1,

@@ -89,6 +89,15 @@ copy of the game.
   brightness and reach. Read 600 lights and zones from `geo_01a`, `pro`,
   `ras_01a` and `yyy_01b` with nothing left over.
 
+- **Levels lit with the game's own baked light (tested in the cloud on 4
+  maps, not on Windows).** The level viewer now draws walls with the
+  lightmaps the game saved inside each map, and props with the light saved
+  at each of their corners, plus the few lights that change during play.
+  The lightmaps read on all 4 maps with every check passing (every wall
+  corner lands inside its own patch of light). `lighting.cfg` lets anyone
+  change the brightness without touching code (see `docs/DESIGN.md`,
+  "Lighting in Bevy").
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
@@ -98,19 +107,19 @@ copy of the game.
   found. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
   No 3D (positional) sound yet.
-- Levels are drawn without lights, lightmaps, sky, characters, effects or
-  moving parts. No collision: the camera flies through walls.
+- Levels are drawn without sky, characters, effects or moving parts. No
+  collision: the camera flies through walls.
 - Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
 - Characters: only the first material slot, no blending between
   animations, no sounds or effects from animation events.
 - No game yet.
-- Lighting in Bevy: `rc_viewer/src/lighting.rs` can place a map's lights, with
-  settings a mod can change from a text file, but its brightness factors are
-  placeholders and it isn't connected to a level yet. The light the game baked
-  into its maps is found for props (one colour per vertex) but not yet for
-  the brush-built walls. Bump maps aren't used for lighting yet, and which way
-  their "up" points isn't checked.
+- Lighting: the overall brightness follows the convention of the game's era
+  (baked light drawn at double strength) and hasn't been compared with the
+  real game side by side. Real-time lights use placeholder strengths and
+  don't light props yet. Shadows from moving lights aren't drawn. Bump maps
+  aren't used for lighting yet, and which way their "up" points isn't
+  checked.
 - 17 textures have small copies (mipmaps) that differ from the full picture.
   This is in the game's own files, not a decoding fault (see `docs/DESIGN.md`).
 
@@ -185,7 +194,10 @@ A window titled `Republic Commando level: geo_01a` opens at the player's start
 point. Controls: W A S D to move, E or Space up, Q or Ctrl down, hold Shift to
 go faster, hold the right mouse button and move the mouse to look around, the
 mouse wheel changes speed. The log goes to `logs\rc_level_viewer.log`. Look for
-`BSP checks: all passed`, the `floor test` lines and `on-screen check PASS`.
+`BSP checks: all passed`, `lightmap checks: all passed`, the `floor test`
+lines and `on-screen check PASS`. To compare with the old full-brightness
+look, make a file called `lighting.cfg` in this folder containing the line
+`baked_light = false` (delete it to go back).
 For another map, give its name, for example
 `cargo run --release -p rc_level_viewer -- ras_01a`.
 

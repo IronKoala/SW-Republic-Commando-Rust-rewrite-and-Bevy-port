@@ -2,8 +2,8 @@
 //! holds the level's own walls, floors and ceilings as flat polygons.
 //!
 //! Only the arrays needed to rebuild the polygons are read: vectors, points,
-//! nodes, surfaces and the vertex pool. Lightmaps, zones and render sections
-//! that follow them are not read yet.
+//! nodes, surfaces and the vertex pool. The zones, render sections and
+//! lightmaps that follow them are read by `lightmap.rs`.
 //!
 //! Field names and meanings come from the public Unreal Engine 1/2 headers as
 //! mirrored, read-only, in SWRC-Modding/CT (`Engine/Inc/UnObj.h`,
@@ -116,7 +116,7 @@ pub struct Polygon {
     pub poly_flags: u32,
 }
 
-fn f32(r: &mut Reader) -> Result<f32> {
+pub(crate) fn f32(r: &mut Reader) -> Result<f32> {
     Ok(f32::from_bits(r.u32()?))
 }
 
@@ -129,7 +129,7 @@ fn vec4(r: &mut Reader) -> Result<[f32; 4]> {
 }
 
 /// Reads an array length and refuses lengths that can't fit in what's left.
-fn count(r: &mut Reader, what: &str, min_item_size: usize) -> Result<usize> {
+pub(crate) fn count(r: &mut Reader, what: &str, min_item_size: usize) -> Result<usize> {
     let n = r.compact_index()?;
     if n < 0 || n as usize * min_item_size > r.len() - r.pos() {
         return r.invalid(format!("{what} count {n} doesn't fit in the object"));

@@ -1,10 +1,13 @@
 //! Builds everything the viewer draws from one map, without Bevy: the BSP
 //! polygons and the placed static meshes, grouped by material into batches
-//! of triangles in Bevy's coordinates.
+//! of triangles in Bevy's coordinates, with the light the game baked into
+//! them (lightmap pages for the BSP, a colour per corner for static meshes).
 
 use crate::materials::{object_path, Loaded, Materials, Picture};
 use rc_level::actors::{self, rotation_axes, Placement};
 use rc_level::bsp::{self, poly_flags, Bsp};
+use rc_level::lightmap::{self, LightMaps};
+use rc_package::light::{self, Light};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
 use std::collections::{BTreeMap, HashMap};
@@ -41,6 +44,14 @@ pub struct Batch {
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
+    /// BSP only: which lightmap page lights these triangles, and where each
+    /// corner falls on it (0..1). `None` for surfaces the game didn't light.
+    pub lightmap_page: Option<usize>,
+    pub lightmap_uvs: Vec<[f32; 2]>,
+    /// Static meshes only: the baked light at each corner, red, green, blue,
+    /// alpha as stored (0-255, the game's own brightness curve). Empty when
+    /// the mesh has none.
+    pub colours: Vec<[u8; 4]>,
 }
 
 #[derive(Default)]
@@ -60,6 +71,20 @@ pub struct Stats {
     pub mesh_failures: BTreeMap<String, usize>,
     pub materials_ok: usize,
     pub material_failures: BTreeMap<String, usize>,
+    /// Baked lighting.
+    pub lightmap_entries: usize,
+    pub lightmap_pages: usize,
+    pub lightmap_checks: Vec<String>,
+    pub lightmap_error: Option<String>,
+    pub bsp_polygons_lit: usize,
+    pub bsp_polygons_unlit: usize,
+    pub mesh_actors_with_colours: usize,
+    pub mesh_actors_without_colours: usize,
+    /// Colour lists whose length isn't the mesh's vertex count (not used).
+    pub colour_count_mismatch: usize,
+    pub lights: usize,
+    pub dynamic_lights: usize,
+    pub zone_ambients: usize,
     /// Floor test: PathNodes and PlayerStarts sit just above a walkable
     /// floor, so a ray straight down from each should hit level geometry
     /// soon, and never closer than about 80 units (they hover at a
@@ -84,6 +109,10 @@ pub struct Spawn {
 
 pub struct Scene {
     pub batches: Vec<Batch>,
+    /// Lightmap pages, decoded to red, green, blue, alpha.
+    pub lightmap_pages: Vec<rc_image::Rgba>,
+    /// The map's lights and zone ambients (`rc_package::light`).
+    pub lights: Vec<Light>,
     pub stats: Stats,
     pub spawn: Spawn,
 }
@@ -91,10 +120,14 @@ pub struct Scene {
 #[derive(Default)]
 struct Builder {
     batches: Vec<Batch>,
-    by_key: HashMap<(String, bool, bool, bool), usize>,
+    by_key: HashMap<BatchKey, usize>,
 }
 
+/// Material, translucent, two-sided, from a mesh, lightmap page, has colours.
+type BatchKey = (String, bool, bool, bool, Option<usize>, bool);
+
 impl Builder {
+    #[allow(clippy::too_many_arguments)]
     fn batch(
         &mut self,
         key: &str,
@@ -102,14 +135,24 @@ impl Builder {
         translucent: bool,
         two_sided: bool,
         from_mesh: bool,
+        lightmap_page: Option<usize>,
+        coloured: bool,
     ) -> &mut Batch {
-        let k = (key.to_string(), translucent, two_sided, from_mesh);
+        let k = (
+            key.to_string(),
+            translucent,
+            two_sided,
+            from_mesh,
+            lightmap_page,
+            coloured,
+        );
         let i = *self.by_key.entry(k).or_insert_with(|| {
             self.batches.push(Batch {
                 picture: picture.clone(),
                 translucent,
                 two_sided,
                 from_mesh,
+                lightmap_page,
                 ..Default::default()
             });
             self.batches.len() - 1
@@ -161,7 +204,7 @@ fn tex_size(p: &Option<Picture>) -> [f32; 2] {
     }
 }
 
-fn add_bsp(b: &mut Builder, bsp: &Bsp, ctx: &mut Ctx) {
+fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, ctx: &mut Ctx) {
     for poly in bsp.polygons() {
         ctx.stats.bsp_polygons += 1;
         let w = Bsp::winding(&poly);
@@ -185,13 +228,31 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, ctx: &mut Ctx) {
         let size = tex_size(&pic);
         let translucent = poly.poly_flags & poly_flags::TRANSLUCENT != 0;
         let two_sided = poly.poly_flags & poly_flags::TWO_SIDED != 0;
-        let batch = b.batch(&key, &pic, translucent, two_sided, false);
+        let node = &bsp.nodes[poly.node];
+        let page = if poly.poly_flags & poly_flags::UNLIT != 0 {
+            None
+        } else {
+            poly.points
+                .first()
+                .and_then(|p| lightmaps.page_uv(node, *p))
+                .map(|(page, _)| page)
+        };
+        if page.is_some() {
+            ctx.stats.bsp_polygons_lit += 1;
+        } else {
+            ctx.stats.bsp_polygons_unlit += 1;
+        }
+        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false);
         let base = batch.positions.len() as u32;
         let n = dir_to_bevy(poly.normal);
         for (p, uv) in poly.points.iter().zip(&poly.uvs) {
             batch.positions.push(to_bevy(*p));
             batch.normals.push(n);
             batch.uvs.push([uv[0] / size[0], uv[1] / size[1]]);
+            if page.is_some() {
+                let lm = lightmaps.page_uv(node, *p).map(|(_, uv)| uv);
+                batch.lightmap_uvs.push(lm.unwrap_or_default());
+            }
         }
         // A fan of triangles from the first corner. The Y/Z swap mirrors the
         // polygon, so corners that went one way round now go the other; Bevy
@@ -260,6 +321,7 @@ fn add_mesh_actor(
     p: &Placement,
     mesh: &StaticMesh,
     owner: &(Package, Vec<u8>),
+    colours: Option<&[[u8; 4]]>,
 ) {
     let axes = rotation_axes(p.rotation);
     let s3 = p.draw_scale_3d;
@@ -290,7 +352,7 @@ fn add_mesh_actor(
                 )
             }
         };
-        let batch = b.batch(&key, &pic, false, false, true);
+        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some());
         let first = sec.first_index as usize;
         let count = sec.num_faces as usize * 3;
         let Some(tris) = mesh.indices.get(first..first + count) else {
@@ -323,6 +385,9 @@ fn add_mesh_actor(
                             .copied()
                             .unwrap_or([0.0, 0.0]),
                     );
+                    if let Some(c) = colours {
+                        batch.colours.push(c[vi as usize]);
+                    }
                     batch.positions.len() as u32 - 1
                 });
             }
@@ -351,7 +416,46 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         data,
     };
     ctx.stats.bsp_checks = bsp.check();
-    add_bsp(&mut b, &bsp, &mut ctx);
+    let e = &pkg.exports[model];
+    let start = e.serial_offset as usize;
+    let lightmaps = data
+        .get(start..start + e.serial_size as usize)
+        .ok_or_else(|| "the BSP model is outside the file".to_string())
+        .and_then(|object| lightmap::read_lightmaps(&bsp, object, start).map_err(|e| e.to_string()))
+        .unwrap_or_else(|e| {
+            // Without lightmaps the level still draws, just unlit.
+            ctx.stats.lightmap_error = Some(e);
+            LightMaps::default()
+        });
+    ctx.stats.lightmap_entries = lightmaps.entries.len();
+    ctx.stats.lightmap_pages = lightmaps.pages.len();
+    ctx.stats.lightmap_checks = lightmaps.check(&bsp);
+    let mut lightmap_pages = Vec::new();
+    for (i, page) in lightmaps.pages.iter().enumerate() {
+        let decoded = crate::materials::pixel_format(page.format)
+            .ok_or_else(|| format!("format {} not supported", page.format))
+            .and_then(|f| {
+                rc_image::decode(f, page.width, page.height, &page.pixels, None)
+                    .map_err(|e| e.to_string())
+            });
+        match decoded {
+            Ok(img) => lightmap_pages.push(img),
+            Err(e) => {
+                ctx.stats
+                    .lightmap_checks
+                    .push(format!("lightmap page {i} can't be decoded: {e}"));
+                // A mid-grey page keeps the indices lined up.
+                lightmap_pages.push(rc_image::Rgba {
+                    width: 1,
+                    height: 1,
+                    pixels: vec![128, 128, 128, 255],
+                });
+            }
+        }
+    }
+    add_bsp(&mut b, &bsp, &lightmaps, &mut ctx);
+
+    let mut lights = Vec::new();
 
     let mut spawn = None;
     let mut floor_points = Vec::new();
@@ -379,6 +483,17 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         if p.class == "PathNode" || p.class == "PlayerStart" {
             floor_points.push(p.location);
         }
+        if light::is_light_class(&p.class) || p.class.to_ascii_lowercase().contains("zoneinfo") {
+            if let Ok(props) = actors::read_actor_properties(pkg, data, a) {
+                if let Some(l) = light::light_from_properties(pkg, &p.class, &props) {
+                    ctx.stats.lights += 1;
+                    ctx.stats.dynamic_lights += l.dynamic as usize;
+                    lights.push(l);
+                } else if light::zone_ambient(pkg, &props).is_some() {
+                    ctx.stats.zone_ambients += 1;
+                }
+            }
+        }
         if p.static_mesh == 0 {
             continue;
         }
@@ -390,7 +505,26 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         match load_mesh(ctx.mats, &mut mesh_cache, pkg, &map, p.static_mesh) {
             Ok(m) => {
                 ctx.stats.mesh_actors_drawn += 1;
-                add_mesh_actor(&mut b, &mut ctx, &p, &m.0, &m.1);
+                let colours = if p.static_mesh_instance != 0 {
+                    actors::read_vertex_colours(pkg, data, p.static_mesh_instance).ok()
+                } else {
+                    None
+                };
+                let colours = match colours {
+                    Some(c) if c.len() == m.0.vertices.len() => {
+                        ctx.stats.mesh_actors_with_colours += 1;
+                        Some(c)
+                    }
+                    Some(_) => {
+                        ctx.stats.colour_count_mismatch += 1;
+                        None
+                    }
+                    None => {
+                        ctx.stats.mesh_actors_without_colours += 1;
+                        None
+                    }
+                };
+                add_mesh_actor(&mut b, &mut ctx, &p, &m.0, &m.1, colours.as_deref());
                 placed.push((p, m));
             }
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
@@ -429,6 +563,8 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     });
     Ok(Scene {
         batches: b.batches,
+        lightmap_pages,
+        lights,
         stats: ctx.stats,
         spawn,
     })

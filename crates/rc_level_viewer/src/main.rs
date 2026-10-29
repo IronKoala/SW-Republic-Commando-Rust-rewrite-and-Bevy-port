@@ -2,29 +2,38 @@
 //! it with a free camera.
 //!
 //! Usage:
-//!   rc_level_viewer [map name or .ctm path] [--frames N]
+//!   rc_level_viewer [map name or .ctm path] [--frames N] [--lighting FILE]
+//!                   [--capture FILE.bmp]
 //!
 //! Defaults to `geo_01a` (the first Geonosis level) from `GameData/Maps` in
 //! the game folder (RC_GAME_DIR or the default Steam path). `--frames N`
 //! closes the window by itself after N frames, for automated tests.
+//! `--lighting FILE` reads lighting settings (default `lighting.cfg` in the
+//! current folder, if there is one; see `lighting.rs` and docs/DESIGN.md).
+//! `--capture FILE.bmp` saves the frame used for the on-screen check as a
+//! picture, for comparing looks without watching the window.
 //!
 //! Everything is logged to `logs/rc_level_viewer.log`: what was read, what
 //! couldn't be shown and why, frame rates, camera position, and an on-screen
 //! check of what was actually drawn.
 
 mod camera;
+mod lighting;
 mod materials;
 mod scene;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::Exposure;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::pbr::Lightmap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::render::view::Tonemapping;
 use bevy::window::WindowResolution;
 use camera::{fly, yaw_from_unreal, FlyCamera};
+use lighting::LightingSettings;
 use rc_package::Package;
 use std::collections::HashSet;
 use std::fs;
@@ -69,6 +78,41 @@ struct LoadedScene(Mutex<Option<scene::Scene>>);
 #[derive(Resource)]
 struct ExitAfter(Option<u32>);
 
+#[derive(Resource)]
+struct CapturePath(Option<PathBuf>);
+
+/// Save red, green, blue pixels (top row first) as a 24-bit .bmp file, a
+/// format every system can open, written by hand to avoid another library.
+fn write_bmp(
+    path: &std::path::Path,
+    w: usize,
+    h: usize,
+    px: impl Fn(usize) -> [u8; 3],
+) -> std::io::Result<()> {
+    let row = (w * 3).div_ceil(4) * 4;
+    let size = 54 + row * h;
+    let mut out = Vec::with_capacity(size);
+    out.extend(b"BM");
+    out.extend((size as u32).to_le_bytes());
+    out.extend([0u8; 4]);
+    out.extend(54u32.to_le_bytes());
+    out.extend(40u32.to_le_bytes());
+    out.extend((w as i32).to_le_bytes());
+    out.extend((h as i32).to_le_bytes());
+    out.extend(1u16.to_le_bytes());
+    out.extend(24u16.to_le_bytes());
+    out.extend([0u8; 24]);
+    // Rows go bottom to top, each pixel blue, green, red.
+    for y in (0..h).rev() {
+        for x in 0..w {
+            let [r, g, b] = px(y * w + x);
+            out.extend([b, g, r]);
+        }
+        out.resize(out.len() + row - w * 3, 0);
+    }
+    fs::write(path, out)
+}
+
 #[derive(Resource, Default)]
 struct FrameStats {
     frames: u32,
@@ -104,19 +148,60 @@ fn to_image(p: &materials::Picture) -> Image {
     image
 }
 
+/// A lightmap page as a Bevy image. Lightmaps are stored on the same
+/// brightness curve as textures, so they are marked sRGB too: Bevy then
+/// multiplies the two in linear light, which on screen matches the game
+/// multiplying them directly (see `LightingSettings::linear_gain`).
+fn lightmap_image(p: &rc_image::Rgba) -> Image {
+    let mut image = Image::new(
+        Extent3d {
+            width: p.width as u32,
+            height: p.height as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        p.pixels.clone(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor::linear());
+    image
+}
+
+/// sRGB 0-255 to linear light, times `gain` (already linear).
+fn colour_to_linear(c: [u8; 4], gain: f32) -> [f32; 4] {
+    let lin = |v: u8| Color::srgb_u8(v, 0, 0).to_linear().red * gain;
+    [lin(c[0]), lin(c[1]), lin(c[2]), 1.0]
+}
+
+#[allow(clippy::too_many_arguments)]
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     loaded: Res<LoadedScene>,
+    settings: Res<LightingSettings>,
     log: Res<RunLog>,
 ) {
     let Some(scene) = loaded.0.lock().unwrap().take() else {
         return;
     };
+    let baked = settings.baked_light;
+    let exposure = Exposure::default();
+    // Lit surfaces are scaled by the camera's exposure; undo it so a
+    // lightmap of 1.0 at gain 1 shows the texture as it is.
+    let lightmap_exposure =
+        LightingSettings::linear_gain(settings.lightmap_gain) / exposure.exposure();
+    let colour_gain = LightingSettings::linear_gain(settings.vertex_colour_gain);
+    let pages: Vec<Handle<Image>> = scene
+        .lightmap_pages
+        .iter()
+        .map(|p| images.add(lightmap_image(p)))
+        .collect();
     let mut triangles = 0;
     let mut textured = 0;
+    let (mut lightmapped, mut coloured, mut full_bright) = (0, 0, 0);
     for b in &scene.batches {
         if b.indices.is_empty() {
             continue;
@@ -128,6 +213,22 @@ fn setup(
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, b.positions.clone());
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, b.normals.clone());
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, b.uvs.clone());
+        let page = b
+            .lightmap_page
+            .filter(|_| baked)
+            .and_then(|p| pages.get(p).cloned());
+        if page.is_some() {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, b.lightmap_uvs.clone());
+        }
+        let with_colours = baked && !b.colours.is_empty();
+        if with_colours {
+            let c: Vec<[f32; 4]> = b
+                .colours
+                .iter()
+                .map(|c| colour_to_linear(*c, colour_gain))
+                .collect();
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, c);
+        }
         mesh.insert_indices(Indices::U32(b.indices.clone()));
         triangles += b.indices.len() / 3;
         let alpha_mode = if b.picture.as_ref().is_some_and(|p| p.additive) {
@@ -140,8 +241,14 @@ fn setup(
             AlphaMode::Opaque
         };
         let material = StandardMaterial {
-            // Lighting is a later step: draw textures at full brightness.
-            unlit: true,
+            // Lightmapped surfaces go through Bevy's lighting (so real-time
+            // lights add to them). Props carry their baked light as vertex
+            // colours, which an unlit material multiplies in directly.
+            // Anything without baked light is drawn at full brightness.
+            unlit: page.is_none(),
+            lightmap_exposure,
+            perceptual_roughness: 1.0,
+            reflectance: 0.0,
             base_color: if b.picture.is_some() {
                 Color::WHITE
             } else {
@@ -161,12 +268,34 @@ fn setup(
             },
             ..default()
         };
-        commands.spawn((
+        let mut entity = commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(material)),
             Transform::default(),
         ));
+        if let Some(image) = page {
+            entity.insert(Lightmap { image, ..default() });
+            lightmapped += 1;
+        } else if with_colours {
+            coloured += 1;
+        } else {
+            full_bright += 1;
+        }
     }
+    let report = lighting::spawn_lights(&mut commands, &settings, &scene.lights);
+    // The baked light already includes the zones' ambient light.
+    commands.insert_resource(GlobalAmbientLight::NONE);
+    log.line(format!(
+        "lighting: baked light {}; draw batches: {lightmapped} with a lightmap, {coloured} with baked corner colours, {full_bright} at full brightness; lightmap gain {} (x{:.2} in linear light), corner colour gain {}; real-time lights: {} point, {} spot, {} sun, {} left to the baked light",
+        if baked { "on" } else { "off" },
+        settings.lightmap_gain,
+        LightingSettings::linear_gain(settings.lightmap_gain),
+        settings.vertex_colour_gain,
+        report.point,
+        report.spot,
+        report.directional,
+        report.skipped
+    ));
     let s = &scene.spawn;
     let yaw = yaw_from_unreal(s.yaw);
     let cam = FlyCamera {
@@ -178,6 +307,7 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Tonemapping::None,
+        exposure,
         Projection::Perspective(PerspectiveProjection {
             fov: 75f32.to_radians(),
             near: 0.05,
@@ -262,6 +392,7 @@ fn check_screen(
     log: Res<RunLog>,
     frames: Res<FrameStats>,
     mut check: ResMut<ScreenCheck>,
+    capture: Res<CapturePath>,
 ) {
     let shot = &captured.image;
     let (w, h) = (shot.width() as usize, shot.height() as usize);
@@ -321,6 +452,15 @@ fn check_screen(
         }
         return;
     }
+    if let Some(path) = &capture.0 {
+        match write_bmp(path, w, h, px) {
+            Ok(()) => log.line(format!("saved the capture to {}", path.display())),
+            Err(e) => log.line(format!(
+                "couldn't save the capture to {}: {e}",
+                path.display()
+            )),
+        }
+    }
     let covered = 100.0 * (n - background) as f64 / n as f64;
     let mean = mean.map(|m| m as f64 / n as f64);
     let pass = covered > 50.0 && colours.len() > 100;
@@ -336,6 +476,28 @@ fn check_screen(
 }
 
 fn log_stats(log: &RunLog, s: &scene::Stats) {
+    if let Some(e) = &s.lightmap_error {
+        log.line(format!("lightmaps NOT read (level drawn unlit): {e}"));
+    }
+    log.line(format!(
+        "lightmaps: {} rectangles on {} pages; BSP polygons with a lightmap {}, without {}",
+        s.lightmap_entries, s.lightmap_pages, s.bsp_polygons_lit, s.bsp_polygons_unlit
+    ));
+    if s.lightmap_checks.is_empty() {
+        log.line("lightmap checks: all passed");
+    } else {
+        for c in &s.lightmap_checks {
+            log.line(format!("lightmap check problem: {c}"));
+        }
+    }
+    log.line(format!(
+        "prop baked light: {} drawn props have corner colours, {} have none, {} have a colour list of the wrong length (not used)",
+        s.mesh_actors_with_colours, s.mesh_actors_without_colours, s.colour_count_mismatch
+    ));
+    log.line(format!(
+        "lights: {} lights read, {} of them real-time (bDynamicLight); {} zones with an ambient light",
+        s.lights, s.dynamic_lights, s.zone_ambients
+    ));
     log.line(format!(
         "BSP: {} polygons, {} triangles drawn, skipped {:?}; winding (backwards, unclear, forwards) {:?}",
         s.bsp_polygons, s.bsp_triangles, s.bsp_skipped, s.bsp_winding
@@ -390,10 +552,18 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
 fn main() -> AppExit {
     let mut positional = Vec::new();
     let mut frames = None;
+    let mut lighting_path = PathBuf::from("lighting.cfg");
+    let mut capture = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--frames" {
             frames = args.next().and_then(|n| n.parse().ok());
+        } else if arg == "--capture" {
+            capture = args.next().map(PathBuf::from);
+        } else if arg == "--lighting" {
+            if let Some(p) = args.next() {
+                lighting_path = PathBuf::from(p);
+            }
         } else {
             positional.push(arg);
         }
@@ -427,6 +597,19 @@ fn main() -> AppExit {
     };
     log.line(format!("rc_level_viewer {}", env!("CARGO_PKG_VERSION")));
     log.line(format!("map: {}", map_path.display()));
+    let (settings, notes) = LightingSettings::load(&lighting_path);
+    log.line(format!(
+        "lighting settings: {} ({:?})",
+        if lighting_path.exists() {
+            format!("read from {}", lighting_path.display())
+        } else {
+            format!("defaults ({} not found)", lighting_path.display())
+        },
+        settings
+    ));
+    for n in notes {
+        log.line(format!("  lighting settings problem: {n}"));
+    }
 
     let t = Instant::now();
     let map = match fs::read(&map_path)
@@ -480,6 +663,8 @@ fn main() -> AppExit {
             BACKGROUND[2],
         )))
         .insert_resource(LoadedScene(Mutex::new(Some(scene))))
+        .insert_resource(settings)
+        .insert_resource(CapturePath(capture))
         .insert_resource(ExitAfter(frames))
         .insert_resource(FrameStats::default())
         .insert_resource(ScreenCheck::default())
