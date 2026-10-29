@@ -150,7 +150,10 @@ mod tests {
         let h = std::f32::consts::FRAC_1_SQRT_2;
         let q = Quat([0.0, 0.0, h, h]);
         assert!(close(q.rotate([1.0, 0.0, 0.0]), [0.0, 1.0, 0.0]));
-        assert!(close(q.compose(q).rotate([1.0, 0.0, 0.0]), [-1.0, 0.0, 0.0]));
+        assert!(close(
+            q.compose(q).rotate([1.0, 0.0, 0.0]),
+            [-1.0, 0.0, 0.0]
+        ));
         assert!(close(
             q.slerp(Quat::IDENTITY, 1.0).rotate([1.0, 0.0, 0.0]),
             [1.0, 0.0, 0.0]

@@ -22,11 +22,11 @@ copy of the game.
   three maps: 2,491 textures, 2,490 pass every check. The one exception is a
   texture whose smallest (1x1) mipmap is stored with no pixels, which looks like
   a quirk in the game's own file. Formats seen: P8, DXT1, DXT3, DXT5, RGBA8,
-  G16, and two 2-byte-per-pixel formats numbered 12 and 14.
+  G16, and the bump-map formats V8U8 (12) and L6V5U5 (14).
 
 - **Turning textures into pictures (tested by numbers, not by eye).** The
-  `rc_image` crate decodes P8 (with its palette), DXT1, DXT3, DXT5, RGBA8 and G16
-  into normal colours, and `rc_probe --export-textures` saves them as PNG files
+  `rc_image` crate decodes P8 (with its palette), DXT1, DXT3, DXT5, RGBA8, G16
+  and the two bump-map formats into normal colours, and `rc_probe --export-textures` saves them as PNG files
   in the gitignored `extracted/textures/` folder. Of 2,491 textures, 2,358 were
   decoded with no failures. For 2,003 of them we could compare against the
   game's own half-size copy, and 1,916 match within 10 out of 255.
@@ -69,9 +69,19 @@ copy of the game.
   passes) and checking its colours match the skin. Battle droids work too.
   On the user's Windows PC the clone scored 0.993 with the right colours.
 
+- **Bump maps (tested by numbers, not by eye).** All 133 bump maps (formats
+  12 and 14) now decode, as the usual light-blue "normal map" pictures. The
+  two layouts were found by measurement, since no documentation names them
+  (see `docs/DESIGN.md`, "Bump maps"). Their own half-size copies match with
+  a median difference of 1.8 of 255.
+
+- **Reading a map's lights (tested in the cloud on 4 maps, not on Windows).**
+  `rc_package::light` turns light and zone actors into position, colour,
+  brightness and reach. Read 600 lights and zones from `geo_01a`, `pro`,
+  `ras_01a` and `yyy_01b` with nothing left over.
+
 ## What doesn't work yet
 
-- Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level geometry and scripts are not decoded yet.
@@ -82,9 +92,16 @@ copy of the game.
 - Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
 - Characters: only the first material slot, no blending between
-  animations, no sounds or effects from animation events. Not run on
-  Windows yet.
+  animations, no sounds or effects from animation events.
 - No levels, no game yet.
+- Lighting in Bevy: `rc_viewer/src/lighting.rs` can place a map's lights, with
+  settings a mod can change from a text file, but its brightness factors are
+  placeholders and it isn't connected to a level yet. The light the game baked
+  into its maps is found for props (one colour per vertex) but not yet for
+  the brush-built walls. Bump maps aren't used for lighting yet, and which way
+  their "up" points isn't checked.
+- 17 textures have small copies (mipmaps) that differ from the full picture.
+  This is in the game's own files, not a decoding fault (see `docs/DESIGN.md`).
 
 ## How to run it
 
