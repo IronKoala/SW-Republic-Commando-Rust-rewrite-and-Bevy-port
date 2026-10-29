@@ -27,7 +27,6 @@
 //! - the body only reads `PlayerIntent` and moves the `Body`;
 //! - the camera only reads the `Body` and `PlayerIntent`'s look direction.
 
-mod level;
 mod script;
 
 use bevy::asset::RenderAssetUsages;
@@ -688,7 +687,7 @@ fn main() -> AppExit {
                 game_data.join("Maps").join(format!("{name}.ctm"))
             };
             let t = Instant::now();
-            let lvl = match level::load(&path, &game_data, params.collision_height) {
+            let lvl = match rc_level::map_collision::load(&path, &game_data, params.collision_height) {
                 Ok(l) => l,
                 Err(e) => {
                     log.line(format!("ERROR loading {}: {e}", path.display()));
@@ -704,12 +703,14 @@ fn main() -> AppExit {
                 t.elapsed().as_secs_f64() * 1000.0
             ));
             let t = Instant::now();
-            let tw = TriangleWorld::new(lvl.triangles);
+            let v = |p: [f32; 3]| UVec3::new(p[0], p[1], p[2]);
+            let tris = lvl.triangles.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect();
+            let tw = TriangleWorld::new(tris);
             log.line(format!(
                 "collision grid built in {:.0} ms",
                 t.elapsed().as_secs_f64() * 1000.0
             ));
-            let start = lvl.start.unwrap_or_else(|| {
+            let start = lvl.start.map(|(f, yaw)| (v(f), yaw)).unwrap_or_else(|| {
                 let (lo, hi) = tw.bounds();
                 log.line("no PlayerStart: starting above the middle of the map");
                 (UVec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z), 0.0)
