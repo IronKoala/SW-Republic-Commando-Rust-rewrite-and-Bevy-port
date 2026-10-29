@@ -36,9 +36,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-/// For other parts and self-tests: the sky camera's marker, the marker the
-/// player's camera gets, and the colour shown where nothing is drawn.
-pub use rc_level_viewer::draw::BACKGROUND as EMPTY_COLOUR;
+/// For other parts and self-tests: the sky camera's marker, and the marker
+/// the player's camera gets.
 pub use rc_level_viewer::sky::{SkyCamera, SkyViewer as SkyFollows};
 
 /// The name this part uses in the loading gate and the log.

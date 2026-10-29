@@ -72,9 +72,6 @@ struct ShotStats {
     /// Amber pixels within 3% of the screen height of the centre (the
     /// crosshair).
     centre_amber: u32,
-    /// Share of pixels in the colour shown where nothing is drawn (no
-    /// level and no sky), 0 to 1.
-    empty: f32,
 }
 
 #[derive(Resource, Default)]
@@ -271,13 +268,15 @@ fn steps() -> Vec<Step> {
             }
         }),
         // Look up 60 degrees: geo_01a shows open sky above the spires there.
+        // Without the sky that view is mostly black (17% lit when the sky
+        // camera was switched off for a trial run; 72% with it).
         Note(|w| set_pitch(w, 60f32.to_radians())),
         Wait(0.5),
         Shot("look_up"),
-        Check("looking up shows the sky, not the empty colour", |w| {
+        Check("looking up shows the sky", |w| {
             let s = shot(w, "look_up")?;
-            let got = format!("{:.1}% empty, {:.0}% lit", s.empty * 100.0, s.lit * 100.0);
-            if s.empty < 0.05 && s.lit > 0.3 {
+            let got = format!("{:.0}% lit", s.lit * 100.0);
+            if s.lit > 0.45 {
                 Ok(got)
             } else {
                 Err(got)
@@ -420,8 +419,7 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
             rgba.extend([p[0], p[1], p[2], 255]);
         }
     }
-    let (mut amber, mut lit, mut centre, mut empty) = (0u32, 0u32, 0u32, 0u32);
-    let bg = rc_level_plugin::EMPTY_COLOUR.map(|c| c as i32);
+    let (mut amber, mut lit, mut centre) = (0u32, 0u32, 0u32);
     let r = (h as f32 * 0.03) as i64;
     for (i, p) in rgba.chunks_exact(4).enumerate() {
         let (x, y) = ((i % w) as i64, (i / w) as i64);
@@ -437,9 +435,6 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         if pr.max(pg).max(pb) > 30 {
             lit += 1;
         }
-        if (pr - bg[0]).abs() <= 6 && (pg - bg[1]).abs() <= 6 && (pb - bg[2]).abs() <= 6 {
-            empty += 1;
-        }
     }
     if lit == 0 {
         log.line(format!(
@@ -452,7 +447,6 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         amber: amber as f32 / n,
         lit: lit as f32 / n,
         centre_amber: centre,
-        empty: empty as f32 / n,
     };
     let path = format!("logs/{name}.png");
     let saved = std::fs::write(
@@ -464,10 +458,9 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         }),
     );
     log.line(format!(
-        "script: screenshot {name} {w}x{h}: {:.2}% amber, {:.1}% lit, {:.1}% empty, {centre} amber at the centre; {}",
+        "script: screenshot {name} {w}x{h}: {:.2}% amber, {:.1}% lit, {centre} amber at the centre; {}",
         stats.amber * 100.0,
         stats.lit * 100.0,
-        stats.empty * 100.0,
         match saved {
             Ok(()) => format!("saved to {path}"),
             Err(e) => format!("not saved ({e})"),

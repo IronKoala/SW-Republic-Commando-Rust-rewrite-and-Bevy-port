@@ -1079,6 +1079,6 @@ at least 30% of the screen must be lit with amber crosshair pixels at the
 centre. With the level part plugged in it also checks the level's counts
 (collision triangles, props, props with their class's model, a player
 start), that the sky camera follows the player's camera, and looks up 60
-degrees in geo_01a: under 5% of the screen may be the empty background
-colour (it was 41% there before the sky was added, measured in the level
-viewer).
+degrees in geo_01a: more than 45% of the screen must be lit (72% with the
+sky; 17% in a trial run with the sky camera switched off, because the game
+clears to black).

@@ -122,9 +122,15 @@ copy of the game.
   (`settings.toml`: game folder, mods, screen, volumes, mouse) and a controls
   file (`data/input/bindings.toml`: the original PC keys, plus gamepad and
   touch). `rc_game --script` drives itself through the menus and a level and
-  passed 17 of 17 checks, including two screenshots checked by colour. Until
-  the levels, weapons, enemies and squad parts plug in, levels are drawn and
-  walked the way `rc_walk --map` does it, with no weapons or enemies.
+  passed 20 of 20 checks, including three screenshots checked by colour.
+  No weapons, enemies or squad until those parts plug in.
+
+- **Levels in the game, with sky, invisible walls and doors (tested in the
+  cloud sandbox on 7 maps, not yet on Windows).** The level part
+  (`rc_level_plugin`) loads the mission you pick in the menu: the map drawn
+  and lit, its sky, and solid walls, props, double doors and invisible walls
+  (blocking volumes). You start at the map's own player start. Checked on
+  geo_01a, pro, ras_01a, yyy_01b, geo_04c, ras_04c and ctf_siege.
 
 - **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
   `rc_level_check` loads every map in the game without a window and logs

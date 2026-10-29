@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Levels plug into the game (rc_level_plugin)
+
+- **Changed:** New crate `crates/rc_level_plugin` with `LevelPlugin`. While the game is loading it reads the chosen map's collision with `rc_level::map_collision::load` (BSP, props, props and double doors whose model comes from their class, blocking volumes), inserts `LevelCollision` and `PlayerStart`, draws the map with the level viewer's code, and spawns the sky camera (camera order -1) and makes the player's camera let it through (`SkyViewer`, no clearing). Everything it spawns is removed when leaving the level. `rc_game` uses it, and the temporary `stand_in_level.rs` is deleted. `rc_game --script` gained 3 checks: the level's counts, the sky camera, and a screenshot looking up 60 degrees. An optional `levels/lighting.cfg` in a data folder sets brightness. `docs/DESIGN.md` and `docs/PLUGINS.md` describe it. Built on the game shell branch (PR #11) with the levels branch (PR #14) merged in.
+- **Why:** The overnight plan's "all levels" part: the game should load the mission you pick through the level part, with the sky, invisible walls and doors from PR #14.
+- **Tested how:** In the cloud sandbox, with maps, textures, static meshes, `Properties` and `System` packages copied read-only from the install (outside the repo): `cargo test -p rc_game -p rc_game_core -p rc_level -p rc_level_plugin`; `xvfb-run rc_game --script` twice; `rc_game --map NAME --frames 300` on pro, ras_01a, yyy_01b, geo_04c, ras_04c and ctf_siege. As a control, one script run with the sky camera switched off.
+- **Result:** Unit tests 21 passed, 0 failed. Script: `SCRIPT DONE: 20 checks passed, 0 failed`, exit code 0. geo_01a: 149,767 collision triangles, 380 props (25 with their class's model), 27 blocking volumes, start feet (2102.0, 1829.6, -2081.8), loaded in 0.4 s and drawn in 2.3 s (debug build). Looking up: 72% of the screen lit with the sky, average colour of the top third (144, 117, 85), an orange-brown; with the sky camera off 17% (the game clears to black), so the check fails as it should. Walking 1 s moved 376 units. All 6 other maps loaded with a sky, a player start from the map and 0 unreadable props or volumes (for example ras_04c: 465,033 triangles, 98 class-model props, 3.7 s to draw).
+- **Still broken / not tested:** Not tested on Windows. Not tested on a map without a sky box (none of the 7 tried). Loading blocks the game for a few seconds (the loading screen stays up). Doors stand closed and don't open; the 9 maps with sky windows but no sky box show black there. Music wasn't copied to the sandbox this time, so it wasn't played. Not compared with the real game by eye.
+- **Next:** Doors that open, and loading in the background.
+
 ## 2026-10-29: Recoil message, and a trial run with the weapons and squad parts
 
 - **Changed:** `rc_game_core` gained `ViewKick` (weapon recoil: pitch and yaw in radians); `rc_game`'s player adds it to the view. `docs/PLUGINS.md` lists it.
