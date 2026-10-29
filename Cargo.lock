@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "rc_image"
+version = "0.1.0"
+
+[[package]]
 name = "rc_package"
 version = "0.1.0"
 
@@ -10,5 +14,6 @@ version = "0.1.0"
 name = "rc_probe"
 version = "0.1.0"
 dependencies = [
+ "rc_image",
  "rc_package",
 ]

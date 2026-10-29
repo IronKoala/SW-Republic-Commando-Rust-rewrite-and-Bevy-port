@@ -10,6 +10,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | Crate | What it does |
 |---|---|
 | `rc_package` | Reads Unreal Engine 2 packages from bytes it's given. Opens no files. No Bevy. |
+| `rc_image` | Turns raw pixel data (P8, DXT1/3/5, RGBA8, G16) into plain RGBA pictures and writes PNG files. Knows nothing about Unreal. No Bevy. |
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
@@ -92,5 +93,39 @@ Three checks show the reading is right, and all pass on real files:
 - Nothing is left over at the end of the object.
 
 Formats are UE2's numbers: 0 P8 (8-bit with a separate palette), 3 DXT1,
-7 DXT3, 8 DXT5, 5 RGBA8, 10 G16 (terrain heightmaps). UE Viewer guesses that
-Republic Commando's format 14 is CxV8U8; we haven't seen it yet.
+7 DXT3, 8 DXT5, 5 RGBA8, 10 G16 (terrain heightmaps). Republic Commando also
+uses 12 and 14, both 2 bytes per pixel (measured on every mipmap). UE Viewer
+guesses 14 is CxV8U8, a two-channel format used for bump maps. We found no name
+for 12.
+
+Known quirk: `MP_Trando_Light_Cluster` (in `multiplayer_textures.utx`) stores
+its last mipmap, 1x1 pixels, with 0 bytes. The file is otherwise consistent, so
+this seems to be how the game shipped. The check reports it rather than hiding
+it.
+
+## From texture bytes to pictures
+
+`rc_image` turns a mipmap's bytes into RGBA (red, green, blue, alpha; 4 bytes
+per pixel):
+
+- **P8**: each byte picks one of 256 colours from the texture's `Palette`
+  object (256 colours stored red, green, blue, alpha). If `bMasked` is set,
+  colour 0 is see-through.
+- **RGBA8**: stored blue, green, red, alpha, so the first and third bytes swap.
+- **DXT1/3/5**: the picture is cut into 4x4 squares. Each square stores two
+  colours and picks between them and two in-between colours per pixel. DXT3
+  adds 4 bits of alpha per pixel; DXT5 adds an alpha pair with 8 steps.
+- **G16**: 16-bit grey; we keep the top 8 bits.
+
+PNG files are written uncompressed (simplest valid PNG), so they're large but
+open anywhere. They go to `extracted/textures/<package>/<texture>.png`.
+
+**How we check pictures without looking at them.** Each texture stores its own
+half-size copy (mip 1), made by the game's tools. We shrink our decoded full-
+size picture (mip 0) by averaging 2x2 squares and compare it with our decoded
+mip 1. Correct decoding gives a small difference; unrelated pictures of the same
+size differ by about 57 out of 255 on average (measured on 524 pairs). Results
+across the install: 1,916 of 2,003 textures differ by under 10; 17 by over 20.
+The 17 are mostly fine patterns (grates, noise, flickering screens). Their
+smaller copies fade toward flat grey, which suggests the artists made those
+mipmaps differently. That explanation is a guess and hasn't been checked by eye.

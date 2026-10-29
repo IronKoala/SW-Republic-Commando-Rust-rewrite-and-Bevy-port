@@ -18,14 +18,25 @@ copy of the game.
 
 - **Reading textures (partly tested).** `rc_probe --textures` reads every `Texture`
   object: its settings (format, size) and the raw pixel data of each mipmap.
-  Tested on the 192 textures inside 50 packages copied from the install: all 192
-  passed the size checks. Formats seen: P8, DXT1, DXT3, DXT5, RGBA8, G16.
+  Tested on all 57 texture packages from the install plus the script packages and
+  three maps: 2,491 textures, 2,490 pass every check. The one exception is a
+  texture whose smallest (1x1) mipmap is stored with no pixels, which looks like
+  a quirk in the game's own file. Formats seen: P8, DXT1, DXT3, DXT5, RGBA8,
+  G16, and two 2-byte-per-pixel formats numbered 12 and 14.
+
+- **Turning textures into pictures (tested by numbers, not by eye).** The
+  `rc_image` crate decodes P8 (with its palette), DXT1, DXT3, DXT5, RGBA8 and G16
+  into normal colours, and `rc_probe --export-textures` saves them as PNG files
+  in the gitignored `extracted/textures/` folder. Of 2,491 textures, 2,358 were
+  decoded with no failures. For 2,003 of them we could compare against the
+  game's own half-size copy, and 1,916 match within 10 out of 255.
 
 ## What doesn't work yet
 
-- Textures are read but not converted into pictures yet, and nothing is shown.
-- Not tested yet: textures in the 54 texture packages (`.utx`) that weren't in the
-  test sample, and the texture scan on Windows.
+- Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
+- Nothing is shown on screen yet; there is no Bevy window.
+- Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
+  texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Other objects (meshes, sounds, level geometry, scripts) are not decoded yet.
 - No Bevy, no window, no game yet.
 
@@ -51,6 +62,13 @@ cargo run --release -p rc_probe -- --textures
 ```
 
 This logs to `logs\rc_textures.log` and ends with a `--- texture summary ---` line.
+To save one package's textures as pictures you can open:
+
+```
+cargo run --release -p rc_probe -- --export-textures "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Textures\weapontextures.utx"
+```
+
+The PNGs go to `extracted\textures\weapontextures\`, which git never tracks.
 
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.

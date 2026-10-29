@@ -5,4 +5,5 @@ description = "Opens game packages read-only and logs what is inside them"
 edition.workspace = true
 
 [dependencies]
+rc_image = { path = "../rc_image" }
 rc_package = { path = "../rc_package" }

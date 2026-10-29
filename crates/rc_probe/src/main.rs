@@ -9,12 +9,15 @@
 //!   rc_probe <file>          open one package and log its details
 //!   rc_probe <folder>        open every package under that folder, one line each
 //!   rc_probe --textures [path]  read every texture in a package or folder
-//!                            (default: the whole GameData folder), log to
-//!                            `logs/rc_textures.log`
+//!                            (default: the whole GameData folder), decode and
+//!                            check its pixels, log to `logs/rc_textures.log`
+//!   rc_probe --export-textures <path>  the same, and also write each texture
+//!                            as a PNG to `extracted/textures/<package>/`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
+mod pixels;
 mod textures;
 
 use rc_package::{ObjectRef, Package};
@@ -28,6 +31,8 @@ const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Repub
 const PACKAGE_EXTENSIONS: &[&str] = &["u", "ctm", "utx", "uax", "usx", "ukx"];
 const LOG_PATH: &str = "logs/rc_probe.log";
 const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
+/// Gitignored folder for anything extracted from the game.
+const EXTRACT_DIR: &str = "extracted/textures";
 
 pub(crate) struct Log {
     file: fs::File,
@@ -50,9 +55,18 @@ fn game_dir() -> PathBuf {
 fn main() {
     let game = game_dir();
     let mut args: Vec<_> = std::env::args_os().skip(1).collect();
-    let texture_mode = args.first().is_some_and(|a| a == "--textures");
+    let export_mode = args.first().is_some_and(|a| a == "--export-textures");
+    let texture_mode = export_mode || args.first().is_some_and(|a| a == "--textures");
     if texture_mode {
         args.remove(0);
+    }
+    if export_mode && args.is_empty() {
+        eprintln!("--export-textures needs a package file or folder, for example:");
+        eprintln!(
+            r#"  rc_probe --export-textures "{}\GameData\Textures\weapontextures.utx""#,
+            game.display()
+        );
+        std::process::exit(2);
     }
     let target = match args.first() {
         Some(arg) => PathBuf::from(arg),
@@ -83,7 +97,8 @@ fn main() {
     log.line(format!("target:      {}", target.display()));
 
     let ok = if texture_mode {
-        textures::scan(&mut log, &target)
+        let export_dir = export_mode.then(|| Path::new(EXTRACT_DIR));
+        textures::scan(&mut log, &target, export_dir)
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {

@@ -5,6 +5,8 @@
 //! Nosov): `Unreal/UnrealMaterial/UnTexture2.cpp`, `UnMaterial2.h` (FMipmap,
 //! ETextureFormat) and `UnCoreSerialize.cpp` (lazy arrays). Republic Commando
 //! has no layout change there; UE Viewer guesses its format 14 is CxV8U8.
+//! Format 12 is not named anywhere we found; in the real files it always
+//! uses 2 bytes per pixel (measured on all 208 of its mipmaps).
 //! Written from those descriptions; no code copied.
 
 use crate::properties::{self, Property, Value};
@@ -52,6 +54,7 @@ pub fn format_name(format: u8) -> &'static str {
         9 => "L8",
         10 => "G16",
         11 => "RRRGGGBBB",
+        12 => "12 (2 bytes per pixel, name unknown)",
         14 => "CxV8U8?",
         _ => "unknown",
     }
@@ -63,7 +66,7 @@ pub fn expected_mip_bytes(format: u8, width: i32, height: i32) -> Option<usize> 
     let blocks = w.div_ceil(4) * h.div_ceil(4);
     match format {
         0 | 9 => Some(w * h),
-        2 | 10 | 14 => Some(w * h * 2),
+        2 | 10 | 12 | 14 => Some(w * h * 2),
         4 => Some(w * h * 3),
         5 => Some(w * h * 4),
         3 => Some(blocks * 8),
@@ -73,6 +76,22 @@ pub fn expected_mip_bytes(format: u8, width: i32, height: i32) -> Option<usize> 
 }
 
 impl Texture {
+    /// The `Palette` property: an object reference, or `None` if absent.
+    pub fn palette_ref(&self, pkg: &Package) -> Option<i32> {
+        match self.property(pkg, "Palette").map(|p| &p.value) {
+            Some(Value::Object(i)) if *i != 0 => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// Whether the `bMasked` property is set: palette colour 0 is see-through.
+    pub fn masked(&self, pkg: &Package) -> bool {
+        matches!(
+            self.property(pkg, "bMasked").map(|p| &p.value),
+            Some(Value::Bool(true))
+        )
+    }
+
     pub fn property<'a>(&'a self, pkg: &Package, name: &str) -> Option<&'a Property> {
         properties::find(pkg, &self.properties, name)
     }
@@ -122,6 +141,35 @@ impl Texture {
         }
         problems
     }
+}
+
+/// Read a `Palette` export: its properties, then 256 colours stored as red,
+/// green, blue, alpha (UE Viewer, `UnMaterial2.h`, UPalette; FColor in
+/// `UnCore.h` uses RGBA order before UE3).
+pub fn read_palette(pkg: &Package, data: &[u8], export: &Export) -> Result<Vec<[u8; 4]>> {
+    let start = export.serial_offset as usize;
+    let Some(object) = data.get(start..start + export.serial_size as usize) else {
+        return Err(ReadError::Invalid {
+            offset: start,
+            what: "export data is outside the file".into(),
+        });
+    };
+    let mut r = Reader::new(object);
+    properties::read_properties(pkg, &mut r)?;
+    let count = r.compact_index()?;
+    if count != 256 {
+        return r.invalid(format!("palette has {count} colours, expected 256"));
+    }
+    let colors = (0..count)
+        .map(|_| r.bytes(4).map(|c| [c[0], c[1], c[2], c[3]]))
+        .collect::<Result<Vec<_>>>()?;
+    if r.pos() != object.len() {
+        return r.invalid(format!(
+            "{} bytes left over after the palette",
+            object.len() - r.pos()
+        ));
+    }
+    Ok(colors)
 }
 
 /// Read a `Texture` export. `data` is the whole package file.

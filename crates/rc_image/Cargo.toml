@@ -1,0 +1,7 @@
+[package]
+name = "rc_image"
+version = "0.1.0"
+description = "Turns texture pixel data into plain RGBA images and writes PNG files"
+edition.workspace = true
+
+[dependencies]
