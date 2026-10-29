@@ -24,7 +24,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
-| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
+| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
+| `rc_save` | Saving, loading and checkpoints: `SavePlugin` writes and reads the save files, quicksave and quickload, and saves at checkpoints. Bevy, but no window. |
 | `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 | `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
@@ -1658,6 +1659,65 @@ question in software from the original's pictures, and compares each with
 a screenshot of the game shrunk to 320x240: the mean difference must stay
 under 12 of 255 and fewer than 5% of pixels may differ by more than 40.
 centre.
+
+## Saving, loading and checkpoints (`rc_game_core::save`, `rc_save`)
+
+**One interface, one section per part.** A save file is a plain TOML text
+file: a `[save]` header (format number, map, last checkpoint, when, time
+played) and then one `[section]` per part of the game. Each part writes its
+own section by implementing `SavePart` (`rc_game_core/src/save.rs`): a
+struct with `Serialize`/`Deserialize`, a `save` that reads it out of the
+game and a `load` that puts it back, registered with
+`app.add_save_part::<T>()`. The save plugin never knows what's inside a
+section. Sections so far: `[player]` (position, speed, on the ground,
+crouched, facing; in `rc_game/src/player.rs`), `[combat]` (health, shield,
+weapons and ammo; `rc_combat/src/save.rs`), `[enemies]` (the battle clock,
+each spawner's state and each living droid; `rc_enemies/src/save.rs`, using
+`rc_ai::Battle::snapshot` and `restore`), `[checkpoints]` (checkpoints
+reached on this map; `rc_save`).
+
+**Loading reloads the map.** Loading a save sets `CurrentLevel` to the
+save's map and goes through `Loading` exactly like the menu does, so the
+level is always built fresh. On the first frame of play, after every
+`OnEnter(InGame)` has run and before input is read, each part's `load` gets
+its section, in the order the parts were registered. So parts only put back
+what changed since the map started, and never have to undo half a level.
+While this happens the resource `RestoringSave` exists; level-start things
+(the level-start autosave, opening scripts) check for it and stay quiet. A
+section the file doesn't have calls `load_missing` (the level stays as it
+starts), and a section no part claims is logged and ignored, so older and
+newer saves still load. A file with a higher format number than ours is
+refused with a message.
+
+**Destroyed droids stay destroyed** because each spawner's count of droids
+made is saved; only living droids are listed. A droid that was fighting
+comes back alerted toward where it last saw the player. Its plan (route,
+cover spot, burst) starts over: our choice, since those plans are rebuilt
+every few seconds anyway.
+
+**Checkpoints.** Entering a map from the menu saves `checkpoint.toml`
+under the name "level start". Level scripts send `CheckpointReached { name
+}`; the first time each name arrives it is added to `[checkpoints]` and
+`checkpoint.toml` is written again. Repeats are ignored, also after a load.
+Where the original places its checkpoints is not found yet (that needs the
+game's maps and scripts, read only).
+
+**Files and folder.** `quicksave.toml`, `checkpoint.toml` and
+`save_NAME.toml` (named saves, for a save menu; only letters, digits, `-`
+and `_` reach the file name). The folder is `[save] folder` in
+`settings.toml`, else `%APPDATA%\rc_game\saves` on Windows,
+`$XDG_DATA_HOME/rc_game/saves` or `~/.local/share/rc_game/saves` on Linux,
+and `saves` beside the settings file elsewhere (the Android app will set
+its own folder). Never the game's install. Each file is written to
+`NAME.toml.writing` and then swapped in, so a crash can't leave half a save.
+`--script` runs save into `logs/script_saves`, emptied at the start.
+
+**Keys and menus.** `Action::QuickSave` (F5) and `Action::QuickLoad` (F9)
+are our choice until checked against the original's `DefaultCtrl.ini`.
+`SaveList` lists the saves newest first for a Load Game screen; a menu
+sends `LoadGame { slot }` or `SaveGame { slot }` and gets `SaveResult` back.
+Every save and load is logged with the prefix `save:` and a one-line summary
+of each section, so a round trip can be checked from the log.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 
