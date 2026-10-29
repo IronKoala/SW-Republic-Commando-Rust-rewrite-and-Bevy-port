@@ -1,37 +1,42 @@
-# DC-17m with the anti-armour attachment: fires a grenade round that goes
-# off on impact (its blast is grenades/dc17m_antiarmor_round.toml). Its own
-# entry in the weapon cycle with its own ammo.
+# DC-17m with the anti-armour attachment: one heavy explosive round at a
+# time, which flies like a grenade (dc17m_antiarmor_round.toml) and goes
+# off on touching anything. Its own entry in the weapon cycle.
 #
-# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own stand-ins,
-# NOT yet read from the original game. They will be replaced with the class
-# defaults from ctinventory.u (with its "...Defaults" class in
-# Properties/properties.u on top) once the game's packages can be read.
-# Class name to check: DC17mAntiArmor.
+# Numbers marked "game:" are DC17mAntiArmor's class defaults (ctinventory.u,
+# with DC17mAntiArmorDefaults in Properties/properties.u on top).
+# "placeholder" marks the few not read yet.
 
 name = "DC-17m Anti-Armour"
 
 [fire]
-mode = "semi_auto"        # placeholder
-shot_delay = 1.0          # placeholder
-aim_error = 0             # placeholder
-offset = [127.4, 30, -10] # the DC-17m's FPFireOffset (placeholder for the attachment)
+mode = "semi_auto"        # game: one round per press
+shot_delay = 0.6          # game: DC17mAntiArmorDefaults ShotDelay
+aim_error = 0
+offset = [127.4, 30, -10] # placeholder: the rifle's FPFireOffset
 
 [ammo]
-clip_size = 1             # placeholder
-max_ammo = 6              # placeholder
-start_ammo = 3            # placeholder
-reload_time = 1.5         # placeholder
+clip_size = 1             # game: ReloadCount
+max_ammo = 4              # game: DC17mAntiArmorAmmoDefaults MaxAmmo
+start_ammo = 4            # game: PickupAmmoCount
+reload_time = 1.5         # placeholder: the attachment's reload animation isn't read yet
 
 [shot]
 kind = "lobbed"           # flies like a grenade
-speed = 3000              # placeholder: uu/s
+speed = 3000              # game: AntiArmorProjDefaults Speed
 grenade = "dc17m_antiarmor_round"
 
+[melee]
+range = 150               # game: MeleeRange
+damage = 220              # game: MeleeDamage
+
 [recoil]
-kick = [800, -200, 0]     # placeholder
+kick = [4000, 0, 0]       # game: WeaponKick
+spring = 3.5              # game: RecoilConstant
+damping = 0.1             # game: RecoilDampening
 
 [sound]
 package = "gen_sound"
+fire = ["wep_GEN_antiArmorGun_03"] # game: FireSound
 empty = "wep_GEN_empty_01"
 
 [model]

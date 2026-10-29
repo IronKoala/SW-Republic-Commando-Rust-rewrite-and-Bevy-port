@@ -23,6 +23,7 @@
 #![allow(clippy::type_complexity)]
 
 mod damage;
+pub mod damage_types;
 pub mod data;
 mod fire;
 pub mod grenade;
@@ -35,6 +36,7 @@ mod throw;
 mod view;
 pub mod weapon;
 
+pub use damage_types::{DamageTable, DamageTypes};
 pub use grenade::{GrenadeParams, Grenades};
 pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
 pub use library::{read_sounds, MeleeParams, PlayerSetup, WeaponLibrary};

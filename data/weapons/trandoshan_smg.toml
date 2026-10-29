@@ -1,0 +1,46 @@
+# The Trandoshan mercenary's ACP repeater (class SMG): a fast instant-hit
+# gun. Trandoshans drop it when they fall, and the player can pick it up.
+#
+# The values are the original game's: class SMG (ctinventory.u) with
+# SMGDefaults (Properties/properties.u) on top, and its ammo SMGAmmo
+# (+Defaults).
+
+name = "ACP Repeater"
+
+[fire]
+mode = "automatic"        # FireMode 2
+shot_delay = 0.1          # SMGDefaults ShotDelay
+aim_error = 25            # SMGDefaults AimError
+offset = [127.4, 10, -7.56] # SMG FPFireOffset
+
+[ammo]
+clip_size = 40            # SMGDefaults ReloadCount
+max_ammo = 160            # SMGAmmoDefaults MaxAmmo
+start_ammo = 160          # SMGDefaults PickupAmmoCount
+reload_time = 1.5         # placeholder: its reload animation isn't read yet
+
+[shot]
+kind = "instant"          # SMGAmmo bInstantHit
+range = 5000              # SMGAmmo Range
+damage = 10               # SMGAmmoDefaults Damage
+damage_kind = "blaster"
+damage_type = "CTDamageBallisticSMG" # MyDamageType
+
+[melee]
+range = 150               # SMGDefaults MeleeRange
+damage = 220              # SMGDefaults MeleeDamage
+
+[recoil]
+kick = [200, 200, 0]      # SMGDefaults WeaponKick
+spring = 4                # SMGDefaults RecoilConstant
+damping = 0.1             # SMG RecoilDampening
+
+[sound]
+package = "gen_sound"     # not checked: the sound packages weren't read in the cloud
+fire = ["Uzi_Fire"]       # SMGDefaults FireSound
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the repeater's own model isn't looked up yet
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.6, 0.2]  # our choice, from the tracer light's hue 18

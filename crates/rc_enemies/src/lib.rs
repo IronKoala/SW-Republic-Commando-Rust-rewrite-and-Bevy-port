@@ -25,8 +25,8 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, Target};
 use rc_combat::{
-    Blast, Body, CombatSet, Damage, Dead, Died, FireShot, Health, Hittable, ShotLanded, Stunned,
-    Team,
+    Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, Health, Hittable,
+    ShotLanded, Stunned, Team,
 };
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -569,6 +569,9 @@ fn think(
                     Visibility::default(),
                     DespawnOnExit(GameState::InGame),
                 ));
+                if !p.combat.damage_table.is_empty() {
+                    e.insert(DamageTable(p.combat.damage_table.clone()));
+                }
                 if let (Some(mesh), Some(material)) = (mesh, tl.and_then(|t| t.material.as_ref())) {
                     // The points move every frame, so Bevy's stored outline
                     // would be wrong: don't let it skip drawing by it.
@@ -788,6 +791,14 @@ fn react_to_combat(
         fight.battle.hear(to_unreal(b.point));
     }
     for (droid, s) in &stunned {
+        if !s.stops {
+            // Burning hurts but doesn't stop it.
+            log.line(format!(
+                "{PART}: t={now:.1}s droid {} burning for {:.1} s",
+                droid.id, s.left
+            ));
+            continue;
+        }
         fight.battle.stun(droid.id, s.left);
         log.line(format!(
             "{PART}: t={now:.1}s droid {} stunned for {:.1} s",

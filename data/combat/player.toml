@@ -9,15 +9,16 @@ health = 200                 # MaxHealth (PlayerCommandoDefaults)
 shield = 100                 # MaxShields (CloneCommando)
 shield_recharge_rate = 20    # ShieldRechargeRate: per second
 shield_recharge_delay = 3    # ShieldRechargeDelay: seconds after a hit
+damage_table = "DV_OrganicCTPlayerDamage"   # DamageVariance: how much each damage type hurts (combat/damage_types.toml)
 weapons = ["dc17m_blaster", "dc17m_sniper", "dc17m_antiarmor", "dc15s_pistol"]   # first one in hand; files in weapons/
 # Grenade kinds carried, in the order the "next grenade" button cycles; the
 # first is selected. Each starts with its file's start_count (grenades/).
 grenades = ["thermal_detonator", "sonic_detonator", "emp_grenade", "flash_grenade"]
 
-# The melee button's hit. !! PLACEHOLDER NUMBERS !! Our own stand-ins, not
-# yet read from the game (the commando's melee is in its weapon and
-# character classes).
+# The melee button's hit, when the weapon in hand has no [melee] section
+# of its own (each weapon file's [melee] wins: the DC-17m's is 220 damage
+# within 150 uu, read from the game).
 [melee]
-damage = 100                 # placeholder
-range = 120                  # placeholder: uu in front of the eye
-delay = 0.8                  # placeholder: seconds between hits
+damage = 220                 # DC17mBlaster MeleeDamage
+range = 150                  # DC17mBlaster MeleeRange: uu in front of the eye
+delay = 0.8                  # placeholder: seconds between hits (the melee animation isn't read yet)

@@ -1,33 +1,38 @@
-# Geonosian warrior: fast and organic.
+# Geonosian warrior: fast, organic, fragile.
 #
-# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own
-# stand-ins, NOT yet read from the original game. They will be replaced with
-# the class defaults from the script packages (ctcharacters.u and its
-# "...Defaults" class in Properties/properties.u) once those can be read.
-# The class names and the mesh and animation names are also unchecked.
-# Anything not listed takes the battle droid's value (battle_droid.toml).
-# Not done: the original's Geonosians fly and climb walls; ours walk.
+# Numbers marked "game:" are the original's: GeonosianWarrior
+# (ctcharacters.u) with GeonosianWarriorDefaults (Properties/properties.u)
+# on top, and its brain GeonosianWarriorBot(+Defaults). "guess" and
+# "placeholder" mark the rest. Anything not listed takes the battle droid's
+# value (battle_droid.toml).
+# Not done: the original's warriors fight with a force pike up close (our
+# enemies can't melee yet, so it shoots a stand-in blaster), and fly and
+# climb walls; ours walk. The other Geonosians (GeonosianDrone,
+# GeonosianElite with its beam) aren't added yet.
 
 [type]
 id = "geonosian"
-name = "Geonosian"
-classes = ["Geonosian*"]  # placeholder: class name to check in the maps
+name = "Geonosian warrior"
+classes = ["GeonosianWarrior*"]  # game: the map class
 body = "organic"
 
 [movement]
-ground_speed = 500        # placeholder
-collision_radius = 30     # placeholder
-collision_height = 70     # placeholder
-base_eye_height = 55      # placeholder
+ground_speed = 450        # game: GroundSpeed
+collision_radius = 50     # game: CollisionRadius
+collision_height = 115    # game: CollisionHeight
+crouch_height = 70        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
 
 [combat]
-health = 80               # placeholder
-accuracy = 0.4            # placeholder
-weapon = "e5_blaster"     # placeholder: a stand-in until its sonic blaster file exists
-burst_count = 1           # placeholder
-ready_distance = 900      # placeholder
-drops = ""                # placeholder: its own weapon file doesn't exist yet
+health = 100              # game: Health
+accuracy = 0.5            # game: Accuracy (Pawn)
+max_aim_yaw = 80          # game: MaxAimYaw (Pawn)
+weapon = "e5_blaster"     # placeholder: the original's ForcePike is a melee weapon our enemies can't use yet
+burst_count = 1           # game: GeonosianWarriorBotDefaults BurstCount
+ready_distance = 900      # guess
+drops = ""                # game: the force pike isn't a pick-up
+damage_table = "DV_GeonoshansWarriorDamage" # game: MyDamageVariance
 
 [look]
-package = "GameData/Animations/geonosian.ukx"   # placeholder
-mesh = "Geonosian"                               # placeholder
+package = "GameData/Animations/geonosian.ukx"   # game: the mesh is in this package
+mesh = "GeonosianWarrior"                        # game: Mesh

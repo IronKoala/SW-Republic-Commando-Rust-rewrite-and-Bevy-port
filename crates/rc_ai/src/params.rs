@@ -77,6 +77,9 @@ pub struct Combat {
     /// The weapon file left on the ground when it falls, for the player to
     /// pick up. Empty for none.
     pub drops: String,
+    /// The original's damage table for this enemy (`DamageVariance`), by
+    /// name in `data/combat/damage_types.toml`. Empty for none.
+    pub damage_table: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -189,6 +192,7 @@ impl AiParams {
                 lost_sight_reposition: 2.0,
                 uses_cover: true,
                 drops: "e5_blaster_pickup".into(),
+                damage_table: "DV_DroidsBattleDroidDamage".into(),
             },
             spawning: Spawning {
                 activate_unscripted_within: 3000.0,
@@ -291,6 +295,7 @@ impl AiParams {
             }
             ("combat", "uses_cover") => c.uses_cover = boolean()?,
             ("combat", "drops") => c.drops = text(),
+            ("combat", "damage_table") => c.damage_table = text(),
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
             ("senses", "auto_detect_radius") => s.auto_detect_radius = num()?,

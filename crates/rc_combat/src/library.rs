@@ -2,6 +2,7 @@
 //! `data/combat/player.toml`, and the weapons' sounds from the game's sound
 //! packages.
 
+use crate::damage_types::{DamageTable, DamageTypes};
 use crate::data::Table;
 use crate::grenade::{GrenadeParams, Grenades};
 use crate::health::{Health, Shield, Team};
@@ -23,6 +24,9 @@ pub struct WeaponLibrary {
     pub weapons: BTreeMap<String, WeaponParams>,
     /// Every grenade the data files describe (`data/grenades/*.toml`).
     pub grenades: BTreeMap<String, GrenadeParams>,
+    /// Damage types and every character's damage table
+    /// (`data/combat/damage_types.toml`).
+    pub damage_types: DamageTypes,
     /// Files that didn't read, with the reason. They are left out.
     pub errors: Vec<String>,
     /// Sound name to Bevy sound. Empty when there is no audio (tests).
@@ -44,10 +48,13 @@ pub struct PlayerSetup {
     /// selected at the start. Each starts with its file's `start_count`.
     pub grenades: Vec<String>,
     pub melee: MeleeParams,
+    /// The player's damage table (in `damage_types.toml`).
+    pub damage_table: Option<String>,
 }
 
-/// The player's close-range hit (the melee button), from
-/// `data/combat/player.toml` `[melee]`.
+/// The player's close-range hit when the weapon in hand has none of its
+/// own, and the time between hits, from `data/combat/player.toml`
+/// `[melee]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeleeParams {
     pub damage: f32,
@@ -59,11 +66,11 @@ pub struct MeleeParams {
 }
 
 impl Default for MeleeParams {
-    /// Our stand-in values until the game's are read (see player.toml).
+    /// The DC-17m's melee (`DC17mBlasterDefaults`), and our own delay.
     fn default() -> Self {
         MeleeParams {
-            damage: 100.0,
-            range: 120.0,
+            damage: 220.0,
+            range: 150.0,
             delay: 0.8,
             sound: None,
         }
@@ -80,6 +87,7 @@ impl Default for PlayerSetup {
             weapons: vec!["dc17m_blaster".into(), "dc15s_pistol".into()],
             grenades: vec![],
             melee: MeleeParams::default(),
+            damage_table: Some("DV_OrganicCTPlayerDamage".into()),
         }
     }
 }
@@ -105,6 +113,7 @@ impl PlayerSetup {
                 delay: t.number("melee.delay")?.unwrap_or(d.melee.delay),
                 sound: t.text("melee.sound")?.or(d.melee.sound),
             },
+            damage_table: t.text("player.damage_table")?.or(d.damage_table),
         };
         t.finish()?;
         Ok(p)
@@ -187,10 +196,11 @@ pub(crate) fn load(
                 say(
                     &log,
                     format!(
-                        "grenades: {id} ({}): carry {} (start {}), thrown at {} uu/s +{} up, fuse {:?}, bounce {}, damage {} ({:?}) within {} uu, stun {} s {:?}, damage_vs {:?}",
-                        p.name, p.max_count, p.start_count, p.speed, p.toss_up, p.fuse,
-                        p.bounce, p.damage, p.damage_kind, p.radius, p.stun_time,
-                        p.stun_only, p.damage_vs
+                        "grenades: {id} ({}): carry {} (start {}), thrown at {} uu/s +{} up, fuse {} s (then {} s after a touch), explodes on actor {} / world {}, sticks world {} / actors {}, proximity {} uu every {} s, bounce {} / {}, damage {} ({}) within {} uu, status {:?}",
+                        p.name, p.max_count, p.start_count, p.speed, p.toss_up, p.fuse_time,
+                        p.after_impact, p.explode_on_actor, p.explode_on_world,
+                        p.stick_to_world, p.stick_to_actors, p.proximity, p.proximity_interval,
+                        p.bounce, p.actor_bounce, p.damage, p.damage_type, p.radius, p.status
                     ),
                 );
                 lib.grenades.insert(id, p);
@@ -201,6 +211,33 @@ pub(crate) fn load(
                 lib.errors.push(e);
             }
         }
+    }
+    match paths.data_file("combat/damage_types.toml") {
+        None => say(
+            &log,
+            "weapons: no combat/damage_types.toml: every hit at full strength".into(),
+        ),
+        Some(p) => match std::fs::read_to_string(&p)
+            .map_err(|e| e.to_string())
+            .and_then(|t| DamageTypes::from_text(&t))
+        {
+            Ok(d) => {
+                say(
+                    &log,
+                    format!(
+                        "weapons: {} damage types and {} damage tables read",
+                        d.parents.len(),
+                        d.tables.len()
+                    ),
+                );
+                lib.damage_types = d;
+            }
+            Err(e) => {
+                let e = format!("{}: {e}", p.display());
+                say(&log, format!("weapons: FAILED to read {e}"));
+                lib.errors.push(e);
+            }
+        },
     }
     match paths.data_file("combat/player.toml") {
         None => say(
@@ -397,6 +434,9 @@ pub(crate) fn equip_player(
                 current: 0,
             },
         ));
+        if let Some(t) = &s.damage_table {
+            commands.entity(e).insert(DamageTable(t.clone()));
+        }
     }
 }
 

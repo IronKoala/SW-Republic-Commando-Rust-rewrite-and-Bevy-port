@@ -1,35 +1,41 @@
-# Super battle droid (B2): slow, heavily armoured, fires a wrist blaster,
-# walks straight at you instead of taking cover.
+# Super battle droid (B2): slow, heavily armoured, fires a wrist blaster
+# in bursts, walks straight at you instead of taking cover.
 #
-# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own
-# stand-ins, NOT yet read from the original game. They will be replaced with
-# the class defaults from the script packages (ctcharacters.u and its
-# "...Defaults" class in Properties/properties.u) once those can be read.
-# The class names and the mesh and animation names are also unchecked.
+# Numbers marked "game:" are the original's: SuperBattleDroid (ctcharacters.u)
+# with SuperBattleDroidDefaults (Properties/properties.u) on top, and its
+# brain SuperBattleDroidBot(+Defaults). "guess"/"our choice" mark the rest.
 # Anything not listed takes the battle droid's value (battle_droid.toml).
 
 [type]
 id = "super_battle_droid"
 name = "super battle droid"
-classes = ["SuperBattleDroid*"]  # placeholder: class name to check in the maps
+classes = ["SuperBattleDroid*"]  # game: the map class (SuperBattleDroid, and its variants)
 body = "droid"
 
 [movement]
-ground_speed = 250        # placeholder
-collision_radius = 40     # placeholder
-collision_height = 90     # placeholder
-crouch_height = 90        # placeholder: B2s don't crouch
-base_eye_height = 70      # placeholder
+ground_speed = 100        # game: GroundSpeed (WalkSpeedRatio 1: it never runs)
+collision_radius = 65     # game: CollisionRadius
+collision_height = 115    # game: CollisionHeight
+crouch_height = 85        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: SightRadius
+peripheral_vision = 0.2   # game: PeripheralVision (Pawn)
 
 [combat]
-health = 400              # placeholder
-accuracy = 0.5            # placeholder
-weapon = "e5_blaster"     # placeholder: a stand-in until its wrist blaster file exists
-burst_count = 5           # placeholder
-ready_distance = 600      # placeholder
-safe_distance = 900       # placeholder
-uses_cover = false        # placeholder: walks at you instead
-drops = ""                # placeholder: B2s have their blaster built in
+health = 500              # game: SuperBattleDroidDefaults MaxHealth
+accuracy = 0.9            # game: Accuracy
+weapon = "sbd_blaster"    # game: RequiredEquipment SBDBlaster (data/weapons/sbd_blaster.toml)
+burst_count = 3           # game: SuperBattleDroidBotDefaults BurstCount
+shot_delay = 0.2          # game: SBDBlaster ShotDelay
+max_aim_yaw = 90          # game: MaxAimYaw
+weapon_range = 7000       # game: Weapon ValidRange max
+ready_distance = 600      # guess
+safe_distance = 900       # guess
+uses_cover = false        # guess: walks at you instead
+drops = ""                # game: the blaster is built in
+damage_table = "DV_DroidsSuperBattleDroidDamage" # game: MyDamageVariance
 
 [look]
 package = "GameData/Animations/droid.ukx"   # placeholder

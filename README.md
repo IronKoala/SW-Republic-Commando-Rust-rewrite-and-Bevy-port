@@ -215,19 +215,20 @@ copy of the game.
   2 droids destroyed by a stand-in player, no droid shooting another, and
   the droids on screen had the skin's colours (all 12 checks passed).
 
-- **Grenades, the DC-17m's attachments, melee, picked-up blasters and
-  more enemy types (tested in the cloud sandbox with automatic tests, not
-  in the real game; the numbers are placeholders).** You can throw thermal,
-  sonic, EMP and flash grenades (they arc, bounce, and go off on a timer or
-  on touch, hurting less the further away you are), switch to the DC-17m's
-  sniper (with a zoom) and anti-armour attachments, hit with melee, and
-  pick up a fallen droid's blaster. EMP grenades stun droids, flash
-  grenades stun everyone else. Droids now shoot at your squad mates too,
-  and hear grenades go off. Super battle droids, Geonosians and
-  Trandoshans each have their own settings file in `data/enemies`, and a
-  map's spawners make whichever type their class names. **Every number in
-  the new files is a stand-in marked "placeholder"**: they still have to be
-  read from the game's script files.
+- **Grenades, the DC-17m's attachments, melee, picked-up weapons and
+  more enemy types, with the original's numbers (tested in the cloud
+  sandbox with automatic tests and the game's script files, not yet played
+  in the real game).** You can throw thermal, sonic, EMP and flash
+  grenades: the thermal bounces and goes off a second after it lands (and
+  sets people close to it alight), the sonic sticks and waits for someone to
+  come near, the EMP electrocutes droids, and the flash stuns anyone looking
+  at it. Switch to the DC-17m's sniper (two zoom steps; zoomed shots hit
+  1.72 times harder) and anti-armour attachments, hit with melee, and pick
+  up a fallen enemy's weapon. Every character takes more or less damage by
+  type, from the game's own damage tables (battle droids shrug off sniper
+  rounds but fall to melee). Super battle droids, Geonosian warriors and
+  Trandoshan mercenaries each have their own settings file in
+  `data/enemies` with the game's health, speed, size and aim.
 
 ## What doesn't work yet
 
@@ -257,15 +258,14 @@ copy of the game.
   animation. Droids don't use jump links or doors.
 
 - Weapons: no first-person arms or muzzle flash, and switching weapons is
-  instant. How the view kick settles back is our own guess. The numbers for
-  grenades, the sniper and anti-armour attachments, melee and the picked-up
-  E-5's ammo are placeholders, not the game's, and grenades have no sounds
-  or models yet (a small glowing ball). Squad mates don't throw grenades.
-- Enemy types: the super battle droid, Geonosian and Trandoshan files use
-  placeholder numbers, and their class, mesh and animation names haven't
-  been checked against the game, so they may not appear on real maps yet.
-  Geonosians walk instead of flying and climbing. Droid sound names are
-  empty until the sound packages are read.
+  instant. How the view kick settles back is our own guess. The
+  attachments' and the Trandoshan repeater's reload times are stand-ins,
+  grenades have no explosion sounds or models yet (a small glowing ball),
+  and nobody but the player throws grenades yet.
+- Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
+  stand-in blaster instead of using their force pike, and walk instead of
+  flying and climbing. The Trandoshan uses a stand-in model. Droid voice
+  lines are empty until the sound packages are read.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our

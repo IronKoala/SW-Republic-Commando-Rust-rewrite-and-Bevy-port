@@ -1,44 +1,46 @@
 # DC-17m with the sniper attachment: slow, accurate, hard-hitting, with a
-# zoom. In the original the attachment swaps onto the rifle; here it is its
-# own entry in the weapon cycle with its own ammo.
+# two-step zoom. In the original the attachment swaps onto the rifle; here
+# it is its own entry in the weapon cycle with its own ammo.
 #
-# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own stand-ins,
-# NOT yet read from the original game. They will be replaced with the class
-# defaults from ctinventory.u (with its "...Defaults" class in
-# Properties/properties.u on top) once the game's packages can be read.
-# Class name to check: DC17mSniper.
+# Numbers marked "game:" are DC17mSniper's class defaults (ctinventory.u,
+# with DC17mSniperDefaults in Properties/properties.u on top). "placeholder"
+# marks the few not read yet.
 
 name = "DC-17m Sniper"
 
 [fire]
-mode = "semi_auto"        # placeholder
-shot_delay = 1.0          # placeholder
-aim_error = 0             # placeholder
-offset = [127.4, 30, -10] # the DC-17m's FPFireOffset (placeholder for the attachment)
-zoom_fov = 30             # placeholder: degrees across 4:3 while zoomed (zoom button)
+mode = "semi_auto"        # game: one shot per press
+shot_delay = 1.5          # game: DC17mSniperDefaults ShotDelay
+aim_error = 0             # game: no AimError
+offset = [130.4, 13, -6.56] # game: FPFireOffset
+zoom_fovs = [30, 10]      # game: ZoomFOVs (degrees across 4:3; the zoom button steps through them)
+zoom_damage = 1.72        # game: ZoomDamageMultiplier (shots while zoomed)
 
 [ammo]
-clip_size = 5             # placeholder
-max_ammo = 30             # placeholder
-start_ammo = 15           # placeholder
-reload_time = 2.0         # placeholder
+clip_size = 5             # game: ReloadCount
+max_ammo = 20             # game: DC17mSniperAmmoDefaults MaxAmmo
+start_ammo = 20           # game: PickupAmmoCount
+reload_time = 2.0         # placeholder: the attachment's reload animation isn't read yet
 
 [shot]
-kind = "bolt"
-accel = 200000            # placeholder
-max_speed = 30000         # placeholder
-life_span = 2
-damage = 150              # placeholder
+kind = "instant"          # game: an instant-hit trace
+range = 10000             # game: TraceRange
+damage = 175              # game: Damage
 damage_kind = "blaster"
+damage_type = "CTDamageBallisticDC17Sniper" # game: MyDamageType
+
+[melee]
+range = 150               # game: MeleeRange
+damage = 220              # game: MeleeDamage
 
 [recoil]
-kick = [600, -100, 0]     # placeholder
-spring = 10               # placeholder
-damping = 0.1             # placeholder
+kick = [2500, 0, 0]       # game: WeaponKick
+spring = 15               # game: RecoilConstant
+damping = 0.2             # game: RecoilDampening
 
 [sound]
 package = "gen_sound"
-fire = ["wep_GEN_dc17Fire_02"]      # placeholder: the rifle's own sound until the sniper's is read
+fire = ["wep_GEN_sniperFire_01"] # game: FireSound
 empty = "wep_GEN_empty_01"
 
 [model]

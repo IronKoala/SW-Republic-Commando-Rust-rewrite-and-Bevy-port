@@ -26,6 +26,15 @@ max_speed = 5000          # MaxSpeed
 life_span = 10
 damage = 24               # Damage (BattleDroidBlasterProjDefaults)
 damage_kind = "blaster"
+# Our choice, NOT the game's: the original's BattleDroidBlasterAmmo uses
+# CTDamageEnergyDroids, which battle droids' damage table ignores (x0). We
+# don't yet know how the original lets the player hurt droids with it, so
+# the player's copy uses the plain energy type.
+damage_type = "CTDamageEnergy"
+
+[melee]
+range = 100               # BattleDroidBlaster MeleeRange
+damage = 15               # BattleDroidBlaster MeleeDamage
 
 [sound]
 package = "gen_sound"

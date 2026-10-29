@@ -131,6 +131,24 @@ impl Table {
         }
     }
 
+    /// A list of numbers. A single number counts as a list of one.
+    pub fn numbers(&mut self, name: &str) -> Result<Option<Vec<f32>>, String> {
+        let bad = |line| format!("line {line}: `{name}` should be a list of numbers");
+        match self.take(name) {
+            None => Ok(None),
+            Some((Value::Number(v), _)) => Ok(Some(vec![v])),
+            Some((Value::List(items), line)) => items
+                .into_iter()
+                .map(|v| match v {
+                    Value::Number(x) => Ok(x),
+                    _ => Err(bad(line)),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Some),
+            Some((_, line)) => Err(bad(line)),
+        }
+    }
+
     /// A list of exactly three numbers, like a position.
     pub fn vec3(&mut self, name: &str) -> Result<Option<[f32; 3]>, String> {
         let bad = |line| format!("line {line}: `{name}` should be three numbers, like [1, 2, 3]");
@@ -148,6 +166,13 @@ impl Table {
             }
             Some((_, line)) => Err(bad(line)),
         }
+    }
+
+    /// Every name the file sets, in file order (`section.name`).
+    pub fn names(&self) -> Vec<String> {
+        let mut v: Vec<(&String, usize)> = self.entries.iter().map(|(k, e)| (k, e.line)).collect();
+        v.sort_by_key(|(_, l)| *l);
+        v.into_iter().map(|(k, _)| k.clone()).collect()
     }
 
     /// Fails if the file set anything nobody asked for (a misspelt name).

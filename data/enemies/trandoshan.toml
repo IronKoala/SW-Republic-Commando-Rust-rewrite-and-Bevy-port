@@ -1,31 +1,38 @@
-# Trandoshan mercenary: tough organic soldier.
+# Trandoshan mercenary: organic, tougher than a battle droid, sprays an
+# instant-hit repeater in long bursts, and the player can pick it up.
 #
-# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own
-# stand-ins, NOT yet read from the original game. They will be replaced with
-# the class defaults from the script packages (ctcharacters.u and its
-# "...Defaults" class in Properties/properties.u) once those can be read.
-# The class names and the mesh and animation names are also unchecked.
-# Anything not listed takes the battle droid's value (battle_droid.toml).
+# Numbers marked "game:" are the original's: TrandoshanMercenary
+# (ctcharacters.u) with TrandoshanMercenaryDefaults (Properties/properties.u)
+# on top, and its brain TrandoshanMercenaryBot(+Defaults). "guess" and
+# "placeholder" mark the rest. Anything not listed takes the battle droid's
+# value (battle_droid.toml).
+# Not done: it also carries thermal detonators (ThermalDetonatorEnemy) that
+# our enemies don't throw yet.
 
 [type]
 id = "trandoshan"
-name = "Trandoshan"
-classes = ["Trandoshan*"]  # placeholder: class name to check in the maps
+name = "Trandoshan mercenary"
+classes = ["TrandoshanMercenary*"]  # game: the map class
 body = "organic"
 
 [movement]
-ground_speed = 400        # placeholder
-collision_radius = 40     # placeholder
-collision_height = 84     # placeholder
-base_eye_height = 70      # placeholder
+ground_speed = 450        # game: GroundSpeed
+collision_radius = 40     # game: CollisionRadius (Pawn)
+collision_height = 84     # game: CollisionHeight
+crouch_height = 56        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
 
 [combat]
-health = 250              # placeholder
-accuracy = 0.5            # placeholder
-weapon = "e5_blaster"     # placeholder: a stand-in until the Trandoshan rifle file exists
-burst_count = 3           # placeholder
-drops = ""                # placeholder: its own weapon file doesn't exist yet
+health = 220              # game: MaxHealth
+accuracy = 0.65           # game: Accuracy
+max_aim_yaw = 70          # game: MaxAimYaw
+weapon = "trandoshan_smg" # game: RequiredEquipment SMG (data/weapons/trandoshan_smg.toml)
+burst_count = 9           # game: TrandoshanMercenaryBotDefaults BurstCount
+shot_delay = 0.1          # game: SMGDefaults ShotDelay
+weapon_range = 5000       # game: SMGAmmo Range
+drops = "trandoshan_smg"  # the player can pick up its repeater
+damage_table = "DV_OrganicTrandoMercDamage" # game: MyDamageVariance
 
 [look]
-package = "GameData/Animations/trandoshan.ukx"  # placeholder
-mesh = "Trandoshan"                             # placeholder
+package = "GameData/Animations/trandoshan.ukx"  # guess: the game's mesh TrandoshanMerc isn't in this package
+mesh = "Trandoshan"                             # placeholder: the closest mesh in trandoshan.ukx
