@@ -14,12 +14,15 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
 | `rc_audio` | Reads `.wav` files into samples and measures them (length, peak, loudness, checksum). Knows nothing about Unreal. No Bevy. |
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
+| `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
+| `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
-Only `rc_viewer` and `rc_soundtest` use Bevy (version 0.20.1, MIT or Apache-2.0).
-Each turns on only the parts of Bevy it needs, which keeps the build smaller:
-`rc_viewer` a 2D window plus `bevy_pbr` for 3D models and their materials;
+Only `rc_viewer`, `rc_character` and `rc_soundtest` use Bevy (version 0.20.1,
+MIT or Apache-2.0). Each turns on only the parts of Bevy it needs, which keeps
+the build smaller: `rc_viewer` and `rc_character` a 2D window plus `bevy_pbr`
+for 3D models and their materials (the same list, so they share one build);
 `rc_soundtest` only audio and WAV decoding, with no window.
 
 ## Finding the game
@@ -434,6 +437,112 @@ DC15Pistol 0.32, ThermalDetonator 2.12 (flipped: 26 to 69).
 
 Known quirk: a capture can arrive before the model is drawn, showing only the
 background. That's retried like an all-black capture.
+## Characters: skeletal meshes and animations
+
+Characters (clone troopers, droids, creatures) live in the `.ukx` packages in
+`GameData\Animations`. Each holds `SkeletalMesh` objects (the bodies) and
+`MeshAnimation` objects (sets of animations). Readers:
+`rc_package::skeletal` and `rc_package::animation`, learned from UE Viewer
+(MIT); the Republic Commando differences are listed at the top of each file.
+
+**A skeletal mesh** is:
+- **Points**: corners of the surface, in the "reference pose" (the clone
+  trooper stands in a T shape, arms out).
+- **Wedges**: a point plus a texture position. Two triangles can share a
+  point but use different spots of the texture, so they get separate wedges.
+- **Triangles**: three wedges and a material slot.
+- **Bones**: a tree. Each bone stores its position and rotation relative to
+  its parent. The root bone's parent is stored as -1. The stored "number of
+  children" counts all bones below a bone, not just direct children (found
+  by measuring; the root of a 65-bone skeleton says 64).
+- **Influences**: "bone B moves point P with weight W". A point can follow up
+  to 3 bones (clone trooper). Weights add up to 1, except a few points in 17
+  meshes that add up to 0.98-0.99; we spread the difference evenly.
+- The skin: an object reference to a material in a texture package. For the
+  clone that's a `Shader` whose `Diffuse` setting is a 512x512 DXT1 picture.
+
+**An animation set** has its own bone list (matched to the mesh's bones by
+name) and a list of sequences (`WalkForward`, `Reload`, ...). Each sequence
+has a frame count, a speed (30 frames per second in every file seen), and
+one track per bone. A track is packed small: positions are three 16-bit
+numbers times a scale, rotations are three 16-bit numbers with flag bits
+that rebuild a quaternion (a compact way to store a rotation), and each key
+lasts a whole number of frames (one byte).
+
+**Rotations.** Republic Commando stores bone rotations mirrored compared with
+other Unreal Engine 2 games, and the engine applies them inverted except on
+the root bone. Together: use the stored rotation as-is, except invert the
+root's. We checked this by measurement instead of trusting it: playing every
+sequence on every mesh, the surface stretches by 3.5% on average with this
+rule and by 86% with the opposite one (limbs fly apart).
+
+**Playing an animation** (`rc_anim`):
+1. `Clip::sample` picks the two keys around the current frame for each bone
+   and blends between them (straight line for positions, "slerp", the smooth
+   rotation blend, for rotations). After the last key it blends back to the
+   first, so the animation loops.
+2. `globals` walks down the bone tree to get each bone's place in the model.
+3. `skin` moves each point: for every bone that influences it, undo the
+   bone's reference placement, apply its animated placement, and mix by the
+   weights. This runs on the CPU, about 1,500 points for the clone.
+
+The pose is a plain list of per-bone transforms, so anything can produce
+one, not only the game's animations: a mod's new animation, a physics
+ragdoll, or tracked VR hands could set some bones and leave the rest to an
+animation.
+
+**How we check without looking:**
+- `rc_probe --characters` reads every mesh and animation set, checks the bone tree,
+  the index ranges and the weights, and plays every sequence of each mesh's
+  animation sets, logging the surface stretch.
+- In the reference pose, each bone sits close to the points it moves (median
+  1.5% of the clone's height).
+
+### Showing a character in Bevy (`rc_character`)
+
+1. Before Bevy starts, `load.rs` reads the mesh, the animation set and the
+   sequence, plays the whole sequence once on the CPU and logs the
+   character's height and surface stretch on every frame, then follows the
+   material to the skin picture and decodes it.
+2. Axes: the game has Z up and is "left-handed"; Bevy has Y up and is
+   "right-handed". Bevy X = game Y, Bevy Y = game Z, Bevy Z = minus game X.
+   Changing handedness mirrors the model, which also flips which side of a
+   triangle is its front. We decide the triangle order by measuring: the
+   "signed volume" of the closed surface is positive when fronts face out.
+3. One Bevy vertex per wedge. Every frame `animate` samples the pose, skins
+   the points, recomputes normals (the direction each bit of surface faces,
+   for lighting) and copies them into the Bevy mesh. The root bone's
+   sideways movement is removed so walks stay in place.
+4. The game's "forward" is +X (checked: `WalkForward` moves the root bone
+   +364.7 units along X, `StepLeft` moves it along -Y, and the toes point
+   +X). The camera sits in front of the character, slightly to one side.
+
+**On-screen check:** on frame 30 the animation pauses and the window is
+captured. We project every triangle of our own skinned points with Bevy's
+camera, fill them into a yes/no grid, and compare with the captured pixels
+that aren't the background colour. The score is the overlap divided by the
+combined area (1.0 = identical). Results in the cloud sandbox: 0.984-0.994
+for the clone trooper, battle droid and super battle droid; comparing
+against a pose 22 frames off scores 0.77-0.86, so the 0.95 pass mark means
+something. The check also compares the colour balance (each colour
+channel's share of the total) of the character on screen with its skin
+picture: lighting changes brightness but not hue. This was added after the
+clone came out magenta on Windows while its outline still matched (Bevy's
+default colour grading needs the `tonemapping_luts` feature, which our shared
+Bevy feature list leaves out, so the camera uses `Tonemapping::None`). The
+magenta picture scores 0.331, the right one 0.001-0.013; 0.06 passes. In the
+sandbox the first capture is often black or shows only
+the background (the mesh hadn't reached the graphics card yet); the check
+retries up to 5 times.
+
+**Fit with the project goals.** Readers and animation maths have no Bevy and
+no platform-specific code, so they build for Windows, Linux and Android
+alike (only `rc_character` needs Bevy). Skinning ~1,500 points on the CPU is
+cheap, but on a phone we will want to hand it to the graphics card through
+Bevy's own skinned meshes; the pose code stays the same. For mods: the
+viewer takes any package, mesh, set and sequence on its command line, and
+nothing assumes the clone trooper's bone names except the defaults.
+
 
 ## Sounds
 

@@ -3896,8 +3896,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_anim"
+version = "0.1.0"
+dependencies = [
+ "rc_package",
+]
+
+[[package]]
 name = "rc_audio"
 version = "0.1.0"
+
+[[package]]
+name = "rc_character"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_anim",
+ "rc_image",
+ "rc_package",
+]
 
 [[package]]
 name = "rc_image"
@@ -3911,6 +3928,7 @@ version = "0.1.0"
 name = "rc_probe"
 version = "0.1.0"
 dependencies = [
+ "rc_anim",
  "rc_audio",
  "rc_image",
  "rc_package",
