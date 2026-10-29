@@ -314,6 +314,8 @@ fn main() -> AppExit {
 
     // PLUGINS FROM OTHER PARTS (see docs/PLUGINS.md).
     app.add_plugins(rc_level_plugin::LevelPlugin);
+    app.add_plugins(rc_combat::CombatPlugin);
+    app.add_plugins(rc_enemies::EnemiesPlugin);
 
     if use_script {
         app.add_plugins(script::ScriptPlugin);

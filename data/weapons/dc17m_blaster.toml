@@ -1,0 +1,50 @@
+# DC-17m blaster rifle: the commando's main weapon.
+#
+# Mods: change any value and restart. A misspelt name stops loading this
+# file with an error naming the line (see logs/rc_game.log).
+#
+# The values are the original game's, read with `rc_probe --class` from the
+# install's script packages: class DC17mBlaster (ctinventory.u) with
+# DC17mBlasterDefaults (Properties/properties.u) on top, its ammo
+# DC17mBlasterAmmo(+Defaults) and its bolt DC17BlasterProj(+Defaults).
+# Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
+# See docs/RESEARCH.md, "Weapons and damage".
+
+name = "DC-17m Blaster"
+
+[fire]
+mode = "automatic"        # FireMode 2 (FM_Automatic): fires while held
+shot_delay = 0.1          # ShotDelay (Weapon's default): 10 shots a second
+aim_error = 15            # AimError: up to 15 uu off per 1000 uu of distance
+offset = [127.4, 30, -10] # FPFireOffset: where bolts start, from the eye (forward, right, up)
+
+[ammo]
+clip_size = 60            # ReloadCount: shots per magazine
+max_ammo = 300            # MaxAmmo: most carried, magazine included
+start_ammo = 120          # PickupAmmoCount: ammo at the start
+reload_time = 1.5         # the first-person Reload animation: 45 frames at 30 fps
+
+[shot]
+kind = "bolt"             # a flying laser bolt (Projectile with bLaserBolt)
+accel = 60000             # AccelFactor (Projectile's default): bolts start at rest
+max_speed = 10000         # MaxSpeed
+life_span = 10            # LifeSpan: seconds before an unhit bolt vanishes
+damage = 20               # Damage
+damage_kind = "blaster"   # CTDamageEnergyDC17
+
+[recoil]
+kick = [200, -100, 0]     # WeaponKick: up, sideways (random either way), 65536 = full turn
+spring = 10               # RecoilConstant
+damping = 0.1             # RecoilDampening
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_dc17Fire_02"]      # FireSound
+reload = "fol_GEN_dc17reload_01"    # played by the Reload animation
+empty = "wep_GEN_empty_01"          # WeaponEmptySound (Weapon's default)
+
+[model]
+package = "weapons"
+mesh = "DC17mBlaster"     # the static mesh in StaticMeshes/weapons.usx
+offset = [40, 12, -14]    # our choice: where it sits in view (forward, right, up)
+bolt_colour = [0.3, 0.7, 1.0]  # our choice, from the bolt light's hue 122 (blue)

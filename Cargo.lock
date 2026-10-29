@@ -4392,6 +4392,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_ai"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_movement",
+ "rc_nav",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_anim"
 version = "0.1.0"
 dependencies = [
@@ -4413,11 +4423,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_combat"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "rc_level_viewer",
+ "rc_movement",
+ "rc_package",
+]
+
+[[package]]
+name = "rc_enemies"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_ai",
+ "rc_anim",
+ "rc_combat",
+ "rc_game_core",
+ "rc_image",
+ "rc_level",
+ "rc_level_viewer",
+ "rc_movement",
+ "rc_nav",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_game"
 version = "0.1.0"
 dependencies = [
  "bevy",
  "blake3",
+ "rc_combat",
+ "rc_enemies",
  "rc_game_core",
  "rc_image",
  "rc_level_plugin",
@@ -4472,6 +4512,15 @@ name = "rc_movement"
 version = "0.1.0"
 
 [[package]]
+name = "rc_nav"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_movement",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_package"
 version = "0.1.0"
 
@@ -4492,6 +4541,30 @@ dependencies = [
  "bevy",
  "rc_audio",
  "rc_package",
+]
+
+[[package]]
+name = "rc_squad"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_movement",
+ "rc_nav",
+ "rc_package",
+]
+
+[[package]]
+name = "rc_squad_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_combat",
+ "rc_game_core",
+ "rc_level",
+ "rc_movement",
+ "rc_nav",
+ "rc_package",
+ "rc_squad",
 ]
 
 [[package]]
