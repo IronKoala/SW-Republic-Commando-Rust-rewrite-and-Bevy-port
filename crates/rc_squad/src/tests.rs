@@ -288,3 +288,33 @@ fn aimed_spot_finds_the_floor_in_front() {
     // Looking up into the open sky meets nothing.
     assert!(aimed_spot(&world, eye, Vec3::new(0.0, 0.0, 1.0), 4000.0, &p).is_none());
 }
+
+#[test]
+fn a_downed_member_stays_put_and_skips_orders() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    let fell_at = squad.members[0].pawn.feet();
+    let ev = squad.set_down(0, true);
+    assert!(matches!(ev, Some(SquadEvent::Down { .. })), "{ev:?}");
+    assert_eq!(squad.set_down(0, true), None);
+    // The leader walks off and orders a form up: the others follow, Sev
+    // doesn't.
+    let away = leader_at(1000.0, 0.0, 0.0);
+    squad.command(Order::FormUp, away, &world);
+    run(&mut squad, away, 6.0, &world);
+    let d = distances(&squad, away.feet);
+    assert!(d[1] < 300.0 && d[2] < 300.0, "{d:?}");
+    let moved = (squad.members[0].pawn.feet() - fell_at).length();
+    assert!(moved < 1.0, "Sev moved {moved}");
+    assert!(squad.status(away)[0].down);
+    // Back up: Sev catches up.
+    assert!(matches!(
+        squad.set_down(0, false),
+        Some(SquadEvent::Revived { .. })
+    ));
+    run(&mut squad, away, 6.0, &world);
+    let d = distances(&squad, away.feet);
+    assert!(d[0] < 300.0, "{d:?}");
+}

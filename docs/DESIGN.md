@@ -1028,9 +1028,22 @@ its way like the player's; with a renderer it gets a capsule in its own
 colour (`EnhancedVisionColor` from the Properties package) and a dark
 visor, until the real model is drawn.
 
+### Health and going down
+
+Each squad mate entity also carries `rc_combat`'s `Health`, `Shield`,
+`Team::Republic` and `Hittable::COMMANDO`, so shots hit them like anyone
+else. The numbers are per member in `squad.toml` (from the Properties
+package: 400 health, 50 shield, recharging 15 per second after 4 s). Squad
+mates can't die in the original (`bCannotDie`): when health reaches 0 (or
+combat marks them `Dead`), `check_down` calls `Squad::set_down`. A downed
+member stops where it is, takes no orders, gives up any marked job (the
+marker opens again), and shows as `Incapacitated` with "Down" on the squad
+panel. Health above 0 again brings them back (`Revived`); nothing heals
+them yet, as reviving isn't built.
+
 ### How we check it without looking
 
 `rc_squad_sim` runs the real plugin on a real map with no window, in fixed
 1/60 s steps, with a scripted player. It logs every order, set-off,
 arrival, stuck, job and a once-a-second line with every member's position,
-state and distances, and checks 18 numbers (see `README.md`).
+state and distances, and checks 23 numbers (see `README.md`).

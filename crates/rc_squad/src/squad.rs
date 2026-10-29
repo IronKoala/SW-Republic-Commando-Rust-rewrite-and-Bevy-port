@@ -97,6 +97,10 @@ pub struct Member {
     pub marker: Option<usize>,
     /// Threat they're moving to fight (search and destroy), if any.
     pub engaging: Option<usize>,
+    /// Out of the fight (health at 0). Squad mates can't die in the
+    /// original: they lie where they fell until revived. A downed member
+    /// takes no orders and doesn't move on its own.
+    pub down: bool,
     path: Vec<Vec3>,
     planned_for: Option<Vec3>,
     think_in: f32,
@@ -169,6 +173,14 @@ pub enum SquadEvent {
         member: String,
         short_by: f32,
     },
+    /// Health ran out: the member is down until revived.
+    Down {
+        member: String,
+        at: Vec3,
+    },
+    Revived {
+        member: String,
+    },
 }
 
 impl fmt::Display for SquadEvent {
@@ -216,6 +228,8 @@ impl fmt::Display for SquadEvent {
             SquadEvent::StoppedShort { member, short_by } => {
                 write!(f, "{member} can't get closer; stopped {short_by:.0} uu short of the spot")
             }
+            SquadEvent::Down { member, at } => write!(f, "{member} is DOWN at {}", p(at)),
+            SquadEvent::Revived { member } => write!(f, "{member} is back up"),
         }
     }
 }
@@ -234,6 +248,7 @@ pub struct MemberStatus {
     pub goal_distance: f32,
     pub speed: f32,
     pub on_ground: bool,
+    pub down: bool,
 }
 
 pub struct Squad {
@@ -320,6 +335,7 @@ impl Squad {
                     hold_point: feet,
                     marker: None,
                     engaging: None,
+                    down: false,
                     path: Vec::new(),
                     planned_for: None,
                     think_in: 0.0,
@@ -405,7 +421,7 @@ impl Squad {
                     .members
                     .iter()
                     .enumerate()
-                    .filter(|(_, m)| m.marker.is_none())
+                    .filter(|(_, m)| m.marker.is_none() && !m.down)
                     .min_by(|a, b| {
                         dist(a.1.pawn.feet(), stand).total_cmp(&dist(b.1.pawn.feet(), stand))
                     });
@@ -446,7 +462,7 @@ impl Squad {
             },
         );
         for i in 0..self.members.len() {
-            if self.members[i].marker.is_none() {
+            if self.members[i].marker.is_none() && !self.members[i].down {
                 self.set_off_now(i, leader, world, &mut events);
             }
         }
@@ -687,6 +703,13 @@ impl Squad {
                     self.members[i].state = MemberState::Working { left };
                 }
             }
+            if self.members[i].down {
+                // Lies where they fell; gravity still applies.
+                let m = &mut self.members[i];
+                m.input = MoveInput::default();
+                m.pawn.step(dt, &m.input, world);
+                continue;
+            }
             self.members[i].think_in -= dt;
             if self.members[i].think_in <= 0.0 {
                 self.members[i].think_in += self.settings.think_interval;
@@ -706,6 +729,7 @@ impl Squad {
     }
 
     /// Turn the member's state into this frame's `MoveInput`.
+    #[allow(clippy::too_many_arguments)]
     fn steer(
         &mut self,
         i: usize,
@@ -832,6 +856,35 @@ impl Squad {
         };
     }
 
+    /// Mark member `i` down (health ran out) or back up. A downed member
+    /// drops any marked job (the spot opens again) and stops where it is.
+    /// `None` when nothing changed.
+    pub fn set_down(&mut self, i: usize, down: bool) -> Option<SquadEvent> {
+        let m = self.members.get_mut(i)?;
+        if m.down == down {
+            return None;
+        }
+        m.down = down;
+        m.think_in = 0.0;
+        m.path.clear();
+        m.planned_for = None;
+        m.slow_time = 0.0;
+        m.tried_jump = false;
+        m.stuck_reported = false;
+        let name = m.settings.name.clone();
+        if !down {
+            m.state = MemberState::Idle;
+            return Some(SquadEvent::Revived { member: name });
+        }
+        m.state = MemberState::Idle;
+        m.engaging = None;
+        let at = m.pawn.feet();
+        if let Some(k) = m.marker.take() {
+            self.markers[k].1 = MarkerState::Open;
+        }
+        Some(SquadEvent::Down { member: name, at })
+    }
+
     /// Every member's state, for the display and the log.
     pub fn status(&self, leader: Leader) -> Vec<MemberStatus> {
         self.members
@@ -853,6 +906,7 @@ impl Squad {
                     goal_distance: dist_2d(feet, m.goal),
                     speed: m.pawn.velocity.length_2d(),
                     on_ground: m.pawn.mode == rc_movement::Mode::Walking,
+                    down: m.down,
                 }
             })
             .collect()

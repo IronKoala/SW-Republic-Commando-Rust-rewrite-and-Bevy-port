@@ -9,6 +9,9 @@
 //!   gamepads, touch and VR all work the same way;
 //! - the leader is the entity with `Player`, the aim is the `PlayerCamera`;
 //! - bodies collide with `LevelCollision`;
+//! - each squad mate is an `rc_combat` target (`Health`, `Shield`, `Team`,
+//!   `Hittable`) with the original's numbers from `data/squad/squad.toml`;
+//!   at 0 health they go down (squad mates can't die) and stop;
 //! - it writes `SquadReadout`, logs to `GameLog`, and runs only while
 //!   playing.
 //!
@@ -18,6 +21,7 @@
 //! program without the loading screen (like `rc_walk`).
 
 use bevy::prelude::*;
+use rc_combat::{Dead, Health, Hittable, Shield, Team};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
@@ -155,7 +159,13 @@ impl Plugin for SquadPlugin {
             .add_systems(OnExit(GameState::InGame), clear_squad)
             .add_systems(
                 Update,
-                (spawn_squad, take_orders, run_squad, write_readout)
+                (
+                    spawn_squad,
+                    check_down,
+                    take_orders,
+                    run_squad,
+                    write_readout,
+                )
                     .chain()
                     .in_set(GameSet::Simulate)
                     .in_set(SquadSet)
@@ -360,6 +370,14 @@ fn spawn_squad(
             Visibility::default(),
             DespawnOnExit(GameState::InGame),
             Name::new(m.settings.name.clone()),
+            Health::new(m.settings.max_health),
+            Shield::new(
+                m.settings.max_shields,
+                m.settings.shield_recharge_rate,
+                m.settings.shield_recharge_delay,
+            ),
+            Team::Republic,
+            Hittable::COMMANDO,
         ));
         if let Some((body, visor, visor_mat, mats, height)) = &look {
             e.with_children(|c| {
@@ -505,6 +523,7 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
             MemberState::Moving { .. } => "moving".to_string(),
             MemberState::Working { left } => format!("working {left:.1}s"),
         };
+        let state = if m.down { "DOWN".to_string() } else { state };
         s.push_str(&format!(
             " | {} ({:.0}, {:.0}, {:.0}) {:.0} uu from leader, {:.0} to spot, speed {:.0}, {}{}",
             m.name,
@@ -521,9 +540,28 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
     s
 }
 
+/// Health at 0 (or `Dead` from combat) puts a squad mate down; health
+/// back above 0 with `Dead` gone (a revive) brings them back.
+fn check_down(
+    mut state: ResMut<SquadState>,
+    mates: Query<(&SquadMate, &Health, Has<Dead>)>,
+    log: Option<Res<GameLog>>,
+) {
+    let Some(squad) = state.squad.as_mut() else {
+        return;
+    };
+    for (mate, health, dead) in &mates {
+        let down = dead || health.is_dead();
+        if let Some(e) = squad.set_down(mate.index, down) {
+            log_line(&log, format!("t={:.2} {e}", squad.time));
+        }
+    }
+}
+
 fn write_readout(
     state: Res<SquadState>,
     player: Query<&Transform, With<Player>>,
+    mates: Query<(&SquadMate, Option<&Health>, Option<&Shield>)>,
     mut readout: Option<ResMut<SquadReadout>>,
 ) {
     let (Some(squad), Ok(pt), Some(readout)) =
@@ -531,17 +569,37 @@ fn write_readout(
     else {
         return;
     };
+    let mut bars = vec![(1.0, 1.0); squad.members.len()];
+    for (mate, health, shield) in &mates {
+        if let Some(b) = bars.get_mut(mate.index) {
+            let frac = |cur: f32, max: f32| {
+                if max > 0.0 {
+                    (cur / max).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            };
+            *b = (
+                health.map_or(1.0, |h| frac(h.current, h.max)),
+                shield.map_or(0.0, |s| frac(s.current, s.max)),
+            );
+        }
+    }
     let members: Vec<SquadMember> = squad
         .status(leader_from(pt))
         .into_iter()
-        .map(|m| SquadMember {
+        .zip(bars)
+        .map(|(m, (health, shield))| SquadMember {
             name: m.name,
             number: m.number,
-            // Full until combat ties in.
-            health: 1.0,
-            shield: 1.0,
-            status: SquadStatus::Ok,
-            order: m.doing,
+            health,
+            shield,
+            status: if m.down {
+                SquadStatus::Incapacitated
+            } else {
+                SquadStatus::Ok
+            },
+            order: if m.down { "Down".into() } else { m.doing },
         })
         .collect();
     if readout.members != members {

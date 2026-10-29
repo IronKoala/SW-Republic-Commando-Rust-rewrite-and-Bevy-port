@@ -14,14 +14,15 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
+use rc_combat::Health;
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
     Action, ActionState, CorePlugin, GameLog, GameSet, GameState, LevelCollision, Player,
-    PlayerCamera,
+    PlayerCamera, SquadReadout, SquadStatus,
 };
 use rc_movement::{MoveInput, MoveParams, Pawn, TriangleWorld, Vec3 as UVec3};
 use rc_squad::{MarkerState, MemberState};
-use rc_squad_plugin::{yaw_rotation, SquadMapData, SquadPlugin, SquadSet, SquadState};
+use rc_squad_plugin::{yaw_rotation, SquadMapData, SquadMate, SquadPlugin, SquadSet, SquadState};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,6 +47,8 @@ enum Step {
     AimAtNearestMarker,
     /// Aim at the marker picked by `AimAtMarker` from where the player is.
     FaceMarker,
+    /// Take all of this squad mate's health (as a hit would).
+    Hurt(usize),
     /// A check on the squad: name, measurement, lowest and highest allowed.
     Check(&'static str, fn(&Sim) -> f32, f32, f32),
 }
@@ -70,6 +73,10 @@ struct Sim {
     secure_spot: Option<UVec3>,
     markers: Vec<(String, UVec3, UVec3, MarkerState)>,
     marker_target: Option<usize>,
+    /// Where the hurt squad mate was when hurt.
+    hurt_at: Option<(usize, UVec3)>,
+    /// The squad panel: health fraction and whether shown as down.
+    readout: Vec<(f32, bool)>,
     world: Arc<TriangleWorld>,
 }
 
@@ -231,6 +238,46 @@ fn steps() -> Vec<Step> {
             0.0,
             400.0,
         ),
+        // Sev goes down: he stays where he fell while the others follow
+        // the leader away.
+        Hurt(0),
+        Hold(0.5, idle),
+        Check(
+            "down: Sev shown down on the squad panel",
+            |s| yes(s.readout.first().is_some_and(|r| r.1 && r.0 == 0.0)),
+            1.0,
+            1.0,
+        ),
+        Check(
+            "down: the others shown up",
+            |s| yes(s.readout.iter().skip(1).all(|r| !r.1 && r.0 == 1.0)),
+            1.0,
+            1.0,
+        ),
+        Turn(180.0),
+        Hold(3.0, keys(1.0)),
+        Hold(4.0, idle),
+        Check(
+            "down: Sev stayed where he fell (uu moved)",
+            |s| {
+                s.hurt_at
+                    .map_or(1e9, |(i, at)| (s.members[i].1 - at).length_2d())
+            },
+            0.0,
+            5.0,
+        ),
+        Check(
+            "down: the other two followed the leader (furthest, uu)",
+            |s| s.members.iter().skip(1).map(|m| m.3).fold(0.0, f32::max),
+            0.0,
+            300.0,
+        ),
+        Check(
+            "down: Sev's distance from the leader now (uu, for the log)",
+            |s| s.members[0].3,
+            0.0,
+            1e9,
+        ),
         Check(
             "nobody fell out of the map (lowest member feet z)",
             |s| s.lowest_member_z,
@@ -245,16 +292,24 @@ fn view_rotation(yaw: f32, pitch: f32) -> Quat {
 }
 
 /// The scripted player: run the steps, move the body, place the camera.
+#[allow(clippy::too_many_arguments)]
 fn drive_player(
     mut sim: ResMut<Sim>,
     mut actions: ResMut<ActionState>,
     mut player: Query<&mut Transform, (With<Player>, Without<PlayerCamera>)>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
     squad: Res<SquadState>,
+    readout: Res<SquadReadout>,
+    mut mates: Query<(&SquadMate, &mut Health)>,
     log: Res<GameLog>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let s = &mut *sim;
+    s.readout = readout
+        .members
+        .iter()
+        .map(|m| (m.health, m.status == SquadStatus::Incapacitated))
+        .collect();
     // Copy the squad's numbers for the checks.
     if let Some(sq) = squad.squad.as_ref() {
         let leader = rc_squad::Leader {
@@ -367,6 +422,17 @@ fn drive_player(
                     s.yaw.to_degrees(),
                     s.pitch.to_degrees()
                 ));
+            }
+            Step::Hurt(i) => {
+                for (mate, mut h) in &mut mates {
+                    if mate.index == i {
+                        h.current = 0.0;
+                        log.line(format!("sim: {} loses all health", mate.name));
+                    }
+                }
+                if let Some(m) = s.members.get(i) {
+                    s.hurt_at = Some((i, m.1));
+                }
             }
             Step::Check(name, f, lo, hi) => {
                 let got = f(s);
@@ -484,6 +550,8 @@ fn main() -> AppExit {
         secure_spot: None,
         markers: vec![],
         marker_target: None,
+        hurt_at: None,
+        readout: vec![],
         world,
     })
     .add_systems(
