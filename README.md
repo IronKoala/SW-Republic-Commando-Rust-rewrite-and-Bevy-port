@@ -89,12 +89,13 @@ copy of the game.
   brightness and reach. Read 600 lights and zones from `geo_01a`, `pro`,
   `ras_01a` and `yyy_01b` with nothing left over.
 
-- **Levels lit with the game's own baked light (tested in the cloud on 4
-  maps, not on Windows).** The level viewer now draws walls with the
+- **Levels lit with the game's own baked light (tested on Windows with
+  `geo_01a`, and in the cloud on 4 maps).** The level viewer now draws walls with the
   lightmaps the game saved inside each map, and props with the light saved
   at each of their corners, plus the few lights that change during play.
   The lightmaps read on all 4 maps with every check passing (every wall
-  corner lands inside its own patch of light). `lighting.cfg` lets anyone
+  corner lands inside its own patch of light). On the user's PC it still
+  draws at a steady 144 frames per second. `lighting.cfg` lets anyone
   change the brightness without touching code (see `docs/DESIGN.md`,
   "Lighting in Bevy").
 
