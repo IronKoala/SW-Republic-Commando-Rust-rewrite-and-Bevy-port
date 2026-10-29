@@ -268,3 +268,32 @@ Easy, 1 on Medium and 1.75 on Hard.
 `RecoilConstant`, `RecoilDampening`) settles back (it is in the compiled
 engine), the burst mode's details, hit-location and damage-type multipliers,
 grenades and melee.
+
+## Grenades, attachments, melee and more enemies: still to read
+
+Written on 2026-10-29 by the fuller-combat thread. The game's script
+packages couldn't be read that night (the install is on the user's PC and
+wasn't connected), so the new data files hold **placeholder** values,
+each marked `placeholder` on its line. To fill them in, read these with
+`rc_probe --class NAME` (each class with its "...Defaults" class in
+`Properties/properties.u` on top, as in "Weapons and damage"):
+
+- Grenades (`data/grenades/*.toml`): the thermal, sonic, EMP and flash
+  grenade classes and their projectiles in `ctinventory.u`: `MaxAmmo`,
+  `PickupAmmoCount`, throw `Speed`/`MaxSpeed`/`TossZ`, fuse time, bounce
+  (`Bounciness` or velocity dampening), `Damage`, `DamageRadius`,
+  `MomentumTransfer`, the damage type class, and sounds. Also the zone's
+  `Gravity` (UE2's usual -950 is our stand-in).
+- DC-17m attachments (`data/weapons/dc17m_sniper.toml`,
+  `dc17m_antiarmor.toml`, `data/grenades/dc17m_antiarmor_round.toml`):
+  their weapon, ammo and projectile classes, and the sniper's zoom FOV.
+- Melee (`[melee]` in `data/combat/player.toml`): damage, reach and delay.
+- The E-5 the player picks up (`data/weapons/e5_blaster_pickup.toml`): its
+  pickup ammo.
+- Enemy types (`data/enemies/super_battle_droid.toml`, `geonosian.toml`,
+  `trandoshan.toml`): the exact class names used by the maps' spawners
+  (log line `spawners no enemy file claims` lists what each map has), and
+  each class's `MaxHealth`, `GroundSpeed`, collision size, `Accuracy`,
+  weapon, mesh and animation names.
+- Droid sounds (`[sound]` in `data/enemies/*.toml`): the package and the
+  names of the spotted, hurt and destroyed lines (`rc_probe --sounds`).

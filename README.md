@@ -215,6 +215,20 @@ copy of the game.
   2 droids destroyed by a stand-in player, no droid shooting another, and
   the droids on screen had the skin's colours (all 12 checks passed).
 
+- **Grenades, the DC-17m's attachments, melee, picked-up blasters and
+  more enemy types (tested in the cloud sandbox with automatic tests, not
+  in the real game; the numbers are placeholders).** You can throw thermal,
+  sonic, EMP and flash grenades (they arc, bounce, and go off on a timer or
+  on touch, hurting less the further away you are), switch to the DC-17m's
+  sniper (with a zoom) and anti-armour attachments, hit with melee, and
+  pick up a fallen droid's blaster. EMP grenades stun droids, flash
+  grenades stun everyone else. Droids now shoot at your squad mates too,
+  and hear grenades go off. Super battle droids, Geonosians and
+  Trandoshans each have their own settings file in `data/enemies`, and a
+  map's spawners make whichever type their class names. **Every number in
+  the new files is a stand-in marked "placeholder"**: they still have to be
+  read from the game's script files.
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
@@ -239,12 +253,19 @@ copy of the game.
   On geo_01a the start area is closed in by such a barricade, so in
   `rc_game` you won't reach the droids yet; `rc_droidview` shows them.
   Some droid numbers are guesses (marked in the data file), including how
-  far a shot can miss. No droid sounds, hit reactions or death effects
-  beyond the animation. Droids don't use jump links or doors.
+  far a shot can miss. No hit reactions or death effects beyond the
+  animation. Droids don't use jump links or doors.
 
-- Weapons: no first-person arms, muzzle flash, grenades, melee or sniper
-  attachment yet, and switching weapons is instant. How the view kick
-  settles back is our own guess.
+- Weapons: no first-person arms or muzzle flash, and switching weapons is
+  instant. How the view kick settles back is our own guess. The numbers for
+  grenades, the sniper and anti-armour attachments, melee and the picked-up
+  E-5's ammo are placeholders, not the game's, and grenades have no sounds
+  or models yet (a small glowing ball). Squad mates don't throw grenades.
+- Enemy types: the super battle droid, Geonosian and Trandoshan files use
+  placeholder numbers, and their class, mesh and animation names haven't
+  been checked against the game, so they may not appear on real maps yet.
+  Geonosians walk instead of flying and climbing. Droid sound names are
+  empty until the sound packages are read.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
