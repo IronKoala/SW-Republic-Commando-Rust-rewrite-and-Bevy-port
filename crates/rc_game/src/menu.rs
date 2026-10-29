@@ -17,8 +17,8 @@
 #![allow(deprecated)]
 
 use crate::input::LookSettings;
-use crate::levels::LevelList;
 use crate::original_menu::OriginalMenus;
+use crate::levels::LevelList;
 use crate::player::FieldOfView;
 use crate::settings::{Settings, SettingsPath};
 use crate::theme::Theme;

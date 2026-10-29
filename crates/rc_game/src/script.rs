@@ -8,7 +8,8 @@
 //! the level's walls and sky (looking up), walk forward, pause (nothing
 //! moves), resume, saving (the level-start checkpoint, a checkpoint, a
 //! quicksave), walking away, quickload (the player is back where they
-//! saved, and saving again gives the same numbers), quit to the main menu (the level is cleared), OPTIONS
+//! saved, and saving again gives the same numbers), quit to the main menu
+//! (the level is cleared), OPTIONS
 //! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
 //! then QUIT again and YES).
 
@@ -20,11 +21,11 @@ use crate::settings::Settings;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
-use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GameSet, GameState, LevelCollision, Play, Player,
     PlayerCamera,
 };
+use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use std::collections::HashSet;
 
 /// How long to wait for a level to load before failing, seconds.
@@ -265,13 +266,11 @@ fn steps() -> Vec<Step> {
                 Err(format!("{s:?}"))
             }
         }),
-        Check(
-            "the level part loaded walls, props, doors and invisible walls",
-            |w| {
-                let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
-                    return Err("no LevelInfo".into());
-                };
-                let got = format!(
+        Check("the level part loaded walls, props, doors and invisible walls", |w| {
+            let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
+                return Err("no LevelInfo".into());
+            };
+            let got = format!(
                 "{}: {} collision triangles, {} props ({} with their class's model), {} blocking volumes, start {}",
                 i.map,
                 i.collision_triangles,
@@ -280,22 +279,18 @@ fn steps() -> Vec<Step> {
                 i.blocking_volumes,
                 if i.has_player_start { "from the map" } else { "MISSING" }
             );
-                if i.collision_triangles > 10_000
-                    && i.props > 0
-                    && i.class_props > 0
-                    && i.has_player_start
-                {
-                    Ok(got)
-                } else {
-                    Err(got)
-                }
-            },
-        ),
+            if i.collision_triangles > 10_000 && i.props > 0 && i.class_props > 0 && i.has_player_start {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check("the sky camera turns with the player's camera", |w| {
             let sky = count::<rc_level_plugin::SkyCamera>(w);
-            let mut q = w
-                .query_filtered::<&Camera, (With<PlayerCamera>, With<rc_level_plugin::SkyFollows>)>(
-                );
+            let mut q = w.query_filtered::<&Camera, (
+                With<PlayerCamera>,
+                With<rc_level_plugin::SkyFollows>,
+            )>();
             let follows = q
                 .iter(w)
                 .filter(|c| matches!(c.clear_color, ClearColorConfig::None))
@@ -303,9 +298,7 @@ fn steps() -> Vec<Step> {
             if sky == 1 && follows == 1 {
                 Ok("1 sky camera; the player's camera lets it through".into())
             } else {
-                Err(format!(
-                    "{sky} sky cameras, {follows} player cameras following"
-                ))
+                Err(format!("{sky} sky cameras, {follows} player cameras following"))
             }
         }),
         // Look up 60 degrees: geo_01a shows open sky above the spires there.
@@ -497,13 +490,12 @@ fn steps() -> Vec<Step> {
                 Err(format!("{p} players, {c} cameras, {meshes} meshes left"))
             }
         }),
-        Check(
-            "the original main menu is back, focus on NEW GAME",
-            |w| match (w.resource::<OriginalMenus>().active(), focus(w)) {
+        Check("the original main menu is back, focus on NEW GAME", |w| {
+            match (w.resource::<OriginalMenus>().active(), focus(w)) {
                 (true, Some(f)) if f == "MenuOptions[0]" => Ok(f),
                 other => Err(format!("{other:?}")),
-            },
-        ),
+            }
+        }),
         Note(|w| {
             let v = w.resource::<Settings>().audio.music_volume;
             w.resource_mut::<Noted>().music_volume = v;
@@ -531,11 +523,9 @@ fn steps() -> Vec<Step> {
         }),
         Press(Action::MenuBack),
         Wait(0.2),
-        Check("Back returns to the original main menu", |w| {
-            match page(w) {
-                Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
-                p => Err(format!("{p:?}")),
-            }
+        Check("Back returns to the original main menu", |w| match page(w) {
+            Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
+            p => Err(format!("{p:?}")),
         }),
         FocusAfter(Action::MenuDown, "MenuOptions[7]"),
         Press(Action::MenuAccept), // QUIT
@@ -607,15 +597,12 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
     let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
     let ours = shrink(&shot, area, W, H);
     let mut menus = w.resource_mut::<OriginalMenus>();
-    let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let reference =
+        original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
     let mut total = 0.0f64;
     let mut worst = 0.0f64;
     let mut far = 0usize;
-    for (a, b) in ours
-        .pixels
-        .chunks_exact(4)
-        .zip(reference.pixels.chunks_exact(4))
-    {
+    for (a, b) in ours.pixels.chunks_exact(4).zip(reference.pixels.chunks_exact(4)) {
         let d = (0..3)
             .map(|k| (a[k] as f64 - b[k] as f64).abs())
             .sum::<f64>()
