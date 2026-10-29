@@ -16,6 +16,7 @@ pub mod animation;
 pub mod properties;
 pub mod reader;
 pub mod skeletal;
+pub mod sound;
 pub mod static_mesh;
 pub mod texture;
 

@@ -6,5 +6,6 @@ edition.workspace = true
 
 [dependencies]
 rc_anim = { path = "../rc_anim" }
+rc_audio = { path = "../rc_audio" }
 rc_image = { path = "../rc_image" }
 rc_package = { path = "../rc_package" }
