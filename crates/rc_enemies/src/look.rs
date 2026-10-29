@@ -86,7 +86,11 @@ pub struct DroidLook {
 fn mesh_point(mesh: &SkeletalMesh, p: [f32; 3]) -> [f32; 3] {
     let s = mesh.mesh_scale;
     let o = mesh.mesh_origin;
-    let q = [(p[0] - o[0]) * s[0], (p[1] - o[1]) * s[1], (p[2] - o[2]) * s[2]];
+    let q = [
+        (p[0] - o[0]) * s[0],
+        (p[1] - o[1]) * s[1],
+        (p[2] - o[2]) * s[2],
+    ];
     let yaw = mesh.rot_origin[1] as f32 * std::f32::consts::TAU / 65536.0;
     let (sin, cos) = yaw.sin_cos();
     [q[0] * cos - q[1] * sin, q[0] * sin + q[1] * cos, q[2]]
@@ -103,12 +107,16 @@ impl DroidLook {
     pub fn load(paths: &GamePaths, look: &Look) -> Result<(DroidLook, Vec<String>), String> {
         let mut notes = Vec::new();
         let file = paths.game_file(&look.package);
-        let data = std::fs::read(&file).map_err(|e| format!("can't read {}: {e}", file.display()))?;
+        let data =
+            std::fs::read(&file).map_err(|e| format!("can't read {}: {e}", file.display()))?;
         let pkg = Package::parse(&data).map_err(|e| format!("{}: {e}", file.display()))?;
         let export = pkg
             .exports
             .iter()
-            .find(|e| pkg.export_class_name(e) == "SkeletalMesh" && pkg.name(e.object_name).eq_ignore_ascii_case(&look.mesh))
+            .find(|e| {
+                pkg.export_class_name(e) == "SkeletalMesh"
+                    && pkg.name(e.object_name).eq_ignore_ascii_case(&look.mesh)
+            })
             .ok_or_else(|| format!("no SkeletalMesh called {} in {}", look.mesh, file.display()))?;
         let mesh = read_skeletal_mesh(&pkg, &data, export).map_err(|e| e.to_string())?;
         let set = mesh
@@ -124,11 +132,18 @@ impl DroidLook {
         let mut clips = HashMap::new();
         for pose in Pose::ALL {
             let name = pose.sequence(look);
-            match anim.sequences.iter().find(|s| s.name.eq_ignore_ascii_case(name)) {
+            match anim
+                .sequences
+                .iter()
+                .find(|s| s.name.eq_ignore_ascii_case(name))
+            {
                 Some(seq) => {
                     clips.insert(pose, Clip::new(&anim, seq, &skeleton));
                 }
-                None => notes.push(format!("no animation called {name} in {}; {pose:?} uses the idle one", pkg.name(set.object_name))),
+                None => notes.push(format!(
+                    "no animation called {name} in {}; {pose:?} uses the idle one",
+                    pkg.name(set.object_name)
+                )),
             }
         }
         if !clips.contains_key(&Pose::Idle) {
@@ -139,10 +154,16 @@ impl DroidLook {
         // Which way round the triangles go once in Bevy's axes (see
         // rc_character/src/load.rs): flip them if the stored order gives a
         // negative volume.
-        let pts: Vec<[f32; 3]> = mesh.points.iter().map(|&p| to_bevy(mesh_point(&mesh, p))).collect();
+        let pts: Vec<[f32; 3]> = mesh
+            .points
+            .iter()
+            .map(|&p| to_bevy(mesh_point(&mesh, p)))
+            .collect();
         let mut volume = 0f64;
         for tri in &mesh.triangles {
-            let [a, b, c] = tri.wedges.map(|w| pts[mesh.wedges[w as usize].point as usize]);
+            let [a, b, c] = tri
+                .wedges
+                .map(|w| pts[mesh.wedges[w as usize].point as usize]);
             let cr = rc_anim::math::cross(b, c);
             volume += (a[0] * cr[0] + a[1] * cr[1] + a[2] * cr[2]) as f64 / 6.0;
         }
@@ -160,10 +181,22 @@ impl DroidLook {
                 None
             }
         };
-        let mut look = DroidLook { mesh, skeleton, weights, clips, skin, indices, lift: 0.0 };
+        let mut look = DroidLook {
+            mesh,
+            skeleton,
+            weights,
+            clips,
+            skin,
+            indices,
+            lift: 0.0,
+        };
         // Stand the idle pose's lowest point on the floor.
         let idle = look.pose_unreal(Pose::Idle, 0.0);
-        let (lo, hi) = idle.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| (lo.min(p[2]), hi.max(p[2])));
+        let (lo, hi) = idle
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p[2]), hi.max(p[2]))
+            });
         look.lift = -lo;
         notes.push(format!(
             "mesh {}: {} bones, {} points, {} triangles ({}), {} of {} animations found, idle pose {:.0} uu tall (lowest point {lo:.0} uu, lifted to the floor), skin {}",
@@ -228,10 +261,24 @@ impl DroidLook {
         }
         for v in &mut n {
             let l = length(*v);
-            *v = if l > 0.0 { v.map(|x| x / l) } else { [0.0, 1.0, 0.0] };
+            *v = if l > 0.0 {
+                v.map(|x| x / l)
+            } else {
+                [0.0, 1.0, 0.0]
+            };
         }
-        let pos = self.mesh.wedges.iter().map(|w| points[w.point as usize]).collect();
-        let normals = self.mesh.wedges.iter().map(|w| n[w.point as usize]).collect();
+        let pos = self
+            .mesh
+            .wedges
+            .iter()
+            .map(|w| points[w.point as usize])
+            .collect();
+        let normals = self
+            .mesh
+            .wedges
+            .iter()
+            .map(|w| n[w.point as usize])
+            .collect();
         (pos, normals)
     }
 
@@ -242,7 +289,11 @@ impl DroidLook {
 
 /// Follows the mesh's first material to a picture and decodes it. Copied
 /// from `rc_character/src/load.rs`.
-fn load_skin(paths: &GamePaths, pkg: &Package, mesh: &SkeletalMesh) -> Result<(String, Rgba), String> {
+fn load_skin(
+    paths: &GamePaths,
+    pkg: &Package,
+    mesh: &SkeletalMesh,
+) -> Result<(String, Rgba), String> {
     let first = *mesh.textures.first().ok_or("the mesh lists no materials")?;
     let ObjectRef::Import(i) = ObjectRef::from_index(first) else {
         return Err("material stored inside the mesh package is not supported yet".into());
@@ -261,7 +312,12 @@ fn load_skin(paths: &GamePaths, pkg: &Package, mesh: &SkeletalMesh) -> Result<(S
     let mut index = tpkg
         .exports
         .iter()
-        .position(|e| tpkg.name(e.object_name).eq_ignore_ascii_case(&material) && tpkg.export_class_name(e).eq_ignore_ascii_case(&class_wanted))
+        .position(|e| {
+            tpkg.name(e.object_name).eq_ignore_ascii_case(&material)
+                && tpkg
+                    .export_class_name(e)
+                    .eq_ignore_ascii_case(&class_wanted)
+        })
         .ok_or_else(|| format!("no {class_wanted} called {material} in {top}"))?;
     for _ in 0..6 {
         let export = &tpkg.exports[index];
@@ -273,19 +329,25 @@ fn load_skin(paths: &GamePaths, pkg: &Package, mesh: &SkeletalMesh) -> Result<(S
         let setting = match class.as_str() {
             "Shader" => "Diffuse",
             "Combiner" => "Material1",
-            "FinalBlend" | "TexModifier" | "TexPanner" | "TexScaler" | "TexRotator" | "TexOscillator" => "Material",
+            "FinalBlend" | "TexModifier" | "TexPanner" | "TexScaler" | "TexRotator"
+            | "TexOscillator" => "Material",
             other => return Err(format!("{name} is a {other}, which we can't follow yet")),
         };
         let start = export.serial_offset as usize;
         let mut r = rc_package::Reader::new(&data[start..start + export.serial_size as usize]);
-        let props = rc_package::properties::read_properties(&tpkg, &mut r).map_err(|e| e.to_string())?;
+        let props =
+            rc_package::properties::read_properties(&tpkg, &mut r).map_err(|e| e.to_string())?;
         let next = match rc_package::properties::find(&tpkg, &props, setting).map(|p| &p.value) {
             Some(Value::Object(o)) if *o != 0 => *o,
             _ => return Err(format!("{class} {name} has no {setting}")),
         };
         index = match ObjectRef::from_index(next) {
             ObjectRef::Export(e) if e < tpkg.exports.len() => e,
-            _ => return Err(format!("{setting} of {name} is in another package, not supported yet")),
+            _ => {
+                return Err(format!(
+                    "{setting} of {name} is in another package, not supported yet"
+                ))
+            }
         };
     }
     Err("materials nested too deeply".into())
@@ -300,11 +362,17 @@ fn decode_texture(pkg: &Package, data: &[u8], export: &rc_package::Export) -> Re
         7 => PixelFormat::Dxt3,
         8 => PixelFormat::Dxt5,
         10 => PixelFormat::G16,
-        f => return Err(format!("texture format {} can't be decoded yet", texture::format_name(f))),
+        f => {
+            return Err(format!(
+                "texture format {} can't be decoded yet",
+                texture::format_name(f)
+            ))
+        }
     };
     let palette = match tex.palette_ref(pkg).map(ObjectRef::from_index) {
         Some(ObjectRef::Export(i)) => {
-            let mut colors = texture::read_palette(pkg, data, &pkg.exports[i]).map_err(|e| e.to_string())?;
+            let mut colors =
+                texture::read_palette(pkg, data, &pkg.exports[i]).map_err(|e| e.to_string())?;
             if tex.masked(pkg) {
                 colors[0][3] = 0;
             }
@@ -314,6 +382,12 @@ fn decode_texture(pkg: &Package, data: &[u8], export: &rc_package::Export) -> Re
         None => None,
     };
     let mip = tex.mips.first().ok_or("texture has no mipmaps")?;
-    rc_image::decode(format, mip.width as usize, mip.height as usize, &data[mip.data_offset..mip.data_offset + mip.data_len], palette.as_deref())
-        .map_err(|e| e.to_string())
+    rc_image::decode(
+        format,
+        mip.width as usize,
+        mip.height as usize,
+        &data[mip.data_offset..mip.data_offset + mip.data_len],
+        palette.as_deref(),
+    )
+    .map_err(|e| e.to_string())
 }

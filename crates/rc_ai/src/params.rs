@@ -178,7 +178,8 @@ impl AiParams {
                 .split_once('=')
                 .ok_or_else(|| format!("line {n}: expected `name = value`, got `{line}`"))?;
             let (key, value) = (key.trim(), value.trim());
-            self.set(&section, key, value).map_err(|e| format!("line {n}: {e}"))?;
+            self.set(&section, key, value)
+                .map_err(|e| format!("line {n}: {e}"))?;
         }
         // Line numbers stay right because every line was kept (blank or not).
         self.movement = self.movement.with_overrides(&movement_lines)?;
@@ -187,7 +188,9 @@ impl AiParams {
 
     fn set(&mut self, section: &str, key: &str, value: &str) -> Result<(), String> {
         let num = || -> Result<f32, String> {
-            value.parse().map_err(|_| format!("`{value}` is not a number"))
+            value
+                .parse()
+                .map_err(|_| format!("`{value}` is not a number"))
         };
         let s = &mut self.senses;
         let c = &mut self.combat;

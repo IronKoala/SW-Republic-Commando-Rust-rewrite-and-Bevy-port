@@ -53,7 +53,9 @@ pub enum NodeKind {
     },
     /// A good spot to fight from (`CombatPoint`). `radius` is how close
     /// counts as "there".
-    Combat { radius: f32 },
+    Combat {
+        radius: f32,
+    },
     PlayerStart,
     /// Points only fliers use (`FlyPoint`).
     Fly,
@@ -137,7 +139,10 @@ impl NavGraph {
         Self::from_map_with_stats(pkg, data).map(|(g, _)| g)
     }
 
-    pub fn from_map_with_stats(pkg: &Package, data: &[u8]) -> Result<(NavGraph, ReadStats), String> {
+    pub fn from_map_with_stats(
+        pkg: &Package,
+        data: &[u8],
+    ) -> Result<(NavGraph, ReadStats), String> {
         let level = actors::read_level(pkg, data).map_err(|e| format!("level: {e}"))?;
         let mut stats = ReadStats::default();
 
@@ -169,13 +174,16 @@ impl NavGraph {
                 _ => 0,
             };
             match (obj("Start"), obj("End")) {
-                (Some(s), Some(t)) => specs.push((s, t, int("Distance") as f32, int("reachFlags") as u32)),
+                (Some(s), Some(t)) => {
+                    specs.push((s, t, int("Distance") as f32, int("reachFlags") as u32))
+                }
                 _ => stats.unreadable += 1,
             }
         }
 
         // 2. Nodes: every level actor that has a PathList or is a link end.
-        let mut wanted: std::collections::HashSet<usize> = specs.iter().flat_map(|s| [s.0, s.1]).collect();
+        let mut wanted: std::collections::HashSet<usize> =
+            specs.iter().flat_map(|s| [s.0, s.1]).collect();
         let mut nodes = Vec::new();
         let mut index_of = HashMap::new();
         for &a in level.actors.iter().flatten() {
@@ -194,7 +202,8 @@ impl NavGraph {
                 .unwrap_or(Vec3::ZERO);
             let yaw = match properties::find(pkg, &props, "Rotation").map(|p| &p.value) {
                 Some(Value::Raw(b)) if b.len() == 12 => {
-                    i32::from_le_bytes(b[4..8].try_into().unwrap()) as f32 / 65536.0 * std::f32::consts::TAU
+                    i32::from_le_bytes(b[4..8].try_into().unwrap()) as f32 / 65536.0
+                        * std::f32::consts::TAU
                 }
                 _ => 0.0,
             };
@@ -237,7 +246,11 @@ impl NavGraph {
             match (index_of.get(&s), index_of.get(&t)) {
                 (Some(&a), Some(&b)) => {
                     *flag_counts.entry(flags).or_default() += 1;
-                    links[a].push(Link { to: b, distance, flags });
+                    links[a].push(Link {
+                        to: b,
+                        distance,
+                        flags,
+                    });
                 }
                 _ => stats.dangling += 1,
             }
@@ -251,7 +264,14 @@ impl NavGraph {
             .filter(|(_, n)| n.class == "BlockedPath")
             .map(|(i, _)| i)
             .collect();
-        Ok((NavGraph { nodes, links, blocked }, stats))
+        Ok((
+            NavGraph {
+                nodes,
+                links,
+                blocked,
+            },
+            stats,
+        ))
     }
 
     /// Block or unblock every node whose tag is `tag` (what a level event
@@ -260,7 +280,11 @@ impl NavGraph {
         let mut n = 0;
         for (i, node) in self.nodes.iter().enumerate() {
             if node.tag.eq_ignore_ascii_case(tag) {
-                let changed = if blocked { self.blocked.insert(i) } else { self.blocked.remove(&i) };
+                let changed = if blocked {
+                    self.blocked.insert(i)
+                } else {
+                    self.blocked.remove(&i)
+                };
                 n += changed as usize;
             }
         }

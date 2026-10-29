@@ -31,7 +31,12 @@ pub enum BattleEvent {
     /// false) by the player coming near one only scripts could start.
     SpawnerOn { spawner: usize, by_trigger: bool },
     /// A new droid. `feet` in Unreal units.
-    Spawned { id: u32, spawner: usize, feet: Vec3, yaw: f32 },
+    Spawned {
+        id: u32,
+        spawner: usize,
+        feet: Vec3,
+        yaw: f32,
+    },
     /// Something a droid decided or did.
     Ai { id: u32, event: AiEvent },
 }
@@ -57,7 +62,12 @@ impl Battle {
             nav,
             spawners: factories
                 .into_iter()
-                .map(|factory| Spawner { factory, active: false, made: 0, next_spawn: 0.0 })
+                .map(|factory| Spawner {
+                    factory,
+                    active: false,
+                    made: 0,
+                    next_spawn: 0.0,
+                })
                 .collect(),
             fighters: Vec::new(),
             made_by: Vec::new(),
@@ -76,7 +86,8 @@ impl Battle {
 
     /// Whether any living droid is fighting (has seen or heard the enemy).
     pub fn in_fight(&self) -> bool {
-        self.alive().any(|f| matches!(f.mode, Mode::Alerted | Mode::Attack))
+        self.alive()
+            .any(|f| matches!(f.mode, Mode::Alerted | Mode::Attack))
     }
 
     /// Advance by `dt` seconds. `player` is where the player is (for
@@ -87,8 +98,16 @@ impl Battle {
             self.spawn(p.centre, &mut out);
         }
         let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
+        let allies: Vec<Vec3> = self.alive().map(|f| f.pawn.location).collect();
         let mut heard = Vec::new();
-        let view = View { world, nav: &self.nav, time: self.time, target: player, cover_taken: &taken };
+        let view = View {
+            world,
+            nav: &self.nav,
+            time: self.time,
+            target: player,
+            cover_taken: &taken,
+            allies: &allies,
+        };
         for f in self.fighters.iter_mut() {
             if f.mode == Mode::Dead {
                 continue;
@@ -100,6 +119,7 @@ impl Battle {
                 out.push(BattleEvent::Ai { id: f.id, event: e });
             }
         }
+        self.keep_apart(world);
         for at in heard {
             out.extend(self.hear(at));
         }
@@ -113,7 +133,10 @@ impl Battle {
         for f in self.fighters.iter_mut() {
             let mut ev = Vec::new();
             f.hear(at, self.time, &mut ev);
-            out.extend(ev.into_iter().map(|event| BattleEvent::Ai { id: f.id, event }));
+            out.extend(
+                ev.into_iter()
+                    .map(|event| BattleEvent::Ai { id: f.id, event }),
+            );
         }
         out
     }
@@ -125,7 +148,9 @@ impl Battle {
         if let Some(f) = self.fighter_mut(id) {
             f.on_damaged(from, time, &mut ev);
         }
-        ev.into_iter().map(|event| BattleEvent::Ai { id, event }).collect()
+        ev.into_iter()
+            .map(|event| BattleEvent::Ai { id, event })
+            .collect()
     }
 
     pub fn killed(&mut self, id: u32) -> Vec<BattleEvent> {
@@ -133,7 +158,9 @@ impl Battle {
         if let Some(f) = self.fighter_mut(id) {
             f.kill(&mut ev);
         }
-        ev.into_iter().map(|event| BattleEvent::Ai { id, event }).collect()
+        ev.into_iter()
+            .map(|event| BattleEvent::Ai { id, event })
+            .collect()
     }
 
     /// For tests and demos with a stand-in player: a path node 2500-4500 uu
@@ -160,6 +187,49 @@ impl Battle {
         None
     }
 
+    /// Characters don't collide with each other in `rc_movement` (only
+    /// with the level), so two droids could walk to the same spot and
+    /// stand inside each other. Push any overlapping pair apart, each by
+    /// half the overlap, where the level allows.
+    fn keep_apart(&mut self, world: &dyn World) {
+        let n = self.fighters.len();
+        for i in 0..n {
+            for j in i + 1..n {
+                let (a, b) = (&self.fighters[i], &self.fighters[j]);
+                if a.mode == Mode::Dead || b.mode == Mode::Dead {
+                    continue;
+                }
+                let need = a.pawn.extent().x + b.pawn.extent().x;
+                let d = (b.pawn.location - a.pawn.location).flat();
+                let dist = d.length();
+                if dist >= need
+                    || (a.pawn.location.z - b.pawn.location.z).abs()
+                        > a.pawn.extent().z + b.pawn.extent().z
+                {
+                    continue;
+                }
+                // Exactly on top of each other: split along a direction
+                // that depends on the pair, so it is the same every run.
+                let dir = if dist > 1.0 {
+                    d * (1.0 / dist)
+                } else {
+                    let k = (a.id * 7 + b.id) as f32;
+                    Vec3::new(k.cos(), k.sin(), 0.0)
+                };
+                let push = dir * ((need - dist) / 2.0 + 1.0);
+                for (k, delta) in [(i, push * -1.0), (j, push)] {
+                    let p = &mut self.fighters[k].pawn;
+                    if world
+                        .sweep(p.extent(), p.location, p.location + delta)
+                        .is_none()
+                    {
+                        p.location = p.location + delta;
+                    }
+                }
+            }
+        }
+    }
+
     /// Switch spawners on, and make at most one droid per step.
     fn spawn(&mut self, player: Vec3, out: &mut Vec<BattleEvent>) {
         let s = &self.params.spawning;
@@ -169,11 +239,18 @@ impl Battle {
             let sp = &mut self.spawners[i];
             let f = &sp.factory;
             if !sp.active {
-                let by_trigger = f.triggers.iter().any(|&(c, r)| (player - c).length_2d() <= r + radius);
-                let near = f.triggers.is_empty() && (f.spot(0).location - player).length() <= s.activate_unscripted_within;
+                let by_trigger = f
+                    .triggers
+                    .iter()
+                    .any(|&(c, r)| (player - c).length_2d() <= r + radius);
+                let near = f.triggers.is_empty()
+                    && (f.spot(0).location - player).length() <= s.activate_unscripted_within;
                 if by_trigger || near {
                     sp.active = true;
-                    out.push(BattleEvent::SpawnerOn { spawner: i, by_trigger });
+                    out.push(BattleEvent::SpawnerOn {
+                        spawner: i,
+                        by_trigger,
+                    });
                 }
                 continue;
             }
@@ -184,17 +261,33 @@ impl Battle {
                 .filter(|(d, &m)| m == i && d.mode != Mode::Dead)
                 .count() as u32;
             let more = f.generate_forever || sp.made < f.capacity.max(1);
-            if more && alive_here < f.max_alive && alive_total < s.max_alive_total && self.time >= sp.next_spawn {
+            if more
+                && alive_here < f.max_alive
+                && alive_total < s.max_alive_total
+                && self.time >= sp.next_spawn
+            {
                 let spot = f.spot(sp.made as usize);
-                let feet = spot.location - Vec3::new(0.0, 0.0, self.params.movement.collision_height);
+                let feet =
+                    spot.location - Vec3::new(0.0, 0.0, self.params.movement.collision_height);
                 let id = self.next_id;
                 self.next_id += 1;
                 sp.made += 1;
                 sp.next_spawn = self.time + f.spawn_interval.max(0.1);
                 let start_state = f.start_state.clone();
-                self.fighters.push(Fighter::new(id, self.params.clone(), feet, spot.yaw, start_state));
+                self.fighters.push(Fighter::new(
+                    id,
+                    self.params.clone(),
+                    feet,
+                    spot.yaw,
+                    start_state,
+                ));
                 self.made_by.push(i);
-                out.push(BattleEvent::Spawned { id, spawner: i, feet, yaw: spot.yaw });
+                out.push(BattleEvent::Spawned {
+                    id,
+                    spawner: i,
+                    feet,
+                    yaw: spot.yaw,
+                });
                 return; // one per step
             }
         }

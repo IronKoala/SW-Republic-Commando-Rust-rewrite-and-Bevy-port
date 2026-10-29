@@ -83,7 +83,10 @@ impl Factory {
     /// Where the n-th character goes.
     pub fn spot(&self, n: usize) -> SpawnSpot {
         if self.spots.is_empty() || self.spawn_mode == 2 {
-            SpawnSpot { location: self.location, yaw: self.yaw }
+            SpawnSpot {
+                location: self.location,
+                yaw: self.yaw,
+            }
         } else {
             self.spots[n % self.spots.len()].clone()
         }
@@ -126,7 +129,11 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
             continue;
         }
         if let Ok(props) = actors::read_actor_properties(pkg, data, a) {
-            list.push(Actor { class, name: pkg.name(e.object_name).to_string(), props });
+            list.push(Actor {
+                class,
+                name: pkg.name(e.object_name).to_string(),
+                props,
+            });
         }
     }
     let get = |a: &Actor, n: &str| properties::find(pkg, &a.props, n).map(|p| p.value.clone());
@@ -138,7 +145,11 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
         Some(Value::Int(i)) => Some(i),
         _ => None,
     };
-    let loc = |a: &Actor| get(a, "Location").and_then(|v| vec3(&v)).unwrap_or(Vec3::ZERO);
+    let loc = |a: &Actor| {
+        get(a, "Location")
+            .and_then(|v| vec3(&v))
+            .unwrap_or(Vec3::ZERO)
+    };
 
     let mut out = Vec::new();
     for f in list.iter().filter(|a| a.class == "PawnFactory") {
@@ -149,12 +160,19 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
         };
         let spots = list
             .iter()
-            .filter(|a| a.class == "SpawnPoint" && name_of(a, "Tag").as_deref() == Some(tag.as_str()))
-            .map(|a| SpawnSpot { location: loc(a), yaw: yaw(get(a, "Rotation").as_ref()) })
+            .filter(|a| {
+                a.class == "SpawnPoint" && name_of(a, "Tag").as_deref() == Some(tag.as_str())
+            })
+            .map(|a| SpawnSpot {
+                location: loc(a),
+                yaw: yaw(get(a, "Rotation").as_ref()),
+            })
             .collect();
         let triggers = list
             .iter()
-            .filter(|a| a.class == "Trigger" && name_of(a, "Event").as_deref() == Some(tag.as_str()))
+            .filter(|a| {
+                a.class == "Trigger" && name_of(a, "Event").as_deref() == Some(tag.as_str())
+            })
             .map(|a| {
                 let r = match get(a, "CollisionRadius") {
                     Some(Value::Float(r)) => r,

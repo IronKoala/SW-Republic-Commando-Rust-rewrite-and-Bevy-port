@@ -97,8 +97,12 @@ fn main() -> AppExit {
             return AppExit::from_code(1);
         }
     };
-    let game = PathBuf::from(std::env::var("RC_GAME_DIR").unwrap_or_else(|_| DEFAULT_GAME_DIR.into()));
-    log.line(format!("rc_droidview: map {map}, game folder {}", game.display()));
+    let game =
+        PathBuf::from(std::env::var("RC_GAME_DIR").unwrap_or_else(|_| DEFAULT_GAME_DIR.into()));
+    log.line(format!(
+        "rc_droidview: map {map}, game folder {}",
+        game.display()
+    ));
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -115,11 +119,22 @@ fn main() -> AppExit {
         .insert_resource(CurrentLevel { map: Some(map) })
         .insert_resource(Options { seconds, check })
         .init_resource::<Check>()
-        .add_systems(Startup, |mut next: ResMut<NextState<GameState>>| next.set(GameState::Loading))
+        .add_systems(Startup, |mut next: ResMut<NextState<GameState>>| {
+            next.set(GameState::Loading)
+        })
         .add_systems(OnEnter(GameState::Loading), load_level)
         .add_systems(Update, place_player.run_if(in_state(GameState::Loading)))
-        .add_systems(Update, stand_in.in_set(GameSet::Simulate).before(CombatSet::Fire).run_if(playing))
-        .add_systems(Update, (picture_check, finish).run_if(in_state(GameState::InGame)))
+        .add_systems(
+            Update,
+            stand_in
+                .in_set(GameSet::Simulate)
+                .before(CombatSet::Fire)
+                .run_if(playing),
+        )
+        .add_systems(
+            Update,
+            (picture_check, finish).run_if(in_state(GameState::InGame)),
+        )
         .run()
 }
 
@@ -127,10 +142,18 @@ fn main() -> AppExit {
 fn load_level(world: &mut World) {
     let log = world.resource::<GameLog>().clone();
     let paths = world.resource::<GamePaths>().clone();
-    let map = world.resource::<CurrentLevel>().map.clone().unwrap_or_default();
+    let map = world
+        .resource::<CurrentLevel>()
+        .map
+        .clone()
+        .unwrap_or_default();
     let path = paths.map_path(&map);
     let t = std::time::Instant::now();
-    let coll = match rc_level::map_collision::load(&path, &paths.game_data(), MoveParams::player_commando().collision_height) {
+    let coll = match rc_level::map_collision::load(
+        &path,
+        &paths.game_data(),
+        MoveParams::player_commando().collision_height,
+    ) {
         Ok(c) => c,
         Err(e) => {
             log.line(format!("ERROR loading {}: {e}", path.display()));
@@ -139,14 +162,24 @@ fn load_level(world: &mut World) {
         }
     };
     let v = |p: [f32; 3]| UVec3::new(p[0], p[1], p[2]);
-    let tris = coll.triangles.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect();
+    let tris = coll
+        .triangles
+        .iter()
+        .map(|t| [v(t[0]), v(t[1]), v(t[2])])
+        .collect();
     world.insert_resource(LevelCollision(Arc::new(TriangleWorld::new(tris))));
-    log.line(format!("level: {} collision triangles in {:.0} ms", coll.triangles.len(), t.elapsed().as_secs_f64() * 1000.0));
-    let built = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|data| {
-        let pkg = Package::parse(&data).map_err(|e| e.to_string())?;
-        let mut mats = materials::Materials::new(&paths.game_data());
-        scene::build(Rc::new((pkg, data)), &mut mats)
-    });
+    log.line(format!(
+        "level: {} collision triangles in {:.0} ms",
+        coll.triangles.len(),
+        t.elapsed().as_secs_f64() * 1000.0
+    ));
+    let built = std::fs::read(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|data| {
+            let pkg = Package::parse(&data).map_err(|e| e.to_string())?;
+            let mut mats = materials::Materials::new(&paths.game_data());
+            scene::build(Rc::new((pkg, data)), &mut mats)
+        });
     match built {
         Ok(sc) => {
             let (settings, _) = LightingSettings::load(Path::new("lighting.cfg"));
@@ -154,7 +187,14 @@ fn load_level(world: &mut World) {
                 world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
                     world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
                         let mut commands = world.commands();
-                        draw::spawn_level(&mut commands, &mut meshes, &mut images, &mut mats, &sc, &settings);
+                        draw::spawn_level(
+                            &mut commands,
+                            &mut meshes,
+                            &mut images,
+                            &mut mats,
+                            &sc,
+                            &settings,
+                        );
                     })
                 })
             });
@@ -172,7 +212,9 @@ fn place_player(
     mut next: ResMut<NextState<GameState>>,
     log: Res<GameLog>,
 ) {
-    let (Some(fight), Some(_)) = (fight, collision) else { return };
+    let (Some(fight), Some(_)) = (fight, collision) else {
+        return;
+    };
     let b = &fight.battle;
     let Some((node, goal, spawner)) = b.approach() else {
         log.line("no droid spawner trigger can be reached on this map");
@@ -182,7 +224,10 @@ fn place_player(
     let params = MoveParams::player_commando();
     let start = b.nav.nodes[node].location;
     let feet = start - UVec3::new(0.0, 0.0, params.collision_height);
-    let route = b.nav.route(start, goal).expect("approach() checked the route");
+    let route = b
+        .nav
+        .route(start, goal)
+        .expect("approach() checked the route");
     log.line(format!(
         "stand-in: starts at path node {} ({:.0}, {:.0}, {:.0}), walks {:.0} uu to the walk-in trigger of {}",
         b.nav.nodes[node].name,
@@ -196,7 +241,13 @@ fn place_player(
     let yaw = (first.y - start.y).atan2(first.x - start.x);
     commands.spawn((
         Player,
-        StandIn { pawn: Pawn::new(params, feet), path: PathFollower::new(route.points), yaw, next_shot: 0.0, look_at: None },
+        StandIn {
+            pawn: Pawn::new(params, feet),
+            path: PathFollower::new(route.points),
+            yaw,
+            next_shot: 0.0,
+            look_at: None,
+        },
         Transform::from_translation(to_bevy(feet)),
     ));
     commands.spawn((
@@ -204,7 +255,12 @@ fn place_player(
         Camera3d::default(),
         Tonemapping::None,
         Exposure::default(),
-        Projection::Perspective(PerspectiveProjection { near: 0.05, far: 5000.0, fov: 70f32.to_radians(), ..default() }),
+        Projection::Perspective(PerspectiveProjection {
+            near: 0.05,
+            far: 5000.0,
+            fov: 70f32.to_radians(),
+            ..default()
+        }),
         Transform::default(),
     ));
     next.set(GameState::InGame);
@@ -220,7 +276,9 @@ fn stand_in(
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
     mut fire: MessageWriter<FireShot>,
 ) {
-    let Ok((entity, mut s, mut t)) = me.single_mut() else { return };
+    let Ok((entity, mut s, mut t)) = me.single_mut() else {
+        return;
+    };
     let dt = time.delta_secs().min(0.1);
     let world = &*collision.0;
     let s = &mut *s;
@@ -231,7 +289,11 @@ fn stand_in(
         .alive()
         .filter(|f| (f.pawn.location - eye).length() < 6000.0)
         .filter(|f| rc_ai::brain::clear_line(world, eye, f.eye()))
-        .min_by(|a, b| (a.pawn.location - eye).length().total_cmp(&(b.pawn.location - eye).length()));
+        .min_by(|a, b| {
+            (a.pawn.location - eye)
+                .length()
+                .total_cmp(&(b.pawn.location - eye).length())
+        });
     if let Some(f) = target {
         let aim = f.pawn.location;
         s.look_at = Some(aim);
@@ -268,11 +330,18 @@ fn stand_in(
 
 fn rgba(img: &Image) -> Option<(Vec<u8>, usize, usize)> {
     let (w, h) = (img.width() as usize, img.height() as usize);
-    let bgra = matches!(img.texture_descriptor.format, TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb);
+    let bgra = matches!(
+        img.texture_descriptor.format,
+        TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb
+    );
     let data = img.data.as_ref()?;
     let mut out = Vec::with_capacity(w * h * 4);
     for p in data.chunks_exact(4) {
-        out.extend(if bgra { [p[2], p[1], p[0], 255] } else { [p[0], p[1], p[2], 255] });
+        out.extend(if bgra {
+            [p[2], p[1], p[0], 255]
+        } else {
+            [p[0], p[1], p[2], 255]
+        });
     }
     Some((out, w, h))
 }
@@ -290,7 +359,14 @@ fn captured(shot: On<ScreenshotCaptured>, mut check: ResMut<Check>) {
 }
 
 fn save(name: &str, w: usize, h: usize, pixels: Vec<u8>) {
-    let _ = std::fs::write(format!("logs/{name}.png"), rc_image::png::encode(&rc_image::Rgba { width: w, height: h, pixels }));
+    let _ = std::fs::write(
+        format!("logs/{name}.png"),
+        rc_image::png::encode(&rc_image::Rgba {
+            width: w,
+            height: h,
+            pixels,
+        }),
+    );
 }
 
 /// The picture test (only with --check).
@@ -313,7 +389,10 @@ fn picture_check(
     let Some(fight) = fight else { return };
     check.frames += 1;
     let verdict = |check: &mut Check, ok: bool, what: String| {
-        log.line(format!("CHECK {}: {what}", if ok { "PASS" } else { "FAIL" }));
+        log.line(format!(
+            "CHECK {}: {what}",
+            if ok { "PASS" } else { "FAIL" }
+        ));
         if !ok {
             check.failed += 1;
         }
@@ -321,15 +400,25 @@ fn picture_check(
     match check.stage {
         // Wait for a fighting droid in front of the camera.
         0 => {
-            let Some(spotted) = fight.stats.first_spotted else { return };
+            let Some(spotted) = fight.stats.first_spotted else {
+                return;
+            };
             let Ok(cam) = camera.single() else { return };
             let fwd = cam.forward();
-            let in_view = fight.battle.alive().filter(|f| f.mode == Mode::Attack).any(|f| {
-                let to = to_bevy(f.pawn.location) - cam.translation;
-                to.length() < 4000.0 / 50.0 && to.normalize().dot(*fwd) > 0.9
-            });
+            let in_view = fight
+                .battle
+                .alive()
+                .filter(|f| f.mode == Mode::Attack)
+                .any(|f| {
+                    let to = to_bevy(f.pawn.location) - cam.translation;
+                    to.length() < 4000.0 / 50.0 && to.normalize().dot(*fwd) > 0.9
+                });
             if fight.battle.time > spotted + 1.0 && in_view {
-                verdict(&mut check, !looks_ready.is_empty(), format!("droids have meshes ({} drawn)", looks_ready.iter().count()));
+                verdict(
+                    &mut check,
+                    !looks_ready.is_empty(),
+                    format!("droids have meshes ({} drawn)", looks_ready.iter().count()),
+                );
                 next_play.set(Play::Paused);
                 check.stage = 1;
                 check.frames = 0;
@@ -339,9 +428,15 @@ fn picture_check(
         1 | 3 => {
             if check.frames == 4 && !check.pending {
                 check.pending = true;
-                commands.spawn(Screenshot::primary_window()).observe(captured);
+                commands
+                    .spawn(Screenshot::primary_window())
+                    .observe(captured);
             }
-            let have = if check.stage == 1 { check.with.is_some() } else { check.without.is_some() };
+            let have = if check.stage == 1 {
+                check.with.is_some()
+            } else {
+                check.without.is_some()
+            };
             if have {
                 if check.stage == 1 {
                     for mut v in &mut droids {
@@ -362,7 +457,9 @@ fn picture_check(
             }
             next_play.set(Play::Running);
             let (w, h) = check.size;
-            let (Some(a), Some(b)) = (check.with.take(), check.without.take()) else { return };
+            let (Some(a), Some(b)) = (check.with.take(), check.without.take()) else {
+                return;
+            };
             let mut mask = vec![0u8; w * h * 4];
             // `n`: pixels the droids changed. `solid`: pixels they changed a
             // lot (their bodies, not edges blended with the background),
@@ -386,7 +483,11 @@ fn picture_check(
                 }
             }
             let mean = sum.map(|s| s / solid.max(1) as f64);
-            let skin = looks.look.as_ref().and_then(|l| l.skin.as_ref()).map(|(_, img)| img.mean());
+            let skin = looks
+                .look
+                .as_ref()
+                .and_then(|l| l.skin.as_ref())
+                .map(|(_, img)| img.mean());
             log.line(format!(
                 "picture: {n} pixels changed when the droids were hidden ({:.2}% of the window), {solid} of them strongly; their average colour R {:.0} G {:.0} B {:.0}; {magenta} magenta; skin texture average {:?}",
                 n as f64 * 100.0 / (w * h) as f64,
@@ -398,8 +499,16 @@ fn picture_check(
             save("droidview_with", w, h, a);
             save("droidview_without", w, h, b);
             save("droidview_droids", w, h, mask);
-            verdict(&mut check, n >= 300, format!("droids are drawn ({n} pixels)"));
-            verdict(&mut check, (magenta as f32) < 0.05 * n as f32, format!("droids are not magenta ({magenta} of {n})"));
+            verdict(
+                &mut check,
+                n >= 300,
+                format!("droids are drawn ({n} pixels)"),
+            );
+            verdict(
+                &mut check,
+                (magenta as f32) < 0.05 * n as f32,
+                format!("droids are not magenta ({magenta} of {n})"),
+            );
             // Brightness: ambient 0.5 alone gives about 0.73 of the skin
             // picture's brightness on screen; the level's lights add to
             // that. Between 0.4 and 2 times the picture means neither black
@@ -416,7 +525,11 @@ fn picture_check(
             if let Some([r, _, b, _]) = skin {
                 let want = r as f64 / (b as f64).max(1.0);
                 let got = mean[0] / mean[2].max(1.0);
-                verdict(&mut check, (got / want - 1.0).abs() < 0.25, format!("droids have the skin's tint (red/blue {got:.2}, skin {want:.2})"));
+                verdict(
+                    &mut check,
+                    (got / want - 1.0).abs() < 0.25,
+                    format!("droids have the skin's tint (red/blue {got:.2}, skin {want:.2})"),
+                );
             }
             check.done = true;
         }
@@ -441,7 +554,10 @@ fn finish(
     let s = &fight.stats;
     let mut failed = check.failed;
     let mut verdict = |ok: bool, what: String| {
-        log.line(format!("CHECK {}: {what}", if ok { "PASS" } else { "FAIL" }));
+        log.line(format!(
+            "CHECK {}: {what}",
+            if ok { "PASS" } else { "FAIL" }
+        ));
         if !ok {
             failed += 1;
         }
@@ -450,11 +566,34 @@ fn finish(
     verdict(s.spawned > 0, format!("droids spawned ({})", s.spawned));
     verdict(s.first_spotted.is_some(), "a droid saw the stand-in".into());
     verdict(s.shots > 0, format!("droids fired ({} shots)", s.shots));
-    verdict(s.hits_on_player > 0 && s.hits_on_player < s.shots, format!("some droid shots hit, not all ({} of {})", s.hits_on_player, s.shots));
-    verdict(s.droids_hurt > 0, format!("the stand-in's shots hurt droids ({} hits, {} destroyed)", s.droids_hurt, s.droids_destroyed));
+    verdict(
+        s.hits_on_player > 0 && s.hits_on_player < s.shots,
+        format!(
+            "some droid shots hit, not all ({} of {})",
+            s.hits_on_player, s.shots
+        ),
+    );
+    verdict(
+        s.bolts_on_droids * 20 <= s.shots,
+        format!(
+            "droids rarely shoot each other ({} of {} bolts hit a droid)",
+            s.bolts_on_droids, s.shots
+        ),
+    );
+    verdict(
+        s.droids_hurt > 0,
+        format!(
+            "the stand-in's shots hurt droids ({} hits, {} destroyed)",
+            s.droids_hurt, s.droids_destroyed
+        ),
+    );
     if opts.check {
         verdict(check.done, "picture check ran".into());
     }
     log.line(format!("DONE: {failed} checks failed"));
-    exit.write(if failed == 0 { AppExit::Success } else { AppExit::from_code(1) });
+    exit.write(if failed == 0 {
+        AppExit::Success
+    } else {
+        AppExit::from_code(1)
+    });
 }

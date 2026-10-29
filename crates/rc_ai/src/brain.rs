@@ -122,22 +122,40 @@ pub struct View<'a> {
     pub target: Option<Target>,
     /// Cover points other fighters hold or are walking to.
     pub cover_taken: &'a HashSet<usize>,
+    /// Centres of friendly fighters (may include this one), so it doesn't
+    /// shoot through them.
+    pub allies: &'a [Vec3],
 }
 
 /// Something the caller should act on or log.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AiEvent {
-    ModeChanged { from: Mode, to: Mode },
-    ManeuverChanged { from: &'static str, to: &'static str },
+    ModeChanged {
+        from: Mode,
+        to: Mode,
+    },
+    ManeuverChanged {
+        from: &'static str,
+        to: &'static str,
+    },
     /// Saw the enemy (first time, or again after losing it).
-    Spotted { distance: f32 },
+    Spotted {
+        distance: f32,
+    },
     LostSight,
     /// Started walking a route: number of nodes and length, uu.
-    Route { nodes: usize, length: f32 },
+    Route {
+        nodes: usize,
+        length: f32,
+    },
     NoRoute,
     /// A shot. `origin` is the muzzle, `direction` has length 1,
     /// `aim_error` is how far off a perfect aim it is, degrees.
-    Fire { origin: Vec3, direction: Vec3, aim_error: f32 },
+    Fire {
+        origin: Vec3,
+        direction: Vec3,
+        aim_error: f32,
+    },
     /// Couldn't make progress along a route for 2 s; gave up on it.
     Stuck,
 }
@@ -176,6 +194,8 @@ pub struct Fighter {
     // Counters, for the log.
     pub shots_fired: u32,
     pub distance_walked: f32,
+    /// Since when a friend has been standing in its line of fire.
+    ally_in_way_since: Option<f32>,
     rng: Rng,
 }
 
@@ -188,7 +208,13 @@ const RETRY_AFTER: f32 = 3.0;
 
 impl Fighter {
     /// A fighter standing with its feet at `feet`, facing `yaw`.
-    pub fn new(id: u32, params: Arc<AiParams>, feet: Vec3, yaw: f32, start_state: StartState) -> Self {
+    pub fn new(
+        id: u32,
+        params: Arc<AiParams>,
+        feet: Vec3,
+        yaw: f32,
+        start_state: StartState,
+    ) -> Self {
         let pawn = Pawn::new(params.movement.clone(), feet);
         let home = pawn.location;
         Fighter {
@@ -214,6 +240,7 @@ impl Fighter {
             next_shot: 0.0,
             shots_fired: 0,
             distance_walked: 0.0,
+            ally_in_way_since: None,
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -228,7 +255,9 @@ impl Fighter {
 
     /// Where it is walking to, if anywhere.
     pub fn destination(&self) -> Option<Vec3> {
-        self.follower.as_ref().and_then(|f| f.points.last().copied())
+        self.follower
+            .as_ref()
+            .and_then(|f| f.points.last().copied())
     }
 
     /// The cover point it holds or is walking to.
@@ -286,14 +315,20 @@ impl Fighter {
 
     fn set_mode(&mut self, to: Mode, events: &mut Vec<AiEvent>) {
         if self.mode != to {
-            events.push(AiEvent::ModeChanged { from: self.mode, to });
+            events.push(AiEvent::ModeChanged {
+                from: self.mode,
+                to,
+            });
             self.mode = to;
         }
     }
 
     fn set_maneuver(&mut self, to: Maneuver, time: f32, events: &mut Vec<AiEvent>) {
         if self.maneuver != to {
-            events.push(AiEvent::ManeuverChanged { from: self.maneuver.name(), to: to.name() });
+            events.push(AiEvent::ManeuverChanged {
+                from: self.maneuver.name(),
+                to: to.name(),
+            });
             self.maneuver = to;
             self.maneuver_started = time;
         }
@@ -335,7 +370,9 @@ impl Fighter {
         let saw = view.target.filter(|t| self.sees(view, t));
         if let Some(t) = saw {
             if !self.enemy_seen_now {
-                events.push(AiEvent::Spotted { distance: (t.centre - self.pawn.location).length() });
+                events.push(AiEvent::Spotted {
+                    distance: (t.centre - self.pawn.location).length(),
+                });
             }
             self.enemy_seen_now = true;
             self.last_seen_at = Some(t.centre);
@@ -375,7 +412,9 @@ impl Fighter {
 
         // 3. Turn and move.
         let mut input = MoveInput::default();
-        let enemy_dir = self.last_seen_at.map(|p| rc_nav::steer::yaw_towards(self.pawn.location, p));
+        let enemy_dir = self
+            .last_seen_at
+            .map(|p| rc_nav::steer::yaw_towards(self.pawn.location, p));
         let mut want_yaw = self.facing;
         if let Some(f) = self.follower.as_mut() {
             match f.update(&self.pawn, dt) {
@@ -404,7 +443,8 @@ impl Fighter {
             }
         }
         let max_turn = senses.turn_rate.to_radians() * dt;
-        self.facing = wrap(self.facing + angle_diff(want_yaw, self.facing).clamp(-max_turn, max_turn));
+        self.facing =
+            wrap(self.facing + angle_diff(want_yaw, self.facing).clamp(-max_turn, max_turn));
         input.yaw = self.facing;
         input.crouch = self.crouch;
         self.pawn.step(dt, &input, view.world);
@@ -412,7 +452,7 @@ impl Fighter {
         // 4. Shoot.
         if self.mode == Mode::Attack {
             if let (Some(t), true) = (saw, self.enemy_seen_now) {
-                self.shoot(view.world, now, &t, &mut events);
+                self.shoot(view.world, view.allies, now, &t, &mut events);
             }
         }
         events
@@ -432,7 +472,10 @@ impl Fighter {
     fn walk_to(&mut self, view: &View, to: Vec3, events: &mut Vec<AiEvent>) -> bool {
         match view.nav.route(self.pawn.location, to) {
             Some(r) => {
-                events.push(AiEvent::Route { nodes: r.nodes.len(), length: r.length });
+                events.push(AiEvent::Route {
+                    nodes: r.nodes.len(),
+                    length: r.length,
+                });
                 self.follower = Some(PathFollower::new(r.points));
                 true
             }
@@ -452,7 +495,10 @@ impl Fighter {
             Some(mut r) => {
                 // The node itself is the goal; don't list it twice.
                 r.points.pop();
-                events.push(AiEvent::Route { nodes: r.nodes.len(), length: r.length });
+                events.push(AiEvent::Route {
+                    nodes: r.nodes.len(),
+                    length: r.length,
+                });
                 self.follower = Some(PathFollower::new(r.points));
                 true
             }
@@ -482,7 +528,11 @@ impl Fighter {
         }
         // Walking somewhere for a clear shot, and now it has one: stop and
         // shoot.
-        if busy && self.enemy_seen_now && matches!(self.maneuver, Maneuver::Reposition | Maneuver::Advance) && dist <= c.safe_distance.max(c.weapon_range * 0.5) {
+        if busy
+            && self.enemy_seen_now
+            && matches!(self.maneuver, Maneuver::Reposition | Maneuver::Advance)
+            && dist <= c.safe_distance.max(c.weapon_range * 0.5)
+        {
             self.follower = None;
             self.set_maneuver(Maneuver::Hold, now, events);
             return;
@@ -502,7 +552,9 @@ impl Fighter {
         }
 
         // Shot at in the open, or bored: look for cover facing the enemy.
-        if std::mem::take(&mut self.wants_cover) || (self.maneuver == Maneuver::Hold && elapsed > c.cover_boredom_time) {
+        if std::mem::take(&mut self.wants_cover)
+            || (self.maneuver == Maneuver::Hold && elapsed > c.cover_boredom_time)
+        {
             if let Some(n) = self.pick_cover(view, enemy) {
                 if self.walk_to_node(view, n, events) {
                     self.set_maneuver(Maneuver::ToCover(n), now, events);
@@ -513,7 +565,9 @@ impl Fighter {
 
         // No clear shot for a while: move to a spot that has one, or else
         // a step towards where the enemy was last seen.
-        if unseen_for > c.lost_sight_reposition && now >= self.next_search {
+        // A friend in the line of fire counts as no clear shot.
+        let blocked_for = self.ally_in_way_since.map_or(0.0, |t| now - t);
+        if unseen_for.max(blocked_for) > c.lost_sight_reposition && now >= self.next_search {
             if let Some(n) = self.pick_firing_spot(view, enemy) {
                 if self.walk_to_node(view, n, events) {
                     self.set_maneuver(Maneuver::Reposition, now, events);
@@ -557,7 +611,8 @@ impl Fighter {
     }
 
     fn destination_far_enough(&self) -> bool {
-        self.destination().is_some_and(|d| (d - self.pawn.location).length_2d() >= MIN_MOVE)
+        self.destination()
+            .is_some_and(|d| (d - self.pawn.location).length_2d() >= MIN_MOVE)
     }
 
     /// The best free cover point near us that faces the enemy and still
@@ -565,7 +620,10 @@ impl Fighter {
     fn pick_cover(&self, view: &View, enemy: Vec3) -> Option<usize> {
         let c = &self.params.combat;
         let mut best: Option<(usize, f32)> = None;
-        for n in view.nav.nodes_near(self.pawn.location, c.cover_search_radius) {
+        for n in view
+            .nav
+            .nodes_near(self.pawn.location, c.cover_search_radius)
+        {
             let node = &view.nav.nodes[n];
             let NodeKind::Cover { facing, .. } = node.kind else {
                 continue;
@@ -596,7 +654,10 @@ impl Fighter {
         let c = &self.params.combat;
         let eye_up = Vec3::new(0.0, 0.0, self.params.movement.base_eye_height);
         let mut tested = 0;
-        for n in view.nav.nodes_near(self.pawn.location, c.cover_search_radius) {
+        for n in view
+            .nav
+            .nodes_near(self.pawn.location, c.cover_search_radius)
+        {
             let node = &view.nav.nodes[n];
             if matches!(node.kind, NodeKind::Fly) || view.cover_taken.contains(&n) {
                 continue;
@@ -607,7 +668,8 @@ impl Fighter {
                 continue;
             }
             let d = (enemy - node.location).length();
-            if d < c.ready_distance * 0.5 || d > c.weapon_range.min(self.params.senses.sight_radius) {
+            if d < c.ready_distance * 0.5 || d > c.weapon_range.min(self.params.senses.sight_radius)
+            {
                 continue;
             }
             tested += 1;
@@ -622,7 +684,14 @@ impl Fighter {
     }
 
     /// Fire in bursts while it has a clear shot within its aim limits.
-    fn shoot(&mut self, world: &dyn World, now: f32, t: &Target, events: &mut Vec<AiEvent>) {
+    fn shoot(
+        &mut self,
+        world: &dyn World,
+        allies: &[Vec3],
+        now: f32,
+        t: &Target,
+        events: &mut Vec<AiEvent>,
+    ) {
         let c = self.params.combat.clone();
         let to = t.centre - self.pawn.location;
         let dist = to.length();
@@ -645,11 +714,26 @@ impl Fighter {
         let origin = self.eye() - Vec3::new(0.0, 0.0, 10.0) + fwd * 30.0 + right * 10.0;
         // Aim at the middle of the body; if that's hidden (behind a wall
         // or a trench lip) but the head isn't, aim at the head.
-        let aim = if clear_line(world, origin, t.centre) { t.centre } else { t.eye };
+        let aim = if clear_line(world, origin, t.centre) {
+            t.centre
+        } else {
+            t.eye
+        };
+        if ally_in_line(origin, aim, allies, self.pawn.location) {
+            // Hold fire rather than shoot a friend; `decide` moves it if
+            // this lasts.
+            self.ally_in_way_since.get_or_insert(now);
+            return;
+        }
+        self.ally_in_way_since = None;
         let perfect = (aim - origin).normalize_or_zero();
         let max_err = (1.0 - c.accuracy).clamp(0.0, 1.0) * c.max_aim_error;
         let (direction, aim_error) = scatter(perfect, max_err, &mut self.rng);
-        events.push(AiEvent::Fire { origin, direction, aim_error });
+        events.push(AiEvent::Fire {
+            origin,
+            direction,
+            aim_error,
+        });
         self.shots_fired += 1;
         self.burst_left -= 1;
         if self.burst_left == 0 {
@@ -659,6 +743,32 @@ impl Fighter {
             self.next_shot = now + c.shot_delay;
         }
     }
+}
+
+/// How close (sideways, uu) a friend's centre may be to the line of fire:
+/// a droid's collision radius plus a margin for aim error.
+const ALLY_CLEARANCE: f32 = 50.0;
+
+/// Does a friend (other than the one at `me`) stand in the line from `a`
+/// to `b`?
+pub fn ally_in_line(a: Vec3, b: Vec3, allies: &[Vec3], me: Vec3) -> bool {
+    let d = b - a;
+    let len2 = d.dot(d);
+    if len2 < 1.0 {
+        return false;
+    }
+    allies.iter().any(|&p| {
+        if (p - me).length() < 1.0 {
+            return false;
+        }
+        let t = (p - a).dot(d) / len2;
+        if !(0.0..1.0).contains(&t) {
+            return false;
+        }
+        let closest = a + d * t;
+        let off = p - closest;
+        (off.x * off.x + off.y * off.y).sqrt() < ALLY_CLEARANCE && off.z.abs() < 90.0
+    })
 }
 
 /// Is the straight line from `a` to `b` free of level geometry?
@@ -701,7 +811,11 @@ pub fn scatter(dir: Vec3, max_deg: f32, rng: &mut Rng) -> (Vec3, f32) {
     let angle = max_deg.to_radians() * rng.unit().sqrt();
     let spin = rng.unit() * std::f32::consts::TAU;
     // Two directions at right angles to `dir`.
-    let helper = if dir.z.abs() < 0.9 { Vec3::UP } else { Vec3::new(1.0, 0.0, 0.0) };
+    let helper = if dir.z.abs() < 0.9 {
+        Vec3::UP
+    } else {
+        Vec3::new(1.0, 0.0, 0.0)
+    };
     let a = cross(dir, helper).normalize_or_zero();
     let b = cross(dir, a);
     let side = a * spin.cos() + b * spin.sin();
@@ -710,7 +824,11 @@ pub fn scatter(dir: Vec3, max_deg: f32, rng: &mut Rng) -> (Vec3, f32) {
 }
 
 fn cross(a: Vec3, b: Vec3) -> Vec3 {
-    Vec3::new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+    Vec3::new(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    )
 }
 
 /// `a - b` as an angle in -pi..pi.

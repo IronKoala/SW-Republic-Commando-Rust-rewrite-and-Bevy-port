@@ -106,7 +106,12 @@ pub struct FightStats {
 
 impl Fight {
     pub fn new(battle: Battle) -> Self {
-        Fight { battle, entities: HashMap::new(), stats: FightStats::default(), next_summary: 0.0 }
+        Fight {
+            battle,
+            entities: HashMap::new(),
+            stats: FightStats::default(),
+            next_summary: 0.0,
+        }
     }
 }
 
@@ -133,16 +138,27 @@ pub struct Looks {
 fn settings(paths: &GamePaths, log: &GameLog) -> AiParams {
     let base = AiParams::battle_droid();
     let Some(path) = paths.data_file("enemies/battle_droid.toml") else {
-        log.line(format!("{PART}: no enemies/battle_droid.toml, using built-in values"));
+        log.line(format!(
+            "{PART}: no enemies/battle_droid.toml, using built-in values"
+        ));
         return base;
     };
-    match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| base.clone().with_overrides(&t)) {
+    match std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|t| base.clone().with_overrides(&t))
+    {
         Ok(p) => {
-            log.line(format!("{PART}: battle droid settings from {}", path.display()));
+            log.line(format!(
+                "{PART}: battle droid settings from {}",
+                path.display()
+            ));
             p
         }
         Err(e) => {
-            log.line(format!("{PART}: ERROR in {}: {e}; using built-in values", path.display()));
+            log.line(format!(
+                "{PART}: ERROR in {}: {e}; using built-in values",
+                path.display()
+            ));
             base
         }
     }
@@ -181,7 +197,10 @@ fn load_fight(
         }
     };
     let all = factories.len();
-    let droids: Vec<rc_ai::Factory> = factories.into_iter().filter(|f| f.prototype.starts_with("BattleDroid")).collect();
+    let droids: Vec<rc_ai::Factory> = factories
+        .into_iter()
+        .filter(|f| f.prototype.starts_with("BattleDroid"))
+        .collect();
     let triggered = droids.iter().filter(|f| !f.triggers.is_empty()).count();
     log.line(format!(
         "{PART}: {map}: {} path points, {} links ({} blocked until scripts open them), {all} spawners, {} make battle droids ({triggered} with walk-in triggers, the rest start when the player comes within {:.0} uu), {:.0} ms",
@@ -201,11 +220,18 @@ fn load_fight(
                 for n in notes {
                     log.line(format!("{PART}: {n}"));
                 }
-                log.line(format!("{PART}: droid mesh read in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0));
+                log.line(format!(
+                    "{PART}: droid mesh read in {:.0} ms",
+                    t.elapsed().as_secs_f64() * 1000.0
+                ));
                 if let (Some(mut images), Some(mut materials)) = (images, materials) {
                     let texture = look.skin.as_ref().map(|(_, img)| {
                         images.add(Image::new(
-                            Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
+                            Extent3d {
+                                width: img.width as u32,
+                                height: img.height as u32,
+                                depth_or_array_layers: 1,
+                            },
                             TextureDimension::D2,
                             img.pixels.clone(),
                             TextureFormat::Rgba8UnormSrgb,
@@ -219,8 +245,13 @@ fn load_fight(
                     // look settings), as light it gives off itself.
                     let a = params.look.ambient.max(0.0);
                     looks.material = Some(materials.add(StandardMaterial {
-                        base_color: if texture.is_some() { Color::WHITE } else { Color::srgb(0.6, 0.6, 0.6) },
-                        emissive: LinearRgba::rgb(a, a, a) * if texture.is_some() { 1.0 } else { 0.3 },
+                        base_color: if texture.is_some() {
+                            Color::WHITE
+                        } else {
+                            Color::srgb(0.6, 0.6, 0.6)
+                        },
+                        emissive: LinearRgba::rgb(a, a, a)
+                            * if texture.is_some() { 1.0 } else { 0.3 },
                         emissive_texture: texture.clone(),
                         base_color_texture: texture,
                         perceptual_roughness: 0.7,
@@ -229,13 +260,20 @@ fn load_fight(
                 }
                 looks.look = Some(Arc::new(look));
             }
-            Err(e) => log.line(format!("{PART}: droid mesh not loaded, droids will be invisible: {e}")),
+            Err(e) => log.line(format!(
+                "{PART}: droid mesh not loaded, droids will be invisible: {e}"
+            )),
         }
     }
     commands.insert_resource(Fight::new(Battle::new(params, nav, droids)));
 }
 
-fn end_fight(mut commands: Commands, fight: Option<Res<Fight>>, mut mood: ResMut<MusicMood>, log: Res<GameLog>) {
+fn end_fight(
+    mut commands: Commands,
+    fight: Option<Res<Fight>>,
+    mut mood: ResMut<MusicMood>,
+    log: Res<GameLog>,
+) {
     if let Some(f) = fight {
         summary(&f, &log);
     }
@@ -276,7 +314,10 @@ fn player_target(
     let feet = to_unreal(t.translation);
     let up = hit.map_or(84.0, |h| h.center_up);
     let centre = feet + rc_movement::Vec3::new(0.0, 0.0, up);
-    let eye = camera.single().map(|c| to_unreal(c.translation)).unwrap_or(centre + rc_movement::Vec3::new(0.0, 0.0, 60.0));
+    let eye = camera
+        .single()
+        .map(|c| to_unreal(c.translation))
+        .unwrap_or(centre + rc_movement::Vec3::new(0.0, 0.0, 60.0));
     Some(Target { centre, eye })
 }
 
@@ -305,22 +346,37 @@ fn think(
     let mut meshes = meshes;
     for e in events {
         match e {
-            BattleEvent::SpawnerOn { spawner, by_trigger } => {
+            BattleEvent::SpawnerOn {
+                spawner,
+                by_trigger,
+            } => {
                 let f = &fight.battle.spawners[spawner].factory;
                 log.line(format!(
                     "{PART}: t={now:.1}s spawner {} ({}) switched on by {}",
                     f.name,
                     f.tag,
-                    if by_trigger { "its walk-in trigger" } else { "the player coming near (scripted in the original)" }
+                    if by_trigger {
+                        "its walk-in trigger"
+                    } else {
+                        "the player coming near (scripted in the original)"
+                    }
                 ));
             }
-            BattleEvent::Spawned { id, spawner, feet, yaw } => {
+            BattleEvent::Spawned {
+                id,
+                spawner,
+                feet,
+                yaw,
+            } => {
                 let p = &fight.battle.params;
                 let mesh = match (&looks.look, meshes.as_mut()) {
                     (Some(look), Some(meshes)) => {
                         let points = look.posed(Pose::Idle, 0.0);
                         let (pos, normals) = look.wedge_attributes(&points);
-                        let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+                        let mut m = Mesh::new(
+                            PrimitiveTopology::TriangleList,
+                            RenderAssetUsages::default(),
+                        );
                         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
                         m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
                         m.insert_attribute(Mesh::ATTRIBUTE_UV_0, look.uvs());
@@ -331,7 +387,13 @@ fn think(
                 };
                 let mut e = commands.spawn((
                     Name::new(format!("battle droid {id}")),
-                    Droid { id, pose: Pose::Idle, frame: 0.0, last_fire: f32::NEG_INFINITY, mesh: mesh.clone() },
+                    Droid {
+                        id,
+                        pose: Pose::Idle,
+                        frame: 0.0,
+                        last_fire: f32::NEG_INFINITY,
+                        mesh: mesh.clone(),
+                    },
                     Health::new(p.combat.health),
                     Team::Separatist,
                     Hittable {
@@ -339,14 +401,19 @@ fn think(
                         half_height: p.movement.collision_height,
                         center_up: p.movement.collision_height,
                     },
-                    Transform::from_translation(to_bevy(feet)).with_rotation(Quat::from_rotation_y(-yaw)),
+                    Transform::from_translation(to_bevy(feet))
+                        .with_rotation(Quat::from_rotation_y(-yaw)),
                     Visibility::default(),
                     DespawnOnExit(GameState::InGame),
                 ));
                 if let (Some(mesh), Some(material)) = (mesh, &looks.material) {
                     // The points move every frame, so Bevy's stored outline
                     // would be wrong: don't let it skip drawing by it.
-                    e.insert((Mesh3d(mesh), MeshMaterial3d(material.clone()), NoFrustumCulling));
+                    e.insert((
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material.clone()),
+                        NoFrustumCulling,
+                    ));
                 }
                 fight.entities.insert(id, e.id());
                 fight.stats.spawned += 1;
@@ -360,9 +427,13 @@ fn think(
                 ));
             }
             BattleEvent::Ai { id, event } => {
-                let Some(&entity) = fight.entities.get(&id) else { continue };
+                let Some(&entity) = fight.entities.get(&id) else {
+                    continue;
+                };
                 match event {
-                    AiEvent::Fire { origin, direction, .. } => {
+                    AiEvent::Fire {
+                        origin, direction, ..
+                    } => {
                         fight.stats.shots += 1;
                         if let Ok(mut d) = droids.get_mut(entity) {
                             d.last_fire = now;
@@ -378,22 +449,28 @@ fn think(
                         fight.stats.first_spotted.get_or_insert(now);
                         log.line(format!("{PART}: t={now:.1}s droid {id} spotted the player {distance:.0} uu away"));
                     }
-                    AiEvent::ModeChanged { from, to } => {
-                        log.line(format!("{PART}: t={now:.1}s droid {id}: {} -> {}", from.name(), to.name()))
-                    }
-                    AiEvent::ManeuverChanged { from, to } => {
-                        log.line(format!("{PART}: t={now:.1}s droid {id}: maneuver {from} -> {to}"))
-                    }
-                    AiEvent::Route { nodes, length } => {
-                        log.line(format!("{PART}: t={now:.1}s droid {id}: route of {nodes} nodes, {length:.0} uu"))
-                    }
+                    AiEvent::ModeChanged { from, to } => log.line(format!(
+                        "{PART}: t={now:.1}s droid {id}: {} -> {}",
+                        from.name(),
+                        to.name()
+                    )),
+                    AiEvent::ManeuverChanged { from, to } => log.line(format!(
+                        "{PART}: t={now:.1}s droid {id}: maneuver {from} -> {to}"
+                    )),
+                    AiEvent::Route { nodes, length } => log.line(format!(
+                        "{PART}: t={now:.1}s droid {id}: route of {nodes} nodes, {length:.0} uu"
+                    )),
                     other => log.line(format!("{PART}: t={now:.1}s droid {id}: {other:?}")),
                 }
             }
         }
     }
 
-    let want = if fight.battle.in_fight() { MusicMood::Battle } else { MusicMood::Calm };
+    let want = if fight.battle.in_fight() {
+        MusicMood::Battle
+    } else {
+        MusicMood::Calm
+    };
     if *mood != want {
         *mood = want;
         log.line(format!("{PART}: t={now:.1}s music mood {want:?}"));
@@ -407,11 +484,19 @@ fn think(
 /// Put each droid's entity where its body is.
 fn place_droids(fight: Res<Fight>, mut droids: Query<(&Droid, &mut Transform, &mut Hittable)>) {
     for f in &fight.battle.fighters {
-        let Some(&e) = fight.entities.get(&f.id) else { continue };
-        let Ok((_, mut t, mut hit)) = droids.get_mut(e) else { continue };
+        let Some(&e) = fight.entities.get(&f.id) else {
+            continue;
+        };
+        let Ok((_, mut t, mut hit)) = droids.get_mut(e) else {
+            continue;
+        };
         t.translation = to_bevy(f.pawn.feet());
         t.rotation = Quat::from_rotation_y(-f.facing);
-        let h = if f.pawn.crouched { f.params.movement.crouch_height } else { f.params.movement.collision_height };
+        let h = if f.pawn.crouched {
+            f.params.movement.crouch_height
+        } else {
+            f.params.movement.collision_height
+        };
         if hit.half_height != h {
             hit.half_height = h;
             hit.center_up = h;
@@ -442,7 +527,9 @@ fn react_to_combat(
             }
             continue;
         }
-        let Ok(droid) = droids.get(d.target) else { continue };
+        let Ok(droid) = droids.get(d.target) else {
+            continue;
+        };
         fight.stats.droids_hurt += 1;
         let from = d
             .instigator
@@ -450,12 +537,17 @@ fn react_to_combat(
             .map(|t| to_unreal(t.translation) + rc_movement::Vec3::new(0.0, 0.0, 84.0));
         for e in fight.battle.damaged(droid.id, from) {
             if let BattleEvent::Ai { event, .. } = e {
-                log.line(format!("{PART}: t={now:.1}s droid {} hurt ({:.0} damage): {event:?}", droid.id, d.amount));
+                log.line(format!(
+                    "{PART}: t={now:.1}s droid {} hurt ({:.0} damage): {event:?}",
+                    droid.id, d.amount
+                ));
             }
         }
     }
     for d in died.read() {
-        let Ok(droid) = droids.get(d.entity) else { continue };
+        let Ok(droid) = droids.get(d.entity) else {
+            continue;
+        };
         fight.battle.killed(droid.id);
         fight.stats.droids_destroyed += 1;
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);
@@ -477,7 +569,19 @@ fn react_to_combat(
         }
         let st = &mut fight.stats;
         match l.target {
-            Some(t) if droids.contains(t) => st.bolts_on_droids += 1,
+            Some(t) if droids.contains(t) => {
+                st.bolts_on_droids += 1;
+                if let (Ok(a), Ok(b)) = (droids.get(l.shooter), droids.get(t)) {
+                    let pos = |e: Entity| transforms.get(e).map(|t| to_unreal(t.translation)).ok();
+                    let gap = pos(l.shooter)
+                        .zip(pos(t))
+                        .map_or(-1.0, |(p, q)| (p - q).length());
+                    log.line(format!(
+                        "{PART}: t={now:.1}s droid {}'s bolt hit droid {} ({:.0} uu along its flight; the two stand {gap:.0} uu apart)",
+                        a.id, b.id, l.distance
+                    ));
+                }
+            }
             Some(_) => {}
             None if l.on_level => st.bolts_on_level += 1,
             None => st.bolts_nowhere += 1,
@@ -493,12 +597,20 @@ fn choose_pose(f: &rc_ai::Fighter, just_fired: bool) -> Pose {
     let v = f.pawn.velocity;
     let speed = (v.x * v.x + v.y * v.y).sqrt();
     if f.pawn.crouched {
-        return if just_fired { Pose::CrouchFire } else { Pose::Crouch };
+        return if just_fired {
+            Pose::CrouchFire
+        } else {
+            Pose::Crouch
+        };
     }
     if speed > 30.0 {
         let rel = rc_ai::brain::angle_diff(v.y.atan2(v.x), f.facing).to_degrees();
         return if rel.abs() <= 45.0 {
-            if speed > 0.75 * f.params.movement.ground_speed { Pose::Run } else { Pose::Walk }
+            if speed > 0.75 * f.params.movement.ground_speed {
+                Pose::Run
+            } else {
+                Pose::Walk
+            }
         } else if rel.abs() >= 135.0 {
             Pose::WalkBack
         } else if rel > 0.0 {
@@ -527,8 +639,12 @@ fn animate(
     let now = fight.battle.time;
     let mut meshes = meshes;
     for f in &fight.battle.fighters {
-        let Some(&e) = fight.entities.get(&f.id) else { continue };
-        let Ok(mut d) = droids.get_mut(e) else { continue };
+        let Some(&e) = fight.entities.get(&f.id) else {
+            continue;
+        };
+        let Ok(mut d) = droids.get_mut(e) else {
+            continue;
+        };
         let pose = choose_pose(f, now - d.last_fire < FIRE_POSE_TIME);
         if pose != d.pose {
             d.pose = pose;
@@ -549,7 +665,9 @@ fn animate(
         if d.pose.once() && before == last && d.frame == last {
             continue;
         }
-        let (Some(handle), Some(meshes)) = (&d.mesh, meshes.as_mut()) else { continue };
+        let (Some(handle), Some(meshes)) = (&d.mesh, meshes.as_mut()) else {
+            continue;
+        };
         let points = look.posed(d.pose, d.frame);
         let (pos, normals) = look.wedge_attributes(&points);
         if let Some(mut m) = meshes.get_mut(handle) {

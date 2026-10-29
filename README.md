@@ -146,9 +146,9 @@ copy of the game.
   damage. They are the game's own animated droid model with its skin.
   Their numbers come from the game's script files and are in
   `data/enemies/battle_droid.toml`, where anyone can change them.
-  `rc_droidview --check` watched a fight on geo_01a: 5 droids, 182 shots,
-  2 droids destroyed by a stand-in player, and the droids on screen had
-  the skin's colours (all 11 checks passed).
+  `rc_droidview --check` watched a fight on geo_01a: 5 droids, 180 shots,
+  2 droids destroyed by a stand-in player, no droid shooting another, and
+  the droids on screen had the skin's colours (all 12 checks passed).
 
 ## What doesn't work yet
 

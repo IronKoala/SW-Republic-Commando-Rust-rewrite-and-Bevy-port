@@ -1048,6 +1048,10 @@ squad:
      Shot at in the open, a droid runs to a free cover point that faces
      the enemy and crouches between bursts; after `CoverBoredomTime` it
      looks for another.
+   - *Friends*: characters only collide with the level, so `Battle`
+     pushes apart droids that overlap, and a droid holds fire while a
+     friend stands within 50 uu of its line of fire (it moves if that
+     lasts).
    - *Forgetting*: `EnemyMemoryTime` without seeing the enemy, then it
      goes to look where it was last seen.
    - *Spawning*: `PawnFactory` actors (with their `SpawnPoint`s) make the
