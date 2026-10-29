@@ -12,8 +12,10 @@ use crate::bsp::{self, Vec3};
 use crate::collision::{add_blocking_volumes, collision_triangles};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
+use crate::class_look::{apply_class_look, ClassLooks, Loaded};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 pub struct MapCollision {
     pub triangles: Vec<[Vec3; 3]>,
@@ -23,6 +25,8 @@ pub struct MapCollision {
     pub bsp_nodes: usize,
     pub mesh_actors: usize,
     pub mesh_failures: usize,
+    /// Props whose model comes from their class, not the map.
+    pub class_mesh_actors: usize,
     /// Blocking volumes added (the ones that stop players), and ones that
     /// couldn't be read.
     pub blocking_volumes: usize,
@@ -70,31 +74,33 @@ fn object_path(pkg: &Package, index: i32) -> Vec<String> {
 
 struct Packages {
     files: HashMap<String, PathBuf>,
-    open: HashMap<String, Option<(Package, Vec<u8>)>>,
+    open: HashMap<String, Option<Loaded>>,
 }
 
 impl Packages {
-    fn get(&mut self, name: &str) -> Option<&(Package, Vec<u8>)> {
+    fn get(&mut self, name: &str) -> Option<Loaded> {
         let key = name.to_ascii_lowercase();
         if !self.open.contains_key(&key) {
             let loaded = self.files.get(&key).and_then(|p| {
                 let data = std::fs::read(p).ok()?;
                 let pkg = Package::parse(&data).ok()?;
-                Some((pkg, data))
+                Some(Rc::new((pkg, data)))
             });
             self.open.insert(key.clone(), loaded);
         }
-        self.open.get(&key).and_then(|o| o.as_ref())
+        self.open.get(&key).cloned().flatten()
     }
 }
 
-/// Read the static mesh an actor points at, from the map or another package.
-fn load_mesh(pkgs: &mut Packages, map: &(Package, Vec<u8>), index: i32) -> Option<StaticMesh> {
+/// Read the static mesh that `index` (a reference inside package `map`,
+/// the map itself or a class's script package) points at.
+fn load_mesh(pkgs: &mut Packages, map: &Loaded, index: i32) -> Option<StaticMesh> {
     match ObjectRef::from_index(index) {
         ObjectRef::Export(k) => static_mesh::read_static_mesh(&map.0, &map.1, &map.0.exports[k]).ok(),
         ObjectRef::Import(_) => {
             let path = object_path(&map.0, index);
-            let (owner, data) = pkgs.get(&path[0])?;
+            let loaded = pkgs.get(&path[0])?;
+            let (owner, data) = (&loaded.0, &loaded.1);
             let rest = &path[1..];
             let k = (0..owner.exports.len()).find(|&i| {
                 let p = object_path(owner, i as i32 + 1);
@@ -116,13 +122,16 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut files = HashMap::new();
     index_packages(game_data, &mut files);
     let mut pkgs = Packages { files, open: HashMap::new() };
-    let map = (pkg, data);
-    let mut cache: HashMap<i32, Option<StaticMesh>> = HashMap::new();
-    let mut placed: Vec<(Placement, i32)> = Vec::new();
+    let map: Loaded = Rc::new((pkg, data));
+    // Keyed by the package the reference is in (by address) and the reference.
+    let mut cache: HashMap<(usize, i32), Option<StaticMesh>> = HashMap::new();
+    let mut placed: Vec<(Placement, (usize, i32))> = Vec::new();
+    let mut looks = ClassLooks::new();
     let mut start = None;
     let mut mesh_failures = 0;
+    let mut class_mesh_actors = 0;
     for &a in level.actors.iter().flatten() {
-        let Ok(p) = actors::read_placement(&map.0, &map.1, a) else {
+        let Ok(mut p) = actors::read_placement(&map.0, &map.1, a) else {
             continue;
         };
         if p.class == "PlayerStart" && start.is_none() {
@@ -131,16 +140,27 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
             let yaw = p.rotation[1] as f32 / 65536.0 * std::f32::consts::TAU;
             start = Some((feet, yaw));
         }
+        // No mesh in the map: the class may give one (props, double doors).
+        let mut owner = map.clone();
+        if p.static_mesh == 0 {
+            match apply_class_look(&mut looks, &map.0, &map.1, &mut p, &mut |n| pkgs.get(n)) {
+                Some(o) if !p.hidden => {
+                    owner = o;
+                    class_mesh_actors += 1;
+                }
+                _ => continue,
+            }
+        }
         // Hidden props are left out, as in the level viewer.
-        if p.static_mesh == 0 || p.hidden {
+        if p.hidden {
             continue;
         }
+        let key = (Rc::as_ptr(&owner) as usize, p.static_mesh);
         let mesh = cache
-            .entry(p.static_mesh)
-            .or_insert_with(|| load_mesh(&mut pkgs, &map, p.static_mesh));
+            .entry(key)
+            .or_insert_with(|| load_mesh(&mut pkgs, &owner, p.static_mesh));
         if mesh.is_some() {
-            let index = p.static_mesh;
-            placed.push((p, index));
+            placed.push((p, key));
         } else {
             mesh_failures += 1;
         }
@@ -158,6 +178,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
         mesh_failures,
+        class_mesh_actors,
         blocking_volumes,
         volume_failures: volumes.failures.len(),
     })

@@ -16,8 +16,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
 | `rc_movement` | The player's walking, jumping, crouching and collision, with the game's own numbers. No Bevy. |
 | `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
-| `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, and each prop's baked corner colours. No Bevy. |
-| `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`) that `rc_walk` uses to draw maps. |
+| `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, each prop's baked corner colours, blocking volumes, models that come from a prop's class, and a map's walking collision (`map_collision`). No Bevy. |
+| `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, with its sky, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`, `sky`) that `rc_walk` uses to draw maps. `rc_level_check` loads every map without a window and logs the results. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
@@ -771,7 +771,9 @@ reads them from the end of the `Model` object, after the vertex pool:
 3. Lightmap rectangles: page, surface, zone, top-left corner and size on the
    page (compact indexes), a 4x4 "world to lightmap" matrix and 9 more
    decimals, then a "shadow bitmap" for each dynamic light that touches it
-   (the light, a byte array, 7 numbers), then 5 more indexes.
+   (the light, a byte array, 7 numbers), then one compact index and one
+   4-byte number. (We first read 5 compact indexes here; that happened to
+   work on the first maps and broke 12 others.)
 4. Pages: the rectangles on it, 3 numbers, two sizes of pixels (each stored
    as a "lazy array": the file position of its end, a length, the bytes),
    then the pixel format (7 = DXT3 in every map so far), width, height and a
@@ -812,6 +814,40 @@ pitch, then roll, Unreal's standard order), then move to `Location`.
 
 The `Level` object holds one unknown byte (always 0 so far), the actor list,
 the map's URL, and then the BSP model reference.
+
+**Values that come from the class.** A map only stores the settings a
+designer changed. Most props (barrels, lamps, bacta dispensers, wall
+pieces) and the double-door movers (`MoverDB_*`) have no `StaticMesh` in
+the map at all: their model is the class's default, stored at the end of
+the class in a script package (`Properties/StaticPropProperties.u`,
+`KarmaPropProperties.u`, `CTInventory.u` and others). `rc_level::class_look`
+walks the class and its parents across packages (nearest class wins) using
+`rc_package::class_defaults`, and fills in `StaticMesh`, `DrawScale`,
+`DrawScale3D` and `bHidden` where the map leaves them out. A class whose
+`DrawType` isn't "static mesh" (8) is left alone, and markers are hidden in
+the game, so they stay hidden. Across all 79 maps this adds 3,460 props.
+
+**Blocking volumes** (`rc_level::volumes`). Invisible walls the designers
+used to keep the player in bounds. Each has a small BSP model (its brush)
+in the brush's own space: subtract `PrePivot`, turn by `Rotation`, then move
+to `Location` (`MainScale` and `PostScale` were 1 in every map). Flags say
+whether it stops players (`bBlockPlayers`), the AI (`bBlockActors`) and
+shots (`bBlockZeroExtentTraces`). The ones that stop players are added to
+the walking collision. Check: only 11 of 8,942 AI path points are inside a
+volume (107 with `PrePivot` ignored, 115 turned a quarter wrong).
+
+**The sky.** Unreal 2 draws the sky from a small sky box somewhere in the
+map, marked by a `SkyZoneInfo`. Windows onto it are BSP surfaces flagged
+"fake backdrop". `rc_level_viewer/src/sky.rs` puts a second camera at the
+`SkyZoneInfo` on its own render layer; it turns with the player but never
+moves, and draws first. The player's camera then draws the level without
+clearing, leaving out the fake backdrop polygons, so the sky shows through.
+Which polygons and props are in the sky box comes from the BSP zone tree
+(`Bsp::point_zone`). 67 of 79 maps have one.
+
+**Collision without Bevy** (`rc_level::map_collision`). Loads a map's BSP,
+placed props (with class models) and player-blocking volumes as triangles,
+plus the first `PlayerStart`. `rc_walk` uses it, and other programs can.
 
 ### Showing a level (`rc_level_viewer`)
 
@@ -855,6 +891,11 @@ It starts at the first `PlayerStart`, 64 units above it, facing its yaw.
 - **Lightmap checks**: the ones listed under "Baked light on the walls". If
   the lightmaps can't be read, the level still loads and draws unlit, and the
   log says why.
+- **Every map** (`rc_level_check`): builds all maps in `GameData/Maps` without
+  a window and writes one block per map to `logs/rc_level_check.log` (BSP,
+  lightmaps, props, materials, volumes, sky, floor test), then a summary
+  line per map. A crash in one map is logged as that map failing. Exits
+  with 1 if any map failed.
 
 ## Sounds
 

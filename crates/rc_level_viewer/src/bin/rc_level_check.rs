@@ -96,10 +96,11 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         log.line(format!("  lightmap check problem: {c}"));
     }
     log.line(format!(
-        "  actors {} read, {} failed; props {} with a mesh, {} drawn, {} hidden, {} not shown; {} prop triangles",
+        "  actors {} read, {} failed; props {} with a mesh ({} from their class), {} drawn, {} hidden, {} not shown; {} prop triangles",
         s.actors,
         s.actor_failures,
         s.mesh_actors,
+        s.class_mesh_actors,
         s.mesh_actors_drawn,
         s.hidden_actors,
         mesh_fail,

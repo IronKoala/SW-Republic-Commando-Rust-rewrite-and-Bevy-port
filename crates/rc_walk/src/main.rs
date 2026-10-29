@@ -710,10 +710,11 @@ fn main() -> AppExit {
                 }
             };
             log.line(format!(
-                "loaded {}: {} BSP nodes, {} static mesh props ({} couldn't be read), {} blocking volumes ({} couldn't be read), {:.0} ms",
+                "loaded {}: {} BSP nodes, {} static mesh props ({} with their class's model, {} couldn't be read), {} blocking volumes ({} couldn't be read), {:.0} ms",
                 path.display(),
                 lvl.bsp_nodes,
                 lvl.mesh_actors,
+                lvl.class_mesh_actors,
                 lvl.mesh_failures,
                 lvl.blocking_volumes,
                 lvl.volume_failures,

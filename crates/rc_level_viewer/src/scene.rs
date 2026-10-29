@@ -116,6 +116,9 @@ pub struct Stats {
     pub volumes_near_paths: usize,
     /// Sky: BSP polygons and props in the sky zone, and "fake backdrop"
     /// polygons left out so the sky shows through them.
+    /// Props with no model in the map that take their class's default model
+    /// (included in `mesh_actors`).
+    pub class_mesh_actors: usize,
     pub sky_polygons: usize,
     pub sky_props: usize,
     pub backdrop_polygons: usize,
@@ -336,12 +339,17 @@ type MeshResult = Result<Rc<(StaticMesh, Loaded)>, String>;
 fn load_mesh(
     mats: &mut Materials,
     cache: &mut HashMap<String, MeshResult>,
-    pkg: &Package,
     map: &Loaded,
     index: i32,
 ) -> MeshResult {
+    let pkg = &map.0;
     let path = object_path(pkg, index);
-    let key = path.join(".");
+    let key = match ObjectRef::from_index(index) {
+        // Objects inside the package itself: name the package too, as
+        // class meshes come from several packages.
+        ObjectRef::Export(_) => format!("({:p}){}", Rc::as_ptr(map), path.join(".")),
+        _ => path.join("."),
+    };
     if let Some(r) = cache.get(&key) {
         return r.clone();
     }
@@ -526,6 +534,7 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     let mut spawn = None;
     let mut floor_points = Vec::new();
     let mut mesh_cache = HashMap::new();
+    let mut class_looks = rc_level::class_look::ClassLooks::new();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
@@ -560,15 +569,31 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 }
             }
         }
+        let mut p = p;
+        // Props and doors that take their model from their class.
+        let mut owner = map.clone();
         if p.static_mesh == 0 {
-            continue;
+            let mats = &mut *ctx.mats;
+            match rc_level::class_look::apply_class_look(
+                &mut class_looks,
+                pkg,
+                data,
+                &mut p,
+                &mut |n: &str| mats.package(n),
+            ) {
+                Some(o) => {
+                    owner = o;
+                    ctx.stats.class_mesh_actors += 1;
+                }
+                None => continue,
+            }
         }
         ctx.stats.mesh_actors += 1;
         if p.hidden {
             ctx.stats.hidden_actors += 1;
             continue;
         }
-        match load_mesh(ctx.mats, &mut mesh_cache, pkg, &map, p.static_mesh) {
+        match load_mesh(ctx.mats, &mut mesh_cache, &owner, p.static_mesh) {
             Ok(m) => {
                 ctx.stats.mesh_actors_drawn += 1;
                 let colours = if p.static_mesh_instance != 0 {

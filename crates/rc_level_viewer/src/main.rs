@@ -414,8 +414,8 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         }
     }
     log.line(format!(
-        "actors: {} read, {} failed; {} with a static mesh, {} drawn, {} hidden; {} different meshes; {} mesh triangles",
-        s.actors, s.actor_failures, s.mesh_actors, s.mesh_actors_drawn, s.hidden_actors, s.unique_meshes, s.mesh_triangles
+        "actors: {} read, {} failed; {} with a static mesh ({} from their class), {} drawn, {} hidden; {} different meshes; {} mesh triangles",
+        s.actors, s.actor_failures, s.mesh_actors, s.class_mesh_actors, s.mesh_actors_drawn, s.hidden_actors, s.unique_meshes, s.mesh_triangles
     ));
     for (e, n) in &s.mesh_failures {
         log.line(format!("  mesh not shown ({n}x): {e}"));

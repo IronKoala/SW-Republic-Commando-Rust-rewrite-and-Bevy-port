@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Props and doors that take their model from their class (rc_level, rc_level_viewer, rc_walk)
+
+- **Changed:** New `rc_level::class_look`: when a map gives an actor no `StaticMesh`, it reads the actor's class defaults (walking the class and its parents across script packages such as `Properties/StaticPropProperties.u`, `KarmaPropProperties.u` and `CTInventory.u`) and fills in `StaticMesh`, `DrawScale`, `DrawScale3D` and `bHidden` where the map leaves them out. Classes whose `DrawType` isn't "static mesh" are left alone. The level viewer, `rc_level_check` and `rc_level::map_collision` (so `rc_walk`) use it. Added `rc_package::class_defaults`, copied unchanged from the weapons thread (commit f4d8880) so both branches carry the same file.
+- **Why:** Most props (barrels, lamps, wall pieces, bacta dispensers) and the double-door movers (`MoverDB_*`) store their model only in their class, so they were missing from the levels and you could walk through where they stand.
+- **Tested how:** `rc_level_check` on all 79 maps, before and after; `rc_walk --map geo_01a --script`; `rc_walk --script`.
+- **Result:** 3,460 more props across the 79 maps (27,521 to 30,981; drawn 27,446 to 30,234), every one of their models read, 1.1 million more triangles. `79 of 79 maps loaded, 0 failed`. Floor test: 7,853 of 8,942 path points have a floor below (7,850 before); 4 more points in geo_03a, yyy_01c and yyy_01d now have something closer than 80 units below (28 in all, 24 before), most likely AI paths that run over one of the new props. Walker: 3 passed, 0 failed on geo_01a (25 props there use their class's model); 21 passed, 0 failed in the test room.
+- **Still broken / not tested:** Not compared with the real game by eye. The doors stand closed where the map puts them and don't open yet. Not tested on Windows.
+- **Next:** Doors that open, and the level plugin for the game.
+
 ## 2026-10-29: The sky (rc_level_viewer, rc_walk)
 
 - **Changed:** New `rc_level_viewer/src/sky.rs`: a second camera stands at the map's `SkyZoneInfo`, inside its small sky box, and turns with the player's view without moving. It draws first; the player's camera draws the level over it without clearing. `scene.rs` puts the sky zone's polygons and props on their own render layer and leaves out "fake backdrop" polygons (the windows onto the sky). Found the zone of a point with a new `Bsp::point_zone` (UE2's tree walk). The viewer has `--pitch DEG` and `--no-sky`; `rc_walk --map` gets the sky too. `spawn_level` now also returns every entity it spawned.
