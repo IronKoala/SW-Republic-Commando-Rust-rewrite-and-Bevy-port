@@ -1,0 +1,33 @@
+# Player movement settings for Delta 38, the player character.
+#
+# Mods: change any number here and restart. Delete a line to use the built-in
+# value. A misspelt name stops the game with an error naming the line.
+#
+# Distances are Unreal units (uu): the commando is 168 uu tall (twice
+# collision_height). Times are seconds. The values are the original game's,
+# read from its script packages (class defaults of CTCharacters.PlayerCommando
+# and its parents, see docs/RESEARCH.md).
+
+[player]
+ground_speed = 450        # top running speed, uu/s
+accel_rate = 1024         # how fast the player speeds up, uu/s²
+jump_z = 475              # upward speed of a jump, uu/s (about 103 uu high)
+air_control = 0.35        # share of accel_rate you keep in the air
+walk_speed_ratio = 0.5    # walking (Shift held) speed / running speed
+crouch_speed_ratio = 0.5  # crouched speed / standing speed
+back_speed_ratio = 0.6    # backwards speed / forwards speed
+side_speed_ratio = 0.75   # sideways speed / forwards speed
+
+collision_radius = 40     # collision box half-width, uu
+collision_height = 84     # collision box half-height, uu
+crouch_radius = 40
+crouch_height = 56
+base_eye_height = 60      # eye above the collision box centre, uu
+max_step_height = 35      # tallest step you walk up without jumping, uu
+min_floor_z = 0.7         # steepest walkable slope (0.7 = about 45.6 degrees)
+
+[world]
+gravity_z = -1100         # uu/s², negative is down
+ground_friction = 8
+terminal_velocity = 12000 # fastest fall, uu/s
+max_fall_speed = 1200     # landing faster than this hurts, uu/s

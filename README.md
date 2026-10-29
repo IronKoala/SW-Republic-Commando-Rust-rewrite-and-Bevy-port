@@ -50,6 +50,15 @@ copy of the game.
   screen: outline match 0.996 and colour difference 1.04 of 255, PASS. It also
   works for the DC-17m, the DC-15s pistol and the thermal detonator.
 
+- **Walking in first person (tested in the cloud sandbox, not yet on
+  Windows).** `rc_walk` puts you in a test room with steps, stairs, ramps, a
+  low ceiling and a tower, and moves you with the original game's numbers
+  (run 450, walk and crouch half speed, jump 103 units high, 35-unit steps,
+  gravity 1100). Controls are the game's: W A S D, mouse, Space, hold C to
+  crouch, hold Shift to walk. The numbers are in
+  `data/movement/player_commando.toml`, which mods can edit. `rc_walk
+  --script` drives itself through 21 checks and passed all of them.
+
 ## What doesn't work yet
 
 - Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
@@ -58,7 +67,12 @@ copy of the game.
 - Animated models (`.ukx`), sounds, level geometry and scripts are not decoded yet.
 - Models are drawn without lighting, bump maps or transparency. Only a
   material's main colour texture is used.
-- No levels, no game yet.
+- No levels yet: walking only works in the hand-made test room. No weapons,
+  enemies, health or sound.
+- Movement guesses: how the game blends the backwards and sideways speed
+  limits, how fast it brakes, and how fast the mouse turns live in the game's
+  compiled engine, so those follow Unreal Engine 2's usual behaviour or our
+  own choice. See `docs/DESIGN.md`.
 
 ## How to run it
 
@@ -120,6 +134,24 @@ models work too, for example
 `cargo run --release -p rc_viewer -- --mesh "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\StaticMeshes\weapons.usx" DC17mBlaster`.
 To check every static mesh: `cargo run --release -p rc_probe -- --meshes`
 (log in `logs\rc_meshes.log`).
+
+To walk around the test room in first person (click the window to look
+around with the mouse, Escape to free the mouse):
+
+```
+cargo run --release -p rc_walk
+```
+
+To let it test itself instead (it moves on its own and closes when done):
+
+```
+cargo run --release -p rc_walk -- --script
+```
+
+The log goes to `logs\rc_walk.log`. The last line should be
+`SCRIPT DONE: 21 checks passed, 0 failed`. To try different movement
+numbers, copy `data\movement\player_commando.toml`, edit it and add
+`--settings yourfile.toml`.
 
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.

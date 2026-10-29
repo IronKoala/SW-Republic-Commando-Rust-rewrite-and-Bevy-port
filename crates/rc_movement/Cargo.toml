@@ -1,0 +1,7 @@
+[package]
+name = "rc_movement"
+version = "0.1.0"
+description = "The player's walking, jumping and crouching physics, using Republic Commando's own numbers. No Bevy."
+edition.workspace = true
+
+[dependencies]

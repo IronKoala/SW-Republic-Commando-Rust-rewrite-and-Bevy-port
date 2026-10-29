@@ -17,6 +17,8 @@
 !rust-toolchain.toml
 !*.rs
 !*.md
+# Game settings files that mods can edit (our own, never the game's).
+!data/**/*.toml
 
 # 4. Never look inside these folders, even if a file in them matches above.
 # Rust build output.
