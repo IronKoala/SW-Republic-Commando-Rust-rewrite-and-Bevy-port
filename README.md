@@ -50,14 +50,26 @@ copy of the game.
   screen: outline match 0.996 and colour difference 1.04 of 255, PASS. It also
   works for the DC-17m, the DC-15s pistol and the thermal detonator.
 
+- **Characters with animation (tested in the cloud, not yet on Windows).**
+  `rc_probe --characters` reads every character body ("skeletal mesh") and
+  animation set in the game: all 131 meshes and 165 animation sets (1,414
+  animations) in the 20 animation packages read with no failures.
+  `rc_character` opens a 3D window with a textured clone trooper walking on
+  the spot. It checks itself by capturing the window and comparing the
+  character's outline with the one it expects (score 0.99 of 1.0; 0.95
+  passes). Battle droids work too.
+
 ## What doesn't work yet
 
 - Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Animated models (`.ukx`), sounds, level geometry and scripts are not decoded yet.
-- Models are drawn without lighting, bump maps or transparency. Only a
+- Sounds, level geometry and scripts are not decoded yet.
+- Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
+- Characters: only the first material slot, no blending between
+  animations, no sounds or effects from animation events. Not run on
+  Windows yet.
 - No levels, no game yet.
 
 ## How to run it
@@ -120,6 +132,29 @@ models work too, for example
 `cargo run --release -p rc_viewer -- --mesh "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\StaticMeshes\weapons.usx" DC17mBlaster`.
 To check every static mesh: `cargo run --release -p rc_probe -- --meshes`
 (log in `logs\rc_meshes.log`).
+
+To check every character and animation in the game:
+
+```
+cargo run --release -p rc_probe -- --characters
+```
+
+This logs to `logs\rc_characters.log` and ends with a `--- character summary ---` part.
+
+To see an animated clone trooper (the first build compiles Bevy's 3D parts,
+which takes several minutes):
+
+```
+cargo run --release -p rc_character
+```
+
+You should see a window titled `Republic Commando: CloneTrooper playing
+WalkForward (CloneCommandoSet)` with a white-armoured clone walking on the
+spot. The log goes to `logs\rc_character.log`; look for the line starting
+`on-screen check PASS`. Give a different animation by name, or add `--list`
+to log all of them, for example `cargo run --release -p rc_character -- Reload`.
+Other characters: `cargo run --release -p rc_character -- --package
+"C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Animations\droid.ukx" --mesh BattleDroid WalkForward`.
 
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.

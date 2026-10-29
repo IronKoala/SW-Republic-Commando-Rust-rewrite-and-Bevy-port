@@ -1,0 +1,18 @@
+[package]
+name = "rc_character"
+version = "0.1.0"
+description = "Shows one animated character from the game in a 3D Bevy window"
+edition.workspace = true
+
+[dependencies]
+rc_anim = { path = "../rc_anim" }
+rc_image = { path = "../rc_image" }
+rc_package = { path = "../rc_package" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The same pieces as rc_viewer
+# (a window plus bevy_pbr for lit, textured 3D meshes), so both programs
+# share one compiled copy of Bevy.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["default_app", "std", "bevy_winit", "multi_threaded", "x11", "2d_bevy_render", "bevy_pbr"]
