@@ -149,10 +149,10 @@ fn move_body(
     collision: Res<LevelCollision>,
     movers: Option<Res<rc_movers_plugin::LevelMovers>>,
     mut kicks: MessageReader<ViewKick>,
-    mut body: Query<(&mut Body, &mut Transform), With<Player>>,
+    mut body: Query<(&mut Body, &mut Transform, Has<rc_combat::Dead>), With<Player>>,
     log: Res<GameLog>,
 ) {
-    let Ok((mut body, mut t)) = body.single_mut() else {
+    let Ok((mut body, mut t, down)) = body.single_mut() else {
         return;
     };
     let dt = time.delta_secs().min(0.25);
@@ -163,13 +163,22 @@ fn move_body(
         .fold(Vec2::ZERO, |k, v| k + Vec2::new(v.yaw, v.pitch));
     body.yaw = (body.yaw + actions.look.x + kick.x).rem_euclid(std::f32::consts::TAU);
     body.pitch = (body.pitch + actions.look.y + kick.y).clamp(-1.5, 1.5);
-    let input = MoveInput {
-        forward: actions.movement.y,
-        strafe: actions.movement.x,
-        yaw: body.yaw,
-        jump: actions.pressed(Action::Jump),
-        crouch: actions.pressed(Action::Crouch),
-        walk: actions.pressed(Action::Walk),
+    // Down (health at 0, waiting for a squad mate to revive): can look
+    // around but not move.
+    let input = if down {
+        MoveInput {
+            yaw: body.yaw,
+            ..Default::default()
+        }
+    } else {
+        MoveInput {
+            forward: actions.movement.y,
+            strafe: actions.movement.x,
+            yaw: body.yaw,
+            jump: actions.pressed(Action::Jump),
+            crouch: actions.pressed(Action::Crouch),
+            walk: actions.pressed(Action::Walk),
+        }
     };
     // Doors and lifts move first, carrying or pushing the player; the
     // player then moves among them (they are in `LevelCollision`).
