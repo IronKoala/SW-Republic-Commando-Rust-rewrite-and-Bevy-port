@@ -115,6 +115,8 @@ fn pixel_format(format: u8) -> Option<PixelFormat> {
         7 => PixelFormat::Dxt3,
         8 => PixelFormat::Dxt5,
         10 => PixelFormat::G16,
+        12 => PixelFormat::V8U8,
+        14 => PixelFormat::L6V5U5,
         _ => return None,
     })
 }

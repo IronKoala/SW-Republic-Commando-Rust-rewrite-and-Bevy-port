@@ -22,11 +22,11 @@ copy of the game.
   three maps: 2,491 textures, 2,490 pass every check. The one exception is a
   texture whose smallest (1x1) mipmap is stored with no pixels, which looks like
   a quirk in the game's own file. Formats seen: P8, DXT1, DXT3, DXT5, RGBA8,
-  G16, and two 2-byte-per-pixel formats numbered 12 and 14.
+  G16, and the bump-map formats V8U8 (12) and L6V5U5 (14).
 
 - **Turning textures into pictures (tested by numbers, not by eye).** The
-  `rc_image` crate decodes P8 (with its palette), DXT1, DXT3, DXT5, RGBA8 and G16
-  into normal colours, and `rc_probe --export-textures` saves them as PNG files
+  `rc_image` crate decodes P8 (with its palette), DXT1, DXT3, DXT5, RGBA8, G16
+  and the two bump-map formats into normal colours, and `rc_probe --export-textures` saves them as PNG files
   in the gitignored `extracted/textures/` folder. Of 2,491 textures, 2,358 were
   decoded with no failures. For 2,003 of them we could compare against the
   game's own half-size copy, and 1,916 match within 10 out of 255.
@@ -50,9 +50,14 @@ copy of the game.
   screen: outline match 0.996 and colour difference 1.04 of 255, PASS. It also
   works for the DC-17m, the DC-15s pistol and the thermal detonator.
 
+- **Bump maps (tested by numbers, not by eye).** All 133 bump maps (formats
+  12 and 14) now decode, as the usual light-blue "normal map" pictures. The
+  two layouts were found by measurement, since no documentation names them
+  (see `docs/DESIGN.md`, "Bump maps"). Their own half-size copies match with
+  a median difference of 1.8 of 255.
+
 ## What doesn't work yet
 
-- Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Animated models (`.ukx`), sounds, level geometry and scripts are not decoded yet.

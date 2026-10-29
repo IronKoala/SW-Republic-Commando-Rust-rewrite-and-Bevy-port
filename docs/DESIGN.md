@@ -98,9 +98,8 @@ Three checks show the reading is right, and all pass on real files:
 
 Formats are UE2's numbers: 0 P8 (8-bit with a separate palette), 3 DXT1,
 7 DXT3, 8 DXT5, 5 RGBA8, 10 G16 (terrain heightmaps). Republic Commando also
-uses 12 and 14, both 2 bytes per pixel (measured on every mipmap). UE Viewer
-guesses 14 is CxV8U8, a two-channel format used for bump maps. We found no name
-for 12.
+uses 12 (V8U8) and 14 (L6V5U5), two bump-map formats, both 2 bytes per pixel.
+How we know which is which is under "Bump maps" below.
 
 Known quirk: `MP_Trando_Light_Cluster` (in `multiplayer_textures.utx`) stores
 its last mipmap, 1x1 pixels, with 0 bytes. The file is otherwise consistent, so
@@ -120,6 +119,7 @@ per pixel):
   colours and picks between them and two in-between colours per pixel. DXT3
   adds 4 bits of alpha per pixel; DXT5 adds an alpha pair with 8 steps.
 - **G16**: 16-bit grey; we keep the top 8 bits.
+- **V8U8 and L6V5U5** (bump maps): see the next section.
 
 PNG files are written uncompressed (simplest valid PNG), so they're large but
 open anywhere. They go to `extracted/textures/<package>/<texture>.png`.
@@ -133,6 +133,44 @@ across the install: 1,916 of 2,003 textures differ by under 10; 17 by over 20.
 The 17 are mostly fine patterns (grates, noise, flickering screens). Their
 smaller copies fade toward flat grey, which suggests the artists made those
 mipmaps differently. That explanation is a guess and hasn't been checked by eye.
+
+## Bump maps (formats 12 and 14)
+
+A bump map (also "normal map") stores, for each pixel, which way the surface
+tilts, so flat walls catch light as if they had dents and rivets. 133 of the
+game's textures are bump maps, in two layouts that Direct3D (the Windows
+graphics system the game ran on) names:
+
+- **Format 12 = V8U8** (29 textures): two bytes per pixel, the sideways tilt U
+  and the up/down tilt V, each a signed number from -128 to 127.
+- **Format 14 = L6V5U5** (104 textures): one 16-bit number per pixel. Bits 0-4
+  are U and bits 5-9 are V (signed, -16 to 15), and bits 10-15 are a brightness
+  value L (0-63). What the game used L for isn't known; some of these textures
+  are named `..._spec`, so it may be shininess. We keep it in the alpha channel.
+
+`rc_image` turns both into the usual normal-map colours: red = U, green = V,
+blue = how much the surface faces straight out, all mapped from -1..1 to
+0..255. A flat pixel becomes (128, 128, 255), the familiar light blue.
+
+**How we found out, without documentation.** UE Viewer guesses format 14 is
+CxV8U8 and marks it "not verified"; nothing names 12. So we tried six possible
+layouts on every bump map and used the mipmap test from above: decode mip 0 and
+mip 1 with each layout, shrink mip 0, and compare. The right layout gives a
+small difference compared with a deliberately mismatched pair. Results
+(difference divided by the mismatched difference, smaller is better):
+
+| Layout tried | Format 12 | Format 14 |
+|---|---|---|
+| V8U8, signed bytes | **0.06** | 0.34 |
+| two unsigned bytes | 0.36 | 0.28 |
+| L6V5U5 | 0.76 | **0.08** (L alone: 0.01) |
+| RGB565, ARGB4444, other bit orders | 0.47-0.76 | 0.37-0.51 |
+
+Each format has one clear winner. With these layouts all 133 bump maps decode;
+for the 121 that have a mip 1, the median mip difference is 1.8 and only one is
+over 10 (11.2). Not checked: which way "up" points for V. Bevy may need its
+`flip_normal_map_y` setting, which can only be told by lighting a bump-mapped
+wall and comparing with the game.
 
 ## Showing a texture in Bevy (`rc_viewer`)
 
