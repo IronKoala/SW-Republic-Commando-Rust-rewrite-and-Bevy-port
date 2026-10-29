@@ -18,39 +18,40 @@
 #   play:<map>    start a map
 #   unavailable   greyed out, can't be chosen (not built yet)
 #
-# NOT CHECKED YET: the function names below are educated guesses
-# (RestartMissionSelected is the one name seen in the install). Run the
-# game once with the install and read the log: any button it lists as
-# having "no command" needs its name added here. `rc_probe --classes
-# XInterfaceCTMenus.u <Class>` also lists a menu's buttons.
+# Checked 2026-10-29 with `rc_probe --pages` against the install: these are
+# the original's function names. `rc_probe --pages` lists every menu's
+# buttons and says which pages would use their original menu.
 
 [pages.paused]
 class = "XInterfaceCTMenus.CTPausePCMenu"
 over_game = true
 back = "resume"
 
+# In the original's order. Saving, loading and hints aren't built yet.
 [pages.paused.buttons]
-ResumeSelected = "resume"
+LoadLastSaveSelected = "unavailable"
+QuickSaveSelected = "unavailable"
+QuickLoadSelected = "unavailable"
 ResumeGameSelected = "resume"
-ContinueSelected = "resume"
 RestartMissionSelected = "restart"
-RestartCheckpointSelected = "unavailable"
-LoadGameSelected = "unavailable"
 SaveGameSelected = "unavailable"
+LoadGameSelected = "unavailable"
 OptionsSelected = "open:options"
-ControlsSelected = "open:options"
-QuitSelected = "quit_to_menu"
-QuitToMainMenuSelected = "quit_to_menu"
-QuitMissionSelected = "quit_to_menu"
-ExitGameSelected = "quit_game"
+EnableHintsSelected = "unavailable"
+EndMissionSelected = "quit_to_menu"
+QuitSelected = "quit_game"
 
+# The campaign menu (checked): its planets, level list and scroll bar are
+# widget kinds the menu reader can't draw yet (MenuButtonSprite,
+# MenuStringList, MenuScrollBar, MenuScrollArea, MenuActiveWidget), so it
+# keeps the placeholder until they are built.
 [pages.campaigns]
 class = "XInterfaceCTMenus.CTCampaignMenu"
 back = "back"
 
 [pages.campaigns.buttons]
-BackSelected = "back"
 OnBButton = "back"
+SelectCurrentLevel = "unavailable"
 
 # The options pages (CTGraphicsOptionsPCMenu, CTSoundOptionsPCMenu,
 # CTControlsOptionsPCMenu, CTMapKeyMenu) use sliders, check boxes and key

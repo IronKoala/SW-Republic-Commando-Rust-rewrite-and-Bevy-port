@@ -71,7 +71,7 @@ impl Screen {
         self.focus.map(|i| self.layout.widgets[i].name.as_str())
     }
 
-    fn on_select(&self, i: usize) -> String {
+    pub(crate) fn on_select(&self, i: usize) -> String {
         match &self.layout.widgets[i].kind {
             Kind::Button(b) => b.on_select.clone(),
             _ => String::new(),

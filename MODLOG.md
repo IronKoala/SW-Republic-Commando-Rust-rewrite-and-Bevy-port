@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Checked against the install: the original pause menu and crosshair are in
+
+- **Changed:** `data/ui/original_menus.toml`: the pause menu's real function names (11 buttons; LOAD LAST SAVE, QUICK SAVE, QUICK LOAD, SAVE GAME, LOAD GAME and ENABLE HINTS greyed out; END MISSION to the main menu; QUIT PROGRAM asks the quit question). The campaign entry notes why it keeps the placeholder. `data/ui/hud.toml`: the PC reticles (`HUD_WeaponDefaultPC`, `HUD_WeaponPistolPC`). `original_hud.rs`: the picture is now added once the HUD exists (it was added before, so it never appeared). `script.rs`: the crosshair check accepts the original's white reticle; a new `FocusPauseItem` step picks pause items by function name; a check that the pause page is the original's; a screenshot of the pause menu.
+- **Why:** The overnight version was built without the game files.
+- **Tested how:** With 421 MB copied read-only from the install into the cloud sandbox: `rc_probe --pages`, `rc_probe --export-textures HUDTextures.utx` (outside the repo), then `xvfb-run rc_game --script` at 1280x720. `cargo test -p rc_game -p rc_menus`.
+- **Result:** `rc_probe --pages`: paused USES THE ORIGINAL; campaigns keeps the placeholder (14 widgets of 5 kinds we don't draw: MenuButtonSprite, MenuStringList, MenuScrollBar, MenuScrollArea, MenuActiveWidget). Script: `SCRIPT DONE: 33 checks passed, 0 failed`, including "the pause menu is the original's: original CTPausePCMenu", RESUME GAME resuming, END MISSION leaving the level, and "original reticle: 461 white pixels at the centre". The first run showed the reticle never appeared (log had no `original hud` lines and the old amber check failed with 0 amber pixels); fixed by adding it after the HUD exists.
+- **Still broken / not tested:** Not tested on Windows. The pause menu isn't colour-compared with a software picture (it's drawn over the game). The reticle's size and on-target red aren't compared with the real game. Campaign and options pages are still placeholders. Mouse on the pause menu not tested by the script.
+- **Next:** Draw `MenuButtonSprite` and `MenuStringList` for the campaign menu.
+
 ## 2026-10-29: The crosshair can use the original's reticle pictures (original_hud.rs)
 
 - **Changed:** New `crates/rc_game/src/original_hud.rs` (`OriginalHudPlugin`) and `data/ui/hud.toml` (default reticle, one per weapon name, size). `hud.rs` exposes `CrossBar` and a `HudSystems` set; `main.rs` adds the plugin.

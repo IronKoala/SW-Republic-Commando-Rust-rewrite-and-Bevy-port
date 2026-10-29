@@ -93,10 +93,10 @@ impl Plugin for OriginalHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OriginalHud>()
             .add_systems(Startup, read_plan)
-            .add_systems(OnEnter(GameState::InGame), spawn_picture)
             .add_systems(
                 Update,
-                update_crosshair
+                (spawn_picture, update_crosshair)
+                    .chain()
                     .in_set(GameSet::Hud)
                     .after(crate::hud::HudSystems)
                     .run_if(in_state(GameState::InGame)),
@@ -127,28 +127,32 @@ fn read_plan(
     }
 }
 
-fn spawn_picture(mut commands: Commands, crosses: Query<Entity, With<CrossBar>>) {
-    // Beside the bars, in the same centred point (their parent).
-    let Some(parent) = crosses.iter().next() else {
+/// Once the HUD is up, add the picture beside the bars, in the same
+/// centred point (their parent). It goes when the HUD goes.
+fn spawn_picture(
+    mut commands: Commands,
+    hud: Res<OriginalHud>,
+    crosses: Query<&ChildOf, With<CrossBar>>,
+    pictures: Query<(), With<CrossPicture>>,
+) {
+    if hud.library.is_none() || !pictures.is_empty() {
+        return;
+    }
+    let Some(centre) = crosses.iter().next().map(|c| c.parent()) else {
         return;
     };
-    commands.queue(move |world: &mut World| {
-        let Some(centre) = world.get::<ChildOf>(parent).map(|c| c.parent()) else {
-            return;
-        };
-        let picture = world
-            .spawn((
-                CrossPicture,
-                ImageNode::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
-                Visibility::Hidden,
-            ))
-            .id();
-        world.entity_mut(centre).add_child(picture);
-    });
+    let picture = commands
+        .spawn((
+            CrossPicture,
+            ImageNode::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(centre).add_child(picture);
 }
 
 fn load_picture(
@@ -255,6 +259,13 @@ fn update_crosshair(
         node.left = Val::Vh(-size.x * s / 2.0);
         node.top = Val::Vh(-size.y * s / 2.0);
     }
+}
+
+/// Whether the original's reticle picture is on screen now (for the
+/// script's check).
+pub fn reticle_showing(w: &mut World) -> bool {
+    let mut q = w.query_filtered::<&Visibility, With<CrossPicture>>();
+    q.iter(w).any(|v| *v != Visibility::Hidden)
 }
 
 #[cfg(test)]
