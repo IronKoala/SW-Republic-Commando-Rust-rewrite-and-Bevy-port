@@ -39,8 +39,7 @@ impl SavePart for CombatSave {
     const KEY: &'static str = "combat";
 
     fn save(world: &mut World) -> Option<Self> {
-        let mut q = world
-            .query_filtered::<(&Health, Option<&Shield>, &Arsenal), With<Player>>();
+        let mut q = world.query_filtered::<(&Health, Option<&Shield>, &Arsenal), With<Player>>();
         let (h, s, a) = q.iter(world).next()?;
         Some(CombatSave {
             health: h.current,
