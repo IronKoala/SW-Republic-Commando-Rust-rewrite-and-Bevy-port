@@ -11,12 +11,16 @@
 //!   rc_probe --textures [path]  read every texture in a package or folder
 //!                            (default: the whole GameData folder), decode and
 //!                            check its pixels, log to `logs/rc_textures.log`
+//!   rc_probe --meshes [path]  read every static mesh (3D model) in a package
+//!                            or folder (default: GameData/StaticMeshes) and
+//!                            check it, log to `logs/rc_meshes.log`
 //!   rc_probe --export-textures <path>  the same, and also write each texture
 //!                            as a PNG to `extracted/textures/<package>/`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
+mod meshes;
 mod pixels;
 mod textures;
 
@@ -31,6 +35,7 @@ const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Repub
 const PACKAGE_EXTENSIONS: &[&str] = &["u", "ctm", "utx", "uax", "usx", "ukx"];
 const LOG_PATH: &str = "logs/rc_probe.log";
 const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
+const MESH_LOG_PATH: &str = "logs/rc_meshes.log";
 /// Gitignored folder for anything extracted from the game.
 const EXTRACT_DIR: &str = "extracted/textures";
 
@@ -57,7 +62,8 @@ fn main() {
     let mut args: Vec<_> = std::env::args_os().skip(1).collect();
     let export_mode = args.first().is_some_and(|a| a == "--export-textures");
     let texture_mode = export_mode || args.first().is_some_and(|a| a == "--textures");
-    if texture_mode {
+    let mesh_mode = args.first().is_some_and(|a| a == "--meshes");
+    if texture_mode || mesh_mode {
         args.remove(0);
     }
     if export_mode && args.is_empty() {
@@ -71,10 +77,13 @@ fn main() {
     let target = match args.first() {
         Some(arg) => PathBuf::from(arg),
         None if texture_mode => game.join("GameData"),
+        None if mesh_mode => game.join("GameData").join("StaticMeshes"),
         None => game.join("GameData").join("System").join("Core.u"),
     };
     let log_path = if texture_mode {
         TEXTURE_LOG_PATH
+    } else if mesh_mode {
+        MESH_LOG_PATH
     } else {
         LOG_PATH
     };
@@ -99,6 +108,8 @@ fn main() {
     let ok = if texture_mode {
         let export_dir = export_mode.then(|| Path::new(EXTRACT_DIR));
         textures::scan(&mut log, &target, export_dir)
+    } else if mesh_mode {
+        meshes::scan(&mut log, &target)
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {
