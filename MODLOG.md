@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Level viewer passes on Windows
+
+- **Changed:** No code changes. Updated `README.md` with the result.
+- **Why:** The level viewer had only been tested in the cloud sandbox.
+- **Tested how:** The user ran `cargo run --release -p rc_level_viewer` on their Windows PC and flew around; Claude read `logs\rc_level_viewer.log` from the PC.
+- **Result:** 249 package files found; BSP checks all passed; 1,209 actors, 355 props, 141,477 triangles; 56 of 56 materials textured; floor test 292 of 293 (0 too close); level built in 246 ms; on-screen check PASS on the first capture (580 colours); steady 144 frames per second while the camera moved about 30 Bevy units.
+- **Still broken / not tested:** Not tested: maps other than `geo_01a`. Still unlit, no collision.
+- **Next:** Lights and lightmaps (roadmap step 2).
+
 ## 2026-10-29: Load a whole level and fly around it (rc_level, rc_level_viewer)
 
 - **Changed:** New crate `crates/rc_level` (no Bevy): `bsp.rs` reads a map's BSP model (the level's own walls and floors: vectors, points, nodes, surfaces, vertex pool) and turns each node into a polygon with texture coordinates; `actors.rs` reads the `Level` object (actor list, map URL, BSP model) and each actor's placement (Location, Rotation, DrawScale, DrawScale3D, PrePivot, StaticMesh, Skins, bHidden), plus the Unreal rotation maths; `collision.rs` gives world-space collision triangles (solid BSP plus placed static meshes, each with its source) for the first-person thread. 3 unit tests. New program `crates/rc_level_viewer`: loads one map (default `geo_01a`), draws the BSP and every placed static mesh with their textures, batched by material, with a free-fly camera starting at the PlayerStart. Logs to `logs/rc_level_viewer.log`. README and DESIGN updated.
