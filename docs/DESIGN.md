@@ -14,15 +14,18 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
 | `rc_audio` | Reads `.wav` files into samples and measures them (length, peak, loudness, checksum). Knows nothing about Unreal. No Bevy. |
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
+| `rc_level` | Reads maps: the level's own geometry (the BSP) and where every actor is placed. No Bevy. |
+| `rc_level_viewer` | Bevy program: loads one map and lets you fly around it. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
-Only `rc_viewer`, `rc_character` and `rc_soundtest` use Bevy (version 0.20.1,
-MIT or Apache-2.0). Each turns on only the parts of Bevy it needs, which keeps
-the build smaller: `rc_viewer` and `rc_character` a 2D window plus `bevy_pbr`
-for 3D models and their materials (the same list, so they share one build);
+Only `rc_viewer`, `rc_character`, `rc_level_viewer` and `rc_soundtest` use Bevy
+(version 0.20.1, MIT or Apache-2.0). Each turns on only the parts of Bevy it
+needs, which keeps the build smaller: `rc_viewer` and `rc_character` a 2D window
+plus `bevy_pbr` for 3D models and their materials (the same list, so they share
+one build); `rc_level_viewer` Bevy's full 3D renderer (`3d_bevy_render`);
 `rc_soundtest` only audio and WAV decoding, with no window.
 
 ## Finding the game
@@ -543,6 +546,106 @@ Bevy's own skinned meshes; the pose code stays the same. For mods: the
 viewer takes any package, mesh, set and sequence on its command line, and
 nothing assumes the clone trooper's bone names except the defaults.
 
+
+## Levels (maps)
+
+A map (`.ctm`) is a package like the others. Three kinds of object matter:
+
+- **`Level`**: the list of every actor in the map (the "things": props,
+  lights, path nodes, triggers, the player start...) and a link to the BSP.
+- **`Model`**: the BSP. Every brush and volume has a small one; the level's
+  own is the one `Level` points at.
+- **Actors**: objects of classes like `StaticMeshActor`, `Light` or
+  `PlayerStart`, each with its own settings.
+
+`rc_level` reads all three. It keeps Unreal's units and axes; converting to
+Bevy is the viewer's job.
+
+### The BSP (the level's own walls and floors)
+
+"BSP" (binary space partition) is how Unreal 2 stored the level's hand-built
+geometry: a tree that splits space with flat planes. For drawing we only need
+its polygons. Each tree node with corners is one flat, convex polygon. The
+arrays, in file order:
+
+1. **Vectors**: directions (surface normals and texture directions).
+2. **Points**: corner positions.
+3. **Nodes**: plane, zone mask, flags, then compact indexes (first corner in
+   the vertex pool, surface, back/front/coplanar children, bounds), a
+   bounding sphere, zones, corner count, leaves, and three numbers Republic
+   Commando adds (they look like render section, first vertex in it, and
+   lightmap). 
+4. **Surfaces**: material, flags (invisible, two-sided, translucent, ...),
+   texture origin point, normal and texture U/V directions, the brush it came
+   from, its plane, and its lightmap scale.
+5. **Vertex pool**: for each corner, a point index and a "side" index.
+
+The field names come from the public Unreal headers (read in the
+SWRC-Modding/CT repository, which has no licence, so nothing was copied); the
+exact Republic Commando layout was worked out from `geo_01a.ctm` and checked
+on 5 maps. Zones, leaves, lightmaps and render sections come after these
+arrays and aren't read yet.
+
+Texture coordinates come from the surface: U = (corner - origin) . U
+direction, same for V, in texels; the viewer divides by the texture's size.
+
+In Republic Commando most of a level is static meshes, not BSP: `geo_01a`
+has 249 BSP polygons but 355 placed props with 141,000 triangles.
+
+### Actors and where they are
+
+Actors in a map start with a short "state frame" (script state) before their
+property list: two compact indexes, 8 bytes, then 2 bytes (UE2 has 4 here;
+found by the lighting thread), and one more compact index if the first was
+not zero. After that come normal properties. `Location` is three decimals,
+`Rotation` three whole numbers (pitch, yaw, roll; 65,536 = a full turn),
+`DrawScale` and `DrawScale3D` scale the model, `StaticMesh` names the model,
+and `Skins` replaces its materials.
+
+To place a model: subtract `PrePivot`, scale, turn (yaw around the up axis,
+pitch, then roll, Unreal's standard order), then move to `Location`.
+
+The `Level` object holds one unknown byte (always 0 so far), the actor list,
+the map's URL, and then the BSP model reference.
+
+### Showing a level (`rc_level_viewer`)
+
+Before Bevy starts, the viewer reads the map, then every material and static
+mesh it uses from the other packages in `GameData` (it indexes every package
+file by name once). Materials are followed to a plain texture: a `Shader` to
+its `Diffuse`, Republic Commando's own `Hs...` materials to their
+`DiffuseTexture`, panners and modifiers to their `Material`. `HsFalloff`
+light shafts are drawn as glow (added on top), not as solid surfaces.
+
+All triangles that share a material go into one Bevy mesh, so the GPU gets
+one "draw call" per material (60 for `geo_01a`) instead of one per prop. This
+matters for slower machines and phones.
+
+**Coordinates.** Unreal: X forward, Y right, Z up. Bevy: Y up. We swap Y and
+Z and divide by 50 (`UNREAL_UNITS_PER_BEVY_UNIT`, the one place the scale is
+set, agreed with the other threads). Swapping two axes mirrors the world,
+which also turns Unreal's left-handed coordinates into Bevy's right-handed
+ones. Mirroring reverses the order of every polygon's corners, so the viewer
+works out each BSP polygon's corner order from its stored normal and writes
+the triangles so the right side faces out. In all 5 maps every BSP polygon
+had the same order.
+
+**Camera.** A free-flying camera in its own file (`camera.rs`), separate from
+level loading, so it can later become a first-person player or a VR headset.
+It starts at the first `PlayerStart`, 64 units above it, facing its yaw.
+
+### How we check a level without looking at it
+
+- **BSP checks**: every index points inside its array, every polygon's
+  corners lie on its node's plane (within 1 unit), plane normals have length 1.
+- **Floor test**: PathNodes (the AI's walking network) and PlayerStarts float
+  at a character's half height above a floor. A ray straight down from each
+  must hit level geometry soon, and never closer than 80 units (that would
+  mean the point is inside a prop). In `geo_01a`, 292 of 293 have a floor
+  within 150 units (median 104), none closer than 80. Turning props the wrong
+  way put 14-20 points inside props, so the test notices wrong placements.
+- **On-screen check**: from the spawn point, more than half the window must
+  be level (not background) with more than 100 different colours.
 
 ## Sounds
 

@@ -1,0 +1,493 @@
+//! Builds everything the viewer draws from one map, without Bevy: the BSP
+//! polygons and the placed static meshes, grouped by material into batches
+//! of triangles in Bevy's coordinates.
+
+use crate::materials::{object_path, Loaded, Materials, Picture};
+use rc_level::actors::{self, rotation_axes, Placement};
+use rc_level::bsp::{self, poly_flags, Bsp};
+use rc_package::static_mesh::{self, StaticMesh};
+use rc_package::{ObjectRef, Package};
+use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
+
+/// Unreal units per Bevy unit (agreed with the other threads). This is the
+/// one place the scale is set. Unreal's own rule of thumb is about 50 units
+/// per metre, so one Bevy unit is roughly one metre; the exact real-world
+/// scale (which matters for VR) is still to be measured against a character.
+pub const UNREAL_UNITS_PER_BEVY_UNIT: f32 = 50.0;
+
+/// Unreal (X forward, Y right, Z up, left-handed) to Bevy (Y up,
+/// right-handed): swap Y and Z, then scale. Swapping two axes is a mirror,
+/// which is exactly what turns left-handed into right-handed.
+pub fn to_bevy(v: [f32; 3]) -> [f32; 3] {
+    let s = 1.0 / UNREAL_UNITS_PER_BEVY_UNIT;
+    [v[0] * s, v[2] * s, v[1] * s]
+}
+
+/// Directions (normals) convert the same way, without the scale.
+pub fn dir_to_bevy(v: [f32; 3]) -> [f32; 3] {
+    [v[0], v[2], v[1]]
+}
+
+/// Triangles that share one material.
+#[derive(Default)]
+pub struct Batch {
+    pub picture: Option<Picture>,
+    pub translucent: bool,
+    pub two_sided: bool,
+    /// True for static mesh triangles, false for BSP ones.
+    pub from_mesh: bool,
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub uvs: Vec<[f32; 2]>,
+    pub indices: Vec<u32>,
+}
+
+#[derive(Default)]
+pub struct Stats {
+    pub bsp_polygons: usize,
+    pub bsp_skipped: BTreeMap<&'static str, usize>,
+    pub bsp_triangles: usize,
+    pub bsp_checks: Vec<String>,
+    pub bsp_winding: [usize; 3],
+    pub actors: usize,
+    pub actor_failures: usize,
+    pub mesh_actors: usize,
+    pub mesh_actors_drawn: usize,
+    pub hidden_actors: usize,
+    pub mesh_triangles: usize,
+    pub unique_meshes: usize,
+    pub mesh_failures: BTreeMap<String, usize>,
+    pub materials_ok: usize,
+    pub material_failures: BTreeMap<String, usize>,
+    /// Floor test: PathNodes and PlayerStarts sit just above a walkable
+    /// floor, so a ray straight down from each should hit level geometry
+    /// soon, and never closer than about 80 units (they hover at a
+    /// character's half height, so they are never inside a prop).
+    pub floor_test: FloorTest,
+    /// Triangles `rc_level::collision` would give a player to collide with.
+    pub collision_triangles: usize,
+    /// The same, counting only static mesh triangles. Turning props the
+    /// wrong way shows up here as points with a prop much too close below.
+    pub floor_test_meshes: FloorTest,
+    pub bounds_min: [f32; 3],
+    pub bounds_max: [f32; 3],
+}
+
+pub struct Spawn {
+    /// Bevy position of the eyes.
+    pub position: [f32; 3],
+    /// Unreal yaw (65536 = full turn).
+    pub yaw: i32,
+    pub from: String,
+}
+
+pub struct Scene {
+    pub batches: Vec<Batch>,
+    pub stats: Stats,
+    pub spawn: Spawn,
+}
+
+#[derive(Default)]
+struct Builder {
+    batches: Vec<Batch>,
+    by_key: HashMap<(String, bool, bool, bool), usize>,
+}
+
+impl Builder {
+    fn batch(
+        &mut self,
+        key: &str,
+        picture: &Option<Picture>,
+        translucent: bool,
+        two_sided: bool,
+        from_mesh: bool,
+    ) -> &mut Batch {
+        let k = (key.to_string(), translucent, two_sided, from_mesh);
+        let i = *self.by_key.entry(k).or_insert_with(|| {
+            self.batches.push(Batch {
+                picture: picture.clone(),
+                translucent,
+                two_sided,
+                from_mesh,
+                ..Default::default()
+            });
+            self.batches.len() - 1
+        });
+        &mut self.batches[i]
+    }
+}
+
+fn material_key(pkg: &Package, index: i32) -> String {
+    if index == 0 {
+        "(none)".into()
+    } else {
+        object_path(pkg, index).join(".")
+    }
+}
+
+/// Look up a material, counting successes and failures by reason.
+fn picture(
+    mats: &mut Materials,
+    stats: &mut Stats,
+    seen: &mut HashMap<String, Option<Picture>>,
+    pkg: &Package,
+    data: &[u8],
+    index: i32,
+) -> (String, Option<Picture>) {
+    let key = material_key(pkg, index);
+    if let Some(p) = seen.get(&key) {
+        return (key, p.clone());
+    }
+    let p = match mats.resolve(pkg, data, index) {
+        Ok(p) => {
+            stats.materials_ok += 1;
+            Some(p)
+        }
+        Err(e) => {
+            *stats.material_failures.entry(e).or_default() += 1;
+            None
+        }
+    };
+    seen.insert(key.clone(), p.clone());
+    (key, p)
+}
+
+fn tex_size(p: &Option<Picture>) -> [f32; 2] {
+    match p {
+        Some(p) => [p.image.width as f32, p.image.height as f32],
+        // Unknown textures: assume 256 so the pattern of UVs still makes sense.
+        None => [256.0, 256.0],
+    }
+}
+
+fn add_bsp(b: &mut Builder, bsp: &Bsp, ctx: &mut Ctx) {
+    for poly in bsp.polygons() {
+        ctx.stats.bsp_polygons += 1;
+        let w = Bsp::winding(&poly);
+        ctx.stats.bsp_winding[(w + 1) as usize] += 1;
+        if poly.poly_flags & poly_flags::INVISIBLE != 0 {
+            *ctx.stats.bsp_skipped.entry("invisible").or_default() += 1;
+            continue;
+        }
+        if poly.poly_flags & poly_flags::PORTAL != 0 {
+            *ctx.stats.bsp_skipped.entry("portal").or_default() += 1;
+            continue;
+        }
+        let (key, pic) = picture(
+            ctx.mats,
+            &mut ctx.stats,
+            &mut ctx.seen,
+            ctx.pkg,
+            ctx.data,
+            poly.material,
+        );
+        let size = tex_size(&pic);
+        let translucent = poly.poly_flags & poly_flags::TRANSLUCENT != 0;
+        let two_sided = poly.poly_flags & poly_flags::TWO_SIDED != 0;
+        let batch = b.batch(&key, &pic, translucent, two_sided, false);
+        let base = batch.positions.len() as u32;
+        let n = dir_to_bevy(poly.normal);
+        for (p, uv) in poly.points.iter().zip(&poly.uvs) {
+            batch.positions.push(to_bevy(*p));
+            batch.normals.push(n);
+            batch.uvs.push([uv[0] / size[0], uv[1] / size[1]]);
+        }
+        // A fan of triangles from the first corner. The Y/Z swap mirrors the
+        // polygon, so corners that went one way round now go the other; Bevy
+        // draws the side where corners go anticlockwise. `winding` says which
+        // way they went in the file.
+        for k in 1..poly.points.len() as u32 - 1 {
+            if w >= 0 {
+                batch.indices.extend([base, base + k + 1, base + k]);
+            } else {
+                batch.indices.extend([base, base + k, base + k + 1]);
+            }
+            ctx.stats.bsp_triangles += 1;
+        }
+    }
+}
+
+struct Ctx<'a> {
+    mats: &'a mut Materials,
+    stats: Stats,
+    seen: HashMap<String, Option<Picture>>,
+    pkg: &'a Package,
+    data: &'a [u8],
+}
+
+/// A static mesh and the package it came from (its materials are
+/// references inside that package), or why it couldn't be read.
+type MeshResult = Result<Rc<(StaticMesh, Loaded)>, String>;
+
+/// Find and read a static mesh by its reference in the map.
+fn load_mesh(
+    mats: &mut Materials,
+    cache: &mut HashMap<String, MeshResult>,
+    pkg: &Package,
+    map: &Loaded,
+    index: i32,
+) -> MeshResult {
+    let path = object_path(pkg, index);
+    let key = path.join(".");
+    if let Some(r) = cache.get(&key) {
+        return r.clone();
+    }
+    let result = (|| {
+        let (owner, k) = match ObjectRef::from_index(index) {
+            ObjectRef::Export(k) => (map.clone(), k),
+            ObjectRef::Import(_) => {
+                let owner = mats
+                    .package(&path[0])
+                    .ok_or_else(|| format!("package {} not found", path[0]))?;
+                let k = crate::materials::find_export(&owner.0, &path[1..])
+                    .ok_or_else(|| format!("{key} not found"))?;
+                (owner, k)
+            }
+            ObjectRef::None => return Err("no mesh".to_string()),
+        };
+        let mesh = static_mesh::read_static_mesh(&owner.0, &owner.1, &owner.0.exports[k])
+            .map_err(|e| format!("mesh read error: {e}"))?;
+        Ok(Rc::new((mesh, owner)))
+    })();
+    cache.insert(key, result.clone());
+    result
+}
+
+fn add_mesh_actor(
+    b: &mut Builder,
+    ctx: &mut Ctx,
+    p: &Placement,
+    mesh: &StaticMesh,
+    owner: &(Package, Vec<u8>),
+) {
+    let axes = rotation_axes(p.rotation);
+    let s3 = p.draw_scale_3d;
+    // A mirrored actor (an odd number of negative scales) turns its
+    // triangles inside out, so flip them back.
+    let mirrored = (s3[0] * s3[1] * s3[2] * p.draw_scale) < 0.0;
+    let uv0 = mesh.uv_sets.first();
+    for (si, sec) in mesh.sections.iter().enumerate() {
+        // The actor's Skins override the mesh's own materials.
+        let (key, pic) = match p.skins.get(si).copied().filter(|&m| m != 0) {
+            Some(m) => picture(
+                ctx.mats,
+                &mut ctx.stats,
+                &mut ctx.seen,
+                ctx.pkg,
+                ctx.data,
+                m,
+            ),
+            None => {
+                let m = mesh.materials.get(si).copied().unwrap_or(0);
+                picture(
+                    ctx.mats,
+                    &mut ctx.stats,
+                    &mut ctx.seen,
+                    &owner.0,
+                    &owner.1,
+                    m,
+                )
+            }
+        };
+        let batch = b.batch(&key, &pic, false, false, true);
+        let first = sec.first_index as usize;
+        let count = sec.num_faces as usize * 3;
+        let Some(tris) = mesh.indices.get(first..first + count) else {
+            continue;
+        };
+        // Copy just the vertices this section uses.
+        let mut remap: HashMap<u16, u32> = HashMap::new();
+        for chunk in tris.as_chunks::<3>().0 {
+            let mut out = [0u32; 3];
+            for (o, &vi) in out.iter_mut().zip(chunk) {
+                *o = *remap.entry(vi).or_insert_with(|| {
+                    let v = mesh.vertices[vi as usize];
+                    let world = p.transform_point(v.position);
+                    let n = v.normal;
+                    let mut wn = [0.0f32; 3];
+                    for (k, axis) in axes.iter().enumerate() {
+                        for c in 0..3 {
+                            // Normals scale by the inverse of the mesh's scale.
+                            let sk = if s3[k].abs() < 1e-6 { 1e-6 } else { s3[k] };
+                            wn[c] += n[k] * axis[c] / sk;
+                        }
+                    }
+                    let len = bsp::dot(wn, wn).sqrt().max(1e-6);
+                    batch.positions.push(to_bevy(world));
+                    batch
+                        .normals
+                        .push(dir_to_bevy([wn[0] / len, wn[1] / len, wn[2] / len]));
+                    batch.uvs.push(
+                        uv0.and_then(|u| u.get(vi as usize))
+                            .copied()
+                            .unwrap_or([0.0, 0.0]),
+                    );
+                    batch.positions.len() as u32 - 1
+                });
+            }
+            if mirrored {
+                batch.indices.extend([out[0], out[2], out[1]]);
+            } else {
+                batch.indices.extend(out);
+            }
+            ctx.stats.mesh_triangles += 1;
+        }
+    }
+}
+
+pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
+    let (pkg, data) = (&map.0, &map.1);
+    let level = actors::read_level(pkg, data).map_err(|e| format!("level: {e}"))?;
+    let model = level.model.ok_or("the level has no BSP model")?;
+    let bsp = bsp::read_model(pkg, data, &pkg.exports[model]).map_err(|e| format!("BSP: {e}"))?;
+
+    let mut b = Builder::default();
+    let mut ctx = Ctx {
+        mats,
+        stats: Stats::default(),
+        seen: HashMap::new(),
+        pkg,
+        data,
+    };
+    ctx.stats.bsp_checks = bsp.check();
+    add_bsp(&mut b, &bsp, &mut ctx);
+
+    let mut spawn = None;
+    let mut floor_points = Vec::new();
+    let mut mesh_cache = HashMap::new();
+    let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
+    for &a in level.actors.iter().flatten() {
+        ctx.stats.actors += 1;
+        let p = match actors::read_placement(pkg, data, a) {
+            Ok(p) => p,
+            Err(_) => {
+                ctx.stats.actor_failures += 1;
+                continue;
+            }
+        };
+        if p.class == "PlayerStart" && spawn.is_none() {
+            // Eye height: Unreal pawns stand with their centre at the
+            // PlayerStart; eyes are a little above it.
+            let eye = [p.location[0], p.location[1], p.location[2] + 64.0];
+            spawn = Some(Spawn {
+                position: to_bevy(eye),
+                yaw: p.rotation[1],
+                from: format!("{} at {:?}", p.name, p.location),
+            });
+        }
+        if p.class == "PathNode" || p.class == "PlayerStart" {
+            floor_points.push(p.location);
+        }
+        if p.static_mesh == 0 {
+            continue;
+        }
+        ctx.stats.mesh_actors += 1;
+        if p.hidden {
+            ctx.stats.hidden_actors += 1;
+            continue;
+        }
+        match load_mesh(ctx.mats, &mut mesh_cache, pkg, &map, p.static_mesh) {
+            Ok(m) => {
+                ctx.stats.mesh_actors_drawn += 1;
+                add_mesh_actor(&mut b, &mut ctx, &p, &m.0, &m.1);
+                placed.push((p, m));
+            }
+            Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
+        }
+    }
+    let pairs: Vec<_> = placed.iter().map(|(p, m)| (p, &m.0)).collect();
+    ctx.stats.collision_triangles = rc_level::collision::collision_triangles(&bsp, &pairs)
+        .triangles
+        .len();
+    ctx.stats.unique_meshes = mesh_cache.values().filter(|r| r.is_ok()).count();
+
+    ctx.stats.floor_test = floor_test(b.batches.iter(), &floor_points);
+    ctx.stats.floor_test_meshes =
+        floor_test(b.batches.iter().filter(|b| b.from_mesh), &floor_points);
+
+    let mut lo = [f32::MAX; 3];
+    let mut hi = [f32::MIN; 3];
+    for batch in &b.batches {
+        for p in &batch.positions {
+            for c in 0..3 {
+                lo[c] = lo[c].min(p[c]);
+                hi[c] = hi[c].max(p[c]);
+            }
+        }
+    }
+    ctx.stats.bounds_min = lo;
+    ctx.stats.bounds_max = hi;
+    let spawn = spawn.unwrap_or(Spawn {
+        position: [
+            (lo[0] + hi[0]) / 2.0,
+            (lo[1] + hi[1]) / 2.0,
+            (lo[2] + hi[2]) / 2.0,
+        ],
+        yaw: 0,
+        from: "no PlayerStart; centre of the level".into(),
+    });
+    Ok(Scene {
+        batches: b.batches,
+        stats: ctx.stats,
+        spawn,
+    })
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct FloorTest {
+    pub tested: usize,
+    /// Floor 0-150 units below.
+    pub near: usize,
+    /// Floor under 80 units below: the point would be inside something.
+    pub too_close: usize,
+    pub median: f32,
+}
+
+/// Distance straight down (in Unreal units) from `from` to the nearest
+/// triangle facing up, for each point. Works in Bevy coordinates, where down
+/// is -Y.
+fn floor_test<'a>(batches: impl Iterator<Item = &'a Batch>, points: &[[f32; 3]]) -> FloorTest {
+    let starts: Vec<[f32; 3]> = points.iter().map(|p| to_bevy(*p)).collect();
+    let mut best = vec![f32::MAX; starts.len()];
+    for b in batches {
+        for t in b.indices.as_chunks::<3>().0 {
+            let [a, bb, c] = [0, 1, 2].map(|k| b.positions[t[k] as usize]);
+            let (minx, maxx) = (a[0].min(bb[0]).min(c[0]), a[0].max(bb[0]).max(c[0]));
+            let (minz, maxz) = (a[2].min(bb[2]).min(c[2]), a[2].max(bb[2]).max(c[2]));
+            for (i, s) in starts.iter().enumerate() {
+                if s[0] < minx || s[0] > maxx || s[2] < minz || s[2] > maxz {
+                    continue;
+                }
+                // Barycentric test in the X-Z plane, then height on the triangle.
+                let d = (bb[2] - c[2]) * (a[0] - c[0]) + (c[0] - bb[0]) * (a[2] - c[2]);
+                if d.abs() < 1e-9 {
+                    continue;
+                }
+                let l1 = ((bb[2] - c[2]) * (s[0] - c[0]) + (c[0] - bb[0]) * (s[2] - c[2])) / d;
+                let l2 = ((c[2] - a[2]) * (s[0] - c[0]) + (a[0] - c[0]) * (s[2] - c[2])) / d;
+                let l3 = 1.0 - l1 - l2;
+                if l1 < 0.0 || l2 < 0.0 || l3 < 0.0 {
+                    continue;
+                }
+                let y = l1 * a[1] + l2 * bb[1] + l3 * c[1];
+                let below = s[1] - y;
+                if below >= -0.02 && below < best[i] {
+                    best[i] = below;
+                }
+            }
+        }
+    }
+    let mut dists: Vec<f32> = best
+        .iter()
+        .filter(|d| **d < f32::MAX)
+        .map(|d| d * UNREAL_UNITS_PER_BEVY_UNIT)
+        .collect();
+    dists.sort_by(|a, b| a.total_cmp(b));
+    FloorTest {
+        tested: points.len(),
+        near: dists.iter().filter(|d| **d <= 150.0).count(),
+        too_close: dists.iter().filter(|d| **d < 80.0).count(),
+        median: dists.get(dists.len() / 2).copied().unwrap_or(f32::NAN),
+    }
+}

@@ -3,6 +3,24 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Level viewer passes on Windows
+
+- **Changed:** No code changes. Updated `README.md` with the result.
+- **Why:** The level viewer had only been tested in the cloud sandbox.
+- **Tested how:** The user ran `cargo run --release -p rc_level_viewer` on their Windows PC and flew around; Claude read `logs\rc_level_viewer.log` from the PC.
+- **Result:** 249 package files found; BSP checks all passed; 1,209 actors, 355 props, 141,477 triangles; 56 of 56 materials textured; floor test 292 of 293 (0 too close); level built in 246 ms; on-screen check PASS on the first capture (580 colours); steady 144 frames per second while the camera moved about 30 Bevy units.
+- **Still broken / not tested:** Not tested: maps other than `geo_01a`. Still unlit, no collision.
+- **Next:** Lights and lightmaps (roadmap step 2).
+
+## 2026-10-29: Load a whole level and fly around it (rc_level, rc_level_viewer)
+
+- **Changed:** New crate `crates/rc_level` (no Bevy): `bsp.rs` reads a map's BSP model (the level's own walls and floors: vectors, points, nodes, surfaces, vertex pool) and turns each node into a polygon with texture coordinates; `actors.rs` reads the `Level` object (actor list, map URL, BSP model) and each actor's placement (Location, Rotation, DrawScale, DrawScale3D, PrePivot, StaticMesh, Skins, bHidden), plus the Unreal rotation maths; `collision.rs` gives world-space collision triangles (solid BSP plus placed static meshes, each with its source) for the first-person thread. 3 unit tests. New program `crates/rc_level_viewer`: loads one map (default `geo_01a`), draws the BSP and every placed static mesh with their textures, batched by material, with a free-fly camera starting at the PlayerStart. Logs to `logs/rc_level_viewer.log`. README and DESIGN updated.
+- **Why:** Roadmap step 1: load a whole level and fly around it.
+- **Tested how:** Copied 5 maps and the 15 packages `geo_01a` uses (read-only) into the cloud sandbox. Read the BSP and all actors of all 5 maps. Ran the viewer on `geo_01a` 4 times with Xvfb and software rendering. New checks: every BSP index in range, every polygon corner on its plane, the arrays end where the next begins; a "floor test" (PathNodes and PlayerStarts must have a floor a little below them and nothing inside them); an on-screen check (how much of the window is level, how many colours).
+- **Result:** 5 of 5 maps: BSP checks all pass, all 3,042 actors read. `geo_01a`: 249 BSP polygons, 355 static mesh actors (60 different meshes), 141,477 triangles in 60 draw batches, 55 of 56 materials textured (the missing one's package wasn't copied). Floor test 292 of 293 points have a floor 0-150 units below (median 104), 0 closer than 80. Deliberately turning props the wrong way made 14-20 points land inside props, so the test notices. On-screen check PASS 4 of 4: 100% of the window covered, 576 colours.
+- **Still broken / not tested:** Not tested on Windows, or on maps other than `geo_01a` in the viewer. Not looked at by eye: the scene is only checked by numbers. Drawn unlit (no lights or lightmaps), no bump maps, no sky box treatment, no movers, characters, emitters or terrain. Two dead ends logged: a first state-frame layout that only fitted StaticMeshActors (the lighting thread found the right one: a 2-byte field, not 4), and on-screen captures that showed only the background colour (now retried like black ones). The real-world scale (50 Unreal units per Bevy unit) is still to be measured against a character.
+- **Next:** Test on the user's PC; then lights and lightmaps (roadmap step 2).
+
 ## 2026-10-29: Fix the pink clone trooper in rc_character
 
 - **Changed:** `crates/rc_character/src/main.rs`: the camera now uses `Tonemapping::None` (and `DebandDither::Disabled`). `crates/rc_character/src/check.rs`: the on-screen check now also compares the colour balance on screen with the skin picture's.
