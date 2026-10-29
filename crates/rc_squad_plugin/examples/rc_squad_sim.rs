@@ -66,6 +66,8 @@ enum Step {
     GoTo(usize),
     /// Hold the Use button for this long (seconds), standing still.
     HoldUse(f32),
+    /// Set how far squad mates go to revive someone (uu); 0 = they don't.
+    ReviveRange(f32),
     /// A check on the squad: name, measurement, lowest and highest allowed.
     Check(&'static str, fn(&Sim) -> f32, f32, f32),
 }
@@ -357,7 +359,9 @@ fn steps() -> Vec<Step> {
             99.0,
             101.0,
         ),
-        // Scorch goes down and the player revives him by holding Use.
+        // Scorch goes down and the player revives him by holding Use. The
+        // others are told not to, or the nearest would get there first.
+        ReviveRange(0.0),
         KnockDown(2),
         Hold(0.2, idle),
         GoTo(2),
@@ -375,6 +379,7 @@ fn steps() -> Vec<Step> {
             1.0,
             1.0,
         ),
+        ReviveRange(4000.0),
         Hold(3.0, idle),
         Check(
             "nobody fell out of the map (lowest member feet z)",
@@ -434,7 +439,7 @@ fn drive_player(
     mut actions: ResMut<ActionState>,
     mut player: Query<&mut Transform, (With<Player>, Without<PlayerCamera>)>,
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
-    squad: Res<SquadState>,
+    mut squad: ResMut<SquadState>,
     readout: Res<SquadReadout>,
     mut mates: Query<(Entity, &SquadMate, &mut Health, Has<Dead>), Without<Player>>,
     players: Query<(Entity, Option<&Health>, Has<Dead>), With<Player>>,
@@ -663,6 +668,12 @@ fn drive_player(
                         m.0, stand.x, stand.y, stand.z
                     ));
                 }
+            }
+            Step::ReviveRange(r) => {
+                if let Some(sq) = squad.squad.as_mut() {
+                    sq.settings.revive.range = r;
+                }
+                log.line(format!("sim: squad mates revive within {r:.0} uu"));
             }
             Step::HoldUse(secs) => {
                 s.use_left = secs;

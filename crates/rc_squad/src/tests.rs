@@ -381,11 +381,11 @@ fn squad_mates_shoot_a_droid_they_can_see() {
         let n = fired.iter().filter(|s| s.0 == *i).count();
         assert!((8..=25).contains(&n), "member {i} fired {n}");
     }
-    // Aimed at the droid's middle, off by at most (1 - 0.7) x 10 degrees.
+    // Aimed at the droid's middle, off by at most (1 - 0.9) x 10 degrees.
     for (_, origin, dir, _) in &fired {
         let want = (droid.centre - *origin).normalize_or_zero();
         let angle = want.dot(*dir).clamp(-1.0, 1.0).acos().to_degrees();
-        assert!(angle <= 3.0 * 1.2 + 0.1, "{angle} deg off");
+        assert!(angle <= 1.0 * 1.2 + 0.1, "{angle} deg off");
     }
 }
 

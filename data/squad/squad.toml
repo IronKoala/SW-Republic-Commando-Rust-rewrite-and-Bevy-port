@@ -110,12 +110,14 @@ prevent_range = 256
 [fight]
 # Their gun: a file in data/weapons. Delta Squad carries the DC-17m.
 weapon = "dc17m_blaster"
-# 0 = wild, 1 = perfect. Guess until read from the game.
-accuracy = 0.7
+# 0 = wild, 1 = perfect. Game: Accuracy in Commando07/40/62DeltaDefaults
+# (Properties package); CloneCommando's own is 0.75.
+accuracy = 0.9
 # Aim error in degrees at accuracy 0; the actual error is
 # (1 - accuracy) x this. Our own (same as the droids').
 max_aim_error = 10
-# Farthest they see an enemy, uu. Guess until read from the game.
+# Farthest they see an enemy, uu. Game: SightRadius in
+# Commando07/40/62DeltaDefaults.
 sight_radius = 5000
 # Seconds from first seeing an enemy to the first shot. Our own.
 reaction_time = 0.5
@@ -137,11 +139,14 @@ friendly_clearance = 60
 # (bCannotDie): at 0 health they go down until someone revives them. Who
 # goes to revive whom is our own rule (docs/DESIGN.md).
 [revive]
-# Seconds a squad mate kneels to revive someone. Guess until read.
+# Seconds a squad mate kneels to revive someone. Guess: the original
+# revives with the bacta healer (CTInventory.BactaHealer: 5 charges,
+# recharging 1 a second), but how fast a revive uses them is compiled code.
 time = 3
-# Seconds the player holds Use by a downed squad mate. Guess until read.
+# Seconds the player holds Use by a downed squad mate. Guess, as above.
 player_time = 3
-# Health they get back, as a share of their maximum (0 to 1). Guess.
+# Health they get back, as a share of their maximum (0 to 1). Guess (not
+# stored in the scripts).
 health = 0.5
 # How close the reviver must be to the body, uu. Our own.
 reach = 100

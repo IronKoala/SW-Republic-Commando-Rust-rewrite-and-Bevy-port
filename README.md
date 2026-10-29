@@ -76,7 +76,7 @@ copy of the game.
   F4 cancel, and aiming at a squad marker (like a bacta dispenser) and
   pressing the squad order key sends one of them to do it. Distances are
   the game's own; every number is in `data/squad/squad.toml`. The
-  windowless test run `rc_squad_sim` passes 23 checks on geo_01a. They
+  windowless test run `rc_squad_sim` passes 33 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
   and stays put until revived. They are in the game program (`rc_game`):
   start a level and they stand with you. Drawn as coloured capsules for
@@ -538,9 +538,8 @@ To run the squad's test on the first level (no window; about a minute):
 cargo run --release -p rc_squad_plugin --example rc_squad_sim
 ```
 
-It logs to `logs\rc_squad_sim.log` and should end with `SIM DONE: N checks
-passed, 0 failed` (the number of checks is printed in the morning report of
-each change). Lines starting `squad: t=` show each squad mate's
+It logs to `logs\rc_squad_sim.log` and should end with `SIM DONE: 33 checks
+passed, 0 failed`. Lines starting `squad: t=` show each squad mate's
 position and distance to you once a second; `ORDER`, `sets off`,
 `arrived`, `STUCK` and `working at` lines show what they decided;
 `targets`, `fires at`, `KILLED`, `goes to revive`, `revived` and the

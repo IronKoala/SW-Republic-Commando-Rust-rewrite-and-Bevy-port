@@ -79,7 +79,7 @@ impl Default for FightSettings {
     fn default() -> Self {
         FightSettings {
             weapon: "dc17m_blaster".into(),
-            accuracy: 0.7,
+            accuracy: 0.9,
             max_aim_error: 10f32.to_radians(),
             sight_radius: 5000.0,
             reaction_time: 0.5,
