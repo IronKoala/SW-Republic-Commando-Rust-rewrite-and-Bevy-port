@@ -82,6 +82,10 @@ pub struct VideoSection {
     /// health and ammo aren't in the far corners of an ultrawide.
     /// 0 lets it fill the screen.
     pub hud_max_aspect: f32,
+    /// The Panini view for very wide screens: 0 is off, up to 1. Bends the
+    /// 3D view so things near the sides aren't stretched; the middle keeps
+    /// its size.
+    pub panini: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -142,6 +146,7 @@ impl Default for Settings {
                 vsync: true,
                 fov: 85.0,
                 hud_max_aspect: 16.0 / 9.0,
+                panini: 0.0,
             },
             audio: AudioSection {
                 master_volume: 1.0,
@@ -226,6 +231,10 @@ fov = 85
 # Widest shape (width / height) the display spreads to; on an ultrawide it
 # stays in a centred area this shape. 1.7777778 is 16:9. 0 fills the screen.
 hud_max_aspect = 1.7777778
+# Panini view for ultrawide screens: 0 is off (the original's straight
+# view), up to 1. Around 0.3 to 0.5 takes the stretching out of the sides on
+# 21:9 and 32:9; the middle stays the same size, a little softer.
+panini = 0.0
 
 [audio]
 master_volume = 1.0   # 0 is silent, 1 is full

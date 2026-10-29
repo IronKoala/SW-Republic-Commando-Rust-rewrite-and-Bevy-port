@@ -4473,6 +4473,7 @@ dependencies = [
  "rc_menus",
  "rc_movement",
  "rc_pads",
+ "rc_panini",
  "rc_squad_plugin",
  "serde",
  "toml 0.8.23",
@@ -4562,6 +4563,14 @@ dependencies = [
  "sdl3-sys",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_panini"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "image",
 ]
 
 [[package]]

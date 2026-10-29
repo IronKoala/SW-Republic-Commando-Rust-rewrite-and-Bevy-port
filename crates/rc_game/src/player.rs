@@ -179,7 +179,7 @@ fn move_body(
     t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
 }
 
-fn place_camera(
+pub(crate) fn place_camera(
     fov: Res<FieldOfView>,
     body: Query<&Body, With<Player>>,
     window: Query<&Window>,

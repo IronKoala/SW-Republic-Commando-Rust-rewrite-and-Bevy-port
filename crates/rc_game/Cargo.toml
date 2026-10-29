@@ -14,6 +14,7 @@ sdl = ["rc_pads/sdl"]
 [dependencies]
 rc_game_core = { path = "../rc_game_core" }
 rc_pads = { path = "../rc_pads" }
+rc_panini = { path = "../rc_panini" }
 rc_image = { path = "../rc_image" }
 rc_menus = { path = "../rc_menus" }
 rc_movement = { path = "../rc_movement" }

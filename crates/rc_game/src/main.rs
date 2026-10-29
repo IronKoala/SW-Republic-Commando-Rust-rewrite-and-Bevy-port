@@ -20,6 +20,7 @@ mod levels;
 mod menu;
 mod music;
 mod original_menu;
+mod panini;
 mod player;
 mod rebind;
 mod script;
@@ -361,6 +362,7 @@ fn main() -> AppExit {
         hud::HudPlugin,
         music::MusicPlugin,
         player::PlayerPlugin,
+        panini::PaniniViewPlugin,
     ))
     .add_systems(Startup, |mut commands: Commands| {
         // The camera for menus and the display; the 3D view has its own.
