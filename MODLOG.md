@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Automatic build checks on GitHub (CI)
+
+- **Changed:** New `.github/workflows/ci.yml`. `.gitignore` gained one whitelist line, `!.github/workflows/*.yml`. A short section at the end of `docs/DESIGN.md`.
+- **Why:** So every pull request is built and tested on Windows and Linux automatically, which catches breakage when several branches are merged.
+- **Tested how:** In the cloud sandbox with no game folder set: `cargo test --workspace` (all 57 unit tests pass, none read game files, so no test needed a skip). `cargo fmt --all --check` and `cargo clippy --workspace --all-targets` both find problems today (72 files need reformatting, about 20 clippy messages), which is why that job only reports. The run on GitHub itself is checked on the draft pull request.
+- **Result:** See the pull request's checks.
+- **Still broken / not tested:** The Bevy programs' windowed `--script` checks are not run on GitHub. No Android build. Not tested on macOS (not a goal).
+- **Next:** Once the code is formatted and the clippy messages are fixed, make that job fail the run too.
+
 ## 2026-10-29: The walker draws levels textured and lit (rc_walk, rc_level_viewer)
 
 - **Changed:** `rc_level_viewer` is now also a library (`src/lib.rs`). Its drawing code moved out of `main.rs` into a new `src/draw.rs` (`spawn_level`, `BACKGROUND`) with no change in what it does. `rc_walk --map` uses it, so the map has its textures, baked light and real-time lights instead of plain grey. The camera now uses the same exposure, no tonemapping, and a far distance of 5000 Bevy units, like the viewer. The test room keeps its own sun and ambient light. If the look can't be built, rc_walk falls back to the grey collision mesh and logs why.
