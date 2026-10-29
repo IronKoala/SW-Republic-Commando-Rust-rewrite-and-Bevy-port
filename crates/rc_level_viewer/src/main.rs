@@ -17,7 +17,6 @@
 //! couldn't be shown and why, frame rates, camera position, and an on-screen
 //! check of what was actually drawn.
 
-
 use bevy::camera::Exposure;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
@@ -391,7 +390,20 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         log.line(format!("  material not shown ({n}x): {e}"));
     }
     log.line(format!(
-        "collision triangles (solid BSP plus props, from rc_level::collision): {}",
+        "blocking volumes (invisible walls): {} read, {} stop players, {} stop the AI, {} unreadable, {} with a scale not applied; {} PathNodes/PlayerStarts inside one (should be 0 or close), {} volumes within 512 units of a path point",
+        s.blocking_volumes,
+        s.volumes_block_players,
+        s.volumes_block_actors,
+        s.volume_failures.len(),
+        s.volumes_scaled,
+        s.path_points_in_volumes,
+        s.volumes_near_paths
+    ));
+    for f in &s.volume_failures {
+        log.line(format!("  volume not read: {f}"));
+    }
+    log.line(format!(
+        "collision triangles (solid BSP, props and blocking volumes, from rc_level::collision): {}",
         s.collision_triangles
     ));
     for (what, f) in [

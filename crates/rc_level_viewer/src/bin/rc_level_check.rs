@@ -59,9 +59,7 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
     };
     let map = Rc::new((pkg, data));
     // A bug in a reader should show up as one failed map, not end the run.
-    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        scene::build(map, mats)
-    }));
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scene::build(map, mats)));
     let scene = match built {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => return fail(format!("level not built: {e}")),
@@ -117,6 +115,19 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
     for (e, n) in &s.material_failures {
         log.line(format!("  material not shown ({n}x): {e}"));
     }
+    log.line(format!(
+        "  blocking volumes {} ({} stop players, {} stop the AI, {} unreadable, {} scaled); {} path points inside one, {} volumes near a path point",
+        s.blocking_volumes,
+        s.volumes_block_players,
+        s.volumes_block_actors,
+        s.volume_failures.len(),
+        s.volumes_scaled,
+        s.path_points_in_volumes,
+        s.volumes_near_paths
+    ));
+    for f in &s.volume_failures {
+        log.line(format!("  volume not read: {f}"));
+    }
     let f = s.floor_test;
     log.line(format!(
         "  floor test: {} of {} path points have a floor 0-150 below, {} closer than 80; collision triangles {}; spawn {}; built in {ms:.0} ms",
@@ -132,6 +143,15 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
     if mat_fail > 0 {
         notes.push(format!("{mat_fail} materials missing"));
     }
+    if !s.volume_failures.is_empty() {
+        notes.push(format!("{} volumes unreadable", s.volume_failures.len()));
+    }
+    if s.path_points_in_volumes > 0 {
+        notes.push(format!(
+            "{} path points in volumes",
+            s.path_points_in_volumes
+        ));
+    }
     if s.lightmap_error.is_some() {
         notes.push("lightmaps unreadable".into());
     }
@@ -145,9 +165,10 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         name,
         ok: true,
         summary: format!(
-            "{} BSP polys, {} props, {} triangles drawn, {ms:.0} ms{}",
+            "{} BSP polys, {} props, {} volumes, {} triangles drawn, {ms:.0} ms{}",
             s.bsp_polygons,
             s.mesh_actors_drawn,
+            s.blocking_volumes,
             s.bsp_triangles + s.mesh_triangles,
             if notes.is_empty() {
                 String::new()
@@ -170,10 +191,7 @@ fn main() {
             .map(|d| {
                 d.flatten()
                     .map(|e| e.path())
-                    .filter(|p| {
-                        p.extension()
-                            .is_some_and(|x| x.eq_ignore_ascii_case("ctm"))
-                    })
+                    .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ctm")))
                     .collect()
             })
             .unwrap_or_default()
@@ -189,7 +207,10 @@ fn main() {
     let cwd = std::env::current_dir().expect("can't read the current folder");
     if let (Ok(c), Ok(g)) = (cwd.canonicalize(), game.canonicalize()) {
         if c.starts_with(&g) {
-            eprintln!("Refusing to run from inside the game folder ({}).", g.display());
+            eprintln!(
+                "Refusing to run from inside the game folder ({}).",
+                g.display()
+            );
             std::process::exit(2);
         }
     }

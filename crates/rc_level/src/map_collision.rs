@@ -1,6 +1,6 @@
 //! Load a map's collision from disk: its BSP walls and floors plus every
-//! placed static mesh, as triangles (via `crate::collision`), and where the
-//! player starts. Unlike the rest of this crate it opens files, because the
+//! placed static mesh and the blocking volumes that stop players, as
+//! triangles (via `crate::collision`), and where the player starts. Unlike the rest of this crate it opens files, because the
 //! static meshes live in other packages under `GameData`. Coordinates stay
 //! in Unreal units (X forward, Y right, Z up).
 //!
@@ -9,7 +9,7 @@
 
 use crate::actors::{self, Placement};
 use crate::bsp::{self, Vec3};
-use crate::collision::collision_triangles;
+use crate::collision::{add_blocking_volumes, collision_triangles};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
 use std::collections::HashMap;
@@ -23,6 +23,10 @@ pub struct MapCollision {
     pub bsp_nodes: usize,
     pub mesh_actors: usize,
     pub mesh_failures: usize,
+    /// Blocking volumes added (the ones that stop players), and ones that
+    /// couldn't be read.
+    pub blocking_volumes: usize,
+    pub volume_failures: usize,
 }
 
 /// Every package file under the game's data folder, by lower-case name.
@@ -145,12 +149,16 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         .iter()
         .filter_map(|(p, i)| cache.get(i).and_then(|m| m.as_ref()).map(|m| (p, m)))
         .collect();
-    let mesh = collision_triangles(&bsp, &pairs);
+    let mut mesh = collision_triangles(&bsp, &pairs);
+    let volumes = crate::volumes::blocking_volumes(&map.0, &map.1, &level);
+    let blocking_volumes = add_blocking_volumes(&mut mesh, &volumes.volumes, true);
     Ok(MapCollision {
         triangles: mesh.triangles,
         start,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
         mesh_failures,
+        blocking_volumes,
+        volume_failures: volumes.failures.len(),
     })
 }

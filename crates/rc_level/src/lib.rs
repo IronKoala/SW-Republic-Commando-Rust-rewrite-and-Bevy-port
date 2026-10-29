@@ -9,3 +9,4 @@ pub mod bsp;
 pub mod collision;
 pub mod lightmap;
 pub mod map_collision;
+pub mod volumes;

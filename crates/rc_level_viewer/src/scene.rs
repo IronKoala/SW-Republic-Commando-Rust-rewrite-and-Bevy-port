@@ -97,6 +97,21 @@ pub struct Stats {
     pub floor_test_meshes: FloorTest,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
+    /// Blocking volumes (invisible walls): read, stopping players, stopping
+    /// the AI, failed to read, and with a scale we don't apply.
+    pub blocking_volumes: usize,
+    pub volumes_block_players: usize,
+    pub volumes_block_actors: usize,
+    pub volume_failures: Vec<String>,
+    pub volumes_scaled: usize,
+    /// PathNodes and PlayerStarts inside a volume that stops players. The AI
+    /// walks between path points, so a correctly placed volume should hold
+    /// none (or almost none) of them.
+    pub path_points_in_volumes: usize,
+    /// Volumes with a path point within 512 units of their bounding box.
+    /// Invisible walls are put next to where people walk, so most should
+    /// be (about 63% across the game; 9% if they were left unplaced).
+    pub volumes_near_paths: usize,
 }
 
 pub struct Spawn {
@@ -531,9 +546,41 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         }
     }
     let pairs: Vec<_> = placed.iter().map(|(p, m)| (p, &m.0)).collect();
-    ctx.stats.collision_triangles = rc_level::collision::collision_triangles(&bsp, &pairs)
-        .triangles
-        .len();
+    let mut collision = rc_level::collision::collision_triangles(&bsp, &pairs);
+    let volumes = rc_level::volumes::blocking_volumes(pkg, data, &level);
+    ctx.stats.volumes_block_players =
+        rc_level::collision::add_blocking_volumes(&mut collision, &volumes.volumes, true);
+    ctx.stats.volumes_block_actors = volumes.volumes.iter().filter(|v| v.block_actors).count();
+    ctx.stats.blocking_volumes = volumes.volumes.len();
+    ctx.stats.volume_failures = volumes.failures;
+    ctx.stats.volumes_scaled = volumes.scaled;
+    ctx.stats.path_points_in_volumes = floor_points
+        .iter()
+        .filter(|p| {
+            volumes
+                .volumes
+                .iter()
+                .any(|v| v.block_players && v.contains(**p))
+        })
+        .count();
+    ctx.stats.volumes_near_paths = volumes
+        .volumes
+        .iter()
+        .filter(|v| {
+            let mut lo = [f32::MAX; 3];
+            let mut hi = [f32::MIN; 3];
+            for q in v.polygons.iter().flatten() {
+                for c in 0..3 {
+                    lo[c] = lo[c].min(q[c]);
+                    hi[c] = hi[c].max(q[c]);
+                }
+            }
+            floor_points
+                .iter()
+                .any(|p| (0..3).all(|c| p[c] > lo[c] - 512.0 && p[c] < hi[c] + 512.0))
+        })
+        .count();
+    ctx.stats.collision_triangles = collision.triangles.len();
     ctx.stats.unique_meshes = mesh_cache.values().filter(|r| r.is_ok()).count();
 
     ctx.stats.floor_test = floor_test(b.batches.iter(), &floor_points);
