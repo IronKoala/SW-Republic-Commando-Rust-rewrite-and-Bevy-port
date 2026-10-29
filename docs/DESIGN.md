@@ -1242,15 +1242,67 @@ mates can't die in the original (`bCannotDie`): when health reaches 0 (or
 combat marks them `Dead`), `check_down` calls `Squad::set_down`. A downed
 member stops where it is, takes no orders, gives up any marked job (the
 marker opens again), and shows as `Incapacitated` with "Down" on the squad
-panel. Health above 0 again brings them back (`Revived`); nothing heals
-them yet, as reviving isn't built.
+panel. Health above 0 again brings them back (`Revived`).
+
+### Squad fighting and reviving (`rc_squad/src/fight.rs`)
+
+The original decides how its squad fights in compiled code (`ctgame.dll`)
+that we don't read, so these rules are **our own**. Every number is in
+`[fight]` and `[revive]` of `squad.toml`, and each one says whether it is
+the game's, a guess, or our own.
+
+*Seeing and picking a target.* The plugin turns every living
+`Team::Separatist` character with a `Hittable` body into a `Threat` each
+frame (`SquadThreats`; the id is the entity's bits). On every think (0.25
+s) a member who is up and not busy with a job or a revive takes the
+nearest threat within `sight_radius` whose eyes it can see (a thin line
+from its eyes to theirs that hits no level geometry). Nothing in sight
+drops the target.
+
+*Shooting.* After `reaction_time` on a new target it fires bursts:
+`burst_count` shots `shot_interval` apart (the DC-17m's fire rate), then a
+pause between `burst_pause_min` and `burst_pause_max`. Each shot aims at
+the target's middle, off by up to `(1 - accuracy) x max_aim_error`; the
+weapons part then adds the gun's own spread, as it does for the player and
+the droids. A standing member turns to face its target and fires only
+within `max_aim_yaw` of its facing; a moving one fires on the move. A
+member holds fire while the player or another squad mate (standing or
+lying) is within `friendly_clearance` of the line of fire, nearer than the
+target. Shots go out as `rc_combat::FireShot` with the squad mate as the
+shooter, so the weapons part flies the bolts, applies the damage, and its
+`ShotLanded` and `Died` messages count hits and kills per member
+(`SquadFightStats`).
+
+*Reviving.* Every frame, each downed commando nobody is seeing to gets the
+nearest member who is up, not on a marked job and not already reviving,
+if one is within `range`. The player counts too when they have `Dead`
+(and `revive_player = "yes"`). The reviver runs to a spot beside the body
+and, once within `reach`, kneels (`MemberState::Reviving`) for `time`
+seconds. Then `ReviveDone` goes out and the plugin sets the patient's
+health to `health` times their maximum and removes `Dead`; next frame
+`check_down` sees them up. The player revives a squad mate by holding
+`Use` within `reach` of the body for `player_time` seconds
+(`Squad::player_use`); letting go starts it over. A revive job ends early
+if the patient is already up (someone else got there) or the reviver goes
+down. While the player is down, `rc_game` keeps their body still (they
+can look around).
+
+Not done yet: droids only shoot at the player (`rc_ai::Battle` takes one
+target), so squad mates are only hurt by stray bolts and the player. The
+original also has the downed player call the squad over with an order;
+here they come on their own.
 
 ### How we check it without looking
 
-`rc_squad_sim` runs the real plugin on a real map with no window, in fixed
-1/60 s steps, with a scripted player. It logs every order, set-off,
-arrival, stuck, job and a once-a-second line with every member's position,
-state and distances, and checks 23 numbers (see `README.md`).
+`rc_squad_sim` runs the real squad and combat plugins on a real map with no
+window, in fixed 1/60 s steps, with a scripted player. It logs every
+order, set-off, arrival, stuck, job, target picked, first shot of each
+burst, kill and revive, a once-a-second line with every member's position,
+state and distances, and every 5 s a fight line with each member's shots,
+hits, kills and revives. For the fight it puts stand-in droids (real
+combat targets with the game's droid size and health that stand still and
+don't shoot back) in sight of the squad. The checks are listed in
+`README.md`.
 
 ## The game program (`rc_game`)
 
