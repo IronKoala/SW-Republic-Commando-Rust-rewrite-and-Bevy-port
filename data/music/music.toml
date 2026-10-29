@@ -1,0 +1,41 @@
+# Which of the game's music tracks (GameData/Music/*.ogg) play where.
+#
+# Each list plays in order and repeats. Names are file names without .ogg.
+# The original switches between calm ("suspense") and battle music as
+# fighting starts and stops; for now the calm list plays, and `battle` is
+# ready for when enemies can tell the music system a fight began.
+# Mods can replace this file to change the soundtrack.
+
+menu = ["musui_mainmenu_lp"]
+
+# Levels pick the first [[level]] block whose prefix starts their map name.
+[[level]]
+prefix = "geo_"
+calm = ["musgeo_suspensestate01_lp", "musgeo_suspensestate02_lp", "musgeo_suspensestate03_lp", "musgeo_suspensestate04_lp", "musgeo_suspensestate05_lp", "musgeo_suspensestate06_lp"]
+battle = ["musgeo_battle02_lp", "musgeo_battle03_lp", "musgeo_jwbattle01_lp", "musgeo_jwbattle02_lp"]
+
+[[level]]
+prefix = "ras_"
+calm = ["musras_suspensestate01_lp", "musras_suspensestate02_lp", "musras_suspensestate03_lp", "musras01_suspenselow01"]
+battle = ["musras_battle02_lp", "musras_jwbattle01_lp", "musras_jwbattle02_lp", "musras_jwbattle03_lp"]
+
+[[level]]
+prefix = "yyy"
+calm = ["musyyy_suspensestate01_lp", "musyyy_suspensestate02_lp", "musyyy_suspensestate03_lp", "musyyy_suspensestate04_lp", "musyyy_suspensestate05_lp"]
+battle = ["musyyy_battle02_lp", "musyyy_battle03_lp", "musyyy_battle04_lp", "musyyy_battle05_lp"]
+
+[[level]]
+prefix = "pro"
+calm = ["musgen_prologuevari_lp"]
+battle = []
+
+[[level]]
+prefix = "epilogue"
+calm = ["musgen_epilogue_ep"]
+battle = []
+
+# Any other map.
+[[level]]
+prefix = ""
+calm = ["musgeo_suspensestate01_lp"]
+battle = []

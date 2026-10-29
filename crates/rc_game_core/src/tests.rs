@@ -47,7 +47,10 @@ fn paths_find_files_ignoring_case_and_mods_win() {
     std::fs::write(modd.join("weapons/dc15s.toml"), b"mod").unwrap();
     let p = GamePaths::new(&game, vec![modd.clone(), base.clone()]);
     assert!(p.map_path("geo_01a").exists());
-    assert_eq!(std::fs::read(p.data_file("weapons/dc15s.toml").unwrap()).unwrap(), b"mod");
+    assert_eq!(
+        std::fs::read(p.data_file("weapons/dc15s.toml").unwrap()).unwrap(),
+        b"mod"
+    );
     assert_eq!(p.data_files("weapons/dc15s.toml").len(), 2);
     assert!(p.data_file("weapons/none.toml").is_none());
     let _ = std::fs::remove_dir_all(&root);
@@ -67,16 +70,27 @@ fn pausing_stops_gameplay_without_leaving_the_level() {
         .init_resource::<Ticks>()
         .add_systems(Update, tick.in_set(GameSet::Simulate).run_if(playing));
     app.update();
-    assert_eq!(app.world().resource::<Ticks>().0, 0, "no ticks outside a level");
-    app.world_mut().resource_mut::<NextState<GameState>>().set(GameState::InGame);
+    assert_eq!(
+        app.world().resource::<Ticks>().0,
+        0,
+        "no ticks outside a level"
+    );
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::InGame);
     app.update();
     app.update();
     let before = app.world().resource::<Ticks>().0;
     assert!(before >= 1);
-    app.world_mut().resource_mut::<NextState<Play>>().set(Play::Paused);
+    app.world_mut()
+        .resource_mut::<NextState<Play>>()
+        .set(Play::Paused);
     app.update();
     app.update();
     let paused = app.world().resource::<Ticks>().0;
     assert!(paused <= before + 1);
-    assert_eq!(*app.world().resource::<State<GameState>>().get(), GameState::InGame);
+    assert_eq!(
+        *app.world().resource::<State<GameState>>().get(),
+        GameState::InGame
+    );
 }
