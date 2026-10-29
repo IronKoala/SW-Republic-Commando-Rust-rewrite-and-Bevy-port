@@ -11,7 +11,7 @@ use bevy::render::view::Tonemapping;
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
     playing, Action, ActionState, GameLog, GamePaths, GameSet, GameState, LevelCollision, Player,
-    PlayerCamera, PlayerStart,
+    PlayerCamera, PlayerStart, ViewKick,
 };
 use rc_movement::{MoveInput, MoveParams, Pawn, Vec3 as UVec3, World};
 use std::sync::Arc;
@@ -136,6 +136,7 @@ fn move_body(
     time: Res<Time>,
     actions: Res<ActionState>,
     collision: Res<LevelCollision>,
+    mut kicks: MessageReader<ViewKick>,
     mut body: Query<(&mut Body, &mut Transform), With<Player>>,
     log: Res<GameLog>,
 ) {
@@ -143,8 +144,13 @@ fn move_body(
         return;
     };
     let dt = time.delta_secs().min(0.25);
-    body.yaw = (body.yaw + actions.look.x).rem_euclid(std::f32::consts::TAU);
-    body.pitch = (body.pitch + actions.look.y).clamp(-1.5, 1.5);
+    // Recoil adds to the look. (The original springs back afterwards; not
+    // done yet.)
+    let kick = kicks
+        .read()
+        .fold(Vec2::ZERO, |k, v| k + Vec2::new(v.yaw, v.pitch));
+    body.yaw = (body.yaw + actions.look.x + kick.x).rem_euclid(std::f32::consts::TAU);
+    body.pitch = (body.pitch + actions.look.y + kick.y).clamp(-1.5, 1.5);
     let input = MoveInput {
         forward: actions.movement.y,
         strafe: actions.movement.x,

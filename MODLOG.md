@@ -12,6 +12,24 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not run on Windows or Android. The droids in `rc_game` itself were not seen in a fight: on geo_01a the start area is closed by a barricade only level scripts open, so the script's short walk never reaches them. The first try at lighting droids made them black (the level's light is baked into its surfaces, and the scene has no ambient light), so they get a steady `ambient = 0.5` of their own colour, a guess. Droid hit rate at long range is low (about 2-3%) because the miss angle (10 degrees at accuracy 0) is a guess. No droid sounds or hit reactions.
 - **Next:** Level scripts (shared with the levels part) so spawners and barricades follow the mission; compare droid numbers and behaviour with the real game on the PC.
 
+## 2026-10-29: Recoil message, and a trial run with the weapons and squad parts
+
+- **Changed:** `rc_game_core` gained `ViewKick` (weapon recoil: pitch and yaw in radians); `rc_game`'s player adds it to the view. `docs/PLUGINS.md` lists it.
+- **Why:** The weapons part sends recoil per shot and needs something to turn the view without depending on the player code.
+- **Tested how:** In a throwaway copy (not pushed), merged this branch with the weapons branch (`rc_combat`, commit 285dd3e) and the squad branch (`rc_squad_plugin`, PR #13), added both plugins to `rc_game`, and ran `rc_game --script`. Then `cargo test` and the script again on this branch alone.
+- **Result:** Together: `SCRIPT DONE: 17 checks passed, 0 failed`. The display showed `DC-17M BLASTER 60 | 60`, health 200, shield 100, and Sev, Fixer and Scorch at 100% on "Form up" (screenshot checked). Only conflicts were the workspace member list, MODLOG and DESIGN (both sides add lines). This branch alone afterwards: 16 unit tests and the script, 17 passed, 0 failed.
+- **Still broken / not tested:** Recoil isn't sprung back yet. Firing wasn't exercised by the script. The other parts are wired in only after their pull requests are merged.
+- **Next:** After merging, add the four plugins to `rc_game` (one line each) and remove the stand-in level.
+
+## 2026-10-29: Android compile check, difficulty setting (rc_game)
+
+- **Changed:** `crates/rc_game/Cargo.toml` gained two Android-only settings (BLAKE3 without C code, Bevy's native Android start-up). New `docs/ANDROID.md`: what works on Linux and what an Android app still needs. `settings.toml` gained `[game] difficulty` (easy, medium, hard; the original's damage factors 0.25, 1, 1.75), also in the options menu.
+- **Why:** The port must run on Linux and Android; check how far an Android build gets. Difficulty is needed by the weapons part.
+- **Tested how:** `cargo check --target aarch64-linux-android -p rc_game` in the cloud sandbox. Then `cargo test -p rc_game` and `rc_game --script` again.
+- **Result:** The Android check first failed in `blake3` (needs an ARM C compiler) and then in `android-activity` (needs a start-up feature); with both settings it finished with no errors. Tests 11 passed; script 17 passed, 0 failed.
+- **Still broken / not tested:** No Android app: nothing linked, packaged or run on a phone (needs the Android NDK, a library entry point, a folder picker and app-folder paths; listed in `docs/ANDROID.md`). Wayland window: built, not run.
+- **Next:** Wire in the other parts' plugins.
+
 ## 2026-10-29: The game program: menus, settings, controls, display, music (rc_game)
 
 - **Changed:** New crate `crates/rc_game`, the one game program the other parts plug into. Files: `settings.rs` (the player's `settings.toml`, written with defaults and notes on first run), `input.rs` (devices to actions, from `data/input/bindings.toml`: the original PC keys from `DefaultCtrl.ini`, a gamepad layout, touch), `player.rs` (`rc_movement` body and a separate eye camera), `levels.rs` (mission names and order read at run time from the game's `LevelLoadingInfo.int`, grouped by `data/levels/campaigns.toml`), `menu.rs` (main, campaign, levels, options, pause, loading screen), `hud.rs` (visor brackets, crosshair, shield and health, ammo, squad, messages), `music.rs` (the game's `.ogg` music, chosen by `data/music/music.toml`), `theme.rs` (`data/ui/theme.toml`), `stand_in_level.rs` (loads maps like `rc_walk --map` until the level part plugs in), `script.rs` (`--script` self-test). `rc_game_core` gained `PlayerStart` and `MusicMood`. Wayland window support is on alongside X11. `.gitignore` unchanged: the new data files are `.toml` under `data/`.

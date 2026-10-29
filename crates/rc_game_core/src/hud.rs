@@ -83,3 +83,11 @@ pub struct HudMessage {
     pub text: String,
     pub seconds: f32,
 }
+
+/// Kick the view (weapon recoil), radians: `pitch` up, `yaw` right. Sent by
+/// weapons; the player's view applies it. A VR mod can ignore it.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct ViewKick {
+    pub pitch: f32,
+    pub yaw: f32,
+}

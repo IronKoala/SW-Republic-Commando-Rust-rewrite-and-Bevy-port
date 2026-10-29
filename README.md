@@ -168,6 +168,8 @@ copy of the game.
   own choice. See `docs/DESIGN.md`.
 - Characters: only the first material slot, no blending between
   animations, no sounds or effects from animation events.
+- Android: the game compiles for Android phones but is not an app yet;
+  see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
   being built to plug into it). No saving or loading, no checkpoints, no
   briefings or cut scenes. Options are a short list. Not tested on Windows,

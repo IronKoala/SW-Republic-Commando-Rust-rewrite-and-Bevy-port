@@ -44,6 +44,7 @@ the small set of types in `crates/rc_game_core`.
 | Player input | read `ActionState` (`pressed(Action::Fire)`, `movement`, `look`). Never read keys, mouse or gamepad. |
 | Collide or trace | `LevelCollision` (Unreal units). The level part inserts it while loading, and may replace it at any time (moving doors) |
 | Where the player starts | the level part inserts `PlayerStart` (feet in Unreal units, yaw) while loading |
+| Recoil | send a `ViewKick { pitch, yaw }` message (radians); the player's view applies it |
 | Battle music | set `MusicMood::Battle` when a fight starts, `Calm` when it ends |
 | Where the player is | the entity with `Player`; the view is the entity with `PlayerCamera` |
 | Show numbers on screen | write `PlayerVitals`, `WeaponReadout`, `SquadReadout`, or send a `HudMessage` |

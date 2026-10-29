@@ -54,6 +54,7 @@ pub enum Opt {
     MouseSensitivity,
     InvertY,
     FieldOfView,
+    Difficulty,
 }
 
 pub struct Item {
@@ -207,6 +208,7 @@ pub fn items(
                     it(&format!("Mouse sensitivity   < {:.2} >", c.mouse_sensitivity * 400.0), Cmd::Setting(Opt::MouseSensitivity)),
                     it(&format!("Invert look   < {} >", if c.invert_y { "on" } else { "off" }), Cmd::Setting(Opt::InvertY)),
                     it(&format!("Field of view   < {:.0} >", settings.video.fov), Cmd::Setting(Opt::FieldOfView)),
+                    it(&format!("Difficulty   < {:?} >", settings.game.difficulty), Cmd::Setting(Opt::Difficulty)),
                     it("Back (saves)", Cmd::Back),
                 ],
             )
@@ -388,6 +390,15 @@ fn change_setting(s: &mut Settings, o: Opt, step: i32) {
         }
         Opt::InvertY => s.controls.invert_y = !s.controls.invert_y,
         Opt::FieldOfView => s.video.fov = (s.video.fov + 5.0 * f).clamp(60.0, 120.0),
+        Opt::Difficulty => {
+            use crate::settings::Difficulty::*;
+            let all = [Easy, Medium, Hard];
+            let i = all
+                .iter()
+                .position(|d| *d == s.game.difficulty)
+                .unwrap_or(1) as i32;
+            s.game.difficulty = all[(i + step).rem_euclid(3) as usize];
+        }
     }
 }
 
