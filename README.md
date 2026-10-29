@@ -152,6 +152,18 @@ copy of the game.
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
 
+- **Levels run their own scripts (tested in the cloud sandbox, not on
+  Windows).** The game reads each map's own scripting (79 of 79 maps, 2,842
+  scripts, 19,041 actions, nothing unreadable) and runs it: scripts wait
+  for events and timers, touch triggers, counters and conditions send
+  events on, doors open by event, checkpoints ask for a save, and
+  barricades come down. On geo_01a the landing zone now plays like the
+  original: after the intro you are hit by a shell, the advisor tells you
+  to heal, the bacta dispenser switches on, and holding Use at it heals you
+  and blows the barricade so you can reach the fight. `rc_game --script`
+  checks that whole chain (37 of 37 checks). `rc_script_check` runs every
+  map's scripts without a window.
+
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
   opens on a main menu in the visor's amber, lists the campaigns and missions
@@ -221,7 +233,13 @@ copy of the game.
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Scripts are not decoded yet.
+- Level scripts run, but only part of what they ask is carried out:
+  doors, barricades, damage to the player, bacta dispensers, prompts,
+  objectives (kept, not shown) and checkpoints. Lines of dialogue, music
+  cues, characters walking or animating, droid factories, the squad
+  joining and leaving, camera moves and level changes are logged as "not
+  done yet". Sound lengths aren't read, so a script waiting for a line
+  waits 3 s. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.

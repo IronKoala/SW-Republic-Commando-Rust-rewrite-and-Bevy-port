@@ -317,12 +317,17 @@ fn main() -> AppExit {
     // PLUGINS FROM OTHER PARTS (see docs/PLUGINS.md).
     app.add_plugins(rc_level_plugin::LevelPlugin);
     app.add_plugins(rc_movers_plugin::MoversPlugin);
+    app.add_plugins(rc_scripts_plugin::ScriptsPlugin);
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),
+    );
+    app.configure_sets(
+        Update,
+        rc_scripts_plugin::ScriptSystems.after(player::PlayerMoveSet),
     );
 
     if use_script {
