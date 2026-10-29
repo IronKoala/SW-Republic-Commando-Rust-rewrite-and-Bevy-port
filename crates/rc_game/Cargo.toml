@@ -40,3 +40,13 @@ features = [
     "vorbis",
     "bevy_gilrs",
 ]
+
+# Android only (see docs/ANDROID.md): BLAKE3 hashing (CC0 OR Apache-2.0,
+# used inside Bevy) without its C code, and Bevy's native Android start-up.
+[target.'cfg(target_os = "android")'.dependencies]
+blake3 = { version = "1.8", features = ["pure"] }
+
+[target.'cfg(target_os = "android")'.dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["android-native-activity"]

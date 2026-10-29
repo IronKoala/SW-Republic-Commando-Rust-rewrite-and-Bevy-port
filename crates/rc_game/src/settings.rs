@@ -29,6 +29,29 @@ pub struct GameSection {
     pub folder: String,
     /// Our own data files (`data` in the project folder).
     pub data_folder: String,
+    pub difficulty: Difficulty,
+}
+
+/// The original's three difficulties.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Difficulty {
+    Easy,
+    #[default]
+    Medium,
+    Hard,
+}
+
+impl Difficulty {
+    /// How much of an attack's damage reaches the player: the original's
+    /// numbers from its `User.ini` (found by the weapons part).
+    pub fn damage_to_player(self) -> f32 {
+        match self {
+            Difficulty::Easy => 0.25,
+            Difficulty::Medium => 1.0,
+            Difficulty::Hard => 1.75,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,6 +104,7 @@ impl Default for Settings {
             game: GameSection {
                 folder: String::new(),
                 data_folder: "data".into(),
+                difficulty: Difficulty::Medium,
             },
             mods: ModsSection {
                 folder: "mods".into(),
@@ -148,6 +172,8 @@ pub const DEFAULT_FILE: &str = r#"# Republic Commando (Rust and Bevy) settings.
 folder = ''
 # Our own data files (menus, controls, music lists).
 data_folder = 'data'
+# easy, medium or hard (how much damage reaches you: 0.25, 1, 1.75 times).
+difficulty = 'medium'
 
 [mods]
 # One sub-folder per mod. A mod holds files with the same names as in
@@ -272,6 +298,14 @@ mod tests {
         let s = Settings::parse("[audio]\nmusic_volume = 0.2\n").unwrap();
         assert_eq!(s.audio.music_volume, 0.2);
         assert_eq!(s.video.fov, 85.0);
+        assert_eq!(
+            Settings::parse("[game]\ndifficulty = 'hard'\n")
+                .unwrap()
+                .game
+                .difficulty,
+            Difficulty::Hard
+        );
+        assert!(Settings::parse("[game]\ndifficulty = 'brutal'\n").is_err());
         let e = Settings::parse("[audio]\nmusic_volum = 0.2\n").unwrap_err();
         assert!(e.contains("music_volum"), "{e}");
     }

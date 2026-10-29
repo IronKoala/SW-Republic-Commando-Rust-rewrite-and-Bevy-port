@@ -150,6 +150,11 @@ fn main() -> AppExit {
         }
     };
 
+    log.line(format!(
+        "difficulty: {:?} (damage to the player x{:.2})",
+        settings.game.difficulty,
+        settings.game.difficulty.damage_to_player()
+    ));
     let (tried, found) = settings::find_game_folder(&settings);
     for t in &tried {
         log.line(format!("game folder: tried {}", t.display()));

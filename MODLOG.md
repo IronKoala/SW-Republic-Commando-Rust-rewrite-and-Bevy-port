@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Android compile check, difficulty setting (rc_game)
+
+- **Changed:** `crates/rc_game/Cargo.toml` gained two Android-only settings (BLAKE3 without C code, Bevy's native Android start-up). New `docs/ANDROID.md`: what works on Linux and what an Android app still needs. `settings.toml` gained `[game] difficulty` (easy, medium, hard; the original's damage factors 0.25, 1, 1.75), also in the options menu.
+- **Why:** The port must run on Linux and Android; check how far an Android build gets. Difficulty is needed by the weapons part.
+- **Tested how:** `cargo check --target aarch64-linux-android -p rc_game` in the cloud sandbox. Then `cargo test -p rc_game` and `rc_game --script` again.
+- **Result:** The Android check first failed in `blake3` (needs an ARM C compiler) and then in `android-activity` (needs a start-up feature); with both settings it finished with no errors. Tests 11 passed; script 17 passed, 0 failed.
+- **Still broken / not tested:** No Android app: nothing linked, packaged or run on a phone (needs the Android NDK, a library entry point, a folder picker and app-folder paths; listed in `docs/ANDROID.md`). Wayland window: built, not run.
+- **Next:** Wire in the other parts' plugins.
+
 ## 2026-10-29: The game program: menus, settings, controls, display, music (rc_game)
 
 - **Changed:** New crate `crates/rc_game`, the one game program the other parts plug into. Files: `settings.rs` (the player's `settings.toml`, written with defaults and notes on first run), `input.rs` (devices to actions, from `data/input/bindings.toml`: the original PC keys from `DefaultCtrl.ini`, a gamepad layout, touch), `player.rs` (`rc_movement` body and a separate eye camera), `levels.rs` (mission names and order read at run time from the game's `LevelLoadingInfo.int`, grouped by `data/levels/campaigns.toml`), `menu.rs` (main, campaign, levels, options, pause, loading screen), `hud.rs` (visor brackets, crosshair, shield and health, ammo, squad, messages), `music.rs` (the game's `.ogg` music, chosen by `data/music/music.toml`), `theme.rs` (`data/ui/theme.toml`), `stand_in_level.rs` (loads maps like `rc_walk --map` until the level part plugs in), `script.rs` (`--script` self-test). `rc_game_core` gained `PlayerStart` and `MusicMood`. Wayland window support is on alongside X11. `.gitignore` unchanged: the new data files are `.toml` under `data/`.
