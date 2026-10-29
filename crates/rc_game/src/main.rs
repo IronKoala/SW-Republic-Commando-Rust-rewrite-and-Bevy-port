@@ -272,6 +272,7 @@ fn main() -> AppExit {
         stick_look_speed: settings.controls.stick_look_speed,
         invert_y: settings.controls.invert_y,
         dead_zone: settings.controls.stick_dead_zone,
+        look_curve: settings.controls.stick_look_curve,
     })
     .insert_resource(bindings)
     .insert_resource(theme)

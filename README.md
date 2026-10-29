@@ -140,6 +140,18 @@ copy of the game.
   about 3,460 props and double doors that take their model from their
   type are now drawn and solid.
 
+  **The menus and on-screen display are placeholders.** The amber menus,
+  loading screen and HUD are our own stand-ins so the game can be started
+  and tested. The plan is to use the original game's own menus and HUD (its
+  layouts, textures, fonts and sounds, read from your install at run time)
+  as much as possible; see `docs/ORIGINAL_MENUS.md`.
+
+  Any screen shape works: the view is "Hor+" (wider screens see more at the
+  sides, the view up and down stays the original's), and the HUD stays in a
+  centred 16:9 area on ultrawides (`hud_max_aspect` in `settings.toml`).
+  Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
+  mouse and a gamepad work at the same time.
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
