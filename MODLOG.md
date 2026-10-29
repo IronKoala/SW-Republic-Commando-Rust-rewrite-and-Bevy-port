@@ -28,6 +28,14 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** 6 passed. geo_01a: 358 nodes, 1,224 links, 0 unreadable, every link's stored distance within 1 uu of the straight line between its nodes, biggest walkable island 257 nodes, 5 long routes (up to 127 nodes, 46,783 uu) in 0.8 ms. geo_01b: 386 nodes, 1,371 links, one island. geo_01c: 180 nodes, 659 links. CTBot now gives EnemyMemoryTime 15, DecisionInterval 0.5, CoverBoredomTime 15 instead of a junk list.
 - **Still broken / not tested:** Link flag 4096 (seen on 7-9 links per map) is Republic Commando's own; meaning unknown, treated as walkable. Jump links are treated as walkable but nothing jumps yet. Not run on Windows.
 - **Next:** Battle droid brain (rc_ai) using these routes, then the Bevy plugin.
+## 2026-10-29: Weapons, shots, health and damage (rc_combat)
+
+- **Changed:** New crate `crates/rc_combat` with `CombatPlugin` (= `HealthPlugin` + `WeaponsPlugin`), weapon files `data/weapons/dc17m_blaster.toml`, `dc15s_pistol.toml`, `e5_blaster.toml`, `e5_blaster_tm.toml`, and the player's numbers in `data/combat/player.toml`. The player fires from the input actions (fire, reload, next/previous weapon); bolts fly with the game's acceleration and top speed, hit the level or a character's cylinder, and send `Damage`; shields take damage first and recharge after a delay; `Died` is sent at 0 health. Anyone (droids, squad) can fire with a `FireShot` message. Took the enemies thread's one-line fix to `class_defaults.rs` so both branches match.
+- **Why:** Overnight goal 2: fire the blaster with the game's own numbers, and a shared health and damage system for the enemies and squad.
+- **Tested how:** `cargo test -p rc_combat`: 13 rule tests and 8 tests that run the plugin in a Bevy app with no window, in the movement test room.
+- **Result:** 21 passed. The DC-17m fires 10 shots a second, a magazine of 60 then a 1.5 s reload; 5 hits of 20 take a 100-health droid down; a bolt reaches a droid 830 uu away in 10 frames; shots land within the game's aim error (15 uu per 1000 uu); the pistol fires once per press and recharges 1.5 shots a second; 5 droid bolts of 24 take the player's 100 shield and 20 health, and the shield waits 3 s then refills at 20 a second.
+- **Still broken / not tested:** Sounds and the weapon model were not tested yet (the tests have no game folder). Recoil is only sent as a `ViewKick` message; nothing turns the view yet. Not done: hit-location and damage-type multipliers, melee, grenades, the weapon's switch and draw times. Not run on Windows.
+- **Next:** A test range program with sound and the model, run on the real game files.
 
 ## 2026-10-29: Read a script class's default values (rc_probe --class)
 

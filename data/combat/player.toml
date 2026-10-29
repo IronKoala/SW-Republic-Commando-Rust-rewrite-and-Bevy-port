@@ -1,0 +1,12 @@
+# The player's health, shield and starting weapons.
+#
+# The values are the original game's: PlayerCommando (ctcharacters.u) and
+# its parents, with PlayerCommandoDefaults (Properties/properties.u) on top.
+# The game fills health to the maximum when the player appears.
+
+[player]
+health = 200                 # MaxHealth (PlayerCommandoDefaults)
+shield = 100                 # MaxShields (CloneCommando)
+shield_recharge_rate = 20    # ShieldRechargeRate: per second
+shield_recharge_delay = 3    # ShieldRechargeDelay: seconds after a hit
+weapons = ["dc17m_blaster", "dc15s_pistol"]   # first one in hand; files in weapons/
