@@ -67,6 +67,8 @@ copy of the game.
   crouch, hold Shift to walk. The numbers are in
   `data/movement/player_commando.toml`, which mods can edit. `rc_walk
   --script` drives itself through 21 checks and passed all of them.
+  `rc_walk --map geo_01a` puts you in the first Geonosis level instead, with
+  collision against its walls, floors and props.
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
@@ -207,6 +209,17 @@ The log goes to `logs\rc_walk.log`. The last line should be
 `SCRIPT DONE: 21 checks passed, 0 failed`. To try different movement
 numbers, copy `data\movement\player_commando.toml`, edit it and add
 `--settings yourfile.toml`.
+
+To walk a real level (the game folder is found the same way as the level
+viewer's; set `RC_GAME_DIR` if yours isn't the default Steam folder):
+
+```
+cargo run --release -p rc_walk -- --map geo_01a
+```
+
+Add `--script` to let it walk a square on its own and check itself. You start
+at the level's PlayerStart, which is in the gunship's hold. The gunship isn't
+solid yet, so you drop to the floor below first.
 
 To load a level and fly around it:
 

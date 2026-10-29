@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Walking a real level, geo_01a (rc_walk)
+
+- **Changed:** New `crates/rc_walk/src/level.rs` loads a map's collision (BSP polygons plus every visible static mesh prop, via `rc_level::collision`) and its PlayerStart. `rc_walk` gained `--map NAME|path.ctm`, and `--script` with a map walks a square (with a jump and a crouch) and checks it stays on the ground. Fix in `rc_movement/src/world.rs`: a move that only grazes a surface no longer counts as hitting it, with a new unit test (`full_jump_while_pushing_into_a_wall`). README and DESIGN updated.
+- **Why:** Roadmap step 5: walk a real level in first person.
+- **Tested how:** 21 unit tests in rc_movement. In the cloud sandbox (Xvfb, software rendering, debug build), `rc_walk --script` (test room) and `rc_walk --map geo_01a --script` with `geo_01a.ctm` and its static mesh packages copied read-only from the user's install.
+- **Result:** Room: `SCRIPT DONE: 21 checks passed, 0 failed`. geo_01a: loaded in 152 ms (249 BSP nodes, 355 props, 0 unreadable), collision grid built in 43 ms, `SCRIPT DONE: 3 checks passed, 0 failed`. Physics took 0.37 ms per frame on average, 5.2 ms at worst. The first walk found a bug: jumping while pressing into a wall rose only 87 of 103 units, because each slide along the wall "hit" the wall again. After the fix the jump on the map peaks about 101 units up in the log's samples (taken every 6 frames; the unit test gets 102.6). The PlayerStart is about 690 units up, inside the gunship, which isn't solid yet, so the player first drops to the floor (lands at 1154 uu/s, no damage).
+- **Still broken / not tested:** Not tested on Windows or by hand with keyboard and mouse. Not solid yet: BlockingVolumes (27 in geo_01a), movers and vehicles. Per-prop collision settings are ignored. The map is drawn plain grey (no textures or lights in rc_walk). Only geo_01a tried.
+- **Next:** BlockingVolumes, then sharing the textured, lit level drawing with `rc_level_viewer`, then the blaster.
+
 ## 2026-10-29: Collision against triangles, ready for real levels (rc_movement)
 
 - **Changed:** New `crates/rc_movement/src/triangles.rs`: `TriangleWorld`, a `World` made of loose triangles (what the level reader produces for BSP polygons and static meshes), filed in a 256-unit grid so each sweep only looks at nearby triangles. The plane sweep in `world.rs` was split out so both worlds share it. DESIGN updated.

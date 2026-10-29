@@ -2,11 +2,16 @@
 //! game's movement (crate `rc_movement`).
 //!
 //! Usage:
-//!   rc_walk [--settings FILE] [--script] [--frames N]
+//!   rc_walk [--map NAME] [--settings FILE] [--script] [--frames N]
 //!
 //! Controls are the game's defaults: W A S D move, mouse looks, Space jumps,
 //! hold C to crouch, hold Shift to walk. Click the window to capture the
 //! mouse, Escape to let it go.
+//!
+//! `--map` walks a real map instead of the test room: a map name from
+//! `GameData/Maps` (like `geo_01a`) or a path to a `.ctm` file. The game
+//! folder is RC_GAME_DIR or the default Steam path. Walls and floors are
+//! drawn plain grey for now (the level viewer draws them textured).
 //!
 //! `--settings` picks the movement settings file (default
 //! `data/movement/player_commando.toml`). `--script` replaces the keyboard
@@ -21,6 +26,7 @@
 //! - the body only reads `PlayerIntent` and moves the `Body`;
 //! - the camera only reads the `Body` and `PlayerIntent`'s look direction.
 
+mod level;
 mod script;
 
 use bevy::asset::RenderAssetUsages;
@@ -29,13 +35,17 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use rc_movement::room::test_room;
-use rc_movement::{Brush, BrushWorld, Event, MoveInput, MoveParams, Pawn, Vec3 as UVec3};
+use rc_movement::{
+    Brush, BrushWorld, Event, MoveInput, MoveParams, Pawn, TriangleWorld, Vec3 as UVec3, World,
+};
+use std::path::PathBuf;
 use std::fs;
 use std::io::Write;
 use std::sync::Mutex;
 use std::time::Instant;
 
 const LOG_PATH: &str = "logs/rc_walk.log";
+const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Republic Commando";
 const DEFAULT_SETTINGS: &str = "data/movement/player_commando.toml";
 /// Unreal units per Bevy unit. Shared with the level and weapon viewers.
 const UU_PER_UNIT: f32 = 50.0;
@@ -97,8 +107,31 @@ struct Body {
 #[derive(Component)]
 struct PlayerView;
 
+/// What the player collides with: the test room or a real map.
+enum Ground {
+    Room(BrushWorld),
+    Map(TriangleWorld),
+}
+
 #[derive(Resource)]
-struct TestWorld(BrushWorld);
+struct TestWorld(Ground);
+
+impl TestWorld {
+    fn world(&self) -> &dyn World {
+        match &self.0 {
+            Ground::Room(w) => w,
+            Ground::Map(w) => w,
+        }
+    }
+}
+
+/// Slowest physics step so far, for the log (matters on big maps).
+#[derive(Resource, Default)]
+struct StepTiming {
+    worst_ms: f64,
+    total_ms: f64,
+    steps: u32,
+}
 
 #[derive(Resource)]
 struct ExitAfter(Option<u32>);
@@ -143,9 +176,40 @@ fn setup(
         perceptual_roughness: 0.8,
         ..default()
     });
-    for (i, b) in world.0.brushes.iter().enumerate() {
-        let mat = if i == 0 { floor.clone() } else { block.clone() };
-        commands.spawn((Mesh3d(meshes.add(brush_mesh(b))), MeshMaterial3d(mat)));
+    match &world.0 {
+        Ground::Room(room) => {
+            for (i, b) in room.brushes.iter().enumerate() {
+                let mat = if i == 0 { floor.clone() } else { block.clone() };
+                commands.spawn((Mesh3d(meshes.add(brush_mesh(b))), MeshMaterial3d(mat)));
+            }
+            log.line(format!(
+                "test room: {} solids; 1 Bevy unit = {UU_PER_UNIT} uu",
+                room.brushes.len()
+            ));
+        }
+        Ground::Map(tw) => {
+            commands.spawn((
+                Mesh3d(meshes.add(triangles_mesh(&tw.triangles))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.6, 0.6, 0.58),
+                    perceptual_roughness: 0.9,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+            ));
+            let (lo, hi) = tw.bounds();
+            log.line(format!(
+                "map: {} collision triangles, bounds ({:.0}, {:.0}, {:.0}) to ({:.0}, {:.0}, {:.0})",
+                tw.triangles.len(),
+                lo.x,
+                lo.y,
+                lo.z,
+                hi.x,
+                hi.y,
+                hi.z
+            ));
+        }
     }
     commands.spawn((
         DirectionalLight {
@@ -165,10 +229,20 @@ fn setup(
         Transform::default(),
         PlayerView,
     ));
-    log.line(format!(
-        "test room: {} solids; 1 Bevy unit = {UU_PER_UNIT} uu",
-        world.0.brushes.len()
-    ));
+}
+
+/// One grey mesh for a map's collision triangles.
+fn triangles_mesh(tris: &[[UVec3; 3]]) -> Mesh {
+    let positions: Vec<[f32; 3]> = tris
+        .iter()
+        .flat_map(|t| t.iter().map(|&p| to_bevy(p).to_array()))
+        .collect();
+    let indices = (0..positions.len() as u32).collect();
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(indices))
+        .with_duplicated_vertices()
+        .with_computed_flat_normals()
 }
 
 /// A Bevy mesh for one solid of the test room (a box, or a ramp along +X).
@@ -284,9 +358,11 @@ fn script_input(
                 body.pawn = Pawn::new(params, *feet);
                 intent.movement = MoveInput { yaw: *yaw, ..Default::default() };
                 intent.pitch = 0.0;
+                let z = body.pawn.feet().z;
                 s.stats = script::Stats {
-                    start_feet_z: body.pawn.feet().z,
-                    peak_feet_z: body.pawn.feet().z,
+                    start_feet_z: z,
+                    peak_feet_z: z,
+                    lowest_feet_z: z,
                     events: vec![],
                 };
                 log.line(format!(
@@ -298,6 +374,24 @@ fn script_input(
                 ));
                 // Let it settle onto the floor before measuring jumps.
                 s.hold_left = 0.0;
+            }
+            script::Step::Turn { degrees } => {
+                let yaw = intent.movement.yaw + degrees.to_radians();
+                intent.movement.yaw = yaw.rem_euclid(std::f32::consts::TAU);
+                log.line(format!("turn {degrees:.0} deg"));
+            }
+            script::Step::AtLeast { name, measure, min } => {
+                let got = measure(&body.pawn, &s.stats);
+                let ok = got >= *min;
+                if ok {
+                    s.passed += 1;
+                } else {
+                    s.failed += 1;
+                }
+                log.line(format!(
+                    "CHECK {name}: got {got:.2}, want at least {min:.2} -> {}",
+                    if ok { "PASS" } else { "FAIL" }
+                ));
             }
             script::Step::Hold { secs, input } => {
                 s.hold_left = *secs;
@@ -330,13 +424,29 @@ fn move_body(
     world: Res<TestWorld>,
     script: Option<ResMut<Script>>,
     mut body: Query<&mut Body>,
+    mut timing: ResMut<StepTiming>,
     log: Res<RunLog>,
 ) {
     let Ok(mut body) = body.single_mut() else {
         return;
     };
     let dt = if script.is_some() { SCRIPT_DT } else { time.delta_secs().min(0.25) };
-    let events = body.pawn.step(dt, &intent.movement, &world.0);
+    let t0 = Instant::now();
+    let events = body.pawn.step(dt, &intent.movement, world.world());
+    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+    timing.steps += 1;
+    timing.total_ms += ms;
+    if ms > timing.worst_ms {
+        timing.worst_ms = ms;
+    }
+    if timing.steps % 600 == 0 {
+        log.line(format!(
+            "physics time per frame: average {:.3} ms, worst {:.3} ms ({} frames)",
+            timing.total_ms / timing.steps as f64,
+            timing.worst_ms,
+            timing.steps
+        ));
+    }
     body.time += dt;
     let feet = body.pawn.feet();
     for e in &events {
@@ -344,6 +454,7 @@ fn move_body(
     }
     if let Some(mut s) = script {
         s.stats.peak_feet_z = s.stats.peak_feet_z.max(feet.z);
+        s.stats.lowest_feet_z = s.stats.lowest_feet_z.min(feet.z);
         s.stats.events.extend(events.iter().cloned());
     }
     if events.iter().any(|e| matches!(e, Event::Landed { damage, .. } if *damage > 0.0)) {
@@ -415,16 +526,18 @@ fn report(
 fn main() -> AppExit {
     let mut settings_path = DEFAULT_SETTINGS.to_string();
     let mut use_script = false;
+    let mut map_name: Option<String> = None;
     let mut frames = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--settings" => settings_path = args.next().unwrap_or_default(),
+            "--map" => map_name = args.next(),
             "--script" => use_script = true,
             "--frames" => frames = args.next().and_then(|n| n.parse().ok()),
             other => {
                 eprintln!("unknown option {other}");
-                eprintln!("usage: rc_walk [--settings FILE] [--script] [--frames N]");
+                eprintln!("usage: rc_walk [--map NAME] [--settings FILE] [--script] [--frames N]");
                 return AppExit::from_code(2);
             }
         }
@@ -461,6 +574,57 @@ fn main() -> AppExit {
         log.line(format!("  {name} = {value}"));
     }
 
+    let (ground, start, steps) = match &map_name {
+        None => (Ground::Room(test_room()), None, script::steps()),
+        Some(name) => {
+            let game = std::env::var_os("RC_GAME_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_DIR));
+            let game_data = game.join("GameData");
+            let path = if name.to_ascii_lowercase().ends_with(".ctm") {
+                PathBuf::from(name)
+            } else {
+                game_data.join("Maps").join(format!("{name}.ctm"))
+            };
+            let t = Instant::now();
+            let lvl = match level::load(&path, &game_data, params.collision_height) {
+                Ok(l) => l,
+                Err(e) => {
+                    log.line(format!("ERROR loading {}: {e}", path.display()));
+                    return AppExit::from_code(1);
+                }
+            };
+            log.line(format!(
+                "loaded {}: {} BSP nodes, {} static mesh props ({} couldn't be read), {:.0} ms",
+                path.display(),
+                lvl.bsp_nodes,
+                lvl.mesh_actors,
+                lvl.mesh_failures,
+                t.elapsed().as_secs_f64() * 1000.0
+            ));
+            let t = Instant::now();
+            let tw = TriangleWorld::new(lvl.triangles);
+            log.line(format!(
+                "collision grid built in {:.0} ms",
+                t.elapsed().as_secs_f64() * 1000.0
+            ));
+            let start = lvl.start.unwrap_or_else(|| {
+                let (lo, hi) = tw.bounds();
+                log.line("no PlayerStart: starting above the middle of the map");
+                (UVec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z), 0.0)
+            });
+            log.line(format!(
+                "start: feet ({:.1}, {:.1}, {:.1}), facing {:.0} deg",
+                start.0.x,
+                start.0.y,
+                start.0.z,
+                start.1.to_degrees()
+            ));
+            let lowest = tw.bounds().0.z;
+            (Ground::Map(tw), Some(start), script::map_steps(start.0, start.1, lowest))
+        }
+    };
+
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -470,7 +634,8 @@ fn main() -> AppExit {
         ..default()
     }))
     .insert_resource(ClearColor(Color::srgb(0.35, 0.45, 0.6)))
-    .insert_resource(TestWorld(test_room()))
+    .insert_resource(TestWorld(ground))
+    .init_resource::<StepTiming>()
     .insert_resource(ExitAfter(frames))
     .init_resource::<FrameCount>()
     .init_resource::<PlayerIntent>()
@@ -482,7 +647,7 @@ fn main() -> AppExit {
     if use_script {
         log.line("input: --script (keyboard and mouse ignored)");
         app.insert_resource(Script {
-            steps: script::steps(),
+            steps,
             next: 0,
             hold_left: 0.0,
             stats: Default::default(),
@@ -495,8 +660,10 @@ fn main() -> AppExit {
         app.add_systems(Update, keyboard_mouse_input.in_set(Stage::Input));
     }
     app.insert_resource(log);
+    let (feet, yaw) = start.unwrap_or((UVec3::ZERO, 0.0));
+    app.world_mut().resource_mut::<PlayerIntent>().movement.yaw = yaw;
     app.world_mut().spawn(Body {
-        pawn: Pawn::new(params, UVec3::ZERO),
+        pawn: Pawn::new(params, feet),
         time: 0.0,
     });
     app.run()

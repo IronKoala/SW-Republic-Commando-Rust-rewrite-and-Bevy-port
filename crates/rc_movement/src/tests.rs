@@ -209,3 +209,23 @@ fn shipped_settings_file_matches_built_in_values() {
     let from_file = zero.with_overrides(text).unwrap();
     assert_eq!(from_file, built_in);
 }
+
+#[test]
+fn full_jump_while_pushing_into_a_wall() {
+    // Found on geo_01a: jumping while pressed against a wall at a shallow
+    // angle used to stall the rise (peak 87 instead of 103), because the
+    // slide along the wall kept "hitting" the same wall. The wall here is
+    // the outer +Y wall of the test room, pushed into at about 5 degrees.
+    let w = test_room();
+    let mut p = player_at(Vec3::new(0.0, 1955.0, 0.0));
+    let input = MoveInput { forward: 1.0, yaw: 5f32.to_radians(), ..Default::default() };
+    run(&mut p, &w, input, 0.5);
+    let z0 = p.feet().z;
+    let mut peak = z0;
+    let jump = MoveInput { jump: true, ..input };
+    for _ in 0..50 {
+        p.step(DT, &jump, &w);
+        peak = peak.max(p.feet().z);
+    }
+    assert!((peak - z0 - 102.6).abs() < 1.0, "peak {}", peak - z0);
+}

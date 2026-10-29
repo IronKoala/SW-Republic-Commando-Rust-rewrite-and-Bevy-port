@@ -87,6 +87,10 @@ impl Brush {
 pub(crate) fn sweep_planes(planes: &[Plane], extent: Vec3, start: Vec3, end: Vec3) -> Option<Hit> {
     {
         let delta = end - start;
+        // A move counts as running along a surface, not into it, when its
+        // push into the surface is this small. Without this, rounding makes
+        // a slide along a wall "hit" the same wall again and again.
+        let parallel = 1e-4 * delta.length();
         let mut enter = -1.0f32;
         let mut exit = 1.0f32;
         let mut enter_normal = Vec3::UP;
@@ -105,7 +109,7 @@ pub(crate) fn sweep_planes(planes: &[Plane], extent: Vec3, start: Vec3, end: Vec
             }
             if d_start > 0.0 {
                 started_outside = true;
-                if d_end >= 0.0 {
+                if d_end >= 0.0 || n.dot(delta) > -parallel {
                     // Both ends outside this side: the line misses the solid.
                     return None;
                 }
@@ -123,7 +127,7 @@ pub(crate) fn sweep_planes(planes: &[Plane], extent: Vec3, start: Vec3, end: Vec
             // An overlap of a hair's width comes from rounding: count it as
             // touching the surface, not as being stuck inside.
             if nearest_out > -0.01 {
-                if delta.dot(nearest_normal) >= 0.0 {
+                if delta.dot(nearest_normal) > -parallel {
                     return None;
                 }
                 return Some(Hit {

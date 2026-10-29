@@ -10,6 +10,7 @@ use rc_movement::{Event, Mode, MoveInput, Pawn, Vec3};
 pub struct Stats {
     pub start_feet_z: f32,
     pub peak_feet_z: f32,
+    pub lowest_feet_z: f32,
     pub events: Vec<Event>,
 }
 
@@ -32,8 +33,12 @@ type Measure = fn(&Pawn, &Stats) -> f32;
 pub enum Step {
     /// Move the player: feet position and facing (radians).
     Place { feet: Vec3, yaw: f32 },
+    /// Turn by this many degrees (positive is to the right).
+    Turn { degrees: f32 },
     /// Hold these keys for this long.
     Hold { secs: f32, input: MoveInput },
+    /// A measurement must be at least `min`.
+    AtLeast { name: &'static str, measure: Measure, min: f32 },
     /// Compare a measurement with what we expect.
     Check { name: &'static str, measure: Measure, want: f32, tolerance: f32 },
 }
@@ -134,4 +139,37 @@ pub fn steps() -> Vec<Step> {
         check("700 fall: landing speed", |_, s| s.landing().map_or(0.0, |l| l.0), 1241.0, 2.0),
         check("700 fall: damage", |_, s| s.landing().map_or(-1.0, |l| l.1), 3.4, 0.3),
     ]
+}
+
+/// A walk around a real map from its PlayerStart: settle, then run in a
+/// square (four legs, turning right each time), jumping on one leg and
+/// crouching on another. Checks only what must hold anywhere: the player
+/// ends on the ground and never drops below the lowest point of the map.
+pub fn map_steps(feet: Vec3, yaw: f32, lowest_z: f32) -> Vec<Step> {
+    let run = keys(1.0, 0.0);
+    let mut s = vec![
+        Step::Place { feet, yaw },
+        // geo_01a's PlayerStart is up in the gunship the squad ropes down
+        // from (the gunship isn't solid yet), so allow time to drop.
+        hold(2.0, MoveInput::default()),
+        check("standing on the map's floor", |p, _| yes(p.mode == Mode::Walking), 1.0, 0.0),
+    ];
+    for leg in 0..4 {
+        let input = match leg {
+            1 => MoveInput { forward: 1.0, jump: true, ..Default::default() },
+            2 => MoveInput { forward: 1.0, crouch: true, ..Default::default() },
+            _ => run,
+        };
+        s.push(hold(3.0, input));
+        s.push(hold(0.5, MoveInput::default()));
+        s.push(Step::Turn { degrees: 90.0 });
+    }
+    s.push(hold(1.0, MoveInput::default()));
+    s.push(check("on the ground at the end", |p, _| yes(p.mode == Mode::Walking), 1.0, 0.0));
+    s.push(Step::AtLeast {
+        name: "never fell below the map's lowest point",
+        measure: |_, st| st.lowest_feet_z,
+        min: lowest_z,
+    });
+    s
 }

@@ -15,7 +15,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_audio` | Reads `.wav` files into samples and measures them (length, peak, loudness, checksum). Knows nothing about Unreal. No Bevy. |
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
 | `rc_movement` | The player's walking, jumping, crouching and collision, with the game's own numbers. No Bevy. |
-| `rc_walk` | Bevy program: walk around a test room in first person using `rc_movement`. |
+| `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
 
 | `rc_level` | Reads maps: the level's own geometry (the BSP) and where every actor is placed. No Bevy. |
 | `rc_level_viewer` | Bevy program: loads one map and lets you fly around it. |
@@ -518,7 +518,17 @@ sweep only checks the ones nearby. The test room cut into triangles gives the
 same results as the box version, within 1 uu.
 
 A 0.1 uu gap is kept between the box and surfaces, so rounding errors can't
-leave it stuck inside a wall.
+leave it stuck inside a wall. A move that only grazes a surface (pushes into it by less than
+1/10000 of its length) doesn't count as hitting it. Without that, sliding
+along a wall kept "hitting" the same wall, and a jump while pressing into a
+wall rose only 87 of its 103 units.
+
+`rc_walk --map NAME` builds a `TriangleWorld` from a map (`rc_walk/src/level.rs`):
+the BSP's polygons plus every visible static mesh prop, cut into triangles by
+`rc_level::collision`, and puts the player at the first PlayerStart (its
+centre is the start point, so feet = start z - 84). Not yet solid:
+BlockingVolumes and movers and vehicles (the gunship you start in). The
+game's per-prop collision settings are ignored: every visible prop is solid.
 
 ### The test room
 
