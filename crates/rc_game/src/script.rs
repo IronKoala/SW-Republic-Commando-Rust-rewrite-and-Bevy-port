@@ -387,6 +387,9 @@ fn steps() -> Vec<Step> {
                 c => Err(format!("{c:?}")),
             }
         }),
+        // Use some ammo first, so the save differs from a fresh start.
+        Hold(Action::Fire, 0.5),
+        Wait(0.2),
         Note(|w| {
             let b = body(w);
             w.resource_mut::<Noted>().saved = b;
@@ -447,6 +450,27 @@ fn steps() -> Vec<Step> {
             let turn = (now_yaw - yaw).abs();
             let got = format!("{d:.2} uu from the saved spot, facing {:.3} rad off", turn);
             if d < 2.0 && turn < 0.001 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("quickload gives back the ammo used before saving", |w| {
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let c = quick.part("combat").ok_or("no [combat] section")?;
+            let saved = c["weapons"].as_array().and_then(|a| a.first()).ok_or("no weapons")?;
+            let saved_clip = saved["clip"].as_float().ok_or("no clip")? as f32;
+            let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+            let a = q.iter(w).next().ok_or("player has no weapons")?;
+            let (id, now) = a.weapons.first().ok_or("no weapons")?;
+            let full = w
+                .resource::<rc_combat::WeaponLibrary>()
+                .weapons
+                .get(id)
+                .map(|p| rc_combat::WeaponState::new(p).clip)
+                .unwrap_or(0.0);
+            let got = format!("{id}: {:.0} in the magazine now, {saved_clip:.0} saved, {full:.0} when full", now.clip);
+            if (now.clip - saved_clip).abs() < 0.01 && saved_clip < full {
                 Ok(got)
             } else {
                 Err(got)

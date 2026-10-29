@@ -4431,6 +4431,7 @@ dependencies = [
  "rc_level_viewer",
  "rc_movement",
  "rc_package",
+ "serde",
 ]
 
 [[package]]
