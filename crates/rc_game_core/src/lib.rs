@@ -16,8 +16,11 @@
 //!   fire, ...), whatever the device. Gameplay never reads keys or buttons.
 //! - [`PlayerVitals`], [`WeaponReadout`], [`SquadReadout`]: numbers the
 //!   on-screen display shows. Gameplay writes them, the display only reads.
-//! - [`LevelCollision`], [`Player`], [`PlayerCamera`]: the level's solid
-//!   surfaces, the player's body and the player's eyes.
+//! - [`LevelCollision`], [`PlayerStart`], [`Player`], [`PlayerCamera`]: the
+//!   level's solid surfaces, where the player starts, the player's body and
+//!   the player's eyes.
+//! - [`MusicMood`]: calm or battle music; whoever knows a fight started
+//!   sets it.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
 //!
 //! This crate has no window or renderer in it, so it builds quickly and its
@@ -26,7 +29,7 @@
 mod actions;
 mod hud;
 mod log;
-mod paths;
+pub mod paths;
 mod state;
 pub mod units;
 
@@ -35,8 +38,8 @@ pub use hud::{HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, 
 pub use log::GameLog;
 pub use paths::GamePaths;
 pub use state::{
-    playing, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate, Play, Player,
-    PlayerCamera,
+    playing, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate, MusicMood, Play,
+    Player, PlayerCamera, PlayerStart,
 };
 
 use bevy::prelude::*;
@@ -56,10 +59,17 @@ impl Plugin for CorePlugin {
             .init_resource::<PlayerVitals>()
             .init_resource::<WeaponReadout>()
             .init_resource::<SquadReadout>()
+            .init_resource::<MusicMood>()
             .add_message::<HudMessage>()
             .configure_sets(
                 Update,
-                (GameSet::Input, GameSet::Simulate, GameSet::View, GameSet::Hud).chain(),
+                (
+                    GameSet::Input,
+                    GameSet::Simulate,
+                    GameSet::View,
+                    GameSet::Hud,
+                )
+                    .chain(),
             );
     }
 }
