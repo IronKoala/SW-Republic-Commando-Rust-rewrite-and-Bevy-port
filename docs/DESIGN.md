@@ -21,6 +21,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
+| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
+| `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
 Only `rc_viewer`, `rc_character`, `rc_level_viewer` and `rc_soundtest` use Bevy
@@ -32,7 +34,14 @@ one build); `rc_level_viewer` Bevy's full 3D renderer (`3d_bevy_render`);
 
 ## Finding the game
 
-The game folder comes from the `RC_GAME_DIR` environment variable, or defaults to
+In the game program (`rc_game`), the folder comes from `settings.toml`
+(`[game] folder`), then the `RC_GAME_DIR` environment variable, then the
+usual Steam folders for the system (Windows, Linux, Linux Flatpak). A folder
+counts if it has `GameData/Maps`. File names are matched without caring
+about upper or lower case, because Linux and Android care and Windows
+doesn't. On Android the folder will be one the player picks.
+
+The older test programs use `RC_GAME_DIR` or default to
 `C:\Games\Steam\steamapps\common\Star Wars Republic Commando`. Programs only ever
 read from it. Logs go to `logs/` in the folder you run from, which `.gitignore`
 never tracks.
@@ -969,3 +978,101 @@ written to disk. The program:
   used. The sandbox runs are on Linux, so Linux is tested; building there
   needs the ALSA development package (`libasound2-dev` on Ubuntu). Windows
   and Android are not tested yet.
+
+## The game program (`rc_game`)
+
+`rc_game` is built from Bevy plugins. Parts don't call each other; they
+share the types in `rc_game_core`. How a part plugs in is in
+`docs/PLUGINS.md`.
+
+**Screens.** `GameState` is `Boot` (read settings) then `MainMenu`, `Loading`
+and `InGame`. While in `InGame` a second state, `Play`, is `Running` or
+`Paused`, so pausing never counts as leaving the level. Gameplay systems run
+only while `Running`. Everything spawned for a level carries
+`DespawnOnExit(GameState::InGame)` and is cleared on the way back to the
+menu (the script checks that no player, camera or level mesh is left).
+
+**Loading.** The menu sets `CurrentLevel` and enters `Loading`. Any part with
+slow work calls `LoadingGate::wait("name")` and later `done("name")` or
+`fail("name", reason)`. The shell moves to `InGame` when nothing is waiting
+(and at least one frame has passed, so every part has had its turn); on a
+failure it goes back to the menu and shows the reason.
+
+**Input.** Devices are read in one place (`input.rs`) into `ActionState`:
+which actions are held this frame, a movement direction and a turn amount.
+Gameplay reads only that. The bindings file maps keys, mouse buttons and
+wheel, gamepad buttons and sticks to actions; touch screens move with a drag
+on the left half, look with a drag on the right half, and fire with a tap.
+The keyboard defaults are the original's `DefaultCtrl.ini`. A scripted run
+or a VR mod writes `ActionState` itself instead.
+
+**The player.** `player.rs` moves a body with `rc_movement` (as `rc_walk`
+does) from `ActionState`, and puts a separate camera at its eyes. The
+camera is not a child of the body, so a VR headset can replace it.
+
+**Menus.** *Placeholders:* these menus and the display below are our own
+stand-ins until the original's menus and HUD are read from the install
+(`docs/ORIGINAL_MENUS.md`). Each menu is a page: a title and a list of items, drawn with
+Bevy's UI and the theme file's colours. Pages: main, campaign list, a
+campaign's levels, options, pause, and "game files not found". The mission
+names, order and loading text come from the game's own
+`GameData/System/LevelLoadingInfo.int` (plain text with numbered entries
+like `MapName[3]="GEO_03A"`), read at start-up, never copied into the repo.
+`data/levels/campaigns.toml` only groups them by name prefix. Sizes are a
+share of the screen height, or of its width when that is smaller, so the
+menus fit a phone or a monitor.
+
+**Screen shapes and controls.** The view is "Hor+": `video.fov` is the
+angle across a 4:3 screen, as in the original, and wider screens see more
+at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+numbers and what is still to do (edge stretching on ultrawides, controller
+pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
+
+**On-screen display.** Corner brackets like the commando's visor, a
+four-bar crosshair whose gap follows the weapon's spread and turns red on a
+target, shield and health bars, the ammo counter, a squad list and short
+messages. It reads only the readout resources, and logs its numbers every
+two seconds.
+
+**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
+`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
+track and, per map name prefix, a calm and a battle list; `MusicMood`
+chooses between them. Each track is despawned when it ends and the next one
+starts.
+
+**Mods.** Everything we ship as data (controls, theme, music, campaigns,
+movement) is found through `GamePaths::data_file`, which looks in each
+enabled mod's folder (`mods/<name>/`) before `data/`. Lists that add up (the
+campaigns file) read every copy.
+
+**The stand-in level.** Until the levels part plugs in its own plugin,
+`stand_in_level.rs` loads a map the way `rc_walk --map` does (its collision
+code is a copy of `rc_walk/src/level.rs`). It is meant to be deleted then.
+
+**Checking without looking.** `rc_game --script` presses the same actions a
+player would and checks each step: menu pages, loading, the player moving
+430 units in a second of walking, nothing moving while paused, the level
+being cleared, options changing. It also captures the window twice and
+measures colours: the main menu must contain amber text, and in the level
+at least 30% of the screen must be lit with amber crosshair pixels at the
+centre.
+
+## Automatic checks on GitHub (`.github/workflows/ci.yml`)
+
+Every pull request, and every push to `main`, is built and tested by GitHub's
+own machines on Windows and Linux. A pull request shows a green tick or a red
+cross for each. The steps are `cargo build --workspace --all-targets --locked`
+and `cargo test --workspace --locked`. `--locked` means the exact library
+versions in `Cargo.lock` are used. Linux also installs the system libraries
+Bevy needs (sound, gamepads, windows). The build folder is cached between
+runs, so a run that changes little is much quicker than the first.
+
+The game is never on GitHub, so `RC_GAME_DIR` is not set there. Unit tests
+must not need game files. A future test that does should check for
+`RC_GAME_DIR`, print "skipped: no game folder" and pass when it isn't set.
+
+A third job runs `cargo fmt --check` (code layout) and `cargo clippy` (common
+mistakes). It only reports: its problems show as warnings and never turn the
+run red. The checks do not open windows or draw anything, so the Bevy
+programs' own `--script` and screenshot checks are not run there, and Android
+is not built yet.

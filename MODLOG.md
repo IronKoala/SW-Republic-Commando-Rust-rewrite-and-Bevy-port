@@ -39,6 +39,60 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** `entry.ctm` (the 6-polygon boot map) still has unreadable lightmaps: its page has no pixels and the bytes after it don't match. 21 maps have a few BSP corners 1-7 units off their plane (the check allows 1); they draw fine as far as the numbers show. One `TexPanner2D` and one odd `TexPanner` aren't shown. Not tested on Windows.
 - **Next:** Invisible walls, then the sky.
 
+## 2026-10-29: Any screen shape, dual input, stick curves; menus marked as placeholders
+
+- **Changed:** `rc_game`'s field of view is now "Hor+": `video.fov` is the angle across a 4:3 screen (the original's 85), turned into a fixed angle up and down, so wider screens see more at the sides instead of losing the top and bottom. The HUD and menus are sized by the screen's smaller side (`Val::VMin`, `FontSize::VMin`), and the HUD stays in a centred 16:9 area on wider screens (new `video.hud_max_aspect`). Sticks: the dead zone now stretches the rest of the range back to 0..1, and a new `controls.stick_look_curve` (default 1.5) gives finer aim near the middle. `rc_game_core::ActionState` gained `last_device` (keyboard and mouse, gamepad or touch) for button prompts. The amber menus and HUD are marked as placeholders in the code, `data/ui/theme.toml`, README and DESIGN. New `docs/ORIGINAL_MENUS.md` (how the original builds its menus and HUD, and the plan to use them) and `docs/DISPLAY_AND_INPUT.md` (screen shapes, controllers, gyro).
+- **Why:** New project goals from the user: any resolution and aspect ratio with proper ultrawide, dual input, wide controller support and gyro aiming; and use the original game's menus as much as possible.
+- **Tested how:** `cargo test -p rc_game -p rc_game_core` (new tests for the field of view numbers and the stick shaping). `rc_game --script` in the cloud sandbox at 1024x768, 1280x720, 1720x720, 2560x720 and 540x960, with screenshots. For the menus: read the install's `XInterfaceCTMenus.u`, `XInterface.u`, `CTGame.u`, `GUIContent.utx`, `WarfareFonts.utx`, `OrbitFonts.utx` and `HUDTextures.utx` with a throwaway tool built on `rc_package` (not committed).
+- **Result:** Tests 18 passed. The script passed 17 of 17 at all five sizes. Logged view angles: 85.0, 101.4, 117.3, 135.5 and 42.3 degrees across, 69.0 up and down every time. Screenshots: on 32:9 the HUD sits in the centred 16:9 area; on the upright phone shape the menu and HUD fit inside the screen. Menus: `CTMenuMain`'s 34 default values read cleanly, including "MAIN MENU" at 0.24, 0.575 and its eight buttons; the HUD (`CTHUD`) is drawn by native code, so only its textures can be reused.
+- **Still broken / not tested:** At 32:9 the edges of the 3D view are visibly stretched (normal for a 135-degree view; needs an optional Panini view). No real gamepad, touch screen or gyro tested. No gyro support (gilrs can't read gyros). No in-game rebinding screen.
+- **Next:** Separate threads: the original's menus (plan in `docs/ORIGINAL_MENUS.md`), gyro and controller pictures (`docs/DISPLAY_AND_INPUT.md`).
+
+## 2026-10-29: Recoil message, and a trial run with the weapons and squad parts
+
+- **Changed:** `rc_game_core` gained `ViewKick` (weapon recoil: pitch and yaw in radians); `rc_game`'s player adds it to the view. `docs/PLUGINS.md` lists it.
+- **Why:** The weapons part sends recoil per shot and needs something to turn the view without depending on the player code.
+- **Tested how:** In a throwaway copy (not pushed), merged this branch with the weapons branch (`rc_combat`, commit 285dd3e) and the squad branch (`rc_squad_plugin`, PR #13), added both plugins to `rc_game`, and ran `rc_game --script`. Then `cargo test` and the script again on this branch alone.
+- **Result:** Together: `SCRIPT DONE: 17 checks passed, 0 failed`. The display showed `DC-17M BLASTER 60 | 60`, health 200, shield 100, and Sev, Fixer and Scorch at 100% on "Form up" (screenshot checked). Only conflicts were the workspace member list, MODLOG and DESIGN (both sides add lines). This branch alone afterwards: 16 unit tests and the script, 17 passed, 0 failed.
+- **Still broken / not tested:** Recoil isn't sprung back yet. Firing wasn't exercised by the script. The other parts are wired in only after their pull requests are merged.
+- **Next:** After merging, add the four plugins to `rc_game` (one line each) and remove the stand-in level.
+
+## 2026-10-29: Android compile check, difficulty setting (rc_game)
+
+- **Changed:** `crates/rc_game/Cargo.toml` gained two Android-only settings (BLAKE3 without C code, Bevy's native Android start-up). New `docs/ANDROID.md`: what works on Linux and what an Android app still needs. `settings.toml` gained `[game] difficulty` (easy, medium, hard; the original's damage factors 0.25, 1, 1.75), also in the options menu.
+- **Why:** The port must run on Linux and Android; check how far an Android build gets. Difficulty is needed by the weapons part.
+- **Tested how:** `cargo check --target aarch64-linux-android -p rc_game` in the cloud sandbox. Then `cargo test -p rc_game` and `rc_game --script` again.
+- **Result:** The Android check first failed in `blake3` (needs an ARM C compiler) and then in `android-activity` (needs a start-up feature); with both settings it finished with no errors. Tests 11 passed; script 17 passed, 0 failed.
+- **Still broken / not tested:** No Android app: nothing linked, packaged or run on a phone (needs the Android NDK, a library entry point, a folder picker and app-folder paths; listed in `docs/ANDROID.md`). Wayland window: built, not run.
+- **Next:** Wire in the other parts' plugins.
+
+## 2026-10-29: The game program: menus, settings, controls, display, music (rc_game)
+
+- **Changed:** New crate `crates/rc_game`, the one game program the other parts plug into. Files: `settings.rs` (the player's `settings.toml`, written with defaults and notes on first run), `input.rs` (devices to actions, from `data/input/bindings.toml`: the original PC keys from `DefaultCtrl.ini`, a gamepad layout, touch), `player.rs` (`rc_movement` body and a separate eye camera), `levels.rs` (mission names and order read at run time from the game's `LevelLoadingInfo.int`, grouped by `data/levels/campaigns.toml`), `menu.rs` (main, campaign, levels, options, pause, loading screen), `hud.rs` (visor brackets, crosshair, shield and health, ammo, squad, messages), `music.rs` (the game's `.ogg` music, chosen by `data/music/music.toml`), `theme.rs` (`data/ui/theme.toml`), `stand_in_level.rs` (loads maps like `rc_walk --map` until the level part plugs in), `script.rs` (`--script` self-test). `rc_game_core` gained `PlayerStart` and `MusicMood`. Wayland window support is on alongside X11. `.gitignore` unchanged: the new data files are `.toml` under `data/`.
+- **Why:** The overnight plan's fifth part: the game itself, so levels, weapons, enemies and squad have one program to plug into, and the game folder is a setting instead of a Windows path.
+- **Tested how:** `cargo test -p rc_game -p rc_game_core` (16 tests). In the cloud sandbox, with the needed map, texture, mesh and music files copied read-only from the install (outside the repo), ran `xvfb-run rc_game --script` twice.
+- **Result:** Both runs: `SCRIPT DONE: 17 checks passed, 0 failed`, exit code 0. The game's list gave 77 maps (2 shown in the sandbox, which only had `pro` and `geo_01a`). `geo_01a`: 139,481 collision triangles, drawn in 2.1 s (debug build, software rendering); walking forward for one second moved 430 units; paused, 0.000 units. Main menu screenshot 0.71% amber; level screenshot 64% lit with 96 amber crosshair pixels at the centre. Menu music and the prologue track decoded and started on a fake ("null") sound card.
+- **Still broken / not tested:** Not tested on Windows, with a gamepad, with a touch screen, on Wayland or on Android. Music heard: not tested (the sandbox has no speakers). The prologue's player start is in the air (it's a cut scene in the original), so the player falls. No weapons, enemies or squad until those parts plug in. Options saved from the menu lose the first-run file's notes.
+- **Next:** Plug in the other parts as they land, check an Android build, run on the user's PC.
+
+## 2026-10-29: Shared game pieces for every part to plug into (rc_game_core)
+
+- **Changed:** New crate `crates/rc_game_core` and `docs/PLUGINS.md`. The crate holds what the whole game shares: the screens (`GameState`: boot, main menu, loading, in game; `Play`: running or paused), the folders (`GamePaths`, with mods searched before `data/`, and file names matched without caring about case for Linux and Android), the input actions (`Action`, `ActionState`), the numbers the on-screen display shows (health, ammo, squad), loading hand-off (`LoadingGate`), level collision, the player and camera markers, unit conversion and one shared log.
+- **Why:** Five parts of the game are being built at the same time (levels, weapons, enemies, squad, menus). They need one agreed way to plug into a single game program without calling each other.
+- **Tested how:** `cargo test -p rc_game_core` (5 tests: action names, press/release tracking, unit conversion, finding files with mods first and any letter case, and pausing stopping gameplay without leaving the level).
+- **Result:** 5 passed, 0 failed.
+- **Still broken / not tested:** Nothing uses it yet. The game program itself (`rc_game`) is the next step.
+- **Next:** `rc_game` with the settings file, menus, input bindings, on-screen display and music.
+
+## 2026-10-29: Automatic build checks on GitHub (CI)
+
+- **Changed:** New `.github/workflows/ci.yml`. `.gitignore` gained one whitelist line, `!.github/workflows/*.yml`. A short section at the end of `docs/DESIGN.md`.
+- **Why:** So every pull request is built and tested on Windows and Linux automatically, which catches breakage when several branches are merged.
+- **Tested how:** In the cloud sandbox with no game folder set: `cargo test --workspace` (all 57 unit tests pass, none read game files, so no test needed a skip). `cargo fmt --all --check` and `cargo clippy --workspace --all-targets` both find problems today (72 files need reformatting, about 20 clippy messages), which is why that job only reports. The run on GitHub itself is checked on the draft pull request.
+- **Result:** First run on draft PR #15: Linux build and test passed (about 6 min), Windows passed (about 12 min, first run without a cache), formatting and clippy job reported its problems without failing.
+- **Still broken / not tested:** The Bevy programs' windowed `--script` checks are not run on GitHub. No Android build. Not tested on macOS (not a goal).
+- **Next:** Once the code is formatted and the clippy messages are fixed, make that job fail the run too.
+
 ## 2026-10-29: The walker draws levels textured and lit (rc_walk, rc_level_viewer)
 
 - **Changed:** `rc_level_viewer` is now also a library (`src/lib.rs`). Its drawing code moved out of `main.rs` into a new `src/draw.rs` (`spawn_level`, `BACKGROUND`) with no change in what it does. `rc_walk --map` uses it, so the map has its textures, baked light and real-time lights instead of plain grey. The camera now uses the same exposure, no tonemapping, and a far distance of 5000 Bevy units, like the viewer. The test room keeps its own sun and ambient light. If the look can't be built, rc_walk falls back to the grey collision mesh and logs why.
