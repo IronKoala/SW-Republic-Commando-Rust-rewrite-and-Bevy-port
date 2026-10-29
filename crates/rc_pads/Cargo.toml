@@ -6,7 +6,9 @@ description = "Controllers: which kind each one is, button names for prompts, an
 
 [features]
 # Read controllers and gyros with SDL3 instead of gilrs. SDL is built from
-# its source code with the game (needs CMake and a C compiler).
+# its source code with the game (needs CMake and a C compiler). On by
+# default, so `cargo run -p rc_pads --bin rc_padtest` works as is.
+default = ["sdl"]
 sdl = ["dep:sdl3-sys"]
 
 [dependencies]

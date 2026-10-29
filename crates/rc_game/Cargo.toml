@@ -13,7 +13,9 @@ sdl = ["rc_pads/sdl"]
 
 [dependencies]
 rc_game_core = { path = "../rc_game_core" }
-rc_pads = { path = "../rc_pads" }
+# Without its default features, so `--no-default-features` here really
+# builds without SDL.
+rc_pads = { path = "../rc_pads", default-features = false }
 rc_panini = { path = "../rc_panini" }
 rc_image = { path = "../rc_image" }
 rc_menus = { path = "../rc_menus" }
