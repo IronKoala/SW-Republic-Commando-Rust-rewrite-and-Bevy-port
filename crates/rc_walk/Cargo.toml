@@ -1,0 +1,18 @@
+[package]
+name = "rc_walk"
+version = "0.1.0"
+description = "Walk around a test room in first person with the game's movement"
+edition.workspace = true
+
+[dependencies]
+rc_level = { path = "../rc_level" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer this time, still
+# without audio, gamepads or UI.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["default_app", "std", "bevy_winit", "multi_threaded", "x11", "3d_bevy_render"]

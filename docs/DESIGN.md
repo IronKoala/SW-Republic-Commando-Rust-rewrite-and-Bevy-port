@@ -14,8 +14,10 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
 | `rc_audio` | Reads `.wav` files into samples and measures them (length, peak, loudness, checksum). Knows nothing about Unreal. No Bevy. |
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
+| `rc_movement` | The player's walking, jumping, crouching and collision, with the game's own numbers. No Bevy. |
+| `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
 | `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, and each prop's baked corner colours. No Bevy. |
-| `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, and lets you fly around it. |
+| `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`) that `rc_walk` uses to draw maps. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
@@ -477,6 +479,129 @@ DC15Pistol 0.32, ThermalDetonator 2.12 (flipped: 26 to 69).
 
 Known quirk: a capture can arrive before the model is drawn, showing only the
 background. That's retried like an all-black capture.
+## Player movement (`rc_movement`, `rc_walk`)
+
+### The numbers
+
+All movement numbers are the original game's, read from its script packages
+(see `docs/RESEARCH.md`, "Player movement"). They live in a settings file,
+`data/movement/player_commando.toml`, so a mod can change them without
+touching code. Each line is `name = number`; a misspelt name or a bad number
+stops the program with the line number, so a mistake in a mod is never
+silently ignored. If the file is missing, the built-in values (the same
+numbers) are used. A unit test checks the file and the built-in values agree.
+
+Distances are Unreal units (uu). The player's collision box is 80 uu wide and
+168 uu tall, so 1 uu is roughly 1.1 cm.
+
+### How a step works
+
+`Pawn::step(dt, input, world)` moves the player by `dt` seconds. Long frames
+are cut into steps of at most 0.05 s. Each step:
+
+1. **Push.** The input's forward/strafe and facing give a direction. The push
+   is always full acceleration (1024 uu/s²), because the game's keys give more
+   than the maximum.
+2. **Jump** if the jump key went down this step, the player is on the ground
+   and not crouching: upward speed becomes 475.
+3. **Crouch.** Holding crouch on the ground shrinks the box from 84 to 56
+   half-height, keeping the feet in place. Letting go stands up only if there
+   are 56 uu of free space above the head.
+4. **Walking physics** (on the ground):
+   - Top speed: 450, times 0.5 if walking, times 0.5 if crouched, times a
+     direction ratio: 1 forwards, 0.75 sideways, 0.6 backwards. For diagonals
+     we blend along an ellipse through those values. **Guess:** the game does
+     this in its compiled engine and we don't know its blend.
+   - With a push: friction (8) turns the current speed toward the push
+     direction, then the push adds speed up to the top speed. Without a push:
+     friction brakes the speed by 2 × 8 = 16 per second, so a 450 run slows
+     below 10 uu/s in about a quarter second and slides about 28 uu. **Guess:**
+     this is Unreal Engine 2's documented behaviour. The game also stores a
+     DecelRate of 600 whose use we don't know, so it is not used.
+   - Moving into something: on floor-like slopes (normal Z ≥ 0.7) the player
+     follows the slope at the same speed across the ground. On a wall it tries
+     to step up: go up 35, forward, back down onto floor. If that fails it
+     slides along the wall.
+   - After moving, it looks for floor up to 35 below and snaps onto it (so
+     stairs and slopes going down keep the feet on the ground). No floor means
+     falling.
+   - The speed afterwards is the distance really moved, so running into a wall
+     stops you, like in the engine.
+5. **Falling physics:** gravity -1100 and 35% steering, which can't push you
+   past running speed. The move uses the average of the old and new speed,
+   which makes jump heights exact at any frame rate (103 uu high, 0.86 s in
+   the air). Landing on floor-like ground switches back to walking and
+   reports the game's falling damage (not applied to health yet).
+6. **Eye height** eases toward 60 (44.8 crouched) at the game's rate and
+   absorbs steps and crouching so the camera doesn't jump.
+
+### Collision
+
+Like Unreal Engine 2, the player collides with the world as an upright box.
+The movement code only asks the world one question, through the `World`
+trait: "slide this box from A to B: where does it first touch, and which way
+does that surface face?". The test room (`rc_movement::room`) answers it with
+convex solids: each solid is a set of flat planes, and each plane is pushed
+outward by the box's size so the box can be treated as a point. Real levels
+will answer the same question with the level's polygons and static mesh
+triangles (from the level-loading work), without changing the movement code.
+
+Real levels use `TriangleWorld`: loose triangles, each treated as a very
+thin solid. To be exact for a box, each triangle's solid has its face (both
+ways), one side per edge, its bounding box's six sides, and one side per
+edge-and-axis pair. Triangles are filed in a grid of 256 uu columns, so a
+sweep only checks the ones nearby. The test room cut into triangles gives the
+same results as the box version, within 1 uu.
+
+A 0.1 uu gap is kept between the box and surfaces, so rounding errors can't
+leave it stuck inside a wall. A move that only grazes a surface (pushes into it by less than
+1/10000 of its length) doesn't count as hitting it. Without that, sliding
+along a wall kept "hitting" the same wall, and a jump while pressing into a
+wall rose only 87 of its 103 units.
+
+`rc_walk --map NAME` draws the map with the level viewer's own code
+(`rc_level_viewer` is also a library: `scene::build` makes the draw batches,
+`draw::spawn_level` turns them into Bevy meshes, materials and lights), so a
+level looks the same in both programs. For collision it builds a
+`TriangleWorld` from the same map (`rc_walk/src/level.rs`):
+the BSP's polygons plus every visible static mesh prop, cut into triangles by
+`rc_level::collision`, and puts the player at the first PlayerStart (its
+centre is the start point, so feet = start z - 84). Not yet solid:
+BlockingVolumes and movers and vehicles (the gunship you start in). The
+game's per-prop collision settings are ignored: every visible prop is solid.
+
+### The test room
+
+`rc_movement::room::test_room()`: a floor with walls, and side-by-side lanes
+starting at x = 1000: a low ceiling (130) to crouch under, steps of 30 and 40,
+stairs (8 steps of 16), ramps of 30 and 50 degrees, and a 700-high tower to
+fall from. The unit tests and `rc_walk --script` both run through it.
+
+### `rc_walk`: the Bevy side
+
+The program is built from separate pieces that only talk through shared data,
+so any one can be replaced:
+
+| Piece | Reads | Writes |
+|---|---|---|
+| Input (keyboard and mouse, or the `--script` list) | keys, mouse | `PlayerIntent`: move, look, jump, crouch, walk |
+| Body | `PlayerIntent` | the `Body` (an `rc_movement::Pawn`) |
+| Camera | `Body`, `PlayerIntent` look direction | camera position and rotation |
+| Report | everything | the log |
+
+`PlayerIntent` holds actions, not keys. A gamepad, touch screen (Android) or
+VR controller only needs a new input piece that fills in the same actions. A
+VR headset only needs a new camera piece. The movement code itself is plain
+Rust with no Bevy and no platform code, so it builds for Windows, Linux and
+Android alike.
+
+Coordinates: `rc_movement` uses Unreal's (Z up). Bevy's are Y up and
+mirrored, so positions convert as Bevy = (X, Z, Y) / 50, the same as the level
+and weapon viewers. The camera's field of view is the game's 85 degrees
+across the screen, converted to Bevy's up-and-down angle for the window's
+shape. Mouse turning speed is our own choice (0.0025 radians per count); the
+game's rule is in the compiled engine.
+
 ## Characters: skeletal meshes and animations
 
 Characters (clone troopers, droids, creatures) live in the `.ukx` packages in

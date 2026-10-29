@@ -59,6 +59,17 @@ copy of the game.
   screen: outline match 0.996 and colour difference 1.04 of 255, PASS. It also
   works for the DC-17m, the DC-15s pistol and the thermal detonator.
 
+- **Walking in first person (tested in the cloud sandbox, not yet on
+  Windows).** `rc_walk` puts you in a test room with steps, stairs, ramps, a
+  low ceiling and a tower, and moves you with the original game's numbers
+  (run 450, walk and crouch half speed, jump 103 units high, 35-unit steps,
+  gravity 1100). Controls are the game's: W A S D, mouse, Space, hold C to
+  crouch, hold Shift to walk. The numbers are in
+  `data/movement/player_commando.toml`, which mods can edit. `rc_walk
+  --script` drives itself through 21 checks and passed all of them.
+  `rc_walk --map geo_01a` puts you in the first Geonosis level instead, with
+  collision against its walls, floors and props.
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
@@ -112,6 +123,12 @@ copy of the game.
   collision: the camera flies through walls.
 - Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
+- No levels yet: walking only works in the hand-made test room. No weapons,
+  enemies, health or sound.
+- Movement guesses: how the game blends the backwards and sideways speed
+  limits, how fast it brakes, and how fast the mouse turns live in the game's
+  compiled engine, so those follow Unreal Engine 2's usual behaviour or our
+  own choice. See `docs/DESIGN.md`.
 - Characters: only the first material slot, no blending between
   animations, no sounds or effects from animation events.
 - No game yet.
@@ -184,6 +201,37 @@ models work too, for example
 `cargo run --release -p rc_viewer -- --mesh "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\StaticMeshes\weapons.usx" DC17mBlaster`.
 To check every static mesh: `cargo run --release -p rc_probe -- --meshes`
 (log in `logs\rc_meshes.log`).
+
+To walk around the test room in first person (click the window to look
+around with the mouse, Escape to free the mouse):
+
+```
+cargo run --release -p rc_walk
+```
+
+To let it test itself instead (it moves on its own and closes when done):
+
+```
+cargo run --release -p rc_walk -- --script
+```
+
+The log goes to `logs\rc_walk.log`. The last line should be
+`SCRIPT DONE: 21 checks passed, 0 failed`. To try different movement
+numbers, copy `data\movement\player_commando.toml`, edit it and add
+`--settings yourfile.toml`.
+
+To walk a real level (the game folder is found the same way as the level
+viewer's; set `RC_GAME_DIR` if yours isn't the default Steam folder):
+
+```
+cargo run --release -p rc_walk -- --map geo_01a
+```
+
+The level is drawn exactly like the level viewer draws it: textured, with
+its baked light (and `lighting.cfg`, if you made one). Add `--script` to let
+it walk a square on its own and check itself. You start at the level's
+PlayerStart, which is in the gunship's hold. The gunship isn't solid yet, so
+you drop to the floor below first.
 
 To load a level and fly around it:
 

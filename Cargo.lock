@@ -4092,6 +4092,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_movement"
+version = "0.1.0"
+
+[[package]]
 name = "rc_package"
 version = "0.1.0"
 
@@ -4120,6 +4124,17 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "rc_image",
+ "rc_package",
+]
+
+[[package]]
+name = "rc_walk"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_level",
+ "rc_level_viewer",
+ "rc_movement",
  "rc_package",
 ]
 
