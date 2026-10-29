@@ -134,6 +134,9 @@ pub struct Placement {
     /// Material overrides by section (`Skins` property), 0 where not set.
     pub skins: Vec<i32>,
     pub hidden: bool,
+    /// Object reference to the actor's `StaticMeshInstance` (its baked
+    /// per-vertex light), 0 if none.
+    pub static_mesh_instance: i32,
 }
 
 fn raw_vec3(p: &Property) -> Option<Vec3> {
@@ -175,6 +178,7 @@ pub fn read_placement(pkg: &Package, data: &[u8], index: usize) -> Result<Placem
         static_mesh: 0,
         skins: Vec::new(),
         hidden: false,
+        static_mesh_instance: 0,
     };
     if let Some(v) = find("Location").and_then(raw_vec3) {
         p.location = v;
@@ -197,6 +201,9 @@ pub fn read_placement(pkg: &Package, data: &[u8], index: usize) -> Result<Placem
     if let Some(Value::Bool(b)) = find("bHidden").map(|p| &p.value) {
         p.hidden = *b;
     }
+    if let Some(Value::Object(o)) = find("StaticMeshInstance").map(|p| &p.value) {
+        p.static_mesh_instance = *o;
+    }
     for prop in props
         .iter()
         .filter(|q| pkg.name(q.name).eq_ignore_ascii_case("Skins"))
@@ -210,6 +217,35 @@ pub fn read_placement(pkg: &Package, data: &[u8], index: usize) -> Result<Placem
         }
     }
     Ok(p)
+}
+
+/// The baked light of one placed static mesh: a `StaticMeshInstance`
+/// object, which is an (empty) property list, then a count and one colour
+/// per mesh vertex, stored blue, green, red, alpha. Returned as red, green,
+/// blue, alpha. A few bytes after the colours are not understood yet and
+/// are ignored. Layout measured on the game's maps (no reference describes
+/// it); `index` is the object reference from `Placement`.
+pub fn read_vertex_colours(pkg: &Package, data: &[u8], index: i32) -> Result<Vec<[u8; 4]>> {
+    let Some(e) = usize::try_from(index - 1)
+        .ok()
+        .and_then(|i| pkg.exports.get(i))
+    else {
+        return Reader::new(&[]).invalid(format!(
+            "vertex colours: {index} isn't an object in this map"
+        ));
+    };
+    let mut r = Reader::new(object_bytes(data, e)?);
+    read_properties(pkg, &mut r)?;
+    let n = r.compact_index()?;
+    if n < 0 || n as usize * 4 > r.len() - r.pos() {
+        return r.invalid(format!("vertex colour count {n} doesn't fit"));
+    }
+    Ok(r.bytes(n as usize * 4)?
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| [c[2], c[1], c[0], c[3]])
+        .collect())
 }
 
 /// Unreal's rotation as three axis directions (forward X, right Y, up Z) in
@@ -284,6 +320,7 @@ mod tests {
             static_mesh: 0,
             skins: vec![],
             hidden: false,
+            static_mesh_instance: 0,
         };
         // One unit forward, doubled, turned to +Y, then moved.
         assert!(close(p.transform_point([1.0, 0.0, 0.0]), [100.0, 2.0, 0.0]));

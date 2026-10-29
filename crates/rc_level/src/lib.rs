@@ -7,3 +7,4 @@
 pub mod actors;
 pub mod bsp;
 pub mod collision;
+pub mod lightmap;

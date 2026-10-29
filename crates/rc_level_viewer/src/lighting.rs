@@ -1,8 +1,10 @@
-//! Puts a map's lights into the Bevy scene.
+//! How a level is lit in Bevy: the settings, and the map's real-time lights.
 //!
-//! Not used by a viewer mode yet: it is switched on once the level loader
-//! lands. Until then it was tested by a separate scratch program that lit a
-//! floor with `ras_01a`'s lights (see MODLOG, 2026-10-29).
+//! Most of a Republic Commando level's light was worked out when the level
+//! was built and saved with it ("baked"): lightmap pages for the walls and a
+//! colour per corner for the props. `scene.rs` reads those; this module holds
+//! how bright they are drawn, and turns the few lights that change during
+//! play (`bDynamicLight`) into Bevy lights.
 //!
 //! Input: the lights and zone ambients read by `rc_package::light`.
 //! Output: Bevy `PointLight`, `SpotLight` and `DirectionalLight` entities and
@@ -11,9 +13,9 @@
 //!
 //! Every number that decides how bright or how far things are comes from
 //! `LightingSettings`, which a mod can change with a plain text file (see
-//! `LightingSettings::load`). Nothing here is tuned to match the original
-//! game yet: the brightness factors are placeholders until they are checked
-//! against the light the game baked into its static meshes.
+//! `LightingSettings::load`). The baked-light gains follow how UE2-era
+//! engines drew lightmaps (at double strength, so a stored 128 means
+//! "normal"); the real-time light factors are still placeholders.
 
 use bevy::prelude::*;
 use rc_package::light::{Light, LightKind, ZoneAmbient};
@@ -22,7 +24,8 @@ use std::path::Path;
 /// Which of the map's lights become real-time Bevy lights.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveLights {
-    /// Every light. Needed until the game's baked lighting is shown.
+    /// Every light, on top of the baked light (too bright; for testing, or
+    /// with `baked_light = false`).
     All,
     /// Only lights marked `bDynamicLight`; the rest is in the baked lighting.
     /// This is the faster choice (and the one that suits VR's frame rates).
@@ -35,6 +38,16 @@ pub enum LiveLights {
 pub struct LightingSettings {
     /// Unreal units per Bevy unit (50, as agreed for the whole viewer).
     pub units_per_bevy: f32,
+    /// Draw the light the game baked into the level. When false, everything
+    /// is drawn at full brightness (the old look, handy for comparing).
+    pub baked_light: bool,
+    /// Lightmap brightness multiplier, in the game's own brightness curve
+    /// (texture x lightmap x this). 2 matches the "double strength" way
+    /// lightmaps were drawn in that era of the engine; measured pages store
+    /// almost everything below 128, which fits.
+    pub lightmap_gain: f32,
+    /// The same for the props' per-corner colours.
+    pub vertex_colour_gain: f32,
     pub live_lights: LiveLights,
     /// Bevy lumens = this * (brightness / 255) * range². Scaling with range²
     /// keeps a light's look at a given fraction of its reach the same for
@@ -51,7 +64,10 @@ impl Default for LightingSettings {
     fn default() -> Self {
         Self {
             units_per_bevy: 50.0,
-            live_lights: LiveLights::All,
+            baked_light: true,
+            lightmap_gain: 2.0,
+            vertex_colour_gain: 2.0,
+            live_lights: LiveLights::DynamicOnly,
             lumens_per_range_squared: 2000.0,
             sun_lux_at_255: 10_000.0,
             ambient_at_255: 2000.0,
@@ -84,6 +100,9 @@ impl LightingSettings {
             let num = value.parse::<f32>();
             match (key, num) {
                 ("units_per_bevy", Ok(v)) if v > 0.0 => s.units_per_bevy = v,
+                ("lightmap_gain", Ok(v)) if v >= 0.0 => s.lightmap_gain = v,
+                ("vertex_colour_gain", Ok(v)) if v >= 0.0 => s.vertex_colour_gain = v,
+                ("baked_light", _) => s.baked_light = value == "true",
                 ("lumens_per_range_squared", Ok(v)) => s.lumens_per_range_squared = v,
                 ("sun_lux_at_255", Ok(v)) => s.sun_lux_at_255 = v,
                 ("ambient_at_255", Ok(v)) => s.ambient_at_255 = v,
@@ -104,6 +123,13 @@ impl LightingSettings {
             }
         }
         (s, notes)
+    }
+
+    /// The game multiplied colours on its own brightness curve (roughly
+    /// "gamma 2.2"); Bevy multiplies in linear light. Doubling on the game's
+    /// curve is the same as multiplying by 2^2.2 (about 4.6) in linear light.
+    pub fn linear_gain(gain: f32) -> f32 {
+        gain.max(0.0).powf(2.2)
     }
 
     /// An Unreal position as a Bevy position.
@@ -207,6 +233,9 @@ pub fn spawn_lights(
     report
 }
 
+/// Not used while the baked light is on (it already includes the zones'
+/// ambient light); kept for drawing without it.
+#[allow(dead_code)]
 /// Bevy has one scene-wide ambient light, but the game has one per zone. Until
 /// zones are known in the viewer, use the dimmest non-zero zone ambient: very
 /// bright ones (192-255 seen) are sky zones. Returns what it chose.
@@ -257,5 +286,11 @@ mod tests {
         assert_eq!(s.live_lights, LiveLights::DynamicOnly);
         assert_eq!(s.sun_lux_at_255, 5.0);
         assert_eq!(notes.len(), 1);
+        std::fs::write(&path, "baked_light = false\nlightmap_gain = 1.5\n").unwrap();
+        let (s, notes) = LightingSettings::load(&path);
+        assert!(!s.baked_light);
+        assert_eq!(s.lightmap_gain, 1.5);
+        assert!(notes.is_empty());
+        assert!((LightingSettings::linear_gain(2.0) - 4.595).abs() < 0.01);
     }
 }
