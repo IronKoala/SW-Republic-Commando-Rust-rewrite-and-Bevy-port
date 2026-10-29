@@ -79,8 +79,19 @@ copy of the game.
   windowless test run `rc_squad_sim` passes 33 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
   and stays put until revived. They are in the game program (`rc_game`):
-  start a level and they stand with you. Drawn as coloured capsules for
-  now.
+  start a level and they stand with you.
+
+- **Sev, Fixer and Scorch look like themselves (tested in the cloud
+  sandbox and on Windows).** Each squad mate is drawn with the
+  original commando model, their own armour (Sev's red, Fixer's green,
+  Scorch's yellow) and the original's animations: standing, walking,
+  running, backing up, side-stepping, firing, falling when knocked out, and
+  kneeling to revive. Everything is read from the install when the level
+  starts; which model and animations are used is in
+  `data/squad/looks.toml`. A squad mate whose model can't be read is drawn
+  as a coloured capsule (a placeholder) and the log says why. They don't
+  hold a weapon yet, and the helmet extras the original adds
+  (`AvailableAccessories`) aren't drawn.
 
 - **The squad fights and revives (tested in the cloud sandbox by numbers,
   not yet on Windows or with eyes).** Sev, Fixer and Scorch shoot enemies
@@ -569,6 +580,25 @@ cargo test --release -p rc_squad_plugin --test fight_room
 ```
 
 It should say `test result: ok. 1 passed`. The log is `logs\fight_room.log`.
+
+To check that Sev, Fixer and Scorch are drawn with their original models
+and armour (opens a window for a few seconds):
+
+```
+cargo run -p rc_squad_plugin --example rc_squad_look_check
+```
+
+It stands the three side by side, checks every animation, checks each
+armour is the one the original gives that commando, and compares the
+outline and colours on screen with what the model and its pictures say. It
+should end with `LOOK CHECK DONE: 48 checks passed, 0 failed`. The log is
+`logs\rc_squad_look_check.log`, and `logs\rc_squad_look_check.ppm` is the
+captured picture. To list what a model package holds (for editing
+`looks.toml`):
+
+```
+cargo run -p rc_model --example rc_model_list -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Animations\clone.ukx" --sequences
+```
 
 ## Credits
 
