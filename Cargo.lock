@@ -4071,6 +4071,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_game_core"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_movement",
+]
+
+[[package]]
 name = "rc_image"
 version = "0.1.0"
 

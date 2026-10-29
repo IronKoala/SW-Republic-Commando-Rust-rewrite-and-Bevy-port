@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Shared game pieces for every part to plug into (rc_game_core)
+
+- **Changed:** New crate `crates/rc_game_core` and `docs/PLUGINS.md`. The crate holds what the whole game shares: the screens (`GameState`: boot, main menu, loading, in game; `Play`: running or paused), the folders (`GamePaths`, with mods searched before `data/`, and file names matched without caring about case for Linux and Android), the input actions (`Action`, `ActionState`), the numbers the on-screen display shows (health, ammo, squad), loading hand-off (`LoadingGate`), level collision, the player and camera markers, unit conversion and one shared log.
+- **Why:** Five parts of the game are being built at the same time (levels, weapons, enemies, squad, menus). They need one agreed way to plug into a single game program without calling each other.
+- **Tested how:** `cargo test -p rc_game_core` (5 tests: action names, press/release tracking, unit conversion, finding files with mods first and any letter case, and pausing stopping gameplay without leaving the level).
+- **Result:** 5 passed, 0 failed.
+- **Still broken / not tested:** Nothing uses it yet. The game program itself (`rc_game`) is the next step.
+- **Next:** `rc_game` with the settings file, menus, input bindings, on-screen display and music.
+
 ## 2026-10-29: The walker draws levels textured and lit (rc_walk, rc_level_viewer)
 
 - **Changed:** `rc_level_viewer` is now also a library (`src/lib.rs`). Its drawing code moved out of `main.rs` into a new `src/draw.rs` (`spawn_level`, `BACKGROUND`) with no change in what it does. `rc_walk --map` uses it, so the map has its textures, baked light and real-time lights instead of plain grey. The camera now uses the same exposure, no tonemapping, and a far distance of 5000 Bevy units, like the viewer. The test room keeps its own sun and ambient light. If the look can't be built, rc_walk falls back to the grey collision mesh and logs why.
