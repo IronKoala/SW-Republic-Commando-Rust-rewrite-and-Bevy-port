@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: rc_viewer tested on Windows
+
+- **Changed:** README "what works" updated. No code changes.
+- **Why:** The Bevy viewer had only been tested in the cloud sandbox.
+- **Tested how:** The user ran `cargo run --release -p rc_viewer` on their Windows PC. I read `logs\rc_viewer.log` from the project folder through folder access.
+- **Result:** `on-screen check PASS: average difference from the texture 3.77 of 255`, on the first capture (no black frame). Window 800x800, texture 720x720. Texture read and decoded in 1.8 ms. Steady 144 frames per second, probably held to the monitor's refresh rate.
+- **Still broken / not tested:** Other textures not tried on Windows.
+- **Next:** Show a mesh or a level's geometry in 3D.
+
 ## 2026-10-29: First Bevy window showing one game texture (rc_viewer)
 
 - **Changed:** New crate `crates/rc_viewer` (Bevy 0.20.1, only the 2D parts turned on), added to the workspace in `Cargo.toml`; `Cargo.lock` updated. Started from the unbuilt draft written in the data loader thread. README and DESIGN updated.

@@ -31,11 +31,13 @@ copy of the game.
   decoded with no failures. For 2,003 of them we could compare against the
   game's own half-size copy, and 1,916 match within 10 out of 255.
 
-- **Showing a texture in a window (tested in the cloud only).** `rc_viewer`
+- **Showing a texture in a window (tested on Windows).** `rc_viewer`
   opens an 800x800 Bevy window showing one texture from the game, by default
   `DC15Blaster` from `weapontextures.utx`. It checks itself: it captures the
   window and compares it pixel by pixel with the texture. In the cloud sandbox
-  this passed 12 of 12 runs on three textures. Not tested yet on Windows.
+  this passed 12 of 12 runs on three textures. On the user's Windows PC it
+  passed first time (difference 3.77 of 255) and ran at a steady 144 frames
+  per second.
 
 ## What doesn't work yet
 

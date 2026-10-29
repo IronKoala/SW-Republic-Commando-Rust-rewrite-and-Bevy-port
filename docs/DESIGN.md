@@ -176,5 +176,5 @@ Results in the cloud sandbox (software rendering, no graphics card):
 
 Known quirk: in the sandbox, the first screenshot is often completely black,
 because the window hadn't been drawn yet. The check then tries again 10 frames
-later, up to 5 times. Whether this happens on a real Windows PC with a graphics
-card is not tested.
+later, up to 5 times. On the user's Windows PC the first capture was fine
+(3.77, PASS).
