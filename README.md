@@ -202,6 +202,22 @@ copy of the game.
   Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
   mouse and a gamepad work at the same time.
 
+- **Controllers and gyro aiming (tested with pretend controllers only, no
+  real hardware yet).** SDL3 reads Xbox, PlayStation, Switch Pro, Joy-Con,
+  GameCube and Steam Deck controllers and says which kind each is. Button
+  names for prompts follow the device you used last (`InputPrompts`,
+  names in `data/input/button_names.toml`). Separate dead zones and curves
+  for each stick, a trigger threshold, and gyro aiming with sensitivity,
+  drift calibration, a ratchet button and on/off (`[gyro]` in
+  `settings.toml`). Changing a control in the game is saved to
+  `my_bindings.toml` (the screen to do it from comes with the original
+  options menus). `rc_padtest` checks a real controller. See
+  `docs/DISPLAY_AND_INPUT.md`.
+- **Panini view for ultrawide screens (tested in a check program, not yet
+  in a level).** `video.panini` in `settings.toml` bends the view so the
+  sides of a 21:9 or 32:9 screen aren't stretched, keeping the middle's
+  size.
+
 - **Battle droids that fight back (tested in the cloud sandbox on
   geo_01a, not yet on Windows).** Droids appear from the map's own
   spawners when you walk into their triggers, walk the level's own path
@@ -261,7 +277,11 @@ copy of the game.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
   being built to plug into it). No saving or loading, no checkpoints, no
   briefings or cut scenes. Options are a short list. Not tested on Windows,
-  with a gamepad, or with a touch screen.
+  with a real controller, or with a touch screen.
+- Controllers: no button pictures yet (words only), no rebinding screen
+  yet, no rumble or aim assist. Gyro on phones isn't started. Building with
+  SDL needs CMake installed (`cargo build --no-default-features` builds
+  without SDL and without gyro).
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the
   real game side by side. Real-time lights use placeholder strengths and
@@ -273,7 +293,10 @@ copy of the game.
 
 ## How to run it
 
-You need Rust (install from <https://rustup.rs>). From this folder:
+You need Rust (install from <https://rustup.rs>) and CMake, which builds
+SDL, the controller and gyro reader (Windows: `winget install
+Kitware.CMake`, then open a new PowerShell; Linux: your system's `cmake`
+package). From this folder:
 
 ```
 cargo run --release -p rc_game
@@ -284,6 +307,14 @@ you run it from; if your game isn't in a usual Steam folder, open that file
 and set `folder` under `[game]`. `--map geo_01a` skips the menus.
 `--script` plays itself through the menus and a level and checks each step
 (the log is `logs/rc_game.log`).
+
+To check a controller without the game (lists every controller, which kind
+it is taken for and whether it has a gyro, then logs its buttons, sticks
+and gyro to `logs\rc_padtest.log` for 20 seconds):
+
+```
+cargo run --release -p rc_pads --bin rc_padtest
+```
 
 To look at one of the original menus without starting the game:
 
