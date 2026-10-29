@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: All overnight parts merged; Delta Squad wired into the game
+
+- **Changed:** Merged into `main`, in order: CI (#15), game shell (#11), all levels (#14), weapons (#16), droids (#12), squad (#13), level plugin (#17), doors and lifts (#18), original main menu (#19). While merging: `rc_combat` now uses the shared `rc_game_core::ViewKick` instead of its own copy; `rc_probe` keeps both class tools (`--class` from weapons, `--classes`/`--fonts` from the menus, now in `class_scan.rs`); level collision indexes only package files, so `Engine.int` can't stand in for `Engine.u`. This change: `rc_game` adds `rc_squad_plugin::SquadPlugin`, and its player movement is in a new `player::PlayerMoveSet` ordered before `SquadSet`.
+- **Why:** The user said "merge them all". The parts were built side by side overnight and only plugged together after merging.
+- **Tested how:** After each merge, `cargo build --workspace --all-targets` and `cargo test --workspace --locked`, then the GitHub checks. On the combined code, `xvfb-run rc_game --script` in the cloud sandbox with 278 game files (about 1 GB) copied read-only from the install.
+- **Result:** All unit tests pass. Script: `SCRIPT DONE: 32 checks passed, 0 failed`. Before the collision fix the level check failed (`0 with their class's model`, also on the level plugin's own branch once the whole `System` folder was present); after it, geo_01a has 380 props, 25 from their class. The log shows the 4 weapons read, 36 droid spawners, and Sev, Fixer and Scorch spawned beside the player.
+- **Still broken / not tested:** Not tested on Windows by us (the GitHub Windows build passes). The script walks only 360 units, so the squad following you and droids attacking aren't checked by it. Doors and lifts (`rc_movers`) aren't in `rc_game` yet.
+- **Next:** Plug movers into the level plugin; check squad following and droid fights in `rc_game`'s script.
+
 ## 2026-10-29: The original main menu, read from the install (rc_menus)
 
 - **Changed:** `rc_package` gained `class.rs` (class default values, Republic Commando enums and property categories) and `font.rs` (Unreal fonts). New crate `crates/rc_menus` (no Bevy): finds menu classes in `GameData`, builds a menu's widgets from its defaults the way the original's menu code describes, turns them into textured rectangles, paints them in software, and has the main menu's and the yes/no question's behaviour rewritten by hand. `rc_game` gained `original_menu.rs`, which draws the original main menu and quit question with Bevy UI in a centred 4:3 area and handles focus with the menu actions; the amber main page now only shows when the install's menu files can't be read. Bevy's `wav` feature is on for the menu sounds. `rc_probe` gained `--classes`, `--fonts` and `--menu`. The script now walks the original main menu and compares two screenshots with software pictures.
