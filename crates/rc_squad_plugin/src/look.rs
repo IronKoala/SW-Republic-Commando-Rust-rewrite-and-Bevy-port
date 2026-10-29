@@ -192,6 +192,12 @@ pub struct MateModel {
     since_shot: f32,
 }
 
+/// The turn from the model's axes to the squad mate body's (see
+/// `spawn_pieces`).
+pub fn model_turn() -> Quat {
+    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)
+}
+
 /// Make Bevy meshes and materials for `model` posed at `pose`, as
 /// children of `parent`.
 pub fn spawn_pieces(
@@ -206,59 +212,68 @@ pub fn spawn_pieces(
     let normals = model.normals(&points);
     let mut pieces = Vec::new();
     let a = ambient.max(0.0);
-    parent.with_children(|c| {
-        for (i, s) in model.sections.iter().enumerate() {
-            let (pos, nrm) = model.section_attributes(s, &points, &normals);
-            let mut m = Mesh::new(
-                PrimitiveTopology::TriangleList,
-                RenderAssetUsages::default(),
-            );
-            m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-            m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
-            m.insert_attribute(Mesh::ATTRIBUTE_UV_0, model.section_uvs(s));
-            m.insert_indices(Indices::U32(s.indices.clone()));
-            let mesh = meshes.add(m);
-            let texture = s.skin.as_ref().map(|k| {
-                images.add(Image::new(
-                    Extent3d {
-                        width: k.image.width as u32,
-                        height: k.image.height as u32,
-                        depth_or_array_layers: 1,
+    // The model faces the game's forward (+X, Bevy +X once converted); the
+    // squad mate's body faces its local -Z like the player. A quarter turn
+    // lines them up.
+    parent.with_children(|p| {
+        let mut holder = p.spawn((
+            Transform::from_rotation(model_turn()),
+            Visibility::default(),
+        ));
+        holder.with_children(|c| {
+            for (i, s) in model.sections.iter().enumerate() {
+                let (pos, nrm) = model.section_attributes(s, &points, &normals);
+                let mut m = Mesh::new(
+                    PrimitiveTopology::TriangleList,
+                    RenderAssetUsages::default(),
+                );
+                m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+                m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
+                m.insert_attribute(Mesh::ATTRIBUTE_UV_0, model.section_uvs(s));
+                m.insert_indices(Indices::U32(s.indices.clone()));
+                let mesh = meshes.add(m);
+                let texture = s.skin.as_ref().map(|k| {
+                    images.add(Image::new(
+                        Extent3d {
+                            width: k.image.width as u32,
+                            height: k.image.height as u32,
+                            depth_or_array_layers: 1,
+                        },
+                        TextureDimension::D2,
+                        k.image.pixels.clone(),
+                        TextureFormat::Rgba8UnormSrgb,
+                        RenderAssetUsages::RENDER_WORLD,
+                    ))
+                });
+                // As for the droids: the level's lights are baked into its
+                // surfaces and the scene has no ambient light, so give the
+                // character a steady share of its own colour.
+                let material = materials.add(StandardMaterial {
+                    base_color: if texture.is_some() {
+                        Color::WHITE
+                    } else {
+                        Color::srgb(0.6, 0.6, 0.6)
                     },
-                    TextureDimension::D2,
-                    k.image.pixels.clone(),
-                    TextureFormat::Rgba8UnormSrgb,
-                    RenderAssetUsages::RENDER_WORLD,
-                ))
-            });
-            // As for the droids: the level's lights are baked into its
-            // surfaces and the scene has no ambient light, so give the
-            // character a steady share of its own colour.
-            let material = materials.add(StandardMaterial {
-                base_color: if texture.is_some() {
-                    Color::WHITE
-                } else {
-                    Color::srgb(0.6, 0.6, 0.6)
-                },
-                emissive: LinearRgba::rgb(a, a, a) * if texture.is_some() { 1.0 } else { 0.3 },
-                emissive_texture: texture.clone(),
-                base_color_texture: texture,
-                perceptual_roughness: 0.7,
-                alpha_mode: if s.skin.as_ref().is_some_and(|k| k.cutout) {
-                    AlphaMode::Mask(0.5)
-                } else {
-                    AlphaMode::Opaque
-                },
-                ..default()
-            });
-            // Posed on the CPU: the mesh's stored bounds don't follow it.
-            c.spawn((
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material),
-                NoFrustumCulling,
-            ));
-            pieces.push(Piece { section: i, mesh });
-        }
+                    emissive: LinearRgba::rgb(a, a, a) * if texture.is_some() { 1.0 } else { 0.3 },
+                    emissive_texture: texture.clone(),
+                    base_color_texture: texture,
+                    perceptual_roughness: 0.7,
+                    alpha_mode: if s.skin.as_ref().is_some_and(|k| k.cutout) {
+                        AlphaMode::Mask(0.5)
+                    } else {
+                        AlphaMode::Opaque
+                    },
+                    ..default()
+                });
+                // Posed on the CPU: the mesh's stored bounds don't follow it.
+                c.spawn((
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(material),
+                    NoFrustumCulling,
+                ));
+                pieces.push(Piece { section: i, mesh });
+            }
+        });
     });
     MateModel {
         model,

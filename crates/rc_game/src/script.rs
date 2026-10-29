@@ -133,6 +133,13 @@ fn set_pitch(w: &mut World, pitch: f32) {
     }
 }
 
+fn turn(w: &mut World, by: f32) {
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.yaw += by;
+    }
+}
+
 fn count<T: Component>(w: &mut World) -> usize {
     let mut q = w.query_filtered::<(), With<T>>();
     q.iter(w).count()
@@ -299,6 +306,38 @@ fn steps() -> Vec<Step> {
             }
         }),
         Note(|w| set_pitch(w, 0.0)),
+        Wait(0.2),
+        // Turn round to where the squad stands (behind the player) and
+        // capture logs/squad.png for a person to look at. The squad's
+        // colour check is rc_squad_look_check, which sees them up close.
+        Note(|w| turn(w, std::f32::consts::PI)),
+        Wait(0.5),
+        Shot("squad"),
+        Check("the squad mates wear their original models and armour", |w| {
+            let mut q =
+                w.query::<(&rc_squad_plugin::SquadMate, &rc_squad_plugin::look::MateModel)>();
+            let mut got: Vec<String> = q
+                .iter(w)
+                .map(|(m, mm)| {
+                    let skins: Vec<&str> = mm
+                        .model
+                        .sections
+                        .iter()
+                        .map(|s| s.skin.as_ref().map_or("none", |k| k.texture.as_str()))
+                        .collect();
+                    format!("{} {} {}", m.name, mm.model.name, skins.join("+"))
+                })
+                .collect();
+            got.sort();
+            let mates = count::<rc_squad_plugin::SquadMate>(w);
+            let all_skinned = got.iter().all(|g| !g.contains("none"));
+            if mates == 3 && got.len() == 3 && all_skinned {
+                Ok(got.join(", "))
+            } else {
+                Err(format!("{mates} squad mates, with models: {got:?}"))
+            }
+        }),
+        Note(|w| turn(w, std::f32::consts::PI)),
         Wait(0.2),
         Note(|w| {
             let f = feet(w);

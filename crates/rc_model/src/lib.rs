@@ -333,36 +333,70 @@ impl Model {
             .ok_or_else(|| format!("no SkeletalMesh called {} in {}", spec.mesh, file.display()))?;
         let name = pkg.name(export.object_name).to_string();
         let mesh = read_skeletal_mesh(&pkg, &data, export).map_err(|e| e.to_string())?;
-        let set = match &spec.set {
+        // Animation sets: the one asked for (or the first the mesh links
+        // to), then every other set the mesh links to in its package.
+        // Commandos keep their everyday moves in one set and the
+        // single-player ones (wounded, healing) in another.
+        let linked: Vec<&Export> = mesh
+            .animations
+            .iter()
+            .filter_map(|&a| match ObjectRef::from_index(a) {
+                ObjectRef::Export(i) => pkg.exports.get(i),
+                _ => None,
+            })
+            .collect();
+        let first = match &spec.set {
             Some(s) => pkg.exports.iter().find(|e| {
                 pkg.export_class_name(e) == "MeshAnimation"
                     && pkg.name(e.object_name).eq_ignore_ascii_case(s)
             }),
-            None => mesh
-                .animations
-                .iter()
-                .find_map(|&a| match ObjectRef::from_index(a) {
-                    ObjectRef::Export(i) => pkg.exports.get(i),
-                    _ => None,
-                }),
+            None => linked.first().copied(),
         }
         .ok_or("animation set not found in the mesh's package")?;
-        let set_name = pkg.name(set.object_name).to_string();
-        let anim = read_mesh_animation(&pkg, &data, set).map_err(|e| e.to_string())?;
+        let set_name = pkg.name(first.object_name).to_string();
+        let mut sets = vec![first];
+        sets.extend(linked.into_iter().filter(|e| !std::ptr::eq(*e, first)));
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
+        let mut read_sets: Vec<Option<rc_package::animation::MeshAnimation>> =
+            (0..sets.len()).map(|_| None).collect();
         for (key, seq_name) in &spec.sequences {
-            match anim
-                .sequences
-                .iter()
-                .find(|s| s.name.eq_ignore_ascii_case(seq_name))
-            {
-                Some(seq) => {
-                    clips.insert(key.clone(), Clip::new(&anim, seq, &skeleton));
+            let mut found = false;
+            for (k, set) in sets.iter().enumerate() {
+                if read_sets[k].is_none() {
+                    match read_mesh_animation(&pkg, &data, set) {
+                        Ok(a) => read_sets[k] = Some(a),
+                        Err(e) => {
+                            notes.push(format!(
+                                "{name}: animation set {} not read: {e}",
+                                pkg.name(set.object_name)
+                            ));
+                            continue;
+                        }
+                    }
                 }
-                None => notes.push(format!(
-                    "{name}: no animation called {seq_name} in {set_name}; {key} stands still"
-                )),
+                let Some(anim) = &read_sets[k] else { continue };
+                if let Some(seq) = anim
+                    .sequences
+                    .iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(seq_name))
+                {
+                    clips.insert(key.clone(), Clip::new(anim, seq, &skeleton));
+                    if k > 0 {
+                        notes.push(format!(
+                            "{name}: {key} = {seq_name} from {}",
+                            pkg.name(set.object_name)
+                        ));
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                notes.push(format!(
+                    "{name}: no animation called {seq_name} in its {} animation sets; {key} stands still",
+                    sets.len()
+                ));
             }
         }
         let weights = weights_per_point(&mesh);

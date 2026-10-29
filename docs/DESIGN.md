@@ -1228,9 +1228,73 @@ leader. It reads `ActionState`, the `Player` and `PlayerCamera` transforms and
 `LevelCollision`, and writes `SquadReadout`. A `SquadOrder` message lets
 anything else (a script, a touch menu, a VR gesture) give orders. Each
 member is an entity with `SquadMate` and a `Transform` at its feet, facing
-its way like the player's; with a renderer it gets a capsule in its own
-colour (`EnhancedVisionColor` from the Properties package) and a dark
-visor, until the real model is drawn.
+its way like the player's; with a renderer it gets the original model (see
+"How the squad looks" below), or, if that can't be read, a capsule in its
+own colour (`EnhancedVisionColor` from the Properties package) with a dark
+visor, as a placeholder.
+
+### How the squad looks (`rc_model`, `rc_squad_plugin/src/look.rs`)
+
+All three squad mates use the same mesh, `CloneCommando` in
+`GameData/Animations/clone.ukx` (the `Mesh` default of the `CloneCommando`
+class in CTCharacters.u). The mesh's own material is a stand-in
+(`CloneCommandoProxy`); each class's `Skins[0]` (in the Properties package,
+`CommandoNNDeltaDefaults`) replaces it with that commando's armour:
+`CloneTextures.CloneTextures.CloneCommando07_Shader` for Sev, `..40..` for
+Fixer and `..62..` for Scorch. A Shader's `Diffuse` leads to the 1024x1024
+picture. The animations are spread over two sets the mesh links to:
+everyday moves in `CloneCommandoSet`, wounded and healing ones in
+`CloneCommandoSPSet`.
+
+`data/squad/looks.toml` names the package, mesh, replacement materials
+(`skins`, by material slot) and which sequence plays for each pose. The
+poses (`look::Pose`) are picked from the squad's state each frame: knocked
+out plays `WoundedFallDown` once and holds it; reviving plays
+`HealImmobileLoop`; moving picks walk, run, back or side-step from the
+speed and the direction against the facing (as the droids do); a shot in
+the last 0.4 s plays `Fire`; otherwise `ActionBreathe`. Which animations the
+original plays for knocked-out and reviving is compiled code, so those two
+are our picks.
+
+`rc_model` is a new crate with no Bevy. It reads a skeletal mesh, the named
+sequences (looking in each animation set the mesh links to, first set
+first), and a picture for every material. A mesh's triangles are split into
+one "section" per material slot, each drawn as its own Bevy mesh with its
+own picture, so a model made of several materials (like `TrooperNoHelmet`:
+face plus armour) is drawn whole. It follows Shader -> `Diffuse`, Combiner
+-> `Material1`, FinalBlend and texture modifiers -> `Material`, including
+steps into another package (looked up in Textures, Animations and
+StaticMeshes). A material counts as see-through-in-places ("cut-out") when
+the texture is masked, a FinalBlend alpha-tests, or a Shader has an
+`Opacity`; other alpha is left alone, because Unreal often keeps
+shininess there. Posing is as for the droids: CPU skinning every frame,
+copied into each section's mesh. The model faces +X in the game's axes,
+the squad mate's body faces its local -Z, so the meshes hang under a holder
+turned a quarter turn (`look::model_turn`).
+
+The droids (`rc_enemies/src/look.rs`) and the `rc_character` viewer still
+have their own one-material readers; they can switch to `rc_model` later.
+
+Each mate reads its model once (about 0.7 s each in a debug build in the
+cloud). The three share one mesh, so reading it once and swapping only the
+picture would be quicker; not done yet.
+
+How it's checked: `rc_squad_look_check` (an example program in
+`rc_squad_plugin`) stands the three in front of a camera using the game's
+own `spawn_pieces`, plays every animation on the CPU and checks heights
+stay between 20 and 260 uu, checks each `skins` entry against the class's
+`Skins` read from the Properties package, then captures the window. For
+each squad mate and each material it projects our own posed triangles
+(nearest in front) and compares: outline overlap (0.93 or more passes; got
+0.986-0.988), and colour balance on screen against the material's picture
+sampled at each triangle's middle, weighted by size (0.04 or less passes;
+got 0.001-0.003). A capture where textures were lost (magenta or plain
+grey) fails the colour part even with a perfect outline. Finally each mate's
+colour must be nearest its own armour's (own 0.001-0.003, nearest other
+0.020-0.023). With Sev's and Scorch's armour swapped in `looks.toml` the
+original-armour check fails for both, as it should. In `rc_game --script`
+the player turns round, `logs/squad.png` is captured, and a check confirms
+all three mates have their model and pictures.
 
 ### Health and going down
 
