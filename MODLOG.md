@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Recoil message, and a trial run with the weapons and squad parts
+
+- **Changed:** `rc_game_core` gained `ViewKick` (weapon recoil: pitch and yaw in radians); `rc_game`'s player adds it to the view. `docs/PLUGINS.md` lists it.
+- **Why:** The weapons part sends recoil per shot and needs something to turn the view without depending on the player code.
+- **Tested how:** In a throwaway copy (not pushed), merged this branch with the weapons branch (`rc_combat`, commit 285dd3e) and the squad branch (`rc_squad_plugin`, PR #13), added both plugins to `rc_game`, and ran `rc_game --script`. Then `cargo test` and the script again on this branch alone.
+- **Result:** Together: `SCRIPT DONE: 17 checks passed, 0 failed`. The display showed `DC-17M BLASTER 60 | 60`, health 200, shield 100, and Sev, Fixer and Scorch at 100% on "Form up" (screenshot checked). Only conflicts were the workspace member list, MODLOG and DESIGN (both sides add lines). This branch alone afterwards: 16 unit tests and the script, 17 passed, 0 failed.
+- **Still broken / not tested:** Recoil isn't sprung back yet. Firing wasn't exercised by the script. The other parts are wired in only after their pull requests are merged.
+- **Next:** After merging, add the four plugins to `rc_game` (one line each) and remove the stand-in level.
+
 ## 2026-10-29: Android compile check, difficulty setting (rc_game)
 
 - **Changed:** `crates/rc_game/Cargo.toml` gained two Android-only settings (BLAKE3 without C code, Bevy's native Android start-up). New `docs/ANDROID.md`: what works on Linux and what an Android app still needs. `settings.toml` gained `[game] difficulty` (easy, medium, hard; the original's damage factors 0.25, 1, 1.75), also in the options menu.

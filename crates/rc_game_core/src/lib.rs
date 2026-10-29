@@ -34,7 +34,9 @@ mod state;
 pub mod units;
 
 pub use actions::{Action, ActionState};
-pub use hud::{HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, WeaponReadout};
+pub use hud::{
+    HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
+};
 pub use log::GameLog;
 pub use paths::GamePaths;
 pub use state::{
@@ -61,6 +63,7 @@ impl Plugin for CorePlugin {
             .init_resource::<SquadReadout>()
             .init_resource::<MusicMood>()
             .add_message::<HudMessage>()
+            .add_message::<ViewKick>()
             .configure_sets(
                 Update,
                 (
