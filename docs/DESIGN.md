@@ -24,6 +24,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
+| `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 | `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
 | `rc_ai` | What enemies decide: settings from `data/enemies/*.toml`, the map's spawners, one fighter's brain, and a whole fight on a map (`Battle`). No Bevy. Tool: `rc_droidsim` (droids against a stand-in player, no window). |
@@ -1167,9 +1168,38 @@ movement) is found through `GamePaths::data_file`, which looks in each
 enabled mod's folder (`mods/<name>/`) before `data/`. Lists that add up (the
 campaigns file) read every copy.
 
-**The stand-in level.** Until the levels part plugs in its own plugin,
-`stand_in_level.rs` loads a map the way `rc_walk --map` does (its collision
-code is a copy of `rc_walk/src/level.rs`). It is meant to be deleted then.
+**The level (`rc_level_plugin`).** `LevelPlugin` is the only part that
+reads the map. When the game enters `Loading` it tells the loading screen to
+wait (`LoadingGate`, part name `level`), waits three frames so the loading
+screen is drawn, then in one go:
+
+1. loads the collision with `rc_level::map_collision::load`: the BSP, every
+   placed prop, props and double doors whose model comes from their class,
+   and the blocking volumes that stop players. It becomes `LevelCollision`
+   (a `rc_movement::TriangleWorld`, in Unreal units);
+2. puts the player's feet one collision height (the commando's, from
+   `MoveParams`) under the map's first `PlayerStart` and inserts
+   `PlayerStart`. A map without one starts above its middle, and says so in
+   the log;
+3. draws the map with `rc_level_viewer::scene::build` and `draw::spawn_level`,
+   with brightness from an optional `levels/lighting.cfg` in a data folder
+   (so a mod can change it);
+4. if the map has a `SkyZoneInfo`, spawns the sky camera
+   (`rc_level_viewer::sky`) at camera order -1, under the player's camera
+   (order 0) and the menus' camera (order 1). Once the player's camera
+   exists, the plugin gives it `SkyViewer` (the sky camera copies its turn
+   and field of view every frame, so it lines up at any screen shape) and
+   stops it clearing the picture, so the sky shows where the level has
+   nothing.
+
+Everything it spawns carries `DespawnOnExit(InGame)`, and `LevelInfo` (the
+counts, for the log and the self-test) is removed on the way out. The
+plugin never reads input and never moves the camera, so a VR camera that
+carries `PlayerCamera` gets the sky the same way.
+
+Loading blocks the game while it runs (about 2 s for geo_01a in a debug
+build in the cloud). Moving it to a background thread is future work; the
+loading screen stays up meanwhile.
 
 **Checking without looking.** `rc_game --script` presses the same actions a
 player would and checks each step: menu pages, loading, the player moving
@@ -1177,6 +1207,12 @@ player would and checks each step: menu pages, loading, the player moving
 being cleared, options changing. It also captures the window twice and
 measures colours: the main menu must contain amber text, and in the level
 at least 30% of the screen must be lit with amber crosshair pixels at the
+centre. With the level part plugged in it also checks the level's counts
+(collision triangles, props, props with their class's model, a player
+start), that the sky camera follows the player's camera, and looks up 60
+degrees in geo_01a: more than 45% of the screen must be lit (72% with the
+sky; 17% in a trial run with the sky camera switched off, because the game
+clears to black).
 centre.
 
 ## Enemies (`rc_nav`, `rc_ai`, `rc_enemies`)

@@ -4,7 +4,7 @@
 //! and exits with code 0 only if every check passed.
 //!
 //! The route: main menu, Campaign, Geonosis, its first level,
-//! loading, walk forward, pause (nothing moves), resume, quit to the main
+//! loading, the level's walls and sky (looking up), walk forward, pause (nothing moves), resume, quit to the main
 //! menu (the level is cleared), Options (music volume up), back, Quit.
 
 use crate::levels::LevelList;
@@ -118,6 +118,13 @@ fn feet(w: &mut World) -> Option<rc_movement::Vec3> {
     q.iter(w).next().map(|b| b.pawn.feet())
 }
 
+fn set_pitch(w: &mut World, pitch: f32) {
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.pitch = pitch;
+    }
+}
+
 fn count<T: Component>(w: &mut World) -> usize {
     let mut q = w.query_filtered::<(), With<T>>();
     q.iter(w).count()
@@ -225,6 +232,58 @@ fn steps() -> Vec<Step> {
                 Err(format!("{s:?}"))
             }
         }),
+        Check("the level part loaded walls, props, doors and invisible walls", |w| {
+            let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
+                return Err("no LevelInfo".into());
+            };
+            let got = format!(
+                "{}: {} collision triangles, {} props ({} with their class's model), {} blocking volumes, start {}",
+                i.map,
+                i.collision_triangles,
+                i.props,
+                i.class_props,
+                i.blocking_volumes,
+                if i.has_player_start { "from the map" } else { "MISSING" }
+            );
+            if i.collision_triangles > 10_000 && i.props > 0 && i.class_props > 0 && i.has_player_start {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("the sky camera turns with the player's camera", |w| {
+            let sky = count::<rc_level_plugin::SkyCamera>(w);
+            let mut q = w.query_filtered::<&Camera, (
+                With<PlayerCamera>,
+                With<rc_level_plugin::SkyFollows>,
+            )>();
+            let follows = q
+                .iter(w)
+                .filter(|c| matches!(c.clear_color, ClearColorConfig::None))
+                .count();
+            if sky == 1 && follows == 1 {
+                Ok("1 sky camera; the player's camera lets it through".into())
+            } else {
+                Err(format!("{sky} sky cameras, {follows} player cameras following"))
+            }
+        }),
+        // Look up 60 degrees: geo_01a shows open sky above the spires there.
+        // Without the sky that view is mostly black (17% lit when the sky
+        // camera was switched off for a trial run; 72% with it).
+        Note(|w| set_pitch(w, 60f32.to_radians())),
+        Wait(0.5),
+        Shot("look_up"),
+        Check("looking up shows the sky", |w| {
+            let s = shot(w, "look_up")?;
+            let got = format!("{:.0}% lit", s.lit * 100.0);
+            if s.lit > 0.45 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Note(|w| set_pitch(w, 0.0)),
+        Wait(0.2),
         Note(|w| {
             let f = feet(w);
             w.resource_mut::<Noted>().feet = f;

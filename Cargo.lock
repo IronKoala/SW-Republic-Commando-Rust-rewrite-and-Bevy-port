@@ -4460,10 +4460,8 @@ dependencies = [
  "rc_enemies",
  "rc_game_core",
  "rc_image",
- "rc_level",
- "rc_level_viewer",
+ "rc_level_plugin",
  "rc_movement",
- "rc_package",
  "serde",
  "toml 0.8.23",
 ]
@@ -4484,6 +4482,18 @@ version = "0.1.0"
 name = "rc_level"
 version = "0.1.0"
 dependencies = [
+ "rc_package",
+]
+
+[[package]]
+name = "rc_level_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "rc_level",
+ "rc_level_viewer",
+ "rc_movement",
  "rc_package",
 ]
 

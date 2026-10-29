@@ -7,10 +7,7 @@ description = "The game: one program with the menus, settings, input, on-screen 
 [dependencies]
 rc_game_core = { path = "../rc_game_core" }
 rc_image = { path = "../rc_image" }
-rc_level = { path = "../rc_level" }
-rc_level_viewer = { path = "../rc_level_viewer" }
 rc_movement = { path = "../rc_movement" }
-rc_package = { path = "../rc_package" }
 # Reading our TOML settings files. serde (MIT OR Apache-2.0),
 # https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
 serde = { version = "1", features = ["derive"] }
@@ -18,6 +15,7 @@ toml = "0.8"
 
 # PLUGINS FROM OTHER PARTS: add the crates of the level, weapons, enemies
 # and squad parts here (see docs/PLUGINS.md).
+rc_level_plugin = { path = "../rc_level_plugin" }
 rc_combat = { path = "../rc_combat" }
 rc_enemies = { path = "../rc_enemies" }
 
