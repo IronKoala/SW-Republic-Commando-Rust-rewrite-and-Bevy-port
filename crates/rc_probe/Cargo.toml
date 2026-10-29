@@ -8,4 +8,5 @@ edition.workspace = true
 rc_anim = { path = "../rc_anim" }
 rc_audio = { path = "../rc_audio" }
 rc_image = { path = "../rc_image" }
+rc_menus = { path = "../rc_menus" }
 rc_package = { path = "../rc_package" }

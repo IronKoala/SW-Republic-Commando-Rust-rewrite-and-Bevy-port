@@ -17,6 +17,7 @@
 #![allow(deprecated)]
 
 use crate::input::LookSettings;
+use crate::original_menu::OriginalMenus;
 use crate::levels::LevelList;
 use crate::player::FieldOfView;
 use crate::settings::{Settings, SettingsPath};
@@ -94,7 +95,7 @@ impl Menu {
         }
     }
 
-    fn go(&mut self, page: Page) {
+    pub(crate) fn go(&mut self, page: Page) {
         self.history.push((self.page, self.selected));
         self.page = page;
         self.selected = 0;
@@ -124,6 +125,11 @@ impl Menu {
 
 pub struct MenuPlugin;
 
+/// The placeholder menu's systems (the original main menu runs before
+/// them).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MenuSystems;
+
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Menu::new(Page::Main))
@@ -140,7 +146,8 @@ impl Plugin for MenuPlugin {
                 Update,
                 (pause_key, navigate, draw_menu, highlight)
                     .chain()
-                    .in_set(GameSet::Hud),
+                    .in_set(GameSet::Hud)
+                    .in_set(MenuSystems),
             )
             .add_systems(OnEnter(GameState::Loading), spawn_loading_screen)
             .add_systems(
@@ -158,6 +165,13 @@ pub struct GamePathsFound(pub bool);
 
 fn menu_visible(state: &GameState, play: Option<&Play>) -> bool {
     *state == GameState::MainMenu || play == Some(&Play::Paused)
+}
+
+/// The original main menu (`original_menu.rs`) draws and handles the main
+/// page when the install has it; this placeholder then stays out of the
+/// way.
+fn original_has_it(state: &GameState, menu: &Menu, original: &OriginalMenus) -> bool {
+    *state == GameState::MainMenu && menu.page == Page::Main && original.active()
 }
 
 pub fn items(
@@ -281,9 +295,13 @@ fn navigate(
     mut next_play: Option<ResMut<NextState<Play>>>,
     mut exit: MessageWriter<AppExit>,
     settings_path: Res<SettingsPath>,
+    original: Res<OriginalMenus>,
     log: Res<GameLog>,
 ) {
-    if !menu_visible(state.get(), play.as_deref().map(|p| p.get())) {
+    if !menu_visible(state.get(), play.as_deref().map(|p| p.get()))
+        || original_has_it(state.get(), &menu, &original)
+        || original.used_input
+    {
         return;
     }
     let (_, list) = items(menu.page, &levels, &settings, &paths);
@@ -445,8 +463,10 @@ fn draw_menu(
     paths: Res<GamePaths>,
     theme: Res<Theme>,
     roots: Query<Entity, With<MenuRoot>>,
+    original: Res<OriginalMenus>,
 ) {
-    let visible = menu_visible(state.get(), play.as_deref().map(|p| p.get()));
+    let visible = menu_visible(state.get(), play.as_deref().map(|p| p.get()))
+        && !original_has_it(state.get(), &menu, &original);
     if !visible {
         for r in &roots {
             commands.entity(r).despawn();

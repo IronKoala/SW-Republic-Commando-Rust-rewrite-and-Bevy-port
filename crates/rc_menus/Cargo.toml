@@ -1,0 +1,9 @@
+[package]
+name = "rc_menus"
+version = "0.1.0"
+edition.workspace = true
+description = "Reads the original game's menu layouts, pictures, fonts and sounds from the install (no Bevy)"
+
+[dependencies]
+rc_image = { path = "../rc_image" }
+rc_package = { path = "../rc_package" }

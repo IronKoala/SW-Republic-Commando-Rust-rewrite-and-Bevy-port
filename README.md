@@ -126,11 +126,21 @@ copy of the game.
   the levels, weapons, enemies and squad parts plug in, levels are drawn and
   walked the way `rc_walk --map` does it, with no weapons or enemies.
 
-  **The menus and on-screen display are placeholders.** The amber menus,
-  loading screen and HUD are our own stand-ins so the game can be started
-  and tested. The plan is to use the original game's own menus and HUD (its
-  layouts, textures, fonts and sounds, read from your install at run time)
-  as much as possible; see `docs/ORIGINAL_MENUS.md`.
+  **The main menu is the original's (tested in the cloud sandbox, not yet
+  on Windows).** `rc_game` opens on the game's own main menu, built at run
+  time from your install: the planets in their rings, the title, the eight
+  buttons in their display box, the original fonts, colours and focus and
+  select sounds. QUIT asks the original's "are you sure?" question. Keyboard,
+  gamepad and mouse move the focus. A screenshot of it matches a picture
+  painted straight from the original's textures (mean difference 3.4 of
+  255). LOAD GAME, PROFILES and EXTRAS are greyed out until they're built;
+  MULTIPLAYER is greyed out for good (offline only).
+
+  **The other menus and the on-screen display are still placeholders.**
+  The campaign list, options, pause, loading screen and HUD are our own
+  amber stand-ins, and the amber main menu comes back if the install's menu
+  files can't be read. The plan is to replace them with the original's in
+  turn; see `docs/ORIGINAL_MENUS.md`.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
   sides, the view up and down stays the original's), and the HUD stays in a
@@ -161,6 +171,11 @@ copy of the game.
   animations, no sounds or effects from animation events.
 - Android: the game compiles for Android phones but is not an app yet;
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
+- Original menus: the main menu's moving background video isn't played
+  (it uses a video format with no Rust decoder yet), and the sides of
+  screens wider than 4:3 stay black. Only the main menu and its quit
+  question are the original's so far. Mouse use wasn't tested by the
+  script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
   being built to plug into it). No saving or loading, no checkpoints, no
   briefings or cut scenes. Options are a short list. Not tested on Windows,
@@ -187,6 +202,16 @@ you run it from; if your game isn't in a usual Steam folder, open that file
 and set `folder` under `[game]`. `--map geo_01a` skips the menus.
 `--script` plays itself through the menus and a level and checks each step
 (the log is `logs/rc_game.log`).
+
+To look at one of the original menus without starting the game:
+
+```
+cargo run --release -p rc_probe -- --menu
+```
+
+This paints the main menu to `extracted\menus\CTMenuMain.png` and logs every
+picture, text and button to `logs\rc_menu.log`. Add a class name, such as
+`--menu XInterface.MenuQuestionYesNo`, for another menu.
 
 The other programs test one piece each:
 

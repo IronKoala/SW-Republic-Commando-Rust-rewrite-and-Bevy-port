@@ -26,10 +26,20 @@
 //!   rc_probe --export-sounds <path>  the same, and also write each sound as
 //!                            a .wav file to `extracted/sounds/<package>/`
 //!
+//!   rc_probe --classes <package.u> [Class]  read every class's default
+//!                            values and every enum, log to `logs/rc_classes.log`;
+//!                            with a class name, write out its values in full
+//!   rc_probe --fonts <package.utx>  read every font, log to `logs/rc_fonts.log`
+//!   rc_probe --menu [Package.Class]  build one of the original menus (default
+//!                            the main menu), log its widgets to `logs/rc_menu.log`
+//!                            and paint it to `extracted/menus/`
+//!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
 mod characters;
+mod classes;
+mod menus;
 mod meshes;
 mod pixels;
 mod sounds;
@@ -49,6 +59,10 @@ const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
 const SOUND_LOG_PATH: &str = "logs/rc_sounds.log";
 const MESH_LOG_PATH: &str = "logs/rc_meshes.log";
 const CHARACTER_LOG_PATH: &str = "logs/rc_characters.log";
+const CLASS_LOG_PATH: &str = "logs/rc_classes.log";
+const FONT_LOG_PATH: &str = "logs/rc_fonts.log";
+const MENU_LOG_PATH: &str = "logs/rc_menu.log";
+const MENU_EXTRACT_DIR: &str = "extracted/menus";
 /// Gitignored folders for anything extracted from the game.
 const EXTRACT_DIR: &str = "extracted/textures";
 const SOUND_EXTRACT_DIR: &str = "extracted/sounds";
@@ -85,7 +99,10 @@ fn main() {
     let sound_mode = sound_export || args.first().is_some_and(|a| a == "--sounds");
     let mesh_mode = args.first().is_some_and(|a| a == "--meshes");
     let character_mode = args.first().is_some_and(|a| a == "--characters");
-    if texture_mode || sound_mode || mesh_mode || character_mode {
+    let class_mode = args.first().is_some_and(|a| a == "--classes");
+    let font_mode = args.first().is_some_and(|a| a == "--fonts");
+    let menu_mode = args.first().is_some_and(|a| a == "--menu");
+    if texture_mode || sound_mode || mesh_mode || character_mode || class_mode || font_mode || menu_mode {
         args.remove(0);
     }
     if sound_export && args.is_empty() {
@@ -110,6 +127,8 @@ fn main() {
         None if sound_mode => game.join("GameData").join("Sounds"),
         None if mesh_mode => game.join("GameData").join("StaticMeshes"),
         None if character_mode => game.join("GameData").join("Animations"),
+        None if class_mode => game.join("GameData").join("System").join("XInterfaceCTMenus.u"),
+        None if font_mode => game.join("GameData").join("Textures").join("WarfareFonts.utx"),
         None => game.join("GameData").join("System").join("Core.u"),
     };
     let log_path = if texture_mode {
@@ -120,6 +139,12 @@ fn main() {
         MESH_LOG_PATH
     } else if character_mode {
         CHARACTER_LOG_PATH
+    } else if class_mode {
+        CLASS_LOG_PATH
+    } else if font_mode {
+        FONT_LOG_PATH
+    } else if menu_mode {
+        MENU_LOG_PATH
     } else {
         LOG_PATH
     };
@@ -151,6 +176,18 @@ fn main() {
         meshes::scan(&mut log, &target)
     } else if character_mode {
         characters::scan(&mut log, &target)
+    } else if class_mode {
+        let only = args.get(1).and_then(|a| a.to_str());
+        classes::scan(&mut log, &target, only)
+    } else if font_mode {
+        classes::fonts(&mut log, &target)
+    } else if menu_mode {
+        let class = args
+            .first()
+            .and_then(|a| a.to_str())
+            .unwrap_or(rc_menus::screens::MAIN_MENU)
+            .to_string();
+        menus::probe(&mut log, &game.join("GameData"), &class, Path::new(MENU_EXTRACT_DIR))
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {

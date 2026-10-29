@@ -4422,6 +4422,7 @@ dependencies = [
  "rc_image",
  "rc_level",
  "rc_level_viewer",
+ "rc_menus",
  "rc_movement",
  "rc_package",
  "serde",
@@ -4458,6 +4459,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_menus"
+version = "0.1.0"
+dependencies = [
+ "rc_image",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_movement"
 version = "0.1.0"
 
@@ -4472,6 +4481,7 @@ dependencies = [
  "rc_anim",
  "rc_audio",
  "rc_image",
+ "rc_menus",
  "rc_package",
 ]
 
