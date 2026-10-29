@@ -31,6 +31,7 @@ pub mod health;
 mod library;
 mod melee;
 pub mod pickup;
+pub mod save;
 pub mod shot;
 mod throw;
 mod view;
@@ -45,6 +46,7 @@ pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{WeaponParams, WeaponState};
 
 use bevy::prelude::*;
+use rc_game_core::save::SaveAppExt;
 use rc_game_core::{playing, GamePaths, GameSet};
 
 /// Something shots can hit: an upright cylinder, as Unreal Engine 2 uses
@@ -242,6 +244,7 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HealthPlugin, WeaponsPlugin));
+        app.add_plugins((HealthPlugin, WeaponsPlugin))
+            .add_save_part::<save::CombatSave>();
     }
 }

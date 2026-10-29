@@ -43,6 +43,30 @@ pub enum BattleEvent {
     Ai { id: u32, event: AiEvent },
 }
 
+/// What a battle needs to carry on where it was, for save files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BattleSnapshot {
+    pub time: f32,
+    pub next_id: u32,
+    /// Each spawner, in order: switched on, droids made, battle time of
+    /// its next droid.
+    pub spawners: Vec<(bool, u32, f32)>,
+    /// The living fighters.
+    pub fighters: Vec<FighterSnapshot>,
+}
+
+/// One living fighter, for save files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FighterSnapshot {
+    pub id: u32,
+    pub spawner: usize,
+    pub feet: Vec3,
+    pub facing: f32,
+    pub mode: Mode,
+    /// Where it last saw (or heard) the enemy.
+    pub last_seen_at: Option<Vec3>,
+}
+
 pub struct Battle {
     pub params: Arc<AiParams>,
     pub nav: NavGraph,
@@ -272,6 +296,82 @@ impl Battle {
                 }
             }
         }
+    }
+
+    /// Everything needed to carry on later (see [`Battle::restore`]).
+    /// Dead fighters are left out: only their spawner's count matters.
+    pub fn snapshot(&self) -> BattleSnapshot {
+        BattleSnapshot {
+            time: self.time,
+            next_id: self.next_id,
+            spawners: self
+                .spawners
+                .iter()
+                .map(|s| (s.active, s.made, s.next_spawn))
+                .collect(),
+            fighters: self
+                .fighters
+                .iter()
+                .zip(&self.made_by)
+                .filter(|(f, _)| f.mode != Mode::Dead)
+                .map(|(f, &spawner)| FighterSnapshot {
+                    id: f.id,
+                    spawner,
+                    feet: f.pawn.feet(),
+                    facing: f.facing,
+                    mode: f.mode,
+                    last_seen_at: f.last_seen_at,
+                })
+                .collect(),
+        }
+    }
+
+    /// Carry on from a snapshot, on a battle freshly made for the same map.
+    /// Returns a `Spawned` event for each fighter put back, so the game
+    /// makes their bodies the usual way. Fighters that were in a fight
+    /// start alerted toward where they last saw the enemy; the rest of
+    /// their plans start over.
+    pub fn restore(&mut self, s: &BattleSnapshot) -> Result<Vec<BattleEvent>, String> {
+        if s.spawners.len() != self.spawners.len() {
+            return Err(format!(
+                "the save has {} spawners, this map has {}",
+                s.spawners.len(),
+                self.spawners.len()
+            ));
+        }
+        for (sp, &(active, made, next)) in self.spawners.iter_mut().zip(&s.spawners) {
+            sp.active = active;
+            sp.made = made;
+            sp.next_spawn = next;
+        }
+        self.time = s.time;
+        self.next_id = s.next_id.max(s.fighters.iter().map(|f| f.id + 1).max().unwrap_or(1));
+        self.fighters.clear();
+        self.made_by.clear();
+        let mut out = Vec::new();
+        for f in &s.fighters {
+            let sp = self
+                .spawners
+                .get(f.spawner)
+                .ok_or(format!("fighter {} names spawner {} of {}", f.id, f.spawner, self.spawners.len()))?;
+            // Its spawner's enemy type, not the battle's default.
+            let (start, params) = (sp.factory.start_state.clone(), sp.params.clone());
+            let mut fighter = Fighter::new(f.id, params, f.feet, f.facing, start);
+            if matches!(f.mode, Mode::Alerted | Mode::Attack | Mode::Investigate) {
+                let at = f.last_seen_at.unwrap_or(fighter.pawn.location);
+                let mut ev = Vec::new();
+                fighter.alert(at, self.time, &mut ev);
+            }
+            self.fighters.push(fighter);
+            self.made_by.push(f.spawner);
+            out.push(BattleEvent::Spawned {
+                id: f.id,
+                spawner: f.spawner,
+                feet: f.feet,
+                yaw: f.facing,
+            });
+        }
+        Ok(out)
     }
 
     /// Switch spawners on, and make at most one droid per step.

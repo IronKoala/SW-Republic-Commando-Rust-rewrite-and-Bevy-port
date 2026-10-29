@@ -54,10 +54,40 @@ the small set of types in `crates/rc_game_core`.
 | Show numbers on screen | write `PlayerVitals`, `WeaponReadout`, `SquadReadout`, or send a `HudMessage` |
 | Units | `units::to_bevy` / `units::to_unreal` (50 Unreal units = 1 Bevy unit) |
 | Logging | `Res<GameLog>`: `log.line("weapons: fired dc15s, 1 hit")` |
+| Be saved and loaded | a struct with `Serialize`/`Deserialize` that implements `rc_game_core::save::SavePart`, registered with `app.add_save_part::<T>()`. See "Saving your part" below |
+| The player reached a checkpoint (level scripts) | send `CheckpointReached { name }`; it is saved the first time each name arrives |
+| Skip level-start things when a save is being put back | check for the resource `RestoringSave` |
+| Load Game screen, save from a menu | read `SaveList`; send `LoadGame { slot }` or `SaveGame { slot }`; results come back as `SaveResult` |
 
 A new action (a button the player presses) is added to `Action` in
 `rc_game_core/src/actions.rs` and given default keys in
 `data/input/bindings.toml`.
+
+## Saving your part
+
+Each part owns one `[section]` of the save file. Loading always loads the
+save's map fresh first (as the menu does), then on the first frame of play,
+after every `OnEnter(GameState::InGame)`, calls each part's `load` with its
+section. So a part only puts back what changed since the map started.
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct WeaponsSave { current: String, ammo: Vec<(String, u32)> }
+
+impl SavePart for WeaponsSave {
+    const KEY: &'static str = "weapons";
+    fn save(world: &mut World) -> Option<Self> { /* read components */ }
+    fn load(world: &mut World, data: Self) -> Result<(), String> { /* set them */ }
+}
+
+app.add_save_part::<WeaponsSave>();
+```
+
+Keep the fields readable (names, numbers, Unreal units): players read these
+files. If your part spawns things later than `OnEnter(InGame)`, keep the data
+from `load` in a resource and apply it once they exist. A file with no
+section for your part calls `load_missing` (by default: leave the level as
+it starts), so old saves still load after you add a part.
 
 ## Who writes what
 
@@ -69,6 +99,7 @@ A new action (a button the player presses) is added to `Action` in
 | weapons and combat | `WeaponReadout`, `PlayerVitals` | `ActionState`, `PlayerCamera`, `LevelCollision` |
 | enemies | their own entities, `MusicMood` | `Player`, `LevelCollision` |
 | squad | `SquadReadout` | `ActionState`, `Player` |
+| saving (`rc_save`) | the save files, `SaveList`, `SaveResult`, `RestoringSave`, `CurrentLevel` when loading | every registered `SavePart`, `CheckpointReached`, `ActionState` |
 
 ## Testing your part inside the game
 
