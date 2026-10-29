@@ -310,6 +310,8 @@ fn main() -> AppExit {
     // PLUGINS FROM OTHER PARTS (see docs/PLUGINS.md). When the level part's
     // plugin is added here, remove the stand-in below.
     app.add_plugins(stand_in_level::StandInLevelPlugin);
+    app.add_plugins(rc_combat::CombatPlugin);
+    app.add_plugins(rc_enemies::EnemiesPlugin);
 
     if use_script {
         app.add_plugins(script::ScriptPlugin);

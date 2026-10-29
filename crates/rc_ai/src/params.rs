@@ -2,8 +2,8 @@
 //! `data/enemies/battle_droid.toml`.
 //!
 //! The file has sections. `[movement]` goes to `rc_movement::MoveParams`
-//! (same names as the player's file). `[senses]`, `[combat]` and
-//! `[spawning]` are read here. Every value has a built-in default (the
+//! (same names as the player's file). `[senses]`, `[combat]`,
+//! `[spawning]` and `[look]` are read here. Every value has a built-in default (the
 //! battle droid's), so a mod's file only needs the lines it changes. A
 //! misspelt name is an error naming the line.
 
@@ -51,12 +51,32 @@ pub struct Spawning {
     pub max_alive_total: u32,
 }
 
+/// How the character looks: its animated mesh and which of its animations
+/// to play for each thing it does. Only the game's Bevy side uses this.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Look {
+    /// The animation package, relative to the game folder.
+    pub package: String,
+    pub mesh: String,
+    pub idle: String,
+    pub walk: String,
+    pub run: String,
+    pub walk_back: String,
+    pub step_left: String,
+    pub step_right: String,
+    pub fire: String,
+    pub crouch: String,
+    pub crouch_fire: String,
+    pub death: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiParams {
     pub movement: MoveParams,
     pub senses: Senses,
     pub combat: Combat,
     pub spawning: Spawning,
+    pub look: Look,
 }
 
 impl AiParams {
@@ -110,6 +130,20 @@ impl AiParams {
                 activate_unscripted_within: 3000.0,
                 max_alive_total: 12,
             },
+            look: Look {
+                package: "GameData/Animations/droid.ukx".into(),
+                mesh: "BattleDroid".into(),
+                idle: "ActionBreathe".into(),
+                walk: "WalkForward".into(),
+                run: "RunForward".into(),
+                walk_back: "WalkBackward".into(),
+                step_left: "StepLeft".into(),
+                step_right: "StepRight".into(),
+                fire: "Fire".into(),
+                crouch: "CrouchBreathe".into(),
+                crouch_fire: "CrouchFire".into(),
+                death: "Death".into(),
+            },
         }
     }
 
@@ -153,6 +187,8 @@ impl AiParams {
         let s = &mut self.senses;
         let c = &mut self.combat;
         let p = &mut self.spawning;
+        let l = &mut self.look;
+        let text = || value.trim_matches('"').to_string();
         match (section, key) {
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
@@ -165,7 +201,7 @@ impl AiParams {
             ("combat", "health") => c.health = num()?,
             ("combat", "accuracy") => c.accuracy = num()?,
             ("combat", "max_aim_error") => c.max_aim_error = num()?,
-            ("combat", "weapon") => c.weapon = value.trim_matches('"').to_string(),
+            ("combat", "weapon") => c.weapon = text(),
             ("combat", "burst_count") => c.burst_count = num()?.max(1.0) as u32,
             ("combat", "shot_delay") => c.shot_delay = num()?,
             ("combat", "burst_pause_min") => c.burst_pause_min = num()?,
@@ -181,6 +217,18 @@ impl AiParams {
             ("combat", "lost_sight_reposition") => c.lost_sight_reposition = num()?,
             ("spawning", "activate_unscripted_within") => p.activate_unscripted_within = num()?,
             ("spawning", "max_alive_total") => p.max_alive_total = num()?.max(0.0) as u32,
+            ("look", "package") => l.package = text(),
+            ("look", "mesh") => l.mesh = text(),
+            ("look", "idle") => l.idle = text(),
+            ("look", "walk") => l.walk = text(),
+            ("look", "run") => l.run = text(),
+            ("look", "walk_back") => l.walk_back = text(),
+            ("look", "step_left") => l.step_left = text(),
+            ("look", "step_right") => l.step_right = text(),
+            ("look", "fire") => l.fire = text(),
+            ("look", "crouch") => l.crouch = text(),
+            ("look", "crouch_fire") => l.crouch_fire = text(),
+            ("look", "death") => l.death = text(),
             _ => return Err(format!("unknown setting `{key}` in [{section}]")),
         }
         Ok(())
@@ -197,6 +245,7 @@ impl AiParams {
         out.push(format!("{:?}", self.senses));
         out.push(format!("{:?}", self.combat));
         out.push(format!("{:?}", self.spawning));
+        out.push(format!("{:?}", self.look));
         out
     }
 }

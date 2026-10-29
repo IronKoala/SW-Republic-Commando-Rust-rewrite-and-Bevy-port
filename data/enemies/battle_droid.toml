@@ -61,3 +61,20 @@ lost_sight_reposition = 2 # guess: seconds without a clear shot before a station
 # from scripts start when the player comes this close instead.
 activate_unscripted_within = 3000
 max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
+
+[look]
+# The animated mesh and which of its animations to play. Names are as
+# stored in the game's package (list them with
+# `rc_character --package <file> --set BattleDroidSet --list`).
+package = "GameData/Animations/droid.ukx"
+mesh = "BattleDroid"
+idle = "ActionBreathe"
+walk = "WalkForward"
+run = "RunForward"
+walk_back = "WalkBackward"
+step_left = "StepLeft"
+step_right = "StepRight"
+fire = "Fire"
+crouch = "CrouchBreathe"
+crouch_fire = "CrouchFire"
+death = "Death"
