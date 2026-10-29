@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Why 17 textures' small copies don't match
+
+- **Changed:** DESIGN "How we check pictures" rewritten with the findings. No code changes.
+- **Why:** 17 textures failed the mip check; we needed to know whether our decoder was wrong.
+- **Tested how:** Throwaway program comparing every mip with the one before, measuring how varied each mip is and its average colour, and trying the small mips sideways and upside down.
+- **Result:** The decoder is fine: the same formats give under 5 on 2,000 other textures, including 159 other non-square ones, and other orientations made things worse. The game's files store different pictures in these mips: 5 arena textures turn exactly flat grey (127, 125, 127) from mip 3 down, one blast door has a different picture on every level, 7 tiny glow sprites are likely just compression error (a guess), and the rest are screens, noise and two menu buttons.
+- **Still broken / not tested:** Not checked by eye.
+- **Next:** Use the game's own mips in Bevy rather than generating new ones.
+
 ## 2026-10-29: Decode the two bump-map formats (12 = V8U8, 14 = L6V5U5)
 
 - **Changed:** `crates/rc_image/src/lib.rs`: new `PixelFormat::V8U8` and `PixelFormat::L6V5U5`, decoded to normal-map colours (L in alpha), 2 new unit tests. `rc_package::texture::format_name` names them. `rc_probe` and `rc_viewer` decode them. DESIGN gains a "Bump maps" section; README updated.

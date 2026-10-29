@@ -129,10 +129,32 @@ half-size copy (mip 1), made by the game's tools. We shrink our decoded full-
 size picture (mip 0) by averaging 2x2 squares and compare it with our decoded
 mip 1. Correct decoding gives a small difference; unrelated pictures of the same
 size differ by about 57 out of 255 on average (measured on 524 pairs). Results
-across the install: 1,916 of 2,003 textures differ by under 10; 17 by over 20.
-The 17 are mostly fine patterns (grates, noise, flickering screens). Their
-smaller copies fade toward flat grey, which suggests the artists made those
-mipmaps differently. That explanation is a guess and hasn't been checked by eye.
+across the install's 57 texture packages: 2,026 of 2,114 textures with a usable
+mip 1 differ by under 10; 17 by 20 or more.
+
+**The 17 that don't match.** We looked at them closely with numbers (each mip
+against the one before it, how varied each mip is, its average colour). Our
+decoding is not the problem: the same decoder gives under 5 on the other 2,000
+textures in the same formats and packages, including 159 other non-square ones,
+and reading their small mips sideways or upside down only made things worse.
+The game's own files store different pictures in their small mips:
+- 5 in `arena_textures.utx` (`Propeller`, `HEX_grate`, `Main_Spire`,
+  `Generic_Cave_Opening`, `Generic_Strips`): mip 1 is a detailed picture but not
+  a shrunk copy of mip 0 (differences 20-60), and from mip 3 down every pixel is
+  exactly the same grey (127, 125, 127). That exact flat grey can't come from
+  shrinking a picture, so these mips were made by hand or by a tool setting.
+- `grndDSBlastDoor02` (`assaultship_textures.utx`): every mip differs from the
+  one before by 48-73, as if each level were a separate picture.
+- 7 tiny glow sprites in `effecttex.utx` (8x8 and 16x16, like `eng_glowblue`):
+  differences of 21-26. At those sizes a DXT block covers a quarter of the
+  picture, so compression error alone may explain it. That part is a guess.
+- `console_display_05`, `PowerBar` and `DigiNoise`: screens and noise. For
+  `DigiNoise`, mips 1 and below agree with each other (about 5) but not with
+  mip 0, so mip 0 is a different noise pattern.
+- `CT_ButtonFocus` and `CT_ButtonDefault` (`guicontent.utx`, 16x32 menu
+  buttons): mip 1 is noticeably brighter than mip 0.
+What this means for the port: use the game's own stored mips rather than
+making new ones, so things look the way the game made them look at a distance.
 
 ## Bump maps (formats 12 and 14)
 

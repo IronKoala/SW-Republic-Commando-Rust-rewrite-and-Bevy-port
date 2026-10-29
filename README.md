@@ -64,6 +64,8 @@ copy of the game.
 - Models are drawn without lighting, bump maps or transparency. Only a
   material's main colour texture is used.
 - No levels, no game yet.
+- 17 textures have small copies (mipmaps) that differ from the full picture.
+  This is in the game's own files, not a decoding fault (see `docs/DESIGN.md`).
 
 ## How to run it
 
