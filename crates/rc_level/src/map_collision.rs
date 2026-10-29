@@ -9,7 +9,7 @@
 
 use crate::actors::{self, Placement};
 use crate::bsp::{self, Vec3};
-use crate::collision::{add_blocking_volumes, collision_triangles};
+use crate::collision::{add_blocking_volumes, collision_triangles, Source};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
 use crate::class_look::{apply_class_look, ClassLooks, Loaded};
@@ -31,6 +31,12 @@ pub struct MapCollision {
     /// couldn't be read.
     pub blocking_volumes: usize,
     pub volume_failures: usize,
+    /// The map's doors, lifts and their triggers (`crate::movers`). Their
+    /// triangles are not in `triangles`: they are in `mover_triangles`,
+    /// by the mover's export index, placed where the map puts them, so
+    /// they can move.
+    pub movers: crate::movers::MapMovers,
+    pub mover_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
 }
 
 /// Every package file under the game's data folder, by lower-case name.
@@ -172,8 +178,21 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut mesh = collision_triangles(&bsp, &pairs);
     let volumes = crate::volumes::blocking_volumes(&map.0, &map.1, &level);
     let blocking_volumes = add_blocking_volumes(&mut mesh, &volumes.volumes, true);
+    // Take the movers' triangles out, so they can move.
+    let movers = crate::movers::read_movers(&mut looks, &map.0, &map.1, &level.actors, &mut |n| pkgs.get(n));
+    let is_mover: std::collections::HashSet<usize> = movers.movers.iter().map(|m| m.place.export).collect();
+    let mut mover_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
+    let mut triangles = Vec::with_capacity(mesh.triangles.len());
+    for (t, src) in mesh.triangles.into_iter().zip(mesh.sources) {
+        match src {
+            Source::Actor(a) if is_mover.contains(&a) => mover_triangles.entry(a).or_default().push(t),
+            _ => triangles.push(t),
+        }
+    }
     Ok(MapCollision {
-        triangles: mesh.triangles,
+        triangles,
+        movers,
+        mover_triangles,
         start,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),

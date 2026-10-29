@@ -8,6 +8,7 @@ edition.workspace = true
 rc_level = { path = "../rc_level" }
 rc_level_viewer = { path = "../rc_level_viewer" }
 rc_movement = { path = "../rc_movement" }
+rc_movers = { path = "../rc_movers" }
 rc_package = { path = "../rc_package" }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer this time, still

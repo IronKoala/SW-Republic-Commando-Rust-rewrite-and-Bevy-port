@@ -1,0 +1,21 @@
+# Doors and lifts (movers): the values that are our own choices.
+#
+# Everything else (where a door goes, how long it takes, how long it stays
+# open, what opens it, its sounds) comes from the map and the game's own
+# script packages, read when the level loads. See docs/DESIGN.md, "Doors and
+# lifts (movers)". Change a value and run the game again; no rebuild needed.
+
+[touch]
+# How close the player's body must come to a door that opens when bumped,
+# in Unreal units (about 2 cm each).
+bump_reach = 4
+# How far below the player's feet a lift may be and still count as stood on.
+stand_reach = 4
+
+[states]
+# What each mover "InitialState" name does. The engine's own names are built
+# in; add the game's (or a mod's) here as  Name = "behaviour".
+# Behaviours: static, trigger_open_timed, trigger_toggle, trigger_control,
+# trigger_pound, bump_open_timed, stand_open_timed, bump_button, loop.
+# A state not listed runs as:
+unknown = "trigger_open_timed"

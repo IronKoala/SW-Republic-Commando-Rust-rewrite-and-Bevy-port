@@ -18,6 +18,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
 | `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, each prop's baked corner colours, blocking volumes, models that come from a prop's class, and a map's walking collision (`map_collision`). No Bevy. |
 | `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, with its sky, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`, `sky`) that `rc_walk` uses to draw maps. `rc_level_check` loads every map without a window and logs the results. |
+| `rc_movers` | Doors, lifts and hatches: runs a map's movers through their keys, makes their collision move with them, carries the player on lifts, and runs triggers. No Bevy. `rc_mover_check` runs every mover in every map without a window and logs the numbers. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
@@ -896,6 +897,121 @@ It starts at the first `PlayerStart`, 64 units above it, facing its yaw.
   lightmaps, props, materials, volumes, sky, floor test), then a summary
   line per map. A crash in one map is logged as that map failing. Exits
   with 1 if any map failed.
+
+## Doors and lifts (movers)
+
+A "mover" is anything in a map that slides or turns between fixed
+positions: doors, lifts, hatches, bridges. The reading is in
+`rc_level::movers`, the running in the `rc_movers` crate, and the drawing in
+`rc_walk`.
+
+### What a mover stores
+
+Read from the map, falling back to the mover's class defaults (the same
+class walk as props, `rc_level::class_look`), then to the engine's own
+defaults. The property names come from Unreal Engine 2's public `Mover`
+and `Trigger` classes; the values are the game's.
+
+- **Keys**: up to 8 positions (`KeyPos`) and turns (`KeyRot`), counted from
+  a base (`BasePos`, `BaseRot`). `NumKeys` of them are used. Key 0 is
+  "closed", the last key is "open". `KeyNum` is where it starts.
+- **Timing**: `MoveTime` is how long one key-to-key move takes, so a door
+  with 3 keys takes 2 x `MoveTime` to open. `StayOpenTime` is how long it
+  waits before going back. `DelayTime` is a wait before it starts.
+- **Easing** (`MoverGlideType`): constant speed, or (the default) a gentle
+  start and stop. We use the smooth curve 3t² - 2t³ for the gentle one. That
+  is our reading of how UE2 describes it; the exact curve is in the compiled
+  engine and hasn't been measured against the real game.
+- **What sets it off** (`InitialState`): see below.
+- **`Tag` and `Event`**: a trigger whose `Event` matches a mover's `Tag`
+  sets it off. A mover that finishes opening sends its own `Event`, so
+  doors and lifts can be chained.
+- **When blocked** (`MoverEncroachType`): stop, go back the way it came (the
+  default), keep going (crush), or pass through.
+- **Sounds**: opening, opened, closing, closed and while moving, kept as the
+  sound's name (like `Package.Group.Name`). They are logged where they would
+  play; `rc_walk` has no audio yet.
+
+### What sets a mover off
+
+`InitialState` names a behaviour. `data/movers/movers.toml` maps each name
+to one of ours, so the game's own state names (or a mod's) can be added
+without code:
+
+| Behaviour | What it does |
+|---|---|
+| `trigger_open_timed` | A trigger opens it; it waits `StayOpenTime`, then closes. |
+| `trigger_toggle` | Each trigger opens it if closed, closes it if open. |
+| `trigger_control` | Open while the trigger is held, closes when let go. |
+| `trigger_pound` | Opens and closes over and over while the trigger is held. |
+| `bump_open_timed` | Opens when the player walks into it (the UE2 default). |
+| `stand_open_timed` | Opens when the player stands on it (a lift). |
+| `bump_button` | Moves when bumped, comes back after a wait. |
+| `loop` | Opens and closes for ever from the start. |
+| `static` | Never moves. |
+
+Touching only counts when it starts: standing on a lift that has come back
+down doesn't send it up again until you step off and on. A door that is
+open keeps to its timer even if you stand in it; if it then closes on you,
+its "when blocked" rule decides.
+
+Triggers (`Trigger` and its subclasses) run when the player's box overlaps
+their cylinder (`CollisionRadius`, `CollisionHeight`) and their
+`TriggerType` includes players. Only triggers in the normal state run;
+others (switched on and off by other triggers) are listed in the log as not
+handled yet. Doors opened by the game's scripts (scripted sequences, squad
+orders) are not handled yet either.
+
+### Moving collision
+
+Each mover's collision triangles are taken out of the level's fixed
+collision and kept on their own, where the map placed the mover. To test a
+move against a mover, the move is shifted into the mover's starting pose
+instead of moving the triangles: exact for sliding movers, and for turning
+ones the player's box keeps its world-aligned shape, which is close enough
+for doors.
+
+Each frame, before the player moves:
+
+1. Triggers and touches are checked.
+2. Each mover works out its next position.
+3. If the player stands on it (a short sweep down hits it as floor), the
+   player is moved by the same amount first, so a lift carries them.
+4. If the mover would then overlap the player, it tries to push them along.
+   If they can't be pushed (a wall behind, or the floor under a closing
+   door), the "when blocked" rule applies: it stops, or turns round.
+
+Then the player moves against the fixed level plus the movers where they
+now are.
+
+### Drawing
+
+`rc_level_viewer::scene` gives each mover its own draw batches, and
+`draw::spawn_level` tags them with `MoverPart(export)`. Their corners are
+where the map placed the mover; `rc_walk` sets their `Transform` each
+frame to the mover's move from there (Unreal to Bevy swaps Y and Z, so the
+turn's rows and columns swap the same way).
+
+### How we check movers without looking
+
+- **Unit tests** (`cargo test -p rc_movers`): a triggered door opens in its
+  `MoveTime`, waits `StayOpenTime` and closes; the smooth curve is at 15.6%
+  a quarter of the way through and 50% halfway; a 3-key mover takes 2 x
+  `MoveTime`; a lift carries the player up 400 units and back down without
+  them sinking in or floating off; a closing door turns back when the
+  player is in the way; walking into a bump door opens it and lets you
+  through.
+- **Every map** (`rc_mover_check`): lists every mover and trigger with
+  their values and logs them to `logs/rc_mover_check.log`. Then it runs
+  each mover through a full open and close with the player far away,
+  logging its position every 0.1 s and checking that opening and closing
+  each take `MoveTime` per key (within 2 frames). Then it stands a player on
+  top of every lift (moves mostly up or down by at least 64 units, wide
+  enough to stand on), sets it going, and checks the player's feet move as
+  far as the lift (within 4 units) and never more than 16 units from it on
+  the way.
+- **In the walker**: `rc_walk --map MAP --ride --script` starts the player
+  on the map's first lift, sets it going, and checks the same three things.
 
 ## Sounds
 
