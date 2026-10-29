@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Path network and route finding for computer characters (rc_nav)
+
+- **Changed:** New crate `crates/rc_nav` (no Bevy): reads a map's path nodes and the editor's links between them ("reach specs"), finds shortest routes (A*), and turns a route into the same move input the player uses, so droids and squad mates walk with the player's physics (`rc_movement`). New tool `rc_navcheck [MAP]` logs and checks a map's network (`logs/rc_navcheck.log`). New `crates/rc_package/src/class_library.rs`: searches several script packages together and merges a class's defaults with its parents' (on top of the weapons thread's `class_defaults.rs`). One line added to `class_defaults.rs`: a list with an array position of 256 or more is a false start (fixes CTBot's list).
+- **Why:** Enemies and the squad both need to walk the level's paths. Built once, shared (agreed with the squad thread).
+- **Tested how:** `cargo test -p rc_nav` (6 tests: shortest walkable route, fly-only links skipped, unreachable node, avoiding a node, nearest node on the same floor, a droid-sized body walking up the test room's stairs along a route). `rc_navcheck` on geo_01a, geo_01b and geo_01c copied read-only from the install into the cloud sandbox.
+- **Result:** 6 passed. geo_01a: 358 nodes, 1,224 links, 0 unreadable, every link's stored distance within 1 uu of the straight line between its nodes, biggest walkable island 257 nodes, 5 long routes (up to 127 nodes, 46,783 uu) in 0.8 ms. geo_01b: 386 nodes, 1,371 links, one island. geo_01c: 180 nodes, 659 links. CTBot now gives EnemyMemoryTime 15, DecisionInterval 0.5, CoverBoredomTime 15 instead of a junk list.
+- **Still broken / not tested:** Link flag 4096 (seen on 7-9 links per map) is Republic Commando's own; meaning unknown, treated as walkable. Jump links are treated as walkable but nothing jumps yet. Not run on Windows.
+- **Next:** Battle droid brain (rc_ai) using these routes, then the Bevy plugin.
+
 ## 2026-10-29: Read a script class's default values (rc_probe --class)
 
 - **Changed:** New `crates/rc_package/src/class_defaults.rs` (finds the default values stored at the end of a class in a `.u` script package) and `rc_probe --class NAME` (`crates/rc_probe/src/classes.rs`), which logs the defaults of a class and of each parent to `logs/rc_class.log`.

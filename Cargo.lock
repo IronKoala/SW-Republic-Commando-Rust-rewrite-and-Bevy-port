@@ -4104,6 +4104,15 @@ name = "rc_movement"
 version = "0.1.0"
 
 [[package]]
+name = "rc_nav"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_movement",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_package"
 version = "0.1.0"
 
