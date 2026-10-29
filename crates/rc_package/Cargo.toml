@@ -1,0 +1,7 @@
+[package]
+name = "rc_package"
+version = "0.1.0"
+description = "Reads the header and tables of Republic Commando's Unreal Engine 2 packages"
+edition.workspace = true
+
+[dependencies]

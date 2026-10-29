@@ -1,0 +1,9 @@
+# One workspace, many small crates (layout idea from vladtrc/iw4L and
+# samwhosung/benilla). File-format readers stay plain Rust with no Bevy in
+# them, so they can be built and tested on their own.
+[workspace]
+resolver = "2"
+members = ["crates/rc_package", "crates/rc_probe"]
+
+[workspace.package]
+edition = "2021"
