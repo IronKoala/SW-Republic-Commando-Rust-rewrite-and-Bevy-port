@@ -22,6 +22,14 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not tested on Windows. The script doesn't walk to a door, so opening one in `rc_game` isn't checked yet (the walker's tests cover the mover code). Droids and the squad use their own collision and don't see doors. Sounds still not played.
 - **Next:** Level scripts: the shared event and tag system, starting with geo_01a.
 
+## 2026-10-29: The self-test ignores the real mouse (rc_game --script)
+
+- **Changed:** `crates/rc_game/src/script.rs`: a scripted run clears the window's pointer position and mouse clicks every frame before the menus look at them, so only the script moves the menus. The music-volume step starts from full volume, rather than from whatever the last run saved.
+- **Why:** On the user's PC, `rc_game --script` chose Resume instead of "Quit to main menu" and 12 checks after it failed. The mouse was over the window, and pointing at a menu button selects it. Each run also saved a lower music volume, so after about ten runs the "left lowers the music volume" check would always fail.
+- **Tested how:** In the cloud sandbox, `xdotool` moved and clicked the mouse over the menus every 40 ms during `rc_game --script`. Before the fix, the route went astray (it opened the wrong level). After it, `SCRIPT DONE: 32 checks passed, 0 failed`, also when starting from a saved music volume of 0.
+- **Still broken / not tested:** Not tested on Windows yet.
+- **Next:** The user re-runs the self-test on the PC.
+
 ## 2026-10-29: The squad fights and revives (rc_squad, rc_squad_plugin)
 
 - **Changed:** New `crates/rc_squad/src/fight.rs`: squad mates pick the nearest enemy they can see, fire DC-17m bursts at it after a reaction time, and hold fire when the player or another mate is in the line; downed mates get the nearest free mate to run over and revive them, the player too, and the player revives a mate by holding Use beside them. New `[fight]` and `[revive]` sections in `data/squad/squad.toml`. `rc_squad_plugin` fills `SquadThreats` from every living `Team::Separatist` body, sends the shots as `rc_combat::FireShot`, gives health back and removes `Dead` on a revive, and counts shots, hits, kills and revives (`SquadFightStats`, a `fight:` log line every 5 s). `rc_game`'s player can't move while down. New test `crates/rc_squad_plugin/tests/fight_room.rs`; `rc_squad_sim` gained a fight and revive part.

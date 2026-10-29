@@ -1,7 +1,8 @@
 //! `--script`: a fixed route through the game, in place of the keyboard and
 //! mouse. It presses the same actions a player would (menu down, accept,
 //! pause...), checks the result of each step, logs `CHECK ... PASS/FAIL`,
-//! and exits with code 0 only if every check passed.
+//! and exits with code 0 only if every check passed. The real mouse is
+//! ignored, so moving it over the window doesn't change the route.
 //!
 //! The route: the original main menu (colours checked against the
 //! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
@@ -109,8 +110,26 @@ impl Plugin for ScriptPlugin {
         })
         .init_resource::<Noted>()
         .init_resource::<Shots>()
-        .add_systems(Update, run.in_set(GameSet::Input));
+        .add_systems(Update, run.in_set(GameSet::Input))
+        .add_systems(
+            PreUpdate,
+            ignore_pointer
+                .after(bevy::input::InputSystems)
+                .before(bevy::ui::UiSystems::Focus),
+        );
     }
+}
+
+/// The script alone drives the menus: a real mouse moving over the window
+/// (or resting on a button) must not change what is selected, or the route
+/// goes astray. So the menus never see where the pointer is or a click.
+fn ignore_pointer(mut windows: Query<&mut Window>, mut mouse: ResMut<ButtonInput<MouseButton>>) {
+    for mut w in &mut windows {
+        if w.physical_cursor_position().is_some() {
+            w.set_physical_cursor_position(None);
+        }
+    }
+    mouse.reset_all();
 }
 
 fn in_state(w: &mut World, s: GameState) -> bool {
@@ -404,8 +423,10 @@ fn steps() -> Vec<Step> {
             }
         }),
         Note(|w| {
-            let v = w.resource::<Settings>().audio.music_volume;
-            w.resource_mut::<Noted>().music_volume = v;
+            // Each run saves the lowered volume to the script's own settings
+            // file; start from full so it never runs down to zero.
+            w.resource_mut::<Settings>().audio.music_volume = 1.0;
+            w.resource_mut::<Noted>().music_volume = 1.0;
         }),
         // MULTIPLAYER, LOAD GAME, PROFILES and EXTRAS are greyed out and
         // skipped.
