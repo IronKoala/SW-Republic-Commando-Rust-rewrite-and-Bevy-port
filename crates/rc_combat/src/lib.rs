@@ -37,7 +37,7 @@ pub mod weapon;
 
 pub use grenade::{GrenadeParams, Grenades};
 pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
-pub use library::{MeleeParams, PlayerSetup, WeaponLibrary};
+pub use library::{read_sounds, MeleeParams, PlayerSetup, WeaponLibrary};
 pub use pickup::{spawn_pickup, WeaponPickup};
 pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{WeaponParams, WeaponState};

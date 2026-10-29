@@ -20,7 +20,7 @@ pub mod spawns;
 
 pub use battle::{Battle, BattleEvent, Spawner};
 pub use brain::{AiEvent, Fighter, Maneuver, Mode, Target, View};
-pub use params::{AiParams, EnemyType};
+pub use params::{AiParams, EnemyType, Sounds};
 pub use spawns::{read_factories, Factory, SpawnSpot, StartState};
 
 #[cfg(test)]

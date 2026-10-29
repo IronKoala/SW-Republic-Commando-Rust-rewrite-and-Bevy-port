@@ -49,6 +49,7 @@ pub struct EnemiesPlugin;
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Looks>()
+            .init_resource::<EnemySounds>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
@@ -140,6 +141,41 @@ pub struct Looks {
     pub by_type: HashMap<String, TypeLook>,
 }
 
+/// Each enemy type's sounds (`[sound]` in its file), by sound name.
+#[derive(Resource, Default)]
+pub struct EnemySounds {
+    tried: std::collections::HashSet<String>,
+    by_type: HashMap<String, HashMap<String, Handle<AudioSource>>>,
+    picks: u32,
+}
+
+impl EnemySounds {
+    /// Play one of `names` (picked in turn) for an enemy of type `kind` at
+    /// `at` (Unreal units), quieter with distance from `listener`. **Our
+    /// choice**, not the game's 3D sound.
+    fn play(
+        &mut self,
+        commands: &mut Commands,
+        kind: &str,
+        names: &[String],
+        at: rc_movement::Vec3,
+        listener: Option<rc_movement::Vec3>,
+    ) -> Option<String> {
+        if names.is_empty() {
+            return None;
+        }
+        self.picks = self.picks.wrapping_add(1);
+        let name = &names[self.picks as usize % names.len()];
+        let h = self.by_type.get(kind)?.get(name)?;
+        let volume = listener.map_or(0.5, |l| 1.0 / (1.0 + (l - at).length() / 1000.0));
+        commands.spawn((
+            AudioPlayer(h.clone()),
+            bevy::audio::PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume)),
+        ));
+        Some(name.clone())
+    }
+}
+
 pub struct TypeLook {
     pub look: Arc<DroidLook>,
     material: Option<Handle<StandardMaterial>>,
@@ -217,6 +253,8 @@ fn load_fight(
     paths: Res<GamePaths>,
     log: Res<GameLog>,
     mut looks: ResMut<Looks>,
+    mut sounds: ResMut<EnemySounds>,
+    audio: Option<ResMut<Assets<AudioSource>>>,
     images: Option<ResMut<Assets<Image>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
 ) {
@@ -273,6 +311,34 @@ fn load_fight(
 
     let mut images = images;
     let mut materials = materials;
+    // Each used type's sounds, once per run.
+    if let Some(mut audio) = audio {
+        for t in &types {
+            if !per_type.contains_key(&t.kind.id) || !sounds.tried.insert(t.kind.id.clone()) {
+                continue;
+            }
+            let snd = &t.sounds;
+            let names: Vec<String> = snd
+                .spotted
+                .iter()
+                .chain(&snd.hurt)
+                .chain(&snd.death)
+                .cloned()
+                .collect();
+            let (found, notes) = rc_combat::read_sounds(&paths, &snd.package, &names, &mut audio);
+            for n in notes {
+                log.line(format!("{PART}: {}: {n}", t.kind.id));
+            }
+            log.line(format!(
+                "{PART}: {} sounds: {} of {} found in {}",
+                t.kind.id,
+                found.len(),
+                names.len(),
+                snd.package
+            ));
+            sounds.by_type.insert(t.kind.id.clone(), found);
+        }
+    }
     // Only the types this map uses, each once per run.
     for t in &types {
         if !per_type.contains_key(&t.kind.id) || looks.tried.contains(&t.kind.id) {
@@ -409,10 +475,12 @@ fn think(
     mut fire: MessageWriter<FireShot>,
     mut mood: ResMut<MusicMood>,
     looks: Res<Looks>,
+    mut sounds: ResMut<EnemySounds>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     log: Res<GameLog>,
 ) {
     let Some(collision) = collision else { return };
+    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
     let dt = time.delta_secs().min(0.1);
     let target = player_target(&player, &camera);
     // The player's side besides the player (squad mates): droids fight
@@ -552,6 +620,17 @@ fn think(
                     }
                     AiEvent::Spotted { distance } => {
                         fight.stats.first_spotted.get_or_insert(now);
+                        if let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) {
+                            if let Some(n) = sounds.play(
+                                &mut commands,
+                                &f.params.kind.id,
+                                &f.params.sounds.spotted,
+                                f.pawn.location,
+                                listener,
+                            ) {
+                                log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
+                            }
+                        }
                         log.line(format!("{PART}: t={now:.1}s droid {id} spotted the player {distance:.0} uu away"));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
@@ -623,10 +702,31 @@ fn react_to_combat(
     droids: Query<&Droid>,
     players: Query<(), With<Player>>,
     transforms: Query<&Transform>,
+    camera: Query<&Transform, With<PlayerCamera>>,
+    mut sounds: ResMut<EnemySounds>,
     log: Res<GameLog>,
 ) {
     let fight = &mut *fight;
     let now = fight.battle.time;
+    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
+    let mut say = |commands: &mut Commands, fight: &Fight, id: u32, what: &str| {
+        let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) else {
+            return;
+        };
+        let names = match what {
+            "hurt" => &f.params.sounds.hurt,
+            _ => &f.params.sounds.death,
+        };
+        if let Some(n) = sounds.play(
+            commands,
+            &f.params.kind.id,
+            names,
+            f.pawn.location,
+            listener,
+        ) {
+            log.line(format!("{PART}: t={now:.1}s droid {id} {what} sound {n}"));
+        }
+    };
     for d in damage.read() {
         if players.contains(d.target) {
             if d.instigator.is_some_and(|i| droids.contains(i)) {
@@ -639,6 +739,7 @@ fn react_to_combat(
             continue;
         };
         fight.stats.droids_hurt += 1;
+        say(&mut commands, fight, droid.id, "hurt");
         let from = d
             .instigator
             .and_then(|i| transforms.get(i).ok())
@@ -658,6 +759,7 @@ fn react_to_combat(
         };
         fight.battle.killed(droid.id);
         fight.stats.droids_destroyed += 1;
+        say(&mut commands, fight, droid.id, "death");
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);
         // It leaves its weapon on the ground for the player.
         if let (Some(f), Ok(t)) = (f, transforms.get(d.entity)) {

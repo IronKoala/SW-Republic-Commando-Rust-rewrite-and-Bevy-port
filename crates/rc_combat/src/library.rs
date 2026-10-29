@@ -295,46 +295,66 @@ fn load_sounds(
         }
     }
     for (package, names) in wanted {
-        let path = paths.game_file(&format!("GameData/Sounds/{package}.uax"));
-        let read = std::fs::read(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|data| {
-                Package::parse(&data)
-                    .map(|p| (p, data))
-                    .map_err(|e| e.to_string())
-            });
-        let (pkg, data) = match read {
-            Ok(v) => v,
-            Err(e) => {
-                say(
-                    log,
-                    format!("weapons: no sounds from {}: {e}", path.display()),
-                );
-                continue;
-            }
+        let (found, notes) = read_sounds(paths, &package, &names, audio);
+        for n in notes {
+            say(log, format!("weapons: {n}"));
+        }
+        lib.sounds.extend(found);
+    }
+}
+
+/// Read sounds by name from one of the game's sound packages
+/// (`GameData/Sounds/<package>.uax`) into Bevy sounds. Returns what was
+/// found and a note for each problem. Any part can use it (enemies do).
+pub fn read_sounds(
+    paths: &GamePaths,
+    package: &str,
+    names: &[String],
+    audio: &mut Assets<AudioSource>,
+) -> (HashMap<String, Handle<AudioSource>>, Vec<String>) {
+    let mut found = HashMap::new();
+    let mut notes = Vec::new();
+    if names.is_empty() {
+        return (found, notes);
+    }
+    let path = paths.game_file(&format!("GameData/Sounds/{package}.uax"));
+    let read = std::fs::read(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|data| {
+            Package::parse(&data)
+                .map(|p| (p, data))
+                .map_err(|e| e.to_string())
+        });
+    let (pkg, data) = match read {
+        Ok(v) => v,
+        Err(e) => {
+            notes.push(format!("no sounds from {}: {e}", path.display()));
+            return (found, notes);
+        }
+    };
+    for name in names {
+        let export = pkg.exports.iter().find(|e| {
+            pkg.export_class_name(e) == "Sound"
+                && pkg.name(e.object_name).eq_ignore_ascii_case(name)
+        });
+        let Some(export) = export else {
+            notes.push(format!("sound {name} not in {package}"));
+            continue;
         };
-        let (pkg, data) = (&pkg, &data);
-        for name in names {
-            let export = pkg.exports.iter().find(|e| {
-                pkg.export_class_name(e) == "Sound"
-                    && pkg.name(e.object_name).eq_ignore_ascii_case(&name)
-            });
-            let Some(export) = export else {
-                say(log, format!("weapons: sound {name} not in {package}"));
-                continue;
-            };
-            match read_sound(pkg, data, export) {
-                Ok(s) => {
-                    let bytes: Vec<u8> = s.bytes(data).to_vec();
-                    let h = audio.add(AudioSource {
+        match read_sound(&pkg, &data, export) {
+            Ok(snd) => {
+                let bytes: Vec<u8> = snd.bytes(&data).to_vec();
+                found.insert(
+                    name.clone(),
+                    audio.add(AudioSource {
                         bytes: bytes.into(),
-                    });
-                    lib.sounds.insert(name, h);
-                }
-                Err(e) => say(log, format!("weapons: sound {name} didn't read: {e}")),
+                    }),
+                );
             }
+            Err(e) => notes.push(format!("sound {name} didn't read: {e}")),
         }
     }
+    (found, notes)
 }
 
 /// Give the player (any new `Player` entity) the game's health, shield,

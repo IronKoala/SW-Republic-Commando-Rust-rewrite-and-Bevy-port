@@ -74,6 +74,15 @@ drops = "e5_blaster_pickup" # placeholder: the weapon file it leaves when it fal
 activate_unscripted_within = 3000
 max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
 
+[sound]
+# Sound names in GameData/Sounds/<package>.uax; one is picked at random.
+# Empty lists play nothing. List a package's sounds with
+# `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
+package = "droid_sound"   # placeholder: package name to check
+spotted = []              # placeholder: names not read yet
+hurt = []                 # placeholder: names not read yet
+death = []                # placeholder: names not read yet
+
 [look]
 # The animated mesh and which of its animations to play. Names are as
 # stored in the game's package (list them with

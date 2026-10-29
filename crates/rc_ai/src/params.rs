@@ -108,9 +108,22 @@ pub struct Look {
     pub ambient: f32,
 }
 
+/// What the character says or sounds like: sound names in `package`
+/// (`GameData/Sounds/<package>.uax`). One is picked at random each time.
+/// Empty lists play nothing.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Sounds {
+    pub package: String,
+    /// On first seeing the enemy.
+    pub spotted: Vec<String>,
+    pub hurt: Vec<String>,
+    pub death: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiParams {
     pub kind: EnemyType,
+    pub sounds: Sounds,
     pub movement: MoveParams,
     pub senses: Senses,
     pub combat: Combat,
@@ -140,6 +153,10 @@ impl AiParams {
                 name: "battle droid".into(),
                 classes: vec!["BattleDroid*".into()],
                 body: "droid".into(),
+            },
+            sounds: Sounds {
+                package: "droid_sound".into(),
+                ..Default::default()
             },
             movement: m,
             senses: Senses {
@@ -257,7 +274,12 @@ impl AiParams {
                 .collect())
         };
         let k = &mut self.kind;
+        let snd = &mut self.sounds;
         match (section, key) {
+            ("sound", "package") => snd.package = text(),
+            ("sound", "spotted") => snd.spotted = list()?,
+            ("sound", "hurt") => snd.hurt = list()?,
+            ("sound", "death") => snd.death = list()?,
             ("type", "id") => k.id = text(),
             ("type", "name") => k.name = text(),
             ("type", "classes") => k.classes = list()?,
