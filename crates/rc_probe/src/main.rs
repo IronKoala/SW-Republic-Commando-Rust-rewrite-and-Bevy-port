@@ -25,6 +25,10 @@
 //!                            it, log to `logs/rc_sounds.log`
 //!   rc_probe --export-sounds <path>  the same, and also write each sound as
 //!                            a .wav file to `extracted/sounds/<package>/`
+//!   rc_probe --class <name>  log the default values of a script class (for
+//!                            example DC17mBlaster) and of each parent class,
+//!                            from GameData/System/*.u and
+//!                            GameData/Properties/*.u, to `logs/rc_class.log`
 //!
 //!   rc_probe --classes <package.u> [Class]  read every class's default
 //!                            values and every enum, log to `logs/rc_classes.log`;
@@ -38,6 +42,7 @@
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
 mod characters;
+mod class_scan;
 mod classes;
 mod menus;
 mod meshes;
@@ -59,7 +64,8 @@ const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
 const SOUND_LOG_PATH: &str = "logs/rc_sounds.log";
 const MESH_LOG_PATH: &str = "logs/rc_meshes.log";
 const CHARACTER_LOG_PATH: &str = "logs/rc_characters.log";
-const CLASS_LOG_PATH: &str = "logs/rc_classes.log";
+const CLASS_LOG_PATH: &str = "logs/rc_class.log";
+const CLASSES_LOG_PATH: &str = "logs/rc_classes.log";
 const FONT_LOG_PATH: &str = "logs/rc_fonts.log";
 const MENU_LOG_PATH: &str = "logs/rc_menu.log";
 const MENU_EXTRACT_DIR: &str = "extracted/menus";
@@ -99,11 +105,25 @@ fn main() {
     let sound_mode = sound_export || args.first().is_some_and(|a| a == "--sounds");
     let mesh_mode = args.first().is_some_and(|a| a == "--meshes");
     let character_mode = args.first().is_some_and(|a| a == "--characters");
-    let class_mode = args.first().is_some_and(|a| a == "--classes");
+    let class_mode = args.first().is_some_and(|a| a == "--class");
+    let classes_mode = args.first().is_some_and(|a| a == "--classes");
     let font_mode = args.first().is_some_and(|a| a == "--fonts");
     let menu_mode = args.first().is_some_and(|a| a == "--menu");
-    if texture_mode || sound_mode || mesh_mode || character_mode || class_mode || font_mode || menu_mode {
+    if texture_mode
+        || sound_mode
+        || mesh_mode
+        || character_mode
+        || class_mode
+        || classes_mode
+        || font_mode
+        || menu_mode
+    {
         args.remove(0);
+    }
+    if class_mode && args.is_empty() {
+        eprintln!("--class needs a class name, for example:");
+        eprintln!("  rc_probe --class DC17mBlaster");
+        std::process::exit(2);
     }
     if sound_export && args.is_empty() {
         eprintln!("--export-sounds needs a package file or folder, for example:");
@@ -141,6 +161,8 @@ fn main() {
         CHARACTER_LOG_PATH
     } else if class_mode {
         CLASS_LOG_PATH
+    } else if classes_mode {
+        CLASSES_LOG_PATH
     } else if font_mode {
         FONT_LOG_PATH
     } else if menu_mode {
@@ -177,10 +199,14 @@ fn main() {
     } else if character_mode {
         characters::scan(&mut log, &target)
     } else if class_mode {
+        let class = target.to_string_lossy().into_owned();
+        let data = game.join("GameData");
+        classes::dump(&mut log, &[data.join("System"), data.join("Properties")], &class)
+    } else if classes_mode {
         let only = args.get(1).and_then(|a| a.to_str());
-        classes::scan(&mut log, &target, only)
+        class_scan::scan(&mut log, &target, only)
     } else if font_mode {
-        classes::fonts(&mut log, &target)
+        class_scan::fonts(&mut log, &target)
     } else if menu_mode {
         let class = args
             .first()

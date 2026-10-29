@@ -1,0 +1,36 @@
+[package]
+name = "rc_enemies"
+version = "0.1.0"
+description = "Battle droids in the game: a Bevy plugin that spawns them from the map, runs their decisions (rc_ai), animates them and fires through rc_combat."
+edition.workspace = true
+
+[dependencies]
+rc_ai = { path = "../rc_ai" }
+rc_anim = { path = "../rc_anim" }
+rc_combat = { path = "../rc_combat" }
+rc_game_core = { path = "../rc_game_core" }
+rc_image = { path = "../rc_image" }
+# rc_level and rc_level_viewer: only the rc_droidview program draws a map.
+rc_level = { path = "../rc_level" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_nav = { path = "../rc_nav" }
+rc_package = { path = "../rc_package" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The same features as
+# rc_combat (3D meshes and materials for the droids), so the game builds
+# one copy of Bevy. The plugin never opens a window itself.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = [
+    "default_app",
+    "std",
+    "bevy_state",
+    "bevy_winit",
+    "multi_threaded",
+    "x11",
+    "3d_bevy_render",
+    "bevy_audio",
+    "wav",
+]

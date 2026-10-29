@@ -1,0 +1,42 @@
+# DC-15s blaster pistol: the commando's sidearm. It never needs reloading:
+# it recharges on its own.
+#
+# The values are the original game's: class DC15s (ctinventory.u) with
+# DC15sDefaults (Properties/properties.u) on top, its charge DC15Ammo(+Defaults)
+# and its bolt DC15Proj(+Defaults). See docs/RESEARCH.md, "Weapons and damage".
+
+name = "DC-15s Pistol"
+
+[fire]
+mode = "semi_auto"        # FireMode not set: FM_SemiAuto, one shot per press
+shot_delay = 0.2          # ShotDelay
+aim_error = 10            # AimError
+offset = [100, 0, -8.56]  # FPFireOffset
+
+[ammo]
+max_ammo = 5              # MaxAmmo: 5 shots of charge
+recharge_rate = 1.5       # RechargeRate: shots regained per second
+
+[shot]
+kind = "bolt"
+accel = 40000             # AccelFactor
+max_speed = 8000          # MaxSpeed
+life_span = 10
+damage = 55               # Damage
+damage_kind = "blaster"   # CTDamageEnergyDC15s
+
+[recoil]
+kick = [300, 300, 0]      # WeaponKick
+spring = 3                # RecoilConstant
+damping = 0.1             # RecoilDampening
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_pistolFire_01"]    # FireSound
+empty = "wep_GEN_empty_01"
+
+[model]
+package = "weapons"
+mesh = "DC15Pistol"
+offset = [35, 10, -12]    # our choice
+bolt_colour = [0.3, 0.6, 1.0]  # our choice, from the bolt light's hue 141 (blue)

@@ -1,201 +1,155 @@
-//! `rc_probe --classes <package> [ClassName]`: reads the default values of
-//! every class in a script package (`.u`) and the names of every enum, and
-//! checks they read cleanly. With a class name, writes out that class's
-//! default values in full, including the values inside structs. This is how
-//! the original menus' layouts were found (see `docs/ORIGINAL_MENUS.md`).
+//! `rc_probe --class NAME`: log a script class's default values, and those
+//! of each parent class, from the game's script packages (`System/*.u`).
 //!
-//! `rc_probe --fonts <package>`: reads every font in a texture package and
-//! checks its letters and pages.
+//! This is how the weapon numbers in `data/weapons/` were found. A value
+//! set by a class wins over the same value in its parents.
 
 use crate::Log;
-use rc_package::class::{self, object_class, object_path};
-use rc_package::font;
+use rc_package::class_defaults::{class_defaults, find_class, parent_name, property_names};
 use rc_package::properties::{Property, PropertyType, Value};
-use rc_package::Package;
+use rc_package::{Package, Reader};
+use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
-pub(crate) fn scan(log: &mut Log, target: &Path, only: Option<&str>) -> bool {
-    let data = match fs::read(target) {
-        Ok(d) => d,
-        Err(e) => {
-            log.line(format!("FAILED: can't read {}: {e}", target.display()));
-            return false;
-        }
-    };
-    let pkg = match Package::parse(&data) {
-        Ok(p) => p,
-        Err(e) => {
-            log.line(format!("FAILED: {e}"));
-            return false;
-        }
-    };
-    let (mut classes, mut failed, mut enums, mut enum_failed, mut unchecked) = (0, 0, 0, 0, 0);
-    for e in &pkg.exports {
-        let name = pkg.name(e.object_name);
-        let kind = pkg.export_class_name(e);
-        if kind == "Class" {
-            if only.is_some_and(|o| !o.eq_ignore_ascii_case(name)) {
-                continue;
-            }
-            classes += 1;
-            match class::read_class_defaults(&pkg, &data, e) {
-                Ok(d) => {
-                    log.line(format!(
-                        "class {name} (parent {}): {} default values from offset {} of {}{}",
-                        pkg.object_name(d.super_class),
-                        d.properties.len(),
-                        d.start,
-                        e.serial_size,
-                        if d.layout_checked {
-                            ""
-                        } else {
-                            " (layout NOT checked)"
-                        }
-                    ));
-                    if !d.layout_checked {
-                        unchecked += 1;
-                    }
-                    if only.is_some() {
-                        if let Ok(b) = class::export_data(&data, e) {
-                            log.line(format!(
-                                "  first bytes {:02X?}",
-                                &b[..(d.start + 8).min(b.len())]
-                            ));
-                        }
-                        for p in &d.properties {
-                            dump(log, &pkg, p, 1);
-                        }
-                    }
-                }
-                Err(err) => {
-                    failed += 1;
-                    log.line(format!("class {name}: FAILED: {err}"));
-                }
-            }
-        } else if kind == "Enum" && only.is_none() {
-            enums += 1;
-            match class::read_enum(&pkg, &data, e) {
-                Ok(names) => log.file_only(format!("enum {name}: {}", names.join(", "))),
-                Err(err) => {
-                    enum_failed += 1;
-                    log.line(format!("enum {name}: FAILED: {err}"));
-                    if let Ok(b) = class::export_data(&data, e) {
-                        log.file_only(format!("  bytes {:02X?}", &b[..b.len().min(64)]));
-                    }
-                }
-            }
-        }
-    }
-    log.line(format!(
-        "SUMMARY: {classes} classes ({failed} failed, {unchecked} layout not checked), {enums} enums ({enum_failed} failed)"
-    ));
-    failed == 0 && unchecked == 0 && enum_failed == 0 && classes > 0
+struct Loaded {
+    file: String,
+    data: Vec<u8>,
+    pkg: Package,
 }
 
-fn dump(log: &mut Log, pkg: &Package, p: &Property, depth: usize) {
-    let pad = "  ".repeat(depth);
+/// Log the defaults of `class` and its parents, looking in the `.u`
+/// packages of each folder in `folders` (the game's `GameData/System` and
+/// `GameData/Properties`, which holds many per-level variants).
+pub fn dump(log: &mut Log, folders: &[PathBuf], class: &str) -> bool {
+    let mut packages = Vec::new();
+    let mut paths = Vec::new();
+    for folder in folders {
+        let Ok(entries) = fs::read_dir(folder) else {
+            log.line(format!("can't read {}, skipped", folder.display()));
+            continue;
+        };
+        let mut found: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("u")))
+            .collect();
+        found.sort();
+        paths.extend(found);
+    }
+    for path in paths {
+        let Ok(data) = fs::read(&path) else { continue };
+        let Ok(pkg) = Package::parse(&data) else {
+            log.line(format!("skipped {} (didn't read)", path.display()));
+            continue;
+        };
+        let file = path.file_name().unwrap().to_string_lossy().into_owned();
+        packages.push(Loaded { file, data, pkg });
+    }
+    log.line(format!("script packages read: {}", packages.len()));
+    let names: HashSet<String> = packages
+        .iter()
+        .flat_map(|l| property_names(&l.pkg))
+        .collect();
+    log.line(format!("property names known: {}", names.len()));
+    let is_property = |n: &str| names.contains(&n.to_ascii_lowercase());
+
+    let mut next = Some(class.to_string());
+    let mut found_any = false;
+    while let Some(name) = next.take() {
+        let Some((l, export)) = packages
+            .iter()
+            .find_map(|l| find_class(&l.pkg, &name).map(|e| (l, e)))
+        else {
+            log.line(format!("class {name}: not in these packages (stops here)"));
+            break;
+        };
+        found_any = true;
+        let parent = parent_name(&l.pkg, export).map(str::to_string);
+        log.line(format!(
+            "=== class {} in {} (parent: {}) ===",
+            name,
+            l.file,
+            parent.as_deref().unwrap_or("none")
+        ));
+        match class_defaults(&l.pkg, &l.data, export, &is_property) {
+            Some(d) => {
+                for p in &d.properties {
+                    log.line(format!("  {}", describe(&l.pkg, p)));
+                }
+                log.line(format!(
+                    "  ({} values, list starts at byte {} of {})",
+                    d.properties.len(),
+                    d.start,
+                    d.data_len
+                ));
+                let off = export.serial_offset as usize;
+                let before = &l.data[off + d.start.saturating_sub(24)..off + d.start];
+                log.file_only(format!("  24 bytes before it: {}", hex(before)));
+            }
+            None => log.line("  no clean defaults list found"),
+        }
+        next = parent;
+    }
+    found_any
+}
+
+/// One property as `Name[index] = value`.
+fn describe(pkg: &Package, p: &Property) -> String {
+    let name = pkg.name(p.name);
     let index = if p.array_index > 0 {
         format!("[{}]", p.array_index)
     } else {
         String::new()
     };
-    let name = format!("{}{index}", pkg.name(p.name));
-    if let Some(inner) = class::struct_properties(pkg, p) {
-        log.line(format!(
-            "{pad}{name}: struct {} ({} values)",
-            p.struct_name.map_or("?", |s| pkg.name(s)),
-            inner.len()
-        ));
-        for q in &inner {
-            dump(log, pkg, q, depth + 1);
-        }
-        return;
-    }
-    let value = match (&p.value, p.kind) {
-        (Value::Object(i), _) => format!(
-            "{} {}",
-            object_class(pkg, *i),
-            if *i == 0 {
-                "None".into()
-            } else {
-                object_path(pkg, *i)
-            }
-        ),
-        (Value::Name(i), _) => format!("name {}", pkg.name(*i)),
-        (Value::Raw(_), PropertyType::Str | PropertyType::String) => {
-            format!("{:?}", class::string_value(p).unwrap_or_default())
-        }
-        (Value::Raw(b), PropertyType::Struct) if b.len() == 4 => {
-            let c = class::color_value(p).unwrap();
-            format!(
-                "struct {} bytes as colour rgba({}, {}, {}, {})",
-                p.struct_name.map_or("?", |s| pkg.name(s)),
-                c[0],
-                c[1],
-                c[2],
-                c[3]
-            )
-        }
-        (Value::Raw(b), _) => format!(
-            "{:?} {} {} bytes {:02X?}",
-            p.kind,
-            p.struct_name.map_or("", |s| pkg.name(s)),
-            b.len(),
-            &b[..b.len().min(24)]
-        ),
-        (v, _) => format!("{v:?}"),
+    let value = match &p.value {
+        Value::Byte(b) => b.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Object(o) => pkg.object_name(*o).to_string(),
+        Value::Name(n) => format!("'{}'", pkg.name(*n)),
+        Value::Raw(raw) => raw_value(pkg, p, raw),
     };
-    log.line(format!("{pad}{name} = {value}"));
+    format!("{name}{index} = {value}")
 }
 
-pub(crate) fn fonts(log: &mut Log, target: &Path) -> bool {
-    let data = match fs::read(target) {
-        Ok(d) => d,
-        Err(e) => {
-            log.line(format!("FAILED: can't read {}: {e}", target.display()));
-            return false;
-        }
+fn raw_value(pkg: &Package, p: &Property, raw: &[u8]) -> String {
+    let words = |raw: &[u8], float: bool| {
+        raw.chunks_exact(4)
+            .map(|c| {
+                let b = [c[0], c[1], c[2], c[3]];
+                if float {
+                    f32::from_le_bytes(b).to_string()
+                } else {
+                    i32::from_le_bytes(b).to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     };
-    let pkg = match Package::parse(&data) {
-        Ok(p) => p,
-        Err(e) => {
-            log.line(format!("FAILED: {e}"));
-            return false;
+    let struct_name = p.struct_name.map_or("?", |n| pkg.name(n));
+    match p.kind {
+        PropertyType::Str | PropertyType::String => {
+            let mut r = Reader::new(raw);
+            r.fstring()
+                .map(|s| format!("\"{s}\""))
+                .unwrap_or_else(|_| hex(raw))
         }
-    };
-    let (mut count, mut failed) = (0, 0);
-    for e in &pkg.exports {
-        if pkg.export_class_name(e) != "Font" {
-            continue;
+        PropertyType::Vector => format!("({})", words(raw, true)),
+        // Rotators are whole numbers: 65536 is one full turn.
+        PropertyType::Rotator => format!("rotator({})", words(raw, false)),
+        PropertyType::Struct if struct_name == "Rotator" => {
+            format!("rotator({})", words(raw, false))
         }
-        count += 1;
-        let name = pkg.name(e.object_name);
-        match font::read_font(&pkg, &data, e) {
-            Ok(f) => {
-                let used = f.glyphs.iter().filter(|g| g.width > 0).count();
-                let a = f.glyph('A');
-                log.line(format!(
-                    "font {name}: {} letters ({used} drawn), {} pages [{}], kerning {}, line height {}, 'A' {:?}, {} bytes left",
-                    f.glyphs.len(),
-                    f.pages.len(),
-                    f.pages
-                        .iter()
-                        .map(|p| object_path(&pkg, *p))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    f.kerning,
-                    f.line_height(),
-                    a,
-                    f.leftover
-                ));
-            }
-            Err(err) => {
-                failed += 1;
-                log.line(format!("font {name}: FAILED: {err}"));
-            }
+        PropertyType::Struct if raw.len() % 4 == 0 && raw.len() <= 64 => {
+            format!("{struct_name}({}) raw {}", words(raw, true), hex(raw))
         }
+        PropertyType::Struct => format!("{struct_name} raw {}", hex(raw)),
+        _ => format!("{:?} raw {}", p.kind, hex(raw)),
     }
-    log.line(format!("SUMMARY: {count} fonts ({failed} failed)"));
-    failed == 0 && count > 0
+}
+
+fn hex(raw: &[u8]) -> String {
+    raw.iter().map(|b| format!("{b:02x}")).collect()
 }

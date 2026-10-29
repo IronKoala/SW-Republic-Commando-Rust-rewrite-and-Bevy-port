@@ -1,0 +1,38 @@
+# E-5 blaster carried by battle droids (BattleDroidBlaster).
+#
+# The values are the original game's: class BattleDroidBlaster
+# (ctinventory.u) with BattleDroidBlasterDefaults (Properties/properties.u)
+# on top, its charge BattleDroidBlasterAmmo and its bolt
+# BattleDroidBlasterProj(+Defaults). Droids fire it by sending FireShot;
+# how well they aim is the droid's own business (its Accuracy), so the
+# weapon itself adds no aim error. See docs/RESEARCH.md.
+
+name = "E-5 Blaster"
+
+[fire]
+mode = "semi_auto"
+shot_delay = 0.55         # ShotDelay (Defaults)
+aim_error = 0             # AimError not set anywhere: 0
+offset = [57.4, 20, -6.56] # FPFireOffset (CTWeaponRecharging)
+
+[ammo]
+max_ammo = 100            # MaxAmmo (CTAmmoRecharging)
+recharge_rate = 100       # RechargeRate: never runs dry
+
+[shot]
+kind = "bolt"
+accel = 60000             # AccelFactor (Projectile's default)
+max_speed = 5000          # MaxSpeed
+life_span = 10
+damage = 24               # Damage (BattleDroidBlasterProjDefaults)
+damage_kind = "blaster"   # CTDamageEnergyDroids
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_sbdGun_01"]   # FireSound (Defaults)
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.35, 0.1]  # our choice, from the bolt light's hue 27 (orange-red)
