@@ -1,0 +1,54 @@
+[package]
+name = "rc_game"
+version = "0.1.0"
+edition.workspace = true
+description = "The game: one program with the menus, settings, input, on-screen display and music, that every other part plugs into."
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+rc_image = { path = "../rc_image" }
+rc_level = { path = "../rc_level" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }
+# Reading our TOML settings files. serde (MIT OR Apache-2.0),
+# https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# PLUGINS FROM OTHER PARTS: add the crates of the level, weapons, enemies
+# and squad parts here (see docs/PLUGINS.md).
+rc_combat = { path = "../rc_combat" }
+rc_enemies = { path = "../rc_enemies" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer, a window on
+# X11 or Wayland, menus and text (bevy_ui with Bevy's built-in font), audio
+# with Ogg Vorbis for the game's music, gamepads (gilrs) and game states.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = [
+    "default_app",
+    "std",
+    "multi_threaded",
+    "bevy_winit",
+    "x11",
+    "wayland",
+    "3d_bevy_render",
+    "ui_api",
+    "ui_bevy_render",
+    "default_font",
+    "bevy_audio",
+    "vorbis",
+    "bevy_gilrs",
+]
+
+# Android only (see docs/ANDROID.md): BLAKE3 hashing (CC0 OR Apache-2.0,
+# used inside Bevy) without its C code, and Bevy's native Android start-up.
+[target.'cfg(target_os = "android")'.dependencies]
+blake3 = { version = "1.8", features = ["pure"] }
+
+[target.'cfg(target_os = "android")'.dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["android-native-activity"]

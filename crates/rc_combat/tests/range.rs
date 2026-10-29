@@ -331,3 +331,70 @@ fn droid_fire_hits_shield_then_health() {
     let v = r.app.world().resource::<PlayerVitals>();
     assert_eq!(v.health, 180.0);
 }
+
+/// With the real game (RC_GAME_DIR set to the install, or a copy of its
+/// System, Sounds, StaticMeshes and Textures folders): every sound the
+/// weapon files name is found, and the DC-17m's model is built.
+#[test]
+fn real_game_sounds_and_model() {
+    let Some(game) = std::env::var_os("RC_GAME_DIR") else {
+        eprintln!("RC_GAME_DIR not set: skipped (not tested)");
+        return;
+    };
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        StatesPlugin,
+        TransformPlugin,
+        bevy::asset::AssetPlugin::default(),
+    ))
+    .init_asset::<bevy::audio::AudioSource>()
+    .init_asset::<Mesh>()
+    .init_asset::<StandardMaterial>()
+    .init_asset::<Image>()
+    .add_plugins((CorePlugin, CombatPlugin))
+    .insert_resource(GamePaths::new(game, vec![data]));
+    app.world_mut().spawn((Player, Transform::default()));
+    let cam = app
+        .world_mut()
+        .spawn((PlayerCamera, Transform::default()))
+        .id();
+    app.world_mut()
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::InGame);
+    for _ in 0..3 {
+        app.update();
+    }
+    let lib = app.world().resource::<WeaponLibrary>();
+    let mut wanted: Vec<String> = vec![];
+    for p in lib.weapons.values() {
+        wanted.extend(p.fire_sounds.iter().cloned());
+        wanted.extend(p.reload_sound.iter().cloned());
+        wanted.extend(p.empty_sound.iter().cloned());
+    }
+    wanted.sort();
+    wanted.dedup();
+    let missing: Vec<_> = wanted
+        .iter()
+        .filter(|n| !lib.sounds.contains_key(*n))
+        .collect();
+    assert!(missing.is_empty(), "sounds not found: {missing:?}");
+    eprintln!("sounds loaded: {}", lib.sounds.len());
+    // The DC-17m in hand: a child of the camera with one mesh per section.
+    let children = app
+        .world()
+        .get::<Children>(cam)
+        .expect("model under the camera");
+    let model = children[0];
+    let parts = app.world().get::<Children>(model).map_or(0, |c| c.len());
+    assert!(parts >= 1, "model has {parts} parts");
+    let meshes = app.world().resource::<Assets<Mesh>>();
+    let mut tris = 0;
+    for part in app.world().get::<Children>(model).unwrap() {
+        let h = &app.world().get::<Mesh3d>(*part).unwrap().0;
+        tris += meshes.get(h).unwrap().indices().unwrap().len() / 3;
+    }
+    eprintln!("DC-17m model: {parts} parts, {tris} triangles");
+    assert!(tris > 100);
+}

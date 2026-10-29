@@ -15,8 +15,16 @@ fn node(name: &str, x: f32, y: f32, z: f32) -> NavNode {
 
 fn two_way(g: &mut NavGraph, a: usize, b: usize) {
     let d = (g.nodes[a].location - g.nodes[b].location).length();
-    g.links[a].push(Link { to: b, distance: d, flags: reach::WALK });
-    g.links[b].push(Link { to: a, distance: d, flags: reach::WALK });
+    g.links[a].push(Link {
+        to: b,
+        distance: d,
+        flags: reach::WALK,
+    });
+    g.links[b].push(Link {
+        to: a,
+        distance: d,
+        flags: reach::WALK,
+    });
 }
 
 /// A square A-B-C-D with a long way round (A-B-C) and a short cut (A-D-C)
@@ -36,7 +44,11 @@ fn square() -> NavGraph {
     two_way(&mut g, 0, 1);
     two_way(&mut g, 1, 2);
     two_way(&mut g, 0, 3);
-    g.links[3].push(Link { to: 2, distance: 1000.0, flags: reach::FLY });
+    g.links[3].push(Link {
+        to: 2,
+        distance: 1000.0,
+        flags: reach::FLY,
+    });
     g
 }
 
@@ -55,7 +67,9 @@ fn shortest_walkable_route() {
 fn avoiding_a_node_takes_the_other_way() {
     let mut g = square();
     two_way(&mut g, 3, 2); // make D-C walkable too
-    let p = g.node_path_avoiding(0, 2, |n| if n == 1 { 5000.0 } else { 0.0 }).unwrap();
+    let p = g
+        .node_path_avoiding(0, 2, |n| if n == 1 { 5000.0 } else { 0.0 })
+        .unwrap();
     assert_eq!(p, vec![0, 3, 2]);
 }
 
@@ -79,7 +93,11 @@ fn route_points_end_at_the_goal() {
     let r = g.route(from, to).unwrap();
     assert_eq!(r.nodes, vec![0, 1, 2]);
     assert_eq!(*r.points.last().unwrap(), to);
-    assert!((r.length - (51.0 + 1000.0 + 1000.0 + 14.1)).abs() < 2.0, "{}", r.length);
+    assert!(
+        (r.length - (51.0 + 1000.0 + 1000.0 + 14.1)).abs() < 2.0,
+        "{}",
+        r.length
+    );
     assert_eq!(g.find_path(from, to).unwrap(), r.points);
 }
 
@@ -121,11 +139,23 @@ fn follower_walks_a_pawn_up_the_stairs() {
         }
         t += dt;
     }
-    assert!(f.finished(), "not finished after {t:.1}s at {:?}", pawn.location);
-    assert!((pawn.feet().z - 128.0).abs() < 2.0, "feet at {}", pawn.feet().z);
+    assert!(
+        f.finished(),
+        "not finished after {t:.1}s at {:?}",
+        pawn.location
+    );
+    assert!(
+        (pawn.feet().z - 128.0).abs() < 2.0,
+        "feet at {}",
+        pawn.feet().z
+    );
     // About 700 uu (less the arrival radius) at 375 uu/s is 1.9 s plus speeding up; allow up to 3 s.
     assert!(t < 3.0, "took {t:.2}s");
-    assert!(f.travelled > 660.0 && f.travelled < 760.0, "travelled {}", f.travelled);
+    assert!(
+        f.travelled > 660.0 && f.travelled < 760.0,
+        "travelled {}",
+        f.travelled
+    );
 }
 
 #[test]
@@ -135,6 +165,11 @@ fn steer_faces_the_target() {
     assert!(!arrived);
     assert!((input.yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-4);
     assert_eq!(input.forward, 1.0);
-    let (_, arrived) = steer(&pawn, pawn.location + Vec3::new(10.0, 0.0, 0.0), 24.0, false);
+    let (_, arrived) = steer(
+        &pawn,
+        pawn.location + Vec3::new(10.0, 0.0, 0.0),
+        24.0,
+        false,
+    );
     assert!(arrived);
 }

@@ -35,18 +35,46 @@ fn at(pawn: &Pawn, target: Vec3, radius: f32) -> bool {
 /// `arrive_radius` sideways). On arrival the input is empty (stand still).
 pub fn steer(pawn: &Pawn, target: Vec3, arrive_radius: f32, walk: bool) -> (MoveInput, bool) {
     if at(pawn, target, arrive_radius) {
-        return (MoveInput { yaw: current_yaw(pawn), walk, ..Default::default() }, true);
+        return (
+            MoveInput {
+                yaw: current_yaw(pawn),
+                walk,
+                ..Default::default()
+            },
+            true,
+        );
     }
     let yaw = yaw_towards(pawn.location, target);
-    (MoveInput { forward: 1.0, yaw, walk, ..Default::default() }, false)
+    (
+        MoveInput {
+            forward: 1.0,
+            yaw,
+            walk,
+            ..Default::default()
+        },
+        false,
+    )
 }
 
 /// Move input that walks towards `target` while facing `face_yaw` (for
 /// characters that can strafe: shooting while moving sideways). The
 /// direction of travel is split into forward and sideways parts.
-pub fn steer_facing(pawn: &Pawn, target: Vec3, face_yaw: f32, arrive_radius: f32, walk: bool) -> (MoveInput, bool) {
+pub fn steer_facing(
+    pawn: &Pawn,
+    target: Vec3,
+    face_yaw: f32,
+    arrive_radius: f32,
+    walk: bool,
+) -> (MoveInput, bool) {
     if at(pawn, target, arrive_radius) {
-        return (MoveInput { yaw: face_yaw, walk, ..Default::default() }, true);
+        return (
+            MoveInput {
+                yaw: face_yaw,
+                walk,
+                ..Default::default()
+            },
+            true,
+        );
     }
     let dir = (target - pawn.location).flat().normalize_or_zero();
     let (fwd, right) = rc_movement::axes(face_yaw);

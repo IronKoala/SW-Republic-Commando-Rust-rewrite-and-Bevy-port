@@ -19,11 +19,11 @@
 //! folder: RC_GAME_DIR or the default Steam path. Log: logs/rc_droidsim.log.
 //! Ends with CHECK lines and exits 1 if any fails.
 
-use rc_ai::{AiEvent, AiParams, Fighter, Mode, Target, View};
+use rc_ai::{AiEvent, AiParams, Mode, Target};
 use rc_movement::{MoveParams, Pawn, TriangleWorld, Vec3};
 use rc_nav::{NavGraph, PathFollower};
 use rc_package::Package;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,7 +53,14 @@ fn fmt(v: Vec3) -> String {
 
 /// Where along `origin + t * dir` a ray first passes within the player's
 /// collision box (an upright cylinder), if it does within `max` uu.
-fn ray_hits_cylinder(origin: Vec3, dir: Vec3, centre: Vec3, radius: f32, half_height: f32, max: f32) -> Option<f32> {
+fn ray_hits_cylinder(
+    origin: Vec3,
+    dir: Vec3,
+    centre: Vec3,
+    radius: f32,
+    half_height: f32,
+    max: f32,
+) -> Option<f32> {
     // Closest approach in the flat plane.
     let o = origin - centre;
     let (dx, dy) = (dir.x, dir.y);
@@ -97,7 +104,8 @@ fn main() {
             other => map = other.to_string(),
         }
     }
-    let game = PathBuf::from(std::env::var("RC_GAME_DIR").unwrap_or_else(|_| DEFAULT_GAME_DIR.into()));
+    let game =
+        PathBuf::from(std::env::var("RC_GAME_DIR").unwrap_or_else(|_| DEFAULT_GAME_DIR.into()));
     let game_data = game.join("GameData");
     let map_path = if map.ends_with(".ctm") {
         PathBuf::from(&map)
@@ -108,7 +116,10 @@ fn main() {
     let mut log = Log(std::fs::File::create("logs/rc_droidsim.log").ok());
     let mut failed = 0;
     let mut check = |log: &mut Log, ok: bool, what: String| {
-        log.line(format!("CHECK {}: {what}", if ok { "PASS" } else { "FAIL" }));
+        log.line(format!(
+            "CHECK {}: {what}",
+            if ok { "PASS" } else { "FAIL" }
+        ));
         if !ok {
             failed += 1;
         }
@@ -120,9 +131,14 @@ fn main() {
 
     // Settings.
     let params = match std::fs::read_to_string(&settings) {
-        Ok(t) => AiParams::battle_droid().with_overrides(&t).unwrap_or_else(|e| fail(&mut log, format!("{}: {e}", settings.display()))),
+        Ok(t) => AiParams::battle_droid()
+            .with_overrides(&t)
+            .unwrap_or_else(|e| fail(&mut log, format!("{}: {e}", settings.display()))),
         Err(_) => {
-            log.line(format!("no {} here; using the built-in battle droid values", settings.display()));
+            log.line(format!(
+                "no {} here; using the built-in battle droid values",
+                settings.display()
+            ));
             AiParams::battle_droid()
         }
     };
@@ -130,7 +146,8 @@ fn main() {
 
     // The map.
     let t0 = std::time::Instant::now();
-    let data = std::fs::read(&map_path).unwrap_or_else(|e| fail(&mut log, format!("can't read {}: {e}", map_path.display())));
+    let data = std::fs::read(&map_path)
+        .unwrap_or_else(|e| fail(&mut log, format!("can't read {}: {e}", map_path.display())));
     let pkg = Package::parse(&data).unwrap_or_else(|e| fail(&mut log, e.to_string()));
     let mut nav = NavGraph::from_map(&pkg, &data).unwrap_or_else(|e| fail(&mut log, e));
     // Barricade path points open when level scripts say so, which we don't
@@ -142,7 +159,12 @@ fn main() {
     let coll = rc_level::map_collision::load(&map_path, &game_data, player_params.collision_height)
         .unwrap_or_else(|e| fail(&mut log, e));
     let v = |p: [f32; 3]| Vec3::new(p[0], p[1], p[2]);
-    let world = TriangleWorld::new(coll.triangles.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect());
+    let world = TriangleWorld::new(
+        coll.triangles
+            .iter()
+            .map(|t| [v(t[0]), v(t[1]), v(t[2])])
+            .collect(),
+    );
     log.line(format!(
         "map {}: {} collision triangles ({} BSP nodes, {} meshes, {} mesh failures), {} path nodes, {} links, {} spawners, loaded in {:.0} ms",
         map_path.display(),
@@ -155,15 +177,22 @@ fn main() {
         factories.len(),
         t0.elapsed().as_secs_f64() * 1000.0
     ));
-    let droid_factories: Vec<&rc_ai::Factory> =
-        factories.iter().filter(|f| f.prototype.starts_with("BattleDroid")).collect();
+    let droid_factories: Vec<&rc_ai::Factory> = factories
+        .iter()
+        .filter(|f| f.prototype.starts_with("BattleDroid"))
+        .collect();
     let mut by_class: BTreeMap<&str, usize> = BTreeMap::new();
     for f in &factories {
         *by_class.entry(f.prototype.as_str()).or_default() += 1;
     }
     log.line(format!("spawners by what they make: {by_class:?}"));
-    log.line(format!("{opened} blocked path points (barricades the level scripts open) opened for this test"));
-    let with_trigger = droid_factories.iter().filter(|f| !f.triggers.is_empty()).count();
+    log.line(format!(
+        "{opened} blocked path points (barricades the level scripts open) opened for this test"
+    ));
+    let with_trigger = droid_factories
+        .iter()
+        .filter(|f| !f.triggers.is_empty())
+        .count();
     let spots: usize = droid_factories.iter().map(|f| f.spots.len()).sum();
     log.line(format!(
         "battle droid spawners: {}; {} have walk-in triggers, the rest start from scripts; {} spawn points in all",
@@ -171,7 +200,11 @@ fn main() {
         with_trigger,
         spots
     ));
-    check(&mut log, !droid_factories.is_empty(), format!("battle droid spawners found ({})", droid_factories.len()));
+    check(
+        &mut log,
+        !droid_factories.is_empty(),
+        format!("battle droid spawners found ({})", droid_factories.len()),
+    );
 
     // The stand-in player.
     let Some((start_feet, start_yaw)) = coll.start.map(|(p, y)| (v(p), y)) else {
@@ -183,7 +216,10 @@ fn main() {
     // starts on a path node 2500-4500 uu (by path) from a battle droid
     // spawner's walk-in trigger and walks into it.
     let goal = match &goal_name {
-        Some(n) => nav.find(n).map(|i| nav.nodes[i].location).unwrap_or_else(|| fail(&mut log, format!("no path node called {n}"))),
+        Some(n) => nav
+            .find(n)
+            .map(|i| nav.nodes[i].location)
+            .unwrap_or_else(|| fail(&mut log, format!("no path node called {n}"))),
         None => {
             let mut chosen = None;
             'outer: for f in &droid_factories {
@@ -212,17 +248,29 @@ fn main() {
                     }
                 }
             }
-            let (c, tag, start) = chosen.unwrap_or_else(|| fail(&mut log, "no droid spawner trigger can be reached".into()));
+            let (c, tag, start) = chosen.unwrap_or_else(|| {
+                fail(&mut log, "no droid spawner trigger can be reached".into())
+            });
             if let Some(i) = start {
-                let feet = nav.nodes[i].location - Vec3::new(0.0, 0.0, player_params.collision_height);
+                let feet =
+                    nav.nodes[i].location - Vec3::new(0.0, 0.0, player_params.collision_height);
                 player = Pawn::new(player_params.clone(), feet);
-                log.line(format!("player starts at path node {} {}", nav.nodes[i].name, fmt(nav.nodes[i].location)));
+                log.line(format!(
+                    "player starts at path node {} {}",
+                    nav.nodes[i].name,
+                    fmt(nav.nodes[i].location)
+                ));
             }
-            log.line(format!("player goal: the walk-in trigger for {tag} at {}", fmt(c)));
+            log.line(format!(
+                "player goal: the walk-in trigger for {tag} at {}",
+                fmt(c)
+            ));
             c
         }
     };
-    let route = nav.route(player.location, goal).unwrap_or_else(|| fail(&mut log, "no route for the player".into()));
+    let route = nav
+        .route(player.location, goal)
+        .unwrap_or_else(|| fail(&mut log, "no route for the player".into()));
     log.line(format!(
         "player route: {} nodes, {:.0} uu, from {} facing {:.0} deg",
         route.nodes.len(),
@@ -235,18 +283,10 @@ fn main() {
     let mut next_player_shot = 0.0f32;
 
     // Fight.
-    struct Live {
-        f: Fighter,
-        health: f32,
-        factory: usize,
-        spawned_at: f32,
-        spot: Vec3,
-    }
-    let mut droids: Vec<Live> = Vec::new();
-    let mut active = vec![false; droid_factories.len()];
-    let mut made = vec![0u32; droid_factories.len()];
-    let mut next_spawn = vec![0.0f32; droid_factories.len()];
-    let mut next_id = 1u32;
+    let droid_factories: Vec<rc_ai::Factory> = droid_factories.into_iter().cloned().collect();
+    let mut battle = rc_ai::Battle::new(params.clone(), nav, droid_factories);
+    let mut health: HashMap<u32, f32> = HashMap::new();
+    let mut spawned_at: HashMap<u32, (f32, Vec3)> = HashMap::new();
     let mut counts: BTreeMap<&'static str, u32> = BTreeMap::new();
     let mut shots = 0u32;
     let mut droid_hits = 0u32;
@@ -281,156 +321,167 @@ fn main() {
             let k = player_path.next_index();
             if k >= 1 && k < route.nodes.len() {
                 let (a, b) = (route.nodes[k - 1], route.nodes[k]);
-                let flags: Vec<u32> = nav.links[a].iter().filter(|l| l.to == b).map(|l| l.flags).collect();
-                log.line(format!("  link {} -> {} has reachFlags {flags:?}", nav.nodes[a].name, nav.nodes[b].name));
+                let nav = &battle.nav;
+                let flags: Vec<u32> = nav.links[a]
+                    .iter()
+                    .filter(|l| l.to == b)
+                    .map(|l| l.flags)
+                    .collect();
+                log.line(format!(
+                    "  link {} -> {} has reachFlags {flags:?}",
+                    nav.nodes[a].name, nav.nodes[b].name
+                ));
             }
             player_path.stuck_time = -1000.0;
         }
 
-        // Spawners.
-        let alive_total = droids.iter().filter(|d| d.f.mode != Mode::Dead).count() as u32;
-        for (i, f) in droid_factories.iter().enumerate() {
-            if !active[i] {
-                let by_trigger = f.triggers.iter().any(|&(c, r)| (player.location - c).length_2d() <= r + player_extent_r);
-                let near = f.triggers.is_empty()
-                    && (f.spot(0).location - player.location).length() <= params.spawning.activate_unscripted_within;
-                if by_trigger || near {
-                    active[i] = true;
-                    log.line(format!(
-                        "[{time:6.2}s] spawner {} ({}) switched on by {}",
-                        f.name,
-                        f.tag,
-                        if by_trigger { "its walk-in trigger" } else { "the player coming near (scripted in the original)" }
-                    ));
-                }
-                continue;
-            }
-            let alive_here = droids.iter().filter(|d| d.factory == i && d.f.mode != Mode::Dead).count() as u32;
-            let more = f.generate_forever || made[i] < f.capacity.max(1);
-            if more && alive_here < f.max_alive && alive_total < params.spawning.max_alive_total && time >= next_spawn[i] {
-                let spot = f.spot(made[i] as usize);
-                let feet = spot.location - Vec3::new(0.0, 0.0, params.movement.collision_height);
-                let fighter = Fighter::new(next_id, params.clone(), feet, spot.yaw, f.start_state.clone());
-                log.line(format!("[{time:6.2}s] droid {next_id} spawned by {} at {} facing {:.0} deg", f.name, fmt(spot.location), spot.yaw.to_degrees()));
-                droids.push(Live { f: fighter, health: params.combat.health, factory: i, spawned_at: time, spot: spot.location });
-                next_id += 1;
-                made[i] += 1;
-                next_spawn[i] = time + f.spawn_interval.max(0.1);
-                break; // one per frame
-            }
-        }
-
-        // Droids think and act.
-        let taken: HashSet<usize> = droids.iter().filter(|d| d.f.mode != Mode::Dead).filter_map(|d| d.f.cover_node()).collect();
-        let target = Some(Target { centre: player.location, eye: player.eye() });
-        let mut heard: Vec<Vec3> = Vec::new();
-        for d in droids.iter_mut() {
-            let view = View { world: &world, nav: &nav, time, target, cover_taken: &taken };
-            for e in d.f.tick(DT, &view) {
-                let id = d.f.id;
-                match &e {
-                    AiEvent::Fire { origin, direction, .. } => {
-                        shots += 1;
-                        heard.push(*origin);
-                        let max = 10000.0;
-                        let wall = rc_ai::brain::trace(&world, *origin, *origin + *direction * max).map(|t| t * max);
-                        let hit = ray_hits_cylinder(*origin, *direction, player.location, player_extent_r, player_extent_h, max);
-                        match (hit, wall) {
-                            (Some(th), w) if w.is_none_or(|tw| th < tw) => {
-                                droid_hits += 1;
-                                player_health -= DROID_BOLT_DAMAGE;
-                                first_hit.get_or_insert(time);
-                            }
-                            (_, Some(_)) => walls += 1,
-                            _ => {}
-                        }
-                        *counts.entry("shots").or_default() += 1;
-                    }
-                    AiEvent::Spotted { distance } => {
-                        first_spot.get_or_insert(time);
-                        log.line(format!("[{time:6.2}s] droid {id} spotted the player {distance:.0} uu away"));
-                    }
-                    AiEvent::ModeChanged { from, to } => {
-                        log.line(format!("[{time:6.2}s] droid {id}: {} -> {}", from.name(), to.name()));
-                    }
-                    AiEvent::ManeuverChanged { from, to } => {
-                        if *to == "in cover" {
-                            cover_reached += 1;
-                        }
-                        log.line(format!("[{time:6.2}s] droid {id}: maneuver {from} -> {to}"));
-                    }
-                    AiEvent::Route { nodes, length } => {
-                        route_lengths.push(*length);
-                        log.line(format!("[{time:6.2}s] droid {id}: route of {nodes} nodes, {length:.0} uu"));
-                    }
-                    other => log.line(format!("[{time:6.2}s] droid {id}: {other:?}")),
-                }
-                *counts
-                    .entry(match e {
-                        AiEvent::Fire { .. } => "fire events",
-                        AiEvent::Spotted { .. } => "spotted",
-                        AiEvent::LostSight => "lost sight",
-                        AiEvent::ModeChanged { .. } => "mode changes",
-                        AiEvent::ManeuverChanged { .. } => "maneuver changes",
-                        AiEvent::Route { .. } => "routes",
-                        AiEvent::NoRoute => "no route",
-                        AiEvent::Stuck => "stuck",
-                    })
-                    .or_default() += 1;
-            }
-            if d.f.mode != Mode::Dead {
-                lowest_z = lowest_z.min(d.f.pawn.location.z - (d.spot.z - 400.0));
-            }
-        }
-
-        // Shots are heard by droids that aren't fighting yet.
-        for at in heard {
-            for d in droids.iter_mut() {
-                let mut ev = Vec::new();
-                d.f.hear(at, time, &mut ev);
-                for e in ev {
-                    log.line(format!("[{time:6.2}s] droid {} heard a shot {:.0} uu away: {e:?}", d.f.id, (at - d.f.pawn.location).length()));
-                }
-            }
-        }
+        // Spawners, droids thinking and acting, droids hearing shots.
+        let target = Some(Target {
+            centre: player.location,
+            eye: player.eye(),
+        });
+        let mut events = battle.step(DT, &world, target);
 
         // The player shoots back at the nearest droid it can see.
         if return_fire && time >= next_player_shot {
             let eye = player.eye();
-            let target = droids
-                .iter_mut()
-                .filter(|d| d.f.mode != Mode::Dead)
-                .filter(|d| (d.f.pawn.location - eye).length() < 6000.0)
-                .filter(|d| rc_ai::brain::clear_line(&world, eye, d.f.eye()))
+            let target = battle
+                .alive()
+                .filter(|f| (f.pawn.location - eye).length() < 6000.0)
+                .filter(|f| rc_ai::brain::clear_line(&world, eye, f.eye()))
                 .min_by(|a, b| {
-                    (a.f.pawn.location - eye).length().total_cmp(&(b.f.pawn.location - eye).length())
-                });
-            if let Some(d) = target {
+                    (a.pawn.location - eye)
+                        .length()
+                        .total_cmp(&(b.pawn.location - eye).length())
+                })
+                .map(|f| f.id);
+            if let Some(id) = target {
                 next_player_shot = time + PLAYER_SHOT_INTERVAL;
-                let shooter = player.location;
-                if std::env::var("DEBUG_LOS").is_ok() {
-                    log.line(format!("  LOS player->droid {} clear, droid->player {}, droid mode {} facing {:.0}, seen_now {}", d.f.id, rc_ai::brain::clear_line(&world, d.f.eye(), eye), d.f.mode.name(), d.f.facing.to_degrees(), d.f.enemy_seen_now));
-                }
-                d.health -= PLAYER_SHOT_DAMAGE;
-                let mut ev = Vec::new();
-                if d.health <= 0.0 {
-                    d.f.kill(&mut ev);
+                let h = health.entry(id).or_insert(params.combat.health);
+                *h -= PLAYER_SHOT_DAMAGE;
+                if *h <= 0.0 {
+                    events.extend(battle.killed(id));
                     deaths += 1;
-                    log.line(format!("[{time:6.2}s] droid {} destroyed ({:.1} s after spawning, fired {} shots, walked {:.0} uu)", d.f.id, time - d.spawned_at, d.f.shots_fired, d.f.distance_walked));
+                    let f = battle.fighters.iter().find(|f| f.id == id).unwrap();
+                    log.line(format!(
+                        "[{time:6.2}s] droid {id} destroyed ({:.1} s after spawning, fired {} shots, walked {:.0} uu)",
+                        time - spawned_at[&id].0,
+                        f.shots_fired,
+                        f.distance_walked
+                    ));
                 } else {
-                    d.f.on_damaged(Some(player.location), time, &mut ev);
+                    events.extend(battle.damaged(id, Some(player.location)));
                 }
-                for e in ev {
-                    log.line(format!("[{time:6.2}s] droid {}: {e:?}", d.f.id));
-                }
-                for d in droids.iter_mut() {
-                    let mut ev = Vec::new();
-                    d.f.hear(shooter, time, &mut ev);
-                    for e in ev {
-                        log.line(format!("[{time:6.2}s] droid {} heard the player's shot: {e:?}", d.f.id));
-                    }
-                }
+                events.extend(battle.hear(player.location));
             }
+        }
+
+        for e in events {
+            let (id, e) = match e {
+                rc_ai::BattleEvent::SpawnerOn {
+                    spawner,
+                    by_trigger,
+                } => {
+                    let f = &battle.spawners[spawner].factory;
+                    log.line(format!(
+                        "[{time:6.2}s] spawner {} ({}) switched on by {}",
+                        f.name,
+                        f.tag,
+                        if by_trigger {
+                            "its walk-in trigger"
+                        } else {
+                            "the player coming near (scripted in the original)"
+                        }
+                    ));
+                    continue;
+                }
+                rc_ai::BattleEvent::Spawned {
+                    id,
+                    spawner,
+                    feet,
+                    yaw,
+                } => {
+                    let loc = feet + Vec3::new(0.0, 0.0, params.movement.collision_height);
+                    log.line(format!(
+                        "[{time:6.2}s] droid {id} spawned by {} at {} facing {:.0} deg",
+                        battle.spawners[spawner].factory.name,
+                        fmt(loc),
+                        yaw.to_degrees()
+                    ));
+                    spawned_at.insert(id, (time, loc));
+                    continue;
+                }
+                rc_ai::BattleEvent::Ai { id, event } => (id, event),
+            };
+            match &e {
+                AiEvent::Fire {
+                    origin, direction, ..
+                } => {
+                    shots += 1;
+                    let max = 10000.0;
+                    let wall = rc_ai::brain::trace(&world, *origin, *origin + *direction * max)
+                        .map(|t| t * max);
+                    let hit = ray_hits_cylinder(
+                        *origin,
+                        *direction,
+                        player.location,
+                        player_extent_r,
+                        player_extent_h,
+                        max,
+                    );
+                    match (hit, wall) {
+                        (Some(th), w) if w.is_none_or(|tw| th < tw) => {
+                            droid_hits += 1;
+                            player_health -= DROID_BOLT_DAMAGE;
+                            first_hit.get_or_insert(time);
+                        }
+                        (_, Some(_)) => walls += 1,
+                        _ => {}
+                    }
+                    *counts.entry("shots").or_default() += 1;
+                }
+                AiEvent::Spotted { distance } => {
+                    first_spot.get_or_insert(time);
+                    log.line(format!(
+                        "[{time:6.2}s] droid {id} spotted the player {distance:.0} uu away"
+                    ));
+                }
+                AiEvent::ModeChanged { from, to } => {
+                    log.line(format!(
+                        "[{time:6.2}s] droid {id}: {} -> {}",
+                        from.name(),
+                        to.name()
+                    ));
+                }
+                AiEvent::ManeuverChanged { from, to } => {
+                    if *to == "in cover" {
+                        cover_reached += 1;
+                    }
+                    log.line(format!("[{time:6.2}s] droid {id}: maneuver {from} -> {to}"));
+                }
+                AiEvent::Route { nodes, length } => {
+                    route_lengths.push(*length);
+                    log.line(format!(
+                        "[{time:6.2}s] droid {id}: route of {nodes} nodes, {length:.0} uu"
+                    ));
+                }
+                other => log.line(format!("[{time:6.2}s] droid {id}: {other:?}")),
+            }
+            *counts
+                .entry(match e {
+                    AiEvent::Fire { .. } => "fire events",
+                    AiEvent::Spotted { .. } => "spotted",
+                    AiEvent::LostSight => "lost sight",
+                    AiEvent::ModeChanged { .. } => "mode changes",
+                    AiEvent::ManeuverChanged { .. } => "maneuver changes",
+                    AiEvent::Route { .. } => "routes",
+                    AiEvent::NoRoute => "no route",
+                    AiEvent::Stuck => "stuck",
+                })
+                .or_default() += 1;
+        }
+        for f in battle.alive() {
+            lowest_z = lowest_z.min(f.pawn.location.z - (spawned_at[&f.id].1.z - 400.0));
         }
 
         let ms = tick_start.elapsed().as_secs_f64() * 1000.0;
@@ -440,10 +491,18 @@ fn main() {
 
         if time >= next_snapshot {
             next_snapshot += 5.0;
-            let alive: Vec<String> = droids
-                .iter()
-                .filter(|d| d.f.mode != Mode::Dead)
-                .map(|d| format!("#{} {} {} at {} {:.0} uu away", d.f.id, d.f.mode.name(), d.f.maneuver.name(), fmt(d.f.pawn.location), (d.f.pawn.location - player.location).length()))
+            let alive: Vec<String> = battle
+                .alive()
+                .map(|f| {
+                    format!(
+                        "#{} {} {} at {} {:.0} uu away",
+                        f.id,
+                        f.mode.name(),
+                        f.maneuver.name(),
+                        fmt(f.pawn.location),
+                        (f.pawn.location - player.location).length()
+                    )
+                })
                 .collect();
             log.line(format!(
                 "[{time:6.2}s] player at {} health {player_health:.0}; {} droids: {}",
@@ -454,6 +513,7 @@ fn main() {
         }
         time += DT;
     }
+    let droids = &battle.fighters;
 
     // Results.
     log.line(format!("events: {counts:?}"));
@@ -477,15 +537,44 @@ fn main() {
         worst_tick_ms,
         ticks
     ));
-    check(&mut log, !droids.is_empty(), format!("droids spawned ({})", droids.len()));
-    let on_floor = droids.iter().filter(|d| d.f.pawn.mode == rc_movement::Mode::Walking || d.f.mode == Mode::Dead).count();
-    check(&mut log, on_floor == droids.len(), format!("every droid standing on a floor at the end ({on_floor} of {})", droids.len()));
+    check(
+        &mut log,
+        !droids.is_empty(),
+        format!("droids spawned ({})", droids.len()),
+    );
+    let on_floor = droids
+        .iter()
+        .filter(|f| f.pawn.mode == rc_movement::Mode::Walking || f.mode == Mode::Dead)
+        .count();
+    check(
+        &mut log,
+        on_floor == droids.len(),
+        format!(
+            "every droid standing on a floor at the end ({on_floor} of {})",
+            droids.len()
+        ),
+    );
     check(&mut log, lowest_z > 0.0, format!("no droid fell more than 400 uu below where it spawned (lowest margin {lowest_z:.0} uu)"));
-    check(&mut log, first_spot.is_some(), "a droid saw the player".into());
+    check(
+        &mut log,
+        first_spot.is_some(),
+        "a droid saw the player".into(),
+    );
     check(&mut log, shots > 0, format!("droids fired ({shots} shots)"));
     let ratio = droid_hits as f32 / shots.max(1) as f32;
-    check(&mut log, droid_hits > 0 && ratio < 0.95, format!("some shots hit, not all ({droid_hits} of {shots}, {:.0}%)", ratio * 100.0));
-    check(&mut log, worst_tick_ms < 50.0, format!("worst frame under 50 ms ({worst_tick_ms:.2} ms)"));
+    check(
+        &mut log,
+        droid_hits > 0 && ratio < 0.95,
+        format!(
+            "some shots hit, not all ({droid_hits} of {shots}, {:.0}%)",
+            ratio * 100.0
+        ),
+    );
+    check(
+        &mut log,
+        worst_tick_ms < 50.0,
+        format!("worst frame under 50 ms ({worst_tick_ms:.2} ms)"),
+    );
     log.line(format!("DONE: {failed} checks failed"));
     std::process::exit(if failed == 0 { 0 } else { 1 });
 }

@@ -150,3 +150,121 @@ at the end of the class" method as the weapon numbers) and `.ini` files:
 - **What isn't readable**: the squad's decisions (`CTSquadNative.Update`,
   `SetStance`, `EngageLocation`...) are native, in `ctgame.dll`. We don't
   read compiled code, so how members pick spots and move is our own design.
+
+## Battle droids
+
+Found on 2026-10-29 by reading the installed game's script packages
+(`ctcharacters.u`, `ctgame.u`, `engine.u`, `ctinventory.u`), read only, with
+`rc_package::class_library` (class defaults merged with their parents'). The
+numbers are in `data/enemies/battle_droid.toml`, each marked "game" or
+"guess"; the rules in `docs/DESIGN.md`, "Enemies", are our own.
+
+geo_01a's spawners make `BattleDroidTM` (the Geonosis trench droid; parents
+BattleDroid, Separatist, CTPawn, Pawn). Its controller is `BattleDroidBot`
+(parent CTBot), its attack state `StateBattleDroidAttack` (parent
+StateAbstractAttack), its weapon `BattleDroidBlasterTM`.
+
+| Setting | Value | Set by |
+|---|---|---|
+| Health | 100 | BattleDroidTM MaxHealth |
+| Accuracy | 0.4 (0 wild, 1 perfect) | BattleDroidTM |
+| Sight radius | 5000 uu | BattleDroidTM |
+| Run speed | 375 uu/s, walk 0.52 of that | BattleDroid GroundSpeed, WalkSpeedRatio |
+| Acceleration | 1000 | BattleDroid AccelRate |
+| Collision radius / half-height | 35 / 80 uu (crouched 35 / 50) | BattleDroid |
+| Eye height above centre | 60 uu | BattleDroid BaseEyeHeight |
+| Can shoot off its facing by | 60° | BattleDroid MaxAimYaw |
+| View cone | 0.2 (about 78° each side) | Pawn PeripheralVision |
+| Notices anyway within | 200 uu | Pawn AutoDetectRadius |
+| Turn rate | 20000 per second (110°/s) | Pawn RotationRate |
+| Forgets the enemy after | 15 s | CTBot EnemyMemoryTime |
+| Thinks every | 0.5 s | CTBot DecisionInterval |
+| Looks for new cover after | 15 s | CTBot CoverBoredomTime |
+| Burst | 3 shots, 0.1 s apart | BattleDroidBot BurstCount; BattleDroidBlasterTM ShotDelay |
+| Likes to stay between | 800 and 1200 uu | StateAbstractAttack ReadyDistance, SafeDistance |
+| Gives up a move after | 10 s | StateBattleDroidAttack MaxManuverTime |
+| Weapon reach | 7000 uu | Weapon ValidRange |
+
+Not stored anywhere we can read (so guessed, and marked so in the file):
+the delay before the first shot (0.5 s), how far a shot can miss at
+accuracy 0 (10°), the rest between bursts (1-2 s), how far it advances at a
+time (`MoveIntervalDist` is declared but has no default), how far it hears
+shots (2500 uu) and how far it goes for cover (1500 uu).
+
+**Spawners.** `PawnFactory` (Engine) has `Prototype`, `Capacity`,
+`MaxAlive`, `bGenerateForever`, `SpawnMode` (0 cyclic, 1 random, 2 at the
+factory, 3 near the player), `SpawnInterval` and the start state given to
+what it makes (6 = stationary attack). `SpawnPoint`s with the factory's
+`Tag` are its spots. A `Trigger` whose `Event` is the factory's tag switches
+it on when touched. geo_01a has 58 factories, 36 making battle droids; 9 of
+those have such triggers and the rest are started by level scripts.
+
+**Path network.** Each `NavigationPoint` lists its outgoing `ReachSpec`s
+(start, end, `Distance`, `CollisionRadius`/`Height`, `reachFlags`). Flags:
+walk 1, fly 2, jump 8, door 16, forced 256 (as in Unreal Engine 2), and
+4096, seen on 7-9 links per map, Republic Commando's own (meaning unknown;
+treated as walkable). `BlockedPath` has `bBlocked` true by default.
+
+**The droid's look.** `BattleDroid` in `GameData/Animations/droid.ukx`: 32
+bones, 848 points, 1,403 triangles, animation set `BattleDroidSet`
+(ActionBreathe, WalkForward, RunForward, WalkBackward, StepLeft/Right, Fire,
+CrouchBreathe, CrouchFire, Death and more, all 30 frames per second). Skin:
+`DroidTextures.BattleDroid_Shader`, whose picture `BattleDroid` is 512 x 512
+and averages R 79, G 74, B 70.
+
+## Weapons and damage
+
+Found on 2026-10-29 by reading the installed game's script packages, read
+only, with `rc_probe --class NAME` (see "Player movement" for how class
+default values are found). Only numbers are taken, and the rules are
+described in our own words. The values are in `data/weapons/*.toml` and
+`data/combat/player.toml`, each line naming the property it came from.
+
+**Where the numbers really live.** Each class's own defaults in
+`ctinventory.u`, `ctcharacters.u` and so on are only part of the story. The
+game also has `GameData/Properties/properties.u`, with a "...Defaults" class
+for most weapons, ammo, bolts and characters (`DC17mBlasterDefaults`,
+`PlayerCommandoDefaults`, ...). Its values replace the base class's: some
+values, like `MaxHealth`, exist only there, and the engine script sets health
+to `MaxHealth` when a character appears. So every number below is the base
+class's value with its "...Defaults" class on top.
+
+| Weapon | Fire | Ammo | Bolt | Damage | Sound |
+|---|---|---|---|---|---|
+| DC-17m rifle (`DC17mBlaster`) | automatic, 0.1 s between shots, aim error 15 | magazine 60, carries 300, starts with 120; reload 1.5 s (the first-person animation: 45 frames at 30 fps) | starts at rest, speeds up at 60000 uu/s² to 10000 uu/s | 20 | `wep_GEN_dc17Fire_02` |
+| DC-15s pistol (`DC15s`) | one shot per press, 0.2 s between shots, aim error 10 | 5 shots of charge, regains 1.5 a second, never reloads | 40000 uu/s² to 8000 uu/s | 55 | `wep_GEN_pistolFire_01` |
+| E-5 droid blaster (`BattleDroidBlaster`) | 0.55 s between shots, aim error 0 | | to 5000 uu/s | 24 | `wep_GEN_sbdGun_01` |
+| E-5, training mode (`BattleDroidBlasterTM`) | 0.1 s between shots | | to 5000 uu/s | 2 | |
+
+| Character | Health | Shield |
+|---|---|---|
+| Player (`PlayerCommando`) | 200 | 100, refills at 20 a second, 3 s after the last hit |
+| Battle droid (`BattleDroid`, `BattleDroidTM`) | 100 | none |
+
+Difficulty (`System/user.ini`): damage to the player is multiplied by 0.25 on
+Easy, 1 on Medium and 1.75 on Hard.
+
+**Rules from the script text:**
+
+- Fire modes: 0 is one shot per press, 1 is burst, 2 is automatic.
+- Laser bolts start with no speed and accelerate along their direction up to
+  their top speed (`Projectile`, when `bLaserBolt` is set).
+- Aim error: the point the shot would hit is moved by up to `AimError` uu for
+  every 1000 uu of distance, along the world's sideways and up axes (not the
+  view's).
+- The player's shots leave the muzzle (the weapon's `FPFireOffset` from the
+  eye) and fly to the point under the crosshair. If that point is behind or
+  far to the side of the muzzle, the shot just goes straight ahead.
+- When something is between the eye and the muzzle (standing against a wall
+  or a droid), the shot starts at the eye instead, so it still hits.
+- Damage goes to the shield first, then health. Any hit on the shield
+  restarts the wait before it refills.
+- Recharging weapons (`CTAmmoRecharging`) build up charge at their
+  `RechargeRate` and need a full 1 to fire.
+- Characters are upright cylinders for collision and hits (40 uu radius,
+  84 uu half-height for a commando).
+
+**What we don't know yet:** how the view kick (`WeaponKick`,
+`RecoilConstant`, `RecoilDampening`) settles back (it is in the compiled
+engine), the burst mode's details, hit-location and damage-type multipliers,
+grenades and melee.

@@ -23,11 +23,14 @@ const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Repub
 
 fn main() {
     let arg = std::env::args().nth(1).unwrap_or_else(|| "geo_01a".into());
-    let game = PathBuf::from(std::env::var("RC_GAME_DIR").unwrap_or_else(|_| DEFAULT_GAME_DIR.into()));
+    let game =
+        PathBuf::from(std::env::var("RC_GAME_DIR").unwrap_or_else(|_| DEFAULT_GAME_DIR.into()));
     let path = if arg.ends_with(".ctm") {
         PathBuf::from(&arg)
     } else {
-        game.join("GameData").join("Maps").join(format!("{arg}.ctm"))
+        game.join("GameData")
+            .join("Maps")
+            .join(format!("{arg}.ctm"))
     };
     let _ = std::fs::create_dir_all("logs");
     let mut log = std::fs::File::create("logs/rc_navcheck.log").ok();
@@ -39,7 +42,10 @@ fn main() {
     };
     let mut failed = 0;
     let mut check = |ok: bool, what: String, line: &mut dyn FnMut(String)| {
-        line(format!("CHECK {}: {what}", if ok { "PASS" } else { "FAIL" }));
+        line(format!(
+            "CHECK {}: {what}",
+            if ok { "PASS" } else { "FAIL" }
+        ));
         if !ok {
             failed += 1;
         }
@@ -75,10 +81,19 @@ fn main() {
     for n in &g.nodes {
         *kinds.entry(n.class.clone()).or_default() += 1;
     }
-    line(format!("nodes by class: {kinds:?}; {} blocked at the start (BlockedPath)", g.blocked.len()));
+    line(format!(
+        "nodes by class: {kinds:?}; {} blocked at the start (BlockedPath)",
+        g.blocked.len()
+    ));
     line(format!("links by reachFlags: {:?}", stats.flag_counts));
     for n in g.nodes.iter().filter(|n| n.is_cover()).take(5) {
-        if let NodeKind::Cover { strafe_left, strafe_right, distance_to_cover, facing } = n.kind {
+        if let NodeKind::Cover {
+            strafe_left,
+            strafe_right,
+            distance_to_cover,
+            facing,
+        } = n.kind
+        {
             line(format!(
                 "cover {} '{}' at ({:.0}, {:.0}, {:.0}): step out left {strafe_left:.0}, right {strafe_right:.0}, cover {distance_to_cover:.0} away, faces {:.0} deg",
                 n.name, n.tag, n.location.x, n.location.y, n.location.z, facing.to_degrees()
@@ -86,7 +101,14 @@ fn main() {
         }
     }
 
-    check(stats.unreadable == 0 && stats.dangling == 0, format!("all reach specs read and connect kept nodes ({} unreadable, {} dangling)", stats.unreadable, stats.dangling), &mut line);
+    check(
+        stats.unreadable == 0 && stats.dangling == 0,
+        format!(
+            "all reach specs read and connect kept nodes ({} unreadable, {} dangling)",
+            stats.unreadable, stats.dangling
+        ),
+        &mut line,
+    );
 
     let mut worst = 0.0f32;
     let mut off = 0;
@@ -105,7 +127,10 @@ fn main() {
     let (islands, biggest) = g.islands();
     check(
         biggest * 2 > g.nodes.len(),
-        format!("one big walkable island: {islands} islands, the biggest has {biggest} of {} nodes", g.nodes.len()),
+        format!(
+            "one big walkable island: {islands} islands, the biggest has {biggest} of {} nodes",
+            g.nodes.len()
+        ),
         &mut line,
     );
 

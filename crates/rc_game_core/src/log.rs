@@ -23,18 +23,28 @@ impl GameLog {
             fs::create_dir_all(dir)?;
         }
         let f = fs::File::create(path)?;
-        Ok(GameLog { file: Arc::new(Mutex::new(Some(f))), start: Instant::now() })
+        Ok(GameLog {
+            file: Arc::new(Mutex::new(Some(f))),
+            start: Instant::now(),
+        })
     }
 
     /// Log to the terminal only (for tests).
     pub fn terminal() -> Self {
-        GameLog { file: Arc::new(Mutex::new(None)), start: Instant::now() }
+        GameLog {
+            file: Arc::new(Mutex::new(None)),
+            start: Instant::now(),
+        }
     }
 
     /// Write one line, stamped with seconds since start. Start the line with
     /// your part's name, like `"weapons: fired dc15s"`.
     pub fn line(&self, s: impl AsRef<str>) {
-        let s = format!("[{:>8.3}s] {}", self.start.elapsed().as_secs_f64(), s.as_ref());
+        let s = format!(
+            "[{:>8.3}s] {}",
+            self.start.elapsed().as_secs_f64(),
+            s.as_ref()
+        );
         println!("{s}");
         if let Ok(mut f) = self.file.lock() {
             if let Some(f) = f.as_mut() {

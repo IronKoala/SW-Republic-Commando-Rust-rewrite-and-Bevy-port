@@ -6,6 +6,7 @@
 
 use crate::actors::Placement;
 use crate::bsp::{poly_flags, Bsp, Vec3};
+use crate::volumes::BlockingVolume;
 use rc_package::static_mesh::StaticMesh;
 
 /// Where a collision triangle came from, for logging what was hit.
@@ -15,6 +16,8 @@ pub enum Source {
     Bsp(usize),
     /// Export index of the actor (0-based).
     Actor(usize),
+    /// Export index of a blocking volume (0-based).
+    Volume(usize),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -29,7 +32,8 @@ pub struct CollisionMesh {
 /// block. Hidden actors are kept too (hidden blocking props still collide).
 ///
 /// Not handled yet: per-section "EnableCollision" flags on static meshes,
-/// simplified collision models, volumes and movers.
+/// simplified collision models and moving movers. Blocking volumes are
+/// added separately with `add_blocking_volumes`.
 pub fn collision_triangles(bsp: &Bsp, meshes: &[(&Placement, &StaticMesh)]) -> CollisionMesh {
     let mut out = CollisionMesh::default();
     for poly in bsp.polygons() {
@@ -57,4 +61,30 @@ pub fn collision_triangles(bsp: &Bsp, meshes: &[(&Placement, &StaticMesh)]) -> C
         }
     }
     out
+}
+
+/// Add the faces of the blocking volumes that stop players (or, with
+/// `players` false, the ones that stop other characters). Returns how many
+/// volumes were added.
+pub fn add_blocking_volumes(
+    out: &mut CollisionMesh,
+    volumes: &[BlockingVolume],
+    players: bool,
+) -> usize {
+    let mut added = 0;
+    for v in volumes {
+        if !(if players {
+            v.block_players
+        } else {
+            v.block_actors
+        }) {
+            continue;
+        }
+        added += 1;
+        for t in v.triangles() {
+            out.triangles.push(t);
+            out.sources.push(Source::Volume(v.export));
+        }
+    }
+    added
 }

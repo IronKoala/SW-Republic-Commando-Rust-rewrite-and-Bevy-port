@@ -120,3 +120,23 @@ pub struct Player;
 /// gameplay around it.
 #[derive(Component, Debug, Default)]
 pub struct PlayerCamera;
+
+/// Where the player starts on the current map: feet position in Unreal
+/// units, and facing (radians, Unreal's yaw: 0 along +X, a quarter turn
+/// along +Y). Inserted by the level plugin while loading, from the map's
+/// first PlayerStart. Without it the player starts at the origin.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct PlayerStart {
+    pub feet: rc_movement::Vec3,
+    pub yaw: f32,
+}
+
+/// The mood of the music. The game shell plays calm music while this is
+/// `Calm` and battle music while it is `Battle`. Whatever knows a fight has
+/// started (enemies spotting the player) sets it.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MusicMood {
+    #[default]
+    Calm,
+    Battle,
+}

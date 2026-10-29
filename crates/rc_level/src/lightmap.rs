@@ -17,7 +17,8 @@
 //!   12 bytes each;
 //! - lightmap entries: page, surface, zone, offset X/Y and size X/Y on the
 //!   page, a 4x4 world-to-lightmap matrix and 9 more floats, then the shadow
-//!   bitmaps of the dynamic lights that touch it, then 5 indices;
+//!   bitmaps of the dynamic lights that touch it, then a compact index and
+//!   an int32 (meaning unknown);
 //! - pages: the lightmap entries on it, 3 ints, two mip levels of pixels
 //!   (stored as "lazy arrays" that start with the absolute file offset of
 //!   their end), then the pixel format, width, height and a revision number.
@@ -135,7 +136,12 @@ pub fn read_lightmaps(bsp: &Bsp, object: &[u8], object_offset: usize) -> Result<
             r.bytes(bits)?;
             r.bytes(28)?; // size, stride, min and max
         }
-        i32s::<5>(&mut r)?;
+        // A small number (3 in every map read) and a 4-byte whole number
+        // (6-8 in small maps, 97 in ctf_siege). Earlier this was read as
+        // five compact indexes, which is the same 5 bytes while the second
+        // number stays under 64; maps where it didn't failed to read.
+        r.compact_index()?;
+        r.i32()?;
         entries.push(LightMap {
             page,
             surf,

@@ -53,7 +53,12 @@ impl NavGraph {
     /// Like `node_path`, with an extra cost for passing through a node
     /// (for example near an enemy's line of fire). `extra(node)` is added
     /// to every link that arrives at `node`.
-    pub fn node_path_avoiding(&self, a: usize, b: usize, extra: impl Fn(usize) -> f32) -> Option<Vec<usize>> {
+    pub fn node_path_avoiding(
+        &self,
+        a: usize,
+        b: usize,
+        extra: impl Fn(usize) -> f32,
+    ) -> Option<Vec<usize>> {
         let n = self.nodes.len();
         if a >= n || b >= n {
             return None;
@@ -92,7 +97,10 @@ impl NavGraph {
                 if cand < g[l.to] {
                     g[l.to] = cand;
                     came[l.to] = node;
-                    heap.push(Open { f: cand + h(l.to), node: l.to });
+                    heap.push(Open {
+                        f: cand + h(l.to),
+                        node: l.to,
+                    });
                 }
             }
         }
@@ -119,7 +127,11 @@ impl NavGraph {
             length += (p - prev).length();
             prev = p;
         }
-        Some(Route { nodes, points, length })
+        Some(Route {
+            nodes,
+            points,
+            length,
+        })
     }
 
     /// Points to walk through from `from` to `to`, ending at `to` and not

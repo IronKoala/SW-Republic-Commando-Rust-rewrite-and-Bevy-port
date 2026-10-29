@@ -82,6 +82,17 @@ copy of the game.
   plugin for the game program (`rc_game`); until that's in `main`, there's
   nothing to see in a window. Drawn as coloured capsules for now.
 
+- **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
+  not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
+  room holding the game's own DC-17m model, and shoot battle droids. The
+  weapons use the original game's numbers: the rifle fires 10 bolts a second
+  from a 60-shot magazine and reloads in 1.5 s, the pistol fires once per
+  press and recharges itself, and a droid with 100 health goes down after 5
+  rifle hits or 2 pistol hits. One droid fires back, and its hits take your
+  shield before your health. The firing and reload sounds are the game's.
+  Every weapon is a text file in `data/weapons`, which mods can edit.
+  `rc_shoot --script` drives itself through 12 checks and passed all of them.
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
@@ -122,28 +133,97 @@ copy of the game.
   change the brightness without touching code (see `docs/DESIGN.md`,
   "Lighting in Bevy").
 
+- **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
+  `rc_level_check` loads every map in the game without a window and logs
+  each one: `79 of 79 maps loaded, 0 failed`. Lightmaps now read on 78 of
+  them (12 failed before a fix). Levels now have their sky (67 maps have
+  one), invisible walls (blocking volumes) are solid when you walk, and
+  about 3,460 props and double doors that take their model from their
+  type are now drawn and solid.
+
+- **The game program, with menus (tested in the cloud sandbox, not yet on
+  Windows).** `rc_game` is the one program the whole game is built into. It
+  opens on a main menu in the visor's amber, lists the campaigns and missions
+  with the names from the game's own files (`Extreme Prejudice`, `Into The
+  Hive`, ...), shows a loading screen with the mission text, and drops you
+  into the level with an on-screen display (shield, health, crosshair, ammo,
+  squad, messages). Escape pauses; the pause menu resumes, opens options or
+  quits to the main menu. It plays the game's own music (the main menu
+  theme, then each campaign's calm tracks). It reads a settings file
+  (`settings.toml`: game folder, mods, screen, volumes, mouse) and a controls
+  file (`data/input/bindings.toml`: the original PC keys, plus gamepad and
+  touch). `rc_game --script` drives itself through the menus and a level and
+  passed 17 of 17 checks, including two screenshots checked by colour. Until
+  the levels, weapons, enemies and squad parts plug in, levels are drawn and
+  walked the way `rc_walk --map` does it, with no weapons or enemies.
+
+  **The menus and on-screen display are placeholders.** The amber menus,
+  loading screen and HUD are our own stand-ins so the game can be started
+  and tested. The plan is to use the original game's own menus and HUD (its
+  layouts, textures, fonts and sounds, read from your install at run time)
+  as much as possible; see `docs/ORIGINAL_MENUS.md`.
+
+  Any screen shape works: the view is "Hor+" (wider screens see more at the
+  sides, the view up and down stays the original's), and the HUD stays in a
+  centred 16:9 area on ultrawides (`hud_max_aspect` in `settings.toml`).
+  Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
+  mouse and a gamepad work at the same time.
+
+- **Battle droids that fight back (tested in the cloud sandbox on
+  geo_01a, not yet on Windows).** Droids appear from the map's own
+  spawners when you walk into their triggers, walk the level's own path
+  network, spot you (sight range, view cone, line of sight), shoot in
+  bursts of three with the game's accuracy, take cover when shot in the
+  open, and die to your shots through the weapons part's health and
+  damage. They are the game's own animated droid model with its skin.
+  Their numbers come from the game's script files and are in
+  `data/enemies/battle_droid.toml`, where anyone can change them.
+  `rc_droidview --check` watched a fight on geo_01a: 5 droids, 180 shots,
+  2 droids destroyed by a stand-in player, no droid shooting another, and
+  the droids on screen had the skin's colours (all 12 checks passed).
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Scripts are not decoded yet.
-- Sound: music (`.ogg` files in `GameData\Music`) isn't played yet, only
-  found. 13 "streamed" ambient loops for the RAS level name files that don't
+- Music: the menu and level tracks play, but the switch to battle music
+  waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
   No 3D (positional) sound yet.
-- Levels are drawn without sky, characters, effects or moving parts. No
-  collision: the camera flies through walls.
+- Levels are drawn without characters, effects or moving parts: doors and
+  lifts stand where the map puts them and don't open. The gunship isn't
+  solid. 9 maps have windows onto a sky but no sky box, so they show a flat
+  colour there. The level viewer's camera flies through walls (`rc_walk`
+  has collision).
 - Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
 - No levels yet: walking only works in the hand-made test room. No weapons,
   enemies, health or sound.
+- Enemies: only battle droids so far. Level scripts don't run yet, so
+  most droid spawners (27 of 36 on geo_01a) start when you come within
+  3000 units instead of when the mission says, and barricades stay shut.
+  On geo_01a the start area is closed in by such a barricade, so in
+  `rc_game` you won't reach the droids yet; `rc_droidview` shows them.
+  Some droid numbers are guesses (marked in the data file), including how
+  far a shot can miss. No droid sounds, hit reactions or death effects
+  beyond the animation. Droids don't use jump links or doors.
+
+- Weapons: no first-person arms, muzzle flash, grenades, melee or sniper
+  attachment yet, and switching weapons is instant. How the view kick
+  settles back is our own guess.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
   own choice. See `docs/DESIGN.md`.
 - Characters: only the first material slot, no blending between
   animations, no sounds or effects from animation events.
-- No game yet.
+- Android: the game compiles for Android phones but is not an app yet;
+  see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
+- The game (`rc_game`): no weapons, enemies or squad yet (other parts are
+  being built to plug into it). No saving or loading, no checkpoints, no
+  briefings or cut scenes. Options are a short list. Not tested on Windows,
+  with a gamepad, or with a touch screen.
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the
   real game side by side. Real-time lights use placeholder strengths and
@@ -156,6 +236,18 @@ copy of the game.
 ## How to run it
 
 You need Rust (install from <https://rustup.rs>). From this folder:
+
+```
+cargo run --release -p rc_game
+```
+
+This is the game. The first time, it writes `settings.toml` next to where
+you run it from; if your game isn't in a usual Steam folder, open that file
+and set `folder` under `[game]`. `--map geo_01a` skips the menus.
+`--script` plays itself through the menus and a level and checks each step
+(the log is `logs/rc_game.log`).
+
+The other programs test one piece each:
 
 ```
 cargo run --release -p rc_probe
@@ -245,6 +337,24 @@ it walk a square on its own and check itself. You start at the level's
 PlayerStart, which is in the gunship's hold. The gunship isn't solid yet, so
 you drop to the floor below first.
 
+To try the weapons on a firing range (click the window to aim with the
+mouse, left button fires, R reloads, Q or the mouse wheel switches weapon,
+Escape frees the mouse):
+
+```
+cargo run --release -p rc_combat --bin rc_shoot
+```
+
+The window title shows your weapon, ammo, health and shield. To let it test
+itself instead (it shoots on its own and closes when done):
+
+```
+cargo run --release -p rc_combat --bin rc_shoot -- --script
+```
+
+The log goes to `logs\rc_shoot.log`. The last line should be
+`script done: 12 of 12 checks passed`.
+
 To load a level and fly around it:
 
 ```
@@ -261,6 +371,17 @@ look, make a file called `lighting.cfg` in this folder containing the line
 `baked_light = false` (delete it to go back).
 For another map, give its name, for example
 `cargo run --release -p rc_level_viewer -- ras_01a`.
+`--pitch 60` starts the camera looking 60 degrees up (to see the sky) and
+`--no-sky` leaves the sky out.
+
+To check every level at once:
+
+```
+cargo run --release -p rc_level_viewer --bin rc_level_check
+```
+
+It takes about 15 seconds after building, writes `logs\rc_level_check.log`,
+and ends with one line per map and `79 of 79 maps loaded, 0 failed`.
 
 To check every character and animation in the game:
 
@@ -284,6 +405,20 @@ spot. The log goes to `logs\rc_character.log`; look for the line starting
 to log all of them, for example `cargo run --release -p rc_character -- Reload`.
 Other characters: `cargo run --release -p rc_character -- --package
 "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Animations\droid.ukx" --mesh BattleDroid WalkForward`.
+
+To watch battle droids fight a stand-in player in geo_01a (a window; it
+closes by itself after 40 seconds of fighting):
+
+```
+cargo run --release -p rc_enemies --bin rc_droidview -- --check
+```
+
+The log goes to `logs\rc_droidview.log` and ends with CHECK lines and
+`DONE: 0 checks failed`. Screenshots go to `logs\droidview_with.png` (the
+droids) and `logs\droidview_droids.png` (only the droids' pixels). The same
+fight with no window, faster, is `cargo run --release -p rc_ai --bin
+rc_droidsim -- geo_01a`, and `cargo run --release -p rc_nav --bin
+rc_navcheck -- geo_01a` checks a map's path network.
 
 To read every sound in the game:
 
