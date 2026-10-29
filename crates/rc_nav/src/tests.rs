@@ -31,6 +31,7 @@ fn square() -> NavGraph {
             node("Island", 5000.0, 5000.0, 84.0),
         ],
         links: vec![Vec::new(); 5],
+        ..Default::default()
     };
     two_way(&mut g, 0, 1);
     two_way(&mut g, 1, 2);
@@ -56,6 +57,18 @@ fn avoiding_a_node_takes_the_other_way() {
     two_way(&mut g, 3, 2); // make D-C walkable too
     let p = g.node_path_avoiding(0, 2, |n| if n == 1 { 5000.0 } else { 0.0 }).unwrap();
     assert_eq!(p, vec![0, 3, 2]);
+}
+
+#[test]
+fn blocked_nodes_are_avoided_until_unblocked() {
+    let mut g = square();
+    two_way(&mut g, 3, 2);
+    g.nodes[1].tag = "Barricade".into();
+    assert_eq!(g.set_blocked_by_tag("barricade", true), 1);
+    assert_eq!(g.node_path(0, 2), Some(vec![0, 3, 2]));
+    assert_eq!(g.node_path(0, 1), None);
+    g.set_blocked_by_tag("Barricade", false);
+    assert_eq!(g.node_path(0, 1), Some(vec![0, 1]));
 }
 
 #[test]

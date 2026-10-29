@@ -4050,6 +4050,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_ai"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_movement",
+ "rc_nav",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_anim"
 version = "0.1.0"
 dependencies = [

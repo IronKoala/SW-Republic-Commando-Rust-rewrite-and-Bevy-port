@@ -45,7 +45,7 @@ impl PartialOrd for Open {
 
 impl NavGraph {
     /// Shortest list of nodes from node `a` to node `b` using walkable
-    /// links. `None` if `b` can't be reached.
+    /// links and no blocked nodes. `None` if `b` can't be reached.
     pub fn node_path(&self, a: usize, b: usize) -> Option<Vec<usize>> {
         self.node_path_avoiding(a, b, |_| 0.0)
     }
@@ -80,7 +80,7 @@ impl NavGraph {
                 continue; // stale heap entry
             }
             for l in &self.links[node] {
-                if !reach::walkable(l.flags) {
+                if !reach::walkable(l.flags) || self.blocked.contains(&l.to) {
                     continue;
                 }
                 let step = if l.distance > 0.0 {
