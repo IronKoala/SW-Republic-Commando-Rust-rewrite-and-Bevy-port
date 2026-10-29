@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Read a script class's default values (rc_probe --class)
+
+- **Changed:** New `crates/rc_package/src/class_defaults.rs` (finds the default values stored at the end of a class in a `.u` script package) and `rc_probe --class NAME` (`crates/rc_probe/src/classes.rs`), which logs the defaults of a class and of each parent to `logs/rc_class.log`.
+- **Why:** The weapon numbers (fire rate, damage, ammo, spread) are class defaults. The movement thread found them by hand; this makes it a repeatable tool.
+- **Tested how:** One unit test on a made-up class. Then ran it on the real `ctinventory.u`, `engine.u`, `ctgame.u`, `ctcharacters.u`, `gameplay.u` and `core.u`, copied read-only from the install into the cloud sandbox.
+- **Result:** `rc_probe --class DC17mBlaster` gives 37 values for DC17mBlaster, 41 for Weapon, 12 for Inventory, 30 for Actor. It also reproduces the movement thread's hand-found numbers (CloneCommando Health 100, Shields 100). Classes found: every weapon, ammo and projectile class tried (about 30).
+- **Still broken / not tested:** Engine's `Weapon` class shows one junk value at the front (`OldSamples[2924]`): the method can't always tell where the list starts. Values of structs other than vectors and rotators are shown as raw bytes. Not run on Windows.
+- **Next:** Put the weapon numbers into data files and fire them.
+
 ## 2026-10-29: Shared game pieces for every part to plug into (rc_game_core)
 
 - **Changed:** New crate `crates/rc_game_core` and `docs/PLUGINS.md`. The crate holds what the whole game shares: the screens (`GameState`: boot, main menu, loading, in game; `Play`: running or paused), the folders (`GamePaths`, with mods searched before `data/`, and file names matched without caring about case for Linux and Android), the input actions (`Action`, `ActionState`), the numbers the on-screen display shows (health, ammo, squad), loading hand-off (`LoadingGate`), level collision, the player and camera markers, unit conversion and one shared log.
