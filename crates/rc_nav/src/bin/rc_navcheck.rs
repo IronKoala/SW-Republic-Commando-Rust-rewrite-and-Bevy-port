@@ -75,7 +75,7 @@ fn main() {
     for n in &g.nodes {
         *kinds.entry(n.class.clone()).or_default() += 1;
     }
-    line(format!("nodes by class: {kinds:?}"));
+    line(format!("nodes by class: {kinds:?}; {} blocked at the start (BlockedPath)", g.blocked.len()));
     line(format!("links by reachFlags: {:?}", stats.flag_counts));
     for n in g.nodes.iter().filter(|n| n.is_cover()).take(5) {
         if let NodeKind::Cover { strafe_left, strafe_right, distance_to_cover, facing } = n.kind {

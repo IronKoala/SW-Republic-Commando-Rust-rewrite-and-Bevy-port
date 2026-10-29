@@ -95,6 +95,11 @@ pub struct Link {
 pub struct NavGraph {
     pub nodes: Vec<NavNode>,
     pub links: Vec<Vec<Link>>,
+    /// Nodes that can't be passed right now. `BlockedPath` nodes start
+    /// blocked (their class default `bBlocked` is true in Engine.u) and a
+    /// level event named after their `Tag` toggles them, for example when a
+    /// barricade is blown up. See `set_blocked_by_tag`.
+    pub blocked: std::collections::HashSet<usize>,
 }
 
 /// Counts from reading, for the log.
@@ -240,7 +245,26 @@ impl NavGraph {
         let mut fc: Vec<(u32, usize)> = flag_counts.into_iter().collect();
         fc.sort();
         stats.flag_counts = fc;
-        Ok((NavGraph { nodes, links }, stats))
+        let blocked = nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.class == "BlockedPath")
+            .map(|(i, _)| i)
+            .collect();
+        Ok((NavGraph { nodes, links, blocked }, stats))
+    }
+
+    /// Block or unblock every node whose tag is `tag` (what a level event
+    /// with that name does in the original). Returns how many changed.
+    pub fn set_blocked_by_tag(&mut self, tag: &str, blocked: bool) -> usize {
+        let mut n = 0;
+        for (i, node) in self.nodes.iter().enumerate() {
+            if node.tag.eq_ignore_ascii_case(tag) {
+                let changed = if blocked { self.blocked.insert(i) } else { self.blocked.remove(&i) };
+                n += changed as usize;
+            }
+        }
+        n
     }
 
     pub fn link_count(&self) -> usize {
