@@ -128,6 +128,16 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
     for f in &s.volume_failures {
         log.line(format!("  volume not read: {f}"));
     }
+    log.line(match &scene.sky {
+        Some(sky) => format!(
+            "  sky: from {}, {} sky box polygons, {} sky props, {} backdrop polygons",
+            sky.from, s.sky_polygons, s.sky_props, s.backdrop_polygons
+        ),
+        None => format!(
+            "  sky: none (no SkyZoneInfo); {} backdrop polygons",
+            s.backdrop_polygons
+        ),
+    });
     let f = s.floor_test;
     log.line(format!(
         "  floor test: {} of {} path points have a floor 0-150 below, {} closer than 80; collision triangles {}; spawn {}; built in {ms:.0} ms",
@@ -142,6 +152,11 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
     }
     if mat_fail > 0 {
         notes.push(format!("{mat_fail} materials missing"));
+    }
+    if scene.sky.is_none() {
+        notes.push("no sky".into());
+    } else if s.sky_polygons + s.sky_props == 0 {
+        notes.push("sky zone is empty".into());
     }
     if !s.volume_failures.is_empty() {
         notes.push(format!("{} volumes unreadable", s.volume_failures.len()));

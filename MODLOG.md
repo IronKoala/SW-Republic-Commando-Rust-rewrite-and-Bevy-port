@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: The sky (rc_level_viewer, rc_walk)
+
+- **Changed:** New `rc_level_viewer/src/sky.rs`: a second camera stands at the map's `SkyZoneInfo`, inside its small sky box, and turns with the player's view without moving. It draws first; the player's camera draws the level over it without clearing. `scene.rs` puts the sky zone's polygons and props on their own render layer and leaves out "fake backdrop" polygons (the windows onto the sky). Found the zone of a point with a new `Bsp::point_zone` (UE2's tree walk). The viewer has `--pitch DEG` and `--no-sky`; `rc_walk --map` gets the sky too. `spawn_level` now also returns every entity it spawned.
+- **Why:** The background behind the level was a flat colour.
+- **Tested how:** `rc_level_check` on all 79 maps; `rc_level_viewer MAP --frames 120 --pitch 60 [--no-sky] --capture` on geo_01a, yyy_01b, ctf_siege; `rc_walk --map geo_01a --script`; `rc_walk --script`.
+- **Result:** 67 of 79 maps have a sky box (each 6-12 polygons with textures like `BigSkyPanel`, `SkyPanel`, `Stars`). Looking up in geo_01a, the window was 41% background colour without the sky and 0% with it; ctf_siege 85% and 0%; yyy_01b 18% and 0%. The geo_01a capture shows an orange Geonosis sky above the spires. Walker: 3 passed, 0 failed on geo_01a; 21 passed, 0 failed in the test room.
+- **Still broken / not tested:** 9 maps have backdrop polygons but no `SkyZoneInfo` (for example geo_03a, geo_05a, ras_01b, yyy_06b); they show the background colour there. Not compared with the real game. Not tested on Windows. The sky camera draws the whole sky layer every frame (small: 1-2 draw batches).
+- **Next:** Doors and lifts.
+
 ## 2026-10-29: Invisible walls (blocking volumes) are solid
 
 - **Changed:** New `rc_level::volumes` reads every `BlockingVolume`: its brush shape (a small BSP model) placed with `PrePivot`, `Rotation` and `Location`, plus whether it stops players, the AI and shots. `rc_level::collision::add_blocking_volumes` adds the ones that stop players to the collision; `rc_level::map_collision::load` (used by `rc_walk`) now does this. The viewer and `rc_level_check` log the volumes and two checks. New `crates/rc_walk/examples/volume_walk_test.rs` runs a commando into volumes with the game's movement.

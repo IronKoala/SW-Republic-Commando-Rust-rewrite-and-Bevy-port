@@ -40,6 +40,8 @@ pub struct Batch {
     pub two_sided: bool,
     /// True for static mesh triangles, false for BSP ones.
     pub from_mesh: bool,
+    /// Part of the sky box (the sky zone), seen only through the sky camera.
+    pub sky: bool,
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
@@ -112,6 +114,24 @@ pub struct Stats {
     /// Invisible walls are put next to where people walk, so most should
     /// be (about 63% across the game; 9% if they were left unplaced).
     pub volumes_near_paths: usize,
+    /// Sky: BSP polygons and props in the sky zone, and "fake backdrop"
+    /// polygons left out so the sky shows through them.
+    pub sky_polygons: usize,
+    pub sky_props: usize,
+    pub backdrop_polygons: usize,
+}
+
+/// Where the sky camera stands: the map's `SkyZoneInfo`. Unreal 2 draws a
+/// level's sky by looking out from this point, inside a small box (the sky
+/// zone) somewhere far from the playing area, turned the same way as the
+/// player's view but never moving with them. That makes the sky look
+/// infinitely far away.
+pub struct Sky {
+    /// Bevy position.
+    pub position: [f32; 3],
+    /// The sky zone's number in the BSP.
+    pub zone: u8,
+    pub from: String,
 }
 
 pub struct Spawn {
@@ -130,6 +150,8 @@ pub struct Scene {
     pub lights: Vec<Light>,
     pub stats: Stats,
     pub spawn: Spawn,
+    /// `None` when the map has no `SkyZoneInfo`.
+    pub sky: Option<Sky>,
 }
 
 #[derive(Default)]
@@ -138,8 +160,9 @@ struct Builder {
     by_key: HashMap<BatchKey, usize>,
 }
 
-/// Material, translucent, two-sided, from a mesh, lightmap page, has colours.
-type BatchKey = (String, bool, bool, bool, Option<usize>, bool);
+/// Material, translucent, two-sided, from a mesh, lightmap page, has
+/// colours, in the sky.
+type BatchKey = (String, bool, bool, bool, Option<usize>, bool, bool);
 
 impl Builder {
     #[allow(clippy::too_many_arguments)]
@@ -152,6 +175,7 @@ impl Builder {
         from_mesh: bool,
         lightmap_page: Option<usize>,
         coloured: bool,
+        sky: bool,
     ) -> &mut Batch {
         let k = (
             key.to_string(),
@@ -160,6 +184,7 @@ impl Builder {
             from_mesh,
             lightmap_page,
             coloured,
+            sky,
         );
         let i = *self.by_key.entry(k).or_insert_with(|| {
             self.batches.push(Batch {
@@ -167,6 +192,7 @@ impl Builder {
                 translucent,
                 two_sided,
                 from_mesh,
+                sky,
                 lightmap_page,
                 ..Default::default()
             });
@@ -219,7 +245,7 @@ fn tex_size(p: &Option<Picture>) -> [f32; 2] {
     }
 }
 
-fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, ctx: &mut Ctx) {
+fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, sky_zone: Option<u8>, ctx: &mut Ctx) {
     for poly in bsp.polygons() {
         ctx.stats.bsp_polygons += 1;
         let w = Bsp::winding(&poly);
@@ -232,6 +258,16 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, ctx: &mut Ctx) {
             *ctx.stats.bsp_skipped.entry("portal").or_default() += 1;
             continue;
         }
+        // "Fake backdrop" surfaces are windows onto the sky: the game draws
+        // the sky zone there instead of the surface.
+        if poly.poly_flags & poly_flags::FAKE_BACKDROP != 0 {
+            ctx.stats.backdrop_polygons += 1;
+            *ctx.stats.bsp_skipped.entry("sky backdrop").or_default() += 1;
+            continue;
+        }
+        // A polygon belongs to the zone on its front side.
+        let sky = sky_zone.is_some_and(|z| bsp.nodes[poly.node].zone[1] == z);
+        ctx.stats.sky_polygons += sky as usize;
         let (key, pic) = picture(
             ctx.mats,
             &mut ctx.stats,
@@ -257,7 +293,7 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, ctx: &mut Ctx) {
         } else {
             ctx.stats.bsp_polygons_unlit += 1;
         }
-        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false);
+        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false, sky);
         let base = batch.positions.len() as u32;
         let n = dir_to_bevy(poly.normal);
         for (p, uv) in poly.points.iter().zip(&poly.uvs) {
@@ -330,9 +366,11 @@ fn load_mesh(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_mesh_actor(
     b: &mut Builder,
     ctx: &mut Ctx,
+    sky: bool,
     p: &Placement,
     mesh: &StaticMesh,
     owner: &(Package, Vec<u8>),
@@ -367,7 +405,7 @@ fn add_mesh_actor(
                 )
             }
         };
-        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some());
+        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some(), sky);
         let first = sec.first_index as usize;
         let count = sec.num_faces as usize * 3;
         let Some(tris) = mesh.indices.get(first..first + count) else {
@@ -468,7 +506,20 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             }
         }
     }
-    add_bsp(&mut b, &bsp, &lightmaps, &mut ctx);
+    // The sky: the first SkyZoneInfo, and the zone it stands in.
+    let sky = level.actors.iter().flatten().find_map(|&a| {
+        if pkg.export_class_name(&pkg.exports[a]) != "SkyZoneInfo" {
+            return None;
+        }
+        let p = actors::read_placement(pkg, data, a).ok()?;
+        Some(Sky {
+            position: to_bevy(p.location),
+            zone: bsp.point_zone(p.location)?,
+            from: format!("{} at {:?}", p.name, p.location),
+        })
+    });
+    let sky_zone = sky.as_ref().map(|s| s.zone);
+    add_bsp(&mut b, &bsp, &lightmaps, sky_zone, &mut ctx);
 
     let mut lights = Vec::new();
 
@@ -539,7 +590,9 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                         None
                     }
                 };
-                add_mesh_actor(&mut b, &mut ctx, &p, &m.0, &m.1, colours.as_deref());
+                let in_sky = sky_zone.is_some() && bsp.point_zone(p.location) == sky_zone;
+                ctx.stats.sky_props += in_sky as usize;
+                add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref());
                 placed.push((p, m));
             }
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
@@ -589,7 +642,7 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
 
     let mut lo = [f32::MAX; 3];
     let mut hi = [f32::MIN; 3];
-    for batch in &b.batches {
+    for batch in b.batches.iter().filter(|b| !b.sky) {
         for p in &batch.positions {
             for c in 0..3 {
                 lo[c] = lo[c].min(p[c]);
@@ -614,6 +667,7 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         lights,
         stats: ctx.stats,
         spawn,
+        sky,
     })
 }
 

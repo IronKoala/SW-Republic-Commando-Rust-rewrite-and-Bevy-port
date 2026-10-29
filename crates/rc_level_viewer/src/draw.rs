@@ -9,6 +9,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::Exposure;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::camera::visibility::RenderLayers;
 use bevy::pbr::Lightmap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -17,7 +18,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 pub const BACKGROUND: [u8; 3] = [64, 72, 89];
 
 /// What `spawn_level` drew, for the log.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct DrawReport {
     pub triangles: usize,
     pub textured: usize,
@@ -25,6 +26,11 @@ pub struct DrawReport {
     pub coloured: usize,
     pub full_bright: usize,
     pub lights: SpawnReport,
+    /// Batches drawn in the sky (seen only by the sky camera).
+    pub sky_batches: usize,
+    /// Every entity spawned (meshes and lights), so a game can tag them,
+    /// for example to remove them when the level ends.
+    pub entities: Vec<Entity>,
 }
 
 pub fn to_image(p: &materials::Picture) -> Image {
@@ -100,6 +106,8 @@ pub fn spawn_level(
     let mut triangles = 0;
     let mut textured = 0;
     let (mut lightmapped, mut coloured, mut full_bright) = (0, 0, 0);
+    let mut sky_batches = 0;
+    let mut entities = Vec::new();
     for b in &scene.batches {
         if b.indices.is_empty() {
             continue;
@@ -171,6 +179,11 @@ pub fn spawn_level(
             MeshMaterial3d(materials.add(material)),
             Transform::default(),
         ));
+        if b.sky {
+            entity.insert(RenderLayers::layer(crate::sky::SKY_LAYER));
+            sky_batches += 1;
+        }
+        entities.push(entity.id());
         if let Some(image) = page {
             entity.insert(Lightmap { image, ..default() });
             lightmapped += 1;
@@ -181,6 +194,7 @@ pub fn spawn_level(
         }
     }
     let report = lighting::spawn_lights(commands, settings, &scene.lights);
+    entities.extend(report.entities.iter().copied());
     // The baked light already includes the zones' ambient light.
     commands.insert_resource(GlobalAmbientLight::NONE);
     DrawReport {
@@ -190,5 +204,7 @@ pub fn spawn_level(
         coloured,
         full_bright,
         lights: report,
+        sky_batches,
+        entities,
     }
 }

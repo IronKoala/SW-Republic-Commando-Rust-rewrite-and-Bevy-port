@@ -3,7 +3,7 @@
 //!
 //! Usage:
 //!   rc_level_viewer [map name or .ctm path] [--frames N] [--lighting FILE]
-//!                   [--capture FILE.bmp]
+//!                   [--capture FILE.bmp] [--pitch DEG] [--no-sky]
 //!
 //! Defaults to `geo_01a` (the first Geonosis level) from `GameData/Maps` in
 //! the game folder (RC_GAME_DIR or the default Steam path). `--frames N`
@@ -11,7 +11,9 @@
 //! `--lighting FILE` reads lighting settings (default `lighting.cfg` in the
 //! current folder, if there is one; see `lighting.rs` and docs/DESIGN.md).
 //! `--capture FILE.bmp` saves the frame used for the on-screen check as a
-//! picture, for comparing looks without watching the window.
+//! picture, for comparing looks without watching the window. `--pitch DEG`
+//! starts the camera looking up (positive) or down. `--no-sky` leaves the
+//! sky out (the background colour shows instead).
 //!
 //! Everything is logged to `logs/rc_level_viewer.log`: what was read, what
 //! couldn't be shown and why, frame rates, camera position, and an on-screen
@@ -26,7 +28,7 @@ use bevy::window::WindowResolution;
 use rc_level_viewer::camera::{fly, yaw_from_unreal, FlyCamera};
 use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
-use rc_level_viewer::{materials, scene};
+use rc_level_viewer::{materials, scene, sky};
 use rc_package::Package;
 use std::collections::HashSet;
 use std::fs;
@@ -71,6 +73,13 @@ struct ExitAfter(Option<u32>);
 
 #[derive(Resource)]
 struct CapturePath(Option<PathBuf>);
+
+/// `--pitch DEG` (start looking up or down) and `--no-sky`.
+#[derive(Resource)]
+struct ViewOptions {
+    pitch_degrees: f32,
+    sky: bool,
+}
 
 /// Save red, green, blue pixels (top row first) as a 24-bit .bmp file, a
 /// format every system can open, written by hand to avoid another library.
@@ -127,6 +136,7 @@ fn setup(
     loaded: Res<LoadedScene>,
     settings: Res<LightingSettings>,
     log: Res<RunLog>,
+    view: Res<ViewOptions>,
 ) {
     let Some(scene) = loaded.0.lock().unwrap().take() else {
         return;
@@ -147,8 +157,32 @@ fn setup(
         r.lightmapped,
         r.coloured,
         r.full_bright,
-        r.lights,
+        r.lights.clone(),
     );
+    let background = Color::srgb_u8(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]);
+    let has_sky = match scene.sky.as_ref().filter(|_| view.sky) {
+        Some(sky) => {
+            sky::spawn_sky_camera(&mut commands, sky, background);
+            log.line(format!(
+                "sky: camera at {:?} (Bevy units) from {}; {} sky batches, {} sky box polygons, {} sky props, {} backdrop polygons left open",
+                sky.position,
+                sky.from,
+                r.sky_batches,
+                scene.stats.sky_polygons,
+                scene.stats.sky_props,
+                scene.stats.backdrop_polygons
+            ));
+            true
+        }
+        None if !view.sky => {
+            log.line("sky: switched off (--no-sky)");
+            false
+        }
+        None => {
+            log.line("sky: this map has no SkyZoneInfo, so no sky");
+            false
+        }
+    };
     log.line(format!(
         "lighting: baked light {}; draw batches: {lightmapped} with a lightmap, {coloured} with baked corner colours, {full_bright} at full brightness; lightmap gain {} (x{:.2} in linear light), corner colour gain {}; real-time lights: {} point, {} spot, {} sun, {} left to the baked light",
         if baked { "on" } else { "off" },
@@ -164,12 +198,18 @@ fn setup(
     let yaw = yaw_from_unreal(s.yaw);
     let cam = FlyCamera {
         yaw,
-        pitch: 0.0,
+        pitch: view.pitch_degrees.to_radians(),
         speed: 10.0,
     };
     let rotation = cam.rotation();
     commands.spawn((
         Camera3d::default(),
+        if has_sky {
+            sky::viewer_camera()
+        } else {
+            Camera::default()
+        },
+        sky::SkyViewer,
         Tonemapping::None,
         exposure,
         Projection::Perspective(PerspectiveProjection {
@@ -431,10 +471,18 @@ fn main() -> AppExit {
     let mut frames = None;
     let mut lighting_path = PathBuf::from("lighting.cfg");
     let mut capture = None;
+    let mut view = ViewOptions {
+        pitch_degrees: 0.0,
+        sky: true,
+    };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--frames" {
             frames = args.next().and_then(|n| n.parse().ok());
+        } else if arg == "--pitch" {
+            view.pitch_degrees = args.next().and_then(|n| n.parse().ok()).unwrap_or(0.0);
+        } else if arg == "--no-sky" {
+            view.sky = false;
         } else if arg == "--capture" {
             capture = args.next().map(PathBuf::from);
         } else if arg == "--lighting" {
@@ -542,10 +590,12 @@ fn main() -> AppExit {
         .insert_resource(LoadedScene(Mutex::new(Some(scene))))
         .insert_resource(settings)
         .insert_resource(CapturePath(capture))
+        .insert_resource(view)
         .insert_resource(ExitAfter(frames))
         .insert_resource(FrameStats::default())
         .insert_resource(ScreenCheck::default())
         .insert_resource(log)
+        .add_plugins(sky::SkyPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (fly, count_frames))
         .run()
