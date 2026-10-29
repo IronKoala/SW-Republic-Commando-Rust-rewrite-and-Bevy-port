@@ -22,11 +22,11 @@ copy of the game.
   three maps: 2,491 textures, 2,490 pass every check. The one exception is a
   texture whose smallest (1x1) mipmap is stored with no pixels, which looks like
   a quirk in the game's own file. Formats seen: P8, DXT1, DXT3, DXT5, RGBA8,
-  G16, and two 2-byte-per-pixel formats numbered 12 and 14.
+  G16, and the bump-map formats V8U8 (12) and L6V5U5 (14).
 
 - **Turning textures into pictures (tested by numbers, not by eye).** The
-  `rc_image` crate decodes P8 (with its palette), DXT1, DXT3, DXT5, RGBA8 and G16
-  into normal colours, and `rc_probe --export-textures` saves them as PNG files
+  `rc_image` crate decodes P8 (with its palette), DXT1, DXT3, DXT5, RGBA8, G16
+  and the two bump-map formats into normal colours, and `rc_probe --export-textures` saves them as PNG files
   in the gitignored `extracted/textures/` folder. Of 2,491 textures, 2,358 were
   decoded with no failures. For 2,003 of them we could compare against the
   game's own half-size copy, and 1,916 match within 10 out of 255.
@@ -38,6 +38,15 @@ copy of the game.
   this passed 12 of 12 runs on three textures. On the user's Windows PC it
   passed first time (difference 3.77 of 255) and ran at a steady 144 frames
   per second.
+
+- **Reading and playing sounds (tested on Windows).** `rc_probe --sounds` reads every sound in the game's 23 sound
+  packages (`.uax`). Every sound inside them is a normal `.wav` file
+  (uncompressed 16-bit): 7,974 sounds, about 4 hours 11 minutes in total, all
+  decoded with no failures. `rc_probe --export-sounds` saves them as `.wav`
+  files in the gitignored `extracted/sounds/` folder. `rc_soundtest` plays the
+  DC-17 rifle firing over a looping battle ambience through Bevy's audio and
+  checks that Bevy decodes every sample exactly as our own reader does. On the
+  user's Windows PC it played and was heard, at exactly real-time speed.
 
 - **Reading 3D models (tested on every static mesh).** `rc_probe --meshes`
   reads every static mesh (the fixed models used for weapons, props and level
@@ -59,17 +68,39 @@ copy of the game.
   window is covered by the level. The level's geometry and actors were read
   from 5 maps with no errors.
 
+- **Bump maps (tested by numbers, not by eye).** All 133 bump maps (formats
+  12 and 14) now decode, as the usual light-blue "normal map" pictures. The
+  two layouts were found by measurement, since no documentation names them
+  (see `docs/DESIGN.md`, "Bump maps"). Their own half-size copies match with
+  a median difference of 1.8 of 255.
+
+- **Reading a map's lights (tested in the cloud on 4 maps, not on Windows).**
+  `rc_package::light` turns light and zone actors into position, colour,
+  brightness and reach. Read 600 lights and zones from `geo_01a`, `pro`,
+  `ras_01a` and `yyy_01b` with nothing left over.
+
 ## What doesn't work yet
 
-- Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Animated models (`.ukx`), sounds and scripts are not decoded yet.
+- Animated models (`.ukx`) and scripts are not decoded yet.
+- Sound: music (`.ogg` files in `GameData\Music`) isn't played yet, only
+  found. 13 "streamed" ambient loops for the RAS level name files that don't
+  exist in the PC install. `SoundMultiple` groups are read but not used yet.
+  No 3D (positional) sound yet.
 - Levels are drawn without lights, lightmaps, sky, characters, effects or
   moving parts. No collision: the camera flies through walls.
 - Models are drawn without lighting, bump maps or transparency. Only a
   material's main colour texture is used.
 - No game yet.
+- Lighting in Bevy: `rc_viewer/src/lighting.rs` can place a map's lights, with
+  settings a mod can change from a text file, but its brightness factors are
+  placeholders and it isn't connected to a level yet. The light the game baked
+  into its maps is found for props (one colour per vertex) but not yet for
+  the brush-built walls. Bump maps aren't used for lighting yet, and which way
+  their "up" points isn't checked.
+- 17 textures have small copies (mipmaps) that differ from the full picture.
+  This is in the game's own files, not a decoding fault (see `docs/DESIGN.md`).
 
 ## How to run it
 
@@ -146,6 +177,33 @@ mouse wheel changes speed. The log goes to `logs\rc_level_viewer.log`. Look for
 For another map, give its name, for example
 `cargo run --release -p rc_level_viewer -- ras_01a`.
 
+To read every sound in the game:
+
+```
+cargo run --release -p rc_probe -- --sounds
+```
+
+This logs to `logs\rc_sounds.log` (one line per sound) and ends with a
+`--- summary ---` block. Expect `Sound objects: 7974  decoded: 7974  with
+problems: 0  failed: 0`. To save one package's sounds as `.wav` files you can
+play:
+
+```
+cargo run --release -p rc_probe -- --export-sounds "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Sounds\ui_sound.uax"
+```
+
+To hear a rifle firing over a looping battle ambience (no window; it stops by
+itself after 8 seconds):
+
+```
+cargo run --release -p rc_soundtest
+```
+
+The log goes to `logs\rc_soundtest.log`. Look for `numbers check ...: PASS`,
+`-> PLAYED` and an `ambience speed` close to `1.00x`. Pick other sounds with
+`--weapon NAME`, `--ambient NAME` and `--seconds N` (names are in
+`logs\rc_sounds.log`).
+
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.
 
@@ -154,9 +212,11 @@ game folder and refuses to run from inside it.
 
 ## Credits
 
-- [Bevy](https://bevy.org) game engine, MIT or Apache-2.0 license.
+- [Bevy](https://bevy.org) game engine, MIT or Apache-2.0 license. Its audio
+  uses [rodio](https://github.com/RustAudio/rodio) and
+  [hound](https://github.com/ruuda/hound) (both MIT or Apache-2.0).
 
-The package format was learned from these. No code was copied from them.
+The package and sound formats were learned from these. No code was copied from them.
 
 - [UE Viewer (UModel)](https://github.com/gildor2/UEViewer) by Konstantin Nosov, MIT
   license. Source of the Republic Commando-specific package details.

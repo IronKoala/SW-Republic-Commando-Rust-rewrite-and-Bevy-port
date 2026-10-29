@@ -12,8 +12,10 @@
 //!
 //! This crate only reads bytes it is given. It never opens or writes files.
 
+pub mod light;
 pub mod properties;
 pub mod reader;
+pub mod sound;
 pub mod static_mesh;
 pub mod texture;
 

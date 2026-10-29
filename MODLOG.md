@@ -21,6 +21,51 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not tested on Windows, or on maps other than `geo_01a` in the viewer. Not looked at by eye: the scene is only checked by numbers. Drawn unlit (no lights or lightmaps), no bump maps, no sky box treatment, no movers, characters, emitters or terrain. Two dead ends logged: a first state-frame layout that only fitted StaticMeshActors (the lighting thread found the right one: a 2-byte field, not 4), and on-screen captures that showed only the background colour (now retried like black ones). The real-world scale (50 Unreal units per Bevy unit) is still to be measured against a character.
 - **Next:** Test on the user's PC; then lights and lightmaps (roadmap step 2).
 
+## 2026-10-29: Lights read from maps; Bevy lighting module with a settings file
+
+- **Changed:** New `crates/rc_package/src/light.rs` (lights and zone ambients from an actor's properties, Unreal hue/saturation to colour). New `crates/rc_viewer/src/lighting.rs` (spawns Bevy point, spot and directional lights and the ambient light; every factor in `LightingSettings`, loadable from a `key = value` text file for mods). `lighting.rs` is compiled into the viewer (using the 3D parts PR #4 added) but no viewer mode uses it yet. DESIGN ("Lights in maps", "Lighting in Bevy") and README updated.
+- **Why:** Roadmap step 2: lights. Prepare them so they can be switched on as soon as a level loads.
+- **Tested how:** Wrote throwaway test programs (kept outside the repo) and ran them on `geo_01a`, `pro`, `ras_01a` and `yyy_01b`, copied read-only from the install. 4 unit tests for colours, light classes, axes, facing and the settings file (23 in the workspace, all pass). A scratch Bevy app placed `ras_01a`'s lights over a white floor, captured the screen and measured it (results in the next line).
+- **Result:** Measured the actor state-frame layout (2 bytes where UE2 has 4): all 600 light/zone/level actors read with 0 bytes left over; shared with the level thread. Lights per map: 31, 211, 286, 37; only 2-9% dynamic. Radius is in plain Unreal units (typical radius 350-1,200 vs 230-840 to the nearest light). Static meshes carry baked light as one colour per vertex: read on all 1,267 instances. Bevy test on `ras_01a`: 282 point lights and 4 spotlights created; with all lights on, the floor's brightest pixel is 225 of 255, with lights off (ambient only) 47, so the lights do light the scene. The first two captures were black (the known sandbox quirk).
+- **Still broken / not tested:** Brightness factors are placeholders, not matched to the game. Spotlight cone angle is a guess. Light defaults are UE2's, not read from the game's `Engine.u`. Where the BSP walls' baked light is stored: not found. Not connected to a level, not tested on Windows.
+- **Next:** When the level thread's loader lands, show its lights; then show the baked vertex colours and tune the factors against them.
+
+## 2026-10-29: Why 17 textures' small copies don't match
+
+- **Changed:** DESIGN "How we check pictures" rewritten with the findings. No code changes.
+- **Why:** 17 textures failed the mip check; we needed to know whether our decoder was wrong.
+- **Tested how:** Throwaway program comparing every mip with the one before, measuring how varied each mip is and its average colour, and trying the small mips sideways and upside down.
+- **Result:** The decoder is fine: the same formats give under 5 on 2,000 other textures, including 159 other non-square ones, and other orientations made things worse. The game's files store different pictures in these mips: 5 arena textures turn exactly flat grey (127, 125, 127) from mip 3 down, one blast door has a different picture on every level, 7 tiny glow sprites are likely just compression error (a guess), and the rest are screens, noise and two menu buttons.
+- **Still broken / not tested:** Not checked by eye.
+- **Next:** Use the game's own mips in Bevy rather than generating new ones.
+
+## 2026-10-29: Decode the two bump-map formats (12 = V8U8, 14 = L6V5U5)
+
+- **Changed:** `crates/rc_image/src/lib.rs`: new `PixelFormat::V8U8` and `PixelFormat::L6V5U5`, decoded to normal-map colours (L in alpha), 2 new unit tests. `rc_package::texture::format_name` names them. `rc_probe` and `rc_viewer` decode them. DESIGN gains a "Bump maps" section; README updated.
+- **Why:** 133 textures (the game's bump maps) couldn't be decoded.
+- **Tested how:** Tried six candidate layouts on every bump map and compared each decoded mip 0, shrunk, against mip 1. Then ran `rc_probe --textures` on all 57 texture packages (copied read-only into the cloud sandbox). All 21 unit tests in the workspace pass (after bringing in PR #4).
+- **Result:** Clear winners, as a fraction of the difference between unrelated pictures: format 12 as V8U8 0.06 (next best 0.36), format 14 as L6V5U5 0.08 (next best 0.28). UE Viewer's unverified guess (CxV8U8 for 14) scored 0.34. Scan: `decoded: 2312  failed: 0`, formats `29 V8U8`, `104 L6V5U5`. Bump-map mip difference median 1.8, one over 10 (11.2). `rc_viewer` shows them and its on-screen check passes: `Wookiee_Bump` (L6V5U5) 3.53, `Wookiee_HairBump` (V8U8) 7.20, and `DC15Blaster` still 3.77.
+- **Still broken / not tested:** Which way V ("up") points for Bevy: not tested. What L means in format 14: unknown (maybe shininess). Not run on Windows.
+- **Next:** Use them for lighting in Bevy.
+
+## 2026-10-29: rc_soundtest tested on Windows
+
+- **Changed:** README "what works" updated. No code changes.
+- **Why:** The sound test had only run in the cloud sandbox with a fake sound card.
+- **Tested how:** The user ran `cargo run --release -p rc_soundtest` in `C:\Users\matth\Projects\sw-rc` and listened. Claude read `logs\rc_soundtest.log` from the PC.
+- **Result:** The user heard it ("it worked"). Log: both sounds `MATCH` Bevy's decoder, the ambience started 0.017 s in, 4 of 4 rifle shots started, `PLAYED`, ambience speed `1.00x` real time. The package read took 22 ms.
+- **Still broken / not tested:** Linux was tested only with a fake sound card. Android is not tested. Music (`.ogg`) is still not played.
+- **Next:** Merge PR #5. Then play music, and later 3D sound with the level work.
+
+## 2026-10-29: Read and play the game's sounds
+
+- **Changed:** New crate `crates/rc_audio` (reads `.wav` files, measures them). New file `crates/rc_package/src/sound.rs` (reads `Sound`, `SoundStreamed` and `SoundMultiple` objects). New `rc_probe --sounds` and `--export-sounds` (`crates/rc_probe/src/sounds.rs`). New Bevy program `crates/rc_soundtest` (no window) that plays a weapon sound over an ambient loop. Updated `README.md` and `docs/DESIGN.md`.
+- **Why:** Roadmap step 4: play the game's sounds.
+- **Tested how:** 4 new unit tests on made-up `.wav` files (20 in total, all passing). Copied all 23 `.uax` packages and 2 music files from the install into the cloud sandbox (outside the repo) and ran `rc_probe --sounds` and `rc_soundtest`. The sandbox has no sound card, so `rc_soundtest` was run once with none (to check it notices) and then with a fake ALSA "null" sound card.
+- **Result:** `Sound objects: 7974  decoded: 7974  with problems: 0  failed: 0  silent: 1` (the silent one is `fol_GEN_silence_01`), 15,068 s of audio, 31.7 s scan. All plain 16-bit PCM WAV. 291 `SoundStreamed` and 1,208 `SoundMultiple` read with nothing left over. `rc_soundtest`: rifle `wep_GEN_dc17Fire_02` 44100 Hz, 1 ch, 58069 frames, 1.317 s, peak 0.977, checksum ac6be1b553909337; ambience `amb_KAM_siege_lp_01` 22050 Hz, 2 ch, 219982 frames, 9.977 s, peak 0.534, checksum 8beac96a49db50df. Bevy's decoder matched both sample for sample (largest difference 0). With the fake sound card: ambience started, 3 of 3 shots started, `PLAYED`. With no sound card: `NOT PLAYED`, exit code 1, as intended.
+- **Still broken / not tested:** Not tested on Windows or on a real sound card, so nobody has heard it yet, and the "1.00x real time" check is untested. Music (`.ogg`) is not played. 13 `amb_RAS_*` streamed loops point at files missing from the PC install. The second list inside `SoundMultiple` is always empty and its meaning is unknown. No positional (3D) sound yet.
+- **Next:** Run `rc_soundtest` on the user's PC. Then play an `.ogg` music track, and later place sounds in 3D with the level work.
+
 ## 2026-10-29: Static meshes: read them, and show the DC-15 blaster in 3D
 
 - **Changed:** New `crates/rc_package/src/static_mesh.rs` (reads `StaticMesh` objects: vertices, normals, UVs, triangles, sections, materials, and checks them), plus `Reader::f32`. New `rc_probe --meshes` (`crates/rc_probe/src/meshes.rs`, logs to `logs/rc_meshes.log`). `rc_viewer --mesh` (`crates/rc_viewer/src/mesh.rs`) shows one model with its texture, by default `DC15Blaster` from `weapons.usx`. It follows `Shader` materials to their `Diffuse` texture. Shared screenshot code in `rc_viewer/src/main.rs` was moved into `read_capture`. Bevy feature `bevy_pbr` added. 1 new unit test (one triangle built byte by byte). README and DESIGN updated.

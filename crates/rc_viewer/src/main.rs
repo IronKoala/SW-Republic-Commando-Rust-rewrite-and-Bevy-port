@@ -15,6 +15,10 @@
 //! the window. On frame `CHECK_FRAME` it also captures what is actually on
 //! screen and compares it with what should be there, pixel by pixel.
 
+// Map lights for Bevy. Not used by a viewer mode yet: it is switched on once a
+// level loads (see `lighting.rs`).
+#[allow(dead_code)]
+mod lighting;
 mod mesh;
 
 use bevy::asset::RenderAssetUsages;
@@ -115,6 +119,8 @@ fn pixel_format(format: u8) -> Option<PixelFormat> {
         7 => PixelFormat::Dxt3,
         8 => PixelFormat::Dxt5,
         10 => PixelFormat::G16,
+        12 => PixelFormat::V8U8,
+        14 => PixelFormat::L6V5U5,
         _ => return None,
     })
 }
