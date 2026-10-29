@@ -8,7 +8,7 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Changed:** New `.github/workflows/ci.yml`. `.gitignore` gained one whitelist line, `!.github/workflows/*.yml`. A short section at the end of `docs/DESIGN.md`.
 - **Why:** So every pull request is built and tested on Windows and Linux automatically, which catches breakage when several branches are merged.
 - **Tested how:** In the cloud sandbox with no game folder set: `cargo test --workspace` (all 57 unit tests pass, none read game files, so no test needed a skip). `cargo fmt --all --check` and `cargo clippy --workspace --all-targets` both find problems today (72 files need reformatting, about 20 clippy messages), which is why that job only reports. The run on GitHub itself is checked on the draft pull request.
-- **Result:** See the pull request's checks.
+- **Result:** First run on draft PR #15: Linux build and test passed (about 6 min), Windows passed (about 12 min, first run without a cache), formatting and clippy job reported its problems without failing.
 - **Still broken / not tested:** The Bevy programs' windowed `--script` checks are not run on GitHub. No Android build. Not tested on macOS (not a goal).
 - **Next:** Once the code is formatted and the clippy messages are fixed, make that job fail the run too.
 
