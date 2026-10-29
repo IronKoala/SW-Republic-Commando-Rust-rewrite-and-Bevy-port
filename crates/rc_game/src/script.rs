@@ -4,7 +4,7 @@
 //! and exits with code 0 only if every check passed.
 //!
 //! The route: main menu, Campaign, Geonosis, its first level,
-//! loading, walk forward, pause (nothing moves), resume, quit to the main
+//! loading, the level's walls and sky (looking up), walk forward, pause (nothing moves), resume, quit to the main
 //! menu (the level is cleared), Options (music volume up), back, Quit.
 
 use crate::levels::LevelList;
@@ -72,6 +72,9 @@ struct ShotStats {
     /// Amber pixels within 3% of the screen height of the centre (the
     /// crosshair).
     centre_amber: u32,
+    /// Share of pixels in the colour shown where nothing is drawn (no
+    /// level and no sky), 0 to 1.
+    empty: f32,
 }
 
 #[derive(Resource, Default)]
@@ -116,6 +119,13 @@ fn page(w: &mut World) -> Page {
 fn feet(w: &mut World) -> Option<rc_movement::Vec3> {
     let mut q = w.query_filtered::<&Body, With<Player>>();
     q.iter(w).next().map(|b| b.pawn.feet())
+}
+
+fn set_pitch(w: &mut World, pitch: f32) {
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.pitch = pitch;
+    }
 }
 
 fn count<T: Component>(w: &mut World) -> usize {
@@ -225,6 +235,56 @@ fn steps() -> Vec<Step> {
                 Err(format!("{s:?}"))
             }
         }),
+        Check("the level part loaded walls, props, doors and invisible walls", |w| {
+            let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
+                return Err("no LevelInfo".into());
+            };
+            let got = format!(
+                "{}: {} collision triangles, {} props ({} with their class's model), {} blocking volumes, start {}",
+                i.map,
+                i.collision_triangles,
+                i.props,
+                i.class_props,
+                i.blocking_volumes,
+                if i.has_player_start { "from the map" } else { "MISSING" }
+            );
+            if i.collision_triangles > 10_000 && i.props > 0 && i.class_props > 0 && i.has_player_start {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("the sky camera turns with the player's camera", |w| {
+            let sky = count::<rc_level_plugin::SkyCamera>(w);
+            let mut q = w.query_filtered::<&Camera, (
+                With<PlayerCamera>,
+                With<rc_level_plugin::SkyFollows>,
+            )>();
+            let follows = q
+                .iter(w)
+                .filter(|c| matches!(c.clear_color, ClearColorConfig::None))
+                .count();
+            if sky == 1 && follows == 1 {
+                Ok("1 sky camera; the player's camera lets it through".into())
+            } else {
+                Err(format!("{sky} sky cameras, {follows} player cameras following"))
+            }
+        }),
+        // Look up 60 degrees: geo_01a shows open sky above the spires there.
+        Note(|w| set_pitch(w, 60f32.to_radians())),
+        Wait(0.5),
+        Shot("look_up"),
+        Check("looking up shows the sky, not the empty colour", |w| {
+            let s = shot(w, "look_up")?;
+            let got = format!("{:.1}% empty, {:.0}% lit", s.empty * 100.0, s.lit * 100.0);
+            if s.empty < 0.05 && s.lit > 0.3 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Note(|w| set_pitch(w, 0.0)),
+        Wait(0.2),
         Note(|w| {
             let f = feet(w);
             w.resource_mut::<Noted>().feet = f;
@@ -360,7 +420,8 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
             rgba.extend([p[0], p[1], p[2], 255]);
         }
     }
-    let (mut amber, mut lit, mut centre) = (0u32, 0u32, 0u32);
+    let (mut amber, mut lit, mut centre, mut empty) = (0u32, 0u32, 0u32, 0u32);
+    let bg = rc_level_plugin::EMPTY_COLOUR.map(|c| c as i32);
     let r = (h as f32 * 0.03) as i64;
     for (i, p) in rgba.chunks_exact(4).enumerate() {
         let (x, y) = ((i % w) as i64, (i / w) as i64);
@@ -376,6 +437,9 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         if pr.max(pg).max(pb) > 30 {
             lit += 1;
         }
+        if (pr - bg[0]).abs() <= 6 && (pg - bg[1]).abs() <= 6 && (pb - bg[2]).abs() <= 6 {
+            empty += 1;
+        }
     }
     if lit == 0 {
         log.line(format!(
@@ -388,6 +452,7 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         amber: amber as f32 / n,
         lit: lit as f32 / n,
         centre_amber: centre,
+        empty: empty as f32 / n,
     };
     let path = format!("logs/{name}.png");
     let saved = std::fs::write(
@@ -399,9 +464,10 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         }),
     );
     log.line(format!(
-        "script: screenshot {name} {w}x{h}: {:.2}% amber, {:.1}% lit, {centre} amber at the centre; {}",
+        "script: screenshot {name} {w}x{h}: {:.2}% amber, {:.1}% lit, {:.1}% empty, {centre} amber at the centre; {}",
         stats.amber * 100.0,
         stats.lit * 100.0,
+        stats.empty * 100.0,
         match saved {
             Ok(()) => format!("saved to {path}"),
             Err(e) => format!("not saved ({e})"),

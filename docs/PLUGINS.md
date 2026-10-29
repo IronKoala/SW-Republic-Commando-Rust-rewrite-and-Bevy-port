@@ -21,9 +21,11 @@ the small set of types in `crates/rc_game_core`.
    or a camera for the player: `rc_game` does that. Your own test program
    (like `rc_walk`) can keep adding them.
 
-3. Until the level part is plugged in, `rc_game` loads maps with a stand-in
-   (`crates/rc_game/src/stand_in_level.rs`), so the game can be played and
-   tested now. When `LevelPlugin` is added, the stand-in line comes out.
+3. The level part (`rc_level_plugin::LevelPlugin`) is already plugged in:
+   it loads the map, its sky, collision and the player start while the
+   game is in `Loading`. If your part needs the map loaded first, run your
+   set-up `OnEnter(GameState::InGame)`, or check for `LevelCollision` while
+   loading.
 
 4. In `crates/rc_game/Cargo.toml` add your crate, and in
    `crates/rc_game/src/main.rs` add your plugin to the list marked
@@ -44,6 +46,8 @@ the small set of types in `crates/rc_game_core`.
 | Player input | read `ActionState` (`pressed(Action::Fire)`, `movement`, `look`). Never read keys, mouse or gamepad. |
 | Collide or trace | `LevelCollision` (Unreal units). The level part inserts it while loading, and may replace it at any time (moving doors) |
 | Where the player starts | the level part inserts `PlayerStart` (feet in Unreal units, yaw) while loading |
+| What the map has | `rc_level_plugin::LevelInfo` (counts, sky position), present while in the game |
+| A new camera the player looks through (VR) | give it `PlayerCamera`; the level part adds `SkyViewer` so the sky turns with it |
 | Recoil | send a `ViewKick { pitch, yaw }` message (radians); the player's view applies it |
 | Battle music | set `MusicMood::Battle` when a fight starts, `Calm` when it ends |
 | Where the player is | the entity with `Player`; the view is the entity with `PlayerCamera` |
@@ -60,7 +64,7 @@ A new action (a button the player presses) is added to `Action` in
 | Part | Writes | Reads |
 |---|---|---|
 | shell (`rc_game`): menus, settings, input, display, music | `GameState`, `Play`, `CurrentLevel`, `ActionState`, `GamePaths` | the readouts |
-| level | `LevelCollision`, `PlayerStart`, the map's look | `CurrentLevel`, `GamePaths` |
+| level (`rc_level_plugin`) | `LevelCollision`, `PlayerStart`, `LevelInfo`, the map's look and sky camera; `SkyViewer` on the player's camera | `CurrentLevel`, `GamePaths` |
 | player | the `Player` body, the `PlayerCamera` | `ActionState`, `LevelCollision` |
 | weapons and combat | `WeaponReadout`, `PlayerVitals` | `ActionState`, `PlayerCamera`, `LevelCollision` |
 | enemies | their own entities, `MusicMood` | `Player`, `LevelCollision` |

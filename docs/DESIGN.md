@@ -22,6 +22,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
+| `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
@@ -1036,9 +1037,38 @@ movement) is found through `GamePaths::data_file`, which looks in each
 enabled mod's folder (`mods/<name>/`) before `data/`. Lists that add up (the
 campaigns file) read every copy.
 
-**The stand-in level.** Until the levels part plugs in its own plugin,
-`stand_in_level.rs` loads a map the way `rc_walk --map` does (its collision
-code is a copy of `rc_walk/src/level.rs`). It is meant to be deleted then.
+**The level (`rc_level_plugin`).** `LevelPlugin` is the only part that
+reads the map. When the game enters `Loading` it tells the loading screen to
+wait (`LoadingGate`, part name `level`), waits three frames so the loading
+screen is drawn, then in one go:
+
+1. loads the collision with `rc_level::map_collision::load`: the BSP, every
+   placed prop, props and double doors whose model comes from their class,
+   and the blocking volumes that stop players. It becomes `LevelCollision`
+   (a `rc_movement::TriangleWorld`, in Unreal units);
+2. puts the player's feet one collision height (the commando's, from
+   `MoveParams`) under the map's first `PlayerStart` and inserts
+   `PlayerStart`. A map without one starts above its middle, and says so in
+   the log;
+3. draws the map with `rc_level_viewer::scene::build` and `draw::spawn_level`,
+   with brightness from an optional `levels/lighting.cfg` in a data folder
+   (so a mod can change it);
+4. if the map has a `SkyZoneInfo`, spawns the sky camera
+   (`rc_level_viewer::sky`) at camera order -1, under the player's camera
+   (order 0) and the menus' camera (order 1). Once the player's camera
+   exists, the plugin gives it `SkyViewer` (the sky camera copies its turn
+   and field of view every frame, so it lines up at any screen shape) and
+   stops it clearing the picture, so the sky shows where the level has
+   nothing.
+
+Everything it spawns carries `DespawnOnExit(InGame)`, and `LevelInfo` (the
+counts, for the log and the self-test) is removed on the way out. The
+plugin never reads input and never moves the camera, so a VR camera that
+carries `PlayerCamera` gets the sky the same way.
+
+Loading blocks the game while it runs (about 2 s for geo_01a in a debug
+build in the cloud). Moving it to a background thread is future work; the
+loading screen stays up meanwhile.
 
 **Checking without looking.** `rc_game --script` presses the same actions a
 player would and checks each step: menu pages, loading, the player moving
@@ -1046,4 +1076,9 @@ player would and checks each step: menu pages, loading, the player moving
 being cleared, options changing. It also captures the window twice and
 measures colours: the main menu must contain amber text, and in the level
 at least 30% of the screen must be lit with amber crosshair pixels at the
-centre.
+centre. With the level part plugged in it also checks the level's counts
+(collision triangles, props, props with their class's model, a player
+start), that the sky camera follows the player's camera, and looks up 60
+degrees in geo_01a: under 5% of the screen may be the empty background
+colour (it was 41% there before the sky was added, measured in the level
+viewer).

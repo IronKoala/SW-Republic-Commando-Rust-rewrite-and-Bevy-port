@@ -1,0 +1,19 @@
+[package]
+name = "rc_level_plugin"
+version = "0.1.0"
+edition.workspace = true
+description = "The level part of the game: loads the chosen mission's map into rc_game (its look, sky, collision and player start)."
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+rc_level = { path = "../rc_level" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Only what drawing a level
+# needs; the game program (rc_game) brings the window.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state", "3d_bevy_render"]
