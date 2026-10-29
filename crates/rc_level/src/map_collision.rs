@@ -1,19 +1,24 @@
-//! Load a map's collision: its BSP walls and floors plus every placed static
-//! mesh, as triangles (via `rc_level::collision`), and where the player
-//! starts.
+//! Load a map's collision from disk: its BSP walls and floors plus every
+//! placed static mesh, as triangles (via `crate::collision`), and where the
+//! player starts. Unlike the rest of this crate it opens files, because the
+//! static meshes live in other packages under `GameData`. Coordinates stay
+//! in Unreal units (X forward, Y right, Z up).
+//!
+//! Moved here from `rc_walk` so other programs (the droid AI tests, the
+//! game) can load the same collision without Bevy.
 
-use rc_level::actors::{self, Placement};
-use rc_level::bsp;
-use rc_level::collision::collision_triangles;
-use rc_movement::Vec3;
+use crate::actors::{self, Placement};
+use crate::bsp::{self, Vec3};
+use crate::collision::collision_triangles;
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub struct Level {
+pub struct MapCollision {
     pub triangles: Vec<[Vec3; 3]>,
-    /// Feet position and facing (radians) of the first PlayerStart.
+    /// Feet position and facing (radians, Unreal yaw) of the first
+    /// PlayerStart.
     pub start: Option<(Vec3, f32)>,
     pub bsp_nodes: usize,
     pub mesh_actors: usize,
@@ -97,7 +102,7 @@ fn load_mesh(pkgs: &mut Packages, map: &(Package, Vec<u8>), index: i32) -> Optio
     }
 }
 
-pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<Level, String> {
+pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<MapCollision, String> {
     let data = std::fs::read(map_path).map_err(|e| format!("can't read {}: {e}", map_path.display()))?;
     let pkg = Package::parse(&data).map_err(|e| e.to_string())?;
     let level = actors::read_level(&pkg, &data).map_err(|e| format!("level: {e}"))?;
@@ -118,7 +123,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         };
         if p.class == "PlayerStart" && start.is_none() {
             // Unreal stands the pawn with its centre at the PlayerStart.
-            let feet = Vec3::new(p.location[0], p.location[1], p.location[2] - collision_height);
+            let feet = [p.location[0], p.location[1], p.location[2] - collision_height];
             let yaw = p.rotation[1] as f32 / 65536.0 * std::f32::consts::TAU;
             start = Some((feet, yaw));
         }
@@ -141,9 +146,8 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         .filter_map(|(p, i)| cache.get(i).and_then(|m| m.as_ref()).map(|m| (p, m)))
         .collect();
     let mesh = collision_triangles(&bsp, &pairs);
-    let v = |p: [f32; 3]| Vec3::new(p[0], p[1], p[2]);
-    Ok(Level {
-        triangles: mesh.triangles.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect(),
+    Ok(MapCollision {
+        triangles: mesh.triangles,
         start,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
