@@ -4463,6 +4463,7 @@ dependencies = [
  "rc_level_plugin",
  "rc_menus",
  "rc_movement",
+ "rc_save",
  "rc_squad_plugin",
  "serde",
  "toml 0.8.23",
@@ -4554,6 +4555,16 @@ dependencies = [
  "rc_image",
  "rc_menus",
  "rc_package",
+]
+
+[[package]]
+name = "rc_save"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]

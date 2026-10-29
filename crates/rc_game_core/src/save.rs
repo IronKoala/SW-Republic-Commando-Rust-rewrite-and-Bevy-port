@@ -166,7 +166,10 @@ impl SaveSlot {
                     .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
                     .take(64)
                     .collect();
-                format!("save_{}.toml", if clean.is_empty() { "unnamed" } else { &clean })
+                format!(
+                    "save_{}.toml",
+                    if clean.is_empty() { "unnamed" } else { &clean }
+                )
             }
         }
     }

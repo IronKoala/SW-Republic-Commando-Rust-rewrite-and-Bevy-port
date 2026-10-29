@@ -6,7 +6,9 @@
 //! The route: the original main menu (colours checked against the
 //! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
 //! the level's walls and sky (looking up), walk forward, pause (nothing
-//! moves), resume, quit to the main menu (the level is cleared), OPTIONS
+//! moves), resume, saving (the level-start checkpoint, a checkpoint, a
+//! quicksave), walking away, quickload (the player is back where they
+//! saved, and saving again gives the same numbers), quit to the main menu (the level is cleared), OPTIONS
 //! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
 //! then QUIT again and YES).
 
@@ -18,6 +20,7 @@ use crate::settings::Settings;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GameSet, GameState, LevelCollision, Play, Player,
     PlayerCamera,
@@ -93,6 +96,8 @@ struct Shots {
 struct Noted {
     feet: Option<rc_movement::Vec3>,
     music_volume: f32,
+    /// The player's centre and facing when the quicksave was made.
+    saved: Option<(rc_movement::Vec3, f32)>,
 }
 
 pub struct ScriptPlugin;
@@ -124,6 +129,18 @@ fn page(w: &mut World) -> Page {
 fn feet(w: &mut World) -> Option<rc_movement::Vec3> {
     let mut q = w.query_filtered::<&Body, With<Player>>();
     q.iter(w).next().map(|b| b.pawn.feet())
+}
+
+/// The player's collision-box centre and facing.
+fn body(w: &mut World) -> Option<(rc_movement::Vec3, f32)> {
+    let mut q = w.query_filtered::<&Body, With<Player>>();
+    q.iter(w).next().map(|b| (b.pawn.location, b.yaw))
+}
+
+fn save_file(w: &mut World, slot: &SaveSlot) -> Result<rc_save::file::SaveFile, String> {
+    let dir = w.resource::<rc_save::SaveFolder>().0.clone();
+    rc_save::file::read(&rc_save::file::slot_path(&dir, slot))
+        .map_err(|e| format!("{}: {e}", slot.file_name()))
 }
 
 fn set_pitch(w: &mut World, pitch: f32) {
@@ -248,11 +265,13 @@ fn steps() -> Vec<Step> {
                 Err(format!("{s:?}"))
             }
         }),
-        Check("the level part loaded walls, props, doors and invisible walls", |w| {
-            let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
-                return Err("no LevelInfo".into());
-            };
-            let got = format!(
+        Check(
+            "the level part loaded walls, props, doors and invisible walls",
+            |w| {
+                let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
+                    return Err("no LevelInfo".into());
+                };
+                let got = format!(
                 "{}: {} collision triangles, {} props ({} with their class's model), {} blocking volumes, start {}",
                 i.map,
                 i.collision_triangles,
@@ -261,18 +280,22 @@ fn steps() -> Vec<Step> {
                 i.blocking_volumes,
                 if i.has_player_start { "from the map" } else { "MISSING" }
             );
-            if i.collision_triangles > 10_000 && i.props > 0 && i.class_props > 0 && i.has_player_start {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+                if i.collision_triangles > 10_000
+                    && i.props > 0
+                    && i.class_props > 0
+                    && i.has_player_start
+                {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Check("the sky camera turns with the player's camera", |w| {
             let sky = count::<rc_level_plugin::SkyCamera>(w);
-            let mut q = w.query_filtered::<&Camera, (
-                With<PlayerCamera>,
-                With<rc_level_plugin::SkyFollows>,
-            )>();
+            let mut q = w
+                .query_filtered::<&Camera, (With<PlayerCamera>, With<rc_level_plugin::SkyFollows>)>(
+                );
             let follows = q
                 .iter(w)
                 .filter(|c| matches!(c.clear_color, ClearColorConfig::None))
@@ -280,7 +303,9 @@ fn steps() -> Vec<Step> {
             if sky == 1 && follows == 1 {
                 Ok("1 sky camera; the player's camera lets it through".into())
             } else {
-                Err(format!("{sky} sky cameras, {follows} player cameras following"))
+                Err(format!(
+                    "{sky} sky cameras, {follows} player cameras following"
+                ))
             }
         }),
         // Look up 60 degrees: geo_01a shows open sky above the spires there.
@@ -348,6 +373,114 @@ fn steps() -> Vec<Step> {
                 p => Err(format!("{p:?}")),
             }
         }),
+        Check("the level's start was saved as a checkpoint", |w| {
+            let f = save_file(w, &SaveSlot::Checkpoint)?;
+            let got = format!("{} at {:?}", f.header.map, f.header.checkpoint);
+            match f.header.checkpoint.as_deref() {
+                Some(rc_save::LEVEL_START) => Ok(got),
+                _ => Err(got),
+            }
+        }),
+        Note(|w| {
+            w.write_message(CheckpointReached {
+                name: "script checkpoint".into(),
+            });
+        }),
+        Wait(0.2),
+        Check("reaching a checkpoint saves it", |w| {
+            let f = save_file(w, &SaveSlot::Checkpoint)?;
+            match f.header.checkpoint.as_deref() {
+                Some("script checkpoint") => Ok("checkpoint.toml at \"script checkpoint\"".into()),
+                c => Err(format!("{c:?}")),
+            }
+        }),
+        Note(|w| {
+            let b = body(w);
+            w.resource_mut::<Noted>().saved = b;
+        }),
+        Press(Action::QuickSave),
+        Wait(0.2),
+        Check("quicksave writes where the player is", |w| {
+            let f = save_file(w, &SaveSlot::Quick)?;
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no player")?;
+            let p = f.part("player").ok_or("no [player] section")?;
+            let loc: Vec<f32> = p["location"]
+                .as_array()
+                .ok_or("no location")?
+                .iter()
+                .filter_map(|v| v.as_float().map(|f| f as f32))
+                .collect();
+            let d = (rc_movement::Vec3::new(loc[0], loc[1], loc[2]) - at).length();
+            let got = format!(
+                "{} sections, player at ({:.1}, {:.1}, {:.1}), {d:.2} uu from the live player",
+                f.parts.len(),
+                loc[0],
+                loc[1],
+                loc[2]
+            );
+            if d < 1.0 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Hold(Action::MoveForward, 1.0),
+        Check("walked away from the saved spot", |w| {
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let (now, _) = body(w).ok_or("no player")?;
+            let d = (now - at).length_2d();
+            if d > 100.0 {
+                Ok(format!("{d:.0} uu away"))
+            } else {
+                Err(format!("only {d:.0} uu"))
+            }
+        }),
+        Press(Action::QuickLoad),
+        Until(
+            "quickload reloads the level",
+            |w| !in_state(w, GameState::InGame),
+            5.0,
+        ),
+        Until(
+            "quickload finished",
+            |w| in_state(w, GameState::InGame) && !w.contains_resource::<RestoringSave>(),
+            LOAD_TIMEOUT,
+        ),
+        Wait(0.3),
+        Check("quickload puts the player back where they saved", |w| {
+            let (at, yaw) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let (now, now_yaw) = body(w).ok_or("no player")?;
+            let d = (now - at).length();
+            let turn = (now_yaw - yaw).abs();
+            let got = format!("{d:.2} uu from the saved spot, facing {:.3} rad off", turn);
+            if d < 2.0 && turn < 0.001 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("saving again after the load gives the same state", |w| {
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let again = rc_save::collect(w, None)?;
+            let mut notes = vec![];
+            for (k, v) in &quick.parts {
+                let Some(b) = again.parts.get(k) else {
+                    return Err(format!("[{k}] missing after the load"));
+                };
+                let diff = rc_save::file::largest_difference(v, b)
+                    .ok_or(format!("[{k}] changed shape: {v} vs {b}"))?;
+                notes.push(format!("[{k}] off by {diff:.3}"));
+                if diff > 2.0 {
+                    return Err(notes.join(", "));
+                }
+            }
+            if again.header.map != quick.header.map
+                || again.header.checkpoint != quick.header.checkpoint
+            {
+                return Err(format!("{:?} vs {:?}", again.header, quick.header));
+            }
+            Ok(notes.join(", "))
+        }),
         Press(Action::Pause),
         Wait(0.2),
         Press(Action::MenuDown),
@@ -364,12 +497,13 @@ fn steps() -> Vec<Step> {
                 Err(format!("{p} players, {c} cameras, {meshes} meshes left"))
             }
         }),
-        Check("the original main menu is back, focus on NEW GAME", |w| {
-            match (w.resource::<OriginalMenus>().active(), focus(w)) {
+        Check(
+            "the original main menu is back, focus on NEW GAME",
+            |w| match (w.resource::<OriginalMenus>().active(), focus(w)) {
                 (true, Some(f)) if f == "MenuOptions[0]" => Ok(f),
                 other => Err(format!("{other:?}")),
-            }
-        }),
+            },
+        ),
         Note(|w| {
             let v = w.resource::<Settings>().audio.music_volume;
             w.resource_mut::<Noted>().music_volume = v;
@@ -397,9 +531,11 @@ fn steps() -> Vec<Step> {
         }),
         Press(Action::MenuBack),
         Wait(0.2),
-        Check("Back returns to the original main menu", |w| match page(w) {
-            Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
-            p => Err(format!("{p:?}")),
+        Check("Back returns to the original main menu", |w| {
+            match page(w) {
+                Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
+                p => Err(format!("{p:?}")),
+            }
         }),
         FocusAfter(Action::MenuDown, "MenuOptions[7]"),
         Press(Action::MenuAccept), // QUIT
@@ -471,12 +607,15 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
     let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
     let ours = shrink(&shot, area, W, H);
     let mut menus = w.resource_mut::<OriginalMenus>();
-    let reference =
-        original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
     let mut total = 0.0f64;
     let mut worst = 0.0f64;
     let mut far = 0usize;
-    for (a, b) in ours.pixels.chunks_exact(4).zip(reference.pixels.chunks_exact(4)) {
+    for (a, b) in ours
+        .pixels
+        .chunks_exact(4)
+        .zip(reference.pixels.chunks_exact(4))
+    {
         let d = (0..3)
             .map(|k| (a[k] as f64 - b[k] as f64).abs())
             .sum::<f64>()
