@@ -19,6 +19,11 @@ use crate::{Export, Package, Reader};
 /// its defaults, in bytes. The biggest weapon defaults seen are under 2 KB.
 const SEARCH_BYTES: usize = 16 * 1024;
 
+/// Largest array position accepted in a defaults list. The game's fixed
+/// arrays are far smaller (the biggest seen is 16); a false start reads
+/// junk like `Tag[14081]` in CTBot's data, and this rejects it.
+const MAX_ARRAY_INDEX: u32 = 256;
+
 /// A class's own default values and where they were found.
 #[derive(Debug, Clone)]
 pub struct Defaults {
@@ -57,6 +62,7 @@ pub fn class_defaults(
         }
         let clean = props.iter().all(|p| {
             !matches!(p.kind, PropertyType::Unknown(_) | PropertyType::Map)
+                && p.array_index < MAX_ARRAY_INDEX
                 && is_property(pkg.name(p.name))
         });
         if clean {
