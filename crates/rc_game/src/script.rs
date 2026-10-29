@@ -6,7 +6,10 @@
 //! The route: the original main menu (colours checked against the
 //! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
 //! the level's walls and sky (looking up), walk forward, pause (nothing
-//! moves), resume, quit to the main menu (the level is cleared), OPTIONS
+//! moves), resume, saving (the level-start checkpoint, a checkpoint, a
+//! quicksave), walking away, quickload (the player is back where they
+//! saved, and saving again gives the same numbers), quit to the main menu
+//! (the level is cleared), OPTIONS
 //! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
 //! then QUIT again and YES).
 
@@ -22,6 +25,7 @@ use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GameSet, GameState, LevelCollision, Play, Player,
     PlayerCamera,
 };
+use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use std::collections::HashSet;
 
 /// How long to wait for a level to load before failing, seconds.
@@ -93,6 +97,8 @@ struct Shots {
 struct Noted {
     feet: Option<rc_movement::Vec3>,
     music_volume: f32,
+    /// The player's centre and facing when the quicksave was made.
+    saved: Option<(rc_movement::Vec3, f32)>,
 }
 
 pub struct ScriptPlugin;
@@ -124,6 +130,18 @@ fn page(w: &mut World) -> Page {
 fn feet(w: &mut World) -> Option<rc_movement::Vec3> {
     let mut q = w.query_filtered::<&Body, With<Player>>();
     q.iter(w).next().map(|b| b.pawn.feet())
+}
+
+/// The player's collision-box centre and facing.
+fn body(w: &mut World) -> Option<(rc_movement::Vec3, f32)> {
+    let mut q = w.query_filtered::<&Body, With<Player>>();
+    q.iter(w).next().map(|b| (b.pawn.location, b.yaw))
+}
+
+fn save_file(w: &mut World, slot: &SaveSlot) -> Result<rc_save::file::SaveFile, String> {
+    let dir = w.resource::<rc_save::SaveFolder>().0.clone();
+    rc_save::file::read(&rc_save::file::slot_path(&dir, slot))
+        .map_err(|e| format!("{}: {e}", slot.file_name()))
 }
 
 fn set_pitch(w: &mut World, pitch: f32) {
@@ -347,6 +365,138 @@ fn steps() -> Vec<Step> {
                 Some(Play::Running) => Ok("running".into()),
                 p => Err(format!("{p:?}")),
             }
+        }),
+        Check("the level's start was saved as a checkpoint", |w| {
+            let f = save_file(w, &SaveSlot::Checkpoint)?;
+            let got = format!("{} at {:?}", f.header.map, f.header.checkpoint);
+            match f.header.checkpoint.as_deref() {
+                Some(rc_save::LEVEL_START) => Ok(got),
+                _ => Err(got),
+            }
+        }),
+        Note(|w| {
+            w.write_message(CheckpointReached {
+                name: "script checkpoint".into(),
+            });
+        }),
+        Wait(0.2),
+        Check("reaching a checkpoint saves it", |w| {
+            let f = save_file(w, &SaveSlot::Checkpoint)?;
+            match f.header.checkpoint.as_deref() {
+                Some("script checkpoint") => Ok("checkpoint.toml at \"script checkpoint\"".into()),
+                c => Err(format!("{c:?}")),
+            }
+        }),
+        // Use some ammo first, so the save differs from a fresh start.
+        Hold(Action::Fire, 0.5),
+        Wait(0.2),
+        Note(|w| {
+            let b = body(w);
+            w.resource_mut::<Noted>().saved = b;
+        }),
+        Press(Action::QuickSave),
+        Wait(0.2),
+        Check("quicksave writes where the player is", |w| {
+            let f = save_file(w, &SaveSlot::Quick)?;
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no player")?;
+            let p = f.part("player").ok_or("no [player] section")?;
+            let loc: Vec<f32> = p["location"]
+                .as_array()
+                .ok_or("no location")?
+                .iter()
+                .filter_map(|v| v.as_float().map(|f| f as f32))
+                .collect();
+            let d = (rc_movement::Vec3::new(loc[0], loc[1], loc[2]) - at).length();
+            let got = format!(
+                "{} sections, player at ({:.1}, {:.1}, {:.1}), {d:.2} uu from the live player",
+                f.parts.len(),
+                loc[0],
+                loc[1],
+                loc[2]
+            );
+            if d < 1.0 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Hold(Action::MoveForward, 1.0),
+        Check("walked away from the saved spot", |w| {
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let (now, _) = body(w).ok_or("no player")?;
+            let d = (now - at).length_2d();
+            if d > 100.0 {
+                Ok(format!("{d:.0} uu away"))
+            } else {
+                Err(format!("only {d:.0} uu"))
+            }
+        }),
+        Press(Action::QuickLoad),
+        Until(
+            "quickload reloads the level",
+            |w| !in_state(w, GameState::InGame),
+            5.0,
+        ),
+        Until(
+            "quickload finished",
+            |w| in_state(w, GameState::InGame) && !w.contains_resource::<RestoringSave>(),
+            LOAD_TIMEOUT,
+        ),
+        Wait(0.3),
+        Check("quickload puts the player back where they saved", |w| {
+            let (at, yaw) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let (now, now_yaw) = body(w).ok_or("no player")?;
+            let d = (now - at).length();
+            let turn = (now_yaw - yaw).abs();
+            let got = format!("{d:.2} uu from the saved spot, facing {:.3} rad off", turn);
+            if d < 2.0 && turn < 0.001 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("quickload gives back the ammo used before saving", |w| {
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let c = quick.part("combat").ok_or("no [combat] section")?;
+            let saved = c["weapons"].as_array().and_then(|a| a.first()).ok_or("no weapons")?;
+            let saved_clip = saved["clip"].as_float().ok_or("no clip")? as f32;
+            let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+            let a = q.iter(w).next().ok_or("player has no weapons")?;
+            let (id, now) = a.weapons.first().ok_or("no weapons")?;
+            let full = w
+                .resource::<rc_combat::WeaponLibrary>()
+                .weapons
+                .get(id)
+                .map(|p| rc_combat::WeaponState::new(p).clip)
+                .unwrap_or(0.0);
+            let got = format!("{id}: {:.0} in the magazine now, {saved_clip:.0} saved, {full:.0} when full", now.clip);
+            if (now.clip - saved_clip).abs() < 0.01 && saved_clip < full {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("saving again after the load gives the same state", |w| {
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let again = rc_save::collect(w, None)?;
+            let mut notes = vec![];
+            for (k, v) in &quick.parts {
+                let Some(b) = again.parts.get(k) else {
+                    return Err(format!("[{k}] missing after the load"));
+                };
+                let diff = rc_save::file::largest_difference(v, b)
+                    .ok_or(format!("[{k}] changed shape: {v} vs {b}"))?;
+                notes.push(format!("[{k}] off by {diff:.3}"));
+                if diff > 2.0 {
+                    return Err(notes.join(", "));
+                }
+            }
+            if again.header.map != quick.header.map
+                || again.header.checkpoint != quick.header.checkpoint
+            {
+                return Err(format!("{:?} vs {:?}", again.header, quick.header));
+            }
+            Ok(notes.join(", "))
         }),
         Press(Action::Pause),
         Wait(0.2),

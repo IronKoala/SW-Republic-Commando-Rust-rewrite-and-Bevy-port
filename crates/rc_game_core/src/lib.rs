@@ -22,6 +22,8 @@
 //! - [`MusicMood`]: calm or battle music; whoever knows a fight started
 //!   sets it.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
+//! - [`save`]: the interface each part fills in so it is saved and loaded
+//!   ([`save::SavePart`]), and the save, load and checkpoint messages.
 //!
 //! This crate has no window or renderer in it, so it builds quickly and its
 //! tests run anywhere.
@@ -30,6 +32,7 @@ mod actions;
 mod hud;
 mod log;
 pub mod paths;
+pub mod save;
 mod state;
 pub mod units;
 
@@ -64,6 +67,11 @@ impl Plugin for CorePlugin {
             .init_resource::<MusicMood>()
             .add_message::<HudMessage>()
             .add_message::<ViewKick>()
+            .init_resource::<save::SaveList>()
+            .add_message::<save::SaveGame>()
+            .add_message::<save::LoadGame>()
+            .add_message::<save::CheckpointReached>()
+            .add_message::<save::SaveResult>()
             .configure_sets(
                 Update,
                 (

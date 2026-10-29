@@ -27,7 +27,10 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
+pub mod save;
+
 use bevy::prelude::*;
+use rc_game_core::save::SaveAppExt;
 use rc_combat::{CombatSet, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded, Team};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -196,7 +199,17 @@ impl Plugin for SquadPlugin {
             .init_resource::<SquadState>()
             .init_resource::<SquadThreats>()
             .init_resource::<SquadFightStats>()
+            .add_save_part::<save::SquadSave>()
             .add_systems(OnEnter(GameState::Loading), load_map_data)
+            .add_systems(
+                Update,
+                save::apply_pending
+                    .in_set(GameSet::Simulate)
+                    .in_set(SquadSet)
+                    .after(spawn_squad)
+                    .before(check_down)
+                    .run_if(resource_exists::<save::PendingSquadSave>),
+            )
             .add_systems(OnExit(GameState::InGame), clear_squad)
             .add_systems(
                 Update,

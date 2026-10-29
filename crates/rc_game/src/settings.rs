@@ -19,6 +19,7 @@ pub struct Settings {
     pub video: VideoSection,
     pub audio: AudioSection,
     pub controls: ControlsSection,
+    pub save: SaveSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -91,6 +92,16 @@ pub struct AudioSection {
     pub effects_volume: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct SaveSection {
+    /// Where save files go. Empty means the system's usual place
+    /// (`%APPDATA%\rc_game\saves` on Windows, `~/.local/share/rc_game/saves`
+    /// on Linux, `saves` next to the settings file elsewhere). Never the
+    /// game's install.
+    pub folder: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ControlsSection {
@@ -141,6 +152,7 @@ impl Default for Settings {
                 stick_dead_zone: 0.15,
                 stick_look_curve: 1.5,
             },
+            save: SaveSection::default(),
         }
     }
 }
@@ -218,6 +230,12 @@ stick_look_speed = 2.5             # radians per second at full stick
 invert_y = false
 stick_dead_zone = 0.15
 stick_look_curve = 1.5             # 1 is straight; higher is finer near the middle
+
+[save]
+# Where save files go (quicksave, checkpoint and named saves, as readable
+# text files). Leave empty for the usual place: %APPDATA%\rc_game\saves on
+# Windows, ~/.local/share/rc_game/saves on Linux.
+folder = ''
 "#;
 
 impl Settings {
