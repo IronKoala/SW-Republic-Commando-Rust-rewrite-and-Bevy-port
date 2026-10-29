@@ -59,14 +59,15 @@ copy of the game.
   screen: outline match 0.996 and colour difference 1.04 of 255, PASS. It also
   works for the DC-17m, the DC-15s pistol and the thermal detonator.
 
-- **Characters with animation (tested in the cloud, not yet on Windows).**
+- **Characters with animation (tested on Windows).**
   `rc_probe --characters` reads every character body ("skeletal mesh") and
   animation set in the game: all 131 meshes and 165 animation sets (1,414
   animations) in the 20 animation packages read with no failures.
   `rc_character` opens a 3D window with a textured clone trooper walking on
   the spot. It checks itself by capturing the window and comparing the
   character's outline with the one it expects (score 0.99 of 1.0; 0.95
-  passes). Battle droids work too.
+  passes) and checking its colours match the skin. Battle droids work too.
+  On the user's Windows PC the clone scored 0.993 with the right colours.
 
 ## What doesn't work yet
 

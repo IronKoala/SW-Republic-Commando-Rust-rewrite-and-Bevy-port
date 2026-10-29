@@ -9,8 +9,9 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Why:** The user ran `rc_character` on Windows: the clone moved correctly but was pink. Cause (my mistake): when I switched `rc_character` to the same Bevy feature list as `rc_viewer` to share one build, I dropped `tonemapping_luts`. Bevy's default colour grading needs those tables and draws every lit pixel magenta without them. The outline check only compared shapes, so it still passed.
 - **Tested how:** Read `logs\rc_character.log` from the user's PC: `character pixels' average colour R 253 G 1 B 254`, outline match 0.989 PASS. Reproduced it in the cloud sandbox (R 253 G 1 B 253, plus Bevy's log error "TonyMcMapFace tonemapping requires the `tonemapping_luts` feature"). Then fixed it and re-ran.
 - **Result:** Clone R 167 G 166 B 165 on screen vs skin R 142 G 139 B 137; colour balance difference 0.005 (BattleDroid 0.013, SuperBattleDroid 0.001), all PASS. With the fix removed on purpose, the new check reports 0.331, `colour WRONG`, FAIL, exit code 1.
-- **Still broken / not tested:** The fix is not yet re-run on Windows.
-- **Next:** User re-runs `cargo run --release -p rc_character`.
+- **Windows re-run:** The user re-ran it on Windows ("he's beautiful"). Their log: `colour balance differs from the skin's by 0.005`, `on-screen check PASS: outline match 0.993 ..., colour ok`.
+- **Still broken / not tested:** Nothing new.
+- **Next:** Merge PR #9.
 
 ## 2026-10-29: Characters: skeletal meshes, animations, and an animated clone trooper in 3D
 
