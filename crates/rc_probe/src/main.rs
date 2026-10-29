@@ -16,10 +16,15 @@
 //!                            check it, log to `logs/rc_meshes.log`
 //!   rc_probe --export-textures <path>  the same, and also write each texture
 //!                            as a PNG to `extracted/textures/<package>/`
+//!   rc_probe --characters [path]  read every character mesh and animation in
+//!                            a package or folder (default: GameData/Animations),
+//!                            play the animations and measure them, log to
+//!                            `logs/rc_characters.log`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
+mod characters;
 mod meshes;
 mod pixels;
 mod textures;
@@ -36,6 +41,7 @@ const PACKAGE_EXTENSIONS: &[&str] = &["u", "ctm", "utx", "uax", "usx", "ukx"];
 const LOG_PATH: &str = "logs/rc_probe.log";
 const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
 const MESH_LOG_PATH: &str = "logs/rc_meshes.log";
+const CHARACTER_LOG_PATH: &str = "logs/rc_characters.log";
 /// Gitignored folder for anything extracted from the game.
 const EXTRACT_DIR: &str = "extracted/textures";
 
@@ -63,7 +69,8 @@ fn main() {
     let export_mode = args.first().is_some_and(|a| a == "--export-textures");
     let texture_mode = export_mode || args.first().is_some_and(|a| a == "--textures");
     let mesh_mode = args.first().is_some_and(|a| a == "--meshes");
-    if texture_mode || mesh_mode {
+    let character_mode = args.first().is_some_and(|a| a == "--characters");
+    if texture_mode || mesh_mode || character_mode {
         args.remove(0);
     }
     if export_mode && args.is_empty() {
@@ -78,12 +85,15 @@ fn main() {
         Some(arg) => PathBuf::from(arg),
         None if texture_mode => game.join("GameData"),
         None if mesh_mode => game.join("GameData").join("StaticMeshes"),
+        None if character_mode => game.join("GameData").join("Animations"),
         None => game.join("GameData").join("System").join("Core.u"),
     };
     let log_path = if texture_mode {
         TEXTURE_LOG_PATH
     } else if mesh_mode {
         MESH_LOG_PATH
+    } else if character_mode {
+        CHARACTER_LOG_PATH
     } else {
         LOG_PATH
     };
@@ -110,6 +120,8 @@ fn main() {
         textures::scan(&mut log, &target, export_dir)
     } else if mesh_mode {
         meshes::scan(&mut log, &target)
+    } else if character_mode {
+        characters::scan(&mut log, &target)
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {
