@@ -16,8 +16,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
 | `rc_movement` | The player's walking, jumping, crouching and collision, with the game's own numbers. No Bevy. |
 | `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
-| `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, and each prop's baked corner colours. No Bevy. |
-| `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`) that `rc_walk` uses to draw maps. |
+| `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, each prop's baked corner colours, blocking volumes, models that come from a prop's class, and a map's walking collision (`map_collision`). No Bevy. |
+| `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, with its sky, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`, `sky`) that `rc_walk` uses to draw maps. `rc_level_check` loads every map without a window and logs the results. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
@@ -783,7 +783,9 @@ reads them from the end of the `Model` object, after the vertex pool:
 3. Lightmap rectangles: page, surface, zone, top-left corner and size on the
    page (compact indexes), a 4x4 "world to lightmap" matrix and 9 more
    decimals, then a "shadow bitmap" for each dynamic light that touches it
-   (the light, a byte array, 7 numbers), then 5 more indexes.
+   (the light, a byte array, 7 numbers), then one compact index and one
+   4-byte number. (We first read 5 compact indexes here; that happened to
+   work on the first maps and broke 12 others.)
 4. Pages: the rectangles on it, 3 numbers, two sizes of pixels (each stored
    as a "lazy array": the file position of its end, a length, the bytes),
    then the pixel format (7 = DXT3 in every map so far), width, height and a
@@ -824,6 +826,40 @@ pitch, then roll, Unreal's standard order), then move to `Location`.
 
 The `Level` object holds one unknown byte (always 0 so far), the actor list,
 the map's URL, and then the BSP model reference.
+
+**Values that come from the class.** A map only stores the settings a
+designer changed. Most props (barrels, lamps, bacta dispensers, wall
+pieces) and the double-door movers (`MoverDB_*`) have no `StaticMesh` in
+the map at all: their model is the class's default, stored at the end of
+the class in a script package (`Properties/StaticPropProperties.u`,
+`KarmaPropProperties.u`, `CTInventory.u` and others). `rc_level::class_look`
+walks the class and its parents across packages (nearest class wins) using
+`rc_package::class_defaults`, and fills in `StaticMesh`, `DrawScale`,
+`DrawScale3D` and `bHidden` where the map leaves them out. A class whose
+`DrawType` isn't "static mesh" (8) is left alone, and markers are hidden in
+the game, so they stay hidden. Across all 79 maps this adds 3,460 props.
+
+**Blocking volumes** (`rc_level::volumes`). Invisible walls the designers
+used to keep the player in bounds. Each has a small BSP model (its brush)
+in the brush's own space: subtract `PrePivot`, turn by `Rotation`, then move
+to `Location` (`MainScale` and `PostScale` were 1 in every map). Flags say
+whether it stops players (`bBlockPlayers`), the AI (`bBlockActors`) and
+shots (`bBlockZeroExtentTraces`). The ones that stop players are added to
+the walking collision. Check: only 11 of 8,942 AI path points are inside a
+volume (107 with `PrePivot` ignored, 115 turned a quarter wrong).
+
+**The sky.** Unreal 2 draws the sky from a small sky box somewhere in the
+map, marked by a `SkyZoneInfo`. Windows onto it are BSP surfaces flagged
+"fake backdrop". `rc_level_viewer/src/sky.rs` puts a second camera at the
+`SkyZoneInfo` on its own render layer; it turns with the player but never
+moves, and draws first. The player's camera then draws the level without
+clearing, leaving out the fake backdrop polygons, so the sky shows through.
+Which polygons and props are in the sky box comes from the BSP zone tree
+(`Bsp::point_zone`). 67 of 79 maps have one.
+
+**Collision without Bevy** (`rc_level::map_collision`). Loads a map's BSP,
+placed props (with class models) and player-blocking volumes as triangles,
+plus the first `PlayerStart`. `rc_walk` uses it, and other programs can.
 
 ### Showing a level (`rc_level_viewer`)
 
@@ -867,6 +903,11 @@ It starts at the first `PlayerStart`, 64 units above it, facing its yaw.
 - **Lightmap checks**: the ones listed under "Baked light on the walls". If
   the lightmaps can't be read, the level still loads and draws unlit, and the
   log says why.
+- **Every map** (`rc_level_check`): builds all maps in `GameData/Maps` without
+  a window and writes one block per map to `logs/rc_level_check.log` (BSP,
+  lightmaps, props, materials, volumes, sky, floor test), then a summary
+  line per map. A crash in one map is logged as that map failing. Exits
+  with 1 if any map failed.
 
 ## Sounds
 
@@ -1196,3 +1237,101 @@ view is the droid's colour.
   can ignore.
 - **Windows, Linux and Android:** plain Rust and Bevy, no operating-system
   code. Tested on Linux in the cloud only.
+
+## The game program (`rc_game`)
+
+`rc_game` is built from Bevy plugins. Parts don't call each other; they
+share the types in `rc_game_core`. How a part plugs in is in
+`docs/PLUGINS.md`.
+
+**Screens.** `GameState` is `Boot` (read settings) then `MainMenu`, `Loading`
+and `InGame`. While in `InGame` a second state, `Play`, is `Running` or
+`Paused`, so pausing never counts as leaving the level. Gameplay systems run
+only while `Running`. Everything spawned for a level carries
+`DespawnOnExit(GameState::InGame)` and is cleared on the way back to the
+menu (the script checks that no player, camera or level mesh is left).
+
+**Loading.** The menu sets `CurrentLevel` and enters `Loading`. Any part with
+slow work calls `LoadingGate::wait("name")` and later `done("name")` or
+`fail("name", reason)`. The shell moves to `InGame` when nothing is waiting
+(and at least one frame has passed, so every part has had its turn); on a
+failure it goes back to the menu and shows the reason.
+
+**Input.** Devices are read in one place (`input.rs`) into `ActionState`:
+which actions are held this frame, a movement direction and a turn amount.
+Gameplay reads only that. The bindings file maps keys, mouse buttons and
+wheel, gamepad buttons and sticks to actions; touch screens move with a drag
+on the left half, look with a drag on the right half, and fire with a tap.
+The keyboard defaults are the original's `DefaultCtrl.ini`. A scripted run
+or a VR mod writes `ActionState` itself instead.
+
+**The player.** `player.rs` moves a body with `rc_movement` (as `rc_walk`
+does) from `ActionState`, and puts a separate camera at its eyes. The
+camera is not a child of the body, so a VR headset can replace it.
+
+**Menus.** *Placeholders:* these menus and the display below are our own
+stand-ins until the original's menus and HUD are read from the install
+(`docs/ORIGINAL_MENUS.md`). Each menu is a page: a title and a list of items, drawn with
+Bevy's UI and the theme file's colours. Pages: main, campaign list, a
+campaign's levels, options, pause, and "game files not found". The mission
+names, order and loading text come from the game's own
+`GameData/System/LevelLoadingInfo.int` (plain text with numbered entries
+like `MapName[3]="GEO_03A"`), read at start-up, never copied into the repo.
+`data/levels/campaigns.toml` only groups them by name prefix. Sizes are a
+share of the screen height, or of its width when that is smaller, so the
+menus fit a phone or a monitor.
+
+**Screen shapes and controls.** The view is "Hor+": `video.fov` is the
+angle across a 4:3 screen, as in the original, and wider screens see more
+at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+numbers and what is still to do (edge stretching on ultrawides, controller
+pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
+
+**On-screen display.** Corner brackets like the commando's visor, a
+four-bar crosshair whose gap follows the weapon's spread and turns red on a
+target, shield and health bars, the ammo counter, a squad list and short
+messages. It reads only the readout resources, and logs its numbers every
+two seconds.
+
+**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
+`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
+track and, per map name prefix, a calm and a battle list; `MusicMood`
+chooses between them. Each track is despawned when it ends and the next one
+starts.
+
+**Mods.** Everything we ship as data (controls, theme, music, campaigns,
+movement) is found through `GamePaths::data_file`, which looks in each
+enabled mod's folder (`mods/<name>/`) before `data/`. Lists that add up (the
+campaigns file) read every copy.
+
+**The stand-in level.** Until the levels part plugs in its own plugin,
+`stand_in_level.rs` loads a map the way `rc_walk --map` does (its collision
+code is a copy of `rc_walk/src/level.rs`). It is meant to be deleted then.
+
+**Checking without looking.** `rc_game --script` presses the same actions a
+player would and checks each step: menu pages, loading, the player moving
+430 units in a second of walking, nothing moving while paused, the level
+being cleared, options changing. It also captures the window twice and
+measures colours: the main menu must contain amber text, and in the level
+at least 30% of the screen must be lit with amber crosshair pixels at the
+centre.
+
+## Automatic checks on GitHub (`.github/workflows/ci.yml`)
+
+Every pull request, and every push to `main`, is built and tested by GitHub's
+own machines on Windows and Linux. A pull request shows a green tick or a red
+cross for each. The steps are `cargo build --workspace --all-targets --locked`
+and `cargo test --workspace --locked`. `--locked` means the exact library
+versions in `Cargo.lock` are used. Linux also installs the system libraries
+Bevy needs (sound, gamepads, windows). The build folder is cached between
+runs, so a run that changes little is much quicker than the first.
+
+The game is never on GitHub, so `RC_GAME_DIR` is not set there. Unit tests
+must not need game files. A future test that does should check for
+`RC_GAME_DIR`, print "skipped: no game folder" and pass when it isn't set.
+
+A third job runs `cargo fmt --check` (code layout) and `cargo clippy` (common
+mistakes). It only reports: its problems show as warnings and never turn the
+run red. The checks do not open windows or draw anything, so the Bevy
+programs' own `--script` and screenshot checks are not run there, and Android
+is not built yet.

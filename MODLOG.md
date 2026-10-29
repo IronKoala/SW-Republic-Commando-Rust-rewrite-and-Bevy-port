@@ -5,6 +5,8 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
 ## 2026-10-29: Battle droids in the game (rc_enemies, rc_droidview)
 
+## 2026-10-29: A firing range for the weapons (rc_shoot), with the game's sounds and gun model
+
 - **Changed:** New crate `crates/rc_enemies` with `EnemiesPlugin` (see `docs/DESIGN.md`, "Enemies"): reads the map's spawners and paths while loading, runs the fight each frame, spawns droids with `rc_combat`'s `Health`, `Team::Separatist` and `Hittable`, sends their shots as `FireShot`, reacts to `Damage` and `Died`, hears the player's shots, sets `MusicMood`, and poses the game's `BattleDroid` mesh on the CPU (skin loading copied from `rc_character`). New program `rc_droidview` (watch a fight in a real level; `--check` tests the picture). `rc_ai`: new `battle.rs` (`Battle`: spawners, droids, hearing; `rc_droidsim` now uses it too) and a `[look]` section in `data/enemies/battle_droid.toml` (mesh, which animation for what, `ambient`). `rc_game`: adds `CombatPlugin` and `EnemiesPlugin` (4 lines). Merged the shell's `rc_game` and the weapons part's `rc_combat` branches.
 - **Why:** The enemies part of the overnight plan, plugged into the game.
 - **Tested how:** `cargo test -p rc_enemies` (2 tests, the plugin with the real combat plugin in the movement test room). `rc_droidview --check --seconds 40` on geo_01a and `rc_game --script` under a virtual screen (xvfb, software rendering) in the cloud sandbox, with the needed game files copied read-only from the install. `rc_droidsim geo_01a --seconds 60` again after moving its loop into `Battle`.
@@ -12,6 +14,60 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Fixed on the way:** The first picture had black droids (the level's light is baked into its surfaces and the scene has no ambient light), so droids get a steady `ambient = 0.5` of their own colour, a guess. Then 50 to 92 of about 180 droid bolts hit other droids: two droids had walked to the same spot and stood inside each other (characters only collide with the level). `Battle` now pushes overlapping droids apart, and a droid holds fire while a friend stands in its line of fire (and moves if that lasts). Two new `rc_ai` tests cover both; friendly hits went to 0.
 - **Still broken / not tested:** Not run on Windows or Android. The droids in `rc_game` itself were not seen in a fight: on geo_01a the start area is closed by a barricade only level scripts open, so the script's short walk never reaches them. `ambient = 0.5` is a guess. Droid hit rate at long range is low (about 2-3%) because the miss angle (10 degrees at accuracy 0) is a guess. No droid sounds or hit reactions.
 - **Next:** Level scripts (shared with the levels part) so spawners and barricades follow the mission; compare droid numbers and behaviour with the real game on the PC.
+
+## 2026-10-29: Weapons, shots, health and damage (rc_combat)
+
+- **Changed:** New crate `crates/rc_combat` with `CombatPlugin` (= `HealthPlugin` + `WeaponsPlugin`), weapon files `data/weapons/dc17m_blaster.toml`, `dc15s_pistol.toml`, `e5_blaster.toml`, `e5_blaster_tm.toml`, and the player's numbers in `data/combat/player.toml`. The player fires from the input actions (fire, reload, next/previous weapon); bolts fly with the game's acceleration and top speed, hit the level or a character's cylinder, and send `Damage`; shields take damage first and recharge after a delay; `Died` is sent at 0 health. Anyone (droids, squad) can fire with a `FireShot` message. Took the enemies thread's one-line fix to `class_defaults.rs` so both branches match.
+- **Why:** Overnight goal 2: fire the blaster with the game's own numbers, and a shared health and damage system for the enemies and squad.
+- **Tested how:** `cargo test -p rc_combat`: 13 rule tests and 8 tests that run the plugin in a Bevy app with no window, in the movement test room.
+- **Result:** 21 passed. The DC-17m fires 10 shots a second, a magazine of 60 then a 1.5 s reload; 5 hits of 20 take a 100-health droid down; a bolt reaches a droid 830 uu away in 10 frames; shots land within the game's aim error (15 uu per 1000 uu); the pistol fires once per press and recharges 1.5 shots a second; 5 droid bolts of 24 take the player's 100 shield and 20 health, and the shield waits 3 s then refills at 20 a second.
+- **Still broken / not tested:** Sounds and the weapon model were not tested yet (the tests have no game folder). Recoil is only sent as a `ViewKick` message; nothing turns the view yet. Not done: hit-location and damage-type multipliers, melee, grenades, the weapon's switch and draw times. Not run on Windows.
+- **Next:** A test range program with sound and the model, run on the real game files.
+
+## 2026-10-29: Read a script class's default values (rc_probe --class)
+
+- **Changed:** New `crates/rc_package/src/class_defaults.rs` (finds the default values stored at the end of a class in a `.u` script package) and `rc_probe --class NAME` (`crates/rc_probe/src/classes.rs`), which logs the defaults of a class and of each parent to `logs/rc_class.log`.
+- **Why:** The weapon numbers (fire rate, damage, ammo, spread) are class defaults. The movement thread found them by hand; this makes it a repeatable tool.
+- **Tested how:** One unit test on a made-up class. Then ran it on the real `ctinventory.u`, `engine.u`, `ctgame.u`, `ctcharacters.u`, `gameplay.u` and `core.u`, copied read-only from the install into the cloud sandbox.
+- **Result:** `rc_probe --class DC17mBlaster` gives 37 values for DC17mBlaster, 41 for Weapon, 12 for Inventory, 30 for Actor. It also reproduces the movement thread's hand-found numbers (CloneCommando Health 100, Shields 100). Classes found: every weapon, ammo and projectile class tried (about 30).
+- **Still broken / not tested:** Engine's `Weapon` class shows one junk value at the front (`OldSamples[2924]`): the method can't always tell where the list starts. Values of structs other than vectors and rotators are shown as raw bytes. Not run on Windows.
+- **Next:** Put the weapon numbers into data files and fire them.
+
+## 2026-10-29: Props and doors that take their model from their class (rc_level, rc_level_viewer, rc_walk)
+
+- **Changed:** New `rc_level::class_look`: when a map gives an actor no `StaticMesh`, it reads the actor's class defaults (walking the class and its parents across script packages such as `Properties/StaticPropProperties.u`, `KarmaPropProperties.u` and `CTInventory.u`) and fills in `StaticMesh`, `DrawScale`, `DrawScale3D` and `bHidden` where the map leaves them out. Classes whose `DrawType` isn't "static mesh" are left alone. The level viewer, `rc_level_check` and `rc_level::map_collision` (so `rc_walk`) use it. Added `rc_package::class_defaults`, copied unchanged from the weapons thread (commit f4d8880) so both branches carry the same file.
+- **Why:** Most props (barrels, lamps, wall pieces, bacta dispensers) and the double-door movers (`MoverDB_*`) store their model only in their class, so they were missing from the levels and you could walk through where they stand.
+- **Tested how:** `rc_level_check` on all 79 maps, before and after; `rc_walk --map geo_01a --script`; `rc_walk --script`.
+- **Result:** 3,460 more props across the 79 maps (27,521 to 30,981; drawn 27,446 to 30,234), every one of their models read, 1.1 million more triangles. `79 of 79 maps loaded, 0 failed`. Floor test: 7,853 of 8,942 path points have a floor below (7,850 before); 4 more points in geo_03a, yyy_01c and yyy_01d now have something closer than 80 units below (28 in all, 24 before), most likely AI paths that run over one of the new props. Walker: 3 passed, 0 failed on geo_01a (25 props there use their class's model); 21 passed, 0 failed in the test room.
+- **Still broken / not tested:** Not compared with the real game by eye. The doors stand closed where the map puts them and don't open yet. Not tested on Windows.
+- **Next:** Doors that open, and the level plugin for the game.
+
+## 2026-10-29: The sky (rc_level_viewer, rc_walk)
+
+- **Changed:** New `rc_level_viewer/src/sky.rs`: a second camera stands at the map's `SkyZoneInfo`, inside its small sky box, and turns with the player's view without moving. It draws first; the player's camera draws the level over it without clearing. `scene.rs` puts the sky zone's polygons and props on their own render layer and leaves out "fake backdrop" polygons (the windows onto the sky). Found the zone of a point with a new `Bsp::point_zone` (UE2's tree walk). The viewer has `--pitch DEG` and `--no-sky`; `rc_walk --map` gets the sky too. `spawn_level` now also returns every entity it spawned.
+- **Why:** The background behind the level was a flat colour.
+- **Tested how:** `rc_level_check` on all 79 maps; `rc_level_viewer MAP --frames 120 --pitch 60 [--no-sky] --capture` on geo_01a, yyy_01b, ctf_siege; `rc_walk --map geo_01a --script`; `rc_walk --script`.
+- **Result:** 67 of 79 maps have a sky box (each 6-12 polygons with textures like `BigSkyPanel`, `SkyPanel`, `Stars`). Looking up in geo_01a, the window was 41% background colour without the sky and 0% with it; ctf_siege 85% and 0%; yyy_01b 18% and 0%. The geo_01a capture shows an orange Geonosis sky above the spires. Walker: 3 passed, 0 failed on geo_01a; 21 passed, 0 failed in the test room.
+- **Still broken / not tested:** 9 maps have backdrop polygons but no `SkyZoneInfo` (for example geo_03a, geo_05a, ras_01b, yyy_06b); they show the background colour there. Not compared with the real game. Not tested on Windows. The sky camera draws the whole sky layer every frame (small: 1-2 draw batches).
+- **Next:** Doors and lifts.
+
+## 2026-10-29: Invisible walls (blocking volumes) are solid
+
+- **Changed:** New `rc_level::volumes` reads every `BlockingVolume`: its brush shape (a small BSP model) placed with `PrePivot`, `Rotation` and `Location`, plus whether it stops players, the AI and shots. `rc_level::collision::add_blocking_volumes` adds the ones that stop players to the collision; `rc_level::map_collision::load` (used by `rc_walk`) now does this. The viewer and `rc_level_check` log the volumes and two checks. New `crates/rc_walk/examples/volume_walk_test.rs` runs a commando into volumes with the game's movement.
+- **Why:** The level designers used these to keep the player in bounds. Without them you could walk off cliffs and through gaps the real game blocks.
+- **Tested how:** `rc_level_check` on all 79 maps; `cargo run --release -p rc_walk --example volume_walk_test -- GAMEDATA geo_01a geo_01b ras_01a yyy_01b geo_04c ras_04c`; `rc_walk --map geo_01a --script`; 2 new unit tests.
+- **Result:** 1,553 volumes in 67 maps, all read, all with scale 1. Only 11 of 8,942 AI path points are inside a volume (107 if `PrePivot` is ignored, 115 if turned a quarter wrong), and 974 volumes sit within 512 units of a path point (145 if left unplaced). Walk test: of 70 runs at a volume, 0 got inside with volumes in the collision and 18 got inside without. `rc_walk --map geo_01a --script`: 3 passed, 0 failed.
+- **Still broken / not tested:** Volumes aren't drawn (they're invisible in the game too). Shots and the AI don't use them yet; the flags are there for those threads. Not tested on Windows.
+- **Next:** The sky.
+
+## 2026-10-29: Every map loads; lightmaps fixed on 11 more maps (rc_level_check)
+
+- **Changed:** New program `rc_level_check` (in `crates/rc_level_viewer/src/bin/`) builds every map the way the viewer does, without a window, and logs each one to `logs/rc_level_check.log`. Fixed the lightmap reader (`rc_level/src/lightmap.rs`): each lightmap entry ends with a compact index and a 4-byte number, not five compact indexes. `ConstantColor` and `FadeColor` materials now show as a flat colour. Map collision loading moved from `rc_walk/src/level.rs` to `rc_level::map_collision` so the droid and squad work can share it.
+- **Why:** Only `geo_01a` and a few others had been tried. The goal is every level.
+- **Tested how:** Copied all 79 maps plus the texture, static mesh and script packages from the install (read only) into the cloud sandbox and ran `rc_level_check`.
+- **Result:** `79 of 79 maps loaded, 0 failed, in 13.2 s` (release build). Before the fix 12 maps had unreadable lightmaps (`shadow bits count ... doesn't fit`); after it 78 read and pass every lightmap check (each corner lands in its own rectangle). Missing materials dropped from 47 to 36, of which 34 are surfaces with no material at all.
+- **Still broken / not tested:** `entry.ctm` (the 6-polygon boot map) still has unreadable lightmaps: its page has no pixels and the bytes after it don't match. 21 maps have a few BSP corners 1-7 units off their plane (the check allows 1); they draw fine as far as the numbers show. One `TexPanner2D` and one odd `TexPanner` aren't shown. Not tested on Windows.
+- **Next:** Invisible walls, then the sky.
 
 ## 2026-10-29: Any screen shape, dual input, stick curves; menus marked as placeholders
 
@@ -102,6 +158,15 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** 5 passed, 0 failed.
 - **Still broken / not tested:** Nothing uses it yet. The game program itself (`rc_game`) is the next step.
 - **Next:** `rc_game` with the settings file, menus, input bindings, on-screen display and music.
+
+## 2026-10-29: Automatic build checks on GitHub (CI)
+
+- **Changed:** New `.github/workflows/ci.yml`. `.gitignore` gained one whitelist line, `!.github/workflows/*.yml`. A short section at the end of `docs/DESIGN.md`.
+- **Why:** So every pull request is built and tested on Windows and Linux automatically, which catches breakage when several branches are merged.
+- **Tested how:** In the cloud sandbox with no game folder set: `cargo test --workspace` (all 57 unit tests pass, none read game files, so no test needed a skip). `cargo fmt --all --check` and `cargo clippy --workspace --all-targets` both find problems today (72 files need reformatting, about 20 clippy messages), which is why that job only reports. The run on GitHub itself is checked on the draft pull request.
+- **Result:** First run on draft PR #15: Linux build and test passed (about 6 min), Windows passed (about 12 min, first run without a cache), formatting and clippy job reported its problems without failing.
+- **Still broken / not tested:** The Bevy programs' windowed `--script` checks are not run on GitHub. No Android build. Not tested on macOS (not a goal).
+- **Next:** Once the code is formatted and the clippy messages are fixed, make that job fail the run too.
 
 ## 2026-10-29: The walker draws levels textured and lit (rc_walk, rc_level_viewer)
 

@@ -84,14 +84,9 @@ pub struct ShotLanded {
     pub distance: f32,
 }
 
-/// The view kick from one shot, for whoever turns the player's view (the
-/// player plugin, or a VR mod that chooses to ignore it). Radians: `pitch`
-/// up, `yaw` right.
-#[derive(Message, Debug, Clone, Copy)]
-pub struct ViewKick {
-    pub pitch: f32,
-    pub yaw: f32,
-}
+/// The view kick from one shot is the shared `rc_game_core::ViewKick`
+/// (radians: `pitch` up, `yaw` right), registered by `CorePlugin`.
+pub use rc_game_core::ViewKick;
 
 /// The weapons a character carries, and which one is in hand. The player
 /// gets one from `data/combat/player.toml`; give one to anyone else whose
@@ -165,7 +160,6 @@ impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FireShot>()
             .add_message::<ShotLanded>()
-            .add_message::<ViewKick>()
             .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
                 Update,

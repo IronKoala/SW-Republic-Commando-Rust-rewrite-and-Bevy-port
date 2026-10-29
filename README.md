@@ -121,6 +121,14 @@ copy of the game.
   change the brightness without touching code (see `docs/DESIGN.md`,
   "Lighting in Bevy").
 
+- **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
+  `rc_level_check` loads every map in the game without a window and logs
+  each one: `79 of 79 maps loaded, 0 failed`. Lightmaps now read on 78 of
+  them (12 failed before a fix). Levels now have their sky (67 maps have
+  one), invisible walls (blocking volumes) are solid when you walk, and
+  about 3,460 props and double doors that take their model from their
+  type are now drawn and solid.
+
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
   opens on a main menu in the visor's amber, lists the campaigns and missions
@@ -171,8 +179,11 @@ copy of the game.
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
   No 3D (positional) sound yet.
-- Levels are drawn without sky, characters, effects or moving parts. No
-  collision: the camera flies through walls.
+- Levels are drawn without characters, effects or moving parts: doors and
+  lifts stand where the map puts them and don't open. The gunship isn't
+  solid. 9 maps have windows onto a sky but no sky box, so they show a flat
+  colour there. The level viewer's camera flies through walls (`rc_walk`
+  has collision).
 - Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
 - No levels yet: walking only works in the hand-made test room. No weapons,
@@ -348,6 +359,17 @@ look, make a file called `lighting.cfg` in this folder containing the line
 `baked_light = false` (delete it to go back).
 For another map, give its name, for example
 `cargo run --release -p rc_level_viewer -- ras_01a`.
+`--pitch 60` starts the camera looking 60 degrees up (to see the sky) and
+`--no-sky` leaves the sky out.
+
+To check every level at once:
+
+```
+cargo run --release -p rc_level_viewer --bin rc_level_check
+```
+
+It takes about 15 seconds after building, writes `logs\rc_level_check.log`,
+and ends with one line per map and `79 of 79 maps loaded, 0 failed`.
 
 To check every character and animation in the game:
 
