@@ -6,3 +6,4 @@ pub mod draw;
 pub mod lighting;
 pub mod materials;
 pub mod scene;
+pub mod sky;
