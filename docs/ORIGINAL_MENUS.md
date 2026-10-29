@@ -161,6 +161,17 @@ layout to read. Its pictures are all there to reuse:
   vision glass, flashlight).
 - `Textures/HUDArmsTextures.utx`: the helmet and arms.
 
+**Started (2026-10-29, NOT TESTED with the game files):** the crosshair.
+`rc_game/src/original_hud.rs` draws the reticle picture named in
+`data/ui/hud.toml` (one per weapon, by the weapon file's `name`, else the
+default), centred and sized by screen height (one picture pixel per line
+of a 480-line screen, a guess), red over an enemy. If the picture can't be
+read, the placeholder's bars stay and the log says why. The paths
+(`HUDTextures.Reticles.HUD_WeaponDefault`, `...HUD_WeaponPistol`) come
+from the earlier look at the package and still need checking. Not done:
+spread (the bars move apart; the picture doesn't grow yet), shield,
+health, ammo and squad pictures.
+
 The plan for the HUD is to place these original pictures where the original
 shows them, matched by eye and by measuring against screenshots of the
 real game, with the helmet model drawn the way the original does once the

@@ -1622,6 +1622,11 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   otherwise the placeholder page stays and every reason is logged. So a
   mod can switch a page to another class, or teach it a button, without
   code, and an unfinished page never shows half-working.
+- `rc_game/src/original_hud.rs` swaps the placeholder HUD's drawn shapes
+  for the original's pictures, named in `data/ui/hud.toml` (the original
+  places them in native code, so placement is ours). It reads its own
+  `rc_menus::Library`, so it works when `--map` skips the menus. So far
+  only the crosshair; the bars stay whenever a picture can't be read.
 
 The menu area is the largest centred 4:3 box in the window; the original's
 positions assume 4:3, so nothing is stretched on wide or tall screens.

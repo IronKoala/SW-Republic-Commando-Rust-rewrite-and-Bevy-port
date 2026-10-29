@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: The crosshair can use the original's reticle pictures (original_hud.rs)
+
+- **Changed:** New `crates/rc_game/src/original_hud.rs` (`OriginalHudPlugin`) and `data/ui/hud.toml` (default reticle, one per weapon name, size). `hud.rs` exposes `CrossBar` and a `HudSystems` set; `main.rs` adds the plugin.
+- **Why:** Next-steps item 2: use the original HUD pictures. The original's HUD is native code, so only its pictures can be reused, placed by us.
+- **Tested how:** `cargo test -p rc_game` (3 new tests: the shipped file reads; with a picture loaded the bars hide, the picture shows centred at 10% of screen height for a 48-pixel-wide picture, and turns red on target; a missing picture keeps the bars). **Not tested with the game files** (no access overnight) and not looked at in a window.
+- **Result:** rc_game tests: 18 passed, 0 failed.
+- **Still broken / not tested:** The picture paths and the size are unchecked guesses. The picture doesn't spread with the weapon yet. Shield, health, ammo and squad still use the placeholder shapes. Colours over the 3D view weren't compared with the original.
+- **Next:** On the PC: `rc_probe --textures ...HUDTextures.utx` for the real names and sizes, a screenshot compare, then the shield and health pictures.
+
 ## 2026-10-29: Pause and campaign pages can use their original menus (rc_menus::pages)
 
 - **Changed:** New `crates/rc_menus/src/pages.rs` and data file `data/ui/original_menus.toml` (which class draws each page, and what each button's function does). `rc_game/src/original_menu.rs` now draws any page that passes `pages::check`, not only the main menu; the pause page draws over the game; the quit question works from any page; RESTART reloads the current level. `menu.rs` steps aside for any page the original draws. New `rc_probe --pages` probes and paints every listed page and says which would be used and why not; the file's reader lives in `rc_menus::pages` (rc_menus now uses serde and toml). `Sprite`, `Text` and `Button` in `rc_menus::layout` gained `Default` (for tests).

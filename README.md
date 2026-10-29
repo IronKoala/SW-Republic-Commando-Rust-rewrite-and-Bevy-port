@@ -199,7 +199,9 @@ copy of the game.
   (named in `data/ui/original_menus.toml`) when everything on them can work
   in this port, and otherwise keep the placeholder and write the reason to
   `logs/rc_game.log` ("original menus: page paused kept the placeholder:
-  ..."). The button names in that file are guesses until checked.
+  ..."). The button names in that file are guesses until checked. The
+  crosshair likewise switches to the original's reticle picture, named in
+  `data/ui/hud.toml`, when it can be read (also not tested with the files).
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
   sides, the view up and down stays the original's), and the HUD stays in a

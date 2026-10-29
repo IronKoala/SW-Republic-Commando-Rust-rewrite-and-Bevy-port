@@ -1,0 +1,20 @@
+# Which of the original game's HUD pictures the HUD uses. The pictures are
+# read from the player's install at run time; nothing from the game is here.
+# The original draws its HUD in native code, so where each picture goes is
+# our own choice.
+#
+# NOT CHECKED YET against the install: the paths below come from an earlier
+# look at Textures/HUDTextures.utx (group "Reticles"). If a picture can't be
+# read, the placeholder crosshair stays and logs/rc_game.log says why
+# ("original hud: crosshair ..."). List the real names with:
+#   rc_probe --textures "<game folder>\GameData\Textures\HUDTextures.utx"
+
+[crosshair]
+enabled = true
+default = "HUDTextures.Reticles.HUD_WeaponDefault"
+# 1 = one picture pixel per line of a 480-line screen (a guess).
+scale = 1.0
+
+# Weapon name, as in its file in data/weapons/, to its reticle.
+[crosshair.weapons]
+"DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistol"

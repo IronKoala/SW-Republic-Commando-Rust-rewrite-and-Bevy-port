@@ -17,6 +17,7 @@ mod input;
 mod levels;
 mod menu;
 mod music;
+mod original_hud;
 mod original_menu;
 mod player;
 mod script;
@@ -287,6 +288,7 @@ fn main() -> AppExit {
         menu::MenuPlugin,
         original_menu::OriginalMenuPlugin,
         hud::HudPlugin,
+        original_hud::OriginalHudPlugin,
         music::MusicPlugin,
         player::PlayerPlugin,
     ))
