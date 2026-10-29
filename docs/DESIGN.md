@@ -365,7 +365,14 @@ that aren't the background colour. The score is the overlap divided by the
 combined area (1.0 = identical). Results in the cloud sandbox: 0.984-0.994
 for the clone trooper, battle droid and super battle droid; comparing
 against a pose 22 frames off scores 0.77-0.86, so the 0.95 pass mark means
-something. In the sandbox the first capture is often black or shows only
+something. The check also compares the colour balance (each colour
+channel's share of the total) of the character on screen with its skin
+picture: lighting changes brightness but not hue. This was added after the
+clone came out magenta on Windows while its outline still matched (Bevy's
+default colour grading needs the `tonemapping_luts` feature, which our shared
+Bevy feature list leaves out, so the camera uses `Tonemapping::None`). The
+magenta picture scores 0.331, the right one 0.001-0.013; 0.06 passes. In the
+sandbox the first capture is often black or shows only
 the background (the mesh hadn't reached the graphics card yet); the check
 retries up to 5 times.
 

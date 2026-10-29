@@ -31,6 +31,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::view::screenshot::Screenshot;
+use bevy::render::view::{DebandDither, Tonemapping};
 use bevy::window::{PrimaryWindow, WindowResolution};
 use rc_anim::globals;
 use rc_package::skeletal::SkeletalMesh;
@@ -250,6 +251,13 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(eye).looking_at(centre, Vec3::Y),
+        // Bevy's default colour grading ("tonemapping") needs lookup tables
+        // from the `tonemapping_luts` feature, which this build leaves out
+        // to share one Bevy build with rc_viewer. Without them every lit
+        // pixel comes out magenta, so switch it off (rc_viewer does too).
+        Tonemapping::None,
+        // Dithering only works with tonemapping on; say so to avoid a warning.
+        DebandDither::Disabled,
     ));
     commands.spawn((
         DirectionalLight {

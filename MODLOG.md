@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Fix the pink clone trooper in rc_character
+
+- **Changed:** `crates/rc_character/src/main.rs`: the camera now uses `Tonemapping::None` (and `DebandDither::Disabled`). `crates/rc_character/src/check.rs`: the on-screen check now also compares the colour balance on screen with the skin picture's.
+- **Why:** The user ran `rc_character` on Windows: the clone moved correctly but was pink. Cause (my mistake): when I switched `rc_character` to the same Bevy feature list as `rc_viewer` to share one build, I dropped `tonemapping_luts`. Bevy's default colour grading needs those tables and draws every lit pixel magenta without them. The outline check only compared shapes, so it still passed.
+- **Tested how:** Read `logs\rc_character.log` from the user's PC: `character pixels' average colour R 253 G 1 B 254`, outline match 0.989 PASS. Reproduced it in the cloud sandbox (R 253 G 1 B 253, plus Bevy's log error "TonyMcMapFace tonemapping requires the `tonemapping_luts` feature"). Then fixed it and re-ran.
+- **Result:** Clone R 167 G 166 B 165 on screen vs skin R 142 G 139 B 137; colour balance difference 0.005 (BattleDroid 0.013, SuperBattleDroid 0.001), all PASS. With the fix removed on purpose, the new check reports 0.331, `colour WRONG`, FAIL, exit code 1.
+- **Still broken / not tested:** The fix is not yet re-run on Windows.
+- **Next:** User re-runs `cargo run --release -p rc_character`.
+
 ## 2026-10-29: Characters: skeletal meshes, animations, and an animated clone trooper in 3D
 
 - **Changed:** New readers `crates/rc_package/src/skeletal.rs` (SkeletalMesh: bones, points, triangles, texture coordinates, bone weights) and `crates/rc_package/src/animation.rs` (MeshAnimation: sequences, packed key tracks). New crate `crates/rc_anim` (no Bevy): poses a skeleton from a sequence and moves the mesh's points with it (skinning). New `rc_probe --characters` mode (`crates/rc_probe/src/characters.rs`, logs to `logs/rc_characters.log`; `--meshes` is the static-mesh mode from PR #4). New 3D Bevy program `crates/rc_character`: shows one character with its skin texture, playing one animation, with an on-screen self-check. Small shared edits: `Reader::i16` in `reader.rs`, two `pub mod` lines in `rc_package/src/lib.rs`, workspace members in `Cargo.toml`.

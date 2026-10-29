@@ -18,6 +18,10 @@ const PASS_SCORE: f64 = 0.95;
 /// A pixel counts as "character" if any channel differs from the
 /// background by more than this (0-255).
 const BACKGROUND_TOLERANCE: i32 = 12;
+/// Largest allowed difference in colour balance (each channel's share of
+/// the total, 0 to 1) between the character on screen and its skin picture.
+/// A grey skin drawn magenta differs by about 0.3.
+const MAX_HUE_DIFFERENCE: f64 = 0.06;
 
 pub(crate) struct Expected {
     /// Each point's position in window pixels (`None` if behind the camera).
@@ -180,10 +184,29 @@ pub(crate) fn check_screen(
         pixel(2 * w + 2),
         BACKGROUND
     ));
-    let pass = score >= PASS_SCORE && n_want > 1000;
+    // Colour: lighting makes the character brighter or darker than its skin
+    // picture, but shouldn't change its hue. Compare each channel's share of
+    // the total ("chromaticity"). Without a skin the material is plain grey.
+    let skin_mean = c.skin.as_ref().map_or([153.0; 3], |(_, img)| {
+        let m = img.mean();
+        [m[0], m[1], m[2]]
+    });
+    let share = |v: [f64; 3]| {
+        let t = (v[0] + v[1] + v[2]).max(1.0);
+        v.map(|x| x / t)
+    };
+    let (a, b) = (share(mean), share(skin_mean));
+    let hue_diff = (0..3).map(|k| (a[k] - b[k]).abs()).fold(0.0, f64::max);
+    let colour_ok = hue_diff <= MAX_HUE_DIFFERENCE;
+    log.line(format!(
+        "on-screen check: colour balance differs from the skin's by {hue_diff:.3} ({MAX_HUE_DIFFERENCE} or less passes; skin average R {:.0} G {:.0} B {:.0})",
+        skin_mean[0], skin_mean[1], skin_mean[2]
+    ));
+    let pass = score >= PASS_SCORE && n_want > 1000 && colour_ok;
     check.passed = Some(pass);
     log.line(format!(
-        "on-screen check {}: outline match {score:.3} (1.0 is perfect, {PASS_SCORE} or more passes)",
-        if pass { "PASS" } else { "FAIL" }
+        "on-screen check {}: outline match {score:.3} (1.0 is perfect, {PASS_SCORE} or more passes), colour {}",
+        if pass { "PASS" } else { "FAIL" },
+        if colour_ok { "ok" } else { "WRONG" }
     ));
 }
