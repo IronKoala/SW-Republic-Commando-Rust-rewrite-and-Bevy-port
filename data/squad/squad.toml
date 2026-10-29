@@ -104,6 +104,52 @@ hp_activate = 768
 hp_deactivate = 384
 prevent_range = 256
 
+# How squad mates fight. The original decides this in compiled code we
+# don't read, so the rules are our own (docs/DESIGN.md, "Squad fighting
+# and reviving"); the numbers say where they come from.
+[fight]
+# Their gun: a file in data/weapons. Delta Squad carries the DC-17m.
+weapon = "dc17m_blaster"
+# 0 = wild, 1 = perfect. Guess until read from the game.
+accuracy = 0.7
+# Aim error in degrees at accuracy 0; the actual error is
+# (1 - accuracy) x this. Our own (same as the droids').
+max_aim_error = 10
+# Farthest they see an enemy, uu. Guess until read from the game.
+sight_radius = 5000
+# Seconds from first seeing an enemy to the first shot. Our own.
+reaction_time = 0.5
+# Shots per burst, and seconds between them. The gap is the DC-17m's
+# fire rate (data/weapons/dc17m_blaster.toml); the burst length is our own.
+burst_count = 5
+shot_interval = 0.1
+# Rest between bursts, shortest and longest, seconds. Our own.
+burst_pause_min = 0.6
+burst_pause_max = 1.2
+# A standing commando shoots only this far off where it faces, degrees.
+# Our own (droids: 60, BattleDroid MaxAimYaw).
+max_aim_yaw = 60
+# Hold fire while the player or a squad mate is this close to the line of
+# fire, uu. Our own.
+friendly_clearance = 60
+
+# Reviving a downed commando. Squad mates can't die in the original
+# (bCannotDie): at 0 health they go down until someone revives them. Who
+# goes to revive whom is our own rule (docs/DESIGN.md).
+[revive]
+# Seconds a squad mate kneels to revive someone. Guess until read.
+time = 3
+# Seconds the player holds Use by a downed squad mate. Guess until read.
+player_time = 3
+# Health they get back, as a share of their maximum (0 to 1). Guess.
+health = 0.5
+# How close the reviver must be to the body, uu. Our own.
+reach = 100
+# Squad mates only go to revive someone this close, uu. Our own.
+range = 4000
+# Squad mates come to revive the player on their own: "yes" or "no".
+revive_player = "yes"
+
 # The squad. `class` is the original's character class (CTCharacters),
 # `number` and `name` are what its HUD shows, `hud_slot` its place on the
 # HUD (SquadHUDSlot), and `slot` the formation slot above. `colour` is each

@@ -9,6 +9,7 @@
 //! distances are the original game's. Where each one stands (its slot) is
 //! our own choice.
 
+use crate::fight::{FightState, Patient, Rng, Threat};
 use crate::map::MarkerSpot;
 use crate::nav::Navigator;
 use crate::settings::{MemberSettings, SquadSettings, StanceSettings, Tether};
@@ -74,6 +75,8 @@ pub enum MemberState {
     Moving { urgent: bool, by_order: bool },
     /// Doing a marked job; seconds left.
     Working { left: f32 },
+    /// Kneeling by a downed commando; seconds left.
+    Reviving { left: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,9 +104,12 @@ pub struct Member {
     /// original: they lie where they fell until revived. A downed member
     /// takes no orders and doesn't move on its own.
     pub down: bool,
+    /// The downed commando they're going to revive, if any.
+    pub revive: Option<Patient>,
+    pub fight: FightState,
     path: Vec<Vec3>,
-    planned_for: Option<Vec3>,
-    think_in: f32,
+    pub(crate) planned_for: Option<Vec3>,
+    pub(crate) think_in: f32,
     input: MoveInput,
     slow_time: f32,
     tried_jump: bool,
@@ -181,6 +187,61 @@ pub enum SquadEvent {
     Revived {
         member: String,
     },
+    /// Picked an enemy to shoot (`target` is the game's id for it).
+    TargetPicked {
+        member: String,
+        target: u64,
+        distance: f32,
+    },
+    /// No enemy in sight any more.
+    TargetLost {
+        member: String,
+    },
+    /// A shot. The game turns it into a bolt (`rc_combat::FireShot`).
+    Fire {
+        member: String,
+        index: usize,
+        origin: Vec3,
+        direction: Vec3,
+        target: u64,
+        distance: f32,
+        /// The first shot of a burst (the log shows only these).
+        burst_start: bool,
+    },
+    /// Didn't shoot: a friend was in the line of fire.
+    HeldFire {
+        member: String,
+        friend: String,
+    },
+    ReviveSetOff {
+        member: String,
+        patient: String,
+        distance: f32,
+    },
+    ReviveStarted {
+        member: String,
+        patient: String,
+    },
+    /// The patient is revived: the game gives their health back.
+    ReviveDone {
+        member: String,
+        patient: Patient,
+        patient_name: String,
+        seconds: f32,
+    },
+    ReviveCancelled {
+        member: String,
+        patient: String,
+        why: String,
+    },
+    PlayerReviveStarted {
+        patient: String,
+    },
+    PlayerReviveStopped {
+        patient: String,
+        after: f32,
+        why: String,
+    },
 }
 
 impl fmt::Display for SquadEvent {
@@ -230,6 +291,35 @@ impl fmt::Display for SquadEvent {
             }
             SquadEvent::Down { member, at } => write!(f, "{member} is DOWN at {}", p(at)),
             SquadEvent::Revived { member } => write!(f, "{member} is back up"),
+            SquadEvent::TargetPicked { member, target, distance } => {
+                write!(f, "{member} targets enemy {target} ({distance:.0} uu away)")
+            }
+            SquadEvent::TargetLost { member } => write!(f, "{member} has no enemy in sight"),
+            SquadEvent::Fire { member, origin, direction, target, distance, .. } => write!(
+                f,
+                "{member} fires at enemy {target} ({distance:.0} uu) from {} along ({:.2}, {:.2}, {:.2})",
+                p(origin),
+                direction.x,
+                direction.y,
+                direction.z
+            ),
+            SquadEvent::HeldFire { member, friend } => {
+                write!(f, "{member} holds fire: {friend} is in the way")
+            }
+            SquadEvent::ReviveSetOff { member, patient, distance } => {
+                write!(f, "{member} goes to revive {patient} ({distance:.0} uu away)")
+            }
+            SquadEvent::ReviveStarted { member, patient } => write!(f, "{member} is reviving {patient}"),
+            SquadEvent::ReviveDone { member, patient_name, seconds, .. } => {
+                write!(f, "{member} revived {patient_name} ({seconds:.1} s)")
+            }
+            SquadEvent::ReviveCancelled { member, patient, why } => {
+                write!(f, "{member} stops reviving {patient}: {why}")
+            }
+            SquadEvent::PlayerReviveStarted { patient } => write!(f, "the player starts reviving {patient}"),
+            SquadEvent::PlayerReviveStopped { patient, after, why } => {
+                write!(f, "the player stops reviving {patient} after {after:.1} s: {why}")
+            }
         }
     }
 }
@@ -261,7 +351,12 @@ pub struct Squad {
     objective_yaw: f32,
     pub markers: Vec<(MarkerSpot, MarkerState)>,
     /// Enemies the squad knows about this frame, set by the game.
-    pub threats: Vec<Vec3>,
+    pub threats: Vec<Threat>,
+    /// The leader (the player) is down, set by the game.
+    pub leader_down: bool,
+    /// The player reviving a squad mate: who, and seconds so far.
+    pub player_revive: Option<(usize, f32)>,
+    pub(crate) rng: Rng,
     pub time: f32,
 }
 
@@ -336,6 +431,8 @@ impl Squad {
                     marker: None,
                     engaging: None,
                     down: false,
+                    revive: None,
+                    fight: FightState::default(),
                     path: Vec::new(),
                     planned_for: None,
                     think_in: 0.0,
@@ -354,6 +451,9 @@ impl Squad {
             objective_yaw: leader.yaw,
             markers: Vec::new(),
             threats: Vec::new(),
+            leader_down: false,
+            player_revive: None,
+            rng: Rng::new(0x0D17_DE17),
             time: 0.0,
         };
         (squad, events)
@@ -507,6 +607,9 @@ impl Squad {
     /// What member `i` is tied to under the current order.
     fn tether_point(&self, i: usize, leader: Leader) -> Vec3 {
         let m = &self.members[i];
+        if let Some(p) = m.revive {
+            return self.patient_feet(p, leader);
+        }
         if let Some(k) = m.marker {
             return self.markers[k].0.stand;
         }
@@ -520,6 +623,9 @@ impl Squad {
     /// Where member `i` wants to stand.
     fn goal_for(&self, i: usize, leader: Leader, world: &dyn World) -> Vec3 {
         let m = &self.members[i];
+        if let Some(p) = m.revive {
+            return self.revive_spot(i, p, leader);
+        }
         if let Some(k) = m.marker {
             return self.markers[k].0.stand;
         }
@@ -535,7 +641,7 @@ impl Squad {
             Stance::SearchAndDestroy => {
                 if let Some(t) = self.engage_target(i, leader) {
                     // Close in to about half the search radius.
-                    let threat = self.threats[t];
+                    let threat = self.threats[t].feet;
                     let from = m.pawn.feet() - threat;
                     let d = from.length_2d().max(1.0);
                     let keep = (self.settings.search_radius * 0.5).min(d);
@@ -566,16 +672,31 @@ impl Squad {
         self.threats
             .iter()
             .enumerate()
-            .filter(|(_, t)| dist(**t, anchor) <= reach)
-            .min_by(|a, b| dist(*a.1, feet).total_cmp(&dist(*b.1, feet)))
+            .filter(|(_, t)| dist(t.feet, anchor) <= reach)
+            .min_by(|a, b| dist(a.1.feet, feet).total_cmp(&dist(b.1.feet, feet)))
             .map(|(k, _)| k)
     }
 
     /// The way an idle member faces.
     fn facing_for(&self, i: usize, leader: Leader) -> f32 {
         let m = &self.members[i];
+        if let Some(p) = m.revive {
+            let d = self.patient_feet(p, leader) - m.pawn.feet();
+            return if d.length_2d() > 1.0 {
+                d.y.atan2(d.x)
+            } else {
+                m.yaw
+            };
+        }
         if let Some(k) = m.marker {
             return self.markers[k].0.yaw;
+        }
+        // Standing and fighting: face the enemy.
+        if let Some(t) = self.target_of(i) {
+            let d = t.centre - m.pawn.feet();
+            if d.length_2d() > 1.0 {
+                return d.y.atan2(d.x);
+            }
         }
         match self.stance {
             Stance::SecurePosition => {
@@ -604,15 +725,42 @@ impl Squad {
             } else {
                 None
             };
+        let reached_patient = self.reached_patient(i, leader);
         let m = &mut self.members[i];
         m.goal = goal;
         m.engaging = engaging;
+        if let Some(p) = m.revive {
+            match m.state {
+                MemberState::Reviving { .. } => {}
+                _ if reached_patient => {
+                    m.state = MemberState::Reviving {
+                        left: self.settings.revive.time,
+                    };
+                    m.slow_time = 0.0;
+                    m.tried_jump = false;
+                    m.stuck_reported = false;
+                    let name = m.settings.name.clone();
+                    let patient = self.patient_name(p);
+                    events.push(SquadEvent::ReviveStarted {
+                        member: name,
+                        patient,
+                    });
+                }
+                _ => {
+                    m.state = MemberState::Moving {
+                        urgent: true,
+                        by_order: true,
+                    };
+                }
+            }
+            return;
+        }
         let feet = m.pawn.feet();
         let td = dist(feet, tether);
         let to_goal = dist_2d(feet, goal);
         let close_height = (feet.z - goal.z).abs() < 150.0;
         match m.state {
-            MemberState::Working { .. } => {}
+            MemberState::Working { .. } | MemberState::Reviving { .. } => {}
             MemberState::Idle => {
                 if m.marker.is_some() && !(to_goal <= arrive && close_height) {
                     m.state = MemberState::Moving {
@@ -683,7 +831,9 @@ impl Squad {
     ) -> Vec<SquadEvent> {
         let mut events = Vec::new();
         self.time += dt;
+        self.assign_revivers(leader, &mut events);
         for i in 0..self.members.len() {
+            self.tick_revive(i, dt, &mut events);
             // Marked jobs count down.
             if let MemberState::Working { left } = self.members[i].state {
                 let left = left - dt;
@@ -717,7 +867,9 @@ impl Squad {
                     self.members[i].think_in = self.settings.think_interval;
                 }
                 self.think(i, leader, world, &mut events);
+                self.pick_target(i, world, &mut events);
             }
+            self.shoot(i, dt, leader, &mut events);
             let facing = self.facing_for(i, leader);
             let near_tether = dist(self.members[i].pawn.feet(), self.tether_point(i, leader))
                 <= self.stance_settings().lp_activate;
@@ -813,7 +965,7 @@ impl Squad {
                 // Close enough to what they're tied to: stand here rather
                 // than push at the obstacle. (A marked job keeps trying
                 // until `marker_give_up` below.)
-                if near_tether && m.marker.is_none() {
+                if near_tether && m.marker.is_none() && m.revive.is_none() {
                     events.push(SquadEvent::StoppedShort {
                         member: m.settings.name.clone(),
                         short_by: to_goal,
@@ -866,6 +1018,7 @@ impl Squad {
         }
         m.down = down;
         m.think_in = 0.0;
+        m.fight.target = None;
         m.path.clear();
         m.planned_for = None;
         m.slow_time = 0.0;
@@ -879,6 +1032,7 @@ impl Squad {
         m.state = MemberState::Idle;
         m.engaging = None;
         let at = m.pawn.feet();
+        m.revive = None;
         if let Some(k) = m.marker.take() {
             self.markers[k].1 = MarkerState::Open;
         }
@@ -891,9 +1045,10 @@ impl Squad {
             .iter()
             .map(|m| {
                 let feet = m.pawn.feet();
-                let doing = match m.marker {
-                    Some(k) => self.markers[k].0.job.clone(),
-                    None => self.stance_settings().name.clone(),
+                let doing = match (m.revive, m.marker) {
+                    (Some(p), _) => format!("Reviving {}", self.patient_name(p)),
+                    (None, Some(k)) => self.markers[k].0.job.clone(),
+                    (None, None) => self.stance_settings().name.clone(),
                 };
                 MemberStatus {
                     name: m.settings.name.clone(),

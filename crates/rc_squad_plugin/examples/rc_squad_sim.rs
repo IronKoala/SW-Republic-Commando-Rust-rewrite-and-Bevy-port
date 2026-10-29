@@ -4,9 +4,14 @@
 //! (default geo_01a; a name from GameData/Maps or a path to a .ctm file).
 //! The game folder is RC_GAME_DIR or the default Steam path.
 //!
-//! It runs the real `SquadPlugin` in a Bevy app without a window, with a
-//! scripted player (the same `rc_movement` body as the walker) who walks,
-//! aims and presses the squad order buttons. After each part it checks the
+//! It runs the real `SquadPlugin` and `rc_combat::CombatPlugin` in a Bevy
+//! app without a window, with a scripted player (the same `rc_movement`
+//! body as the walker) who walks, aims and presses the squad order buttons.
+//! For the fight it puts stand-in battle droids in sight of the squad:
+//! real combat targets (health, team, body size of the game's droid) that
+//! stand still and don't shoot back, so the squad's shooting, hits and
+//! kills can be counted on their own. Then it knocks squad mates and the
+//! player down and checks who revives whom, and how long it takes. After each part it checks the
 //! squad's numbers, logs everything to `logs/rc_squad_sim.log`, and ends
 //! with `SIM DONE: N checks passed, M failed` (exit code 1 if any failed).
 //! Time runs in fixed 1/60 s steps, so every run gives the same numbers.
@@ -14,15 +19,17 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
-use rc_combat::Health;
+use rc_combat::{Damage, DamageKind, Dead, Health, Hittable, Team};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
-    Action, ActionState, CorePlugin, GameLog, GameSet, GameState, LevelCollision, Player,
-    PlayerCamera, SquadReadout, SquadStatus,
+    Action, ActionState, CorePlugin, GameLog, GamePaths, GameSet, GameState, LevelCollision,
+    Player, PlayerCamera, SquadReadout, SquadStatus,
 };
 use rc_movement::{MoveInput, MoveParams, Pawn, TriangleWorld, Vec3 as UVec3};
 use rc_squad::{MarkerState, MemberState};
-use rc_squad_plugin::{yaw_rotation, SquadMapData, SquadMate, SquadPlugin, SquadSet, SquadState};
+use rc_squad_plugin::{
+    yaw_rotation, SquadFightStats, SquadMapData, SquadMate, SquadPlugin, SquadSet, SquadState,
+};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,6 +56,16 @@ enum Step {
     FaceMarker,
     /// Take all of this squad mate's health (as a hit would).
     Hurt(usize),
+    /// Knock a squad mate down with a real hit through the combat part.
+    KnockDown(usize),
+    /// Knock the player down.
+    KnockDownPlayer,
+    /// Put this many stand-in droids in sight of the player.
+    SpawnDroids(usize),
+    /// Stand next to this (downed) squad mate.
+    GoTo(usize),
+    /// Hold the Use button for this long (seconds), standing still.
+    HoldUse(f32),
     /// A check on the squad: name, measurement, lowest and highest allowed.
     Check(&'static str, fn(&Sim) -> f32, f32, f32),
 }
@@ -77,10 +94,25 @@ struct Sim {
     hurt_at: Option<(usize, UVec3)>,
     /// The squad panel: health fraction and whether shown as down.
     readout: Vec<(f32, bool)>,
+    /// The squad's fight numbers.
+    fight: SquadFightStats,
+    /// Stand-in droids spawned, and how many are still standing.
+    droids: Vec<Entity>,
+    droids_alive: usize,
+    /// The player: down, and health.
+    player_down: bool,
+    player_health: f32,
+    /// Which squad mates are down.
+    down: Vec<bool>,
+    /// Seconds Use is still held.
+    use_left: f32,
     world: Arc<TriangleWorld>,
 }
 
 impl Sim {
+    fn total(v: &[u32]) -> f32 {
+        v.iter().sum::<u32>() as f32
+    }
     fn max_leader_distance(&self) -> f32 {
         self.members.iter().map(|m| m.3).fold(0.0, f32::max)
     }
@@ -238,8 +270,7 @@ fn steps() -> Vec<Step> {
             0.0,
             400.0,
         ),
-        // Sev goes down: he stays where he fell while the others follow
-        // the leader away.
+        // Sev goes down: the nearest squad mate goes and revives him.
         Hurt(0),
         Hold(0.5, idle),
         Check(
@@ -254,30 +285,97 @@ fn steps() -> Vec<Step> {
             1.0,
             1.0,
         ),
-        Turn(180.0),
-        Hold(3.0, keys(1.0)),
-        Hold(4.0, idle),
+        Hold(8.0, idle),
         Check(
-            "down: Sev stayed where he fell (uu moved)",
-            |s| {
-                s.hurt_at
-                    .map_or(1e9, |(i, at)| (s.members[i].1 - at).length_2d())
-            },
-            0.0,
-            5.0,
+            "revive: Sev back up within 8.5 s",
+            |s| yes(!s.down[0]),
+            1.0,
+            1.0,
         ),
         Check(
-            "down: the other two followed the leader (furthest, uu)",
-            |s| s.members.iter().skip(1).map(|m| m.3).fold(0.0, f32::max),
-            0.0,
-            300.0,
+            "revive: Sev back with half health on the panel",
+            |s| s.readout[0].0,
+            0.49,
+            0.51,
         ),
         Check(
-            "down: Sev's distance from the leader now (uu, for the log)",
-            |s| s.members[0].3,
-            0.0,
+            "revive: done by a squad mate",
+            |s| Sim::total(&s.fight.revives),
+            1.0,
+            1.0,
+        ),
+        // The fight: droids in sight. Search and destroy so the squad
+        // spreads out ahead.
+        Press(Action::SquadFormUp),
+        Hold(3.0, idle),
+        SpawnDroids(3),
+        Hold(20.0, idle),
+        Check(
+            "fight: squad shots fired",
+            |s| Sim::total(&s.fight.shots),
+            20.0,
             1e9,
         ),
+        Check(
+            "fight: squad shots that hit a droid",
+            |s| Sim::total(&s.fight.hits),
+            5.0,
+            1e9,
+        ),
+        Check(
+            "fight: droids killed by the squad",
+            |s| Sim::total(&s.fight.kills),
+            1.0,
+            3.0,
+        ),
+        Check(
+            "fight: every droid down after 20 s",
+            |s| s.droids_alive as f32,
+            0.0,
+            0.0,
+        ),
+        Check(
+            "fight: the squad never hit the player or each other (player health)",
+            |s| s.player_health,
+            200.0,
+            200.0,
+        ),
+        // The player goes down: a squad mate comes to revive them.
+        KnockDownPlayer,
+        Hold(0.5, idle),
+        Check("player down", |s| yes(s.player_down), 1.0, 1.0),
+        Hold(8.0, idle),
+        Check(
+            "player revived within 8.5 s",
+            |s| yes(!s.player_down),
+            1.0,
+            1.0,
+        ),
+        Check(
+            "player back with half health",
+            |s| s.player_health,
+            99.0,
+            101.0,
+        ),
+        // Scorch goes down and the player revives him by holding Use.
+        KnockDown(2),
+        Hold(0.2, idle),
+        GoTo(2),
+        HoldUse(3.3),
+        Hold(0.5, idle),
+        Check(
+            "player revive: Scorch back up",
+            |s| yes(!s.down[2]),
+            1.0,
+            1.0,
+        ),
+        Check(
+            "player revive: counted for the player",
+            |s| s.fight.player_revives as f32,
+            1.0,
+            1.0,
+        ),
+        Hold(3.0, idle),
         Check(
             "nobody fell out of the map (lowest member feet z)",
             |s| s.lowest_member_z,
@@ -285,6 +383,44 @@ fn steps() -> Vec<Step> {
             1e9,
         ),
     ]
+}
+
+/// Up to `n` spots a droid can stand in sight of the player, 600 to 1400
+/// uu ahead, spread across the view.
+fn droid_spots(world: &TriangleWorld, pawn: &Pawn, yaw: f32, n: usize) -> Vec<UVec3> {
+    use rc_movement::World;
+    let eye = pawn.eye();
+    let ext = UVec3::new(35.0, 35.0, 80.0);
+    let mut out: Vec<UVec3> = Vec::new();
+    for dist in [1000.0f32, 800.0, 1300.0, 600.0] {
+        for deg in [-25.0f32, 0.0, 25.0, -45.0, 45.0, -12.0, 12.0] {
+            if out.len() >= n {
+                return out;
+            }
+            let a = yaw + deg.to_radians();
+            let want = pawn.feet() + UVec3::new(a.cos() * dist, a.sin() * dist, 0.0);
+            // The floor under it (from a bit above eye height).
+            let top = UVec3::new(want.x, want.y, eye.z + 100.0);
+            let bottom = top - UVec3::new(0.0, 0.0, 1200.0);
+            let Some(h) = world.sweep(ext, top, bottom) else {
+                continue;
+            };
+            if h.start_solid {
+                continue;
+            }
+            let centre = top + (bottom - top) * h.time;
+            let feet = centre - UVec3::new(0.0, 0.0, 80.0);
+            let droid_eye = centre + UVec3::new(0.0, 0.0, 60.0);
+            if world.sweep(UVec3::ZERO, eye, droid_eye).is_some() {
+                continue;
+            }
+            if out.iter().any(|o| (*o - feet).length() < 200.0) {
+                continue;
+            }
+            out.push(feet);
+        }
+    }
+    out
 }
 
 fn view_rotation(yaw: f32, pitch: f32) -> Quat {
@@ -300,11 +436,38 @@ fn drive_player(
     mut camera: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
     squad: Res<SquadState>,
     readout: Res<SquadReadout>,
-    mut mates: Query<(&SquadMate, &mut Health)>,
+    mut mates: Query<(Entity, &SquadMate, &mut Health, Has<Dead>), Without<Player>>,
+    players: Query<(Entity, Option<&Health>, Has<Dead>), With<Player>>,
+    droids: Query<
+        (),
+        (
+            With<Team>,
+            Without<Dead>,
+            Without<SquadMate>,
+            Without<Player>,
+        ),
+    >,
+    stats: Res<SquadFightStats>,
+    mut damage: MessageWriter<Damage>,
+    mut commands: Commands,
     log: Res<GameLog>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let s = &mut *sim;
+    s.fight = stats.clone();
+    s.droids_alive = s.droids.iter().filter(|e| droids.contains(**e)).count();
+    let player_entity = players.single().ok().map(|p| p.0);
+    if let Ok((_, h, dead)) = players.single() {
+        s.player_down = dead;
+        s.player_health = h.map_or(0.0, |h| h.current);
+    }
+    let mut down = vec![false; 3];
+    for (_, m, _, dead) in &mates {
+        if let Some(d) = down.get_mut(m.index) {
+            *d = dead;
+        }
+    }
+    s.down = down;
     s.readout = readout
         .members
         .iter()
@@ -335,6 +498,10 @@ fn drive_player(
     let mut pressed = HashSet::new();
     if let Some(a) = s.press.take() {
         pressed.insert(a);
+    }
+    if s.use_left > 0.0 {
+        s.use_left -= DT;
+        pressed.insert(Action::Use);
     }
     while s.hold_left <= 0.0 {
         let Some(&step) = s.steps.get(s.next) else {
@@ -423,8 +590,88 @@ fn drive_player(
                     s.pitch.to_degrees()
                 ));
             }
+            Step::KnockDown(i) => {
+                for (e, mate, _, _) in &mates {
+                    if mate.index == i {
+                        damage.write(Damage {
+                            target: e,
+                            amount: 10_000.0,
+                            kind: DamageKind::Other,
+                            instigator: None,
+                            point: Vec3::ZERO,
+                            direction: Vec3::ZERO,
+                        });
+                        log.line(format!("sim: {} knocked down", mate.name));
+                    }
+                }
+            }
+            Step::KnockDownPlayer => {
+                if let Some(e) = player_entity {
+                    damage.write(Damage {
+                        target: e,
+                        amount: 10_000.0,
+                        kind: DamageKind::Other,
+                        instigator: None,
+                        point: Vec3::ZERO,
+                        direction: Vec3::ZERO,
+                    });
+                    log.line("sim: the player is knocked down");
+                }
+            }
+            Step::SpawnDroids(n) => {
+                let spots = droid_spots(&s.world, &s.pawn, s.yaw, n);
+                for (k, feet) in spots.iter().enumerate() {
+                    let e = commands
+                        .spawn((
+                            Name::new(format!("stand-in droid {k}")),
+                            Health::new(100.0),
+                            Team::Separatist,
+                            Hittable {
+                                radius: 35.0,
+                                half_height: 80.0,
+                                center_up: 80.0,
+                            },
+                            Transform::from_translation(to_bevy(*feet)),
+                        ))
+                        .id();
+                    s.droids.push(e);
+                    log.line(format!(
+                        "sim: stand-in droid {k} at ({:.0}, {:.0}, {:.0}), {:.0} uu from the player",
+                        feet.x,
+                        feet.y,
+                        feet.z,
+                        (*feet - s.pawn.feet()).length()
+                    ));
+                }
+                if spots.len() < n {
+                    log.line(format!("sim: only {} droid spots in sight", spots.len()));
+                }
+            }
+            Step::GoTo(i) => {
+                if let Some(m) = s.members.get(i) {
+                    let feet = m.1;
+                    let to = s.pawn.feet() - feet;
+                    let side = if to.length_2d() > 1.0 {
+                        to.flat().normalize_or_zero()
+                    } else {
+                        UVec3::new(1.0, 0.0, 0.0)
+                    };
+                    let stand = feet + side * 70.0;
+                    s.pawn = Pawn::new(s.pawn.params.clone(), stand + UVec3::new(0.0, 0.0, 10.0));
+                    log.line(format!(
+                        "sim: the player stands beside {} at ({:.0}, {:.0}, {:.0})",
+                        m.0, stand.x, stand.y, stand.z
+                    ));
+                }
+            }
+            Step::HoldUse(secs) => {
+                s.use_left = secs;
+                s.hold_left = secs;
+                s.input = MoveInput::default();
+                log.line(format!("sim: hold Use for {secs:.1} s"));
+            }
             Step::Hurt(i) => {
-                for (mate, mut h) in &mut mates {
+                for (_, mate, mut h, _) in &mut mates {
                     if mate.index == i {
                         h.current = 0.0;
                         log.line(format!("sim: {} loses all health", mate.name));
@@ -525,8 +772,10 @@ fn main() -> AppExit {
         StatesPlugin,
         TransformPlugin,
         CorePlugin,
+        rc_combat::CombatPlugin,
         SquadPlugin,
     ))
+    .insert_resource(GamePaths::new(game.clone(), vec![PathBuf::from("data")]))
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
         DT,
     )))
@@ -552,6 +801,13 @@ fn main() -> AppExit {
         marker_target: None,
         hurt_at: None,
         readout: vec![],
+        fight: SquadFightStats::default(),
+        droids: vec![],
+        droids_alive: 0,
+        player_down: false,
+        player_health: 0.0,
+        down: vec![false; 3],
+        use_left: 0.0,
         world,
     })
     .add_systems(

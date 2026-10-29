@@ -51,6 +51,78 @@ pub struct MemberSettings {
     pub shield_recharge_delay: f32,
 }
 
+/// How squad mates fight. See `[fight]` in `squad.toml`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FightSettings {
+    /// A weapon file in `data/weapons`, without `.toml`.
+    pub weapon: String,
+    /// 0 (wild) to 1 (perfect).
+    pub accuracy: f32,
+    /// Aim error at accuracy 0, radians.
+    pub max_aim_error: f32,
+    /// Farthest a member sees an enemy, uu.
+    pub sight_radius: f32,
+    /// Seconds from first seeing an enemy to the first shot.
+    pub reaction_time: f32,
+    pub burst_count: u32,
+    /// Seconds between shots in a burst.
+    pub shot_interval: f32,
+    pub burst_pause_min: f32,
+    pub burst_pause_max: f32,
+    /// How far off their facing a standing member can shoot, radians.
+    pub max_aim_yaw: f32,
+    /// Hold fire when a friend is this close to the line of fire, uu.
+    pub friendly_clearance: f32,
+}
+
+impl Default for FightSettings {
+    fn default() -> Self {
+        FightSettings {
+            weapon: "dc17m_blaster".into(),
+            accuracy: 0.7,
+            max_aim_error: 10f32.to_radians(),
+            sight_radius: 5000.0,
+            reaction_time: 0.5,
+            burst_count: 5,
+            shot_interval: 0.1,
+            burst_pause_min: 0.6,
+            burst_pause_max: 1.2,
+            max_aim_yaw: 60f32.to_radians(),
+            friendly_clearance: 60.0,
+        }
+    }
+}
+
+/// How downed commandos get back up. See `[revive]` in `squad.toml`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviveSettings {
+    /// Seconds a squad mate takes to revive someone.
+    pub time: f32,
+    /// Seconds the player holds Use to revive a squad mate.
+    pub player_time: f32,
+    /// Health a revived commando gets back, as a share of their maximum.
+    pub health: f32,
+    /// How close to the downed body the reviver must be, uu.
+    pub reach: f32,
+    /// Squad mates only go to revive someone this close, uu.
+    pub range: f32,
+    /// Squad mates come to revive the player on their own.
+    pub revive_player: bool,
+}
+
+impl Default for ReviveSettings {
+    fn default() -> Self {
+        ReviveSettings {
+            time: 3.0,
+            player_time: 3.0,
+            health: 0.5,
+            reach: 100.0,
+            range: 4000.0,
+            revive_player: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Spawn {
     WithPlayer,
@@ -79,6 +151,8 @@ pub struct SquadSettings {
     pub secure_position: StanceSettings,
     pub search_and_destroy: StanceSettings,
     pub hold: StanceSettings,
+    pub fight: FightSettings,
+    pub revive: ReviveSettings,
     pub members: Vec<MemberSettings>,
 }
 
@@ -168,6 +242,8 @@ impl Default for SquadSettings {
                 (768.0, 384.0),
                 256.0,
             ),
+            fight: FightSettings::default(),
+            revive: ReviveSettings::default(),
             members: vec![
                 member("sev", "Commando07Delta", "Sev", "07", 1, [0.71, 0.18, 0.17]),
                 member(
@@ -246,6 +322,8 @@ impl SquadSettings {
                         | "stance.secure_position"
                         | "stance.search_and_destroy"
                         | "stance.hold"
+                        | "fight"
+                        | "revive"
                 ) {
                     return Err(format!("line {n}: unknown section [{section}]"));
                 }
@@ -338,6 +416,8 @@ impl SquadSettings {
                 };
                 table[i] = [f, r];
             }
+            "fight" => set_fight(&mut self.fight, key, value)?,
+            "revive" => set_revive(&mut self.revive, key, value)?,
             "formation_secure" => match key {
                 "radius" => self.secure_radius = one(value)?,
                 _ => return Err(unknown()),
@@ -389,6 +469,31 @@ impl SquadSettings {
                 s.prevent_range
             ));
         }
+        let f = &self.fight;
+        out.push(format!(
+            "fight: {}, accuracy {}, aim error up to {:.1} deg, sees {} uu, reacts in {} s, bursts of {} every {} s, pause {}-{} s, aims {:.0} deg off facing, friendly clearance {} uu",
+            f.weapon,
+            f.accuracy,
+            f.max_aim_error.to_degrees(),
+            f.sight_radius,
+            f.reaction_time,
+            f.burst_count,
+            f.shot_interval,
+            f.burst_pause_min,
+            f.burst_pause_max,
+            f.max_aim_yaw.to_degrees(),
+            f.friendly_clearance
+        ));
+        let r = &self.revive;
+        out.push(format!(
+            "revive: squad mate {} s, player {} s, back with {:.0}% health, reach {} uu, range {} uu, revive the player {}",
+            r.time,
+            r.player_time,
+            r.health * 100.0,
+            r.reach,
+            r.range,
+            if r.revive_player { "yes" } else { "no" }
+        ));
         for m in &self.members {
             out.push(format!(
                 "member {} ({}, {}): HUD slot {}, formation slot {}, health {}, shields {} (+{}/s after {} s)",
@@ -483,6 +588,52 @@ fn set_member(m: &mut MemberSettings, key: &str, value: Value) -> Result<(), Str
         "shield_recharge_rate" => m.shield_recharge_rate = one(value)?,
         "shield_recharge_delay" => m.shield_recharge_delay = one(value)?,
         _ => return Err(format!("unknown setting `{key}` for a squad member")),
+    }
+    Ok(())
+}
+
+fn set_fight(f: &mut FightSettings, key: &str, value: Value) -> Result<(), String> {
+    if key == "weapon" {
+        match value {
+            Value::Text(t) => f.weapon = t,
+            _ => return Err("weapon must be \"text\" (a file name in data/weapons)".into()),
+        }
+        return Ok(());
+    }
+    let v = one(value)?;
+    match key {
+        "accuracy" => f.accuracy = v,
+        "max_aim_error" => f.max_aim_error = v.to_radians(),
+        "sight_radius" => f.sight_radius = v,
+        "reaction_time" => f.reaction_time = v,
+        "burst_count" => f.burst_count = (v.max(1.0)) as u32,
+        "shot_interval" => f.shot_interval = v,
+        "burst_pause_min" => f.burst_pause_min = v,
+        "burst_pause_max" => f.burst_pause_max = v,
+        "max_aim_yaw" => f.max_aim_yaw = v.to_radians(),
+        "friendly_clearance" => f.friendly_clearance = v,
+        _ => return Err(format!("unknown setting `{key}` in [fight]")),
+    }
+    Ok(())
+}
+
+fn set_revive(r: &mut ReviveSettings, key: &str, value: Value) -> Result<(), String> {
+    if key == "revive_player" {
+        r.revive_player = match value {
+            Value::Text(t) if t == "yes" => true,
+            Value::Text(t) if t == "no" => false,
+            _ => return Err("revive_player must be \"yes\" or \"no\"".into()),
+        };
+        return Ok(());
+    }
+    let v = one(value)?;
+    match key {
+        "time" => r.time = v,
+        "player_time" => r.player_time = v,
+        "health" => r.health = v,
+        "reach" => r.reach = v,
+        "range" => r.range = v,
+        _ => return Err(format!("unknown setting `{key}` in [revive]")),
     }
     Ok(())
 }
