@@ -13,11 +13,13 @@
 
 pub mod params;
 pub mod room;
+pub mod triangles;
 pub mod vec;
 pub mod world;
 
 pub use params::MoveParams;
 pub use vec::Vec3;
+pub use triangles::TriangleWorld;
 pub use world::{Brush, BrushWorld, Hit, Plane, World};
 
 /// Gap kept between the player and any surface, uu. Stops rounding errors

@@ -342,6 +342,13 @@ outward by the box's size so the box can be treated as a point. Real levels
 will answer the same question with the level's polygons and static mesh
 triangles (from the level-loading work), without changing the movement code.
 
+Real levels use `TriangleWorld`: loose triangles, each treated as a very
+thin solid. To be exact for a box, each triangle's solid has its face (both
+ways), one side per edge, its bounding box's six sides, and one side per
+edge-and-axis pair. Triangles are filed in a grid of 256 uu columns, so a
+sweep only checks the ones nearby. The test room cut into triangles gives the
+same results as the box version, within 1 uu.
+
 A 0.1 uu gap is kept between the box and surfaces, so rounding errors can't
 leave it stuck inside a wall.
 

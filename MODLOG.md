@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Collision against triangles, ready for real levels (rc_movement)
+
+- **Changed:** New `crates/rc_movement/src/triangles.rs`: `TriangleWorld`, a `World` made of loose triangles (what the level reader produces for BSP polygons and static meshes), filed in a 256-unit grid so each sweep only looks at nearby triangles. The plane sweep in `world.rs` was split out so both worlds share it. DESIGN updated.
+- **Why:** Real levels are triangles, not boxes. This lets the movement code walk a map once `rc_level` (draft PR #8) is merged, without changing the movement code.
+- **Tested how:** 3 new unit tests (20 in rc_movement, all passing): a box dropped on a single triangle, and the test room cut into triangles run lane by lane next to the original box version (30 and 40 steps, stairs, both ramps, low ceiling standing and crouched).
+- **Result:** Landing on a triangle hits at exactly the expected point (time 0.5). In every lane, the player ends within 1 uu of where the box version puts it.
+- **Still broken / not tested:** Not tested on a real map yet (needs PR #8), and speed with 141,477 triangles (geo_01a) is not measured. Not tested on Windows.
+- **Next:** After PR #8 merges: load geo_01a's collision triangles into `rc_walk` and walk it, logging speed per step.
+
 ## 2026-10-29: First-person movement with the game's own numbers (rc_movement, rc_walk)
 
 - **Changed:** New crate `crates/rc_movement` (player walking, running, strafing, jumping, falling, crouching, step and slope handling, box collision; plain Rust, no Bevy) and `crates/rc_walk` (Bevy 3D program: first-person test room, keyboard/mouse or `--script` input). New settings file `data/movement/player_commando.toml`, and a `.gitignore` line allowing `data/**/*.toml`. Workspace `Cargo.toml` and `Cargo.lock` updated. Research written up in `docs/RESEARCH.md` ("Player movement"); design in `docs/DESIGN.md`; README updated.

@@ -76,9 +76,16 @@ impl Brush {
         Brush { planes, min, max }
     }
 
-    /// Sweep a box against this solid. The solid is grown by the box's size
-    /// on every plane, so the box becomes a point and the sweep a line.
     fn sweep(&self, extent: Vec3, start: Vec3, end: Vec3) -> Option<Hit> {
+        sweep_planes(&self.planes, extent, start, end)
+    }
+}
+
+/// Sweep a box against the convex solid inside `planes`. The solid is grown
+/// by the box's size on every plane, so the box becomes a point and the sweep
+/// a line.
+pub(crate) fn sweep_planes(planes: &[Plane], extent: Vec3, start: Vec3, end: Vec3) -> Option<Hit> {
+    {
         let delta = end - start;
         let mut enter = -1.0f32;
         let mut exit = 1.0f32;
@@ -87,7 +94,7 @@ impl Brush {
         // For a start inside the solid: the side it is least deep behind.
         let mut nearest_out = f32::MIN;
         let mut nearest_normal = Vec3::UP;
-        for p in &self.planes {
+        for p in planes {
             let n = p.normal;
             let grow = n.x.abs() * extent.x + n.y.abs() * extent.y + n.z.abs() * extent.z;
             let d_start = n.dot(start) - p.dist - grow;
