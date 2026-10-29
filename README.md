@@ -78,9 +78,9 @@ copy of the game.
   the game's own; every number is in `data/squad/squad.toml`. The
   windowless test run `rc_squad_sim` passes 23 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
-  and stays put (reviving isn't built yet). It's a
-  plugin for the game program (`rc_game`); until that's in `main`, there's
-  nothing to see in a window. Drawn as coloured capsules for now.
+  and stays put (reviving isn't built yet). They are in the game program
+  (`rc_game`): start a level and they stand with you. Drawn as coloured
+  capsules for now.
 
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test

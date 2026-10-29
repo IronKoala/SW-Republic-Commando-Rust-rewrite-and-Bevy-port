@@ -1222,8 +1222,9 @@ lifted by a step's height so floors and small steps don't count.
 ### In Bevy
 
 `SquadPlugin` follows `docs/PLUGINS.md`. Its systems run in
-`GameSet::Simulate` inside `SquadSet` (order the player's movement before
-it). It reads `ActionState`, the `Player` and `PlayerCamera` transforms and
+`GameSet::Simulate` inside `SquadSet`. `rc_game` orders its
+`player::PlayerMoveSet` before `SquadSet`, so the squad sees this frame's
+leader. It reads `ActionState`, the `Player` and `PlayerCamera` transforms and
 `LevelCollision`, and writes `SquadReadout`. A `SquadOrder` message lets
 anything else (a script, a touch menu, a VR gesture) give orders. Each
 member is an entity with `SquadMate` and a `Transform` at its feet, facing
