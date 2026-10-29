@@ -1,0 +1,10 @@
+[package]
+name = "rc_movers"
+version = "0.1.0"
+description = "Doors, lifts and hatches: moves a map's movers, makes their collision move with them, and carries the player"
+edition.workspace = true
+
+[dependencies]
+rc_level = { path = "../rc_level" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }

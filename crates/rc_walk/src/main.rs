@@ -2,7 +2,7 @@
 //! game's movement (crate `rc_movement`).
 //!
 //! Usage:
-//!   rc_walk [--map NAME] [--settings FILE] [--script] [--frames N]
+//!   rc_walk [--map NAME] [--settings FILE] [--script] [--frames N] [--ride]
 //!
 //! Controls are the game's defaults: W A S D move, mouse looks, Space jumps,
 //! hold C to crouch, hold Shift to walk. Click the window to capture the
@@ -19,6 +19,12 @@
 //! and mouse with a fixed list of moves and checks the results, then exits
 //! with code 0 if every check passed. `--frames N` closes after N frames.
 //! Everything is logged to `logs/rc_walk.log`.
+//!
+//! On a map, doors and lifts move (crate `rc_movers`, settings in
+//! `data/movers/movers.toml`): walk into a door or a trigger and it
+//! opens; stand on a lift and it carries you. `--ride` starts the player
+//! on the map's first lift and sets it going, and with `--script` checks
+//! that the player rides it all the way.
 //!
 //! The pieces are kept apart on purpose, so one can be swapped without
 //! touching the others (for example a VR headset for the camera, or a
@@ -40,9 +46,12 @@ use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
 use rc_level_viewer::{materials, scene, sky};
 use rc_movement::room::test_room;
+use rc_level_viewer::draw::MoverPart;
 use rc_movement::{
     Brush, BrushWorld, Event, MoveInput, MoveParams, Pawn, TriangleWorld, Vec3 as UVec3, World,
 };
+use rc_movers::{MoverEvent, MoverSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::fs;
@@ -53,6 +62,7 @@ use std::time::Instant;
 const LOG_PATH: &str = "logs/rc_walk.log";
 const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Republic Commando";
 const DEFAULT_SETTINGS: &str = "data/movement/player_commando.toml";
+const MOVER_SETTINGS: &str = "data/movers/movers.toml";
 /// Unreal units per Bevy unit. Shared with the level and weapon viewers.
 const UU_PER_UNIT: f32 = 50.0;
 /// The game's horizontal field of view, degrees (PlayerController defaults).
@@ -142,6 +152,16 @@ struct StepTiming {
     worst_ms: f64,
     total_ms: f64,
     steps: u32,
+}
+
+/// The map's doors and lifts, and which mover each export index is.
+#[derive(Resource)]
+struct Movers {
+    set: MoverSet,
+    by_export: HashMap<usize, usize>,
+    /// `--ride`: the lift the player started on, its height then, and the
+    /// player's feet height then.
+    ride: Option<(usize, f32, f32)>,
 }
 
 #[derive(Resource)]
@@ -441,6 +461,7 @@ fn keyboard_mouse_input(
 fn script_input(
     mut script: ResMut<Script>,
     mut intent: ResMut<PlayerIntent>,
+    mut movers: ResMut<Movers>,
     mut body: Query<&mut Body>,
     mut exit: MessageWriter<AppExit>,
     log: Res<RunLog>,
@@ -477,7 +498,7 @@ fn script_input(
                     start_feet_z: z,
                     peak_feet_z: z,
                     lowest_feet_z: z,
-                    events: vec![],
+                    ..Default::default()
                 };
                 log.line(format!(
                     "place feet ({:.0}, {:.0}, {:.0}) yaw {:.0} deg",
@@ -488,6 +509,20 @@ fn script_input(
                 ));
                 // Let it settle onto the floor before measuring jumps.
                 s.hold_left = 0.0;
+            }
+            script::Step::StartRide => {
+                let m = &mut *movers;
+                if let Some((i, _, _)) = m.ride {
+                    let lift_z = m.set.movers[i].pose.pos.z;
+                    m.ride = Some((i, lift_z, body.pawn.feet().z));
+                    let ev = m.set.open(i);
+                    log_mover_events(&m.set, &ev, body.time, &log);
+                    log.line(format!(
+                        "ride: {} set going with the player on it, lift z {lift_z:.1}, feet z {:.1}",
+                        m.set.movers[i].info.place.name,
+                        body.pawn.feet().z
+                    ));
+                }
             }
             script::Step::Turn { degrees } => {
                 let yaw = intent.movement.yaw + degrees.to_radians();
@@ -532,10 +567,12 @@ fn script_input(
 }
 
 /// Move the body with this frame's intent.
+#[allow(clippy::too_many_arguments)]
 fn move_body(
     time: Res<Time>,
     intent: Res<PlayerIntent>,
     world: Res<TestWorld>,
+    mut movers: ResMut<Movers>,
     script: Option<ResMut<Script>>,
     mut body: Query<&mut Body>,
     mut timing: ResMut<StepTiming>,
@@ -546,7 +583,11 @@ fn move_body(
     };
     let dt = if script.is_some() { SCRIPT_DT } else { time.delta_secs().min(0.25) };
     let t0 = Instant::now();
-    let events = body.pawn.step(dt, &intent.movement, world.world());
+    // Doors and lifts move first, carrying or pushing the player.
+    let mover_events = movers.set.step(dt, world.world(), &mut body.pawn);
+    log_mover_events(&movers.set, &mover_events, body.time + dt, &log);
+    let w = movers.set.world(world.world());
+    let events = body.pawn.step(dt, &intent.movement, &w);
     let ms = t0.elapsed().as_secs_f64() * 1000.0;
     timing.steps += 1;
     timing.total_ms += ms;
@@ -566,13 +607,83 @@ fn move_body(
     for e in &events {
         log.line(format!("t={:.3} event {e:?} feet z {:.2}", body.time, feet.z));
     }
+    // `--ride`: how far the lift and the player have gone since it started
+    // (NaN until the script sets it going).
+    let ride = movers.ride.and_then(|(i, lift0, feet0)| {
+        let lift = movers.set.movers[i].pose.pos.z - lift0;
+        lift.is_finite().then_some((lift, feet.z - feet0))
+    });
+    if let Some((lift, moved)) = ride {
+        let before = body.time - dt;
+        if (body.time / 0.25).floor() != (before / 0.25).floor() {
+            log.line(format!("t={:.3} ride: lift {lift:+.1} uu, feet {moved:+.1} uu", body.time));
+        }
+    }
     if let Some(mut s) = script {
+        if let Some((lift, moved)) = ride {
+            s.stats.lift_moved = lift;
+            s.stats.feet_moved = moved;
+            s.stats.worst_ride_gap = s.stats.worst_ride_gap.max((lift - moved).abs());
+        }
         s.stats.peak_feet_z = s.stats.peak_feet_z.max(feet.z);
         s.stats.lowest_feet_z = s.stats.lowest_feet_z.min(feet.z);
         s.stats.events.extend(events.iter().cloned());
     }
     if events.iter().any(|e| matches!(e, Event::Landed { damage, .. } if *damage > 0.0)) {
         log.line("  (the original game would take this much health; not applied yet)");
+    }
+}
+
+fn log_mover_events(set: &MoverSet, events: &[MoverEvent], t: f32, log: &RunLog) {
+    let name = |i: usize| set.movers.get(i).map_or("?", |m| m.info.place.name.as_str());
+    for e in events {
+        let text = match e {
+            MoverEvent::StartedOpening { mover } => format!("{} starts opening", name(*mover)),
+            MoverEvent::Opened { mover, secs } => format!("{} open after {secs:.2} s", name(*mover)),
+            MoverEvent::StartedClosing { mover } => format!("{} starts closing", name(*mover)),
+            MoverEvent::Closed { mover, secs } => format!("{} closed after {secs:.2} s", name(*mover)),
+            MoverEvent::Blocked { mover, what } => format!("{} blocked by the player ({what:?})", name(*mover)),
+            MoverEvent::Sound { mover, sound } => format!("{} sound {sound} (not played yet)", name(*mover)),
+            MoverEvent::Triggered { trigger, event, movers } => {
+                format!("trigger {trigger} sends {event:?} to {movers} movers")
+            }
+            MoverEvent::Event { mover, event, movers } => {
+                format!("{} sends {event:?} to {movers} movers", name(*mover))
+            }
+            MoverEvent::Boarded { mover } => format!("player stands on {}", name(*mover)),
+            MoverEvent::LeftBoard { mover } => format!("player steps off {}", name(*mover)),
+        };
+        log.line(format!("t={t:.3} mover: {text}"));
+    }
+}
+
+/// `--ride` without `--script`: set the lift going once the player stands
+/// on it.
+fn start_ride_when_standing(mut movers: ResMut<Movers>, body: Query<&Body>, log: Res<RunLog>) {
+    let Ok(body) = body.single() else { return };
+    let m = &mut *movers;
+    if let Some((i, lift0, _)) = m.ride {
+        if lift0.is_nan() && m.set.riding == Some(i) {
+            let lift_z = m.set.movers[i].pose.pos.z;
+            m.ride = Some((i, lift_z, body.pawn.feet().z));
+            let ev = m.set.open(i);
+            log_mover_events(&m.set, &ev, body.time, &log);
+        }
+    }
+}
+
+/// Move each mover's drawn triangles to where the mover is now. Unreal
+/// to Bevy swaps Y and Z and scales, so the turn's rows and columns 1 and
+/// 2 swap too.
+fn place_movers(movers: Res<Movers>, mut parts: Query<(&MoverPart, &mut Transform)>) {
+    for (part, mut t) in &mut parts {
+        let Some(&i) = movers.by_export.get(&part.0) else { continue };
+        let (m, shift) = movers.set.movers[i].motion().matrix();
+        let s = [0usize, 2, 1];
+        let col = |c: usize| Vec3::new(m[s[0]][s[c]], m[s[1]][s[c]], m[s[2]][s[c]]);
+        let rot = Mat3::from_cols(col(0), col(1), col(2));
+        t.rotation = Quat::from_mat3(&rot).normalize();
+        t.translation = to_bevy(shift);
     }
 }
 
@@ -642,6 +753,7 @@ fn main() -> AppExit {
     let mut use_script = false;
     let mut map_name: Option<String> = None;
     let mut frames = None;
+    let mut ride = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -649,9 +761,10 @@ fn main() -> AppExit {
             "--map" => map_name = args.next(),
             "--script" => use_script = true,
             "--frames" => frames = args.next().and_then(|n| n.parse().ok()),
+            "--ride" => ride = true,
             other => {
                 eprintln!("unknown option {other}");
-                eprintln!("usage: rc_walk [--map NAME] [--settings FILE] [--script] [--frames N]");
+                eprintln!("usage: rc_walk [--map NAME] [--settings FILE] [--script] [--frames N] [--ride]");
                 return AppExit::from_code(2);
             }
         }
@@ -688,6 +801,28 @@ fn main() -> AppExit {
         log.line(format!("  {name} = {value}"));
     }
 
+    let mover_settings = match fs::read_to_string(MOVER_SETTINGS) {
+        Ok(text) => match rc_movers::Settings::default().with_overrides(&text) {
+            Ok(s) => {
+                log.line(format!("door and lift settings from {MOVER_SETTINGS}"));
+                s
+            }
+            Err(e) => {
+                log.line(format!("ERROR in {MOVER_SETTINGS}: {e}"));
+                return AppExit::from_code(1);
+            }
+        },
+        Err(_) => {
+            log.line(format!("no {MOVER_SETTINGS}; built-in door and lift settings"));
+            rc_movers::Settings::default()
+        }
+    };
+    let mut movers = Movers {
+        set: MoverSet::new(Default::default(), mover_settings.clone(), |_| Vec::new()),
+        by_export: HashMap::new(),
+        ride: None,
+    };
+
     let mut look = None;
     let (ground, start, steps) = match &map_name {
         None => (Ground::Room(test_room()), None, script::steps()),
@@ -723,6 +858,42 @@ fn main() -> AppExit {
             let t = Instant::now();
             let v = |p: [f32; 3]| UVec3::new(p[0], p[1], p[2]);
             let tris = lvl.triangles.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect();
+            let mt = &lvl.mover_triangles;
+            let set = MoverSet::new(lvl.movers.clone(), mover_settings.clone(), |e| {
+                mt.get(&e)
+                    .map(|ts| ts.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect())
+                    .unwrap_or_default()
+            });
+            log.line(format!(
+                "doors and lifts: {} movers ({} solid), {} triggers that run, {} that don't yet",
+                set.movers.len(),
+                set.movers.iter().filter(|m| m.collision.is_some()).count(),
+                set.active_triggers().count(),
+                set.unhandled_triggers.len()
+            ));
+            for (i, m) in set.movers.iter().enumerate() {
+                log.line(format!(
+                    "  mover {i} {} ({}): {} keys, opens in {:.2} s, StayOpenTime {:.2} s, state {:?} -> {}, tag {:?}, at ({:.0}, {:.0}, {:.0})",
+                    m.info.place.name,
+                    m.info.chain[0],
+                    m.info.num_keys,
+                    m.info.open_time(),
+                    m.info.stay_open_time,
+                    m.info.state,
+                    m.behaviour.name(),
+                    m.info.tag,
+                    m.pose.pos.x,
+                    m.pose.pos.y,
+                    m.pose.pos.z
+                ));
+            }
+            movers.by_export = set
+                .movers
+                .iter()
+                .enumerate()
+                .map(|(i, m)| (m.info.place.export, i))
+                .collect();
+            movers.set = set;
             let tw = TriangleWorld::new(tris);
             log.line(format!(
                 "collision grid built in {:.0} ms",
@@ -742,7 +913,35 @@ fn main() -> AppExit {
             ));
             look = build_look(&path, &game_data, &log);
             let lowest = tw.bounds().0.z;
-            (Ground::Map(tw), Some(start), script::map_steps(start.0, start.1, lowest))
+            let mut steps = script::map_steps(start.0, start.1, lowest);
+            let mut start = start;
+            if ride {
+                let r = params.collision_radius;
+                let ext = UVec3::new(r, r, params.collision_height);
+                let lift = (0..movers.set.movers.len()).find_map(|i| {
+                    let m = &movers.set.movers[i];
+                    let (spot, clear) = m.ride_clearance(&tw, ext).filter(|_| m.is_lift(r))?;
+                    (clear >= 0.999).then_some((i, spot))
+                });
+                match lift {
+                    Some((i, spot)) => {
+                        let m = &movers.set.movers[i];
+                        let secs = m.info.open_time();
+                        log.line(format!(
+                            "ride: starting on {} at ({:.0}, {:.0}, {:.0}); it takes {secs:.2} s",
+                            m.info.place.name, spot.x, spot.y, spot.z
+                        ));
+                        start = (spot, 0.0);
+                        steps = script::ride_steps(spot, secs);
+                        movers.ride = Some((i, f32::NAN, f32::NAN));
+                    }
+                    None => {
+                        log.line("ERROR: --ride, but this map has no lift to stand on");
+                        return AppExit::from_code(1);
+                    }
+                }
+            }
+            (Ground::Map(tw), Some(start), steps)
         }
     };
 
@@ -764,6 +963,7 @@ fn main() -> AppExit {
     }))
     .insert_resource(MapLook(Mutex::new(look)))
     .insert_resource(TestWorld(ground))
+    .insert_resource(movers)
     .init_resource::<StepTiming>()
     .insert_resource(ExitAfter(frames))
     .init_resource::<FrameCount>()
@@ -772,7 +972,7 @@ fn main() -> AppExit {
     .add_plugins(sky::SkyPlugin)
     .add_systems(Startup, setup)
     .add_systems(Update, move_body.in_set(Stage::Move))
-    .add_systems(Update, place_view.in_set(Stage::View))
+    .add_systems(Update, (place_view, place_movers).in_set(Stage::View))
     .add_systems(Update, report.in_set(Stage::Report));
     if use_script {
         log.line("input: --script (keyboard and mouse ignored)");
@@ -787,6 +987,11 @@ fn main() -> AppExit {
         .add_systems(Update, script_input.in_set(Stage::Input));
     } else {
         log.line("input: keyboard and mouse (click the window to look around)");
+        if ride {
+            // No script to set the lift going: it goes as soon as the
+            // player lands on it.
+            app.add_systems(Update, start_ride_when_standing.in_set(Stage::Input));
+        }
         app.add_systems(Update, keyboard_mouse_input.in_set(Stage::Input));
     }
     app.insert_resource(log);

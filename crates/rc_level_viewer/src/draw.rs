@@ -17,6 +17,12 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 /// Sky-blue-grey background, as 0-255 sRGB values.
 pub const BACKGROUND: [u8; 3] = [64, 72, 89];
 
+/// Marks the drawn triangles of a mover (door, lift), by the mover's
+/// export index in the map. Their vertices are where the map placed the
+/// mover; moving the entity's `Transform` moves the mover.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct MoverPart(pub usize);
+
 /// What `spawn_level` drew, for the log.
 #[derive(Debug, Default, Clone)]
 pub struct DrawReport {
@@ -179,6 +185,9 @@ pub fn spawn_level(
             MeshMaterial3d(materials.add(material)),
             Transform::default(),
         ));
+        if let Some(m) = b.mover {
+            entity.insert(MoverPart(m));
+        }
         if b.sky {
             entity.insert(RenderLayers::layer(crate::sky::SKY_LAYER));
             sky_batches += 1;

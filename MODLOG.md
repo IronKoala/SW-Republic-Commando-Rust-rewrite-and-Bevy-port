@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Doors and lifts move (rc_level::movers, rc_movers, rc_walk)
+
+- **Changed:** New `rc_level::movers` reads every mover (door, lift, hatch) and trigger in a map: keys, timing, easing, what it does when blocked, what sets it off, tag, event and sounds, from the map and then the class defaults (`ClassLook` now keeps all of a class's default values). New crate `rc_movers` runs them: moves them key to key, moves their collision with them, carries a player standing on a lift, pushes or backs off when the player is in the way, runs player-touch triggers and chained events. Our own choices are in `data/movers/movers.toml`. `map_collision` keeps mover triangles apart; the level viewer's scene gives movers their own draw batches (`MoverPart`); `rc_walk` moves them every frame, logs every mover event, and has `--ride`. New program `rc_mover_check` runs every mover in every map without a window.
+- **Why:** Overnight item 1 (all levels): doors and lifts stood still, so routes through levels were shut.
+- **Tested how:** `cargo test -p rc_movers` (11 tests), `rc_mover_check` on all 79 maps, `rc_walk --map geo_05a --ride --script`, `rc_walk --script` in the test room, `cargo build --workspace`.
+- **Found in the game's data:** RC keeps one time per step (`MoveTimes[]`), has its own states (`TriggerLoop`, `Locked`, `Looping`, `None`) and four events (`OpeningEvent`, `OpenedEvent`, `ClosingEvent`, `ClosedEvent`). Movers have up to 24 keys. Double doors take their values from `MarkerProperties.u`. Engine triggers fire once by default.
+- **Result:** All 79 maps: 941 movers (877 with collision), 1,675 triggers, no unknown states; 863 of 863 movers opened and closed in their `MoveTimes` (72 over 60 s not run); 33 of 33 lift rides passed (25 skipped where the level is in the way). Walker on geo_05a: the player rode `Mover37` 12,176 units up in 18 s, 5 of 5 checks passed. Unit tests 11 passed, 0 failed: a triggered door opens in 1.50 s (MoveTime 1.5), waits 2 s, closes in 1.50 s; a lift carries the player up 400 units and back down, feet never more than 1 unit off its top; a closing door turns back when the player stands in it; walking into a bump door opens it and the player gets through. Test room: `SCRIPT DONE: 21 checks passed, 0 failed`.
+- **Still broken / not tested:** Not tested on Windows. Not compared with the real game by eye. Sounds are logged, not played. 472 movers wait for a tag nothing in the map sends (scripts, squad orders), and `Locked`/`None` doors stay shut, since we don't run the game's scripts. Triggers that other triggers switch on and off aren't handled. `bAutoDoor` isn't acted on. Turning movers collide approximately. The smooth easing curve is our reading of UE2, not measured.
+- **Next:** Scripted doors (the game's scripted sequences and squad door orders), then sounds.
+
 ## 2026-10-29: Levels plug into the game (rc_level_plugin)
 
 ## 2026-10-29: Delta Squad follows the player and takes orders (rc_squad, rc_squad_plugin)

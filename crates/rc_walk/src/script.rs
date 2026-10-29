@@ -12,6 +12,11 @@ pub struct Stats {
     pub peak_feet_z: f32,
     pub lowest_feet_z: f32,
     pub events: Vec<Event>,
+    /// `--ride`: how far the lift and the player's feet have moved since
+    /// the lift was set going, and the biggest difference on the way.
+    pub lift_moved: f32,
+    pub feet_moved: f32,
+    pub worst_ride_gap: f32,
 }
 
 impl Stats {
@@ -41,6 +46,8 @@ pub enum Step {
     AtLeast { name: &'static str, measure: Measure, min: f32 },
     /// Compare a measurement with what we expect.
     Check { name: &'static str, measure: Measure, want: f32, tolerance: f32 },
+    /// Set the `--ride` lift going.
+    StartRide,
 }
 
 fn hold(secs: f32, input: MoveInput) -> Step {
@@ -172,4 +179,30 @@ pub fn map_steps(feet: Vec3, yaw: f32, lowest_z: f32) -> Vec<Step> {
         min: lowest_z,
     });
     s
+}
+
+/// `--ride`: stand on a lift at `feet`, set it going, and check the player
+/// goes up (or down) with it. `secs` is how long the lift takes.
+pub fn ride_steps(feet: Vec3, secs: f32) -> Vec<Step> {
+    vec![
+        Step::Place { feet, yaw: 0.0 },
+        hold(0.5, MoveInput::default()),
+        check("standing on the lift", |p, _| yes(p.mode == Mode::Walking), 1.0, 0.0),
+        Step::StartRide,
+        hold(secs + 0.5, MoveInput::default()),
+        Step::AtLeast { name: "the lift moved (uu)", measure: |_, st| st.lift_moved.abs(), min: 32.0 },
+        check(
+            "the player's feet moved as far as the lift (uu)",
+            |_, st| st.feet_moved - st.lift_moved,
+            0.0,
+            4.0,
+        ),
+        check(
+            "the player stayed on the lift all the way (biggest gap, uu)",
+            |_, st| st.worst_ride_gap,
+            0.0,
+            16.0,
+        ),
+        check("still standing at the end", |p, _| yes(p.mode == Mode::Walking), 1.0, 0.0),
+    ]
 }

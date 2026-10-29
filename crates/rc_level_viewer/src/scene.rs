@@ -54,6 +54,9 @@ pub struct Batch {
     /// alpha as stored (0-255, the game's own brightness curve). Empty when
     /// the mesh has none.
     pub colours: Vec<[u8; 4]>,
+    /// The mover (door, lift) these triangles belong to, by its export
+    /// index, so they can be moved. `None` for everything that stays put.
+    pub mover: Option<usize>,
 }
 
 #[derive(Default)]
@@ -120,6 +123,9 @@ pub struct Stats {
     /// (included in `mesh_actors`).
     pub class_mesh_actors: usize,
     pub sky_polygons: usize,
+    /// Doors, lifts and other movers in the map, and how many have a model.
+    pub movers: usize,
+    pub movers_drawn: usize,
     pub sky_props: usize,
     pub backdrop_polygons: usize,
 }
@@ -164,8 +170,8 @@ struct Builder {
 }
 
 /// Material, translucent, two-sided, from a mesh, lightmap page, has
-/// colours, in the sky.
-type BatchKey = (String, bool, bool, bool, Option<usize>, bool, bool);
+/// colours, in the sky, mover.
+type BatchKey = (String, bool, bool, bool, Option<usize>, bool, bool, Option<usize>);
 
 impl Builder {
     #[allow(clippy::too_many_arguments)]
@@ -179,6 +185,7 @@ impl Builder {
         lightmap_page: Option<usize>,
         coloured: bool,
         sky: bool,
+        mover: Option<usize>,
     ) -> &mut Batch {
         let k = (
             key.to_string(),
@@ -188,6 +195,7 @@ impl Builder {
             lightmap_page,
             coloured,
             sky,
+            mover,
         );
         let i = *self.by_key.entry(k).or_insert_with(|| {
             self.batches.push(Batch {
@@ -197,6 +205,7 @@ impl Builder {
                 from_mesh,
                 sky,
                 lightmap_page,
+                mover,
                 ..Default::default()
             });
             self.batches.len() - 1
@@ -296,7 +305,7 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, sky_zone: Option<u
         } else {
             ctx.stats.bsp_polygons_unlit += 1;
         }
-        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false, sky);
+        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false, sky, None);
         let base = batch.positions.len() as u32;
         let n = dir_to_bevy(poly.normal);
         for (p, uv) in poly.points.iter().zip(&poly.uvs) {
@@ -383,6 +392,7 @@ fn add_mesh_actor(
     mesh: &StaticMesh,
     owner: &(Package, Vec<u8>),
     colours: Option<&[[u8; 4]]>,
+    mover: Option<usize>,
 ) {
     let axes = rotation_axes(p.rotation);
     let s3 = p.draw_scale_3d;
@@ -413,7 +423,7 @@ fn add_mesh_actor(
                 )
             }
         };
-        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some(), sky);
+        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some(), sky, mover);
         let first = sec.first_index as usize;
         let count = sec.num_faces as usize * 3;
         let Some(tris) = mesh.indices.get(first..first + count) else {
@@ -535,6 +545,16 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     let mut floor_points = Vec::new();
     let mut mesh_cache = HashMap::new();
     let mut class_looks = rc_level::class_look::ClassLooks::new();
+    // Doors and lifts get batches of their own, so they can move.
+    let movers = {
+        let mats = &mut *ctx.mats;
+        rc_level::movers::read_movers(&mut class_looks, pkg, data, &level.actors, &mut |n: &str| {
+            mats.package(n)
+        })
+    };
+    let mover_exports: std::collections::HashSet<usize> =
+        movers.movers.iter().map(|m| m.place.export).collect();
+    ctx.stats.movers = movers.movers.len();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
@@ -617,7 +637,9 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 };
                 let in_sky = sky_zone.is_some() && bsp.point_zone(p.location) == sky_zone;
                 ctx.stats.sky_props += in_sky as usize;
-                add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref());
+                let mover = mover_exports.contains(&p.export).then_some(p.export);
+                ctx.stats.movers_drawn += mover.is_some() as usize;
+                add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref(), mover);
                 placed.push((p, m));
             }
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,

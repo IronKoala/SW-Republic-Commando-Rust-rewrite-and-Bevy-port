@@ -39,9 +39,30 @@ pub struct ClassLook {
     pub draw_scale: Option<f32>,
     pub draw_scale_3d: Option<Vec3>,
     pub hidden: Option<bool>,
+    /// Every class's own default values, nearest class first, with the
+    /// package they were read from (names and references are that
+    /// package's). Used for values other than the look, such as a door's
+    /// timing (`crate::movers`).
+    pub defaults: Vec<(Loaded, Vec<Property>)>,
 }
 
 impl ClassLook {
+    /// The nearest class's default for `name` (array element `index`), and
+    /// the package it belongs to.
+    pub fn find(&self, name: &str, index: u32) -> Option<(&Loaded, &Property)> {
+        self.defaults.iter().find_map(|(l, props)| {
+            props
+                .iter()
+                .find(|p| p.array_index == index && l.0.name(p.name).eq_ignore_ascii_case(name))
+                .map(|p| (l, p))
+        })
+    }
+
+    /// Whether the class is `name` or comes from it.
+    pub fn is_a(&self, name: &str) -> bool {
+        self.chain.iter().any(|c| c.eq_ignore_ascii_case(name))
+    }
+
     /// The mesh to draw: a default mesh, unless the class draws something
     /// else (a skeletal mesh, a sprite) or is hidden in the game.
     pub fn drawn_mesh(&self) -> Option<&(Loaded, i32)> {
@@ -175,6 +196,7 @@ impl ClassLooks {
             draw_scale: None,
             draw_scale_3d: None,
             hidden: None,
+            defaults: Vec::new(),
         };
         // Nearest class wins: walk from the class up and keep the first
         // value found for each.
@@ -183,6 +205,7 @@ impl ClassLooks {
             let Some(d) = class_defaults(pkg, data, &pkg.exports[*k], &is_property) else {
                 continue;
             };
+            look.defaults.push((loaded.clone(), d.properties.clone()));
             let find = |n: &str| -> Option<&Property> {
                 d.properties
                     .iter()
