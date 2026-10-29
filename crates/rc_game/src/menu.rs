@@ -17,8 +17,8 @@
 #![allow(deprecated)]
 
 use crate::input::LookSettings;
-use crate::original_menu::OriginalMenus;
 use crate::levels::LevelList;
+use crate::original_menu::OriginalMenus;
 use crate::player::FieldOfView;
 use crate::settings::{Settings, SettingsPath};
 use crate::theme::Theme;
@@ -103,7 +103,7 @@ impl Menu {
         self.dirty = true;
     }
 
-    fn back(&mut self) -> bool {
+    pub(crate) fn back(&mut self) -> bool {
         match self.history.pop() {
             Some((p, s)) => {
                 self.page = p;
@@ -167,11 +167,16 @@ fn menu_visible(state: &GameState, play: Option<&Play>) -> bool {
     *state == GameState::MainMenu || play == Some(&Play::Paused)
 }
 
-/// The original main menu (`original_menu.rs`) draws and handles the main
-/// page when the install has it; this placeholder then stays out of the
-/// way.
-fn original_has_it(state: &GameState, menu: &Menu, original: &OriginalMenus) -> bool {
-    *state == GameState::MainMenu && menu.page == Page::Main && original.active()
+/// The original menus (`original_menu.rs`) draw and handle the main page,
+/// and any other page whose original menu works here; this placeholder
+/// then stays out of the way.
+fn original_has_it(
+    state: &GameState,
+    play: Option<&Play>,
+    menu: &Menu,
+    original: &OriginalMenus,
+) -> bool {
+    original.shown(state, play, menu).is_some()
 }
 
 pub fn items(
@@ -299,7 +304,12 @@ fn navigate(
     log: Res<GameLog>,
 ) {
     if !menu_visible(state.get(), play.as_deref().map(|p| p.get()))
-        || original_has_it(state.get(), &menu, &original)
+        || original_has_it(
+            state.get(),
+            play.as_deref().map(|p| p.get()),
+            &menu,
+            &original,
+        )
         || original.used_input
     {
         return;
@@ -466,7 +476,12 @@ fn draw_menu(
     original: Res<OriginalMenus>,
 ) {
     let visible = menu_visible(state.get(), play.as_deref().map(|p| p.get()))
-        && !original_has_it(state.get(), &menu, &original);
+        && !original_has_it(
+            state.get(),
+            play.as_deref().map(|p| p.get()),
+            &menu,
+            &original,
+        );
     if !visible {
         for r in &roots {
             commands.entity(r).despawn();

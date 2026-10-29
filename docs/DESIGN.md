@@ -1612,6 +1612,16 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   gives the original's sRGB result over black.
 - `rc_menus::screens` holds what each menu's script does, rewritten by
   hand (the main menu and the yes/no question so far).
+- `rc_menus::pages` handles the pages behind the main menu (pause,
+  campaign, options) as data. `data/ui/original_menus.toml` names each
+  page's menu class and maps each button's function name (the original's
+  `OnSelect`) to one of a few commands (`resume`, `restart`,
+  `open:<page>`, `back`, `quit_to_menu`, `quit_game`, `play:<map>`,
+  `unavailable`). `pages::check` lets a page use its original menu only
+  if every widget is a kind we draw and every button has a command;
+  otherwise the placeholder page stays and every reason is logged. So a
+  mod can switch a page to another class, or teach it a button, without
+  code, and an unfinished page never shows half-working.
 
 The menu area is the largest centred 4:3 box in the window; the original's
 positions assume 4:3, so nothing is stretched on wide or tall screens.

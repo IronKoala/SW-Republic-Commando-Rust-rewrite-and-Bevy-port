@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Pause and campaign pages can use their original menus (rc_menus::pages)
+
+- **Changed:** New `crates/rc_menus/src/pages.rs` and data file `data/ui/original_menus.toml` (which class draws each page, and what each button's function does). `rc_game/src/original_menu.rs` now draws any page that passes `pages::check`, not only the main menu; the pause page draws over the game; the quit question works from any page; RESTART reloads the current level. `menu.rs` steps aside for any page the original draws. `Sprite`, `Text` and `Button` in `rc_menus::layout` gained `Default` (for tests).
+- **Why:** Next-steps item 2: replace the amber placeholder screens with the original's, read from the install.
+- **Tested how:** `cargo test -p rc_menus -p rc_game` (4 new tests in `pages.rs`, 2 in `original_menu.rs`), `cargo build`, `cargo clippy` (no new warnings). **Not tested with the game files**: the PC connection wasn't approved overnight, so no game data was available.
+- **Result:** Tests pass: rc_menus 11, rc_game 15. A page with an unknown button or an undrawable widget keeps the placeholder and lists both reasons; unavailable buttons grey out; hidden and console-only buttons are ignored.
+- **Still broken / not tested:** Not run with the install at all. Button function names are guesses (see `docs/ORIGINAL_MENUS.md`). Options pages are left out (sliders and key lists aren't drawn yet). The script's pause steps assume the placeholder's button order.
+- **Next:** One run on the PC to read the real button names from the log, then fix the names and the script.
+
 ## 2026-10-29: All overnight parts merged; Delta Squad wired into the game
 
 - **Changed:** Merged into `main`, in order: CI (#15), game shell (#11), all levels (#14), weapons (#16), droids (#12), squad (#13), level plugin (#17), doors and lifts (#18), original main menu (#19). While merging: `rc_combat` now uses the shared `rc_game_core::ViewKick` instead of its own copy; `rc_probe` keeps both class tools (`--class` from weapons, `--classes`/`--fonts` from the menus, now in `class_scan.rs`); level collision indexes only package files, so `Engine.int` can't stand in for `Engine.u`. This change: `rc_game` adds `rc_squad_plugin::SquadPlugin`, and its player movement is in a new `player::PlayerMoveSet` ordered before `SquadSet`.

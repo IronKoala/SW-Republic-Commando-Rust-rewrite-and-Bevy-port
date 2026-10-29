@@ -1,8 +1,10 @@
-//! The original game's main menu, drawn from the player's install (see
-//! `rc_menus` and `docs/ORIGINAL_MENUS.md`). It replaces the placeholder
-//! main menu page in `menu.rs`; the other pages (campaign list, options,
-//! pause) are still the placeholders until their original screens are
-//! built.
+//! The original game's menus, drawn from the player's install (see
+//! `rc_menus` and `docs/ORIGINAL_MENUS.md`). The main menu replaces the
+//! placeholder main page in `menu.rs`. The other pages (pause, campaign,
+//! options) use the original menu named for them in
+//! `data/ui/original_menus.toml` when every widget and button on it can
+//! work here (`rc_menus::pages::check`); otherwise the placeholder page
+//! stays and the log says why.
 //!
 //! The original lays menus out for a 4:3 screen. We draw them in a centred
 //! 4:3 area, as large as the window allows, with black on either side
@@ -23,13 +25,15 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 use rc_game_core::{
-    Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LoadingGate,
+    Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LoadingGate, Play,
 };
 use rc_menus::gpu::{self, Variant};
 use rc_menus::layout::{Kind, MenuLayout};
+use rc_menus::pages::{self, PageButtons, PageCmd, PagePlan};
 use rc_menus::quads::{self, Quad, Sizes};
 use rc_menus::screens::{self, MainAction};
 use rc_menus::value::V;
+use serde::Deserialize;
 use std::collections::HashMap;
 
 /// The original's menu shape.
@@ -92,13 +96,49 @@ impl Screen {
     }
 }
 
+/// A page behind the main menu drawn from its original menu.
+pub struct PageScreen {
+    pub screen: Screen,
+    pub plan: PagePlan,
+    pub buttons: PageButtons,
+}
+
+/// Which original screen is showing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shown {
+    Main,
+    /// A page by its name in `original_menus.toml` (`paused`...).
+    Page(String),
+}
+
+/// The page's name in `original_menus.toml`.
+pub fn page_key(page: Page) -> Option<&'static str> {
+    match page {
+        Page::Campaigns => Some("campaigns"),
+        Page::Options => Some("options"),
+        Page::Paused => Some("paused"),
+        Page::Main | Page::Levels(_) | Page::NoGame => None,
+    }
+}
+
+fn page_from_key(key: &str) -> Option<Page> {
+    match key {
+        "campaigns" => Some(Page::Campaigns),
+        "options" => Some(Page::Options),
+        "paused" => Some(Page::Paused),
+        _ => None,
+    }
+}
+
 /// The original menus, when the install has them.
 #[derive(Resource, Default)]
 pub struct OriginalMenus {
     /// Tried to load them (only once).
     pub tried: bool,
     pub main: Option<Screen>,
-    /// The "are you sure?" box over the main menu.
+    /// Pages behind the main menu that use their original menu, by name.
+    pub pages: HashMap<String, PageScreen>,
+    /// The "are you sure?" box over the screen showing.
     pub question: Option<Screen>,
     /// The question box's layout, kept for when QUIT is chosen again.
     question_layout: Option<MenuLayout>,
@@ -123,6 +163,94 @@ impl OriginalMenus {
     pub fn active(&self) -> bool {
         self.main.is_some()
     }
+
+    /// The original screen to show now, if any (else the placeholder
+    /// page shows).
+    pub fn shown(&self, state: &GameState, play: Option<&Play>, menu: &Menu) -> Option<Shown> {
+        if *state == GameState::MainMenu && menu.page == Page::Main && self.active() {
+            return Some(Shown::Main);
+        }
+        if *state != GameState::MainMenu && play != Some(&Play::Paused) {
+            return None;
+        }
+        let key = page_key(menu.page)?;
+        self.pages
+            .contains_key(key)
+            .then(|| Shown::Page(key.to_string()))
+    }
+
+    fn screen(&self, shown: &Shown) -> Option<&Screen> {
+        match shown {
+            Shown::Main => self.main.as_ref(),
+            Shown::Page(k) => self.pages.get(k).map(|p| &p.screen),
+        }
+    }
+
+    fn screen_mut(&mut self, shown: &Shown) -> Option<&mut Screen> {
+        match shown {
+            Shown::Main => self.main.as_mut(),
+            Shown::Page(k) => self.pages.get_mut(k).map(|p| &mut p.screen),
+        }
+    }
+}
+
+/// `data/ui/original_menus.toml`.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct PagesFile {
+    pages: std::collections::BTreeMap<String, PageDef>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageDef {
+    class: String,
+    #[serde(default)]
+    over_game: bool,
+    back: Option<String>,
+    #[serde(default)]
+    buttons: std::collections::BTreeMap<String, String>,
+}
+
+/// Read the page list: the first copy found in the data folders (so a mod
+/// wins), else the one built into the game.
+fn page_plans(paths: &GamePaths, log: &GameLog) -> Vec<PagePlan> {
+    const REL: &str = "ui/original_menus.toml";
+    let text = match paths.data_file(REL) {
+        Some(p) => match std::fs::read_to_string(&p) {
+            Ok(t) => t,
+            Err(e) => {
+                log.line(format!("original menus: can't read {}: {e}", p.display()));
+                include_str!("../../../data/ui/original_menus.toml").to_string()
+            }
+        },
+        None => include_str!("../../../data/ui/original_menus.toml").to_string(),
+    };
+    parse_plans(&text).unwrap_or_else(|e| {
+        log.line(format!("original menus: {REL}: {e}; no original pages"));
+        Vec::new()
+    })
+}
+
+fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
+    let f: PagesFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for (page, d) in f.pages {
+        let cmd = |s: &str| PageCmd::parse(s).ok_or(format!("page {page}: unknown command {s:?}"));
+        let mut buttons = Vec::new();
+        for (f, c) in &d.buttons {
+            buttons.push((f.clone(), cmd(c)?));
+        }
+        let back = d.back.as_deref().map(cmd).transpose()?;
+        out.push(PagePlan {
+            page: page.to_ascii_lowercase(),
+            class: d.class,
+            buttons,
+            back,
+            over_game: d.over_game,
+        });
+    }
+    Ok(out)
 }
 
 pub struct OriginalMenuPlugin;
@@ -131,9 +259,10 @@ impl Plugin for OriginalMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OriginalMenus>()
             .add_systems(OnEnter(GameState::MainMenu), (load, reset).chain())
+            .add_systems(OnEnter(Play::Paused), load)
             .add_systems(
                 Update,
-                (navigate, draw, fit_area)
+                (focus_new_page, navigate, draw, fit_area)
                     .chain()
                     .in_set(GameSet::Hud)
                     // Before the placeholder menu reads the same actions.
@@ -168,6 +297,60 @@ fn load(
             return;
         }
     };
+    let mut paths_needed = Vec::new();
+    for plan in page_plans(&paths, &log) {
+        let class = match assets.library.class(&plan.class) {
+            Ok(c) => c,
+            Err(e) => {
+                log.line(format!(
+                    "original menus: page {} kept the placeholder: can't read {}: {e}",
+                    plan.page, plan.class
+                ));
+                continue;
+            }
+        };
+        let mut layout = rc_menus::build(&class);
+        for w in &layout.widgets {
+            if let Kind::Button(b) = &w.kind {
+                if w.shown_on_pc() {
+                    log.line(format!(
+                        "original menus:   {} button {} calls {:?}",
+                        plan.class, w.name, b.on_select
+                    ));
+                }
+            }
+        }
+        match pages::check(&mut layout, &plan) {
+            Ok(buttons) => {
+                log.line(format!(
+                    "original menus: page {} uses {} ({} buttons)",
+                    plan.page,
+                    plan.class,
+                    buttons.commands.len()
+                ));
+                paths_needed.extend(assets.textures_of(&layout));
+                menus.pages.insert(
+                    plan.page.clone(),
+                    PageScreen {
+                        screen: Screen {
+                            layout,
+                            focus: None,
+                        },
+                        plan,
+                        buttons,
+                    },
+                );
+            }
+            Err(why) => {
+                for w in why {
+                    log.line(format!(
+                        "original menus: page {} kept the placeholder: {w}",
+                        plan.page
+                    ));
+                }
+            }
+        }
+    }
     let quit_text = match main.get("QuitGameConfirm") {
         Some(V::Str(s)) => s.clone(),
         _ => "Quit?".into(),
@@ -186,7 +369,7 @@ fn load(
         }
     };
     // Load every picture up front so the menu never waits.
-    let mut paths_needed = assets.textures_of(&layout);
+    paths_needed.extend(assets.textures_of(&layout));
     if let Some(q) = &question_layout {
         paths_needed.extend(assets.textures_of(q));
     }
@@ -236,8 +419,31 @@ fn reset(mut menus: ResMut<OriginalMenus>, log: Res<GameLog>) {
     log.line(format!("original menus: main menu opened, focus on {name}"));
 }
 
-fn showing(state: &GameState, menu: &Menu, menus: &OriginalMenus) -> bool {
-    *state == GameState::MainMenu && menu.page == Page::Main && menus.active()
+/// When an original page comes on screen, focus its first button (the
+/// main menu does this in `reset`).
+fn focus_new_page(
+    state: Res<State<GameState>>,
+    play: Option<Res<State<Play>>>,
+    menu: Res<Menu>,
+    mut menus: ResMut<OriginalMenus>,
+    mut last: Local<Option<Shown>>,
+    log: Res<GameLog>,
+) {
+    let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
+    if shown == *last {
+        return;
+    }
+    *last = shown.clone();
+    menus.question = None;
+    menus.dirty = true;
+    if let Some(Shown::Page(k)) = &shown {
+        let screen = &mut menus.pages.get_mut(k).unwrap().screen;
+        screen.focus = screen.buttons().first().copied();
+        log.line(format!(
+            "original menus: page {k} opened, focus on {}",
+            screen.focused_name().unwrap_or("none")
+        ));
+    }
 }
 
 #[derive(Component)]
@@ -250,7 +456,7 @@ struct OriginalRoot;
 #[derive(Component)]
 struct HitBox(bool, usize);
 
-fn play(
+fn play_sound(
     commands: &mut Commands,
     menus: &mut OriginalMenus,
     sources: &mut Assets<AudioSource>,
@@ -289,12 +495,14 @@ fn navigate(
     mut commands: Commands,
     actions: Res<ActionState>,
     state: Res<State<GameState>>,
+    play: Option<Res<State<Play>>>,
     mut menu: ResMut<Menu>,
     mut menus: ResMut<OriginalMenus>,
     hits: Query<(&Interaction, &HitBox), Changed<Interaction>>,
     mut current: ResMut<CurrentLevel>,
     mut gate: ResMut<LoadingGate>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut next_play: Option<ResMut<NextState<Play>>>,
     mut exit: MessageWriter<AppExit>,
     mut sources: ResMut<Assets<AudioSource>>,
     mut cursor: MessageReader<CursorMoved>,
@@ -305,9 +513,9 @@ fn navigate(
     // not when the menu is redrawn under a still pointer.
     let mouse_moved = cursor.read().count() > 0;
     menus.used_input = false;
-    if !showing(state.get(), &menu, &menus) {
+    let Some(shown) = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu) else {
         return;
-    }
+    };
     let menus = &mut *menus;
     let in_question = menus.question.is_some();
     let mut chosen = None;
@@ -316,7 +524,7 @@ fn navigate(
         let screen = if in_question {
             menus.question.as_mut().unwrap()
         } else {
-            menus.main.as_mut().unwrap()
+            menus.screen_mut(&shown).unwrap()
         };
         if actions.just_pressed(Action::MenuDown) || actions.just_pressed(Action::MenuRight) {
             moved |= screen.step(1);
@@ -356,7 +564,7 @@ fn navigate(
     if moved {
         menus.dirty = true;
         let s = menus.focus_sound.clone();
-        play(&mut commands, menus, &mut sources, &settings, s, &log);
+        play_sound(&mut commands, menus, &mut sources, &settings, s, &log);
     }
     let back = actions.just_pressed(Action::MenuBack);
     if in_question {
@@ -369,8 +577,9 @@ fn navigate(
         let Some(answer) = answer else {
             return;
         };
+        menus.used_input = true;
         let s = menus.select_sound.clone();
-        play(&mut commands, menus, &mut sources, &settings, s, &log);
+        play_sound(&mut commands, menus, &mut sources, &settings, s, &log);
         // In the question box, A is YES and B is NO (MenuQuestionYesNo).
         if answer == "OnAButton" {
             log.line("original menus: quit question answered YES; quitting");
@@ -382,31 +591,83 @@ fn navigate(
         }
         return;
     }
-    let Some(i) = chosen else {
-        return;
+    let cmd = match &shown {
+        Shown::Main => {
+            let Some(i) = chosen else {
+                return;
+            };
+            let main = menus.main.as_ref().unwrap();
+            let name = main.layout.widgets[i].name.clone();
+            let action = screens::main_action(&main.on_select(i));
+            log.line(format!("original menus: chose {name}: {action:?}"));
+            match action {
+                // The original opens the prologue map, PRO.
+                MainAction::NewGame => PageCmd::Play("pro".into()),
+                MainAction::CampaignMap => PageCmd::Open("campaigns".into()),
+                MainAction::Options => PageCmd::Open("options".into()),
+                MainAction::Quit => PageCmd::QuitGame,
+                other => {
+                    log.line(format!("original menus: {other:?} isn't available yet"));
+                    return;
+                }
+            }
+        }
+        Shown::Page(k) => {
+            let p = &menus.pages[k];
+            let cmd = match chosen {
+                Some(i) => p.buttons.command(i).cloned(),
+                None if back => Some(p.plan.back.clone().unwrap_or(PageCmd::Back)),
+                None => None,
+            };
+            let Some(cmd) = cmd else {
+                return;
+            };
+            let name = chosen.map_or("back".to_string(), |i| {
+                p.screen.layout.widgets[i].name.clone()
+            });
+            log.line(format!("original menus: page {k}: chose {name}: {cmd:?}"));
+            cmd
+        }
     };
     menus.used_input = true;
-    let main = menus.main.as_ref().unwrap();
-    let name = main.layout.widgets[i].name.clone();
-    let action = screens::main_action(&main.on_select(i));
-    log.line(format!("original menus: chose {name}: {action:?}"));
     let s = menus.select_sound.clone();
-    play(&mut commands, menus, &mut sources, &settings, s, &log);
-    match action {
-        MainAction::NewGame => {
-            // The original opens the prologue map, PRO.
-            log.line("menu: loading map pro");
+    play_sound(&mut commands, menus, &mut sources, &settings, s, &log);
+    let resume = |next_play: &mut Option<ResMut<NextState<Play>>>| {
+        if let Some(n) = next_play.as_mut() {
+            n.set(Play::Running);
+        }
+    };
+    match cmd {
+        PageCmd::Play(map) => {
+            log.line(format!("menu: loading map {map}"));
             menu.notice = None;
-            current.map = Some("pro".into());
+            current.map = Some(map);
             gate.reset();
             next_state.set(GameState::Loading);
         }
-        MainAction::CampaignMap => menu.go(Page::Campaigns),
-        MainAction::Options => menu.go(Page::Options),
-        MainAction::Quit => match &menus.question_layout {
+        PageCmd::Restart => match current.map.clone() {
+            Some(map) => {
+                log.line(format!("menu: restarting map {map}"));
+                gate.reset();
+                next_state.set(GameState::Loading);
+            }
+            None => log.line("original menus: no level to restart"),
+        },
+        PageCmd::Open(key) => match page_from_key(&key) {
+            Some(p) => menu.go(p),
+            None => log.line(format!("original menus: no page called {key:?}")),
+        },
+        PageCmd::Back => {
+            if !menu.back() && menu.page == Page::Paused {
+                resume(&mut next_play);
+            }
+        }
+        PageCmd::Resume => resume(&mut next_play),
+        PageCmd::QuitToMenu => next_state.set(GameState::MainMenu),
+        PageCmd::QuitGame => match &menus.question_layout {
             Some(l) => {
                 let mut layout = l.clone();
-                let under = menus.main.as_ref().map(|m| &m.layout);
+                let under = menus.screen(&shown).map(|s| &s.layout);
                 let focus = screens::setup_question(&mut layout, &menus.quit_text, under);
                 menus.question = Some(Screen { layout, focus });
                 menus.dirty = true;
@@ -419,7 +680,7 @@ fn navigate(
                 exit.write(AppExit::Success);
             }
         },
-        other => log.line(format!("original menus: {other:?} isn't available yet")),
+        PageCmd::Unavailable => {}
     }
 }
 
@@ -427,19 +688,20 @@ fn navigate(
 fn draw(
     mut commands: Commands,
     state: Res<State<GameState>>,
+    play: Option<Res<State<Play>>>,
     menu: Res<Menu>,
     mut menus: ResMut<OriginalMenus>,
     roots: Query<Entity, With<OriginalRoot>>,
     mut image_assets: ResMut<Assets<Image>>,
 ) {
-    let show = showing(state.get(), &menu, &menus);
-    if !show {
+    let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
+    let Some(shown) = shown else {
         for r in &roots {
             commands.entity(r).despawn();
         }
         menus.dirty = true;
         return;
-    }
+    };
     if !menus.dirty && !roots.is_empty() {
         return;
     }
@@ -448,14 +710,22 @@ fn draw(
         commands.entity(r).despawn();
     }
     let menus = &mut *menus;
+    // The pause menu draws over the game; the rest over black.
+    let backdrop = match &shown {
+        Shown::Page(k) if menus.pages[k].plan.over_game => Color::NONE,
+        _ => Color::BLACK,
+    };
     let Some(assets) = menus.assets.as_mut() else {
         return;
     };
-    // The question box replaces the main menu on screen (it borrows only
+    // The question box replaces the screen under it (it borrows only
     // its background picture), as in the original.
     let (is_question, screen) = match &menus.question {
         Some(q) => (true, q),
-        None => (false, menus.main.as_ref().unwrap()),
+        None => match &shown {
+            Shown::Main => (false, menus.main.as_ref().unwrap()),
+            Shown::Page(k) => (false, &menus.pages[k].screen),
+        },
     };
     // (question box?, pictures, mouse areas by widget index)
     type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>);
@@ -512,7 +782,7 @@ fn draw(
                 height: Val::Percent(100.0),
                 ..default()
             },
-            BackgroundColor(Color::BLACK),
+            BackgroundColor(backdrop),
             GlobalZIndex(10),
         ))
         .with_children(|root| {
@@ -630,4 +900,30 @@ pub fn software_picture(
         height,
         [0, 0, 0, 255],
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shipped_page_list_reads() {
+        let plans = parse_plans(include_str!("../../../data/ui/original_menus.toml")).unwrap();
+        let paused = plans.iter().find(|p| p.page == "paused").expect("paused");
+        assert!(paused.over_game);
+        assert_eq!(paused.back, Some(PageCmd::Resume));
+        assert_eq!(
+            paused.command("restartmissionselected"),
+            Some(&PageCmd::Restart)
+        );
+        for p in &plans {
+            assert!(page_from_key(&p.page).is_some(), "unknown page {}", p.page);
+        }
+    }
+
+    #[test]
+    fn a_bad_command_is_reported() {
+        let e = parse_plans("[pages.paused]\nclass = \"A.B\"\nback = \"fly\"\n").unwrap_err();
+        assert!(e.contains("fly"), "{e}");
+    }
 }

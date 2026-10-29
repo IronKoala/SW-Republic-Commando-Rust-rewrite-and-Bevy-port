@@ -61,6 +61,35 @@ How to look at a menu without the game: `rc_probe --menu` (main menu) or
 `extracted/menus/<Class>.png` and logs every widget to `logs/rc_menu.log`.
 `rc_probe --classes <package.u> [Class]` logs a package's class defaults.
 
+## Pages behind the main menu (2026-10-29, NOT TESTED with the game files)
+
+The pause, campaign and options pages can each use their original menu.
+`data/ui/original_menus.toml` lists, for each page, its class and what each
+button's function does. When the game starts, each page's class is read
+and checked (`rc_menus::pages::check`): a page uses the original only if
+every widget on it is a kind we can draw (picture, text, text button) and
+every button a PC player can reach has a command. Otherwise the amber
+placeholder stays, and the log lists every reason, plus every button the
+class has and the function it calls. So one run with the install shows
+exactly what to add.
+
+Built the night of 2026-10-29 without access to the game files (the PC
+connection wasn't approved yet), so:
+
+- The button function names in the file are guesses, except
+  `RestartMissionSelected`, which was seen in `CTPausePCMenu` earlier.
+- Whether `CTPausePCMenu` and `CTCampaignMenu` have widgets we can't draw
+  (sliders, lists, scroll areas) is not known. The options classes almost
+  certainly do, so they aren't listed yet.
+- The pause menu is drawn over the game (no black backdrop), assuming its
+  own `Background` widget darkens the view as the original does.
+- `rc_game --script` presses Down, Down, Accept on the pause page for
+  "Quit to main menu", which matches the placeholder. If the original
+  pause page turns on, that step needs updating to its button order.
+
+To check on the PC: run `rc_game` once, open the pause menu, quit, and read
+`logs\rc_game.log` for lines starting `original menus: page`.
+
 ## What the original's menus are made of (checked 2026-10-29)
 
 Checked by reading the install's packages with our own `rc_package` reader

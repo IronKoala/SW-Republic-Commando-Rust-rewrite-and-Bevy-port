@@ -194,7 +194,12 @@ copy of the game.
   The campaign list, options, pause, loading screen and HUD are our own
   amber stand-ins, and the amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
-  turn; see `docs/ORIGINAL_MENUS.md`.
+  turn; see `docs/ORIGINAL_MENUS.md`. **Not tested with the game's files:**
+  the pause and campaign pages now switch to their original menus
+  (named in `data/ui/original_menus.toml`) when everything on them can work
+  in this port, and otherwise keep the placeholder and write the reason to
+  `logs/rc_game.log` ("original menus: page paused kept the placeholder:
+  ..."). The button names in that file are guesses until checked.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
   sides, the view up and down stays the original's), and the HUD stays in a
