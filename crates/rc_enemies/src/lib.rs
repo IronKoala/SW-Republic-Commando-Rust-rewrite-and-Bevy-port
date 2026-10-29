@@ -23,7 +23,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, Target};
-use rc_combat::{CombatSet, Damage, Dead, Died, FireShot, Health, Hittable, Team};
+use rc_combat::{CombatSet, Damage, Dead, Died, FireShot, Health, Hittable, ShotLanded, Team};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LevelCollision, MusicMood,
@@ -97,6 +97,11 @@ pub struct FightStats {
     pub droids_hurt: u32,
     pub droids_destroyed: u32,
     pub first_spotted: Option<f32>,
+    /// Where droid bolts ended: on another droid, on the level, or nowhere
+    /// (out of range). Hits on the player are `hits_on_player`.
+    pub bolts_on_droids: u32,
+    pub bolts_on_level: u32,
+    pub bolts_nowhere: u32,
 }
 
 impl Fight {
@@ -119,9 +124,9 @@ pub struct Droid {
 
 /// The droid's mesh, read once from the game and kept between maps.
 #[derive(Resource, Default)]
-struct Looks {
+pub struct Looks {
     tried: bool,
-    look: Option<Arc<DroidLook>>,
+    pub look: Option<Arc<DroidLook>>,
     material: Option<Handle<StandardMaterial>>,
 }
 
@@ -207,8 +212,16 @@ fn load_fight(
                             RenderAssetUsages::RENDER_WORLD,
                         ))
                     });
+                    // The level's lit surfaces carry their light baked in
+                    // and the scene has no ambient light, so a character
+                    // would be black away from live lights. Give it a
+                    // steady share of its own colour ("ambient" in the
+                    // look settings), as light it gives off itself.
+                    let a = params.look.ambient.max(0.0);
                     looks.material = Some(materials.add(StandardMaterial {
                         base_color: if texture.is_some() { Color::WHITE } else { Color::srgb(0.6, 0.6, 0.6) },
+                        emissive: LinearRgba::rgb(a, a, a) * if texture.is_some() { 1.0 } else { 0.3 },
+                        emissive_texture: texture.clone(),
                         base_color_texture: texture,
                         perceptual_roughness: 0.7,
                         ..default()
@@ -235,7 +248,7 @@ fn end_fight(mut commands: Commands, fight: Option<Res<Fight>>, mut mood: ResMut
 fn summary(f: &Fight, log: &GameLog) {
     let s = &f.stats;
     log.line(format!(
-        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hit the player for {:.0} damage; droids hurt {} times; first spotted at {}",
+        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hit the player for {:.0} damage ({} hit other droids, {} the level, {} nothing); droids hurt {} times; first spotted at {}",
         f.battle.time,
         f.battle.alive().count(),
         s.spawned,
@@ -243,6 +256,9 @@ fn summary(f: &Fight, log: &GameLog) {
         s.shots,
         s.hits_on_player,
         s.damage_to_player,
+        s.bolts_on_droids,
+        s.bolts_on_level,
+        s.bolts_nowhere,
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
@@ -410,6 +426,7 @@ fn react_to_combat(
     mut damage: MessageReader<Damage>,
     mut died: MessageReader<Died>,
     mut shots: MessageReader<FireShot>,
+    mut landed: MessageReader<ShotLanded>,
     droids: Query<&Droid>,
     players: Query<(), With<Player>>,
     transforms: Query<&Transform>,
@@ -452,6 +469,18 @@ fn react_to_combat(
     for s in shots.read() {
         if players.contains(s.shooter) {
             fight.battle.hear(to_unreal(s.origin));
+        }
+    }
+    for l in landed.read() {
+        if !droids.contains(l.shooter) {
+            continue;
+        }
+        let st = &mut fight.stats;
+        match l.target {
+            Some(t) if droids.contains(t) => st.bolts_on_droids += 1,
+            Some(_) => {}
+            None if l.on_level => st.bolts_on_level += 1,
+            None => st.bolts_nowhere += 1,
         }
     }
 }

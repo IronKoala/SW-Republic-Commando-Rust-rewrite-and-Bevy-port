@@ -175,7 +175,10 @@ impl DroidLook {
             look.clips.len(),
             Pose::ALL.len(),
             hi - lo,
-            look.skin.as_ref().map_or("none".to_string(), |(n, i)| format!("{n} {}x{}", i.width, i.height))
+            look.skin.as_ref().map_or("none".to_string(), |(n, i)| {
+                let [r, g, b, _] = i.mean();
+                format!("{n} {}x{}, average colour R {r:.0} G {g:.0} B {b:.0}", i.width, i.height)
+            })
         ));
         Ok((look, notes))
     }

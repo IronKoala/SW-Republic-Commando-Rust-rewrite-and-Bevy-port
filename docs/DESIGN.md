@@ -23,6 +23,9 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
+| `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
+| `rc_ai` | What enemies decide: settings from `data/enemies/*.toml`, the map's spawners, one fighter's brain, and a whole fight on a map (`Battle`). No Bevy. Tool: `rc_droidsim` (droids against a stand-in player, no window). |
+| `rc_enemies` | Bevy plugin `EnemiesPlugin`: battle droids in the game, shooting and taking damage through `rc_combat`, animated with the game's mesh. Program: `rc_droidview` (watch a fight in a real level, with a picture check). |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
 Only `rc_viewer`, `rc_character`, `rc_level_viewer` and `rc_soundtest` use Bevy
@@ -1006,3 +1009,89 @@ being cleared, options changing. It also captures the window twice and
 measures colours: the main menu must contain amber text, and in the level
 at least 30% of the screen must be lit with amber crosshair pixels at the
 centre.
+
+## Enemies (`rc_nav`, `rc_ai`, `rc_enemies`)
+
+Three layers, so the rules can be tested without a window and reused by the
+squad:
+
+1. **Paths (`rc_nav`).** Every map stores a network of path points
+   (`PathNode`, cover points, `PlayerStart`, ...) and, for each, the links
+   the editor worked out ("reach specs": start, end, length and flags such
+   as walk, fly, jump, door). `NavGraph::from_map` reads them; links whose
+   flags allow walking are used. `BlockedPath` points (barricades) start
+   blocked, as their class default `bBlocked` says, and
+   `set_blocked_by_tag` opens one when its event fires. Routes are found
+   with A* ("walked so far + straight line still to go"), and
+   `PathFollower` turns a route into the same `MoveInput` the player's
+   keys make, so droids move with the player's physics (`rc_movement`).
+   `rc_navcheck MAP` checks a map: on geo_01a 358 points, 1,224 links,
+   every stored length within 1 uu of the straight line.
+
+2. **Decisions (`rc_ai`).** The original's AI is compiled engine code we
+   don't read. What we can read are its settings and the names of its
+   states, so the rules are ours, built on those settings
+   (`data/enemies/battle_droid.toml`, each value marked "game" or "guess"):
+   - *Noticing*: within sight radius, within the view cone
+     (`PeripheralVision`), with a clear line from eye to eye; or anything
+     within `AutoDetectRadius`; or a shot heard nearby. Once fighting, it
+     keeps track by line of sight alone (as Unreal Engine 2 bots do).
+   - *Reacting*: waits `reaction_time`, turns at its turn rate, and shoots
+     only within `MaxAimYaw` of its facing.
+   - *Shooting*: bursts of `BurstCount`, `ShotDelay` apart, then a rest.
+     Each shot's aim is off by up to `(1 - Accuracy) x max_aim_error`
+     degrees. Aims at the body, or the head if only that is visible.
+   - *Moving*: spawners set a start state; "stationary attack" droids hold
+     their spot unless they lose sight of the enemy. Others keep between
+     `ReadyDistance` and `SafeDistance`, move to a path point with a clear
+     shot when they lose one, and give up a move after `MaxManuverTime`.
+     Shot at in the open, a droid runs to a free cover point that faces
+     the enemy and crouches between bursts; after `CoverBoredomTime` it
+     looks for another.
+   - *Forgetting*: `EnemyMemoryTime` without seeing the enemy, then it
+     goes to look where it was last seen.
+   - *Spawning*: `PawnFactory` actors (with their `SpawnPoint`s) make the
+     droids. One switches on when the player walks into a `Trigger` whose
+     event is the factory's tag. Factories only level scripts can start
+     switch on when the player comes within `activate_unscripted_within`
+     (a stand-in until scripts run).
+   `Battle` runs all of this for a map; the game plugin and `rc_droidsim`
+   both use it.
+
+3. **The game (`rc_enemies`).** `EnemiesPlugin` (see `docs/PLUGINS.md`):
+   - On `OnEnter(Loading)` it reads the map's paths and spawners and the
+     settings file through `GamePaths::data_file`, so a mod's file wins.
+   - Each frame (`GameSet::Simulate`, before `CombatSet::Fire`) it steps
+     the `Battle` with the `Player`'s position (eyes from `PlayerCamera`)
+     and `LevelCollision`, spawns droid entities with `Health`,
+     `Team::Separatist` and `Hittable` (35 x 80 uu, 50 crouched), and
+     turns each shot into `rc_combat::FireShot` with the weapon named in
+     the settings. The weapons part flies the bolts and applies damage.
+   - It reads `Damage` (the droid reacts, maybe runs for cover) and
+     `Died` (the droid stops and plays its death animation, and its body
+     stays), and hears the player's `FireShot`s.
+   - `MusicMood::Battle` while any droid is alerted or attacking, `Calm`
+     otherwise and on leaving the level.
+   - Looks: the `[look]` section names the mesh (`BattleDroid` in
+     `droid.ukx`) and which animation plays for idle, walk, run, back,
+     sidesteps, fire, crouch, crouched fire and death. Every droid's points
+     are posed on the CPU each frame with `rc_anim` (as `rc_character`
+     does) and copied into its own Bevy mesh; 848 points each, so a dozen
+     droids cost little. The level's light is baked into its surfaces and
+     the scene has no ambient light, so droids get a steady share of their
+     own colour (`ambient`, a guess standing in for each zone's ambient
+     light, which we don't read yet).
+   - VR and other platforms: nothing here reads input or the screen; the
+     player is found by its `Player` and `PlayerCamera` markers, so a VR
+     camera works the same. No platform-specific code.
+
+**Checking without looking.** `rc_droidsim` (no window) and
+`rc_droidview --check` (a window) run a stand-in player into a spawner's
+trigger on a real map and log every spawn, sighting, state change, route,
+shot and death, then print CHECK lines. `rc_droidview --check` also
+captures the window with the droids shown and hidden, counts the pixels
+that changed and compares their colour with the skin picture (it must not
+be black, washed out, magenta or a different tint). `cargo test -p
+rc_enemies` runs the plugin with the real combat plugin in a test room: a
+droid spawns, spots the player in under a second, fires bursts that
+sometimes hit, and dies to the player's DC-17.

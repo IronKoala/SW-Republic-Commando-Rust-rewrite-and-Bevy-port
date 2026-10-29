@@ -136,6 +136,30 @@ impl Battle {
         ev.into_iter().map(|event| BattleEvent::Ai { id, event }).collect()
     }
 
+    /// For tests and demos with a stand-in player: a path node 2500-4500 uu
+    /// along the paths from some spawner's walk-in trigger, and that
+    /// trigger's centre. Returns (node, trigger centre, spawner).
+    pub fn approach(&self) -> Option<(usize, Vec3, usize)> {
+        for (k, sp) in self.spawners.iter().enumerate() {
+            for &(c, _) in &sp.factory.triggers {
+                for (i, n) in self.nav.nodes.iter().enumerate() {
+                    if !matches!(n.kind, rc_nav::NodeKind::Path) || self.nav.blocked.contains(&i) {
+                        continue;
+                    }
+                    if !(2000.0..4500.0).contains(&(n.location - c).length()) {
+                        continue;
+                    }
+                    if let Some(r) = self.nav.route(n.location, c) {
+                        if (2500.0..4500.0).contains(&r.length) {
+                            return Some((i, c, k));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Switch spawners on, and make at most one droid per step.
     fn spawn(&mut self, player: Vec3, out: &mut Vec<BattleEvent>) {
         let s = &self.params.spawning;

@@ -4443,6 +4443,8 @@ dependencies = [
  "rc_combat",
  "rc_game_core",
  "rc_image",
+ "rc_level",
+ "rc_level_viewer",
  "rc_movement",
  "rc_nav",
  "rc_package",

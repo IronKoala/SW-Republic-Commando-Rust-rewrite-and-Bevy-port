@@ -10,6 +10,9 @@ rc_anim = { path = "../rc_anim" }
 rc_combat = { path = "../rc_combat" }
 rc_game_core = { path = "../rc_game_core" }
 rc_image = { path = "../rc_image" }
+# rc_level and rc_level_viewer: only the rc_droidview program draws a map.
+rc_level = { path = "../rc_level" }
+rc_level_viewer = { path = "../rc_level_viewer" }
 rc_movement = { path = "../rc_movement" }
 rc_nav = { path = "../rc_nav" }
 rc_package = { path = "../rc_package" }

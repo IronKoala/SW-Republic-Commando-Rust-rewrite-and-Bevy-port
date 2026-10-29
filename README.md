@@ -126,6 +126,19 @@ copy of the game.
   the levels, weapons, enemies and squad parts plug in, levels are drawn and
   walked the way `rc_walk --map` does it, with no weapons or enemies.
 
+- **Battle droids that fight back (tested in the cloud sandbox on
+  geo_01a, not yet on Windows).** Droids appear from the map's own
+  spawners when you walk into their triggers, walk the level's own path
+  network, spot you (sight range, view cone, line of sight), shoot in
+  bursts of three with the game's accuracy, take cover when shot in the
+  open, and die to your shots through the weapons part's health and
+  damage. They are the game's own animated droid model with its skin.
+  Their numbers come from the game's script files and are in
+  `data/enemies/battle_droid.toml`, where anyone can change them.
+  `rc_droidview --check` watched a fight on geo_01a: 5 droids, 182 shots,
+  2 droids destroyed by a stand-in player, and the droids on screen had
+  the skin's colours (all 11 checks passed).
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
@@ -141,6 +154,14 @@ copy of the game.
   material's main colour texture is used.
 - No levels yet: walking only works in the hand-made test room. No weapons,
   enemies, health or sound.
+- Enemies: only battle droids so far. Level scripts don't run yet, so
+  most droid spawners (27 of 36 on geo_01a) start when you come within
+  3000 units instead of when the mission says, and barricades stay shut.
+  On geo_01a the start area is closed in by such a barricade, so in
+  `rc_game` you won't reach the droids yet; `rc_droidview` shows them.
+  Some droid numbers are guesses (marked in the data file), including how
+  far a shot can miss. No droid sounds, hit reactions or death effects
+  beyond the animation. Droids don't use jump links or doors.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
@@ -303,6 +324,20 @@ spot. The log goes to `logs\rc_character.log`; look for the line starting
 to log all of them, for example `cargo run --release -p rc_character -- Reload`.
 Other characters: `cargo run --release -p rc_character -- --package
 "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Animations\droid.ukx" --mesh BattleDroid WalkForward`.
+
+To watch battle droids fight a stand-in player in geo_01a (a window; it
+closes by itself after 40 seconds of fighting):
+
+```
+cargo run --release -p rc_enemies --bin rc_droidview -- --check
+```
+
+The log goes to `logs\rc_droidview.log` and ends with CHECK lines and
+`DONE: 0 checks failed`. Screenshots go to `logs\droidview_with.png` (the
+droids) and `logs\droidview_droids.png` (only the droids' pixels). The same
+fight with no window, faster, is `cargo run --release -p rc_ai --bin
+rc_droidsim -- geo_01a`, and `cargo run --release -p rc_nav --bin
+rc_navcheck -- geo_01a` checks a map's path network.
 
 To read every sound in the game:
 

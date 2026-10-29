@@ -116,3 +116,64 @@ don't read): the exact walking and falling physics step, how DecelRate and the
 back/side ratios are applied, and how mouse movement turns into turning. For
 those we follow how Unreal Engine 2 is publicly documented to work and mark
 them as guesses in `docs/DESIGN.md`.
+
+## Battle droids
+
+Found on 2026-10-29 by reading the installed game's script packages
+(`ctcharacters.u`, `ctgame.u`, `engine.u`, `ctinventory.u`), read only, with
+`rc_package::class_library` (class defaults merged with their parents'). The
+numbers are in `data/enemies/battle_droid.toml`, each marked "game" or
+"guess"; the rules in `docs/DESIGN.md`, "Enemies", are our own.
+
+geo_01a's spawners make `BattleDroidTM` (the Geonosis trench droid; parents
+BattleDroid, Separatist, CTPawn, Pawn). Its controller is `BattleDroidBot`
+(parent CTBot), its attack state `StateBattleDroidAttack` (parent
+StateAbstractAttack), its weapon `BattleDroidBlasterTM`.
+
+| Setting | Value | Set by |
+|---|---|---|
+| Health | 100 | BattleDroidTM MaxHealth |
+| Accuracy | 0.4 (0 wild, 1 perfect) | BattleDroidTM |
+| Sight radius | 5000 uu | BattleDroidTM |
+| Run speed | 375 uu/s, walk 0.52 of that | BattleDroid GroundSpeed, WalkSpeedRatio |
+| Acceleration | 1000 | BattleDroid AccelRate |
+| Collision radius / half-height | 35 / 80 uu (crouched 35 / 50) | BattleDroid |
+| Eye height above centre | 60 uu | BattleDroid BaseEyeHeight |
+| Can shoot off its facing by | 60° | BattleDroid MaxAimYaw |
+| View cone | 0.2 (about 78° each side) | Pawn PeripheralVision |
+| Notices anyway within | 200 uu | Pawn AutoDetectRadius |
+| Turn rate | 20000 per second (110°/s) | Pawn RotationRate |
+| Forgets the enemy after | 15 s | CTBot EnemyMemoryTime |
+| Thinks every | 0.5 s | CTBot DecisionInterval |
+| Looks for new cover after | 15 s | CTBot CoverBoredomTime |
+| Burst | 3 shots, 0.1 s apart | BattleDroidBot BurstCount; BattleDroidBlasterTM ShotDelay |
+| Likes to stay between | 800 and 1200 uu | StateAbstractAttack ReadyDistance, SafeDistance |
+| Gives up a move after | 10 s | StateBattleDroidAttack MaxManuverTime |
+| Weapon reach | 7000 uu | Weapon ValidRange |
+
+Not stored anywhere we can read (so guessed, and marked so in the file):
+the delay before the first shot (0.5 s), how far a shot can miss at
+accuracy 0 (10°), the rest between bursts (1-2 s), how far it advances at a
+time (`MoveIntervalDist` is declared but has no default), how far it hears
+shots (2500 uu) and how far it goes for cover (1500 uu).
+
+**Spawners.** `PawnFactory` (Engine) has `Prototype`, `Capacity`,
+`MaxAlive`, `bGenerateForever`, `SpawnMode` (0 cyclic, 1 random, 2 at the
+factory, 3 near the player), `SpawnInterval` and the start state given to
+what it makes (6 = stationary attack). `SpawnPoint`s with the factory's
+`Tag` are its spots. A `Trigger` whose `Event` is the factory's tag switches
+it on when touched. geo_01a has 58 factories, 36 making battle droids; 9 of
+those have such triggers and the rest are started by level scripts.
+
+**Path network.** Each `NavigationPoint` lists its outgoing `ReachSpec`s
+(start, end, `Distance`, `CollisionRadius`/`Height`, `reachFlags`). Flags:
+walk 1, fly 2, jump 8, door 16, forced 256 (as in Unreal Engine 2), and
+4096, seen on 7-9 links per map, Republic Commando's own (meaning unknown;
+treated as walkable). `BlockedPath` has `bBlocked` true by default.
+
+**The droid's look.** `BattleDroid` in `GameData/Animations/droid.ukx`: 32
+bones, 848 points, 1,403 triangles, animation set `BattleDroidSet`
+(ActionBreathe, WalkForward, RunForward, WalkBackward, StepLeft/Right, Fire,
+CrouchBreathe, CrouchFire, Death and more, all 30 frames per second). Skin:
+`DroidTextures.BattleDroid_Shader`, whose picture `BattleDroid` is 512 x 512
+and averages R 79, G 74, B 70.

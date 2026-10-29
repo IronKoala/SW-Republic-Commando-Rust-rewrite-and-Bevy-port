@@ -68,6 +68,10 @@ pub struct Look {
     pub crouch: String,
     pub crouch_fire: String,
     pub death: String,
+    /// Light the character always gets, 0 to 1 of its full colour, on top
+    /// of the level's lights (the original lights characters with each
+    /// zone's ambient light, which we don't read yet).
+    pub ambient: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,6 +147,7 @@ impl AiParams {
                 crouch: "CrouchBreathe".into(),
                 crouch_fire: "CrouchFire".into(),
                 death: "Death".into(),
+                ambient: 0.5,
             },
         }
     }
@@ -229,6 +234,7 @@ impl AiParams {
             ("look", "crouch") => l.crouch = text(),
             ("look", "crouch_fire") => l.crouch_fire = text(),
             ("look", "death") => l.death = text(),
+            ("look", "ambient") => l.ambient = num()?,
             _ => return Err(format!("unknown setting `{key}` in [{section}]")),
         }
         Ok(())
