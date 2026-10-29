@@ -1015,3 +1015,23 @@ being cleared, options changing. It also captures the window twice and
 measures colours: the main menu must contain amber text, and in the level
 at least 30% of the screen must be lit with amber crosshair pixels at the
 centre.
+
+## Automatic checks on GitHub (`.github/workflows/ci.yml`)
+
+Every pull request, and every push to `main`, is built and tested by GitHub's
+own machines on Windows and Linux. A pull request shows a green tick or a red
+cross for each. The steps are `cargo build --workspace --all-targets --locked`
+and `cargo test --workspace --locked`. `--locked` means the exact library
+versions in `Cargo.lock` are used. Linux also installs the system libraries
+Bevy needs (sound, gamepads, windows). The build folder is cached between
+runs, so a run that changes little is much quicker than the first.
+
+The game is never on GitHub, so `RC_GAME_DIR` is not set there. Unit tests
+must not need game files. A future test that does should check for
+`RC_GAME_DIR`, print "skipped: no game folder" and pass when it isn't set.
+
+A third job runs `cargo fmt --check` (code layout) and `cargo clippy` (common
+mistakes). It only reports: its problems show as warnings and never turn the
+run red. The checks do not open windows or draw anything, so the Bevy
+programs' own `--script` and screenshot checks are not run there, and Android
+is not built yet.
