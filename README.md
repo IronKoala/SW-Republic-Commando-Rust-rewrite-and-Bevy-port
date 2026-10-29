@@ -31,14 +31,19 @@ copy of the game.
   decoded with no failures. For 2,003 of them we could compare against the
   game's own half-size copy, and 1,916 match within 10 out of 255.
 
+- **Showing a texture in a window (tested in the cloud only).** `rc_viewer`
+  opens an 800x800 Bevy window showing one texture from the game, by default
+  `DC15Blaster` from `weapontextures.utx`. It checks itself: it captures the
+  window and compares it pixel by pixel with the texture. In the cloud sandbox
+  this passed 12 of 12 runs on three textures. Not tested yet on Windows.
+
 ## What doesn't work yet
 
 - Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
-- Nothing is shown on screen yet; there is no Bevy window.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Other objects (meshes, sounds, level geometry, scripts) are not decoded yet.
-- No Bevy, no window, no game yet.
+- No 3D, no levels, no game yet. The Bevy window shows one flat picture.
 
 ## How to run it
 
@@ -70,6 +75,23 @@ cargo run --release -p rc_probe -- --export-textures "C:\Games\Steam\steamapps\c
 
 The PNGs go to `extracted\textures\weapontextures\`, which git never tracks.
 
+To open a window showing one texture (the first build downloads and compiles
+Bevy, which takes several minutes):
+
+```
+cargo run --release -p rc_viewer
+```
+
+You should see a window titled `Republic Commando texture: DC15Blaster` with the
+texture in the middle of a dark grey square. The log goes to
+`logs\rc_viewer.log`. Look for the line starting `on-screen check PASS`.
+To show a different texture, give the package and the texture's name, and add
+`--frames 300` to close the window by itself after 300 frames:
+
+```
+cargo run --release -p rc_viewer -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Textures\weapontextures.utx" WookieeMelee --frames 300
+```
+
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.
 
@@ -77,6 +99,8 @@ Results go to the screen and to `logs\rc_probe.log`. The program only reads the
 game folder and refuses to run from inside it.
 
 ## Credits
+
+- [Bevy](https://bevy.org) game engine, MIT or Apache-2.0 license.
 
 The package format was learned from these. No code was copied from them.
 
