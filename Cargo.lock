@@ -4071,6 +4071,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_combat"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "rc_level_viewer",
+ "rc_movement",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_game_core"
 version = "0.1.0"
 dependencies = [

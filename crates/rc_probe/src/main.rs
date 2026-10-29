@@ -27,7 +27,8 @@
 //!                            a .wav file to `extracted/sounds/<package>/`
 //!   rc_probe --class <name>  log the default values of a script class (for
 //!                            example DC17mBlaster) and of each parent class,
-//!                            from GameData/System/*.u, to `logs/rc_class.log`
+//!                            from GameData/System/*.u and
+//!                            GameData/Properties/*.u, to `logs/rc_class.log`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
@@ -166,7 +167,8 @@ fn main() {
         characters::scan(&mut log, &target)
     } else if class_mode {
         let class = target.to_string_lossy().into_owned();
-        classes::dump(&mut log, &game.join("GameData").join("System"), &class)
+        let data = game.join("GameData");
+        classes::dump(&mut log, &[data.join("System"), data.join("Properties")], &class)
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {
