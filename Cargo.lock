@@ -4534,6 +4534,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_squad"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_movement",
+ "rc_nav",
+ "rc_package",
+]
+
+[[package]]
+name = "rc_squad_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_combat",
+ "rc_game_core",
+ "rc_level",
+ "rc_movement",
+ "rc_nav",
+ "rc_package",
+ "rc_squad",
+]
+
+[[package]]
 name = "rc_viewer"
 version = "0.1.0"
 dependencies = [

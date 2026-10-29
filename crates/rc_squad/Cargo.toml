@@ -1,0 +1,12 @@
+[package]
+name = "rc_squad"
+version = "0.1.0"
+description = "Delta Squad's following and squad orders, with Republic Commando's own numbers. No Bevy."
+edition.workspace = true
+
+[dependencies]
+rc_level = { path = "../rc_level" }
+rc_movement = { path = "../rc_movement" }
+# The map's path network, shared with the enemies (crate by the enemies thread).
+rc_nav = { path = "../rc_nav" }
+rc_package = { path = "../rc_package" }

@@ -1,0 +1,26 @@
+[package]
+name = "rc_squad_plugin"
+version = "0.1.0"
+description = "Delta Squad in Bevy: the squad plugin for the game, plus the rc_squad_sim example, a windowless test run on a real map"
+edition.workspace = true
+
+[dependencies]
+# Health, shields and teams: squad mates are targets like everyone else.
+rc_combat = { path = "../rc_combat" }
+rc_game_core = { path = "../rc_game_core" }
+rc_movement = { path = "../rc_movement" }
+rc_nav = { path = "../rc_nav" }
+rc_package = { path = "../rc_package" }
+rc_squad = { path = "../rc_squad" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Game states, and the 3D
+# material types for the squad's stand-in bodies. No window: the game
+# (rc_game or rc_walk) brings that.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state", "bevy_pbr"]
+
+[dev-dependencies]
+# Only for the rc_squad_sim example: loads a map's collision.
+rc_level = { path = "../rc_level" }

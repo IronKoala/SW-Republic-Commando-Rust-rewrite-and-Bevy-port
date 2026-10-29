@@ -117,6 +117,40 @@ back/side ratios are applied, and how mouse movement turns into turning. For
 those we follow how Unreal Engine 2 is publicly documented to work and mark
 them as guesses in `docs/DESIGN.md`.
 
+## The squad (read for `rc_squad`, 2026-10-29)
+
+From the script packages (class defaults, read with the same "property list
+at the end of the class" method as the weapon numbers) and `.ini` files:
+
+- **Keys** (`System/defaultctrl.ini`, `user.ini`): F1 `SetStanceOffensive`
+  (search and destroy), F2 `SetStanceDefensive` (form up), F3
+  `SquadEngage` (secure position, at the spot aimed at), F4
+  `CancelAllMarkers` (cancel/recall). `SetStanceHold` and `SquadRecall`
+  exist but have no key.
+- **Stances** (CTGame.u): `StanceFormUp`, `StanceFormUpTight`,
+  `StanceFormUpLoose`, `StanceSecurePosition`, `StanceSearchAndDestroy`,
+  `StanceEngageTarget`, `StanceHold`, `StancePreviousOrder`, all children of
+  Engine's `SquadStance`. Each sets tether distances and priorities, a
+  "prevent range", what it's tied to (`EStanceTetherObject`: leader,
+  objective, self) and a HUD icon. Values are in `data/squad/squad.toml`
+  and the table in `docs/DESIGN.md`. Squad defaults:
+  `DefaultSearchAndDestroyRadius` 768. `CTBot.AUTORUNDISTANCE` 400.
+  `CloneCommandoBot.DecisionInterval` 0.25.
+- **The squad mates** (CTCharacters.u): `Commando07Delta` (HUD nickname SEV,
+  slot 1, bot `Commando07Bot`, auto-snipes), `Commando40Delta` (FIXER, slot 2,
+  auto-grenades), `Commando62Delta` (SCORCH, slot 3, auto anti-armour). From
+  the Properties package (`GameData/Properties/properties.u`,
+  `CommandoNNDeltaDefaults`): MaxHealth 400, MaxShields 50, shield recharge
+  15 per second after 4 s, `bCannotDie` (they go down instead of dying),
+  and each one's `EnhancedVisionColor` (Sev red, Fixer green, Scorch yellow).
+- **Marked jobs**: `SquadMarkerSpot` actors, `MyAnchor` naming the object
+  (bacta dispenser, demolition charge, door, terminal...). Marker classes
+  live in CTMarkers.u (`MarkerSnipe`, `MarkerGrenade`, `MarkerDoorBreach`,
+  ...).
+- **What isn't readable**: the squad's decisions (`CTSquadNative.Update`,
+  `SetStance`, `EngageLocation`...) are native, in `ctgame.dll`. We don't
+  read compiled code, so how members pick spots and move is our own design.
+
 ## Battle droids
 
 Found on 2026-10-29 by reading the installed game's script packages

@@ -70,6 +70,18 @@ copy of the game.
   `rc_walk --map geo_01a` puts you in the first Geonosis level instead, with
   collision against its walls, floors and props.
 
+- **Delta Squad (tested in the cloud sandbox by numbers, not yet on Windows
+  or with eyes).** Sev, Fixer and Scorch follow you and obey the original's
+  orders: F1 search and destroy, F2 form up, F3 secure the spot you aim at,
+  F4 cancel, and aiming at a squad marker (like a bacta dispenser) and
+  pressing the squad order key sends one of them to do it. Distances are
+  the game's own; every number is in `data/squad/squad.toml`. The
+  windowless test run `rc_squad_sim` passes 23 checks on geo_01a. They
+  have the original's health and shields, and at 0 health one goes down
+  and stays put (reviving isn't built yet). It's a
+  plugin for the game program (`rc_game`); until that's in `main`, there's
+  nothing to see in a window. Drawn as coloured capsules for now.
+
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
   room holding the game's own DC-17m model, and shoot battle droids. The
@@ -440,6 +452,17 @@ If your game is somewhere else, set `RC_GAME_DIR` first, for example
 
 Results go to the screen and to `logs\rc_probe.log`. The program only reads the
 game folder and refuses to run from inside it.
+
+To run the squad's test on the first level (no window; about a minute):
+
+```
+cargo run --release -p rc_squad_plugin --example rc_squad_sim
+```
+
+It logs to `logs\rc_squad_sim.log` and should end with `SIM DONE: 23 checks
+passed, 0 failed`. Lines starting `squad: t=` show each squad mate's
+position and distance to you once a second; `ORDER`, `sets off`,
+`arrived`, `STUCK` and `working at` lines show what they decided.
 
 ## Credits
 
