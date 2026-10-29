@@ -74,6 +74,9 @@ pub struct Combat {
     pub lost_sight_reposition: f32,
     /// Looks for cover when shot in the open. Super battle droids don't.
     pub uses_cover: bool,
+    /// The weapon file left on the ground when it falls, for the player to
+    /// pick up. Empty for none.
+    pub drops: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -168,6 +171,7 @@ impl AiParams {
                 cover_search_radius: 1500.0,
                 lost_sight_reposition: 2.0,
                 uses_cover: true,
+                drops: "e5_blaster_pickup".into(),
             },
             spawning: Spawning {
                 activate_unscripted_within: 3000.0,
@@ -264,6 +268,7 @@ impl AiParams {
                 }
             }
             ("combat", "uses_cover") => c.uses_cover = boolean()?,
+            ("combat", "drops") => c.drops = text(),
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
             ("senses", "auto_detect_radius") => s.auto_detect_radius = num()?,

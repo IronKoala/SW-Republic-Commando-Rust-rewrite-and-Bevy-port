@@ -29,6 +29,7 @@ burst_count = 5           # placeholder
 ready_distance = 600      # placeholder
 safe_distance = 900       # placeholder
 uses_cover = false        # placeholder: walks at you instead
+drops = ""                # placeholder: B2s have their blaster built in
 
 [look]
 package = "GameData/Animations/droid.ukx"   # placeholder

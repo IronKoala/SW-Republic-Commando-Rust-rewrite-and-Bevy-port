@@ -24,6 +24,7 @@ health = 250              # placeholder
 accuracy = 0.5            # placeholder
 weapon = "e5_blaster"     # placeholder: a stand-in until the Trandoshan rifle file exists
 burst_count = 3           # placeholder
+drops = ""                # placeholder: its own weapon file doesn't exist yet
 
 [look]
 package = "GameData/Animations/trandoshan.ukx"  # placeholder

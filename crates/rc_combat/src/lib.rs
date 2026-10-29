@@ -29,6 +29,7 @@ pub mod grenade;
 pub mod health;
 mod library;
 mod melee;
+pub mod pickup;
 pub mod shot;
 mod throw;
 mod view;
@@ -37,6 +38,7 @@ pub mod weapon;
 pub use grenade::{GrenadeParams, Grenades};
 pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
 pub use library::{MeleeParams, PlayerSetup, WeaponLibrary};
+pub use pickup::{spawn_pickup, WeaponPickup};
 pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{WeaponParams, WeaponState};
 
@@ -198,7 +200,12 @@ impl Plugin for WeaponsPlugin {
             )
             .add_systems(
                 Update,
-                (fire::fly_bolts, throw::fly_grenades, throw::wear_off_stuns)
+                (
+                    fire::fly_bolts,
+                    throw::fly_grenades,
+                    throw::wear_off_stuns,
+                    pickup::collect_pickups,
+                )
                     .in_set(CombatSet::Flight)
                     .run_if(playing)
                     .run_if(resource_exists::<WeaponLibrary>),

@@ -26,6 +26,7 @@ accuracy = 0.4            # placeholder
 weapon = "e5_blaster"     # placeholder: a stand-in until its sonic blaster file exists
 burst_count = 1           # placeholder
 ready_distance = 900      # placeholder
+drops = ""                # placeholder: its own weapon file doesn't exist yet
 
 [look]
 package = "GameData/Animations/geonosian.ukx"   # placeholder

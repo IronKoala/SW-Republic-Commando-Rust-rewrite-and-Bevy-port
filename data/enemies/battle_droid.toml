@@ -65,6 +65,7 @@ cover_boredom_time = 15   # game: CTBot CoverBoredomTime (looks for new cover af
 cover_search_radius = 1500 # guess: how far it will go to reach cover
 lost_sight_reposition = 2 # guess: seconds without a clear shot before a stationary droid moves
 uses_cover = true         # guess: looks for cover when shot in the open
+drops = "e5_blaster_pickup" # placeholder: the weapon file it leaves when it falls ("" for none)
 
 [spawning]
 # The original starts most spawners from level scripts. We run proximity

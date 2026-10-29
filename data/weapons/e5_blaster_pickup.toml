@@ -1,0 +1,39 @@
+# A battle droid's E-5 blaster, picked up by the player from a fallen
+# droid. Its bolt, damage and fire rate are the droid's E-5
+# (e5_blaster.toml, read from the game); only the player's ammo is ours.
+#
+# !! PLACEHOLDER NUMBERS !! The ammo values marked "placeholder" are our
+# own stand-ins, NOT yet read from the original game (the picked-up
+# weapon's own class and ammo in ctinventory.u).
+
+name = "E-5 Blaster"
+
+[fire]
+mode = "semi_auto"        # as e5_blaster.toml
+shot_delay = 0.55         # ShotDelay (BattleDroidBlasterDefaults)
+aim_error = 10            # placeholder: the player's aim error with it
+offset = [57.4, 20, -6.56] # FPFireOffset (CTWeaponRecharging)
+
+[ammo]
+clip_size = 30            # placeholder: no reload, the whole charge is one magazine
+max_ammo = 30             # placeholder
+start_ammo = 30           # placeholder: shots left in a dropped blaster
+
+[shot]
+kind = "bolt"
+accel = 60000             # AccelFactor (Projectile's default)
+max_speed = 5000          # MaxSpeed
+life_span = 10
+damage = 24               # Damage (BattleDroidBlasterProjDefaults)
+damage_kind = "blaster"
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_sbdGun_01"]   # FireSound (Defaults)
+empty = "wep_GEN_empty_01"
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.35, 0.1]

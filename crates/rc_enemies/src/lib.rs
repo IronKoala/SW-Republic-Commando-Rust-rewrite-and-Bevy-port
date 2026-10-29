@@ -612,6 +612,7 @@ fn place_droids(fight: Res<Fight>, mut droids: Query<(&Droid, &mut Transform, &m
 /// Damage and deaths from the weapons part, and the player's shots heard.
 #[allow(clippy::too_many_arguments)]
 fn react_to_combat(
+    mut commands: Commands,
     mut fight: ResMut<Fight>,
     mut damage: MessageReader<Damage>,
     mut died: MessageReader<Died>,
@@ -658,6 +659,16 @@ fn react_to_combat(
         fight.battle.killed(droid.id);
         fight.stats.droids_destroyed += 1;
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);
+        // It leaves its weapon on the ground for the player.
+        if let (Some(f), Ok(t)) = (f, transforms.get(d.entity)) {
+            if !f.params.combat.drops.is_empty() {
+                rc_combat::spawn_pickup(&mut commands, &f.params.combat.drops, t.translation);
+                log.line(format!(
+                    "{PART}: t={now:.1}s droid {} dropped {}",
+                    droid.id, f.params.combat.drops
+                ));
+            }
+        }
         log.line(format!(
             "{PART}: t={now:.1}s droid {} destroyed (fired {} shots, walked {:.0} uu)",
             droid.id,

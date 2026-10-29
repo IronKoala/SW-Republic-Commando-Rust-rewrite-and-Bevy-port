@@ -140,6 +140,7 @@ fn every_weapon_file_reads() {
             "dc17m_blaster",
             "dc17m_sniper",
             "e5_blaster",
+            "e5_blaster_pickup",
             "e5_blaster_tm"
         ]
     );
@@ -615,4 +616,29 @@ fn melee_hits_only_within_reach() {
     assert_eq!(seen.damage[0].target, r.droid);
     assert_eq!(seen.damage[0].amount, reach.damage);
     assert_eq!(seen.damage[0].kind, rc_combat::DamageKind::Melee);
+}
+
+#[test]
+fn walking_over_a_dropped_weapon_picks_it_up() {
+    let mut r = Range::new();
+    let p = r.app.world().resource::<WeaponLibrary>().weapons["e5_blaster_pickup"].clone();
+    let mut commands = r.app.world_mut().commands();
+    rc_combat::spawn_pickup(&mut commands, "e5_blaster_pickup", b(-200.0, 0.0, 0.0));
+    r.run(2, &[]);
+    assert_eq!(r.arsenal().weapons.len(), 4, "not picked up from 300 uu");
+    r.app
+        .world_mut()
+        .entity_mut(r.player)
+        .insert(Transform::from_translation(b(-220.0, 0.0, 0.0)));
+    r.run(2, &[]);
+    let a = r.arsenal();
+    let (id, w) = a.weapons.last().unwrap();
+    assert_eq!(id, "e5_blaster_pickup");
+    assert_eq!(w.shots_in_clip() + w.reserve, p.start_ammo);
+    let mut q = r.app.world_mut().query::<&rc_combat::WeaponPickup>();
+    assert_eq!(
+        q.iter(r.app.world()).count(),
+        0,
+        "it's gone from the ground"
+    );
 }

@@ -252,3 +252,17 @@ fn droids_shoot_squad_mates_too() {
     assert_eq!(fight.battle.fighters[0].target_index, Some(1));
     assert!(r.app.world().get::<Health>(mate).unwrap().current < 100.0);
 }
+
+#[test]
+fn a_fallen_droid_leaves_its_blaster() {
+    let mut r = Room::new();
+    r.seconds(1.0, &[]);
+    r.seconds(8.0, &[Action::Fire]);
+    let w = r.app.world_mut();
+    let drops: Vec<String> = w
+        .query::<&rc_combat::WeaponPickup>()
+        .iter(w)
+        .map(|p| p.weapon.clone())
+        .collect();
+    assert_eq!(drops, ["e5_blaster_pickup"]);
+}
