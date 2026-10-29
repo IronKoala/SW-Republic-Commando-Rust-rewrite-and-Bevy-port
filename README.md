@@ -298,7 +298,9 @@ cargo run --release -p rc_probe -- --menu
 
 This paints the main menu to `extracted\menus\CTMenuMain.png` and logs every
 picture, text and button to `logs\rc_menu.log`. Add a class name, such as
-`--menu XInterface.MenuQuestionYesNo`, for another menu.
+`--menu XInterface.MenuQuestionYesNo`, for another menu. `rc_probe --pages` does
+this for every page in `data/ui/original_menus.toml` and ends with a
+summary of which would use their original menu in the game, and why not.
 
 The other programs test one piece each:
 

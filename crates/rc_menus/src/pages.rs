@@ -10,6 +10,8 @@
 //! is missing.
 
 use crate::layout::{Kind, MenuLayout};
+use serde::Deserialize;
+use std::collections::BTreeMap;
 
 /// What choosing a button on an original page asks the game to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +136,46 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
     }
     crate::screens::setup_titled(layout);
     Ok(PageButtons { commands })
+}
+
+/// `data/ui/original_menus.toml`.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct PagesFile {
+    pages: BTreeMap<String, PageDef>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageDef {
+    class: String,
+    #[serde(default)]
+    over_game: bool,
+    back: Option<String>,
+    #[serde(default)]
+    buttons: BTreeMap<String, String>,
+}
+
+/// Read `data/ui/original_menus.toml`.
+pub fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
+    let f: PagesFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for (page, d) in f.pages {
+        let cmd = |s: &str| PageCmd::parse(s).ok_or(format!("page {page}: unknown command {s:?}"));
+        let mut buttons = Vec::new();
+        for (f, c) in &d.buttons {
+            buttons.push((f.clone(), cmd(c)?));
+        }
+        let back = d.back.as_deref().map(cmd).transpose()?;
+        out.push(PagePlan {
+            page: page.to_ascii_lowercase(),
+            class: d.class,
+            buttons,
+            back,
+            over_game: d.over_game,
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

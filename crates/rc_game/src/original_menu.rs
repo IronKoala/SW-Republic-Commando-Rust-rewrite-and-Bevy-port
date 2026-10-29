@@ -33,7 +33,6 @@ use rc_menus::pages::{self, PageButtons, PageCmd, PagePlan};
 use rc_menus::quads::{self, Quad, Sizes};
 use rc_menus::screens::{self, MainAction};
 use rc_menus::value::V;
-use serde::Deserialize;
 use std::collections::HashMap;
 
 /// The original's menu shape.
@@ -194,24 +193,6 @@ impl OriginalMenus {
     }
 }
 
-/// `data/ui/original_menus.toml`.
-#[derive(Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-struct PagesFile {
-    pages: std::collections::BTreeMap<String, PageDef>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PageDef {
-    class: String,
-    #[serde(default)]
-    over_game: bool,
-    back: Option<String>,
-    #[serde(default)]
-    buttons: std::collections::BTreeMap<String, String>,
-}
-
 /// Read the page list: the first copy found in the data folders (so a mod
 /// wins), else the one built into the game.
 fn page_plans(paths: &GamePaths, log: &GameLog) -> Vec<PagePlan> {
@@ -226,31 +207,10 @@ fn page_plans(paths: &GamePaths, log: &GameLog) -> Vec<PagePlan> {
         },
         None => include_str!("../../../data/ui/original_menus.toml").to_string(),
     };
-    parse_plans(&text).unwrap_or_else(|e| {
+    pages::parse_plans(&text).unwrap_or_else(|e| {
         log.line(format!("original menus: {REL}: {e}; no original pages"));
         Vec::new()
     })
-}
-
-fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
-    let f: PagesFile = toml::from_str(text).map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for (page, d) in f.pages {
-        let cmd = |s: &str| PageCmd::parse(s).ok_or(format!("page {page}: unknown command {s:?}"));
-        let mut buttons = Vec::new();
-        for (f, c) in &d.buttons {
-            buttons.push((f.clone(), cmd(c)?));
-        }
-        let back = d.back.as_deref().map(cmd).transpose()?;
-        out.push(PagePlan {
-            page: page.to_ascii_lowercase(),
-            class: d.class,
-            buttons,
-            back,
-            over_game: d.over_game,
-        });
-    }
-    Ok(out)
 }
 
 pub struct OriginalMenuPlugin;
@@ -908,7 +868,8 @@ mod tests {
 
     #[test]
     fn shipped_page_list_reads() {
-        let plans = parse_plans(include_str!("../../../data/ui/original_menus.toml")).unwrap();
+        let plans =
+            pages::parse_plans(include_str!("../../../data/ui/original_menus.toml")).unwrap();
         let paused = plans.iter().find(|p| p.page == "paused").expect("paused");
         assert!(paused.over_game);
         assert_eq!(paused.back, Some(PageCmd::Resume));
@@ -923,7 +884,8 @@ mod tests {
 
     #[test]
     fn a_bad_command_is_reported() {
-        let e = parse_plans("[pages.paused]\nclass = \"A.B\"\nback = \"fly\"\n").unwrap_err();
+        let e =
+            pages::parse_plans("[pages.paused]\nclass = \"A.B\"\nback = \"fly\"\n").unwrap_err();
         assert!(e.contains("fly"), "{e}");
     }
 }

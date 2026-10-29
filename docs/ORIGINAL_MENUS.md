@@ -87,8 +87,12 @@ connection wasn't approved yet), so:
   "Quit to main menu", which matches the placeholder. If the original
   pause page turns on, that step needs updating to its button order.
 
-To check on the PC: run `rc_game` once, open the pause menu, quit, and read
-`logs\rc_game.log` for lines starting `original menus: page`.
+To check on the PC without playing: `rc_probe --pages` probes every page
+in `data/ui/original_menus.toml` as `--menu` does (widgets and each
+button's function in `logs/rc_menu.log`, a painting in `extracted/menus/`),
+then ends with a summary saying which pages would use the original and
+why the others wouldn't. In the game, the same reasons are in
+`logs\rc_game.log` on lines starting `original menus: page`.
 
 ## What the original's menus are made of (checked 2026-10-29)
 

@@ -4515,6 +4515,8 @@ version = "0.1.0"
 dependencies = [
  "rc_image",
  "rc_package",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]
