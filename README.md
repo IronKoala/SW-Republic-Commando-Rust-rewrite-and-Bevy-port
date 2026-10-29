@@ -68,6 +68,16 @@ copy of the game.
   window is covered by the level. The level's geometry and actors were read
   from 5 maps with no errors.
 
+- **Characters with animation (tested on Windows).**
+  `rc_probe --characters` reads every character body ("skeletal mesh") and
+  animation set in the game: all 131 meshes and 165 animation sets (1,414
+  animations) in the 20 animation packages read with no failures.
+  `rc_character` opens a 3D window with a textured clone trooper walking on
+  the spot. It checks itself by capturing the window and comparing the
+  character's outline with the one it expects (score 0.99 of 1.0; 0.95
+  passes) and checking its colours match the skin. Battle droids work too.
+  On the user's Windows PC the clone scored 0.993 with the right colours.
+
 - **Bump maps (tested by numbers, not by eye).** All 133 bump maps (formats
   12 and 14) now decode, as the usual light-blue "normal map" pictures. The
   two layouts were found by measurement, since no documentation names them
@@ -83,15 +93,17 @@ copy of the game.
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Animated models (`.ukx`) and scripts are not decoded yet.
+- Scripts are not decoded yet.
 - Sound: music (`.ogg` files in `GameData\Music`) isn't played yet, only
   found. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
   No 3D (positional) sound yet.
 - Levels are drawn without lights, lightmaps, sky, characters, effects or
   moving parts. No collision: the camera flies through walls.
-- Models are drawn without lighting, bump maps or transparency. Only a
+- Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
+- Characters: only the first material slot, no blending between
+  animations, no sounds or effects from animation events.
 - No game yet.
 - Lighting in Bevy: `rc_viewer/src/lighting.rs` can place a map's lights, with
   settings a mod can change from a text file, but its brightness factors are
@@ -176,6 +188,29 @@ mouse wheel changes speed. The log goes to `logs\rc_level_viewer.log`. Look for
 `BSP checks: all passed`, the `floor test` lines and `on-screen check PASS`.
 For another map, give its name, for example
 `cargo run --release -p rc_level_viewer -- ras_01a`.
+
+To check every character and animation in the game:
+
+```
+cargo run --release -p rc_probe -- --characters
+```
+
+This logs to `logs\rc_characters.log` and ends with a `--- character summary ---` part.
+
+To see an animated clone trooper (the first build compiles Bevy's 3D parts,
+which takes several minutes):
+
+```
+cargo run --release -p rc_character
+```
+
+You should see a window titled `Republic Commando: CloneTrooper playing
+WalkForward (CloneCommandoSet)` with a white-armoured clone walking on the
+spot. The log goes to `logs\rc_character.log`; look for the line starting
+`on-screen check PASS`. Give a different animation by name, or add `--list`
+to log all of them, for example `cargo run --release -p rc_character -- Reload`.
+Other characters: `cargo run --release -p rc_character -- --package
+"C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Animations\droid.ukx" --mesh BattleDroid WalkForward`.
 
 To read every sound in the game:
 

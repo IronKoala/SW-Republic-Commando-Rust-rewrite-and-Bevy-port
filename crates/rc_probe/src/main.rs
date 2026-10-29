@@ -16,6 +16,10 @@
 //!                            check it, log to `logs/rc_meshes.log`
 //!   rc_probe --export-textures <path>  the same, and also write each texture
 //!                            as a PNG to `extracted/textures/<package>/`
+//!   rc_probe --characters [path]  read every character mesh and animation in
+//!                            a package or folder (default: GameData/Animations),
+//!                            play the animations and measure them, log to
+//!                            `logs/rc_characters.log`
 //!   rc_probe --sounds [path] read every sound in a package or folder
 //!                            (default: GameData/Sounds), decode and measure
 //!                            it, log to `logs/rc_sounds.log`
@@ -25,6 +29,7 @@
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
+mod characters;
 mod meshes;
 mod pixels;
 mod sounds;
@@ -43,6 +48,7 @@ const LOG_PATH: &str = "logs/rc_probe.log";
 const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
 const SOUND_LOG_PATH: &str = "logs/rc_sounds.log";
 const MESH_LOG_PATH: &str = "logs/rc_meshes.log";
+const CHARACTER_LOG_PATH: &str = "logs/rc_characters.log";
 /// Gitignored folders for anything extracted from the game.
 const EXTRACT_DIR: &str = "extracted/textures";
 const SOUND_EXTRACT_DIR: &str = "extracted/sounds";
@@ -78,7 +84,8 @@ fn main() {
     let sound_export = args.first().is_some_and(|a| a == "--export-sounds");
     let sound_mode = sound_export || args.first().is_some_and(|a| a == "--sounds");
     let mesh_mode = args.first().is_some_and(|a| a == "--meshes");
-    if texture_mode || sound_mode || mesh_mode {
+    let character_mode = args.first().is_some_and(|a| a == "--characters");
+    if texture_mode || sound_mode || mesh_mode || character_mode {
         args.remove(0);
     }
     if sound_export && args.is_empty() {
@@ -102,6 +109,7 @@ fn main() {
         None if texture_mode => game.join("GameData"),
         None if sound_mode => game.join("GameData").join("Sounds"),
         None if mesh_mode => game.join("GameData").join("StaticMeshes"),
+        None if character_mode => game.join("GameData").join("Animations"),
         None => game.join("GameData").join("System").join("Core.u"),
     };
     let log_path = if texture_mode {
@@ -110,6 +118,8 @@ fn main() {
         SOUND_LOG_PATH
     } else if mesh_mode {
         MESH_LOG_PATH
+    } else if character_mode {
+        CHARACTER_LOG_PATH
     } else {
         LOG_PATH
     };
@@ -139,6 +149,8 @@ fn main() {
         sounds::scan(&mut log, &target, &game.join("GameData"), export_dir)
     } else if mesh_mode {
         meshes::scan(&mut log, &target)
+    } else if character_mode {
+        characters::scan(&mut log, &target)
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {

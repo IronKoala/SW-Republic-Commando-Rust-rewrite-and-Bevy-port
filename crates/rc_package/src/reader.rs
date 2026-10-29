@@ -107,6 +107,10 @@ impl<'a> Reader<'a> {
         Ok(i32::from_le_bytes(self.bytes(4)?.try_into().unwrap()))
     }
 
+    pub fn i16(&mut self) -> Result<i16> {
+        Ok(i16::from_le_bytes(self.bytes(2)?.try_into().unwrap()))
+    }
+
     pub fn f32(&mut self) -> Result<f32> {
         Ok(f32::from_bits(self.u32()?))
     }
