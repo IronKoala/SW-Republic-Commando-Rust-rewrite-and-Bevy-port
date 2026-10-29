@@ -194,6 +194,105 @@ over 10 (11.2). Not checked: which way "up" points for V. Bevy may need its
 `flip_normal_map_y` setting, which can only be told by lighting a bump-mapped
 wall and comparing with the game.
 
+## Lights in maps
+
+A map (`.ctm`) stores its lights as actors, objects placed in the level:
+`Light` (most), `Spotlight`, `Sunlight`, `TriggerLight` (can be switched on and
+off) and a few game-specific ones such as `K_POWSpotLight`. Each `ZoneInfo`
+(one per room-like area) adds a flat "ambient" light inside it.
+
+**Actors have an extra header.** Before their property list, actors store a
+"state frame" (where their script was running). We measured its layout in
+Republic Commando: a compact number, another compact number, 8 bytes, 2 bytes,
+and one more compact number if the first one isn't 0. This read all 600
+light, zone and level actors in four maps with 0 bytes left over; the usual UE2
+layout (4 bytes in place of the 2) did not fit. The level thread's actor reader
+(`rc_level`) uses the same layout.
+
+**What a light stores** (`rc_package::light`):
+- `Location` (Unreal units: X forward, Y right, Z up) and `Rotation`
+  (pitch, yaw, roll, 65536 per full turn) for spotlights and sunlight.
+- `LightBrightness`: a float here (UE2 used 0-255; values up to 500 were seen).
+- `LightHue` and `LightSaturation`, 0-255. Hue goes round the colour wheel.
+  Saturation works backwards: 255 is white, 0 is the pure colour.
+- `LightRadius`: how far the light reaches. Also a float here, and in plain
+  Unreal units: the typical radius (350-1,200) is about one to three times the
+  distance to the nearest other light (230-840). UE2's rule of 25 x (radius +
+  1) would make lights reach 20 times further than their spacing, so Republic
+  Commando must have dropped it.
+- `LightRadiusInner`: Republic Commando only. Meaning not known yet.
+- `bDynamicLight`: whether it lights moving things while playing.
+
+Properties the editor left at their default aren't stored. We use UE2's
+documented defaults for those (brightness 64, saturation 255, radius 64); the
+game's own defaults in `Engine.u` haven't been read yet.
+
+| Map | Lights (point / spot / sun) | Dynamic | Zones with ambient |
+|---|---|---|---|
+| `geo_01a` | 29 / 0 / 2 | 2 | 4 |
+| `pro` | 211 / 0 / 0 | 19 | 7 |
+| `ras_01a` | 282 / 4 / 0 | 7 | 7 |
+| `yyy_01b` | 29 / 1 / 0 (7 switched off) | 2 | 7 |
+
+**Most of the lighting is baked.** Only 2-9% of lights are dynamic. The rest
+were worked out when the level was built and saved into the map:
+- **Static meshes** (props, most walls): each `StaticMeshActor` has a
+  `StaticMeshInstance` holding one colour per mesh corner (vertex). Layout: an
+  empty property list, a count, then that many 4-byte colours (blue, green,
+  red, alpha). It read correctly on all 1,267 instances in the four maps. A
+  few bytes after the colours (4 + 6 x n) are not understood yet. Many of the
+  colours are black (60-80%), so the game probably brightens them when
+  drawing (UE2 often doubled vertex light). Not checked.
+- **BSP geometry** (the level's brush-built walls and floors): not found yet.
+  The maps hold no separate lightmap texture objects, so it must be inside the
+  level's `Model` data, which the level thread is reading.
+
+## Lighting in Bevy (`rc_viewer/src/lighting.rs`)
+
+Bevy lights are physically based (lumens, lux), the game's are not, so the
+conversion has tunable factors. All of them sit in one `LightingSettings`
+resource, and a plain text file can change them (`key = value` lines, `#`
+comments) so modders can tweak lighting without touching code:
+
+```
+# lighting.cfg
+units_per_bevy = 50             # Unreal units per Bevy unit (project-wide rule)
+live_lights = all               # all, dynamic, or none
+lumens_per_range_squared = 2000 # point and spot light power
+sun_lux_at_255 = 10000          # Sunlight brightness
+ambient_at_255 = 2000           # zone ambient brightness
+shadows = false
+```
+
+- Positions: Bevy (x, y, z) = Unreal (x, z, y) / 50. Swapping Y and Z also
+  turns Unreal's left-handed axes into Bevy's right-handed ones. The other
+  threads use the same rule.
+- Point light power = factor x (brightness / 255) x range². Range is the
+  game's radius in Bevy units. Scaling with range² means a light looks the
+  same at the same fraction of its reach, big or small.
+- Spotlight cone: we guess `LightCone` 0-255 spans 0-90 degrees. Not checked.
+- Ambient: Bevy has one ambient light for the whole scene, the game has one
+  per zone. For now we take the dimmest non-zero zone (the bright 192-255 ones
+  are skies).
+
+The factors are placeholders. The plan to set them properly: compute what our
+lights would give at each static-mesh vertex and compare with the colours the
+game baked there, then adjust until they agree.
+
+**Plan for speed (and VR).** Once the baked light is shown, set `live_lights =
+dynamic`: the 91-98% of lights that are baked cost nothing at run time, and
+only a handful of real-time lights remain. That suits a later VR version,
+which has to draw everything twice (once per eye) at 90 frames per second or
+more.
+
+**Phones and other platforms.** Textures, bump maps included, are decoded to
+plain RGBA on the CPU before Bevy sees them, so no graphics card has to
+understand the game's DXT compression. Android GPUs often can't, so this path
+works on Windows, Linux and Android alike. The cost is memory (4 bytes per
+pixel instead of 0.5-1); re-compressing into a phone-friendly format (ETC2 or
+ASTC) can come later if memory gets tight. Baked lighting with few real-time
+lights is also the cheap option for phone GPUs.
+
 ## Showing a texture in Bevy (`rc_viewer`)
 
 Bevy is the game engine. A Bevy program is an "app" made of:

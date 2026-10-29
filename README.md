@@ -56,6 +56,11 @@ copy of the game.
   (see `docs/DESIGN.md`, "Bump maps"). Their own half-size copies match with
   a median difference of 1.8 of 255.
 
+- **Reading a map's lights (tested in the cloud on 4 maps, not on Windows).**
+  `rc_package::light` turns light and zone actors into position, colour,
+  brightness and reach. Read 600 lights and zones from `geo_01a`, `pro`,
+  `ras_01a` and `yyy_01b` with nothing left over.
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
@@ -64,6 +69,12 @@ copy of the game.
 - Models are drawn without lighting, bump maps or transparency. Only a
   material's main colour texture is used.
 - No levels, no game yet.
+- Lighting in Bevy: `rc_viewer/src/lighting.rs` can place a map's lights, with
+  settings a mod can change from a text file, but its brightness factors are
+  placeholders and it isn't connected to a level yet. The light the game baked
+  into its maps is found for props (one colour per vertex) but not yet for
+  the brush-built walls. Bump maps aren't used for lighting yet, and which way
+  their "up" points isn't checked.
 - 17 textures have small copies (mipmaps) that differ from the full picture.
   This is in the game's own files, not a decoding fault (see `docs/DESIGN.md`).
 

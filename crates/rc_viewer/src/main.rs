@@ -15,6 +15,10 @@
 //! the window. On frame `CHECK_FRAME` it also captures what is actually on
 //! screen and compares it with what should be there, pixel by pixel.
 
+// Map lights for Bevy. Not used by a viewer mode yet: it is switched on once a
+// level loads (see `lighting.rs`).
+#[allow(dead_code)]
+mod lighting;
 mod mesh;
 
 use bevy::asset::RenderAssetUsages;
