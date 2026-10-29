@@ -6,6 +6,10 @@ description = "The shared pieces every part of the game plugs into: game states,
 
 [dependencies]
 rc_movement = { path = "../rc_movement" }
+# Save files are TOML. serde (MIT OR Apache-2.0), https://serde.rs; toml
+# (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. Only the app, ECS and states:
 # no window or renderer, so plugins that use this crate choose those
