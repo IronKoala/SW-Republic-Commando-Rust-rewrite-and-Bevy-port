@@ -12,15 +12,24 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_package` | Reads Unreal Engine 2 packages from bytes it's given. Opens no files. No Bevy. |
 | `rc_image` | Turns raw pixel data (P8, DXT1/3/5, RGBA8, G16) into plain RGBA pictures and writes PNG files. Knows nothing about Unreal. No Bevy. |
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
+| `rc_audio` | Reads `.wav` files into samples and measures them (length, peak, loudness, checksum). Knows nothing about Unreal. No Bevy. |
 | `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
 | `rc_movement` | The player's walking, jumping, crouching and collision, with the game's own numbers. No Bevy. |
 | `rc_walk` | Bevy program: walk around a test room in first person using `rc_movement`. |
 
+| `rc_level` | Reads maps: the level's own geometry (the BSP) and where every actor is placed. No Bevy. |
+| `rc_level_viewer` | Bevy program: loads one map and lets you fly around it. |
+| `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
+| `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
+| `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
+
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
-Only `rc_viewer` uses Bevy (version 0.20.1, MIT or Apache-2.0). It turns on
-only the parts of Bevy it needs: a 2D window, plus `bevy_pbr` for 3D models
-and their materials (no audio, gamepads or UI yet), which keeps the build
-smaller.
+Only `rc_viewer`, `rc_character`, `rc_level_viewer` and `rc_soundtest` use Bevy
+(version 0.20.1, MIT or Apache-2.0). Each turns on only the parts of Bevy it
+needs, which keeps the build smaller: `rc_viewer` and `rc_character` a 2D window
+plus `bevy_pbr` for 3D models and their materials (the same list, so they share
+one build); `rc_level_viewer` Bevy's full 3D renderer (`3d_bevy_render`);
+`rc_soundtest` only audio and WAV decoding, with no window.
 
 ## Finding the game
 
@@ -100,9 +109,8 @@ Three checks show the reading is right, and all pass on real files:
 
 Formats are UE2's numbers: 0 P8 (8-bit with a separate palette), 3 DXT1,
 7 DXT3, 8 DXT5, 5 RGBA8, 10 G16 (terrain heightmaps). Republic Commando also
-uses 12 and 14, both 2 bytes per pixel (measured on every mipmap). UE Viewer
-guesses 14 is CxV8U8, a two-channel format used for bump maps. We found no name
-for 12.
+uses 12 (V8U8) and 14 (L6V5U5), two bump-map formats, both 2 bytes per pixel.
+How we know which is which is under "Bump maps" below.
 
 Known quirk: `MP_Trando_Light_Cluster` (in `multiplayer_textures.utx`) stores
 its last mipmap, 1x1 pixels, with 0 bytes. The file is otherwise consistent, so
@@ -122,6 +130,7 @@ per pixel):
   colours and picks between them and two in-between colours per pixel. DXT3
   adds 4 bits of alpha per pixel; DXT5 adds an alpha pair with 8 steps.
 - **G16**: 16-bit grey; we keep the top 8 bits.
+- **V8U8 and L6V5U5** (bump maps): see the next section.
 
 PNG files are written uncompressed (simplest valid PNG), so they're large but
 open anywhere. They go to `extracted/textures/<package>/<texture>.png`.
@@ -131,10 +140,169 @@ half-size copy (mip 1), made by the game's tools. We shrink our decoded full-
 size picture (mip 0) by averaging 2x2 squares and compare it with our decoded
 mip 1. Correct decoding gives a small difference; unrelated pictures of the same
 size differ by about 57 out of 255 on average (measured on 524 pairs). Results
-across the install: 1,916 of 2,003 textures differ by under 10; 17 by over 20.
-The 17 are mostly fine patterns (grates, noise, flickering screens). Their
-smaller copies fade toward flat grey, which suggests the artists made those
-mipmaps differently. That explanation is a guess and hasn't been checked by eye.
+across the install's 57 texture packages: 2,026 of 2,114 textures with a usable
+mip 1 differ by under 10; 17 by 20 or more.
+
+**The 17 that don't match.** We looked at them closely with numbers (each mip
+against the one before it, how varied each mip is, its average colour). Our
+decoding is not the problem: the same decoder gives under 5 on the other 2,000
+textures in the same formats and packages, including 159 other non-square ones,
+and reading their small mips sideways or upside down only made things worse.
+The game's own files store different pictures in their small mips:
+- 5 in `arena_textures.utx` (`Propeller`, `HEX_grate`, `Main_Spire`,
+  `Generic_Cave_Opening`, `Generic_Strips`): mip 1 is a detailed picture but not
+  a shrunk copy of mip 0 (differences 20-60), and from mip 3 down every pixel is
+  exactly the same grey (127, 125, 127). That exact flat grey can't come from
+  shrinking a picture, so these mips were made by hand or by a tool setting.
+- `grndDSBlastDoor02` (`assaultship_textures.utx`): every mip differs from the
+  one before by 48-73, as if each level were a separate picture.
+- 7 tiny glow sprites in `effecttex.utx` (8x8 and 16x16, like `eng_glowblue`):
+  differences of 21-26. At those sizes a DXT block covers a quarter of the
+  picture, so compression error alone may explain it. That part is a guess.
+- `console_display_05`, `PowerBar` and `DigiNoise`: screens and noise. For
+  `DigiNoise`, mips 1 and below agree with each other (about 5) but not with
+  mip 0, so mip 0 is a different noise pattern.
+- `CT_ButtonFocus` and `CT_ButtonDefault` (`guicontent.utx`, 16x32 menu
+  buttons): mip 1 is noticeably brighter than mip 0.
+What this means for the port: use the game's own stored mips rather than
+making new ones, so things look the way the game made them look at a distance.
+
+## Bump maps (formats 12 and 14)
+
+A bump map (also "normal map") stores, for each pixel, which way the surface
+tilts, so flat walls catch light as if they had dents and rivets. 133 of the
+game's textures are bump maps, in two layouts that Direct3D (the Windows
+graphics system the game ran on) names:
+
+- **Format 12 = V8U8** (29 textures): two bytes per pixel, the sideways tilt U
+  and the up/down tilt V, each a signed number from -128 to 127.
+- **Format 14 = L6V5U5** (104 textures): one 16-bit number per pixel. Bits 0-4
+  are U and bits 5-9 are V (signed, -16 to 15), and bits 10-15 are a brightness
+  value L (0-63). What the game used L for isn't known; some of these textures
+  are named `..._spec`, so it may be shininess. We keep it in the alpha channel.
+
+`rc_image` turns both into the usual normal-map colours: red = U, green = V,
+blue = how much the surface faces straight out, all mapped from -1..1 to
+0..255. A flat pixel becomes (128, 128, 255), the familiar light blue.
+
+**How we found out, without documentation.** UE Viewer guesses format 14 is
+CxV8U8 and marks it "not verified"; nothing names 12. So we tried six possible
+layouts on every bump map and used the mipmap test from above: decode mip 0 and
+mip 1 with each layout, shrink mip 0, and compare. The right layout gives a
+small difference compared with a deliberately mismatched pair. Results
+(difference divided by the mismatched difference, smaller is better):
+
+| Layout tried | Format 12 | Format 14 |
+|---|---|---|
+| V8U8, signed bytes | **0.06** | 0.34 |
+| two unsigned bytes | 0.36 | 0.28 |
+| L6V5U5 | 0.76 | **0.08** (L alone: 0.01) |
+| RGB565, ARGB4444, other bit orders | 0.47-0.76 | 0.37-0.51 |
+
+Each format has one clear winner. With these layouts all 133 bump maps decode;
+for the 121 that have a mip 1, the median mip difference is 1.8 and only one is
+over 10 (11.2). Not checked: which way "up" points for V. Bevy may need its
+`flip_normal_map_y` setting, which can only be told by lighting a bump-mapped
+wall and comparing with the game.
+
+## Lights in maps
+
+A map (`.ctm`) stores its lights as actors, objects placed in the level:
+`Light` (most), `Spotlight`, `Sunlight`, `TriggerLight` (can be switched on and
+off) and a few game-specific ones such as `K_POWSpotLight`. Each `ZoneInfo`
+(one per room-like area) adds a flat "ambient" light inside it.
+
+**Actors have an extra header.** Before their property list, actors store a
+"state frame" (where their script was running). We measured its layout in
+Republic Commando: a compact number, another compact number, 8 bytes, 2 bytes,
+and one more compact number if the first one isn't 0. This read all 600
+light, zone and level actors in four maps with 0 bytes left over; the usual UE2
+layout (4 bytes in place of the 2) did not fit. The level thread's actor reader
+(`rc_level`) uses the same layout.
+
+**What a light stores** (`rc_package::light`):
+- `Location` (Unreal units: X forward, Y right, Z up) and `Rotation`
+  (pitch, yaw, roll, 65536 per full turn) for spotlights and sunlight.
+- `LightBrightness`: a float here (UE2 used 0-255; values up to 500 were seen).
+- `LightHue` and `LightSaturation`, 0-255. Hue goes round the colour wheel.
+  Saturation works backwards: 255 is white, 0 is the pure colour.
+- `LightRadius`: how far the light reaches. Also a float here, and in plain
+  Unreal units: the typical radius (350-1,200) is about one to three times the
+  distance to the nearest other light (230-840). UE2's rule of 25 x (radius +
+  1) would make lights reach 20 times further than their spacing, so Republic
+  Commando must have dropped it.
+- `LightRadiusInner`: Republic Commando only. Meaning not known yet.
+- `bDynamicLight`: whether it lights moving things while playing.
+
+Properties the editor left at their default aren't stored. We use UE2's
+documented defaults for those (brightness 64, saturation 255, radius 64); the
+game's own defaults in `Engine.u` haven't been read yet.
+
+| Map | Lights (point / spot / sun) | Dynamic | Zones with ambient |
+|---|---|---|---|
+| `geo_01a` | 29 / 0 / 2 | 2 | 4 |
+| `pro` | 211 / 0 / 0 | 19 | 7 |
+| `ras_01a` | 282 / 4 / 0 | 7 | 7 |
+| `yyy_01b` | 29 / 1 / 0 (7 switched off) | 2 | 7 |
+
+**Most of the lighting is baked.** Only 2-9% of lights are dynamic. The rest
+were worked out when the level was built and saved into the map:
+- **Static meshes** (props, most walls): each `StaticMeshActor` has a
+  `StaticMeshInstance` holding one colour per mesh corner (vertex). Layout: an
+  empty property list, a count, then that many 4-byte colours (blue, green,
+  red, alpha). It read correctly on all 1,267 instances in the four maps. A
+  few bytes after the colours (4 + 6 x n) are not understood yet. Many of the
+  colours are black (60-80%), so the game probably brightens them when
+  drawing (UE2 often doubled vertex light). Not checked.
+- **BSP geometry** (the level's brush-built walls and floors): not found yet.
+  The maps hold no separate lightmap texture objects, so it must be inside the
+  level's `Model` data, which the level thread is reading.
+
+## Lighting in Bevy (`rc_viewer/src/lighting.rs`)
+
+Bevy lights are physically based (lumens, lux), the game's are not, so the
+conversion has tunable factors. All of them sit in one `LightingSettings`
+resource, and a plain text file can change them (`key = value` lines, `#`
+comments) so modders can tweak lighting without touching code:
+
+```
+# lighting.cfg
+units_per_bevy = 50             # Unreal units per Bevy unit (project-wide rule)
+live_lights = all               # all, dynamic, or none
+lumens_per_range_squared = 2000 # point and spot light power
+sun_lux_at_255 = 10000          # Sunlight brightness
+ambient_at_255 = 2000           # zone ambient brightness
+shadows = false
+```
+
+- Positions: Bevy (x, y, z) = Unreal (x, z, y) / 50. Swapping Y and Z also
+  turns Unreal's left-handed axes into Bevy's right-handed ones. The other
+  threads use the same rule.
+- Point light power = factor x (brightness / 255) x range². Range is the
+  game's radius in Bevy units. Scaling with range² means a light looks the
+  same at the same fraction of its reach, big or small.
+- Spotlight cone: we guess `LightCone` 0-255 spans 0-90 degrees. Not checked.
+- Ambient: Bevy has one ambient light for the whole scene, the game has one
+  per zone. For now we take the dimmest non-zero zone (the bright 192-255 ones
+  are skies).
+
+The factors are placeholders. The plan to set them properly: compute what our
+lights would give at each static-mesh vertex and compare with the colours the
+game baked there, then adjust until they agree.
+
+**Plan for speed (and VR).** Once the baked light is shown, set `live_lights =
+dynamic`: the 91-98% of lights that are baked cost nothing at run time, and
+only a handful of real-time lights remain. That suits a later VR version,
+which has to draw everything twice (once per eye) at 90 frames per second or
+more.
+
+**Phones and other platforms.** Textures, bump maps included, are decoded to
+plain RGBA on the CPU before Bevy sees them, so no graphics card has to
+understand the game's DXT compression. Android GPUs often can't, so this path
+works on Windows, Linux and Android alike. The cost is memory (4 bytes per
+pixel instead of 0.5-1); re-compressing into a phone-friendly format (ETC2 or
+ASTC) can come later if memory gets tight. Baked lighting with few real-time
+lights is also the cheap option for phone GPUs.
 
 ## Showing a texture in Bevy (`rc_viewer`)
 
@@ -383,3 +551,283 @@ and weapon viewers. The camera's field of view is the game's 85 degrees
 across the screen, converted to Bevy's up-and-down angle for the window's
 shape. Mouse turning speed is our own choice (0.0025 radians per count); the
 game's rule is in the compiled engine.
+
+## Characters: skeletal meshes and animations
+
+Characters (clone troopers, droids, creatures) live in the `.ukx` packages in
+`GameData\Animations`. Each holds `SkeletalMesh` objects (the bodies) and
+`MeshAnimation` objects (sets of animations). Readers:
+`rc_package::skeletal` and `rc_package::animation`, learned from UE Viewer
+(MIT); the Republic Commando differences are listed at the top of each file.
+
+**A skeletal mesh** is:
+- **Points**: corners of the surface, in the "reference pose" (the clone
+  trooper stands in a T shape, arms out).
+- **Wedges**: a point plus a texture position. Two triangles can share a
+  point but use different spots of the texture, so they get separate wedges.
+- **Triangles**: three wedges and a material slot.
+- **Bones**: a tree. Each bone stores its position and rotation relative to
+  its parent. The root bone's parent is stored as -1. The stored "number of
+  children" counts all bones below a bone, not just direct children (found
+  by measuring; the root of a 65-bone skeleton says 64).
+- **Influences**: "bone B moves point P with weight W". A point can follow up
+  to 3 bones (clone trooper). Weights add up to 1, except a few points in 17
+  meshes that add up to 0.98-0.99; we spread the difference evenly.
+- The skin: an object reference to a material in a texture package. For the
+  clone that's a `Shader` whose `Diffuse` setting is a 512x512 DXT1 picture.
+
+**An animation set** has its own bone list (matched to the mesh's bones by
+name) and a list of sequences (`WalkForward`, `Reload`, ...). Each sequence
+has a frame count, a speed (30 frames per second in every file seen), and
+one track per bone. A track is packed small: positions are three 16-bit
+numbers times a scale, rotations are three 16-bit numbers with flag bits
+that rebuild a quaternion (a compact way to store a rotation), and each key
+lasts a whole number of frames (one byte).
+
+**Rotations.** Republic Commando stores bone rotations mirrored compared with
+other Unreal Engine 2 games, and the engine applies them inverted except on
+the root bone. Together: use the stored rotation as-is, except invert the
+root's. We checked this by measurement instead of trusting it: playing every
+sequence on every mesh, the surface stretches by 3.5% on average with this
+rule and by 86% with the opposite one (limbs fly apart).
+
+**Playing an animation** (`rc_anim`):
+1. `Clip::sample` picks the two keys around the current frame for each bone
+   and blends between them (straight line for positions, "slerp", the smooth
+   rotation blend, for rotations). After the last key it blends back to the
+   first, so the animation loops.
+2. `globals` walks down the bone tree to get each bone's place in the model.
+3. `skin` moves each point: for every bone that influences it, undo the
+   bone's reference placement, apply its animated placement, and mix by the
+   weights. This runs on the CPU, about 1,500 points for the clone.
+
+The pose is a plain list of per-bone transforms, so anything can produce
+one, not only the game's animations: a mod's new animation, a physics
+ragdoll, or tracked VR hands could set some bones and leave the rest to an
+animation.
+
+**How we check without looking:**
+- `rc_probe --characters` reads every mesh and animation set, checks the bone tree,
+  the index ranges and the weights, and plays every sequence of each mesh's
+  animation sets, logging the surface stretch.
+- In the reference pose, each bone sits close to the points it moves (median
+  1.5% of the clone's height).
+
+### Showing a character in Bevy (`rc_character`)
+
+1. Before Bevy starts, `load.rs` reads the mesh, the animation set and the
+   sequence, plays the whole sequence once on the CPU and logs the
+   character's height and surface stretch on every frame, then follows the
+   material to the skin picture and decodes it.
+2. Axes: the game has Z up and is "left-handed"; Bevy has Y up and is
+   "right-handed". Bevy X = game Y, Bevy Y = game Z, Bevy Z = minus game X.
+   Changing handedness mirrors the model, which also flips which side of a
+   triangle is its front. We decide the triangle order by measuring: the
+   "signed volume" of the closed surface is positive when fronts face out.
+3. One Bevy vertex per wedge. Every frame `animate` samples the pose, skins
+   the points, recomputes normals (the direction each bit of surface faces,
+   for lighting) and copies them into the Bevy mesh. The root bone's
+   sideways movement is removed so walks stay in place.
+4. The game's "forward" is +X (checked: `WalkForward` moves the root bone
+   +364.7 units along X, `StepLeft` moves it along -Y, and the toes point
+   +X). The camera sits in front of the character, slightly to one side.
+
+**On-screen check:** on frame 30 the animation pauses and the window is
+captured. We project every triangle of our own skinned points with Bevy's
+camera, fill them into a yes/no grid, and compare with the captured pixels
+that aren't the background colour. The score is the overlap divided by the
+combined area (1.0 = identical). Results in the cloud sandbox: 0.984-0.994
+for the clone trooper, battle droid and super battle droid; comparing
+against a pose 22 frames off scores 0.77-0.86, so the 0.95 pass mark means
+something. The check also compares the colour balance (each colour
+channel's share of the total) of the character on screen with its skin
+picture: lighting changes brightness but not hue. This was added after the
+clone came out magenta on Windows while its outline still matched (Bevy's
+default colour grading needs the `tonemapping_luts` feature, which our shared
+Bevy feature list leaves out, so the camera uses `Tonemapping::None`). The
+magenta picture scores 0.331, the right one 0.001-0.013; 0.06 passes. In the
+sandbox the first capture is often black or shows only
+the background (the mesh hadn't reached the graphics card yet); the check
+retries up to 5 times.
+
+**Fit with the project goals.** Readers and animation maths have no Bevy and
+no platform-specific code, so they build for Windows, Linux and Android
+alike (only `rc_character` needs Bevy). Skinning ~1,500 points on the CPU is
+cheap, but on a phone we will want to hand it to the graphics card through
+Bevy's own skinned meshes; the pose code stays the same. For mods: the
+viewer takes any package, mesh, set and sequence on its command line, and
+nothing assumes the clone trooper's bone names except the defaults.
+
+
+## Levels (maps)
+
+A map (`.ctm`) is a package like the others. Three kinds of object matter:
+
+- **`Level`**: the list of every actor in the map (the "things": props,
+  lights, path nodes, triggers, the player start...) and a link to the BSP.
+- **`Model`**: the BSP. Every brush and volume has a small one; the level's
+  own is the one `Level` points at.
+- **Actors**: objects of classes like `StaticMeshActor`, `Light` or
+  `PlayerStart`, each with its own settings.
+
+`rc_level` reads all three. It keeps Unreal's units and axes; converting to
+Bevy is the viewer's job.
+
+### The BSP (the level's own walls and floors)
+
+"BSP" (binary space partition) is how Unreal 2 stored the level's hand-built
+geometry: a tree that splits space with flat planes. For drawing we only need
+its polygons. Each tree node with corners is one flat, convex polygon. The
+arrays, in file order:
+
+1. **Vectors**: directions (surface normals and texture directions).
+2. **Points**: corner positions.
+3. **Nodes**: plane, zone mask, flags, then compact indexes (first corner in
+   the vertex pool, surface, back/front/coplanar children, bounds), a
+   bounding sphere, zones, corner count, leaves, and three numbers Republic
+   Commando adds (they look like render section, first vertex in it, and
+   lightmap). 
+4. **Surfaces**: material, flags (invisible, two-sided, translucent, ...),
+   texture origin point, normal and texture U/V directions, the brush it came
+   from, its plane, and its lightmap scale.
+5. **Vertex pool**: for each corner, a point index and a "side" index.
+
+The field names come from the public Unreal headers (read in the
+SWRC-Modding/CT repository, which has no licence, so nothing was copied); the
+exact Republic Commando layout was worked out from `geo_01a.ctm` and checked
+on 5 maps. Zones, leaves, lightmaps and render sections come after these
+arrays and aren't read yet.
+
+Texture coordinates come from the surface: U = (corner - origin) . U
+direction, same for V, in texels; the viewer divides by the texture's size.
+
+In Republic Commando most of a level is static meshes, not BSP: `geo_01a`
+has 249 BSP polygons but 355 placed props with 141,000 triangles.
+
+### Actors and where they are
+
+Actors in a map start with a short "state frame" (script state) before their
+property list: two compact indexes, 8 bytes, then 2 bytes (UE2 has 4 here;
+found by the lighting thread), and one more compact index if the first was
+not zero. After that come normal properties. `Location` is three decimals,
+`Rotation` three whole numbers (pitch, yaw, roll; 65,536 = a full turn),
+`DrawScale` and `DrawScale3D` scale the model, `StaticMesh` names the model,
+and `Skins` replaces its materials.
+
+To place a model: subtract `PrePivot`, scale, turn (yaw around the up axis,
+pitch, then roll, Unreal's standard order), then move to `Location`.
+
+The `Level` object holds one unknown byte (always 0 so far), the actor list,
+the map's URL, and then the BSP model reference.
+
+### Showing a level (`rc_level_viewer`)
+
+Before Bevy starts, the viewer reads the map, then every material and static
+mesh it uses from the other packages in `GameData` (it indexes every package
+file by name once). Materials are followed to a plain texture: a `Shader` to
+its `Diffuse`, Republic Commando's own `Hs...` materials to their
+`DiffuseTexture`, panners and modifiers to their `Material`. `HsFalloff`
+light shafts are drawn as glow (added on top), not as solid surfaces.
+
+All triangles that share a material go into one Bevy mesh, so the GPU gets
+one "draw call" per material (60 for `geo_01a`) instead of one per prop. This
+matters for slower machines and phones.
+
+**Coordinates.** Unreal: X forward, Y right, Z up. Bevy: Y up. We swap Y and
+Z and divide by 50 (`UNREAL_UNITS_PER_BEVY_UNIT`, the one place the scale is
+set, agreed with the other threads). Swapping two axes mirrors the world,
+which also turns Unreal's left-handed coordinates into Bevy's right-handed
+ones. Mirroring reverses the order of every polygon's corners, so the viewer
+works out each BSP polygon's corner order from its stored normal and writes
+the triangles so the right side faces out. In all 5 maps every BSP polygon
+had the same order.
+
+**Camera.** A free-flying camera in its own file (`camera.rs`), separate from
+level loading, so it can later become a first-person player or a VR headset.
+It starts at the first `PlayerStart`, 64 units above it, facing its yaw.
+
+### How we check a level without looking at it
+
+- **BSP checks**: every index points inside its array, every polygon's
+  corners lie on its node's plane (within 1 unit), plane normals have length 1.
+- **Floor test**: PathNodes (the AI's walking network) and PlayerStarts float
+  at a character's half height above a floor. A ray straight down from each
+  must hit level geometry soon, and never closer than 80 units (that would
+  mean the point is inside a prop). In `geo_01a`, 292 of 293 have a floor
+  within 150 units (median 104), none closer than 80. Turning props the wrong
+  way put 14-20 points inside props, so the test notices wrong placements.
+- **On-screen check**: from the spawn point, more than half the window must
+  be level (not background) with more than 100 different colours.
+
+## Sounds
+
+### Where the game keeps its sounds
+
+- `GameData\Sounds\*.uax`: 23 packages. Three classes of object matter:
+  - `Sound`: holds a complete `.wav` file. After the usual property list comes
+    the file type as a name (always `WAV`), then the file's bytes stored the
+    same way as texture mipmaps (a "skip position" telling where the bytes
+    end, then a length, then the bytes). All 7,974 are plain uncompressed PCM,
+    16-bit: 3,794 at 11,025 Hz mono (mostly voices), 4,039 at 22,050 Hz mono,
+    34 at 44,100 Hz mono, 106 at 22,050 Hz stereo (ambient loops), 1 at
+    44,100 Hz stereo. Source for the layout: UE Viewer's `UnSound.cpp` (MIT).
+  - `SoundStreamed`: holds no audio, only a file name, played from disk while
+    the game runs. Layout (worked out from the game's own bytes): the property
+    list (`Looping`, `Streaming`, fades), then the file name as a string.
+    272 of the 285 names match an `.ogg` file in `GameData\Music`
+    (case doesn't matter). The other 13 are `amb_RAS_*` ambient loops whose
+    files aren't in the PC install.
+  - `SoundMultiple`: a group of sounds the game picks from (for example the
+    13 "whisper" music pieces). Layout (worked out from the bytes): the
+    property list, a list of references to sounds, then a second list that was
+    empty in all 1,208 found. Its meaning is not known yet.
+- `GameData\Music\*.ogg`: 296 music files (Ogg Vorbis). Not decoded yet.
+
+### Checking sounds without listening
+
+`rc_audio` turns a `.wav` file into numbers: sample rate, channels, length,
+peak (loudest sample, 0 to 1, also in decibels where 0 dB is the loudest
+possible), RMS (average loudness), how many samples hit full scale, and a
+checksum that changes if any sample changes. `rc_probe --sounds` logs these
+for every sound. The only silent sound found is called `fol_GEN_silence_01`.
+
+### Playing sounds in Bevy (`rc_soundtest`)
+
+Bevy plays sounds from an `AudioSource`, which is just the bytes of a sound
+file. We hand it the `.wav` bytes straight out of the package, so nothing is
+written to disk. The program:
+
+1. Reads `gen_sound.uax` and finds `wep_GEN_dc17Fire_02` (DC-17 rifle,
+   44,100 Hz mono, 1.317 s) and `amb_KAM_siege_lp_01` (battle ambience,
+   22,050 Hz stereo, 9.977 s).
+2. Decodes each one twice: with `rc_audio`, and with Bevy's own decoder. It
+   compares every sample. They must match exactly (they do: largest
+   difference 0, same checksum).
+3. Runs Bevy without a window: the ambience loops, the rifle fires every 2
+   seconds. When Bevy actually hands a sound to the sound card it adds an
+   `AudioSink` to it; the program logs that moment, and the ambience's play
+   position each second.
+4. At the end it reports `PLAYED` or `NOT PLAYED (Bevy found no sound card)`
+   and the ambience speed: play position divided by time. On a real sound card
+   that should be about 1.00. In the cloud sandbox there is no sound card, so
+   a fake "null" one was set up; it swallows sound as fast as it can, about
+   60x.
+
+### Fitting the long-term goals
+
+- **Easy modding.** Sounds are found by name, and Bevy is given plain `.wav`
+  bytes, the same thing Bevy loads from a normal `.wav` file. So a later step
+  can let a mod folder replace a game sound by dropping in a `.wav` (or `.ogg`)
+  file with the same name, without touching the game's packages.
+- **VR.** This test plays sounds "flat" (not placed in the world). Bevy also
+  has positional sound (`SpatialListener` on the player's head, sounds placed
+  on entities). The game's sounds are mostly mono, which is what positional
+  sound needs. Placing sounds in the world comes with the level and player
+  steps.
+- **Windows, Linux and Android.** `rc_audio` and `rc_package` are plain Rust
+  with no operating-system code. Bevy's audio goes through rodio and cpal,
+  which talk to WASAPI on Windows, ALSA on Linux and AAudio on Android, and
+  WAV decoding (hound) is pure Rust. No Windows-only audio API or codec is
+  used. The sandbox runs are on Linux, so Linux is tested; building there
+  needs the ALSA development package (`libasound2-dev` on Ubuntu). Windows
+  and Android are not tested yet.

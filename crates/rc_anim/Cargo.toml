@@ -1,0 +1,8 @@
+[package]
+name = "rc_anim"
+version = "0.1.0"
+description = "Poses a skeleton from an animation and moves a mesh's points with it (skinning). No Bevy."
+edition.workspace = true
+
+[dependencies]
+rc_package = { path = "../rc_package" }

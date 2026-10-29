@@ -21,6 +21,88 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not tested on Windows (not built there; the Windows build can't be checked from the sandbox). Not tested by hand: nobody has walked it with a real keyboard and mouse. Guesses, because the game does them in compiled engine code: diagonal blend of the back/side speed limits, braking (Unreal Engine 2 style; the game's DecelRate of 600 is unused), mouse turning speed. Fall damage is reported, not applied. Only test-room collision; no level collision yet.
 - **Next:** Collision against real level polygons and static mesh triangles once `rc_level` lands, then walking a real map.
 
+## 2026-10-29: Level viewer passes on Windows
+
+- **Changed:** No code changes. Updated `README.md` with the result.
+- **Why:** The level viewer had only been tested in the cloud sandbox.
+- **Tested how:** The user ran `cargo run --release -p rc_level_viewer` on their Windows PC and flew around; Claude read `logs\rc_level_viewer.log` from the PC.
+- **Result:** 249 package files found; BSP checks all passed; 1,209 actors, 355 props, 141,477 triangles; 56 of 56 materials textured; floor test 292 of 293 (0 too close); level built in 246 ms; on-screen check PASS on the first capture (580 colours); steady 144 frames per second while the camera moved about 30 Bevy units.
+- **Still broken / not tested:** Not tested: maps other than `geo_01a`. Still unlit, no collision.
+- **Next:** Lights and lightmaps (roadmap step 2).
+
+## 2026-10-29: Load a whole level and fly around it (rc_level, rc_level_viewer)
+
+- **Changed:** New crate `crates/rc_level` (no Bevy): `bsp.rs` reads a map's BSP model (the level's own walls and floors: vectors, points, nodes, surfaces, vertex pool) and turns each node into a polygon with texture coordinates; `actors.rs` reads the `Level` object (actor list, map URL, BSP model) and each actor's placement (Location, Rotation, DrawScale, DrawScale3D, PrePivot, StaticMesh, Skins, bHidden), plus the Unreal rotation maths; `collision.rs` gives world-space collision triangles (solid BSP plus placed static meshes, each with its source) for the first-person thread. 3 unit tests. New program `crates/rc_level_viewer`: loads one map (default `geo_01a`), draws the BSP and every placed static mesh with their textures, batched by material, with a free-fly camera starting at the PlayerStart. Logs to `logs/rc_level_viewer.log`. README and DESIGN updated.
+- **Why:** Roadmap step 1: load a whole level and fly around it.
+- **Tested how:** Copied 5 maps and the 15 packages `geo_01a` uses (read-only) into the cloud sandbox. Read the BSP and all actors of all 5 maps. Ran the viewer on `geo_01a` 4 times with Xvfb and software rendering. New checks: every BSP index in range, every polygon corner on its plane, the arrays end where the next begins; a "floor test" (PathNodes and PlayerStarts must have a floor a little below them and nothing inside them); an on-screen check (how much of the window is level, how many colours).
+- **Result:** 5 of 5 maps: BSP checks all pass, all 3,042 actors read. `geo_01a`: 249 BSP polygons, 355 static mesh actors (60 different meshes), 141,477 triangles in 60 draw batches, 55 of 56 materials textured (the missing one's package wasn't copied). Floor test 292 of 293 points have a floor 0-150 units below (median 104), 0 closer than 80. Deliberately turning props the wrong way made 14-20 points land inside props, so the test notices. On-screen check PASS 4 of 4: 100% of the window covered, 576 colours.
+- **Still broken / not tested:** Not tested on Windows, or on maps other than `geo_01a` in the viewer. Not looked at by eye: the scene is only checked by numbers. Drawn unlit (no lights or lightmaps), no bump maps, no sky box treatment, no movers, characters, emitters or terrain. Two dead ends logged: a first state-frame layout that only fitted StaticMeshActors (the lighting thread found the right one: a 2-byte field, not 4), and on-screen captures that showed only the background colour (now retried like black ones). The real-world scale (50 Unreal units per Bevy unit) is still to be measured against a character.
+- **Next:** Test on the user's PC; then lights and lightmaps (roadmap step 2).
+
+## 2026-10-29: Fix the pink clone trooper in rc_character
+
+- **Changed:** `crates/rc_character/src/main.rs`: the camera now uses `Tonemapping::None` (and `DebandDither::Disabled`). `crates/rc_character/src/check.rs`: the on-screen check now also compares the colour balance on screen with the skin picture's.
+- **Why:** The user ran `rc_character` on Windows: the clone moved correctly but was pink. Cause (my mistake): when I switched `rc_character` to the same Bevy feature list as `rc_viewer` to share one build, I dropped `tonemapping_luts`. Bevy's default colour grading needs those tables and draws every lit pixel magenta without them. The outline check only compared shapes, so it still passed.
+- **Tested how:** Read `logs\rc_character.log` from the user's PC: `character pixels' average colour R 253 G 1 B 254`, outline match 0.989 PASS. Reproduced it in the cloud sandbox (R 253 G 1 B 253, plus Bevy's log error "TonyMcMapFace tonemapping requires the `tonemapping_luts` feature"). Then fixed it and re-ran.
+- **Result:** Clone R 167 G 166 B 165 on screen vs skin R 142 G 139 B 137; colour balance difference 0.005 (BattleDroid 0.013, SuperBattleDroid 0.001), all PASS. With the fix removed on purpose, the new check reports 0.331, `colour WRONG`, FAIL, exit code 1.
+- **Windows re-run:** The user re-ran it on Windows ("he's beautiful"). Their log: `colour balance differs from the skin's by 0.005`, `on-screen check PASS: outline match 0.993 ..., colour ok`.
+- **Still broken / not tested:** Nothing new.
+- **Next:** Merge PR #9.
+
+## 2026-10-29: Characters: skeletal meshes, animations, and an animated clone trooper in 3D
+
+- **Changed:** New readers `crates/rc_package/src/skeletal.rs` (SkeletalMesh: bones, points, triangles, texture coordinates, bone weights) and `crates/rc_package/src/animation.rs` (MeshAnimation: sequences, packed key tracks). New crate `crates/rc_anim` (no Bevy): poses a skeleton from a sequence and moves the mesh's points with it (skinning). New `rc_probe --characters` mode (`crates/rc_probe/src/characters.rs`, logs to `logs/rc_characters.log`; `--meshes` is the static-mesh mode from PR #4). New 3D Bevy program `crates/rc_character`: shows one character with its skin texture, playing one animation, with an on-screen self-check. Small shared edits: `Reader::i16` in `reader.rs`, two `pub mod` lines in `rc_package/src/lib.rs`, workspace members in `Cargo.toml`.
+- **Why:** Roadmap step 3: load a character with animation.
+- **Tested how:** 6 new unit tests (all 23 unit tests in the workspace pass). Copied the 20 animation packages plus `clonetextures.utx` and `droidtextures.utx` from the install into the cloud sandbox and ran `rc_probe --characters` on them and `rc_character` under a virtual screen (software rendering). Not run on the user's PC yet.
+- **Result:** `skeletal meshes: 131 read, 0 with problems, 0 failed`; `animation sets: 165 read, 2 with problems, 0 failed; 1414 sequences, 127873 frames`. Rotation convention checked by playing every sequence of every mesh (226 mesh/set pairs, 8 frames each): average edge stretch 0.035 with the convention UE Viewer describes, 0.857 with the opposite one. CloneTrooper: 65 bones, 1556 points, 3008 triangles; WalkForward 48 frames at 30 fps, height 169.1-174.2 units throughout, root moves 364.7 units per loop (removed for display). `rc_character`: `on-screen check PASS: outline match 0.991` for the clone (0.993 on 6 of 6 runs of RunForward), 0.988 for BattleDroid, 0.994 for SuperBattleDroid; comparing against a pose 22 frames off gives 0.773 and 0.858, so the 0.95 pass mark catches a wrong pose.
+- **Still broken / not tested:** Not tested on Windows (needs one run on the user's PC). The 2 "problem" animation sets are real data: an empty sequence named `None` with 0 frames (`SecCameraASet`, `TranTurretSet`). 29 bytes at the end of every mesh are not understood (UE Viewer skips them too). Only the skin's colour picture is drawn: bump maps, shininess and the material's other layers are ignored. Only the first material slot is used (the clone has one; some hud arms have up to 7). Animation notifies (footstep sounds, gun fire) are read but not used. Skinning runs on the CPU. Pitch and roll of the mesh's stored rotation are ignored (all zero in the files tested).
+- **Next:** Run `rc_character` on the user's PC. Later: GPU skinning through Bevy's own skinned meshes, more material slots, blending between animations.
+
+## 2026-10-29: Lights read from maps; Bevy lighting module with a settings file
+
+- **Changed:** New `crates/rc_package/src/light.rs` (lights and zone ambients from an actor's properties, Unreal hue/saturation to colour). New `crates/rc_viewer/src/lighting.rs` (spawns Bevy point, spot and directional lights and the ambient light; every factor in `LightingSettings`, loadable from a `key = value` text file for mods). `lighting.rs` is compiled into the viewer (using the 3D parts PR #4 added) but no viewer mode uses it yet. DESIGN ("Lights in maps", "Lighting in Bevy") and README updated.
+- **Why:** Roadmap step 2: lights. Prepare them so they can be switched on as soon as a level loads.
+- **Tested how:** Wrote throwaway test programs (kept outside the repo) and ran them on `geo_01a`, `pro`, `ras_01a` and `yyy_01b`, copied read-only from the install. 4 unit tests for colours, light classes, axes, facing and the settings file (23 in the workspace, all pass). A scratch Bevy app placed `ras_01a`'s lights over a white floor, captured the screen and measured it (results in the next line).
+- **Result:** Measured the actor state-frame layout (2 bytes where UE2 has 4): all 600 light/zone/level actors read with 0 bytes left over; shared with the level thread. Lights per map: 31, 211, 286, 37; only 2-9% dynamic. Radius is in plain Unreal units (typical radius 350-1,200 vs 230-840 to the nearest light). Static meshes carry baked light as one colour per vertex: read on all 1,267 instances. Bevy test on `ras_01a`: 282 point lights and 4 spotlights created; with all lights on, the floor's brightest pixel is 225 of 255, with lights off (ambient only) 47, so the lights do light the scene. The first two captures were black (the known sandbox quirk).
+- **Still broken / not tested:** Brightness factors are placeholders, not matched to the game. Spotlight cone angle is a guess. Light defaults are UE2's, not read from the game's `Engine.u`. Where the BSP walls' baked light is stored: not found. Not connected to a level, not tested on Windows.
+- **Next:** When the level thread's loader lands, show its lights; then show the baked vertex colours and tune the factors against them.
+
+## 2026-10-29: Why 17 textures' small copies don't match
+
+- **Changed:** DESIGN "How we check pictures" rewritten with the findings. No code changes.
+- **Why:** 17 textures failed the mip check; we needed to know whether our decoder was wrong.
+- **Tested how:** Throwaway program comparing every mip with the one before, measuring how varied each mip is and its average colour, and trying the small mips sideways and upside down.
+- **Result:** The decoder is fine: the same formats give under 5 on 2,000 other textures, including 159 other non-square ones, and other orientations made things worse. The game's files store different pictures in these mips: 5 arena textures turn exactly flat grey (127, 125, 127) from mip 3 down, one blast door has a different picture on every level, 7 tiny glow sprites are likely just compression error (a guess), and the rest are screens, noise and two menu buttons.
+- **Still broken / not tested:** Not checked by eye.
+- **Next:** Use the game's own mips in Bevy rather than generating new ones.
+
+## 2026-10-29: Decode the two bump-map formats (12 = V8U8, 14 = L6V5U5)
+
+- **Changed:** `crates/rc_image/src/lib.rs`: new `PixelFormat::V8U8` and `PixelFormat::L6V5U5`, decoded to normal-map colours (L in alpha), 2 new unit tests. `rc_package::texture::format_name` names them. `rc_probe` and `rc_viewer` decode them. DESIGN gains a "Bump maps" section; README updated.
+- **Why:** 133 textures (the game's bump maps) couldn't be decoded.
+- **Tested how:** Tried six candidate layouts on every bump map and compared each decoded mip 0, shrunk, against mip 1. Then ran `rc_probe --textures` on all 57 texture packages (copied read-only into the cloud sandbox). All 21 unit tests in the workspace pass (after bringing in PR #4).
+- **Result:** Clear winners, as a fraction of the difference between unrelated pictures: format 12 as V8U8 0.06 (next best 0.36), format 14 as L6V5U5 0.08 (next best 0.28). UE Viewer's unverified guess (CxV8U8 for 14) scored 0.34. Scan: `decoded: 2312  failed: 0`, formats `29 V8U8`, `104 L6V5U5`. Bump-map mip difference median 1.8, one over 10 (11.2). `rc_viewer` shows them and its on-screen check passes: `Wookiee_Bump` (L6V5U5) 3.53, `Wookiee_HairBump` (V8U8) 7.20, and `DC15Blaster` still 3.77.
+- **Still broken / not tested:** Which way V ("up") points for Bevy: not tested. What L means in format 14: unknown (maybe shininess). Not run on Windows.
+- **Next:** Use them for lighting in Bevy.
+
+## 2026-10-29: rc_soundtest tested on Windows
+
+- **Changed:** README "what works" updated. No code changes.
+- **Why:** The sound test had only run in the cloud sandbox with a fake sound card.
+- **Tested how:** The user ran `cargo run --release -p rc_soundtest` in `C:\Users\matth\Projects\sw-rc` and listened. Claude read `logs\rc_soundtest.log` from the PC.
+- **Result:** The user heard it ("it worked"). Log: both sounds `MATCH` Bevy's decoder, the ambience started 0.017 s in, 4 of 4 rifle shots started, `PLAYED`, ambience speed `1.00x` real time. The package read took 22 ms.
+- **Still broken / not tested:** Linux was tested only with a fake sound card. Android is not tested. Music (`.ogg`) is still not played.
+- **Next:** Merge PR #5. Then play music, and later 3D sound with the level work.
+
+## 2026-10-29: Read and play the game's sounds
+
+- **Changed:** New crate `crates/rc_audio` (reads `.wav` files, measures them). New file `crates/rc_package/src/sound.rs` (reads `Sound`, `SoundStreamed` and `SoundMultiple` objects). New `rc_probe --sounds` and `--export-sounds` (`crates/rc_probe/src/sounds.rs`). New Bevy program `crates/rc_soundtest` (no window) that plays a weapon sound over an ambient loop. Updated `README.md` and `docs/DESIGN.md`.
+- **Why:** Roadmap step 4: play the game's sounds.
+- **Tested how:** 4 new unit tests on made-up `.wav` files (20 in total, all passing). Copied all 23 `.uax` packages and 2 music files from the install into the cloud sandbox (outside the repo) and ran `rc_probe --sounds` and `rc_soundtest`. The sandbox has no sound card, so `rc_soundtest` was run once with none (to check it notices) and then with a fake ALSA "null" sound card.
+- **Result:** `Sound objects: 7974  decoded: 7974  with problems: 0  failed: 0  silent: 1` (the silent one is `fol_GEN_silence_01`), 15,068 s of audio, 31.7 s scan. All plain 16-bit PCM WAV. 291 `SoundStreamed` and 1,208 `SoundMultiple` read with nothing left over. `rc_soundtest`: rifle `wep_GEN_dc17Fire_02` 44100 Hz, 1 ch, 58069 frames, 1.317 s, peak 0.977, checksum ac6be1b553909337; ambience `amb_KAM_siege_lp_01` 22050 Hz, 2 ch, 219982 frames, 9.977 s, peak 0.534, checksum 8beac96a49db50df. Bevy's decoder matched both sample for sample (largest difference 0). With the fake sound card: ambience started, 3 of 3 shots started, `PLAYED`. With no sound card: `NOT PLAYED`, exit code 1, as intended.
+- **Still broken / not tested:** Not tested on Windows or on a real sound card, so nobody has heard it yet, and the "1.00x real time" check is untested. Music (`.ogg`) is not played. 13 `amb_RAS_*` streamed loops point at files missing from the PC install. The second list inside `SoundMultiple` is always empty and its meaning is unknown. No positional (3D) sound yet.
+- **Next:** Run `rc_soundtest` on the user's PC. Then play an `.ogg` music track, and later place sounds in 3D with the level work.
+
 ## 2026-10-29: Static meshes: read them, and show the DC-15 blaster in 3D
 
 - **Changed:** New `crates/rc_package/src/static_mesh.rs` (reads `StaticMesh` objects: vertices, normals, UVs, triangles, sections, materials, and checks them), plus `Reader::f32`. New `rc_probe --meshes` (`crates/rc_probe/src/meshes.rs`, logs to `logs/rc_meshes.log`). `rc_viewer --mesh` (`crates/rc_viewer/src/mesh.rs`) shows one model with its texture, by default `DC15Blaster` from `weapons.usx`. It follows `Shader` materials to their `Diffuse` texture. Shared screenshot code in `rc_viewer/src/main.rs` was moved into `read_capture`. Bevy feature `bevy_pbr` added. 1 new unit test (one triangle built byte by byte). README and DESIGN updated.
