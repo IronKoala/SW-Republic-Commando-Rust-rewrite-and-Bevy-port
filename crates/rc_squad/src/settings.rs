@@ -669,6 +669,7 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                 .collect()
         }
         "weapon" => j.weapon = text(value)?,
+        "preferred" => j.preferred = text(value)?,
         "kind" => {
             j.kind = match text(value)?.as_str() {
                 "once" => JobKind::Once,
@@ -713,6 +714,7 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                 "throw_fuse" => j.throw_fuse = v,
                 "throw_damage" => j.throw_damage = v,
                 "throw_radius" => j.throw_radius = v,
+                "target_radius" => j.target_radius = v,
                 _ => return Err(format!("unknown setting `{key}` for a job")),
             }
         }

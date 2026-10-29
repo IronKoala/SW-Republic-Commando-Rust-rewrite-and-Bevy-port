@@ -1,7 +1,7 @@
 //! Squad context orders in the movement test room, with the real squad and
 //! combat plugins and no game files (so it runs anywhere, including the
 //! GitHub checks): a bacta dispenser heals the squad mate who uses it, and
-//! a demolition charge blows up a stand-in droid next to it and reports
+//! a demolition charge (Scorch's job) blows up a stand-in droid next to it and reports
 //! the job done.
 //!
 //! Run: cargo test --release -p rc_squad_plugin --test jobs_room -- --nocapture
@@ -42,6 +42,7 @@ fn marker(name: &str, anchor: &str, class: &str, stand: UVec3) -> MarkerSpot {
         stand,
         yaw: 0.0,
         aim: stand + UVec3::new(60.0, 0.0, 60.0),
+        ..Default::default()
     }
 }
 
@@ -167,17 +168,18 @@ fn bacta_heals_and_a_demolition_charge_blows_up_what_is_near_it() {
                 half_height: 80.0,
                 center_up: 80.0,
             },
-            Transform::from_translation(to_bevy(UVec3::new(1150.0, 300.0, 0.0))),
+            Transform::from_translation(to_bevy(UVec3::new(1150.0, 150.0, 0.0))),
         ))
         .id();
     // Keep it from being shot first: it's a Neutral prop for the squad
     // until the blast (squad mates only shoot Separatists).
     app.world_mut().entity_mut(droid).insert(Team::Neutral);
     app.world_mut().write_message(SquadOrder(Order::Marker(1)));
-    run(&mut app, 6.0);
+    // Walk and set it (about 6 s), then the 10 s fuse.
+    run(&mut app, 12.0);
     assert!(app.world().get::<Dead>(droid).is_none(), "blew too early");
     assert!(app.world().resource::<Done>().0.is_empty());
-    run(&mut app, 6.0);
+    run(&mut app, 8.0);
     assert!(app.world().get::<Dead>(droid).is_some(), "the blast missed");
     let done = &app.world().resource::<Done>().0;
     assert_eq!(done.len(), 1, "{done:?}");

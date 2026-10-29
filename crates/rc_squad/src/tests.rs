@@ -244,6 +244,7 @@ fn marker_sends_the_nearest_member_who_does_the_job() {
             stand: Vec3::new(-300.0, 600.0, 0.0),
             yaw: 0.0,
             aim: Vec3::new(-260.0, 640.0, 60.0),
+            ..Default::default()
         },
         MarkerState::Open,
     ));
@@ -579,6 +580,7 @@ fn spot(name: &str, anchor: &str, anchor_class: &str, stand: Vec3) -> MarkerSpot
         stand,
         yaw: 0.0,
         aim: stand + Vec3::new(60.0, 0.0, 60.0),
+        ..Default::default()
     }
 }
 
@@ -656,13 +658,21 @@ fn demolition_charge_blows_after_its_fuse_and_triggers_the_anchor() {
         "DemolitionCharge",
         Vec3::new(500.0, 0.0, 0.0),
     )]);
-    squad.command(Order::Marker(0), start, &world);
+    let ev = squad.command(Order::Marker(0), start, &world);
+    // Scorch is the original's demolition man, though Fixer is nearer.
+    assert!(
+        has(
+            &ev,
+            |e| matches!(e, SquadEvent::MarkerAssigned { member, .. } if member == "Scorch")
+        ),
+        "{ev:?}"
+    );
     // Walk (~2 s) and work (3 s): the fuse is lit, nothing blown yet.
     let ev = run(&mut squad, start, 6.5, &world);
     assert!(
         has(
             &ev,
-            |e| matches!(e, SquadEvent::FuseLit { seconds, .. } if *seconds == 5.0)
+            |e| matches!(e, SquadEvent::FuseLit { seconds, .. } if *seconds == 10.0)
         ),
         "{ev:?}"
     );
@@ -670,11 +680,13 @@ fn demolition_charge_blows_after_its_fuse_and_triggers_the_anchor() {
     assert_eq!(squad.markers[0].1, MarkerState::Done);
     // The member is free again as soon as the charge is set.
     assert!(squad.members.iter().all(|m| m.marker.is_none()));
-    let ev = run(&mut squad, start, 5.5, &world);
+    let ev = run(&mut squad, start, 4.0, &world);
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::Blast { .. })));
+    let ev = run(&mut squad, start, 7.0, &world);
     assert!(
         has(
             &ev,
-            |e| matches!(e, SquadEvent::Blast { damage, radius, .. } if *damage == 500.0 && *radius == 512.0)
+            |e| matches!(e, SquadEvent::Blast { damage, radius, .. } if *damage == 256.0 && *radius == 256.0)
         ),
         "{ev:?}"
     );
@@ -877,4 +889,74 @@ fn job_settings_read_from_the_file() {
         .with_overrides("[job.bacta]\nresult = \"explode\"\n")
         .unwrap_err();
     assert!(err.starts_with("line 2:"), "{err}");
+}
+
+#[test]
+fn order_markers_pick_the_job_before_the_anchor() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    let at = |name: &str, marker: &str| MarkerSpot {
+        name: name.into(),
+        marker_class: marker.into(),
+        anchor: "MarkerSnipeAnchorRAS1".into(),
+        anchor_class: "MarkerSnipeAnchorRAS".into(),
+        ..Default::default()
+    };
+    // One firing position, three kinds of order marker on it.
+    squad.set_markers(vec![
+        at("MarkerSnipe1", "MarkerSnipe"),
+        at("MarkerGrenade0", "MarkerGrenade"),
+        at("MarkerAntiArmor0", "MarkerAntiArmor"),
+        at("SquadMarkerSpot2", ""),
+    ]);
+    let keys: Vec<_> = (0..4)
+        .map(|k| squad.job_of(k).map(|j| j.key.clone()))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            Some("sniper".to_string()),
+            Some("grenade".to_string()),
+            Some("anti_armour".to_string()),
+            Some("sniper".to_string())
+        ]
+    );
+}
+
+#[test]
+fn grenade_post_with_a_target_area_throws_only_into_it() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    let post = Vec3::new(-400.0, 0.0, 0.0);
+    let area = Vec3::new(-400.0, -1300.0, 0.0);
+    squad.set_markers(vec![MarkerSpot {
+        name: "MarkerGrenade0".into(),
+        marker_class: "MarkerGrenade".into(),
+        job: "Grenade".into(),
+        anchor: "MarkerSnipeAnchorRAS0".into(),
+        anchor_class: "MarkerSnipeAnchorRAS".into(),
+        stand: post,
+        aim: post,
+        target: Some(area),
+        ..Default::default()
+    }]);
+    squad.command(Order::Marker(0), start, &world);
+    run(&mut squad, start, 4.0, &world);
+    // One droid near the post, outside the area: no grenade for it.
+    squad.threats = vec![threat(1, post + Vec3::new(0.0, 400.0, 0.0))];
+    let ev = run(&mut squad, start, 4.0, &world);
+    assert!(
+        !has(&ev, |e| matches!(e, SquadEvent::Throw { .. })),
+        "{ev:?}"
+    );
+    // One in the area (even out of sight) gets one.
+    let inside = area + Vec3::new(300.0, 0.0, 0.0);
+    squad.threats.push(threat(2, inside));
+    let ev = run(&mut squad, start, 1.0, &world);
+    assert!(
+        has(&ev, |e| matches!(e, SquadEvent::Throw { target: 2, .. })),
+        "{ev:?}"
+    );
 }

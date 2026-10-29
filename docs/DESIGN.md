@@ -1207,11 +1207,18 @@ has 6: five bacta dispensers and a demolition charge.
 
 What a marked job *does* depends on its kind. Each `[job.<name>]` section
 of `squad.toml` describes one; a marker gets the first job whose `match`
-words appear in its anchor's class name (`BactaDispenserGEO` matches
-"bacta"). A marker no job matches is a plain "walk there, work
-`marker_work_time` seconds, done". The original decides all of this in
-compiled code, so the rules are **our own** and most numbers are guesses,
-marked in the file. Mods can change a job or add a new one (say a
+words appear in its order marker's class (`MarkerDoorBreach` matches
+"breach"), or, with none, its anchor's class (`BactaDispenserGEO` matches
+"bacta"). How a map's anchors, order markers and spots fit together is
+in docs/RESEARCH.md, "Squad markers"; `rc_squad::map::read` turns them
+into one `MarkerSpot` per place a squad mate stands (a firing position
+with no spot puts them at the anchor). A marker no job matches is a plain
+"walk there, work `marker_work_time` seconds, done". Blast sizes, fuses,
+grenades and who prefers which job are the game's numbers; how long the
+work takes and the posts' firing rhythm are compiled code in the
+original, so those are our own, marked in the file. A job's `preferred`
+squad mate takes it when free (Scorch demolition and anti-armour, Fixer
+slicing, Sev sniping, as in the original). Mods can change a job or add a new one (say a
 `[job.turret]` matching "turret").
 
 - **Once** jobs (bacta, demolition, breach, slice): walk to the spot,
@@ -1235,8 +1242,10 @@ marked in the file. Mods can change a job or add a new one (say a
   While posted, the job's own shooting numbers replace `[fight]`'s:
   the sniper sees 8000 uu and fires single aimed shots with
   `dc17m_sniper`. A grenade post throws a grenade every `throw_interval`
-  seconds at its target if it is within `throw_range`; it goes off
-  `throw_fuse` seconds later where the target stood.
+  seconds; it goes off `throw_fuse` seconds later where the target stood.
+  A grenade marker names a target area (`WeaponTarget`): the grenadier
+  throws at the enemy nearest it within `target_radius`, seen or not.
+  Without one, at its own target within `throw_range`.
 - **Blasts** (charges and grenades) hurt everyone near: `rc_combat::Damage`
   of kind `Explosion`, `blast_damage` at the middle falling to nothing at
   the radius, measured to the edge of each body. Friend or foe, as in the

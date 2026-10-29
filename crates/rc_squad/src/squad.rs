@@ -574,14 +574,13 @@ impl Squad {
     }
 
     /// The job a marker is for: the first `[job.*]` whose words are in
-    /// its anchor's class name (or, with no anchor, the marker's name).
+    /// its order marker's class (`MarkerDoorBreach`), else its anchor's
+    /// (`BactaDispenserGEO`), else the marker's name.
     pub fn job_of(&self, k: usize) -> Option<&JobSettings> {
         let (spot, _) = self.markers.get(k)?;
-        let key = if spot.anchor_class.is_empty() {
-            &spot.name
-        } else {
-            &spot.anchor_class
-        };
+        let key = [&spot.marker_class, &spot.anchor_class, &spot.name]
+            .into_iter()
+            .find(|s| !s.is_empty())?;
         self.settings.jobs.iter().find(|j| j.fits(key))
     }
 
@@ -696,20 +695,39 @@ impl Squad {
                 }
                 // One member per spot (a group job fills every spot of
                 // its anchor, the ordered one first), nearest first.
+                // The job's preferred squad mate takes the ordered spot
+                // when free (Scorch for demolition, Fixer for slicing, Sev
+                // for sniping, as in the original).
+                let preferred = self
+                    .job_of(k)
+                    .map(|j| j.preferred.clone())
+                    .unwrap_or_default();
                 for g in self.group_of(k) {
                     if self.markers[g].1 != MarkerState::Open {
                         continue;
                     }
                     let stand = self.markers[g].0.stand;
-                    let best = self
-                        .members
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, m)| m.marker.is_none() && !m.down)
-                        .min_by(|a, b| {
-                            dist(a.1.pawn.feet(), stand).total_cmp(&dist(b.1.pawn.feet(), stand))
+                    let free = |m: &Member| m.marker.is_none() && !m.down;
+                    let wanted = (g == k && !preferred.is_empty())
+                        .then(|| {
+                            self.members.iter().position(|m| {
+                                free(m)
+                                    && (m.settings.class.eq_ignore_ascii_case(&preferred)
+                                        || m.settings.key.eq_ignore_ascii_case(&preferred))
+                            })
                         })
-                        .map(|(i, _)| i);
+                        .flatten();
+                    let best = wanted.or_else(|| {
+                        self.members
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, m)| free(m))
+                            .min_by(|a, b| {
+                                dist(a.1.pawn.feet(), stand)
+                                    .total_cmp(&dist(b.1.pawn.feet(), stand))
+                            })
+                            .map(|(i, _)| i)
+                    });
                     let Some(i) = best else { break };
                     let m = &self.members[i];
                     events.push(SquadEvent::MarkerAssigned {
@@ -1373,26 +1391,42 @@ impl Squad {
         if job.throw_interval <= 0.0 {
             return;
         }
-        let (interval, range, fuse, damage, radius) = (
+        let (interval, range, fuse, damage, radius, area_radius) = (
             job.throw_interval,
             job.throw_range,
             job.throw_fuse,
             job.throw_damage,
             job.throw_radius,
+            job.target_radius,
         );
+        let area = self.members[i]
+            .marker
+            .and_then(|k| self.markers[k].0.target);
         let m = &mut self.members[i];
         m.throw_in -= dt;
         if m.throw_in > 0.0 {
             return;
         }
-        let Some(t) = self.target_of(i).copied() else {
+        let from = self.members[i].pawn.eye();
+        // A marker with a target area: the enemy nearest that area, within
+        // `target_radius` of it (seen or not: grenades arc over cover).
+        // Otherwise their own target, within `throw_range`.
+        let t = match area {
+            Some(a) => self
+                .threats
+                .iter()
+                .filter(|t| dist(t.feet, a) <= area_radius)
+                .min_by(|x, y| dist(x.feet, a).total_cmp(&dist(y.feet, a)))
+                .copied(),
+            None => self
+                .target_of(i)
+                .copied()
+                .filter(|t| dist(from, t.feet) <= range),
+        };
+        let Some(t) = t else {
             return;
         };
         let m = &self.members[i];
-        let from = m.pawn.eye();
-        if dist(from, t.feet) > range {
-            return;
-        }
         let name = m.settings.name.clone();
         self.members[i].throw_in = interval;
         events.push(SquadEvent::Throw {

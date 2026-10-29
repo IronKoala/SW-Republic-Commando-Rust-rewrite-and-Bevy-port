@@ -105,8 +105,10 @@ copy of the game.
   seconds. Every job is a `[job.*]` part of `data/squad/squad.toml`, so
   mods can change them or add new ones. Doors don't open yet: the squad
   reports the job done, and the level scripts part will act on it. The
-  marker names and most numbers are still guesses until they're checked
-  against the game's files.
+  markers are read the way the original's maps lay them out (checked on
+  all 50 campaign maps), and blast sizes, fuses and who does which job
+  are the game's; how long the work takes is our guess. Traps, mines and
+  turrets aren't done yet.
 
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test

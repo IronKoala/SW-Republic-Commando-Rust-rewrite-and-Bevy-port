@@ -11,8 +11,9 @@
 //!   job's own weapon and sight (sniper, anti-armour) or throwing grenades
 //!   (`throw_...`), until the player recalls the squad (F4).
 //!
-//! A map marker gets the first job whose `match` words appear in the
-//! anchor's class name (or, failing that, the marker's own name).
+//! A map marker gets the first job whose `match` words appear in its order
+//! marker's class (`MarkerDoorBreach`), or, for one with no order marker,
+//! its anchor's class (`BactaDispenserGEO`).
 
 /// One-off job or a post held until recalled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,9 +40,12 @@ pub struct JobSettings {
     pub key: String,
     /// What the squad panel and the log call it.
     pub name: String,
-    /// Words to find in the anchor's class name (lower case).
+    /// Words to find in the marker's class name (lower case).
     pub matches: Vec<String>,
     pub kind: JobKind,
+    /// The squad mate who does it when free (a member's `class` or key);
+    /// "" = whoever is nearest.
+    pub preferred: String,
     /// Seconds of work at the spot (once).
     pub work_time: f32,
     pub result: JobResult,
@@ -72,6 +76,9 @@ pub struct JobSettings {
     pub throw_fuse: f32,
     pub throw_damage: f32,
     pub throw_radius: f32,
+    /// Post with a target area (a grenade marker's `WeaponTarget`): throw
+    /// only at enemies this close to it.
+    pub target_radius: f32,
 }
 
 impl JobSettings {
@@ -81,6 +88,7 @@ impl JobSettings {
             name: name.into(),
             matches: matches.iter().map(|s| s.to_string()).collect(),
             kind,
+            preferred: String::new(),
             work_time: 3.0,
             result: JobResult::Nothing,
             group: false,
@@ -99,6 +107,7 @@ impl JobSettings {
             throw_fuse: 0.0,
             throw_damage: 0.0,
             throw_radius: 0.0,
+            target_radius: 0.0,
         }
     }
 
@@ -175,30 +184,28 @@ pub fn default_jobs() -> Vec<JobSettings> {
     let mut demolition =
         JobSettings::new("demolition", "Demolition", &["demolition"], JobKind::Once);
     demolition.result = JobResult::Trigger;
-    demolition.fuse = 5.0;
-    demolition.blast_damage = 500.0;
-    demolition.blast_radius = 512.0;
+    demolition.preferred = "Commando62Delta".into();
+    demolition.fuse = 10.0;
+    demolition.blast_damage = 256.0;
+    demolition.blast_radius = 256.0;
 
     let mut breach = JobSettings::new("breach", "Breach door", &["breach"], JobKind::Once);
     breach.result = JobResult::Trigger;
     breach.group = true;
-    breach.fuse = 3.0;
+    breach.fuse = 2.5;
     breach.blast_damage = 200.0;
     breach.blast_radius = 256.0;
 
-    let mut slice = JobSettings::new(
-        "slice",
-        "Slice",
-        &["slice", "hack", "terminal", "console"],
-        JobKind::Once,
-    );
+    let mut slice = JobSettings::new("slice", "Slice", &["hack", "slice"], JobKind::Once);
     slice.result = JobResult::Trigger;
+    slice.preferred = "Commando40Delta".into();
     slice.work_time = 8.0;
 
     let mut sniper = JobSettings::new("sniper", "Sniper position", &["snipe"], JobKind::Post);
     sniper.weapon = "dc17m_sniper".into();
     sniper.sight_radius = 8000.0;
-    sniper.accuracy = 0.97;
+    sniper.preferred = "Commando07Delta".into();
+    sniper.accuracy = 1.0;
     sniper.burst_count = 1;
     sniper.shot_interval = 0.1;
     sniper.burst_pause_min = 1.5;
@@ -208,8 +215,9 @@ pub fn default_jobs() -> Vec<JobSettings> {
     grenade.throw_interval = 6.0;
     grenade.throw_range = 1500.0;
     grenade.throw_fuse = 2.0;
-    grenade.throw_damage = 300.0;
-    grenade.throw_radius = 384.0;
+    grenade.throw_damage = 400.0;
+    grenade.throw_radius = 512.0;
+    grenade.target_radius = 512.0;
 
     let mut anti_armour = JobSettings::new(
         "anti_armour",
@@ -217,6 +225,7 @@ pub fn default_jobs() -> Vec<JobSettings> {
         &["antiarmor", "antiarmour"],
         JobKind::Post,
     );
+    anti_armour.preferred = "Commando62Delta".into();
     anti_armour.weapon = "dc17m_antiarmor".into();
     anti_armour.burst_count = 1;
     anti_armour.shot_interval = 0.1;
