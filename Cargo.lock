@@ -4417,6 +4417,7 @@ name = "rc_game"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "blake3",
  "rc_game_core",
  "rc_image",
  "rc_level",
