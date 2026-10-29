@@ -1,0 +1,29 @@
+[package]
+name = "rc_combat"
+version = "0.1.0"
+description = "Weapons, shots, health and damage, with Republic Commando's own numbers. A Bevy plugin for the game, plus the rc_shoot test range."
+edition.workspace = true
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer (for the
+# weapon in your hands and the bolts) and audio (for the shots). The plugin
+# never opens a window itself; rc_shoot and rc_game do.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = [
+    "default_app",
+    "std",
+    "bevy_state",
+    "bevy_winit",
+    "multi_threaded",
+    "x11",
+    "3d_bevy_render",
+    "bevy_audio",
+    "wav",
+]

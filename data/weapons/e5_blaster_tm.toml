@@ -1,0 +1,33 @@
+# E-5 blaster of the battle droid variant that the first Geonosis level
+# spawns (BattleDroidBlasterTM in Properties/properties.u, found by the
+# enemies thread). Faster and much weaker shots than the plain E-5.
+
+name = "E-5 Blaster (TM)"
+
+[fire]
+mode = "semi_auto"
+shot_delay = 0.1          # ShotDelay (BattleDroidBlasterTM)
+aim_error = 0
+offset = [57.4, 20, -6.56]
+
+[ammo]
+max_ammo = 100
+recharge_rate = 100
+
+[shot]
+kind = "bolt"
+accel = 60000
+max_speed = 5000          # MaxSpeed (BattleDroidBlasterProj)
+life_span = 10
+damage = 2                # Damage (BattleDroidBlasterProjTM)
+damage_kind = "blaster"   # CTDamageEnergyDroids
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_sbdGun_01"]
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.35, 0.1]

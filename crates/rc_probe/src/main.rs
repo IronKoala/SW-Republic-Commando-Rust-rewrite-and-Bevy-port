@@ -25,11 +25,16 @@
 //!                            it, log to `logs/rc_sounds.log`
 //!   rc_probe --export-sounds <path>  the same, and also write each sound as
 //!                            a .wav file to `extracted/sounds/<package>/`
+//!   rc_probe --class <name>  log the default values of a script class (for
+//!                            example DC17mBlaster) and of each parent class,
+//!                            from GameData/System/*.u and
+//!                            GameData/Properties/*.u, to `logs/rc_class.log`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
 mod characters;
+mod classes;
 mod meshes;
 mod pixels;
 mod sounds;
@@ -49,6 +54,7 @@ const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
 const SOUND_LOG_PATH: &str = "logs/rc_sounds.log";
 const MESH_LOG_PATH: &str = "logs/rc_meshes.log";
 const CHARACTER_LOG_PATH: &str = "logs/rc_characters.log";
+const CLASS_LOG_PATH: &str = "logs/rc_class.log";
 /// Gitignored folders for anything extracted from the game.
 const EXTRACT_DIR: &str = "extracted/textures";
 const SOUND_EXTRACT_DIR: &str = "extracted/sounds";
@@ -85,8 +91,14 @@ fn main() {
     let sound_mode = sound_export || args.first().is_some_and(|a| a == "--sounds");
     let mesh_mode = args.first().is_some_and(|a| a == "--meshes");
     let character_mode = args.first().is_some_and(|a| a == "--characters");
-    if texture_mode || sound_mode || mesh_mode || character_mode {
+    let class_mode = args.first().is_some_and(|a| a == "--class");
+    if texture_mode || sound_mode || mesh_mode || character_mode || class_mode {
         args.remove(0);
+    }
+    if class_mode && args.is_empty() {
+        eprintln!("--class needs a class name, for example:");
+        eprintln!("  rc_probe --class DC17mBlaster");
+        std::process::exit(2);
     }
     if sound_export && args.is_empty() {
         eprintln!("--export-sounds needs a package file or folder, for example:");
@@ -120,6 +132,8 @@ fn main() {
         MESH_LOG_PATH
     } else if character_mode {
         CHARACTER_LOG_PATH
+    } else if class_mode {
+        CLASS_LOG_PATH
     } else {
         LOG_PATH
     };
@@ -151,6 +165,10 @@ fn main() {
         meshes::scan(&mut log, &target)
     } else if character_mode {
         characters::scan(&mut log, &target)
+    } else if class_mode {
+        let class = target.to_string_lossy().into_owned();
+        let data = game.join("GameData");
+        classes::dump(&mut log, &[data.join("System"), data.join("Properties")], &class)
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {

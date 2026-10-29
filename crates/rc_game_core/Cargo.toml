@@ -1,0 +1,16 @@
+[package]
+name = "rc_game_core"
+version = "0.1.0"
+edition.workspace = true
+description = "The shared pieces every part of the game plugs into: game states, folders, input actions, HUD readouts, loading and the log."
+
+[dependencies]
+rc_movement = { path = "../rc_movement" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Only the app, ECS and states:
+# no window or renderer, so plugins that use this crate choose those
+# themselves and this crate's tests run without a screen.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state"]

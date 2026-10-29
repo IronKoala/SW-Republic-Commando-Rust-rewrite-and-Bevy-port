@@ -1,0 +1,81 @@
+# Battle droid (B1) settings: the Geonosis trench variant, BattleDroidTM,
+# which is what geo_01a's spawners create.
+#
+# Mods: change any number here and restart. Delete a line to use the
+# built-in value. A misspelt name stops the game with an error naming the
+# line. Distances are Unreal units (uu; a commando is 168 uu tall), times
+# are seconds, angles degrees.
+#
+# Where a value comes from:
+#   "game"  = the original's class defaults (Properties.BattleDroidTM and
+#             its parents BattleDroid, Pawn; BattleDroidBot, CTBot;
+#             StateBattleDroidAttack, StateAbstractAttack;
+#             BattleDroidBlasterTM). See docs/RESEARCH.md "Battle droids".
+#   "guess" = the original decides this in its compiled engine, which we
+#             don't read. Our own choice; tune freely.
+
+[movement]
+ground_speed = 375        # game: BattleDroid GroundSpeed
+accel_rate = 1000         # game: BattleDroid AccelRate
+walk_speed_ratio = 0.52   # game: BattleDroid WalkSpeedRatio
+collision_radius = 35     # game: BattleDroid CollisionRadius
+collision_height = 80     # game: BattleDroid CollisionHeight (half-height)
+crouch_radius = 35        # game: BattleDroid CrouchRadius
+crouch_height = 50        # game: BattleDroid CrouchHeight
+base_eye_height = 60      # game: BattleDroid BaseEyeHeight
+side_speed_ratio = 0.8    # game: Pawn SideSpeedRatio
+jump_z = 0                # droids don't jump
+
+[senses]
+sight_radius = 5000       # game: BattleDroidTM SightRadius
+peripheral_vision = 0.2   # game: Pawn PeripheralVision (sees things within about 78 degrees of straight ahead)
+auto_detect_radius = 200  # game: Pawn AutoDetectRadius (notices you this close whichever way it faces)
+enemy_memory_time = 15    # game: CTBot EnemyMemoryTime (forgets you after this long unseen)
+decision_interval = 0.5   # game: CTBot DecisionInterval
+reaction_time = 0.5       # guess: delay between first seeing you and starting to shoot
+turn_rate = 110           # game: Pawn RotationRate yaw 20000 per second = 110 degrees/s
+hearing_radius = 2500     # guess: hears shots this far away and turns to fight (the original's hearing is in its engine)
+
+[combat]
+health = 100              # game: BattleDroidTM MaxHealth (Pawn sets Health = MaxHealth at spawn)
+accuracy = 0.4            # game: BattleDroidTM Accuracy (0 = wild, 1 = perfect)
+max_aim_error = 10        # guess: aim error in degrees at accuracy 0; actual error is (1 - accuracy) x this
+weapon = "e5_blaster_tm"  # the weapons thread's data file (data/weapons/e5_blaster_tm.toml)
+burst_count = 3           # game: BattleDroidBot BurstCount
+shot_delay = 0.1          # game: BattleDroidBlasterTM ShotDelay (seconds between shots in a burst)
+burst_pause_min = 1.0     # guess: rest between bursts, shortest
+burst_pause_max = 2.0     # guess: rest between bursts, longest
+weapon_range = 7000       # game: Weapon ValidRange max
+max_aim_yaw = 60          # game: BattleDroid MaxAimYaw (can shoot this far off its facing)
+ready_distance = 800      # game: StateAbstractAttack ReadyDistance (distance it likes to keep)
+safe_distance = 1200      # game: StateAbstractAttack SafeDistance (farthest it likes to be)
+move_interval = 400       # guess: how far it advances at a time (StateBattleDroidAttack MoveIntervalDist; value not stored in the scripts)
+max_maneuver_time = 10    # game: StateBattleDroidAttack MaxManuverTime
+cover_boredom_time = 15   # game: CTBot CoverBoredomTime (looks for new cover after this long)
+cover_search_radius = 1500 # guess: how far it will go to reach cover
+lost_sight_reposition = 2 # guess: seconds without a clear shot before a stationary droid moves
+
+[spawning]
+# The original starts most spawners from level scripts. We run proximity
+# Triggers (the player walks into one) ourselves; spawners only reachable
+# from scripts start when the player comes this close instead.
+activate_unscripted_within = 3000
+max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
+
+[look]
+# The animated mesh and which of its animations to play. Names are as
+# stored in the game's package (list them with
+# `rc_character --package <file> --set BattleDroidSet --list`).
+package = "GameData/Animations/droid.ukx"
+mesh = "BattleDroid"
+idle = "ActionBreathe"
+walk = "WalkForward"
+run = "RunForward"
+walk_back = "WalkBackward"
+step_left = "StepLeft"
+step_right = "StepRight"
+fire = "Fire"
+crouch = "CrouchBreathe"
+crouch_fire = "CrouchFire"
+death = "Death"
+ambient = 0.5             # guess: light the droid always gets (0 to 1); the original uses each zone's ambient light, which we don't read yet

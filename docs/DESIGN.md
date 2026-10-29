@@ -22,6 +22,14 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
+| `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
+| `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
+| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
+| `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
+| `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
+| `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
+| `rc_ai` | What enemies decide: settings from `data/enemies/*.toml`, the map's spawners, one fighter's brain, and a whole fight on a map (`Battle`). No Bevy. Tool: `rc_droidsim` (droids against a stand-in player, no window). |
+| `rc_enemies` | Bevy plugin `EnemiesPlugin`: battle droids in the game, shooting and taking damage through `rc_combat`, animated with the game's mesh. Program: `rc_droidview` (watch a fight in a real level, with a picture check). |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
 Only `rc_viewer`, `rc_character`, `rc_level_viewer` and `rc_soundtest` use Bevy
@@ -33,7 +41,14 @@ one build); `rc_level_viewer` Bevy's full 3D renderer (`3d_bevy_render`);
 
 ## Finding the game
 
-The game folder comes from the `RC_GAME_DIR` environment variable, or defaults to
+In the game program (`rc_game`), the folder comes from `settings.toml`
+(`[game] folder`), then the `RC_GAME_DIR` environment variable, then the
+usual Steam folders for the system (Windows, Linux, Linux Flatpak). A folder
+counts if it has `GameData/Maps`. File names are matched without caring
+about upper or lower case, because Linux and Android care and Windows
+doesn't. On Android the folder will be one the player picks.
+
+The older test programs use `RC_GAME_DIR` or default to
 `C:\Games\Steam\steamapps\common\Star Wars Republic Commando`. Programs only ever
 read from it. Logs go to `logs/` in the folder you run from, which `.gitignore`
 never tracks.
@@ -1118,3 +1133,509 @@ written to disk. The program:
   used. The sandbox runs are on Linux, so Linux is tested; building there
   needs the ALSA development package (`libasound2-dev` on Ubuntu). Windows
   and Android are not tested yet.
+
+## Delta Squad (`rc_squad`, `rc_squad_plugin`)
+
+Sev (07), Fixer (40) and Scorch (62) follow the player and take the four
+squad orders of the original. Every number is in `data/squad/squad.toml`.
+
+### Bodies
+
+Each squad mate is an `rc_movement::Pawn`, the same body and physics as the
+player (the commandos share the player's speeds and size in the game's
+data). The squad steers each one the way a player would press keys: a
+`MoveInput` that faces the next point and holds "forward", with "walk" held
+when the spot is closer than 400 uu (the original's `AUTORUNDISTANCE`). A
+body that barely moves for 0.6 s jumps once; after 3 s it's logged as stuck.
+
+### Orders are stances, and stances are tethers
+
+In the original each order switches the squad's "stance". A stance ties
+("tethers") each member to something and gives two pairs of distances,
+read from the stance classes' defaults:
+
+| Order (PC key) | Stance class | Tied to | Set off beyond | Stop within | Urgent beyond / until |
+|---|---|---|---|---|---|
+| Search and destroy (F1) | StanceSearchAndDestroy | objective (we use the leader) | 512 | 256 | 2048 / 1280 |
+| Form up (F2) | StanceFormUp | leader | 768 | 192 | 1280 / 768 |
+| Secure position (F3, aimed) | StanceSecurePosition | the aimed spot | 768 | 128 | 1024 / 512 |
+| Hold (no PC key) | StanceHold | where they stood | 512 | 256 | 768 / 384 |
+| Cancel (F4) | (cancels all marked jobs, back to form up) | | | | |
+
+How we use them (the original does this in compiled code, so the rules are
+our reading of the numbers):
+
+- Every 0.25 s (`DecisionInterval`) each member works out its spot and its
+  distance to what it's tied to.
+- Standing, it stays put until that distance passes "set off beyond". Then
+  it walks (or runs) to its spot, and stops at the spot or once back within
+  "stop within". So the squad doesn't shuffle after every step: on geo_01a
+  they set off when the player was 837 uu away and stopped about 200 uu
+  from them.
+- Beyond "urgent" it always runs, until back within the second number.
+- A direct order (pressing the key) sends everyone to their new spot at
+  once, all the way, whatever the distances.
+- If it gets stuck while already within "set off beyond", it stops where it
+  is ("stopped short" in the log) instead of pushing at the obstacle.
+
+Spots (our own, in `squad.toml`): form up uses three slots behind the
+leader, measured along the way they face; search and destroy three slots
+spread out ahead; secure position a circle of 110 uu around the spot. A
+slot inside a wall is pulled back towards the leader (or the spot) and
+dropped to the floor below.
+
+Search and destroy in the original advances to the squad's next objective
+(set by each map's scripts). Map objectives aren't read yet, so we tie it
+to the leader. With enemies known (`SquadThreats`), each member closes to
+half the search radius (768 uu, `Squad.DefaultSearchAndDestroyRadius`) of
+the nearest one within reach.
+
+### Aimed orders and marked jobs
+
+F3 and `squad_command` trace a line from the player's eyes up to 4096 uu.
+Where it meets the world, the spot is moved back a body's width and
+dropped to the floor. If the aim is within 0.12 radians of a squad marker,
+`squad_command` (and `use`) send the nearest free member to do that job
+instead.
+
+A marked job is two actors in the map: the thing (the "anchor", like
+`BactaDispenserGEO4`) and a `SquadMarkerSpot` next to it whose `MyAnchor`
+names it. The member walks to the spot, works for 3 s (our own; the
+original plays an animation), and the marker is done. Stuck for 10 s on
+the way, it gives the job up. geo_01a has 6: five bacta dispensers and a
+demolition charge.
+
+### Where the squad comes from
+
+`spawn = "with_player"` puts all three in their form-up slots at the
+start. The original brings them in through each map's scripts: on geo_01a
+only Scorch, from `PawnFactory14` on the `levelstart` event. The log lists
+these (`the map would bring in ...`) for later.
+
+### Finding the way
+
+Routes come from `rc_nav` (the enemies thread's crate: the map's path
+nodes and links). The squad only asks for one when a straight walk is
+blocked: it sweeps a slightly slimmer body from where it is to the spot,
+lifted by a step's height so floors and small steps don't count.
+
+### In Bevy
+
+`SquadPlugin` follows `docs/PLUGINS.md`. Its systems run in
+`GameSet::Simulate` inside `SquadSet` (order the player's movement before
+it). It reads `ActionState`, the `Player` and `PlayerCamera` transforms and
+`LevelCollision`, and writes `SquadReadout`. A `SquadOrder` message lets
+anything else (a script, a touch menu, a VR gesture) give orders. Each
+member is an entity with `SquadMate` and a `Transform` at its feet, facing
+its way like the player's; with a renderer it gets a capsule in its own
+colour (`EnhancedVisionColor` from the Properties package) and a dark
+visor, until the real model is drawn.
+
+### Health and going down
+
+Each squad mate entity also carries `rc_combat`'s `Health`, `Shield`,
+`Team::Republic` and `Hittable::COMMANDO`, so shots hit them like anyone
+else. The numbers are per member in `squad.toml` (from the Properties
+package: 400 health, 50 shield, recharging 15 per second after 4 s). Squad
+mates can't die in the original (`bCannotDie`): when health reaches 0 (or
+combat marks them `Dead`), `check_down` calls `Squad::set_down`. A downed
+member stops where it is, takes no orders, gives up any marked job (the
+marker opens again), and shows as `Incapacitated` with "Down" on the squad
+panel. Health above 0 again brings them back (`Revived`); nothing heals
+them yet, as reviving isn't built.
+
+### How we check it without looking
+
+`rc_squad_sim` runs the real plugin on a real map with no window, in fixed
+1/60 s steps, with a scripted player. It logs every order, set-off,
+arrival, stuck, job and a once-a-second line with every member's position,
+state and distances, and checks 23 numbers (see `README.md`).
+
+## The game program (`rc_game`)
+
+`rc_game` is built from Bevy plugins. Parts don't call each other; they
+share the types in `rc_game_core`. How a part plugs in is in
+`docs/PLUGINS.md`.
+
+**Screens.** `GameState` is `Boot` (read settings) then `MainMenu`, `Loading`
+and `InGame`. While in `InGame` a second state, `Play`, is `Running` or
+`Paused`, so pausing never counts as leaving the level. Gameplay systems run
+only while `Running`. Everything spawned for a level carries
+`DespawnOnExit(GameState::InGame)` and is cleared on the way back to the
+menu (the script checks that no player, camera or level mesh is left).
+
+**Loading.** The menu sets `CurrentLevel` and enters `Loading`. Any part with
+slow work calls `LoadingGate::wait("name")` and later `done("name")` or
+`fail("name", reason)`. The shell moves to `InGame` when nothing is waiting
+(and at least one frame has passed, so every part has had its turn); on a
+failure it goes back to the menu and shows the reason.
+
+**Input.** Devices are read in one place (`input.rs`) into `ActionState`:
+which actions are held this frame, a movement direction and a turn amount.
+Gameplay reads only that. The bindings file maps keys, mouse buttons and
+wheel, gamepad buttons and sticks to actions; touch screens move with a drag
+on the left half, look with a drag on the right half, and fire with a tap.
+The keyboard defaults are the original's `DefaultCtrl.ini`. A scripted run
+or a VR mod writes `ActionState` itself instead.
+
+**The player.** `player.rs` moves a body with `rc_movement` (as `rc_walk`
+does) from `ActionState`, and puts a separate camera at its eyes. The
+camera is not a child of the body, so a VR headset can replace it.
+
+**Menus.** *Placeholders:* these menus and the display below are our own
+stand-ins until the original's menus and HUD are read from the install
+(`docs/ORIGINAL_MENUS.md`). Each menu is a page: a title and a list of items, drawn with
+Bevy's UI and the theme file's colours. Pages: main, campaign list, a
+campaign's levels, options, pause, and "game files not found". The mission
+names, order and loading text come from the game's own
+`GameData/System/LevelLoadingInfo.int` (plain text with numbered entries
+like `MapName[3]="GEO_03A"`), read at start-up, never copied into the repo.
+`data/levels/campaigns.toml` only groups them by name prefix. Sizes are a
+share of the screen height, or of its width when that is smaller, so the
+menus fit a phone or a monitor.
+
+**Screen shapes and controls.** The view is "Hor+": `video.fov` is the
+angle across a 4:3 screen, as in the original, and wider screens see more
+at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+numbers and what is still to do (edge stretching on ultrawides, controller
+pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
+
+**On-screen display.** Corner brackets like the commando's visor, a
+four-bar crosshair whose gap follows the weapon's spread and turns red on a
+target, shield and health bars, the ammo counter, a squad list and short
+messages. It reads only the readout resources, and logs its numbers every
+two seconds.
+
+**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
+`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
+track and, per map name prefix, a calm and a battle list; `MusicMood`
+chooses between them. Each track is despawned when it ends and the next one
+starts.
+
+**Mods.** Everything we ship as data (controls, theme, music, campaigns,
+movement) is found through `GamePaths::data_file`, which looks in each
+enabled mod's folder (`mods/<name>/`) before `data/`. Lists that add up (the
+campaigns file) read every copy.
+
+**The level (`rc_level_plugin`).** `LevelPlugin` is the only part that
+reads the map. When the game enters `Loading` it tells the loading screen to
+wait (`LoadingGate`, part name `level`), waits three frames so the loading
+screen is drawn, then in one go:
+
+1. loads the collision with `rc_level::map_collision::load`: the BSP, every
+   placed prop, props and double doors whose model comes from their class,
+   and the blocking volumes that stop players. It becomes `LevelCollision`
+   (a `rc_movement::TriangleWorld`, in Unreal units);
+2. puts the player's feet one collision height (the commando's, from
+   `MoveParams`) under the map's first `PlayerStart` and inserts
+   `PlayerStart`. A map without one starts above its middle, and says so in
+   the log;
+3. draws the map with `rc_level_viewer::scene::build` and `draw::spawn_level`,
+   with brightness from an optional `levels/lighting.cfg` in a data folder
+   (so a mod can change it);
+4. if the map has a `SkyZoneInfo`, spawns the sky camera
+   (`rc_level_viewer::sky`) at camera order -1, under the player's camera
+   (order 0) and the menus' camera (order 1). Once the player's camera
+   exists, the plugin gives it `SkyViewer` (the sky camera copies its turn
+   and field of view every frame, so it lines up at any screen shape) and
+   stops it clearing the picture, so the sky shows where the level has
+   nothing.
+
+Everything it spawns carries `DespawnOnExit(InGame)`, and `LevelInfo` (the
+counts, for the log and the self-test) is removed on the way out. The
+plugin never reads input and never moves the camera, so a VR camera that
+carries `PlayerCamera` gets the sky the same way.
+
+Loading blocks the game while it runs (about 2 s for geo_01a in a debug
+build in the cloud). Moving it to a background thread is future work; the
+loading screen stays up meanwhile.
+
+**Checking without looking.** `rc_game --script` presses the same actions a
+player would and checks each step: menu pages, loading, the player moving
+430 units in a second of walking, nothing moving while paused, the level
+being cleared, options changing. It also captures the window twice and
+measures colours: the main menu must contain amber text, and in the level
+at least 30% of the screen must be lit with amber crosshair pixels at the
+centre. With the level part plugged in it also checks the level's counts
+(collision triangles, props, props with their class's model, a player
+start), that the sky camera follows the player's camera, and looks up 60
+degrees in geo_01a: more than 45% of the screen must be lit (72% with the
+sky; 17% in a trial run with the sky camera switched off, because the game
+clears to black).
+centre.
+
+## Enemies (`rc_nav`, `rc_ai`, `rc_enemies`)
+
+Three layers, so the rules can be tested without a window and reused by the
+squad:
+
+1. **Paths (`rc_nav`).** Every map stores a network of path points
+   (`PathNode`, cover points, `PlayerStart`, ...) and, for each, the links
+   the editor worked out ("reach specs": start, end, length and flags such
+   as walk, fly, jump, door). `NavGraph::from_map` reads them; links whose
+   flags allow walking are used. `BlockedPath` points (barricades) start
+   blocked, as their class default `bBlocked` says, and
+   `set_blocked_by_tag` opens one when its event fires. Routes are found
+   with A* ("walked so far + straight line still to go"), and
+   `PathFollower` turns a route into the same `MoveInput` the player's
+   keys make, so droids move with the player's physics (`rc_movement`).
+   `rc_navcheck MAP` checks a map: on geo_01a 358 points, 1,224 links,
+   every stored length within 1 uu of the straight line.
+
+2. **Decisions (`rc_ai`).** The original's AI is compiled engine code we
+   don't read. What we can read are its settings and the names of its
+   states, so the rules are ours, built on those settings
+   (`data/enemies/battle_droid.toml`, each value marked "game" or "guess"):
+   - *Noticing*: within sight radius, within the view cone
+     (`PeripheralVision`), with a clear line from eye to eye; or anything
+     within `AutoDetectRadius`; or a shot heard nearby. Once fighting, it
+     keeps track by line of sight alone (as Unreal Engine 2 bots do).
+   - *Reacting*: waits `reaction_time`, turns at its turn rate, and shoots
+     only within `MaxAimYaw` of its facing.
+   - *Shooting*: bursts of `BurstCount`, `ShotDelay` apart, then a rest.
+     Each shot's aim is off by up to `(1 - Accuracy) x max_aim_error`
+     degrees. Aims at the body, or the head if only that is visible.
+   - *Moving*: spawners set a start state; "stationary attack" droids hold
+     their spot unless they lose sight of the enemy. Others keep between
+     `ReadyDistance` and `SafeDistance`, move to a path point with a clear
+     shot when they lose one, and give up a move after `MaxManuverTime`.
+     Shot at in the open, a droid runs to a free cover point that faces
+     the enemy and crouches between bursts; after `CoverBoredomTime` it
+     looks for another.
+   - *Friends*: characters only collide with the level, so `Battle`
+     pushes apart droids that overlap, and a droid holds fire while a
+     friend stands within 50 uu of its line of fire (it moves if that
+     lasts).
+   - *Forgetting*: `EnemyMemoryTime` without seeing the enemy, then it
+     goes to look where it was last seen.
+   - *Spawning*: `PawnFactory` actors (with their `SpawnPoint`s) make the
+     droids. One switches on when the player walks into a `Trigger` whose
+     event is the factory's tag. Factories only level scripts can start
+     switch on when the player comes within `activate_unscripted_within`
+     (a stand-in until scripts run).
+   `Battle` runs all of this for a map; the game plugin and `rc_droidsim`
+   both use it.
+
+3. **The game (`rc_enemies`).** `EnemiesPlugin` (see `docs/PLUGINS.md`):
+   - On `OnEnter(Loading)` it reads the map's paths and spawners and the
+     settings file through `GamePaths::data_file`, so a mod's file wins.
+   - Each frame (`GameSet::Simulate`, before `CombatSet::Fire`) it steps
+     the `Battle` with the `Player`'s position (eyes from `PlayerCamera`)
+     and `LevelCollision`, spawns droid entities with `Health`,
+     `Team::Separatist` and `Hittable` (35 x 80 uu, 50 crouched), and
+     turns each shot into `rc_combat::FireShot` with the weapon named in
+     the settings. The weapons part flies the bolts and applies damage.
+   - It reads `Damage` (the droid reacts, maybe runs for cover) and
+     `Died` (the droid stops and plays its death animation, and its body
+     stays), and hears the player's `FireShot`s.
+   - `MusicMood::Battle` while any droid is alerted or attacking, `Calm`
+     otherwise and on leaving the level.
+   - Looks: the `[look]` section names the mesh (`BattleDroid` in
+     `droid.ukx`) and which animation plays for idle, walk, run, back,
+     sidesteps, fire, crouch, crouched fire and death. Every droid's points
+     are posed on the CPU each frame with `rc_anim` (as `rc_character`
+     does) and copied into its own Bevy mesh; 848 points each, so a dozen
+     droids cost little. The level's light is baked into its surfaces and
+     the scene has no ambient light, so droids get a steady share of their
+     own colour (`ambient`, a guess standing in for each zone's ambient
+     light, which we don't read yet).
+   - VR and other platforms: nothing here reads input or the screen; the
+     player is found by its `Player` and `PlayerCamera` markers, so a VR
+     camera works the same. No platform-specific code.
+
+**Checking without looking.** `rc_droidsim` (no window) and
+`rc_droidview --check` (a window) run a stand-in player into a spawner's
+trigger on a real map and log every spawn, sighting, state change, route,
+shot and death, then print CHECK lines. `rc_droidview --check` also
+captures the window with the droids shown and hidden, counts the pixels
+that changed and compares their colour with the skin picture (it must not
+be black, washed out, magenta or a different tint). `cargo test -p
+rc_enemies` runs the plugin with the real combat plugin in a test room: a
+droid spawns, spots the player in under a second, fires bursts that
+sometimes hit, and dies to the player's DC-17.
+
+## Weapons, shots and damage (`rc_combat`, `rc_shoot`)
+
+`rc_combat` is the game's weapons and health, as a Bevy plugin
+(`CombatPlugin`) that the game program adds. It follows `docs/PLUGINS.md`:
+it reads input only from `ActionState` (fire, reload, next and previous
+weapon), the player from `Player` and `PlayerCamera`, the level from
+`LevelCollision`, and writes the display's `PlayerVitals` and
+`WeaponReadout`. The numbers are the original game's (see
+`docs/RESEARCH.md`, "Weapons and damage").
+
+### The pieces
+
+- `data.rs` reads our settings files (a small part of TOML). A misspelt
+  setting is an error that names the line, so a mod's typo is reported.
+- `weapon.rs`: a weapon's numbers (`WeaponParams`, read from
+  `data/weapons/<id>.toml`) and its state (`WeaponState`: magazine, spare
+  ammo, time to the next shot, reload). Firing adds the time between shots
+  instead of setting it, so 0.1 s is exactly 10 shots a second at any frame
+  rate.
+- `shot.rs`: where a shot starts, the aim error, how a bolt flies (exact
+  for any frame time), and whether a line hits a character's cylinder. This
+  is in the game's own units and axes.
+- `health.rs`: `Health`, `Shield`, `Team`, and the `Damage` and `Died`
+  messages. Damage goes to the shield first.
+- `fire.rs`: the player's trigger, `FireShot` from anyone, bolts in flight,
+  and the sounds. `damage.rs` applies `Damage`.
+- `view.rs`: the gun in the player's view (the game's own model and
+  textures) and the bolts' glow.
+
+### How other parts use it
+
+- To damage anything: send `Damage { target, amount, kind, instigator,
+  point, direction }`. Anything with `Health` (and optionally `Shield`) can
+  take it. `Died` is sent once at 0 health, and the entity gets `Dead`.
+- To fire a weapon (droids, squad mates): send `FireShot { shooter,
+  origin, direction, weapon }`. `weapon` is a file name from
+  `data/weapons`. The plugin adds the weapon's aim error, plays its sound,
+  flies the bolt and sends `ShotLanded` when it ends.
+- To be hit: add `Hittable` (the cylinder) and `Team`.
+- Recoil: each player shot sends `ViewKick { pitch, yaw }` (radians). The
+  player's view applies it; a VR mod can ignore it.
+
+### Modding
+
+Every weapon is one file in `data/weapons`. A mod folder's file with the
+same name replaces it, and a new file is a new weapon. The player's health,
+shield and starting weapons are in `data/combat/player.toml`.
+
+### `rc_shoot`: the firing range
+
+`rc_shoot` puts the player in the movement test room with three battle
+droids: one straight ahead, one to the right, and one far away that fires
+back every 2 seconds. Downed droids tip over and stand up again after 4
+seconds. The window title shows the weapon, ammo, health and shield. The
+keys are mapped to actions in `rc_shoot` itself; the real game reads them
+from `data/input/bindings.toml`.
+
+`rc_shoot --script` plays a fixed list of actions and checks 12 things: the
+files read, 5 rifle hits down the droid ahead, the magazine and spare counts
+before and after a 1.5 s reload, the pistol's two shots, the far droid's
+shots taking shield before health, and the picture. For the picture it
+captures the window and checks that the gun's corner has many colours and
+no magenta (magenta means a missing material), and that the middle of the
+view is the droid's colour.
+
+### Our choices (not from the game)
+
+- The DC-17m has no instant-hit setting in the game, so it fires bolts with
+  its bolt's damage.
+- How the view kick settles back is in the game's compiled engine. In
+  `rc_shoot` it fades at exp(-8 t).
+- The fire sound is full volume for the player and quieter with distance for
+  others; the game uses its 3D sound system.
+- Weapon switching is instant; the game plays holster and draw animations
+  (0.37 s and 0.67 s for the DC-17m).
+- The gun's place in view (`[model] offset`) and the bolt colour are ours.
+  The game draws the gun with first-person arms, which aren't done yet.
+
+### Fitting the long-term goals
+
+- **Modding:** all numbers are in text files, each line naming where in the
+  game the value came from.
+- **VR:** a shot is a start point and a direction, not a screen position, so
+  a tracked controller can be the gun later. The kick is a message the view
+  can ignore.
+- **Windows, Linux and Android:** plain Rust and Bevy, no operating-system
+  code. Tested on Linux in the cloud only.
+
+## The game program (`rc_game`)
+
+`rc_game` is built from Bevy plugins. Parts don't call each other; they
+share the types in `rc_game_core`. How a part plugs in is in
+`docs/PLUGINS.md`.
+
+**Screens.** `GameState` is `Boot` (read settings) then `MainMenu`, `Loading`
+and `InGame`. While in `InGame` a second state, `Play`, is `Running` or
+`Paused`, so pausing never counts as leaving the level. Gameplay systems run
+only while `Running`. Everything spawned for a level carries
+`DespawnOnExit(GameState::InGame)` and is cleared on the way back to the
+menu (the script checks that no player, camera or level mesh is left).
+
+**Loading.** The menu sets `CurrentLevel` and enters `Loading`. Any part with
+slow work calls `LoadingGate::wait("name")` and later `done("name")` or
+`fail("name", reason)`. The shell moves to `InGame` when nothing is waiting
+(and at least one frame has passed, so every part has had its turn); on a
+failure it goes back to the menu and shows the reason.
+
+**Input.** Devices are read in one place (`input.rs`) into `ActionState`:
+which actions are held this frame, a movement direction and a turn amount.
+Gameplay reads only that. The bindings file maps keys, mouse buttons and
+wheel, gamepad buttons and sticks to actions; touch screens move with a drag
+on the left half, look with a drag on the right half, and fire with a tap.
+The keyboard defaults are the original's `DefaultCtrl.ini`. A scripted run
+or a VR mod writes `ActionState` itself instead.
+
+**The player.** `player.rs` moves a body with `rc_movement` (as `rc_walk`
+does) from `ActionState`, and puts a separate camera at its eyes. The
+camera is not a child of the body, so a VR headset can replace it.
+
+**Menus.** *Placeholders:* these menus and the display below are our own
+stand-ins until the original's menus and HUD are read from the install
+(`docs/ORIGINAL_MENUS.md`). Each menu is a page: a title and a list of items, drawn with
+Bevy's UI and the theme file's colours. Pages: main, campaign list, a
+campaign's levels, options, pause, and "game files not found". The mission
+names, order and loading text come from the game's own
+`GameData/System/LevelLoadingInfo.int` (plain text with numbered entries
+like `MapName[3]="GEO_03A"`), read at start-up, never copied into the repo.
+`data/levels/campaigns.toml` only groups them by name prefix. Sizes are a
+share of the screen height, or of its width when that is smaller, so the
+menus fit a phone or a monitor.
+
+**Screen shapes and controls.** The view is "Hor+": `video.fov` is the
+angle across a 4:3 screen, as in the original, and wider screens see more
+at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+numbers and what is still to do (edge stretching on ultrawides, controller
+pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
+
+**On-screen display.** Corner brackets like the commando's visor, a
+four-bar crosshair whose gap follows the weapon's spread and turns red on a
+target, shield and health bars, the ammo counter, a squad list and short
+messages. It reads only the readout resources, and logs its numbers every
+two seconds.
+
+**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
+`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
+track and, per map name prefix, a calm and a battle list; `MusicMood`
+chooses between them. Each track is despawned when it ends and the next one
+starts.
+
+**Mods.** Everything we ship as data (controls, theme, music, campaigns,
+movement) is found through `GamePaths::data_file`, which looks in each
+enabled mod's folder (`mods/<name>/`) before `data/`. Lists that add up (the
+campaigns file) read every copy.
+
+**The stand-in level.** Until the levels part plugs in its own plugin,
+`stand_in_level.rs` loads a map the way `rc_walk --map` does (its collision
+code is a copy of `rc_walk/src/level.rs`). It is meant to be deleted then.
+
+**Checking without looking.** `rc_game --script` presses the same actions a
+player would and checks each step: menu pages, loading, the player moving
+430 units in a second of walking, nothing moving while paused, the level
+being cleared, options changing. It also captures the window twice and
+measures colours: the main menu must contain amber text, and in the level
+at least 30% of the screen must be lit with amber crosshair pixels at the
+centre.
+
+## Automatic checks on GitHub (`.github/workflows/ci.yml`)
+
+Every pull request, and every push to `main`, is built and tested by GitHub's
+own machines on Windows and Linux. A pull request shows a green tick or a red
+cross for each. The steps are `cargo build --workspace --all-targets --locked`
+and `cargo test --workspace --locked`. `--locked` means the exact library
+versions in `Cargo.lock` are used. Linux also installs the system libraries
+Bevy needs (sound, gamepads, windows). The build folder is cached between
+runs, so a run that changes little is much quicker than the first.
+
+The game is never on GitHub, so `RC_GAME_DIR` is not set there. Unit tests
+must not need game files. A future test that does should check for
+`RC_GAME_DIR`, print "skipped: no game folder" and pass when it isn't set.
+
+A third job runs `cargo fmt --check` (code layout) and `cargo clippy` (common
+mistakes). It only reports: its problems show as warnings and never turn the
+run red. The checks do not open windows or draw anything, so the Bevy
+programs' own `--script` and screenshot checks are not run there, and Android
+is not built yet.

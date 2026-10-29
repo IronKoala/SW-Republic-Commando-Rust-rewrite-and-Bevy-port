@@ -1,0 +1,150 @@
+# Delta Squad settings: who is in the squad, where they stand, and how each
+# squad order behaves.
+#
+# Mods: change any value here and restart. Delete a line to use the
+# built-in value. A misspelt name stops the game with an error naming the
+# line.
+#
+# Distances are Unreal units (uu): a commando is 168 uu tall, and runs at
+# 450 uu per second. Times are seconds. Where a value is the original
+# game's, the comment says which class it was read from (the class defaults
+# in the game's script packages, see docs/RESEARCH.md). "Our own" means the
+# original keeps it in compiled code we don't read, so we chose it.
+
+[squad]
+# Further than this from where they're going, members run; closer, they
+# walk. Original: CTBot's AUTORUNDISTANCE.
+autorun_distance = 400
+# How often each member re-thinks where to go. Original: CloneCommandoBot
+# DecisionInterval.
+think_interval = 0.25
+# Close enough to a spot to stop. Our own.
+arrive_radius = 40
+# A path point counts as passed when this close. Our own.
+waypoint_radius = 64
+# Ask for a new path when the spot has moved this far. Our own.
+replan_distance = 96
+# Turning speed when standing, degrees per second. Our own.
+turn_rate = 360
+# Seconds a member spends doing a marker job (placing a charge, using a
+# bacta dispenser) before it's done. Our own; the original plays an
+# animation of about this length.
+marker_work_time = 3
+# Search and destroy: how far from the squad's anchor members look for
+# enemies. Original: Squad.DefaultSearchAndDestroyRadius.
+search_radius = 768
+# Where the squad comes from. "with_player": all three start in their
+# form-up slots around the player. "none": no squad. (The original brings
+# them in through each map's scripts, one by one on Geonosis; the log lists
+# where each map would have spawned them.)
+spawn = "with_player"
+
+# Where each member stands while following, measured from the leader:
+# `forward` along the way the leader faces (negative is behind), `right`
+# to the leader's right. Our own; the original works its formation out in
+# compiled code. Kept inside the form-up "stop" distance (192 uu) below.
+[formation]
+slot1 = -130, -110
+slot2 = -130, 110
+slot3 = -180, 0
+
+# Search and destroy: members spread out ahead of the leader instead.
+# Our own.
+[formation_search]
+slot1 = 200, -220
+slot2 = 200, 220
+slot3 = 320, 0
+
+# Secure position: members stand around the ordered spot, this far from
+# it. Our own.
+[formation_secure]
+radius = 110
+
+# Each order is a "stance" in the original. Every member is tied (a
+# "tether") to something: the leader, the ordered spot ("objective"), or
+# where they stood when the order came ("self"). Members stay put while
+# they're within `lp_activate` of it. Further away they set off back, and
+# stop once they're within `lp_deactivate` of it or at their spot.
+# Beyond `hp_activate` the pull is urgent (always run). `prevent_range`
+# is how far from it a member may go to fight. Values: the stance's
+# class defaults, falling back to SquadStance's.
+[stance.form_up]          # F2 in the original. CTGame.StanceFormUp
+name = "Form up"
+tether = "leader"
+lp_activate = 768         # SquadStance
+lp_deactivate = 192       # StanceFormUp
+hp_activate = 1280        # StanceFormUp
+hp_deactivate = 768       # StanceFormUp
+prevent_range = 1024      # SquadStance
+
+[stance.secure_position]  # F3, aimed at a spot. CTGame.StanceSecurePosition
+name = "Secure area"
+tether = "objective"
+lp_activate = 768         # SquadStance
+lp_deactivate = 128       # StanceSecurePosition
+hp_activate = 1024        # SquadStance
+hp_deactivate = 512       # SquadStance
+prevent_range = 640       # StanceSecurePosition
+
+[stance.search_and_destroy]  # F1. CTGame.StanceSearchAndDestroy
+name = "Search and destroy"
+tether = "leader"         # original: the squad's objective; see docs/DESIGN.md
+lp_activate = 512
+lp_deactivate = 256
+hp_activate = 2048
+hp_deactivate = 1280
+prevent_range = 1024      # SquadStance
+
+[stance.hold]             # no key in the PC version. CTGame.StanceHold
+name = "Hold"
+tether = "self"
+lp_activate = 512
+lp_deactivate = 256
+hp_activate = 768
+hp_deactivate = 384
+prevent_range = 256
+
+# The squad. `class` is the original's character class (CTCharacters),
+# `number` and `name` are what its HUD shows, `hud_slot` its place on the
+# HUD (SquadHUDSlot), and `slot` the formation slot above. `colour` is each
+# commando's own colour (EnhancedVisionColor in the Properties package's
+# CommandoNNDeltaDefaults), used for the stand-in bodies until the real
+# models are drawn. Health and shields are the same classes' MaxHealth,
+# MaxShields, ShieldRechargeRate (per second) and ShieldRechargeDelay
+# (seconds before recharging starts). Squad mates can't die
+# (bCannotDie): at 0 health they go down until revived.
+[member.sev]
+class = "Commando07Delta"
+name = "Sev"
+number = "07"
+hud_slot = 1
+slot = 1
+colour = 0.71, 0.18, 0.17
+max_health = 400
+max_shields = 50
+shield_recharge_rate = 15
+shield_recharge_delay = 4
+
+[member.fixer]
+class = "Commando40Delta"
+name = "Fixer"
+number = "40"
+hud_slot = 2
+slot = 2
+colour = 0.21, 0.49, 0.17
+max_health = 400
+max_shields = 50
+shield_recharge_rate = 15
+shield_recharge_delay = 4
+
+[member.scorch]
+class = "Commando62Delta"
+name = "Scorch"
+number = "62"
+hud_slot = 3
+slot = 3
+colour = 0.85, 0.80, 0.13
+max_health = 400
+max_shields = 50
+shield_recharge_rate = 15
+shield_recharge_delay = 4
