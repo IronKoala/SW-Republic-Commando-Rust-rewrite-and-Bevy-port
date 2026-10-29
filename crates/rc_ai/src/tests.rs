@@ -401,3 +401,92 @@ fn droids_on_the_same_spot_are_pushed_apart() {
     let gap = (b.fighters[0].pawn.location - b.fighters[1].pawn.location).length();
     assert!(gap >= 69.0, "still overlapping: {gap:.1} uu apart");
 }
+
+/// A battle with one stationary droid at the origin, facing +X.
+fn one_droid_battle() -> Battle {
+    let params = Arc::new(AiParams::battle_droid());
+    let mut b = Battle::new(params.clone(), NavGraph::default(), vec![]);
+    b.fighters.push(Fighter::new(
+        1,
+        params,
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    ));
+    b.made_by.push(0);
+    b
+}
+
+fn fire_directions(events: &[BattleEvent]) -> Vec<Vec3> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            BattleEvent::Ai {
+                event: AiEvent::Fire { direction, .. },
+                ..
+            } => Some(*direction),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn shoots_a_squad_mate_when_the_player_is_hidden() {
+    // The player stands behind a wall; a squad mate is in the open.
+    let wall = Brush::cuboid(
+        Vec3::new(900.0, 1400.0, 0.0),
+        Vec3::new(1100.0, 2600.0, 400.0),
+    );
+    let world = flat_floor(vec![wall]);
+    let mut b = one_droid_battle();
+    let player = target_at(2000.0, 2000.0);
+    let mate = target_at(1500.0, -300.0);
+    let mut dirs = Vec::new();
+    for _ in 0..90 {
+        dirs.extend(fire_directions(&b.step_with(
+            1.0 / 30.0,
+            &world,
+            Some(player),
+            &[mate],
+        )));
+    }
+    assert!(!dirs.is_empty(), "never fired");
+    let to_mate = (mate.centre - Vec3::new(0.0, 0.0, 60.0)).normalize_or_zero();
+    for d in &dirs {
+        assert!(d.dot(to_mate) > 0.95, "fired at {d:?}, not the mate");
+    }
+    assert_eq!(b.fighters[0].target_index, Some(1));
+}
+
+#[test]
+fn prefers_the_nearest_visible_enemy_and_keeps_it() {
+    let world = flat_floor(vec![]);
+    let mut b = one_droid_battle();
+    let player = target_at(3000.0, 0.0);
+    let mate = target_at(1000.0, 200.0);
+    for _ in 0..30 {
+        b.step_with(1.0 / 30.0, &world, Some(player), &[mate]);
+    }
+    assert_eq!(b.fighters[0].target_index, Some(1), "nearest is the mate");
+    // The player walks closer, but the droid keeps its target while it
+    // can still see it.
+    let near_player = target_at(800.0, 0.0);
+    b.step_with(1.0 / 30.0, &world, Some(near_player), &[mate]);
+    assert_eq!(b.fighters[0].target_index, Some(1));
+}
+
+#[test]
+fn a_stunned_droid_does_nothing() {
+    let world = flat_floor(vec![]);
+    let mut b = one_droid_battle();
+    b.stun(1, 2.0);
+    let mut shots = 0;
+    for _ in 0..55 {
+        shots += fire_directions(&b.step(1.0 / 30.0, &world, Some(target_at(1500.0, 0.0)))).len();
+    }
+    assert_eq!(shots, 0, "fired while stunned");
+    for _ in 0..60 {
+        shots += fire_directions(&b.step(1.0 / 30.0, &world, Some(target_at(1500.0, 0.0)))).len();
+    }
+    assert!(shots > 0, "never fired after the stun wore off");
+}

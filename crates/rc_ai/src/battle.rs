@@ -93,6 +93,20 @@ impl Battle {
     /// Advance by `dt` seconds. `player` is where the player is (for
     /// spawners and for droids to look at); `None` while there's no player.
     pub fn step(&mut self, dt: f32, world: &dyn World, player: Option<Target>) -> Vec<BattleEvent> {
+        self.step_with(dt, world, player, &[])
+    }
+
+    /// Like [`Battle::step`], with other enemies of the droids besides the
+    /// player (squad mates). Each droid fights the nearest one it can see,
+    /// and the player when it sees none (so it still hunts the player).
+    /// Spawners only react to the player.
+    pub fn step_with(
+        &mut self,
+        dt: f32,
+        world: &dyn World,
+        player: Option<Target>,
+        others: &[Target],
+    ) -> Vec<BattleEvent> {
         let mut out = Vec::new();
         if let Some(p) = player {
             self.spawn(p.centre, &mut out);
@@ -100,18 +114,26 @@ impl Battle {
         let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
         let allies: Vec<Vec3> = self.alive().map(|f| f.pawn.location).collect();
         let mut heard = Vec::new();
-        let view = View {
-            world,
-            nav: &self.nav,
-            time: self.time,
-            target: player,
-            cover_taken: &taken,
-            allies: &allies,
-        };
+        let mut targets: Vec<Target> = player.into_iter().collect();
+        targets.extend_from_slice(others);
         for f in self.fighters.iter_mut() {
             if f.mode == Mode::Dead {
                 continue;
             }
+            // Stunned (a flash or EMP grenade): stands still, does nothing.
+            if self.time < f.stunned_until {
+                f.pawn.velocity = Vec3::ZERO;
+                continue;
+            }
+            let target = f.choose_target(world, &targets).or(player);
+            let view = View {
+                world,
+                nav: &self.nav,
+                time: self.time,
+                target,
+                cover_taken: &taken,
+                allies: &allies,
+            };
             for e in f.tick(dt, &view) {
                 if let AiEvent::Fire { origin, .. } = e {
                     heard.push(origin);
@@ -151,6 +173,14 @@ impl Battle {
         ev.into_iter()
             .map(|event| BattleEvent::Ai { id, event })
             .collect()
+    }
+
+    /// The droid can't act for `seconds` (a flash or EMP blast).
+    pub fn stun(&mut self, id: u32, seconds: f32) {
+        let until = self.time + seconds;
+        if let Some(f) = self.fighter_mut(id) {
+            f.stunned_until = f.stunned_until.max(until);
+        }
     }
 
     pub fn killed(&mut self, id: u32) -> Vec<BattleEvent> {

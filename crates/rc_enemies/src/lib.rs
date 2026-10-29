@@ -23,7 +23,10 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, Target};
-use rc_combat::{CombatSet, Damage, Dead, Died, FireShot, Health, Hittable, ShotLanded, Team};
+use rc_combat::{
+    Blast, Body, CombatSet, Damage, Dead, Died, FireShot, Health, Hittable, ShotLanded, Stunned,
+    Team,
+};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LevelCollision, MusicMood,
@@ -330,6 +333,7 @@ fn think(
     collision: Option<Res<LevelCollision>>,
     player: Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
     camera: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
+    allies: Query<(&Transform, &Hittable, &Team), (Without<Player>, Without<Dead>, Without<Droid>)>,
     mut droids: Query<&mut Droid>,
     mut fire: MessageWriter<FireShot>,
     mut mood: ResMut<MusicMood>,
@@ -340,8 +344,21 @@ fn think(
     let Some(collision) = collision else { return };
     let dt = time.delta_secs().min(0.1);
     let target = player_target(&player, &camera);
+    // The player's side besides the player (squad mates): droids fight
+    // them too.
+    let others: Vec<Target> = allies
+        .iter()
+        .filter(|(_, _, team)| **team == Team::Republic)
+        .map(|(t, hit, _)| {
+            let centre = to_unreal(t.translation) + rc_movement::Vec3::new(0.0, 0.0, hit.center_up);
+            Target {
+                centre,
+                eye: centre + rc_movement::Vec3::new(0.0, 0.0, hit.half_height * 0.7),
+            }
+        })
+        .collect();
     let fight = &mut *fight;
-    let events = fight.battle.step(dt, &*collision.0, target);
+    let events = fight.battle.step_with(dt, &*collision.0, target, &others);
     let now = fight.battle.time;
     let mut meshes = meshes;
     for e in events {
@@ -396,6 +413,7 @@ fn think(
                     },
                     Health::new(p.combat.health),
                     Team::Separatist,
+                    Body::Droid,
                     Hittable {
                         radius: p.movement.collision_radius,
                         half_height: p.movement.collision_height,
@@ -512,6 +530,8 @@ fn react_to_combat(
     mut died: MessageReader<Died>,
     mut shots: MessageReader<FireShot>,
     mut landed: MessageReader<ShotLanded>,
+    mut blasts: MessageReader<Blast>,
+    stunned: Query<(&Droid, &Stunned), Added<Stunned>>,
     droids: Query<&Droid>,
     players: Query<(), With<Player>>,
     transforms: Query<&Transform>,
@@ -562,6 +582,17 @@ fn react_to_combat(
         if players.contains(s.shooter) {
             fight.battle.hear(to_unreal(s.origin));
         }
+    }
+    // Grenade blasts are heard by every droid in earshot.
+    for b in blasts.read() {
+        fight.battle.hear(to_unreal(b.point));
+    }
+    for (droid, s) in &stunned {
+        fight.battle.stun(droid.id, s.left);
+        log.line(format!(
+            "{PART}: t={now:.1}s droid {} stunned for {:.1} s",
+            droid.id, s.left
+        ));
     }
     for l in landed.read() {
         if !droids.contains(l.shooter) {
