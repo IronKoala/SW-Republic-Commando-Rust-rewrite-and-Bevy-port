@@ -36,6 +36,14 @@ impl Default for Settings {
             ("bumpbutton", Behaviour::BumpButton),
             ("constantloop", Behaviour::Loop),
             ("loopmove", Behaviour::Loop),
+            // Republic Commando's own state names, found by listing what
+            // the game's movers use. `Locked` is the double doors' class
+            // default: they stay shut until a script unlocks them. A map
+            // that sets `None` on purpose leaves the mover to scripts too.
+            ("triggerloop", Behaviour::TriggerLoop),
+            ("looping", Behaviour::Loop),
+            ("locked", Behaviour::Static),
+            ("none", Behaviour::Static),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

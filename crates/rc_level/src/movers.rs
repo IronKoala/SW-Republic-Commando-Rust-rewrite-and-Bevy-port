@@ -6,13 +6,19 @@
 //! their property names; nothing copied):
 //! - up to 8 key positions and turns (`KeyPos`, `KeyRot`), counted from a
 //!   base (`BasePos`, `BaseRot`); `NumKeys` of them are used;
-//! - which key it starts at (`KeyNum`), how long one move takes
-//!   (`MoveTime`), how long it waits before going back (`StayOpenTime`),
-//!   and how it eases in and out (`MoverGlideType`);
+//! - which key it starts at (`KeyNum`), how long each move takes, how
+//!   long it waits before going back (`StayOpenTime`), and how it eases in
+//!   and out (`MoverGlideType`). Republic Commando keeps one time per key
+//!   (`MoveTimes[k]`, the move from key k to key k+1) where UE2 has one
+//!   `MoveTime`, found by listing what the game's movers set;
 //! - what sets it off (`InitialState`, such as `BumpOpenTimed` or
 //!   `TriggerOpenTimed`) and its `Tag`, which triggers name in their
 //!   `Event`;
 //! - what it does when it runs into someone (`MoverEncroachType`);
+//! - Republic Commando's own events, sent when it starts opening, is open,
+//!   starts closing and is closed (`OpeningEvent`, `OpenedEvent`,
+//!   `ClosingEvent`, `ClosedEvent`), and whether it's an automatic door
+//!   (`bAutoDoor`, read and logged, not acted on yet);
 //! - sounds for opening, opened, closing, closed and while moving.
 //!
 //! A map only stores what a designer changed, so every value falls back
@@ -25,11 +31,14 @@ use crate::class_look::{object_path, ClassLooks, Loaded};
 use rc_package::properties::{Property, Value};
 use rc_package::Package;
 
-/// Most keys a mover can have.
-pub const MAX_KEYS: usize = 8;
+/// Most keys a mover can have. UE2 has 24; the game's maps use up to 12.
+pub const MAX_KEYS: usize = 24;
 
 /// Engine defaults, used when neither the map nor the class sets a value.
 /// From the public UE2 `Mover` class defaults.
+/// Republic Commando's `Mover` class sets no `MoveTimes`, so a mover whose
+/// map and class set none would move instantly. Our own fallback: 1 s, the
+/// UE2 `MoveTime` default.
 pub const DEFAULT_MOVE_TIME: f32 = 1.0;
 pub const DEFAULT_STAY_OPEN_TIME: f32 = 4.0;
 pub const DEFAULT_NUM_KEYS: u8 = 2;
@@ -80,7 +89,8 @@ pub struct MoverInfo {
     pub num_keys: u8,
     /// The key it starts at.
     pub key_num: u8,
-    pub move_time: f32,
+    /// Seconds for the move between key k and key k+1 (either way).
+    pub move_times: [f32; MAX_KEYS],
     pub stay_open_time: f32,
     pub delay_time: f32,
     pub glide: Glide,
@@ -88,8 +98,14 @@ pub struct MoverInfo {
     /// `InitialState`, e.g. `BumpOpenTimed`; empty if none was set.
     pub state: String,
     pub tag: String,
-    /// What it sets off when it finishes opening.
-    pub event: String,
+    /// Events it sends when it starts opening, is open, starts closing and
+    /// is closed (empty if none). `opened` falls back to UE2's `Event`.
+    pub opening_event: String,
+    pub opened_event: String,
+    pub closing_event: String,
+    pub closed_event: String,
+    /// `bAutoDoor`: Republic Commando's automatic doors.
+    pub auto_door: bool,
     pub trigger_once_only: bool,
     pub sounds: Sounds,
     /// Values that were missing from both the map and the class, so the
@@ -119,6 +135,16 @@ impl MoverInfo {
     /// Does it ever turn, or only slide?
     pub fn turns(&self) -> bool {
         (0..self.num_keys as usize).any(|k| self.key_rot[k] != self.key_rot[0])
+    }
+
+    /// Seconds for one move between keys `a` and `b` (next to each other).
+    pub fn segment_time(&self, a: usize, b: usize) -> f32 {
+        self.move_times[a.min(b).min(MAX_KEYS - 1)]
+    }
+
+    /// Seconds to go from key 0 to the last key.
+    pub fn open_time(&self) -> f32 {
+        (0..self.num_keys.max(1) as usize - 1).map(|k| self.segment_time(k, k + 1)).sum()
     }
 
     /// Longest distance between its keys, Unreal units.
@@ -216,15 +242,19 @@ impl<'a> Lookup<'a> {
         }
     }
 
+    /// A name value. A map that sets it to `None` on purpose gets "None",
+    /// not the class's value.
     fn name(&self, name: &str) -> Option<String> {
         let (pkg, p) = self.get(name, 0)?;
         match p.value {
-            Value::Name(n) => {
-                let s = pkg.name(n);
-                (!s.eq_ignore_ascii_case("None")).then(|| s.to_string())
-            }
+            Value::Name(n) => Some(pkg.name(n).to_string()),
             _ => None,
         }
+    }
+
+    /// An event name: "None" means no event.
+    fn event(&self, name: &str) -> Option<String> {
+        self.name(name).filter(|s| !s.eq_ignore_ascii_case("None"))
     }
 
     fn object(&self, name: &str) -> Option<String> {
@@ -301,8 +331,8 @@ pub fn read_movers(
                 location: place.location,
                 radius: l.float("CollisionRadius").unwrap_or(22.0),
                 height: l.float("CollisionHeight").unwrap_or(22.0),
-                event: l.name("Event").unwrap_or_default(),
-                tag: l.name("Tag").unwrap_or_default(),
+                event: l.event("Event").unwrap_or_default(),
+                tag: l.event("Tag").unwrap_or_default(),
                 trigger_type: l.byte("TriggerType").unwrap_or(0),
                 once_only: l.bool("bTriggerOnceOnly").unwrap_or(false),
                 state: l.name("InitialState").unwrap_or_default(),
@@ -325,10 +355,20 @@ pub fn read_movers(
             defaulted.push("NumKeys");
             DEFAULT_NUM_KEYS
         });
-        let move_time = l.float("MoveTime").unwrap_or_else(|| {
-            defaulted.push("MoveTime");
-            DEFAULT_MOVE_TIME
-        });
+        // Each move's time; a key with none set takes the one before's
+        // (our guess), and the first falls back to UE2's `MoveTime`.
+        let mut move_times = [0.0f32; MAX_KEYS];
+        let mut last = l.float("MoveTime");
+        for (k, t) in move_times.iter_mut().enumerate() {
+            match l.get("MoveTimes", k as u32).map(|(_, p)| &p.value) {
+                Some(Value::Float(f)) if *f > 0.0 => last = Some(*f),
+                _ => {}
+            }
+            *t = last.unwrap_or(DEFAULT_MOVE_TIME);
+        }
+        if last.is_none() {
+            defaulted.push("MoveTimes");
+        }
         let stay_open_time = l.float("StayOpenTime").unwrap_or_else(|| {
             defaulted.push("StayOpenTime");
             DEFAULT_STAY_OPEN_TIME
@@ -364,14 +404,18 @@ pub fn read_movers(
             key_rot,
             num_keys: num_keys.clamp(1, MAX_KEYS as u8),
             key_num,
-            move_time,
+            move_times,
             stay_open_time,
             delay_time: l.float("DelayTime").unwrap_or(0.0),
             glide,
             encroach,
             state: l.name("InitialState").unwrap_or_default(),
-            tag: l.name("Tag").unwrap_or_default(),
-            event: l.name("Event").unwrap_or_default(),
+            tag: l.event("Tag").unwrap_or_default(),
+            opening_event: l.event("OpeningEvent").unwrap_or_default(),
+            opened_event: l.event("OpenedEvent").or_else(|| l.event("Event")).unwrap_or_default(),
+            closing_event: l.event("ClosingEvent").unwrap_or_default(),
+            closed_event: l.event("ClosedEvent").unwrap_or_default(),
+            auto_door: l.bool("bAutoDoor").unwrap_or(false),
             trigger_once_only: l.bool("bTriggerOnceOnly").unwrap_or(false),
             sounds: Sounds {
                 opening: l.object("OpeningSound"),

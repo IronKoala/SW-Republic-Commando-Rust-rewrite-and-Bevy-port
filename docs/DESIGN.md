@@ -912,20 +912,30 @@ class walk as props, `rc_level::class_look`), then to the engine's own
 defaults. The property names come from Unreal Engine 2's public `Mover`
 and `Trigger` classes; the values are the game's.
 
-- **Keys**: up to 8 positions (`KeyPos`) and turns (`KeyRot`), counted from
-  a base (`BasePos`, `BaseRot`). `NumKeys` of them are used. Key 0 is
+- **Keys**: up to 24 positions (`KeyPos`) and turns (`KeyRot`), counted
+  from a base (`BasePos`, `BaseRot`). `NumKeys` of them are used. Key 0 is
   "closed", the last key is "open". `KeyNum` is where it starts.
-- **Timing**: `MoveTime` is how long one key-to-key move takes, so a door
-  with 3 keys takes 2 x `MoveTime` to open. `StayOpenTime` is how long it
-  waits before going back. `DelayTime` is a wait before it starts.
+- **Timing**: Republic Commando keeps one time per step, `MoveTimes[k]`,
+  the seconds from key k to key k+1 (UE2 had one `MoveTime` for all). A
+  step with no entry takes the one before it; with none at all, 1 s.
+  `StayOpenTime` is how long it waits before going back. `DelayTime` is a
+  wait before it starts.
+- **Loops that go round**: when the last key is the same pose as key 0 (a
+  turntable, a conveyor), a looping mover carries on round from key 0
+  instead of going back the way it came.
 - **Easing** (`MoverGlideType`): constant speed, or (the default) a gentle
   start and stop. We use the smooth curve 3t² - 2t³ for the gentle one. That
   is our reading of how UE2 describes it; the exact curve is in the compiled
   engine and hasn't been measured against the real game.
 - **What sets it off** (`InitialState`): see below.
-- **`Tag` and `Event`**: a trigger whose `Event` matches a mover's `Tag`
-  sets it off. A mover that finishes opening sends its own `Event`, so
-  doors and lifts can be chained.
+- **`Tag` and events**: a trigger whose `Event` matches a mover's `Tag`
+  sets it off. RC movers send four events of their own, `OpeningEvent`,
+  `OpenedEvent` (falls back to `Event`), `ClosingEvent` and `ClosedEvent`,
+  so doors and lifts can be chained.
+- **`bAutoDoor`** is read and logged, not acted on yet.
+- **Double doors** (`MoverDB_*` and `MoverDBSlave_*`) take their values from
+  `Properties/MarkerProperties.u`: they start `Locked`, open in 0.5 s after
+  a 0.2 s delay.
 - **When blocked** (`MoverEncroachType`): stop, go back the way it came (the
   default), keep going (crush), or pass through.
 - **Sounds**: opening, opened, closing, closed and while moving, kept as the
@@ -947,8 +957,18 @@ without code:
 | `bump_open_timed` | Opens when the player walks into it (the UE2 default). |
 | `stand_open_timed` | Opens when the player stands on it (a lift). |
 | `bump_button` | Moves when bumped, comes back after a wait. |
+| `trigger_loop` | A trigger starts it opening and closing over and over; the next trigger stops it where it rests. |
 | `loop` | Opens and closes for ever from the start. |
 | `static` | Never moves. |
+
+Republic Commando's own state names, found by listing all 941 movers in the
+79 maps: `TriggerControl` 335, `TriggerLoop` 186, `BumpOpenTimed` 122,
+`TriggerToggle` 109, `None` 84, `Locked` 58, `TriggerOpenTimed` 42,
+`Looping` 5. `Locked` and `None` run as `static` (scripts move them, which
+we don't run yet); `Looping` runs as `loop`.
+
+Engine `Trigger`s default to `bTriggerOnceOnly = true` in RC's packages,
+so most fire once.
 
 Touching only counts when it starts: standing on a lift that has come back
 down doesn't send it up again until you step off and on. A door that is
@@ -1010,8 +1030,21 @@ turn's rows and columns swap the same way).
   enough to stand on), sets it going, and checks the player's feet move as
   far as the lift (within 4 units) and never more than 16 units from it on
   the way.
+  Doors that rise into a ceiling look like lifts by shape, so a lift is
+  only ridden when a player's box can travel its whole path through the
+  fixed level (a sweep from bottom to top); the rest are counted as
+  "level in the way".
 - **In the walker**: `rc_walk --map MAP --ride --script` starts the player
-  on the map's first lift, sets it going, and checks the same three things.
+  on the map's first rideable lift, sets it going, and checks the same
+  three things.
+
+Results on all 79 maps (2026-10-29): 941 movers (877 with collision), 1,675
+triggers, 1,405 sounds named, no unknown states. 863 of 863 movers opened
+and closed in their `MoveTimes` (72 take over 60 s and weren't run). 33 of
+33 lift rides passed (25 skipped, level in the way). 472 trigger-driven
+movers have nothing in the map sending their tag: most likely the game's
+scripts. In the walker, geo_05a's `Mover37` carried the player 12,176
+units up in 18 s with a gap of 0.0 units.
 
 ## Sounds
 

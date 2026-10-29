@@ -37,6 +37,10 @@ pub enum Behaviour {
     TriggerControl,
     /// Opens and closes over and over while the trigger is held.
     TriggerPound,
+    /// A trigger starts it going back and forth through its keys; the next
+    /// trigger lets it finish at key 0 and stop (Republic Commando's
+    /// `TriggerLoop`, our reading of the name).
+    TriggerLoop,
     /// Opens when someone walks into it, waits, closes.
     BumpOpenTimed,
     /// Opens when someone stands on it (a lift), waits, goes back.
@@ -48,12 +52,13 @@ pub enum Behaviour {
 }
 
 impl Behaviour {
-    pub const ALL: [Behaviour; 9] = [
+    pub const ALL: [Behaviour; 10] = [
         Behaviour::Static,
         Behaviour::TriggerOpenTimed,
         Behaviour::TriggerToggle,
         Behaviour::TriggerControl,
         Behaviour::TriggerPound,
+        Behaviour::TriggerLoop,
         Behaviour::BumpOpenTimed,
         Behaviour::StandOpenTimed,
         Behaviour::BumpButton,
@@ -68,6 +73,7 @@ impl Behaviour {
             Behaviour::TriggerToggle => "trigger_toggle",
             Behaviour::TriggerControl => "trigger_control",
             Behaviour::TriggerPound => "trigger_pound",
+            Behaviour::TriggerLoop => "trigger_loop",
             Behaviour::BumpOpenTimed => "bump_open_timed",
             Behaviour::StandOpenTimed => "stand_open_timed",
             Behaviour::BumpButton => "bump_button",
@@ -80,7 +86,7 @@ impl Behaviour {
     }
 
     /// Goes back on its own after `StayOpenTime`.
-    fn timed(self) -> bool {
+    pub fn timed(self) -> bool {
         matches!(
             self,
             Behaviour::TriggerOpenTimed
@@ -237,6 +243,8 @@ pub struct Mover {
     /// The player was bumping or standing on it last step: only a new
     /// touch sets it off.
     was_touched: bool,
+    /// Its own events (`OpeningEvent` and so on) waiting to be sent.
+    to_send: Vec<String>,
     /// When the current opening or closing run started, s.
     run_started: f32,
 }
@@ -254,7 +262,8 @@ pub enum MoverEvent {
     Sound { mover: usize, sound: String },
     /// A trigger was touched and sent its event.
     Triggered { trigger: usize, event: String, movers: usize },
-    /// A mover finished opening and sent its own event.
+    /// A mover sent one of its own events (opening, opened, closing,
+    /// closed).
     Event { mover: usize, event: String, movers: usize },
     /// The player started or stopped standing on a mover.
     Boarded { mover: usize },
@@ -286,6 +295,7 @@ impl Mover {
             held: false,
             used: false,
             was_touched: false,
+            to_send: Vec::new(),
             run_started: 0.0,
             info,
         }
@@ -329,6 +339,23 @@ impl Mover {
             .then(|| Vec3::new(above.x, above.y, above.z - drop * h.time - extent.z))
     }
 
+    /// For a lift: where to stand on it (feet), and how much of its
+    /// journey (0 to 1) a player standing there can make before the fixed
+    /// level gets in the way (a ceiling over a door that slides up, say).
+    /// `None` if there's nowhere to stand.
+    pub fn ride_clearance(&self, fixed: &dyn World, extent: Vec3) -> Option<(Vec3, f32)> {
+        let spot = self.top_spot(extent)?;
+        let (a, b) = (self.info.key(0).0, self.info.key(self.last_key()).0);
+        let shift = Vec3::new(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+        let centre = spot + Vec3::new(0.0, 0.0, extent.z + SKIN);
+        let clear = match fixed.sweep(extent, centre, centre + shift) {
+            None => 1.0,
+            Some(h) if h.start_solid => 0.0,
+            Some(h) => h.time,
+        };
+        Some((spot, clear))
+    }
+
     /// Is it fully closed (at key 0 and still)?
     pub fn is_closed(&self) -> bool {
         self.key == 0 && self.phase == Phase::Rest
@@ -356,6 +383,12 @@ impl Mover {
             .is_some_and(|h| h.start_solid)
     }
 
+    fn queue(&mut self, event: &str) {
+        if !event.is_empty() {
+            self.to_send.push(event.to_string());
+        }
+    }
+
     fn play(&self, me: usize, sound: &Option<String>, events: &mut Vec<MoverEvent>) {
         if let Some(s) = sound {
             events.push(MoverEvent::Sound {
@@ -365,10 +398,26 @@ impl Mover {
         }
     }
 
+    /// Its last key is the same place as key 0 (a full circle, or a path
+    /// that comes back where it started). Such a mover, when looping, goes
+    /// on round instead of back: after the last key it carries on from key
+    /// 0. Our reading of the game's maps: spinning antennas set key 1 a
+    /// full turn from key 0, and searchlights go 0, 1, 2 with 2 = 0.
+    pub fn is_circuit(&self) -> bool {
+        let (a, b) = (key_pose(&self.info, 0), key_pose(&self.info, self.last_key()));
+        let turn_same = (0..3).all(|c| ((a.rot[c] - b.rot[c]) % 65536.0).abs() < 1.0);
+        self.last_key() > 0 && (a.pos - b.pos).length() < 1.0 && turn_same
+    }
+
     fn start_opening(&mut self, me: usize, now: f32, events: &mut Vec<MoverEvent>) {
         let last = self.last_key();
         if last == 0 {
             return;
+        }
+        if self.phase == Phase::Rest && self.key >= last && self.is_circuit() {
+            // Round again from key 0 (the same place).
+            self.key = 0;
+            self.pose = key_pose(&self.info, 0);
         }
         self.opening = true;
         match self.phase {
@@ -402,6 +451,8 @@ impl Mover {
         self.run_started = now;
         events.push(MoverEvent::StartedOpening { mover: me });
         self.play(me, &self.info.sounds.opening, events);
+        let e = self.info.opening_event.clone();
+        self.queue(&e);
     }
 
     fn start_closing(&mut self, me: usize, now: f32, events: &mut Vec<MoverEvent>) {
@@ -427,6 +478,8 @@ impl Mover {
         self.run_started = now;
         events.push(MoverEvent::StartedClosing { mover: me });
         self.play(me, &self.info.sounds.closing, events);
+        let e = self.info.closing_event.clone();
+        self.queue(&e);
     }
 
     /// A trigger with this mover's tag went off.
@@ -446,6 +499,12 @@ impl Mover {
             Behaviour::TriggerControl | Behaviour::TriggerPound => {
                 self.held = true;
                 self.start_opening(me, now, events);
+            }
+            Behaviour::TriggerLoop => {
+                self.held = !self.held;
+                if self.held {
+                    self.start_opening(me, now, events);
+                }
             }
             // Bump and stand movers can be triggered too in UE2; they
             // open the same way.
@@ -487,7 +546,7 @@ impl Mover {
     fn advance(&self, dt: f32) -> (Pose, Phase, usize) {
         match self.phase {
             Phase::Moving { from, to, t } => {
-                let mut t = t + dt / self.info.move_time.max(1e-3);
+                let mut t = t + dt / self.info.segment_time(from, to).max(1e-3);
                 // Adding up frame times leaves 0.9999997 instead of 1.
                 if t > 1.0 - 1e-4 {
                     t = 1.0;
@@ -505,8 +564,8 @@ impl Mover {
     }
 
     /// Bookkeeping after a move was allowed: arriving at keys, waits,
-    /// delays. Returns this mover's own event to send, if it just opened.
-    fn settle(&mut self, me: usize, dt: f32, now: f32, events: &mut Vec<MoverEvent>) -> Option<String> {
+    /// delays.
+    fn settle(&mut self, me: usize, dt: f32, now: f32, events: &mut Vec<MoverEvent>) {
         match self.phase {
             Phase::Delay { left } => {
                 if left - dt <= 0.0 {
@@ -541,16 +600,29 @@ impl Mover {
                     self.phase = Phase::Rest;
                     events.push(MoverEvent::Opened { mover: me, secs });
                     self.play(me, &self.info.sounds.opened, events);
+                    let e = self.info.opened_event.clone();
+                    self.queue(&e);
                     let pound = self.behaviour == Behaviour::TriggerPound;
+                    let looping = self.behaviour == Behaviour::Loop
+                        || (self.behaviour == Behaviour::TriggerLoop && self.held);
                     if self.behaviour.timed() {
                         self.phase = Phase::Wait {
                             left: self.info.stay_open_time,
                         };
-                    } else if self.behaviour == Behaviour::Loop || pound {
+                    } else if looping && self.is_circuit() {
+                        self.start_opening(me, now, events);
+                    } else if looping || pound {
                         self.start_closing(me, now, events);
-                    }
-                    if !self.info.event.is_empty() {
-                        return Some(self.info.event.clone());
+                    } else if self.behaviour == Behaviour::TriggerLoop {
+                        // Switched off part way: finish where it rests.
+                        // A circuit's last key is key 0's pose, so it is
+                        // already home; anything else goes back.
+                        if self.is_circuit() {
+                            self.key = 0;
+                            self.opening = false;
+                        } else {
+                            self.start_closing(me, now, events);
+                        }
                     }
                 } else {
                     let secs = now - self.run_started;
@@ -560,15 +632,16 @@ impl Mover {
                     self.opening = false;
                     events.push(MoverEvent::Closed { mover: me, secs });
                     self.play(me, &self.info.sounds.closed, events);
-                    let pound = self.behaviour == Behaviour::TriggerPound && self.held;
-                    if self.behaviour == Behaviour::Loop || pound {
+                    let e = self.info.closed_event.clone();
+                    self.queue(&e);
+                    let again = matches!(self.behaviour, Behaviour::TriggerPound | Behaviour::TriggerLoop) && self.held;
+                    if self.behaviour == Behaviour::Loop || again {
                         self.start_opening(me, now, events);
                     }
                 }
             }
             _ => {}
         }
-        None
     }
 }
 
@@ -739,7 +812,37 @@ impl MoverSet {
         let mut events = Vec::new();
         let now = self.time;
         self.movers[i].start_opening(i, now, &mut events);
+        self.send_queued(&mut events);
         events
+    }
+
+    /// Start mover `i` closing. For tests and the check tool.
+    pub fn close(&mut self, i: usize) -> Vec<MoverEvent> {
+        let mut events = Vec::new();
+        let now = self.time;
+        self.movers[i].start_closing(i, now, &mut events);
+        self.send_queued(&mut events);
+        events
+    }
+
+    /// Send the movers' own queued events (which can set off more movers,
+    /// which can queue more; a chain stops after 16 rounds).
+    fn send_queued(&mut self, events: &mut Vec<MoverEvent>) {
+        for _ in 0..16 {
+            let mut queued = Vec::new();
+            for (i, m) in self.movers.iter_mut().enumerate() {
+                for e in m.to_send.drain(..) {
+                    queued.push((i, e));
+                }
+            }
+            if queued.is_empty() {
+                return;
+            }
+            for (i, e) in queued {
+                let n = self.send(&e, events);
+                events.push(MoverEvent::Event { mover: i, event: e, movers: n });
+            }
+        }
     }
 
     fn unsend(&mut self, event: &str, events: &mut Vec<MoverEvent>) {
@@ -828,7 +931,13 @@ impl MoverSet {
         for i in 0..self.movers.len() {
             let (pose, phase, key) = self.movers[i].advance(dt);
             let old = self.movers[i].pose;
-            if pose != old {
+            if pose == old {
+                // Nothing moves (a wait, or keys in the same place): the
+                // timer still runs.
+                let m = &mut self.movers[i];
+                m.phase = phase;
+                m.key = key;
+            } else {
                 let step = Motion::new(old, pose);
                 let built = self.movers[i].built;
                 let new_motion = Motion::new(built, pose);
@@ -877,11 +986,9 @@ impl MoverSet {
                     m.key = key;
                 }
             }
-            if let Some(e) = self.movers[i].settle(i, dt, now, &mut events) {
-                let n = self.send(&e, &mut events);
-                events.push(MoverEvent::Event { mover: i, event: e, movers: n });
-            }
+            self.movers[i].settle(i, dt, now, &mut events);
         }
+        self.send_queued(&mut events);
         // Don't log the same block every frame.
         events.dedup();
         events

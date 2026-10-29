@@ -41,8 +41,10 @@ struct Totals {
     unknown_states: BTreeMap<String, usize>,
     timing_checked: usize,
     timing_failed: usize,
+    too_slow: usize,
     rides: usize,
     rides_failed: usize,
+    rides_blocked: usize,
     no_sender: usize,
     sounds: usize,
 }
@@ -169,7 +171,12 @@ fn main() {
                 + set
                     .movers
                     .iter()
-                    .filter(|o| !o.info.event.is_empty() && o.info.event.eq_ignore_ascii_case(&info.tag))
+                    .filter(|o| {
+                        let i = &o.info;
+                        [&i.opening_event, &i.opened_event, &i.closing_event, &i.closed_event]
+                            .iter()
+                            .any(|e| !e.is_empty() && e.eq_ignore_ascii_case(&info.tag))
+                    })
                     .count();
             let needs_sender = matches!(
                 m.behaviour,
@@ -177,6 +184,7 @@ fn main() {
                     | Behaviour::TriggerToggle
                     | Behaviour::TriggerControl
                     | Behaviour::TriggerPound
+                    | Behaviour::TriggerLoop
             );
             if needs_sender && senders == 0 {
                 t.no_sender += 1;
@@ -192,23 +200,27 @@ fn main() {
                 .map(|c| c.bounds())
                 .unwrap_or((Vec3::ZERO, Vec3::ZERO));
             log.line(format!(
-                "  mover {i} {} class {} state {:?} -> {}{} | {} keys from key {}, travel {:.0} uu{}, MoveTime {:.2} s, StayOpenTime {:.2} s, DelayTime {:.2}, {:?} glide, {:?} when blocked | tag {:?} event {:?}, {} senders{} | {} collision triangles, box ({:.0}, {:.0}, {:.0})-({:.0}, {:.0}, {:.0}){}",
+                "  mover {i} {} class {} state {:?} -> {}{}{} | {} keys from key {}, travel {:.0} uu{}, MoveTimes {:?} s, StayOpenTime {:.2} s, DelayTime {:.2}, {:?} glide, {:?} when blocked | tag {:?}, events opening {:?} opened {:?} closing {:?} closed {:?}, {} senders{} | {} collision triangles, box ({:.0}, {:.0}, {:.0})-({:.0}, {:.0}, {:.0}){}",
                 info.place.name,
                 info.chain.join(" < "),
                 info.state,
                 m.behaviour.name(),
                 if m.known_state { "" } else { " (unknown state)" },
+                if info.auto_door { ", auto door" } else { "" },
                 info.num_keys,
                 info.key_num,
                 info.travel(),
                 if info.turns() { ", turns" } else { "" },
-                info.move_time,
+                &info.move_times[..(info.num_keys.max(2) as usize - 1)],
                 info.stay_open_time,
                 info.delay_time,
                 info.glide,
                 info.encroach,
                 info.tag,
-                info.event,
+                info.opening_event,
+                info.opened_event,
+                info.closing_event,
+                info.closed_event,
                 senders,
                 if needs_sender && senders == 0 { " (NONE: opened by a script?)" } else { "" },
                 m.collision.as_ref().map_or(0, |c| c.triangles.len()),
@@ -230,13 +242,24 @@ fn main() {
         // Run each mover on its own, with the player far away.
         for i in 0..set.movers.len() {
             let m = &set.movers[i];
-            if m.behaviour == Behaviour::Static || m.info.num_keys < 2 {
+            if m.info.num_keys < 2 {
+                continue;
+            }
+            let want = m.info.open_time();
+            if want > 60.0 {
+                t.too_slow += 1;
+                log.line(format!(
+                    "  run mover {i} {}: takes {want:.0} s to open, too slow to run here; skipped",
+                    m.info.place.name
+                ));
                 continue;
             }
             let mut one = MoverSet::new(lvl.movers.only(i), settings.clone(), |_| Vec::new());
             let mut far = Pawn::new(params.clone(), Vec3::new(1e6, 1e6, 1e6));
-            let want = one.movers[0].info.move_time * (one.movers[0].info.num_keys as f32 - 1.0);
-            let mut ev = one.open(0);
+            // A mover that starts at its last key (open) is run closing
+            // first, unless it goes round in a circuit.
+            let starts_open = one.movers[0].key >= one.movers[0].last_key() && !one.movers[0].is_circuit();
+            let mut ev = if starts_open { one.close(0) } else { one.open(0) };
             let (mut open_s, mut close_s) = (None, None);
             let mut trace = Vec::new();
             let limit = (2.0 * want + one.movers[0].info.stay_open_time + 2.0).min(120.0);
@@ -257,16 +280,21 @@ fn main() {
                 }
             }
             let ok = |x: Option<f32>| x.is_some_and(|s| (s - want).abs() <= 2.0 * DT);
-            let timed = one.movers[0].behaviour != Behaviour::TriggerToggle
-                && one.movers[0].behaviour != Behaviour::TriggerControl;
-            let pass = ok(open_s) && (!timed || ok(close_s));
+            let b = one.movers[0].behaviour;
+            let circuit = one.movers[0].is_circuit();
+            // Does it come back by itself within the time we ran?
+            let back = (b.timed() && 2.0 * want + one.movers[0].info.stay_open_time + 0.5 < limit)
+                || (b == Behaviour::Loop && !circuit);
+            let pass = if starts_open { ok(close_s) } else { ok(open_s) && (!back || ok(close_s)) };
+            let timed = back;
             t.timing_checked += 1;
             t.timing_failed += !pass as usize;
             log.line(format!(
-                "  run mover {i} {}: opened in {} s, closed in {} s, want {want:.2} s -> {}",
+                "  run mover {i} {}{}: opened in {} s, closed in {} s, want {want:.2} s -> {}",
                 m.info.place.name,
+                if starts_open { " (starts open)" } else if circuit { " (goes round)" } else { "" },
                 open_s.map_or("never".into(), |s| format!("{s:.2}")),
-                close_s.map_or(if timed { "never".into() } else { "(stays open)".into() }, |s| format!("{s:.2}")),
+                close_s.map_or(if timed || starts_open { "never".into() } else { "(not waited for)".into() }, |s| format!("{s:.2}")),
                 if pass { "PASS" } else { "FAIL" }
             ));
             log.line(format!("    positions: {}", trace.join(" ")));
@@ -280,10 +308,19 @@ fn main() {
             }
             let info = &set.movers[i].info;
             let mut one = MoverSet::new(lvl.movers.only(i), settings.clone(), |e| tri_of(e));
-            let Some(spot) = one.movers[0].top_spot(ext) else {
+            let Some((spot, clear)) = one.movers[0].ride_clearance(&fixed, ext) else {
                 log.line(format!("  ride mover {i} {}: no floor on top found, skipped", info.place.name));
                 continue;
             };
+            if clear < 0.999 {
+                t.rides_blocked += 1;
+                log.line(format!(
+                    "  ride mover {i} {}: the level is in the way {:.0}% of the way along (a door into a ceiling, or a lift with no room on top), skipped",
+                    info.place.name,
+                    clear * 100.0
+                ));
+                continue;
+            }
             let feet_z = spot.z;
             let mut p = Pawn::new(params.clone(), spot);
             let w = one.world(&fixed);
@@ -298,7 +335,10 @@ fn main() {
             let mut worst = 0.0f32;
             let mut boarded = false;
             let mut trace = Vec::new();
-            let want = info.move_time * (info.num_keys as f32 - 1.0);
+            let want = info.open_time();
+            if want > 60.0 {
+                continue;
+            }
             let frames = ((want + 0.5) / DT) as usize;
             for f in 1..=frames {
                 ev.extend(one.step(DT, &fixed, &mut p));
@@ -341,11 +381,17 @@ fn main() {
     log.line(format!("unknown states (run as {}): {:?}", settings.unknown_state.name(), t.unknown_states));
     log.line(format!("trigger-driven movers with no trigger or mover sending their tag: {}", t.no_sender));
     log.line(format!(
-        "timing: {} of {} movers opened and closed in MoveTime per key",
+        "timing: {} of {} movers opened and closed in their MoveTimes ({} take over 60 s and weren't run)",
         t.timing_checked - t.timing_failed,
-        t.timing_checked
+        t.timing_checked,
+        t.too_slow
     ));
-    log.line(format!("lift rides: {} of {} passed", t.rides - t.rides_failed, t.rides));
+    log.line(format!(
+        "lift rides: {} of {} passed ({} more movers that look like lifts have the level in the way and weren't ridden)",
+        t.rides - t.rides_failed,
+        t.rides,
+        t.rides_blocked
+    ));
     if t.timing_failed > 0 || t.rides_failed > 0 || t.map_failures > 0 {
         std::process::exit(1);
     }

@@ -13,9 +13,13 @@ bump_reach = 4
 stand_reach = 4
 
 [states]
-# What each mover "InitialState" name does. The engine's own names are built
-# in; add the game's (or a mod's) here as  Name = "behaviour".
+# What each mover "InitialState" name does. The engine's names and the
+# game's own (TriggerLoop, Looping, Locked, None) are built in; add or
+# change one (or a mod's) here as  Name = "behaviour".
 # Behaviours: static, trigger_open_timed, trigger_toggle, trigger_control,
-# trigger_pound, bump_open_timed, stand_open_timed, bump_button, loop.
+# trigger_pound, trigger_loop, bump_open_timed, stand_open_timed,
+# bump_button, loop.
+# Locked = "static" and None = "static" are built in: the game's scripts
+# open those, which we don't run yet.
 # A state not listed runs as:
 unknown = "trigger_open_timed"

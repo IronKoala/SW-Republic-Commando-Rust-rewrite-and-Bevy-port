@@ -873,11 +873,11 @@ fn main() -> AppExit {
             ));
             for (i, m) in set.movers.iter().enumerate() {
                 log.line(format!(
-                    "  mover {i} {} ({}): {} keys, MoveTime {:.2} s, StayOpenTime {:.2} s, state {:?} -> {}, tag {:?}, at ({:.0}, {:.0}, {:.0})",
+                    "  mover {i} {} ({}): {} keys, opens in {:.2} s, StayOpenTime {:.2} s, state {:?} -> {}, tag {:?}, at ({:.0}, {:.0}, {:.0})",
                     m.info.place.name,
                     m.info.chain[0],
                     m.info.num_keys,
-                    m.info.move_time,
+                    m.info.open_time(),
                     m.info.stay_open_time,
                     m.info.state,
                     m.behaviour.name(),
@@ -920,12 +920,13 @@ fn main() -> AppExit {
                 let ext = UVec3::new(r, r, params.collision_height);
                 let lift = (0..movers.set.movers.len()).find_map(|i| {
                     let m = &movers.set.movers[i];
-                    m.is_lift(r).then(|| m.top_spot(ext).map(|s| (i, s))).flatten()
+                    let (spot, clear) = m.ride_clearance(&tw, ext).filter(|_| m.is_lift(r))?;
+                    (clear >= 0.999).then_some((i, spot))
                 });
                 match lift {
                     Some((i, spot)) => {
                         let m = &movers.set.movers[i];
-                        let secs = m.info.move_time * (m.info.num_keys as f32 - 1.0);
+                        let secs = m.info.open_time();
                         log.line(format!(
                             "ride: starting on {} at ({:.0}, {:.0}, {:.0}); it takes {secs:.2} s",
                             m.info.place.name, spot.x, spot.y, spot.z

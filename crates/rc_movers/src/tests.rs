@@ -59,14 +59,18 @@ fn mover(state: &str, keys: &[[f32; 3]], move_time: f32, stay: f32) -> MoverInfo
         key_rot: [[0; 3]; MAX_KEYS],
         num_keys: keys.len() as u8,
         key_num: 0,
-        move_time,
+        move_times: [move_time; MAX_KEYS],
         stay_open_time: stay,
         delay_time: 0.0,
         glide: Glide::Smooth,
         encroach: Encroach::Return,
         state: state.into(),
         tag: "Door1".into(),
-        event: String::new(),
+        opening_event: String::new(),
+        opened_event: String::new(),
+        closing_event: String::new(),
+        closed_event: String::new(),
+        auto_door: false,
         trigger_once_only: false,
         sounds: Sounds {
             opening: Some("Sounds.Door.Open".into()),
@@ -261,4 +265,57 @@ fn turning_mover_moves_points_with_it() {
         mat[2][0] * 100.0 + mat[2][2] * 5.0 + shift.z,
     );
     assert!((q.y - 100.0).abs() < 1e-3);
+}
+
+#[test]
+fn per_key_times_and_chained_events() {
+    // Two keys' worth of moves with different times, and a second mover
+    // that the first sets off when it's open.
+    let keys = [[0.0; 3], [0.0, 0.0, 100.0], [0.0, 0.0, 300.0]];
+    let mut a = mover("TriggerToggle", &keys, 0.5, 0.0);
+    a.move_times[1] = 1.5;
+    a.opened_event = "Lift2".into();
+    let mut b = mover("TriggerToggle", &[[0.0; 3], [100.0, 0.0, 0.0]], 1.0, 0.0);
+    b.tag = "Lift2".into();
+    b.place.export = 8;
+    assert!((a.open_time() - 2.0).abs() < 1e-6);
+    let map = MapMovers { movers: vec![a, b], triggers: vec![], failures: vec![] };
+    let mut set = MoverSet::new(map, Settings::default(), |_| Vec::new());
+    let fixed = floor();
+    let mut p = far_player();
+    let mut ev = Vec::new();
+    set.send("Door1", &mut ev);
+    let (mut a_open, mut b_open) = (None, None);
+    for f in 1..=240 {
+        for e in set.step(DT, &fixed, &mut p) {
+            if let MoverEvent::Opened { mover, secs } = e {
+                if mover == 0 { a_open = Some(secs) } else { b_open = Some(f as f32 * DT) }
+            }
+        }
+        if f == 30 {
+            // Half a second in: at key 1.
+            assert!((set.movers[0].pose.pos.z - 100.0).abs() < 1.0);
+        }
+    }
+    assert!((a_open.unwrap() - 2.0).abs() < 0.05);
+    // B starts when A is open (2 s) and takes 1 s.
+    assert!((b_open.unwrap() - 3.0).abs() < 0.05, "{b_open:?}");
+}
+
+#[test]
+fn trigger_loop_runs_until_triggered_again() {
+    let mut set = set_of(mover("TriggerLoop", &[[0.0; 3], [0.0, 0.0, 100.0]], 0.5, 0.0), vec![]);
+    let fixed = floor();
+    let mut p = far_player();
+    let mut ev = Vec::new();
+    set.send("Door1", &mut ev);
+    for _ in 0..(60 * 3) {
+        set.step(DT, &fixed, &mut p);
+    }
+    assert!(set.movers[0].stats.opened >= 2);
+    set.send("Door1", &mut ev);
+    for _ in 0..(60 * 3) {
+        set.step(DT, &fixed, &mut p);
+    }
+    assert!(set.movers[0].is_closed());
 }
