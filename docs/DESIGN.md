@@ -21,6 +21,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
+| `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
+| `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
 Only `rc_viewer`, `rc_character`, `rc_level_viewer` and `rc_soundtest` use Bevy
@@ -928,3 +930,107 @@ written to disk. The program:
   used. The sandbox runs are on Linux, so Linux is tested; building there
   needs the ALSA development package (`libasound2-dev` on Ubuntu). Windows
   and Android are not tested yet.
+
+## Delta Squad (`rc_squad`, `rc_squad_plugin`)
+
+Sev (07), Fixer (40) and Scorch (62) follow the player and take the four
+squad orders of the original. Every number is in `data/squad/squad.toml`.
+
+### Bodies
+
+Each squad mate is an `rc_movement::Pawn`, the same body and physics as the
+player (the commandos share the player's speeds and size in the game's
+data). The squad steers each one the way a player would press keys: a
+`MoveInput` that faces the next point and holds "forward", with "walk" held
+when the spot is closer than 400 uu (the original's `AUTORUNDISTANCE`). A
+body that barely moves for 0.6 s jumps once; after 3 s it's logged as stuck.
+
+### Orders are stances, and stances are tethers
+
+In the original each order switches the squad's "stance". A stance ties
+("tethers") each member to something and gives two pairs of distances,
+read from the stance classes' defaults:
+
+| Order (PC key) | Stance class | Tied to | Set off beyond | Stop within | Urgent beyond / until |
+|---|---|---|---|---|---|
+| Search and destroy (F1) | StanceSearchAndDestroy | objective (we use the leader) | 512 | 256 | 2048 / 1280 |
+| Form up (F2) | StanceFormUp | leader | 768 | 192 | 1280 / 768 |
+| Secure position (F3, aimed) | StanceSecurePosition | the aimed spot | 768 | 128 | 1024 / 512 |
+| Hold (no PC key) | StanceHold | where they stood | 512 | 256 | 768 / 384 |
+| Cancel (F4) | (cancels all marked jobs, back to form up) | | | | |
+
+How we use them (the original does this in compiled code, so the rules are
+our reading of the numbers):
+
+- Every 0.25 s (`DecisionInterval`) each member works out its spot and its
+  distance to what it's tied to.
+- Standing, it stays put until that distance passes "set off beyond". Then
+  it walks (or runs) to its spot, and stops at the spot or once back within
+  "stop within". So the squad doesn't shuffle after every step: on geo_01a
+  they set off when the player was 837 uu away and stopped about 200 uu
+  from them.
+- Beyond "urgent" it always runs, until back within the second number.
+- A direct order (pressing the key) sends everyone to their new spot at
+  once, all the way, whatever the distances.
+- If it gets stuck while already within "set off beyond", it stops where it
+  is ("stopped short" in the log) instead of pushing at the obstacle.
+
+Spots (our own, in `squad.toml`): form up uses three slots behind the
+leader, measured along the way they face; search and destroy three slots
+spread out ahead; secure position a circle of 110 uu around the spot. A
+slot inside a wall is pulled back towards the leader (or the spot) and
+dropped to the floor below.
+
+Search and destroy in the original advances to the squad's next objective
+(set by each map's scripts). Map objectives aren't read yet, so we tie it
+to the leader. With enemies known (`SquadThreats`), each member closes to
+half the search radius (768 uu, `Squad.DefaultSearchAndDestroyRadius`) of
+the nearest one within reach.
+
+### Aimed orders and marked jobs
+
+F3 and `squad_command` trace a line from the player's eyes up to 4096 uu.
+Where it meets the world, the spot is moved back a body's width and
+dropped to the floor. If the aim is within 0.12 radians of a squad marker,
+`squad_command` (and `use`) send the nearest free member to do that job
+instead.
+
+A marked job is two actors in the map: the thing (the "anchor", like
+`BactaDispenserGEO4`) and a `SquadMarkerSpot` next to it whose `MyAnchor`
+names it. The member walks to the spot, works for 3 s (our own; the
+original plays an animation), and the marker is done. Stuck for 10 s on
+the way, it gives the job up. geo_01a has 6: five bacta dispensers and a
+demolition charge.
+
+### Where the squad comes from
+
+`spawn = "with_player"` puts all three in their form-up slots at the
+start. The original brings them in through each map's scripts: on geo_01a
+only Scorch, from `PawnFactory14` on the `levelstart` event. The log lists
+these (`the map would bring in ...`) for later.
+
+### Finding the way
+
+Routes come from `rc_nav` (the enemies thread's crate: the map's path
+nodes and links). The squad only asks for one when a straight walk is
+blocked: it sweeps a slightly slimmer body from where it is to the spot,
+lifted by a step's height so floors and small steps don't count.
+
+### In Bevy
+
+`SquadPlugin` follows `docs/PLUGINS.md`. Its systems run in
+`GameSet::Simulate` inside `SquadSet` (order the player's movement before
+it). It reads `ActionState`, the `Player` and `PlayerCamera` transforms and
+`LevelCollision`, and writes `SquadReadout`. A `SquadOrder` message lets
+anything else (a script, a touch menu, a VR gesture) give orders. Each
+member is an entity with `SquadMate` and a `Transform` at its feet, facing
+its way like the player's; with a renderer it gets a capsule in its own
+colour (`EnhancedVisionColor` from the Properties package) and a dark
+visor, until the real model is drawn.
+
+### How we check it without looking
+
+`rc_squad_sim` runs the real plugin on a real map with no window, in fixed
+1/60 s steps, with a scripted player. It logs every order, set-off,
+arrival, stuck, job and a once-a-second line with every member's position,
+state and distances, and checks 18 numbers (see `README.md`).
