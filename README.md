@@ -215,7 +215,7 @@ copy of the game.
   2 droids destroyed by a stand-in player, no droid shooting another, and
   the droids on screen had the skin's colours (all 12 checks passed).
 
-- **Saving and loading (unit-tested; not yet run in the real game).**
+- **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
   checkpoint the level reports are saved automatically to the checkpoint
   save. A save holds where you are and where you look, your health, shield,
@@ -223,7 +223,9 @@ copy of the game.
   droids are still alive, where they are and their health. Saves are
   readable text files in `%APPDATA%\rc_game\saves` on Windows or
   `~/.local/share/rc_game/saves` on Linux (change it with `[save] folder` in
-  `settings.toml`), never in the game's folder.
+  `settings.toml`), never in the game's folder. The scripted run saves,
+  walks 422 units away and quickloads, and the player comes back 0.00
+  units from the saved spot with the ammo as it was.
 
 ## What doesn't work yet
 
@@ -271,8 +273,9 @@ copy of the game.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
   being built to plug into it). No briefings or cut scenes. Saving: the
   squad and doors aren't saved yet, there's no Load Game screen yet (the
-  menu's LOAD GAME stays greyed out), and the original's own checkpoint
-  places aren't used yet (levels have only the level-start checkpoint). Options are a short list. Not tested on Windows,
+  menu's LOAD GAME stays greyed out), and the original's own checkpoints
+  (144 found in the campaign maps) wait on the level scripts part to fire
+  them, so for now each level has only its level-start checkpoint. Options are a short list. Not tested on Windows,
   with a gamepad, or with a touch screen.
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the

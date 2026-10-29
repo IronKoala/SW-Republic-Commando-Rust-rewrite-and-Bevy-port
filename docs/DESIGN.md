@@ -1699,8 +1699,14 @@ every few seconds anyway.
 under the name "level start". Level scripts send `CheckpointReached { name
 }`; the first time each name arrives it is added to `[checkpoints]` and
 `checkpoint.toml` is written again. Repeats are ignored, also after a load.
-Where the original places its checkpoints is not found yet (that needs the
-game's maps and scripts, read only).
+The original does this with placeable `CTGame.Checkpoint` actors. When an
+event matching a checkpoint's `Tag` fires, it waits until the player is up
+(not incapacitated) and autosaves. `rc_level::checkpoints::read` lists a
+map's checkpoints and the actors whose `Event` names each tag. The 50
+campaign maps with checkpoints hold 144: 56 fired by a walk-in `Trigger`
+and 88 by level scripts. The level scripts part fires them and sends
+`CheckpointReached` with the checkpoint actor's name (like `checkpoint1`).
+`DefaultCtrl.ini` binds quicksave to F5 and quickload to F9, as we do.
 
 **Files and folder.** `quicksave.toml`, `checkpoint.toml` and
 `save_NAME.toml` (named saves, for a save menu; only letters, digits, `-`
@@ -1712,8 +1718,8 @@ its own folder). Never the game's install. Each file is written to
 `NAME.toml.writing` and then swapped in, so a crash can't leave half a save.
 `--script` runs save into `logs/script_saves`, emptied at the start.
 
-**Keys and menus.** `Action::QuickSave` (F5) and `Action::QuickLoad` (F9)
-are our choice until checked against the original's `DefaultCtrl.ini`.
+**Keys and menus.** `Action::QuickSave` (F5) and `Action::QuickLoad` (F9),
+the original's keys.
 `SaveList` lists the saves newest first for a Load Game screen; a menu
 sends `LoadGame { slot }` or `SaveGame { slot }` and gets `SaveResult` back.
 Every save and load is logged with the prefix `save:` and a one-line summary
