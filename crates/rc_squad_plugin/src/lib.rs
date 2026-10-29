@@ -12,6 +12,13 @@
 //! - each squad mate is an `rc_combat` target (`Health`, `Shield`, `Team`,
 //!   `Hittable`) with the original's numbers from `data/squad/squad.toml`;
 //!   at 0 health they go down (squad mates can't die) and stop;
+//! - they fight: every living `Team::Separatist` character is a threat
+//!   (`SquadThreats`), and their shots are `rc_combat::FireShot`, so the
+//!   weapons part flies the bolts and does the damage;
+//! - downed commandos are revived: squad mates go to each other and to the
+//!   player (when the player has `Dead`), and the player revives a mate by
+//!   holding `Use` next to them. A revive gives health back and removes
+//!   `Dead`;
 //! - it writes `SquadReadout`, logs to `GameLog`, and runs only while
 //!   playing.
 //!
@@ -21,7 +28,9 @@
 //! program without the loading screen (like `rc_walk`).
 
 use bevy::prelude::*;
-use rc_combat::{Dead, Health, Hittable, Shield, Team};
+use rc_combat::{
+    CombatSet, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded, Team,
+};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
@@ -30,8 +39,8 @@ use rc_game_core::{
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
 use rc_squad::{
-    aimed_spot, Leader, MapSquadInfo, MemberState, Navigator, Order, Squad, SquadSettings,
-    StraightLine,
+    aimed_spot, Leader, MapSquadInfo, MemberState, Navigator, Order, Patient, Squad, SquadEvent,
+    SquadSettings, StraightLine, Threat,
 };
 use std::f32::consts::FRAC_PI_2;
 use std::path::{Path, PathBuf};
@@ -44,6 +53,8 @@ pub const ORDER_REACH: f32 = 4096.0;
 pub const MARKER_AIM_ANGLE: f32 = 0.12;
 /// Log every member's position this often, seconds.
 pub const LOG_EVERY: f32 = 1.0;
+/// Log the squad's fight numbers this often, seconds.
+pub const FIGHT_LOG_EVERY: f32 = 5.0;
 
 /// An order from something other than the player's buttons: a script, a
 /// touch menu, a VR gesture, or a test. Aimed orders need their spot
@@ -58,11 +69,42 @@ pub struct SquadState {
     since_log: f32,
 }
 
-/// Enemies the squad should know about, in Unreal units. Filled by
-/// whatever tracks enemies (until combat ties in, nothing does and the
-/// squad only follows and holds).
+/// Enemies the squad knows about this frame, in Unreal units. Rebuilt
+/// every frame from the living `Team::Separatist` characters that have a
+/// `Hittable` body; `Threat::id` is the entity's bits.
 #[derive(Resource, Default, Debug, Clone)]
-pub struct SquadThreats(pub Vec<UVec3>);
+pub struct SquadThreats(pub Vec<Threat>);
+
+/// The squad's fight so far, per member (in `Squad::members` order), for
+/// the log and tests.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct SquadFightStats {
+    pub shots: Vec<u32>,
+    /// Shots that landed on an enemy.
+    pub hits: Vec<u32>,
+    pub kills: Vec<u32>,
+    /// Revives done: by each member, and by the player.
+    pub revives: Vec<u32>,
+    pub player_revives: u32,
+    /// Seconds from going down to back up, every revive.
+    pub revive_waits: Vec<f32>,
+    /// Squad time each commando went down (index = member, last = player).
+    down_since: Vec<Option<f32>>,
+    since_log: f32,
+}
+
+impl SquadFightStats {
+    fn sized(n: usize) -> Self {
+        SquadFightStats {
+            shots: vec![0; n],
+            hits: vec![0; n],
+            kills: vec![0; n],
+            revives: vec![0; n],
+            down_since: vec![None; n + 1],
+            ..Default::default()
+        }
+    }
+}
 
 /// What the current map tells the squad: marked jobs, where the map would
 /// bring squad mates in, and its path network.
@@ -155,6 +197,7 @@ impl Plugin for SquadPlugin {
         app.add_message::<SquadOrder>()
             .init_resource::<SquadState>()
             .init_resource::<SquadThreats>()
+            .init_resource::<SquadFightStats>()
             .add_systems(OnEnter(GameState::Loading), load_map_data)
             .add_systems(OnExit(GameState::InGame), clear_squad)
             .add_systems(
@@ -163,12 +206,21 @@ impl Plugin for SquadPlugin {
                     spawn_squad,
                     check_down,
                     take_orders,
+                    gather_threats,
                     run_squad,
                     write_readout,
                 )
                     .chain()
                     .in_set(GameSet::Simulate)
                     .in_set(SquadSet)
+                    .before(CombatSet::Fire)
+                    .run_if(playing),
+            )
+            .add_systems(
+                Update,
+                count_hits
+                    .in_set(GameSet::Simulate)
+                    .after(CombatSet::ApplyDamage)
                     .run_if(playing),
             )
             .add_systems(
@@ -211,7 +263,14 @@ fn load_map_data(
     commands.insert_resource(data);
 }
 
-fn clear_squad(mut state: ResMut<SquadState>) {
+fn clear_squad(
+    mut state: ResMut<SquadState>,
+    stats: Res<SquadFightStats>,
+    log: Option<Res<GameLog>>,
+) {
+    if let Some(squad) = &state.squad {
+        log_line(&log, fight_line(squad, &stats));
+    }
     state.squad = None;
 }
 
@@ -315,6 +374,7 @@ fn spawn_squad(
     for e in &events {
         log_line(&log, e.to_string());
     }
+    commands.insert_resource(SquadFightStats::sized(squad.members.len()));
     log_line(
         &log,
         format!(
@@ -378,6 +438,9 @@ fn spawn_squad(
             ),
             Team::Republic,
             Hittable::COMMANDO,
+            // The original's squad damage table: droid bolts x0.15,
+            // explosions x0.4, stuns x0.
+            DamageTable("DV_OrganicCTSquadDamage".into()),
         ));
         if let Some((body, visor, visor_mat, mats, height)) = &look {
             e.with_children(|c| {
@@ -471,16 +534,47 @@ fn take_orders(
     }
 }
 
+/// Every living enemy with a body, for the squad to fight.
+fn gather_threats(
+    mut threats: ResMut<SquadThreats>,
+    enemies: Query<(Entity, &Transform, &Team, &Hittable), Without<Dead>>,
+) {
+    threats.0.clear();
+    for (e, t, team, hit) in &enemies {
+        if *team != Team::Separatist {
+            continue;
+        }
+        let feet = to_unreal(t.translation);
+        let centre = feet + UVec3::new(0.0, 0.0, hit.center_up);
+        threats.0.push(Threat {
+            id: e.to_bits(),
+            feet,
+            centre,
+            // Eyes near the top of the body (a battle droid's are 60 uu
+            // above its middle, a commando's 64).
+            eye: centre + UVec3::new(0.0, 0.0, hit.half_height * 0.75),
+        });
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn run_squad(
     time: Res<Time>,
     mut state: ResMut<SquadState>,
-    player: Query<&Transform, With<Player>>,
+    mut player: Query<(Entity, &Transform, Option<&mut Health>, Has<Dead>), With<Player>>,
+    mut mates: Query<(Entity, &SquadMate, &mut Health), Without<Player>>,
+    actions: Option<Res<ActionState>>,
     collision: Option<Res<LevelCollision>>,
     map: Option<Res<SquadMapData>>,
     threats: Res<SquadThreats>,
+    mut stats: ResMut<SquadFightStats>,
+    mut fire: MessageWriter<FireShot>,
+    mut commands: Commands,
     log: Option<Res<GameLog>>,
 ) {
-    let (Ok(pt), Some(collision)) = (player.single(), collision) else {
+    let (Ok((player_e, pt, mut player_health, player_dead)), Some(collision)) =
+        (player.single_mut(), collision)
+    else {
         return;
     };
     let leader = leader_from(pt);
@@ -490,20 +584,200 @@ fn run_squad(
         return;
     };
     squad.threats.clone_from(&threats.0);
+    if squad.leader_down != player_dead {
+        squad.leader_down = player_dead;
+        let n = stats.down_since.len();
+        if n > 0 {
+            stats.down_since[n - 1] = player_dead.then_some(squad.time);
+        }
+        log_line(
+            &log,
+            format!(
+                "t={:.2} the player is {}",
+                squad.time,
+                if player_dead { "DOWN" } else { "back up" }
+            ),
+        );
+    }
     let world: &dyn World = &*collision.0;
     let nav: &dyn Navigator = match map.as_ref().and_then(|m| m.nav.as_ref()) {
         Some(g) => g,
         None => &StraightLine,
     };
-    let events = squad.update(dt, leader, world, nav);
+    let holding_use = actions.as_ref().is_some_and(|a| a.pressed(Action::Use));
+    let mut events = squad.player_use(dt, leader, holding_use);
+    events.extend(squad.update(dt, leader, world, nav));
+    let weapon = squad.settings.fight.weapon.clone();
+    let revive_health = squad.settings.revive.health.clamp(0.01, 1.0);
     for e in &events {
-        log_line(&log, format!("t={:.2} {e}", squad.time));
+        match e {
+            SquadEvent::Fire {
+                index,
+                origin,
+                direction,
+                burst_start,
+                ..
+            } => {
+                if let Some((entity, _, _)) = mates.iter().find(|(_, m, _)| m.index == *index) {
+                    fire.write(FireShot {
+                        shooter: entity,
+                        origin: to_bevy(*origin),
+                        direction: Vec3::new(direction.x, direction.z, direction.y),
+                        weapon: weapon.clone(),
+                    });
+                    if let Some(n) = stats.shots.get_mut(*index) {
+                        *n += 1;
+                    }
+                }
+                if *burst_start {
+                    log_line(&log, format!("t={:.2} {e}", squad.time));
+                }
+            }
+            SquadEvent::HeldFire { .. } => log_line(&log, format!("t={:.2} {e}", squad.time)),
+            SquadEvent::ReviveDone {
+                member, patient, ..
+            } => {
+                log_line(&log, format!("t={:.2} {e}", squad.time));
+                let by = squad
+                    .members
+                    .iter()
+                    .position(|m| &m.settings.name == member);
+                match by {
+                    Some(i) => stats.revives[i] += 1,
+                    None => stats.player_revives += 1,
+                }
+                let slot = match patient {
+                    Patient::Mate(i) => *i,
+                    Patient::Leader => stats.down_since.len().saturating_sub(1),
+                };
+                if let Some(since) = stats.down_since.get_mut(slot).and_then(|s| s.take()) {
+                    let wait = squad.time - since;
+                    stats.revive_waits.push(wait);
+                    log_line(
+                        &log,
+                        format!(
+                            "t={:.2} {} was down for {wait:.1} s",
+                            squad.time,
+                            e_patient(e)
+                        ),
+                    );
+                }
+                // Health back and `Dead` gone: the game sees them up again.
+                match patient {
+                    Patient::Mate(i) => {
+                        for (entity, mate, mut h) in &mut mates {
+                            if mate.index == *i {
+                                h.current = h.max * revive_health;
+                                commands.entity(entity).remove::<Dead>();
+                            }
+                        }
+                    }
+                    Patient::Leader => {
+                        if let Some(h) = player_health.as_mut() {
+                            h.current = h.max * revive_health;
+                        }
+                        commands.entity(player_e).remove::<Dead>();
+                    }
+                }
+            }
+            _ => log_line(&log, format!("t={:.2} {e}", squad.time)),
+        }
     }
     state.since_log += dt;
     if state.since_log >= LOG_EVERY {
         state.since_log = 0.0;
         log_line(&log, status_line(squad, leader));
     }
+    stats.since_log += dt;
+    if stats.since_log >= FIGHT_LOG_EVERY {
+        stats.since_log = 0.0;
+        log_line(&log, fight_line(squad, &stats));
+    }
+}
+
+fn e_patient(e: &SquadEvent) -> String {
+    match e {
+        SquadEvent::ReviveDone { patient_name, .. } => patient_name.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Hits and kills by squad mates, from the weapons part's messages.
+fn count_hits(
+    state: Res<SquadState>,
+    mut stats: ResMut<SquadFightStats>,
+    mut landed: MessageReader<ShotLanded>,
+    mut died: MessageReader<Died>,
+    mates: Query<&SquadMate>,
+    names: Query<&Name>,
+    log: Option<Res<GameLog>>,
+) {
+    let time = state.squad.as_ref().map_or(0.0, |s| s.time);
+    for l in landed.read() {
+        let (Ok(m), Some(t)) = (mates.get(l.shooter), l.target) else {
+            continue;
+        };
+        if mates.contains(t) {
+            log_line(
+                &log,
+                format!("t={time:.2} {} hit a squad mate by mistake", m.name),
+            );
+            continue;
+        }
+        if let Some(n) = stats.hits.get_mut(m.index) {
+            *n += 1;
+        }
+    }
+    for d in died.read() {
+        if mates.contains(d.entity) {
+            if let Some(slot) = stats.down_since.get_mut(mates.get(d.entity).unwrap().index) {
+                *slot = Some(time);
+            }
+            continue;
+        }
+        let Some(m) = d.killer.and_then(|k| mates.get(k).ok()) else {
+            continue;
+        };
+        if let Some(n) = stats.kills.get_mut(m.index) {
+            *n += 1;
+        }
+        let who = names
+            .get(d.entity)
+            .map_or_else(|_| format!("{:?}", d.entity), |n| n.to_string());
+        log_line(&log, format!("t={time:.2} {} KILLED {who}", m.name));
+    }
+}
+
+/// The squad's fight numbers so far, for the log.
+pub fn fight_line(squad: &Squad, stats: &SquadFightStats) -> String {
+    let mut s = format!("t={:.2} fight:", squad.time);
+    for (i, m) in squad.members.iter().enumerate() {
+        s.push_str(&format!(
+            " {} {} shots, {} hits, {} kills, {} revives, held fire {} times;",
+            m.settings.name,
+            stats.shots.get(i).copied().unwrap_or(0),
+            stats.hits.get(i).copied().unwrap_or(0),
+            stats.kills.get(i).copied().unwrap_or(0),
+            stats.revives.get(i).copied().unwrap_or(0),
+            m.fight.held_fire
+        ));
+    }
+    let waits = &stats.revive_waits;
+    s.push_str(&format!(
+        " player revives {}; revives done {}{}",
+        stats.player_revives,
+        waits.len(),
+        if waits.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", down for {:.1}-{:.1} s",
+                waits.iter().copied().fold(f32::INFINITY, f32::min),
+                waits.iter().copied().fold(0.0, f32::max)
+            )
+        }
+    ));
+    s
 }
 
 /// One line with everyone's position and state, for the log.
@@ -522,6 +796,7 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
             MemberState::Moving { urgent: true, .. } => "running (urgent)".to_string(),
             MemberState::Moving { .. } => "moving".to_string(),
             MemberState::Working { left } => format!("working {left:.1}s"),
+            MemberState::Reviving { left } => format!("reviving {left:.1}s"),
         };
         let state = if m.down { "DOWN".to_string() } else { state };
         s.push_str(&format!(
@@ -607,7 +882,10 @@ fn write_readout(
     }
 }
 
-fn place_bodies(state: Res<SquadState>, mut mates: Query<(&SquadMate, &mut Transform)>) {
+fn place_bodies(
+    state: Res<SquadState>,
+    mut mates: Query<(&SquadMate, &mut Transform), Without<Player>>,
+) {
     let Some(squad) = state.squad.as_ref() else {
         return;
     };

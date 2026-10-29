@@ -76,11 +76,23 @@ copy of the game.
   F4 cancel, and aiming at a squad marker (like a bacta dispenser) and
   pressing the squad order key sends one of them to do it. Distances are
   the game's own; every number is in `data/squad/squad.toml`. The
-  windowless test run `rc_squad_sim` passes 23 checks on geo_01a. They
+  windowless test run `rc_squad_sim` passes 33 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
-  and stays put (reviving isn't built yet). They are in the game program
-  (`rc_game`): start a level and they stand with you. Drawn as coloured
-  capsules for now.
+  and stays put until revived. They are in the game program (`rc_game`):
+  start a level and they stand with you. Drawn as coloured capsules for
+  now.
+
+- **The squad fights and revives (tested in the cloud sandbox by numbers,
+  not yet on Windows or with eyes).** Sev, Fixer and Scorch shoot enemies
+  they can see with the DC-17m, in bursts, and hold fire when you or
+  another squad mate is in the way. When one goes down, the nearest other
+  runs over and revives them in 3 s; they revive you the same way, and you
+  revive them by holding Use (E) next to them for 3 s. While you're down
+  you can look around but not move. The rules are our own (the original's
+  are compiled code we don't read) and every number is in the `[fight]`
+  and `[revive]` parts of `data/squad/squad.toml`; the ones marked "guess"
+  still have to be read from the game. Droids still only shoot at you, not
+  at the squad.
 
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
@@ -547,10 +559,21 @@ To run the squad's test on the first level (no window; about a minute):
 cargo run --release -p rc_squad_plugin --example rc_squad_sim
 ```
 
-It logs to `logs\rc_squad_sim.log` and should end with `SIM DONE: 23 checks
+It logs to `logs\rc_squad_sim.log` and should end with `SIM DONE: 33 checks
 passed, 0 failed`. Lines starting `squad: t=` show each squad mate's
 position and distance to you once a second; `ORDER`, `sets off`,
-`arrived`, `STUCK` and `working at` lines show what they decided.
+`arrived`, `STUCK` and `working at` lines show what they decided;
+`targets`, `fires at`, `KILLED`, `goes to revive`, `revived` and the
+`fight:` lines every 5 s show their fight.
+
+The squad's fight in the test room, with no game files needed (a few
+seconds):
+
+```
+cargo test --release -p rc_squad_plugin --test fight_room
+```
+
+It should say `test result: ok. 1 passed`. The log is `logs\fight_room.log`.
 
 ## Credits
 
