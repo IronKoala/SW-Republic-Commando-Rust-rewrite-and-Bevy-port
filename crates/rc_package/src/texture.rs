@@ -4,9 +4,9 @@
 //! Layout learned from UE Viewer (github.com/gildor2/UEViewer, MIT, Konstantin
 //! Nosov): `Unreal/UnrealMaterial/UnTexture2.cpp`, `UnMaterial2.h` (FMipmap,
 //! ETextureFormat) and `UnCoreSerialize.cpp` (lazy arrays). Republic Commando
-//! has no layout change there; UE Viewer guesses its format 14 is CxV8U8.
-//! Format 12 is not named anywhere we found; in the real files it always
-//! uses 2 bytes per pixel (measured on all 208 of its mipmaps).
+//! has no layout change there; UE Viewer guesses (unverified) its format 14 is
+//! CxV8U8. We measured instead that 12 is V8U8 and 14 is L6V5U5, two bump-map
+//! layouts from Direct3D (see `docs/DESIGN.md`, "Bump maps").
 //! Written from those descriptions; no code copied.
 
 use crate::properties::{self, Property, Value};
@@ -54,8 +54,8 @@ pub fn format_name(format: u8) -> &'static str {
         9 => "L8",
         10 => "G16",
         11 => "RRRGGGBBB",
-        12 => "12 (2 bytes per pixel, name unknown)",
-        14 => "CxV8U8?",
+        12 => "V8U8",
+        14 => "L6V5U5",
         _ => "unknown",
     }
 }

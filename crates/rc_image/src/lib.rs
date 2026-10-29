@@ -3,7 +3,10 @@
 //!
 //! Knows nothing about Unreal packages: it is given raw bytes, a format and a
 //! size. DXT ("S3TC") block layouts follow Microsoft's public Direct3D
-//! documentation for BC1, BC2 and BC3. PNG follows the W3C PNG specification.
+//! documentation for BC1, BC2 and BC3. The two bump-map layouts (V8U8 and
+//! L6V5U5) follow Direct3D's public D3DFORMAT descriptions; which Republic
+//! Commando format number is which was measured (see `docs/DESIGN.md`).
+//! PNG follows the W3C PNG specification.
 
 pub mod png;
 
@@ -29,6 +32,13 @@ pub enum PixelFormat {
     Dxt5,
     /// Two bytes per pixel, grayscale (terrain heightmaps).
     G16,
+    /// Bump map, two bytes per pixel: signed U (sideways tilt), then signed V
+    /// (up/down tilt), each -128..127. Republic Commando format 12.
+    V8U8,
+    /// Bump map, one 16-bit number per pixel: bits 0-4 signed U, bits 5-9
+    /// signed V (-16..15), bits 10-15 a brightness value L (0..63).
+    /// Republic Commando format 14.
+    L6V5U5,
 }
 
 #[derive(Debug)]
@@ -63,7 +73,7 @@ pub fn decode(
     let needed = match format {
         PixelFormat::P8 => w * h,
         PixelFormat::Bgra8 => w * h * 4,
-        PixelFormat::G16 => w * h * 2,
+        PixelFormat::G16 | PixelFormat::V8U8 | PixelFormat::L6V5U5 => w * h * 2,
         PixelFormat::Dxt1 => blocks * 8,
         PixelFormat::Dxt3 | PixelFormat::Dxt5 => blocks * 16,
     };
@@ -95,6 +105,23 @@ pub fn decode(
                 // Keep the high byte of the little-endian 16-bit value.
                 let g = i[1];
                 o.copy_from_slice(&[g, g, g, 255]);
+            }
+        }
+        PixelFormat::V8U8 => {
+            for (o, i) in out.chunks_exact_mut(4).zip(data.chunks_exact(2)) {
+                let (u, v) = (i[0] as i8 as f32 / 127.0, i[1] as i8 as f32 / 127.0);
+                o.copy_from_slice(&normal_rgba(u, v, 255));
+            }
+        }
+        PixelFormat::L6V5U5 => {
+            for (o, i) in out.chunks_exact_mut(4).zip(data.chunks_exact(2)) {
+                let word = u16::from_le_bytes([i[0], i[1]]);
+                let signed5 = |bits: u16| {
+                    let b = (bits & 31) as i32;
+                    (if b >= 16 { b - 32 } else { b }) as f32 / 15.0
+                };
+                let l = ((word >> 10) & 63) as u32 * 255 / 63;
+                o.copy_from_slice(&normal_rgba(signed5(word), signed5(word >> 5), l as u8));
             }
         }
         PixelFormat::Dxt1 | PixelFormat::Dxt3 | PixelFormat::Dxt5 => {
@@ -132,6 +159,17 @@ pub fn decode(
         height: h,
         pixels: out,
     })
+}
+
+/// Turn a bump map's two tilts (each -1..1) into the usual "normal map"
+/// colours: red = sideways tilt, green = up/down tilt, blue = how much the
+/// surface faces straight out, each mapped from -1..1 to 0..255. A flat
+/// surface (no tilt) becomes (128, 128, 255), the light blue of normal maps.
+fn normal_rgba(u: f32, v: f32, alpha: u8) -> [u8; 4] {
+    let (u, v) = (u.clamp(-1.0, 1.0), v.clamp(-1.0, 1.0));
+    let z = (1.0 - u * u - v * v).max(0.0).sqrt();
+    let to_byte = |x: f32| ((x * 0.5 + 0.5) * 255.0).round() as u8;
+    [to_byte(u), to_byte(v), to_byte(z), alpha]
 }
 
 fn rgb565(c: u16) -> [u8; 3] {
@@ -308,6 +346,23 @@ mod tests {
         pal[7] = [10, 20, 30, 255];
         let img = decode(PixelFormat::P8, 2, 1, &[7, 0], Some(&pal)).unwrap();
         assert_eq!(img.pixels, [10, 20, 30, 255, 0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn v8u8_flat_and_tilted() {
+        // (0, 0) is a flat surface; (127, 0) tilts fully sideways.
+        let img = decode(PixelFormat::V8U8, 2, 1, &[0, 0, 127, 0], None).unwrap();
+        assert_eq!(img.pixels, [128, 128, 255, 255, 255, 128, 128, 255]);
+    }
+
+    #[test]
+    fn l6v5u5_fields() {
+        // L = 63 (bits 10-15), V = -1 (bits 5-9 = 31), U = 0.
+        let word: u16 = (63 << 10) | (31 << 5);
+        let img = decode(PixelFormat::L6V5U5, 1, 1, &word.to_le_bytes(), None).unwrap();
+        let p = &img.pixels;
+        assert_eq!((p[0], p[3]), (128, 255));
+        assert!(p[1] < 128 && p[2] > 250, "{p:?}");
     }
 
     #[test]
