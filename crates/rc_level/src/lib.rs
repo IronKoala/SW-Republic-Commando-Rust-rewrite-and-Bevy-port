@@ -6,5 +6,8 @@
 
 pub mod actors;
 pub mod bsp;
+pub mod class_look;
 pub mod collision;
 pub mod lightmap;
+pub mod map_collision;
+pub mod volumes;

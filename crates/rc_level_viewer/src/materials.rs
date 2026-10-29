@@ -249,6 +249,13 @@ impl Materials {
         if class == "Texture" {
             return decode_texture(pkg, data, k);
         }
+        if let Some(colour_prop) = match class.as_str() {
+            "ConstantColor" => Some("Color"),
+            "FadeColor" => Some("Color1"),
+            _ => None,
+        } {
+            return constant_colour(pkg, data, k, colour_prop);
+        }
         let links = links_for(&class);
         if links.is_empty() {
             return Err(format!("material class {class} not handled"));
@@ -280,4 +287,30 @@ impl Materials {
         let names: Vec<_> = props.iter().map(|p| pkg.name(p.name).to_string()).collect();
         Err(format!("{class} has none of {links:?} (it has {names:?})"))
     }
+}
+
+/// A material that is one flat colour (`ConstantColor`, or the first colour
+/// of a `FadeColor`), as a 1x1 picture. The colour is a 4-byte `Color`
+/// struct, read red, green, blue, alpha (UE Viewer's `FColor` order). An
+/// unset colour is the engine default, opaque black.
+fn constant_colour(pkg: &Package, data: &[u8], k: usize, name: &str) -> Result<Picture, Failure> {
+    let e = &pkg.exports[k];
+    let start = e.serial_offset as usize;
+    let bytes = &data[start..start + e.serial_size as usize];
+    let mut r = rc_package::Reader::new(bytes);
+    let props = properties::read_properties(pkg, &mut r).map_err(|e| e.to_string())?;
+    let rgba = match properties::find(pkg, &props, name).map(|p| &p.value) {
+        Some(Value::Raw(b)) if b.len() == 4 => [b[0], b[1], b[2], b[3]],
+        None => [0, 0, 0, 255],
+        Some(v) => return Err(format!("{name} is {v:?}, expected 4 colour bytes")),
+    };
+    Ok(Picture {
+        image: Rgba {
+            width: 1,
+            height: 1,
+            pixels: rgba.to_vec(),
+        },
+        has_alpha: rgba[3] < 255,
+        additive: false,
+    })
 }
