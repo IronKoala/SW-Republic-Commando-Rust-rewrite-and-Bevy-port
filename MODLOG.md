@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: A firing range for the weapons (rc_shoot), with the game's sounds and gun model
+
+- **Changed:** New program `crates/rc_combat/src/bin/rc_shoot.rs`: the test room with three battle droids, one firing back, the gun in view, the window title as a display, and a `--script` self-test. The weapon sounds now load straight from the game's `.uax` packages. Gun parts without a texture are drawn grey instead of left out. New test `real_game_sounds_and_model` (runs only when `RC_GAME_DIR` is set). Docs: `docs/DESIGN.md` and `docs/RESEARCH.md` got a weapons section, README says how to run it.
+- **Why:** To see and hear the weapons working with the real game files, and to check them without a person watching.
+- **Tested how:** In the cloud sandbox with the game's script, sound, mesh and texture packages copied read-only from the install: `rc_shoot --script` under a virtual screen, `cargo test -p rc_combat` with and without `RC_GAME_DIR`, and a look at the self-test's picture.
+- **Result:** `script done: 12 of 12 checks passed`. 5 sounds loaded; the DC-17m model has 2 parts and the pistol 1, all textured. The picture shows the textured DC-17m in the lower right and the crosshair on the droid; the gun's corner has 590 colours and no magenta. The far droid's 2 hits took the shield from 100 to 52 and left health at 200. 22 tests pass.
+- **Still broken / not tested:** Not run on Windows. Sound couldn't be heard (the sandbox has no sound card); it was only checked that the sounds load. The view kick's settling is our own guess.
+- **Next:** The game program (`rc_game`) adds `CombatPlugin`; first-person arms and muzzle flash.
+
 ## 2026-10-29: Weapons, shots, health and damage (rc_combat)
 
 - **Changed:** New crate `crates/rc_combat` with `CombatPlugin` (= `HealthPlugin` + `WeaponsPlugin`), weapon files `data/weapons/dc17m_blaster.toml`, `dc15s_pistol.toml`, `e5_blaster.toml`, `e5_blaster_tm.toml`, and the player's numbers in `data/combat/player.toml`. The player fires from the input actions (fire, reload, next/previous weapon); bolts fly with the game's acceleration and top speed, hit the level or a character's cylinder, and send `Damage`; shields take damage first and recharge after a delay; `Died` is sent at 0 health. Anyone (droids, squad) can fire with a `FireShot` message. Took the enemies thread's one-line fix to `class_defaults.rs` so both branches match.

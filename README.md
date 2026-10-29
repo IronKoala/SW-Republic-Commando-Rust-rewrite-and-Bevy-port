@@ -70,6 +70,17 @@ copy of the game.
   `rc_walk --map geo_01a` puts you in the first Geonosis level instead, with
   collision against its walls, floors and props.
 
+- **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
+  not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
+  room holding the game's own DC-17m model, and shoot battle droids. The
+  weapons use the original game's numbers: the rifle fires 10 bolts a second
+  from a 60-shot magazine and reloads in 1.5 s, the pistol fires once per
+  press and recharges itself, and a droid with 100 health goes down after 5
+  rifle hits or 2 pistol hits. One droid fires back, and its hits take your
+  shield before your health. The firing and reload sounds are the game's.
+  Every weapon is a text file in `data/weapons`, which mods can edit.
+  `rc_shoot --script` drives itself through 12 checks and passed all of them.
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
@@ -123,8 +134,9 @@ copy of the game.
   collision: the camera flies through walls.
 - Models are drawn without bump maps or transparency. Only a
   material's main colour texture is used.
-- No levels yet: walking only works in the hand-made test room. No weapons,
-  enemies, health or sound.
+- Weapons: no first-person arms, muzzle flash, grenades, melee or sniper
+  attachment yet, and switching weapons is instant. How the view kick
+  settles back is our own guess.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
@@ -232,6 +244,24 @@ its baked light (and `lighting.cfg`, if you made one). Add `--script` to let
 it walk a square on its own and check itself. You start at the level's
 PlayerStart, which is in the gunship's hold. The gunship isn't solid yet, so
 you drop to the floor below first.
+
+To try the weapons on a firing range (click the window to aim with the
+mouse, left button fires, R reloads, Q or the mouse wheel switches weapon,
+Escape frees the mouse):
+
+```
+cargo run --release -p rc_combat --bin rc_shoot
+```
+
+The window title shows your weapon, ammo, health and shield. To let it test
+itself instead (it shoots on its own and closes when done):
+
+```
+cargo run --release -p rc_combat --bin rc_shoot -- --script
+```
+
+The log goes to `logs\rc_shoot.log`. The last line should be
+`script done: 12 of 12 checks passed`.
 
 To load a level and fly around it:
 
