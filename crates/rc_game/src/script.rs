@@ -3,12 +3,16 @@
 //! pause...), checks the result of each step, logs `CHECK ... PASS/FAIL`,
 //! and exits with code 0 only if every check passed.
 //!
-//! The route: main menu, Campaign, Geonosis, its first level,
-//! loading, the level's walls and sky (looking up), walk forward, pause (nothing moves), resume, quit to the main
-//! menu (the level is cleared), Options (music volume up), back, Quit.
+//! The route: the original main menu (colours checked against the
+//! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
+//! the level's walls and sky (looking up), walk forward, pause (nothing
+//! moves), resume, quit to the main menu (the level is cleared), OPTIONS
+//! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
+//! then QUIT again and YES).
 
 use crate::levels::LevelList;
 use crate::menu::{Menu, Page};
+use crate::original_menu::{self, OriginalMenus};
 use crate::player::Body;
 use crate::settings::Settings;
 use bevy::prelude::*;
@@ -41,6 +45,8 @@ enum Step {
     Note(fn(&mut World)),
     /// Press menu-down until the item the function names is selected.
     SelectItem(&'static str, fn(&mut World) -> Option<usize>),
+    /// Press an action, then check which original menu button has focus.
+    FocusAfter(Action, &'static str),
     /// Capture the window, save it to `logs/<name>.png` and measure its
     /// colours (retried while the capture comes back black).
     Shot(&'static str),
@@ -77,6 +83,8 @@ struct ShotStats {
 #[derive(Resource, Default)]
 struct Shots {
     stats: std::collections::HashMap<&'static str, ShotStats>,
+    /// The captured pictures, for colour checks.
+    pictures: std::collections::HashMap<&'static str, rc_image::Rgba>,
     pending: Option<&'static str>,
     attempts: u32,
 }
@@ -138,23 +146,31 @@ fn steps() -> Vec<Step> {
             Page::Main => Ok("main".into()),
             p => Err(format!("{p:?}")),
         }),
-        Wait(0.5),
-        Shot("main_menu"),
-        Check("main menu is drawn in amber", |w| {
-            let s = shot(w, "main_menu")?;
-            if s.amber > 0.002 && s.lit > 0.002 {
-                Ok(format!(
-                    "{:.2}% amber, {:.1}% lit",
-                    s.amber * 100.0,
-                    s.lit * 100.0
-                ))
+        Wait(0.3),
+        Check("the original main menu is drawn", |w| {
+            let m = w.resource::<OriginalMenus>();
+            if !m.active() {
+                return Err("not loaded (placeholder menu shown)".into());
+            }
+            let focus = focus(w);
+            let n = w.resource::<OriginalMenus>().drawn.len();
+            if n > 100 && focus.as_deref() == Some("MenuOptions[0]") {
+                Ok(format!("{n} pictures and letters, focus on {focus:?}"))
             } else {
-                Err(format!("{s:?}"))
+                Err(format!("{n} pictures and letters, focus on {focus:?}"))
             }
         }),
+        Wait(0.5),
+        Shot("main_menu"),
+        Check("main menu matches the original's pictures", |w| {
+            compare(w, "main_menu", 0.2)
+        }),
+        FocusAfter(Action::MenuDown, "MenuOptions[2]"),
+        FocusAfter(Action::MenuUp, "MenuOptions[0]"),
+        FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         Press(Action::MenuAccept),
         Wait(0.2),
-        Check("Campaign opens the campaign list", |w| match page(w) {
+        Check("CAMPAIGN MAP opens the campaign list", |w| match page(w) {
             Page::Campaigns => Ok("campaigns".into()),
             p => Err(format!("{p:?}")),
         }),
@@ -348,13 +364,26 @@ fn steps() -> Vec<Step> {
                 Err(format!("{p} players, {c} cameras, {meshes} meshes left"))
             }
         }),
+        Check("the original main menu is back, focus on NEW GAME", |w| {
+            match (w.resource::<OriginalMenus>().active(), focus(w)) {
+                (true, Some(f)) if f == "MenuOptions[0]" => Ok(f),
+                other => Err(format!("{other:?}")),
+            }
+        }),
         Note(|w| {
             let v = w.resource::<Settings>().audio.music_volume;
             w.resource_mut::<Noted>().music_volume = v;
         }),
-        Press(Action::MenuDown),
-        Press(Action::MenuAccept), // Options
+        // MULTIPLAYER, LOAD GAME, PROFILES and EXTRAS are greyed out and
+        // skipped.
+        FocusAfter(Action::MenuDown, "MenuOptions[2]"),
+        FocusAfter(Action::MenuDown, "MenuOptions[4]"),
+        Press(Action::MenuAccept), // OPTIONS
         Wait(0.2),
+        Check("OPTIONS opens the options page", |w| match page(w) {
+            Page::Options => Ok("options".into()),
+            p => Err(format!("{p:?}")),
+        }),
         Press(Action::MenuLeft), // music volume down a step
         Wait(0.2),
         Check("left lowers the music volume", |w| {
@@ -368,26 +397,155 @@ fn steps() -> Vec<Step> {
         }),
         Press(Action::MenuBack),
         Wait(0.2),
-        Check("Back returns to the main menu", |w| match page(w) {
-            Page::Main => Ok("main".into()),
+        Check("Back returns to the original main menu", |w| match page(w) {
+            Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
             p => Err(format!("{p:?}")),
         }),
-        Press(Action::MenuDown),
-        Check("Quit is selected", |w| {
-            let s = w.resource::<Menu>().selected;
-            if s == 2 {
-                Ok("item 2".into())
+        FocusAfter(Action::MenuDown, "MenuOptions[7]"),
+        Press(Action::MenuAccept), // QUIT
+        Wait(0.3),
+        Check("QUIT asks the original's question, on NO", |w| {
+            let m = w.resource::<OriginalMenus>();
+            let q = m.question.as_ref().ok_or("no question box")?;
+            match q.focused_name() {
+                Some("BButton") => Ok("question box up, focus on NO (BButton)".into()),
+                f => Err(format!("focus on {f:?}")),
+            }
+        }),
+        Shot("quit_question"),
+        Check("question box matches the original's pictures", |w| {
+            // Mostly dark: the question, title, two buttons and the
+            // background lines.
+            compare(w, "quit_question", 0.03)
+        }),
+        Press(Action::MenuAccept), // NO
+        Wait(0.2),
+        Check("NO closes the question and stays", |w| {
+            let m = w.resource::<OriginalMenus>();
+            if m.question.is_none() && in_state(w, GameState::MainMenu) {
+                Ok("back on the main menu".into())
             } else {
-                Err(format!("item {s}"))
+                Err("question still up".into())
+            }
+        }),
+        Press(Action::MenuAccept), // QUIT again
+        Wait(0.2),
+        Press(Action::MenuRight),
+        Check("right moves to YES", |w| {
+            let m = w.resource::<OriginalMenus>();
+            match m.question.as_ref().and_then(|q| q.focused_name()) {
+                Some("AButton") => Ok("YES (AButton)".into()),
+                f => Err(format!("focus on {f:?}")),
             }
         }),
         Summary,
-        Press(Action::MenuAccept), // Quit: the game should close now.
+        Press(Action::MenuAccept), // YES: the game should close now.
         Wait(5.0),
-        Check("Quit closes the game", |_| {
+        Check("YES closes the game", |_| {
             Err("still running 5 s later".into())
         }),
     ]
+}
+
+fn focus(w: &mut World) -> Option<String> {
+    w.resource::<OriginalMenus>()
+        .main
+        .as_ref()
+        .and_then(|m| m.focused_name().map(str::to_string))
+}
+
+/// Compare the menu area of a screenshot with the same menu painted in
+/// software straight from the original's textures (`rc_menus::render`).
+/// Both are shrunk to 320x240 and compared pixel by pixel. `min_lit` is
+/// how much of the reference must be lit, so that comparing two black
+/// pictures can't pass.
+fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, String> {
+    const W: usize = 320;
+    const H: usize = 240;
+    let shot = w
+        .resource::<Shots>()
+        .pictures
+        .get(name)
+        .cloned()
+        .ok_or("no screenshot")?;
+    let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
+    let ours = shrink(&shot, area, W, H);
+    let mut menus = w.resource_mut::<OriginalMenus>();
+    let reference =
+        original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let mut total = 0.0f64;
+    let mut worst = 0.0f64;
+    let mut far = 0usize;
+    for (a, b) in ours.pixels.chunks_exact(4).zip(reference.pixels.chunks_exact(4)) {
+        let d = (0..3)
+            .map(|k| (a[k] as f64 - b[k] as f64).abs())
+            .sum::<f64>()
+            / 3.0;
+        total += d;
+        worst = worst.max(d);
+        if d > 40.0 {
+            far += 1;
+        }
+    }
+    let n = (W * H) as f64;
+    let mean = total / n;
+    let lit = reference
+        .pixels
+        .chunks_exact(4)
+        .filter(|p| p[0].max(p[1]).max(p[2]) > 30)
+        .count() as f64
+        / n;
+    let _ = std::fs::write(
+        format!("logs/{name}_reference.png"),
+        rc_image::png::encode(&reference),
+    );
+    let msg = format!(
+        "mean difference {mean:.1} of 255, {:.1}% of pixels differ by more than 40, reference {:.0}% lit (saved logs/{name}_reference.png)",
+        far as f64 / n * 100.0,
+        lit * 100.0
+    );
+    // Software and GPU filtering and blending differ a little; a wrong
+    // texture, colour or position shows up as large differences.
+    if mean < 12.0 && (far as f64 / n) < 0.05 && lit > min_lit {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// Cut `area` (in pixels) out of `img` and shrink it to `w` x `h` by
+/// averaging.
+fn shrink(img: &rc_image::Rgba, area: Rect, w: usize, h: usize) -> rc_image::Rgba {
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let x0 = area.min.x + area.width() * x as f32 / w as f32;
+            let x1 = area.min.x + area.width() * (x + 1) as f32 / w as f32;
+            let y0 = area.min.y + area.height() * y as f32 / h as f32;
+            let y1 = area.min.y + area.height() * (y + 1) as f32 / h as f32;
+            let mut sum = [0u32; 3];
+            let mut n = 0u32;
+            for sy in (y0 as usize)..(y1.ceil() as usize).min(img.height) {
+                for sx in (x0 as usize)..(x1.ceil() as usize).min(img.width) {
+                    let i = (sy * img.width + sx) * 4;
+                    for (k, s) in sum.iter_mut().enumerate() {
+                        *s += img.pixels[i + k] as u32;
+                    }
+                    n += 1;
+                }
+            }
+            let o = (y * w + x) * 4;
+            for k in 0..3 {
+                out[o + k] = (sum[k] / n.max(1)) as u8;
+            }
+            out[o + 3] = 255;
+        }
+    }
+    rc_image::Rgba {
+        width: w,
+        height: h,
+        pixels: out,
+    }
 }
 
 fn shot(w: &mut World, name: &str) -> Result<ShotStats, String> {
@@ -449,14 +607,13 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         centre_amber: centre,
     };
     let path = format!("logs/{name}.png");
-    let saved = std::fs::write(
-        &path,
-        rc_image::png::encode(&rc_image::Rgba {
-            width: w,
-            height: h,
-            pixels: rgba,
-        }),
-    );
+    let picture = rc_image::Rgba {
+        width: w,
+        height: h,
+        pixels: rgba,
+    };
+    let saved = std::fs::write(&path, rc_image::png::encode(&picture));
+    shots.pictures.insert(name, picture);
     log.line(format!(
         "script: screenshot {name} {w}x{h}: {:.2}% amber, {:.1}% lit, {centre} amber at the centre; {}",
         stats.amber * 100.0,
@@ -552,6 +709,25 @@ fn run(world: &mut World) {
                     }
                 }
             },
+            Step::FocusAfter(a, want) => {
+                if frames == 0 {
+                    held.insert(a);
+                    done = false;
+                } else {
+                    let f = focus(world);
+                    let mut s = world.resource_mut::<Script>();
+                    if f.as_deref() == Some(want) {
+                        s.passed += 1;
+                        log.line(format!("CHECK {} moves focus to {want} -> PASS", a.name()));
+                    } else {
+                        s.failed += 1;
+                        log.line(format!(
+                            "CHECK {} moves focus to {want}: got {f:?} -> FAIL",
+                            a.name()
+                        ));
+                    }
+                }
+            }
             Step::Shot(name) => {
                 let mut shots = world.resource_mut::<Shots>();
                 if shots.stats.contains_key(name) {
@@ -591,7 +767,10 @@ fn run(world: &mut World) {
             s.frames = 0;
             // Steps that take no time run in the same frame; a key press or
             // wait ends this frame's turn.
-            if matches!(step, Step::Press(_) | Step::Hold(..) | Step::Wait(_)) {
+            if matches!(
+                step,
+                Step::Press(_) | Step::Hold(..) | Step::Wait(_) | Step::FocusAfter(..)
+            ) {
                 break;
             }
         } else {

@@ -17,6 +17,7 @@ mod input;
 mod levels;
 mod menu;
 mod music;
+mod original_menu;
 mod player;
 mod script;
 mod settings;
@@ -284,6 +285,7 @@ fn main() -> AppExit {
     .insert_resource(ExitAfter(frames))
     .add_plugins((
         menu::MenuPlugin,
+        original_menu::OriginalMenuPlugin,
         hud::HudPlugin,
         music::MusicPlugin,
         player::PlayerPlugin,

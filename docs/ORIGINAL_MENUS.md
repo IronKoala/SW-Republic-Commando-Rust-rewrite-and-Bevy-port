@@ -10,6 +10,57 @@ Everything below is read from the player's own install **at run time**.
 None of the original's files, textures, text or code go into this
 repository.
 
+## Done so far: the main menu (2026-10-29)
+
+`rc_game` now draws the original main menu (`XInterfaceCTMenus.CTMenuMain`)
+and its quit question (`XInterface.MenuQuestionYesNo`) from the install,
+with the original's pictures, fonts, colours, positions and focus and
+select sounds. The amber placeholder pages are still used for everything
+the main menu opens (campaign list, options, pause) and whenever the
+install's menu packages can't be read.
+
+How it works:
+
+- `rc_package::class` reads a class's default values (tagged values at the
+  end of the class's data), Republic Commando's enums (their value names)
+  and which category each property is in. Checked on all 601 classes in
+  `Core`, `Engine`, `XInterface`, `XInterfaceCommon`, `XInterfaceCTMenus`
+  and `CTGame`: every one read, every enum read.
+- `rc_package::font` reads Unreal fonts (letter rectangles on texture
+  pages). `OrbitFonts` read fully; some `WarfareFonts` use a different
+  layout and aren't needed yet.
+- New crate `rc_menus` (no Bevy) turns a menu class into a list of
+  widgets, filled in the way the original's menu code describes in its own
+  comments: positions interpolated down arrays, other values copied down
+  arrays, a widget's `Style` filled from its template, and the
+  `DefaultMenu...` blocks filling the rest, never overwriting a value that's
+  set. Then it turns the widgets into textured rectangles for a 640x480
+  menu area (checked: the planets only fit inside their rings at that
+  size). Pictures with the "stretch" scale modes are drawn in nine pieces.
+  Text supports `MaxSizeX` with "..." or word wrap.
+- `rc_menus::screens` has what the main menu's script does on a PC,
+  rewritten by hand: the border grows by one row for QUIT, Xbox Live and
+  controller items are hidden, NEW GAME starts `PRO`, QUIT asks "are you
+  sure?" (starting on NO), and so on. No script text is copied.
+- `rc_game/src/original_menu.rs` draws the rectangles with Bevy UI in the
+  largest centred 4:3 area of the window (black at the sides), and moves
+  focus with the menu actions, so keyboard, gamepad and mouse all work.
+- Colours: the original multiplied and blended colours in sRGB numbers,
+  Bevy does it in linear light. `rc_menus::gpu` bakes each tint into its
+  own copy of the picture and adjusts transparency so the result matches
+  the original over a black background.
+
+Not done yet: the background video (`Movies/menu_bg.avi`, an MPEG-4 v2
+video with no Rust decoder), LOAD GAME, PROFILES and EXTRAS (greyed out
+until built), MULTIPLAYER (greyed out for good: offline only), the
+campaign, options and pause menus, button prompt pictures, and filling the
+sides of wide screens. Mouse use was not tested by the script.
+
+How to look at a menu without the game: `rc_probe --menu` (main menu) or
+`rc_probe --menu XInterface.MenuQuestionYesNo` paints it to
+`extracted/menus/<Class>.png` and logs every widget to `logs/rc_menu.log`.
+`rc_probe --classes <package.u> [Class]` logs a package's class defaults.
+
 ## What the original's menus are made of (checked 2026-10-29)
 
 Checked by reading the install's packages with our own `rc_package` reader

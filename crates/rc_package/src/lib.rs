@@ -13,8 +13,10 @@
 //! This crate only reads bytes it is given. It never opens or writes files.
 
 pub mod animation;
+pub mod class;
 pub mod class_defaults;
 pub mod class_library;
+pub mod font;
 pub mod light;
 pub mod properties;
 pub mod reader;

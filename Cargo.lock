@@ -4461,6 +4461,7 @@ dependencies = [
  "rc_game_core",
  "rc_image",
  "rc_level_plugin",
+ "rc_menus",
  "rc_movement",
  "serde",
  "toml 0.8.23",
@@ -4508,6 +4509,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_menus"
+version = "0.1.0"
+dependencies = [
+ "rc_image",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_movement"
 version = "0.1.0"
 
@@ -4540,6 +4549,7 @@ dependencies = [
  "rc_anim",
  "rc_audio",
  "rc_image",
+ "rc_menus",
  "rc_package",
 ]
 

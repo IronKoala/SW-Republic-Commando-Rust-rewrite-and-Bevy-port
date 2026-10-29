@@ -1585,6 +1585,40 @@ like `MapName[3]="GEO_03A"`), read at start-up, never copied into the repo.
 share of the screen height, or of its width when that is smaller, so the
 menus fit a phone or a monitor.
 
+**The original main menu.** When the install's menu packages can be read,
+`original_menu.rs` draws the original main menu instead of the placeholder
+main page (the placeholder pages stay for everything else). The layout comes
+from the menu class's default values, read by `rc_package::class` and
+filled in by the new `rc_menus` crate, which knows nothing about Bevy:
+
+- `rc_menus::library` finds packages and classes in `GameData` and merges
+  a class's defaults with its parents' (child values win). It keeps the
+  order properties were declared in, because that is the drawing order
+  (a child that redeclares a widget moves it to its own place).
+- `rc_menus::layout::build` turns the defaults into widgets (pictures,
+  texts, buttons), applying the menu system's rules from the comments in
+  `MenuBase`: positions are interpolated down arrays, other values are
+  copied, `Style` fills from a template, sub-widgets fill from each other
+  (blurred to focused and so on) and the `DefaultMenu...` blocks fill the
+  rest. A value that is already set is never overwritten. Empty colours
+  mean opaque white, empty scales mean 1.
+- `rc_menus::quads` turns widgets into textured rectangles in a 0..1 menu
+  area laid out for 640x480. `rc_menus::render` paints the same rectangles
+  in software; the script compares that picture with a screenshot.
+- `rc_menus::gpu` makes copies of pictures for Bevy: each render style
+  (normal, masked, translucent or additive, alpha) and each tint gets its
+  own copy, with transparency adjusted so Bevy's linear-light blending
+  gives the original's sRGB result over black.
+- `rc_menus::screens` holds what each menu's script does, rewritten by
+  hand (the main menu and the yes/no question so far).
+
+The menu area is the largest centred 4:3 box in the window; the original's
+positions assume 4:3, so nothing is stretched on wide or tall screens.
+Focus moves with the menu actions (`MenuUp`, `MenuDown`, `MenuAccept`,
+`MenuBack`), so gamepads and keyboards work the same; the mouse moves focus
+only when it actually moves. Details and what is left are in
+`docs/ORIGINAL_MENUS.md`.
+
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
 at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
@@ -1618,6 +1652,10 @@ player would and checks each step: menu pages, loading, the player moving
 being cleared, options changing. It also captures the window twice and
 measures colours: the main menu must contain amber text, and in the level
 at least 30% of the screen must be lit with amber crosshair pixels at the
+centre. With the original menus, it also paints the main menu and the quit
+question in software from the original's pictures, and compares each with
+a screenshot of the game shrunk to 320x240: the mean difference must stay
+under 12 of 255 and fewer than 5% of pixels may differ by more than 40.
 centre.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)

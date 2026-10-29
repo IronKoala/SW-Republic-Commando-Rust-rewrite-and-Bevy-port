@@ -7,6 +7,7 @@ description = "The game: one program with the menus, settings, input, on-screen 
 [dependencies]
 rc_game_core = { path = "../rc_game_core" }
 rc_image = { path = "../rc_image" }
+rc_menus = { path = "../rc_menus" }
 rc_movement = { path = "../rc_movement" }
 # Reading our TOML settings files. serde (MIT OR Apache-2.0),
 # https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
@@ -21,7 +22,8 @@ rc_enemies = { path = "../rc_enemies" }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer, a window on
 # X11 or Wayland, menus and text (bevy_ui with Bevy's built-in font), audio
-# with Ogg Vorbis for the game's music, gamepads (gilrs) and game states.
+# with Ogg Vorbis for the game's music and WAV for the menus' sounds,
+# gamepads (gilrs) and game states.
 [dependencies.bevy]
 version = "0.20.1"
 default-features = false
@@ -38,6 +40,7 @@ features = [
     "default_font",
     "bevy_audio",
     "vorbis",
+    "wav",
     "bevy_gilrs",
 ]
 
