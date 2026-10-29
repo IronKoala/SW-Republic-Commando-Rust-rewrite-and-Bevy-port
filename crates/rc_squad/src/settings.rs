@@ -7,6 +7,7 @@
 //! only needs the lines it changes. An unknown section or name, or a bad
 //! value, is an error naming the line, so a typo is reported, not ignored.
 
+use crate::jobs::{default_jobs, JobKind, JobResult, JobSettings};
 use std::collections::BTreeMap;
 
 /// What a stance ties each member to.
@@ -153,6 +154,8 @@ pub struct SquadSettings {
     pub hold: StanceSettings,
     pub fight: FightSettings,
     pub revive: ReviveSettings,
+    /// The marked jobs ("context orders"), in the order they're matched.
+    pub jobs: Vec<JobSettings>,
     pub members: Vec<MemberSettings>,
 }
 
@@ -244,6 +247,7 @@ impl Default for SquadSettings {
             ),
             fight: FightSettings::default(),
             revive: ReviveSettings::default(),
+            jobs: default_jobs(),
             members: vec![
                 member("sev", "Commando07Delta", "Sev", "07", 1, [0.71, 0.18, 0.17]),
                 member(
@@ -312,6 +316,10 @@ impl SquadSettings {
                         members.insert(key.to_string(), base);
                         member_order.push(key.to_string());
                     }
+                } else if let Some(key) = section.strip_prefix("job.") {
+                    if !self.jobs.iter().any(|j| j.key == key) {
+                        self.jobs.push(JobSettings::blank(key));
+                    }
                 } else if !matches!(
                     section.as_str(),
                     "squad"
@@ -339,7 +347,14 @@ impl SquadSettings {
                     value.trim()
                 )
             })?;
-            let res = if let Some(mk) = section.strip_prefix("member.") {
+            let res = if let Some(jk) = section.strip_prefix("job.") {
+                let j = self
+                    .jobs
+                    .iter_mut()
+                    .find(|j| j.key == jk)
+                    .expect("added with its section");
+                set_job(j, key, value)
+            } else if let Some(mk) = section.strip_prefix("member.") {
                 let m = members.get_mut(mk).expect("added with its section");
                 set_member(m, key, value)
             } else {
@@ -494,6 +509,7 @@ impl SquadSettings {
             r.range,
             if r.revive_player { "yes" } else { "no" }
         ));
+        out.extend(self.jobs.iter().map(JobSettings::summary));
         for m in &self.members {
             out.push(format!(
                 "member {} ({}, {}): HUD slot {}, formation slot {}, health {}, shields {} (+{}/s after {} s)",
@@ -634,6 +650,72 @@ fn set_revive(r: &mut ReviveSettings, key: &str, value: Value) -> Result<(), Str
         "reach" => r.reach = v,
         "range" => r.range = v,
         _ => return Err(format!("unknown setting `{key}` in [revive]")),
+    }
+    Ok(())
+}
+
+fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
+    let text = |v: Value| match v {
+        Value::Text(t) => Ok(t),
+        _ => Err(format!("{key} must be \"text\"")),
+    };
+    match key {
+        "name" => j.name = text(value)?,
+        "match" => {
+            j.matches = text(value)?
+                .split(',')
+                .map(|w| w.trim().to_ascii_lowercase())
+                .filter(|w| !w.is_empty())
+                .collect()
+        }
+        "weapon" => j.weapon = text(value)?,
+        "kind" => {
+            j.kind = match text(value)?.as_str() {
+                "once" => JobKind::Once,
+                "post" => JobKind::Post,
+                t => return Err(format!("kind must be \"once\" or \"post\", not \"{t}\"")),
+            }
+        }
+        "result" => {
+            j.result = match text(value)?.as_str() {
+                "none" => JobResult::Nothing,
+                "heal" => JobResult::Heal,
+                "trigger" => JobResult::Trigger,
+                t => {
+                    return Err(format!(
+                        "result must be \"none\", \"heal\" or \"trigger\", not \"{t}\""
+                    ))
+                }
+            }
+        }
+        "group" => {
+            j.group = match text(value)?.as_str() {
+                "yes" => true,
+                "no" => false,
+                _ => return Err("group must be \"yes\" or \"no\"".into()),
+            }
+        }
+        _ => {
+            let v = one(value)?;
+            match key {
+                "work_time" => j.work_time = v,
+                "fuse" => j.fuse = v,
+                "blast_damage" => j.blast_damage = v,
+                "blast_radius" => j.blast_radius = v,
+                "sight_radius" => j.sight_radius = v,
+                "accuracy" => j.accuracy = v,
+                "burst_count" => j.burst_count = v.max(0.0) as u32,
+                "shot_interval" => j.shot_interval = v,
+                "burst_pause_min" => j.burst_pause_min = v,
+                "burst_pause_max" => j.burst_pause_max = v,
+                "throw_interval" => j.throw_interval = v,
+                "throw_range" => j.throw_range = v,
+                "throw_fuse" => j.throw_fuse = v,
+                "throw_damage" => j.throw_damage = v,
+                "throw_radius" => j.throw_radius = v,
+                _ => return Err(format!("unknown setting `{key}` for a job")),
+            }
+        }
     }
     Ok(())
 }

@@ -1200,10 +1200,50 @@ instead.
 
 A marked job is two actors in the map: the thing (the "anchor", like
 `BactaDispenserGEO4`) and a `SquadMarkerSpot` next to it whose `MyAnchor`
-names it. The member walks to the spot, works for 3 s (our own; the
-original plays an animation), and the marker is done. Stuck for 10 s on
-the way, it gives the job up. geo_01a has 6: five bacta dispensers and a
-demolition charge.
+names it. Stuck for 10 s on the way, a member gives the job up. geo_01a
+has 6: five bacta dispensers and a demolition charge.
+
+### Context orders (`rc_squad/src/jobs.rs`, `[job.*]` in `squad.toml`)
+
+What a marked job *does* depends on its kind. Each `[job.<name>]` section
+of `squad.toml` describes one; a marker gets the first job whose `match`
+words appear in its anchor's class name (`BactaDispenserGEO` matches
+"bacta"). A marker no job matches is a plain "walk there, work
+`marker_work_time` seconds, done". The original decides all of this in
+compiled code, so the rules are **our own** and most numbers are guesses,
+marked in the file. Mods can change a job or add a new one (say a
+`[job.turret]` matching "turret").
+
+- **Once** jobs (bacta, demolition, breach, slice): walk to the spot,
+  work `work_time` seconds, done. The member is free again at once. Then,
+  after `fuse` seconds (the charge burning), there is a blast if
+  `blast_damage` is set, and the `result`:
+  - `heal` (bacta): the squad mate's health and shield are filled.
+  - `trigger` (breach, slice, demolition): the plugin sends a
+    `SquadJobDone` message naming the anchor. Whoever owns that actor (the
+    level's scripts and doors, still being built in their own part)
+    opens the door or destroys the target. Until then it is logged:
+    `Demolition done: sets off DemolitionCharge DemolitionCharge2`.
+- **Group** jobs (`group = "yes"`, the door breach): ordering one spot
+  sends a free member to every spot sharing the same anchor (the ordered
+  spot first, nearest member each). Members wait at their spots (`Ready`)
+  until all are in place; then the one at the ordered spot does the work
+  and the others stand guard and shoot. When it's done, every spot is
+  done. If someone gives up (stuck or down), the rest go ahead without.
+- **Posts** (sniper, grenade, anti-armour): walk to the spot and stay
+  (`Posted`) until F4 recalls the squad, even if the player walks away.
+  While posted, the job's own shooting numbers replace `[fight]`'s:
+  the sniper sees 8000 uu and fires single aimed shots with
+  `dc17m_sniper`. A grenade post throws a grenade every `throw_interval`
+  seconds at its target if it is within `throw_range`; it goes off
+  `throw_fuse` seconds later where the target stood.
+- **Blasts** (charges and grenades) hurt everyone near: `rc_combat::Damage`
+  of kind `Explosion`, `blast_damage` at the middle falling to nothing at
+  the radius, measured to the edge of each body. Friend or foe, as in the
+  original, so stand clear of a demolition charge.
+- **Guns from other parts.** `dc17m_sniper` and `dc17m_antiarmor` come with
+  the weapons part's attachments. If a post's weapon file isn't there, the
+  squad mate uses the usual DC-17m and the log says so once.
 
 ### Where the squad comes from
 

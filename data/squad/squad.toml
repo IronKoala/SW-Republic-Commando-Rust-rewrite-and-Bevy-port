@@ -26,9 +26,8 @@ waypoint_radius = 64
 replan_distance = 96
 # Turning speed when standing, degrees per second. Our own.
 turn_rate = 360
-# Seconds a member spends doing a marker job (placing a charge, using a
-# bacta dispenser) before it's done. Our own; the original plays an
-# animation of about this length.
+# Seconds a member spends on a marked job that no [job.*] below matches.
+# Our own; the original plays an animation of about this length.
 marker_work_time = 3
 # Search and destroy: how far from the squad's anchor members look for
 # enemies. Original: Squad.DefaultSearchAndDestroyRadius.
@@ -154,6 +153,96 @@ reach = 100
 range = 4000
 # Squad mates come to revive the player on their own: "yes" or "no".
 revive_player = "yes"
+
+# Marked jobs ("context orders"): aim at a squad marker in the map and
+# press the squad command key (or Use), and a squad mate does the job.
+# A marker gets the first job below whose `match` words (comma separated,
+# any case) appear in the class name of the thing the marker is for (its
+# `MyAnchor`). Mods can change any job or add new ones; a missing line
+# keeps the built-in value. How the original does each job lives in
+# compiled code we don't read, so unless a comment says "game", the
+# numbers are our own or guesses (docs/DESIGN.md, "Context orders").
+#
+# kind = "once": walk to the spot, work `work_time` seconds, done; then,
+#   after `fuse` seconds, a blast (`blast_damage` at the middle, falling
+#   to nothing at `blast_radius` uu) if set, and the `result`:
+#   "heal" (the squad mate gets health and shield back), "trigger" (sets
+#   off the marker's anchor: the level's door or script reacts), "none".
+#   `group = "yes"` sends a squad mate to every spot of the same anchor
+#   and starts when all are in place (door breach: stack up, then blow).
+# kind = "post": walk to the spot and stay until recalled (F4), fighting
+#   from there with `weapon` (a file in data/weapons) and the shooting
+#   numbers given (0 or missing = [fight]'s), or throwing a grenade every
+#   `throw_interval` seconds at an enemy within `throw_range` (it goes off
+#   `throw_fuse` seconds later, `throw_damage` falling to 0 at
+#   `throw_radius`).
+
+[job.bacta]
+name = "Bacta"
+match = "bacta"
+kind = "once"
+work_time = 3
+result = "heal"
+
+[job.demolition]
+name = "Demolition"
+match = "demolition"
+kind = "once"
+work_time = 3
+result = "trigger"
+fuse = 5                  # guess
+blast_damage = 500        # guess
+blast_radius = 512        # guess
+
+[job.breach]
+name = "Breach door"
+match = "breach"
+kind = "once"
+group = "yes"
+work_time = 3
+result = "trigger"
+fuse = 3                  # guess
+blast_damage = 200        # guess
+blast_radius = 256        # guess
+
+[job.slice]
+name = "Slice"
+match = "slice, hack, terminal, console"
+kind = "once"
+work_time = 8             # guess: slicing takes longer than a charge
+result = "trigger"
+
+[job.sniper]
+name = "Sniper position"
+match = "snipe"
+kind = "post"
+weapon = "dc17m_sniper"   # from the weapons part; the usual gun until it's there
+sight_radius = 8000       # guess
+accuracy = 0.97           # guess
+burst_count = 1
+shot_interval = 0.1
+burst_pause_min = 1.5     # guess
+burst_pause_max = 2.5     # guess
+
+[job.grenade]
+name = "Grenade position"
+match = "grenade"
+kind = "post"
+throw_interval = 6        # guess
+throw_range = 1500        # guess
+throw_fuse = 2            # guess
+throw_damage = 300        # guess
+throw_radius = 384        # guess
+
+[job.anti_armour]
+name = "Anti-armour position"
+match = "antiarmor, antiarmour"
+kind = "post"
+weapon = "dc17m_antiarmor"  # from the weapons part; the usual gun until it's there
+burst_count = 1
+shot_interval = 0.1
+burst_pause_min = 2       # guess
+burst_pause_max = 3       # guess
 
 # The squad. `class` is the original's character class (CTCharacters),
 # `number` and `name` are what its HUD shows, `hud_slot` its place on the

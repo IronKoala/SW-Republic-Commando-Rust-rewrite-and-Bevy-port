@@ -567,3 +567,314 @@ fn revive_and_fight_settings_read_from_the_file() {
         .unwrap_err();
     assert!(e.contains("line 2"), "{e}");
 }
+
+// ---- Context orders: the jobs of `[job.*]` ----
+
+fn spot(name: &str, anchor: &str, anchor_class: &str, stand: Vec3) -> MarkerSpot {
+    MarkerSpot {
+        name: name.into(),
+        job: map::job_name(anchor_class),
+        anchor: anchor.into(),
+        anchor_class: anchor_class.into(),
+        stand,
+        yaw: 0.0,
+        aim: stand + Vec3::new(60.0, 0.0, 60.0),
+    }
+}
+
+fn has(ev: &[SquadEvent], f: impl Fn(&SquadEvent) -> bool) -> bool {
+    ev.iter().any(f)
+}
+
+#[test]
+fn markers_get_their_job_from_the_anchor_class() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    let z = Vec3::ZERO;
+    squad.set_markers(vec![
+        spot("S0", "BactaDispenserGEO4", "BactaDispenserGEO", z),
+        spot("S1", "DemolitionCharge2", "DemolitionCharge", z),
+        spot("S2", "MarkerDoorBreach1", "MarkerDoorBreach", z),
+        spot("S3", "HackTerminal0", "HackTerminal", z),
+        spot("S4", "MarkerSnipe0", "MarkerSnipe", z),
+        spot("S5", "MarkerGrenade0", "MarkerGrenade", z),
+        spot("S6", "Thing0", "SomethingElse", z),
+    ]);
+    let keys: Vec<Option<&str>> = (0..7)
+        .map(|k| squad.job_of(k).map(|j| j.key.as_str()))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            Some("bacta"),
+            Some("demolition"),
+            Some("breach"),
+            Some("slice"),
+            Some("sniper"),
+            Some("grenade"),
+            None
+        ]
+    );
+    assert_eq!(squad.markers[4].0.job, "Sniper position");
+    // No job: the old generic name stays.
+    assert_eq!(squad.markers[6].0.job, "SomethingElse");
+}
+
+#[test]
+fn bacta_heals_the_member_who_used_it() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.set_markers(vec![spot(
+        "S0",
+        "BactaDispenserGEO0",
+        "BactaDispenserGEO",
+        Vec3::new(-300.0, 600.0, 0.0),
+    )]);
+    squad.command(Order::Marker(0), start, &world);
+    let ev = run(&mut squad, start, 8.0, &world);
+    assert!(
+        has(
+            &ev,
+            |e| matches!(e, SquadEvent::JobResult { result: JobResult::Heal, member, .. } if member == "Fixer")
+        ),
+        "{ev:?}"
+    );
+    // A heal has no blast.
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::Blast { .. })));
+}
+
+#[test]
+fn demolition_charge_blows_after_its_fuse_and_triggers_the_anchor() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.set_markers(vec![spot(
+        "S0",
+        "DemolitionCharge2",
+        "DemolitionCharge",
+        Vec3::new(500.0, 0.0, 0.0),
+    )]);
+    squad.command(Order::Marker(0), start, &world);
+    // Walk (~2 s) and work (3 s): the fuse is lit, nothing blown yet.
+    let ev = run(&mut squad, start, 6.5, &world);
+    assert!(
+        has(
+            &ev,
+            |e| matches!(e, SquadEvent::FuseLit { seconds, .. } if *seconds == 5.0)
+        ),
+        "{ev:?}"
+    );
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::Blast { .. })));
+    assert_eq!(squad.markers[0].1, MarkerState::Done);
+    // The member is free again as soon as the charge is set.
+    assert!(squad.members.iter().all(|m| m.marker.is_none()));
+    let ev = run(&mut squad, start, 5.5, &world);
+    assert!(
+        has(
+            &ev,
+            |e| matches!(e, SquadEvent::Blast { damage, radius, .. } if *damage == 500.0 && *radius == 512.0)
+        ),
+        "{ev:?}"
+    );
+    assert!(has(&ev, |e| matches!(
+        e,
+        SquadEvent::JobResult { result: JobResult::Trigger, anchor, .. } if anchor == "DemolitionCharge2"
+    )));
+}
+
+#[test]
+fn breach_fills_every_spot_and_starts_when_all_are_in_place() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.set_markers(vec![
+        spot(
+            "S0",
+            "MarkerDoorBreach1",
+            "MarkerDoorBreach",
+            Vec3::new(600.0, -100.0, 0.0),
+        ),
+        spot(
+            "S1",
+            "MarkerDoorBreach1",
+            "MarkerDoorBreach",
+            Vec3::new(600.0, 100.0, 0.0),
+        ),
+        // Far away: the last one in place.
+        spot(
+            "S2",
+            "MarkerDoorBreach1",
+            "MarkerDoorBreach",
+            Vec3::new(-300.0, -1700.0, 0.0),
+        ),
+        // Another door's spot is not part of this breach.
+        spot(
+            "S3",
+            "MarkerDoorBreach2",
+            "MarkerDoorBreach",
+            Vec3::new(0.0, 600.0, 0.0),
+        ),
+    ]);
+    let ev = squad.command(Order::Marker(0), start, &world);
+    let assigned = ev
+        .iter()
+        .filter(|e| matches!(e, SquadEvent::MarkerAssigned { .. }))
+        .count();
+    assert_eq!(assigned, 3, "{ev:#?}");
+    assert_eq!(squad.markers[3].1, MarkerState::Open);
+    let ev = run(&mut squad, start, 3.0, &world);
+    // The near two wait for the far one.
+    assert!(
+        has(&ev, |e| matches!(e, SquadEvent::MarkerReady { .. })),
+        "{ev:?}"
+    );
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::MarkerStarted { .. })));
+    let ev = run(&mut squad, start, 12.0, &world);
+    let started: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match e {
+            SquadEvent::MarkerStarted { marker, .. } => Some(marker.clone()),
+            _ => None,
+        })
+        .collect();
+    // Only the ordered spot's member works.
+    assert_eq!(started, ["S0"], "{ev:?}");
+    let done = ev
+        .iter()
+        .filter(|e| matches!(e, SquadEvent::MarkerDone { .. }))
+        .count();
+    assert_eq!(done, 3);
+    assert!(has(&ev, |e| matches!(e, SquadEvent::Blast { .. })));
+    assert!(has(&ev, |e| matches!(
+        e,
+        SquadEvent::JobResult { result: JobResult::Trigger, anchor, .. } if anchor == "MarkerDoorBreach1"
+    )));
+    assert!(squad.members.iter().all(|m| m.marker.is_none()));
+}
+
+#[test]
+fn slice_takes_longer_and_triggers_without_a_blast() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.set_markers(vec![spot(
+        "S0",
+        "HackTerminal0",
+        "HackTerminal",
+        Vec3::new(400.0, 0.0, 0.0),
+    )]);
+    squad.command(Order::Marker(0), start, &world);
+    let ev = run(&mut squad, start, 5.0, &world);
+    assert!(has(&ev, |e| matches!(e, SquadEvent::MarkerStarted { .. })));
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::MarkerDone { .. })));
+    let ev = run(&mut squad, start, 8.0, &world);
+    assert!(has(&ev, |e| matches!(
+        e,
+        SquadEvent::JobResult {
+            result: JobResult::Trigger,
+            ..
+        }
+    )));
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::Blast { .. })));
+}
+
+#[test]
+fn sniper_post_holds_until_recalled_and_uses_its_own_gun() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    let post = Vec3::new(-800.0, 0.0, 0.0);
+    squad.set_markers(vec![spot("S0", "MarkerSnipe0", "MarkerSnipe", post)]);
+    squad.command(Order::Marker(0), start, &world);
+    let ev = run(&mut squad, start, 6.0, &world);
+    assert!(
+        has(&ev, |e| matches!(e, SquadEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    let i = squad
+        .members
+        .iter()
+        .position(|m| m.marker == Some(0))
+        .unwrap();
+    assert_eq!(squad.members[i].state, MemberState::Posted);
+    // The leader walks off: the sniper stays.
+    let away = leader_at(800.0, 0.0, 0.0);
+    run(&mut squad, away, 4.0, &world);
+    assert!((squad.members[i].pawn.feet() - post).length_2d() < 60.0);
+    // The test room is too small for 5000 uu, so shrink the usual sight:
+    // a droid 1800 uu off is beyond it (1000), within the sniper's
+    // (8000). Only the sniper shoots, one shot at a time, with the sniper
+    // rifle.
+    squad.settings.fight.sight_radius = 1000.0;
+    squad.threats = vec![threat(9, post + Vec3::new(0.0, -1800.0, 0.0))];
+    let ev = run(&mut squad, away, 6.0, &world);
+    let fired: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match e {
+            SquadEvent::Fire { index, weapon, .. } => Some((*index, weapon.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(!fired.is_empty(), "{ev:?}");
+    assert!(
+        fired.iter().all(|(k, w)| *k == i && w == "dc17m_sniper"),
+        "{fired:?}"
+    );
+    // About one shot every 1.5-2.5 s.
+    assert!(fired.len() <= 5, "{}", fired.len());
+    // F4 recalls them.
+    let ev = squad.command(Order::Cancel, away, &world);
+    assert!(has(&ev, |e| matches!(
+        e,
+        SquadEvent::MarkerCancelled { .. }
+    )));
+    assert_eq!(squad.markers[0].1, MarkerState::Open);
+    assert!(squad.members[i].marker.is_none());
+}
+
+#[test]
+fn grenade_post_throws_at_enemies_in_range() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    let post = Vec3::new(-400.0, 0.0, 0.0);
+    squad.set_markers(vec![spot("S0", "MarkerGrenade0", "MarkerGrenade", post)]);
+    squad.command(Order::Marker(0), start, &world);
+    run(&mut squad, start, 4.0, &world);
+    // Clear of the room's tower (x -1200).
+    let droid = post + Vec3::new(0.0, -1100.0, 0.0);
+    squad.threats = vec![threat(5, droid)];
+    let ev = run(&mut squad, start, 10.0, &world);
+    let throws = ev
+        .iter()
+        .filter(|e| matches!(e, SquadEvent::Throw { .. }))
+        .count();
+    // Every 6 s: two in 10 s.
+    assert_eq!(throws, 2, "{ev:?}");
+    assert!(has(&ev, |e| matches!(
+        e,
+        SquadEvent::Blast { at, what, .. } if what == "grenade" && (*at - droid).length() < 1.0
+    )));
+}
+
+#[test]
+fn job_settings_read_from_the_file() {
+    let s = SquadSettings::default()
+        .with_overrides(
+            "[job.bacta]\nwork_time = 1.5\n[job.turret]\nname = \"Man turret\"\nmatch = \"Turret, gun\"\nkind = \"post\"\n",
+        )
+        .unwrap();
+    let bacta = s.jobs.iter().find(|j| j.key == "bacta").unwrap();
+    assert_eq!(bacta.work_time, 1.5);
+    assert_eq!(bacta.result, JobResult::Heal);
+    let turret = s.jobs.last().unwrap();
+    assert_eq!(turret.key, "turret");
+    assert_eq!(turret.matches, ["turret", "gun"]);
+    assert_eq!(turret.kind, JobKind::Post);
+    let err = SquadSettings::default()
+        .with_overrides("[job.bacta]\nresult = \"explode\"\n")
+        .unwrap_err();
+    assert!(err.starts_with("line 2:"), "{err}");
+}
