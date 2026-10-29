@@ -162,10 +162,10 @@ pub fn find<'a>(pkg: &Package, props: &'a [Property], name: &str) -> Option<&'a 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn package_with_names(names: &[&str]) -> Package {
+    pub(crate) fn package_with_names(names: &[&str]) -> Package {
         Package {
             summary: crate::Summary {
                 tag: crate::PACKAGE_TAG,

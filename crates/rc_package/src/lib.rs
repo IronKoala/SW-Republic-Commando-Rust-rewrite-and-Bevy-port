@@ -14,6 +14,7 @@
 
 pub mod properties;
 pub mod reader;
+pub mod static_mesh;
 pub mod texture;
 
 pub use reader::{ReadError, Reader, Result};

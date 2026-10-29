@@ -1,16 +1,17 @@
 [package]
 name = "rc_viewer"
 version = "0.1.0"
-description = "First Bevy program: opens a window and shows one texture from the game"
+description = "Bevy viewer: shows one texture or one 3D model from the game"
 edition.workspace = true
 
 [dependencies]
 rc_image = { path = "../rc_image" }
 rc_package = { path = "../rc_package" }
 
-# Bevy (MIT OR Apache-2.0), https://bevy.org. Only the pieces needed for a 2D
-# window: no audio, gamepads or UI yet, which keeps the first build shorter.
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Only the pieces needed: a 2D
+# window for textures, plus `bevy_pbr` for 3D models and their materials. No
+# audio, gamepads or UI yet, which keeps the build shorter.
 [dependencies.bevy]
 version = "0.20.1"
 default-features = false
-features = ["default_app", "std", "bevy_winit", "multi_threaded", "x11", "2d_bevy_render"]
+features = ["default_app", "std", "bevy_winit", "multi_threaded", "x11", "2d_bevy_render", "bevy_pbr"]
