@@ -1,0 +1,44 @@
+# Thermal detonator: the standard explosive grenade.
+#
+# Mods: change any value and restart. A misspelt name stops loading this
+# file with an error naming the line (see logs/rc_game.log).
+#
+# !! PLACEHOLDER NUMBERS !! Every value marked "placeholder" below is our
+# own stand-in, NOT yet read from the original game. They will be replaced
+# with the original's class defaults (class name to check: ThermalDetonator in ctinventory.u, with its
+# "...Defaults" class in Properties/properties.u on top) once the game's
+# script packages can be read. See docs/RESEARCH.md, "Grenades".
+# Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
+
+name = "Thermal Detonator"
+
+[ammo]
+max_count = 4             # placeholder: most carried
+start_count = 2           # placeholder: carried at the start
+
+[throw]
+speed = 1200              # placeholder: throw speed along the view, uu/s
+toss_up = 250             # placeholder: extra upward speed, uu/s
+offset = [40, 20, -10]    # placeholder: where it leaves the hand (forward, right, up)
+delay = 1.0               # placeholder: seconds between throws
+
+[fuse]
+kind = "timed"
+time = 3.0                # placeholder: seconds from the throw
+
+[flight]
+bounce = 0.4              # placeholder: speed kept after a bounce
+gravity = 950             # placeholder: downward pull, uu/s² (UE2's usual zone gravity)
+
+[blast]
+damage = 250              # placeholder
+radius = 450              # placeholder
+damage_kind = "explosion"
+momentum = 0              # placeholder: push (not used yet)
+
+[sound]
+package = "gen_sound"
+# Sound names to read from the game; none set yet.
+
+[model]
+blast_colour = [1.0, 0.6, 0.2]   # our choice: colour of the stand-in ball

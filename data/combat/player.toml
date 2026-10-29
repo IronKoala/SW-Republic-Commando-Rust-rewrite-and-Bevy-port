@@ -10,3 +10,6 @@ shield = 100                 # MaxShields (CloneCommando)
 shield_recharge_rate = 20    # ShieldRechargeRate: per second
 shield_recharge_delay = 3    # ShieldRechargeDelay: seconds after a hit
 weapons = ["dc17m_blaster", "dc15s_pistol"]   # first one in hand; files in weapons/
+# Grenade kinds carried, in the order the "next grenade" button cycles; the
+# first is selected. Each starts with its file's start_count (grenades/).
+grenades = ["thermal_detonator", "sonic_detonator", "emp_grenade", "flash_grenade"]

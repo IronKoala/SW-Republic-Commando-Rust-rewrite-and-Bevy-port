@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
 use rc_combat::{
-    Arsenal, CombatPlugin, Damage, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded,
-    Team, WeaponLibrary,
+    Arsenal, Blast, Body, CombatPlugin, Damage, Dead, Died, FireShot, Grenades, Health, Hittable,
+    Shield, ShotLanded, Stunned, Team, ThrowGrenade, WeaponLibrary,
 };
 use rc_game_core::{
     Action, ActionState, CorePlugin, GamePaths, GameState, LevelCollision, Player, PlayerCamera,
@@ -29,6 +29,7 @@ struct Seen {
     landed: Vec<ShotLanded>,
     died: Vec<Died>,
     damage: Vec<Damage>,
+    blasts: Vec<Blast>,
 }
 
 fn record(
@@ -36,7 +37,9 @@ fn record(
     mut l: MessageReader<ShotLanded>,
     mut d: MessageReader<Died>,
     mut h: MessageReader<Damage>,
+    mut x: MessageReader<Blast>,
 ) {
+    seen.blasts.extend(x.read().cloned());
     seen.landed.extend(l.read().cloned());
     seen.died.extend(d.read().cloned());
     seen.damage.extend(h.read().cloned());
@@ -397,4 +400,122 @@ fn real_game_sounds_and_model() {
     }
     eprintln!("DC-17m model: {parts} parts, {tris} triangles");
     assert!(tris > 100);
+}
+
+#[test]
+fn every_grenade_file_reads_and_the_player_carries_them() {
+    let r = Range::new();
+    let lib = r.app.world().resource::<WeaponLibrary>();
+    assert!(lib.errors.is_empty(), "{:?}", lib.errors);
+    let ids: Vec<_> = lib.grenades.keys().cloned().collect();
+    assert_eq!(
+        ids,
+        [
+            "emp_grenade",
+            "flash_grenade",
+            "sonic_detonator",
+            "thermal_detonator"
+        ]
+    );
+    let g = r.app.world().get::<Grenades>(r.player).unwrap();
+    assert_eq!(g.carried[0].0, "thermal_detonator");
+    assert_eq!(
+        g.carried[0].1,
+        lib.grenades["thermal_detonator"].start_count
+    );
+    let ro = r.app.world().resource::<WeaponReadout>();
+    assert_eq!(
+        ro.grenade,
+        Some(("Thermal Detonator".to_string(), g.carried[0].1))
+    );
+}
+
+/// Drop a grenade at rest at `at` (Unreal units) and wait for its blast.
+fn drop_grenade(r: &mut Range, id: &str, at: (f32, f32, f32)) -> Seen {
+    r.seen();
+    let origin = b(at.0, at.1, at.2);
+    r.app.world_mut().write_message(ThrowGrenade {
+        thrower: r.player,
+        origin,
+        velocity: Vec3::ZERO,
+        grenade: id.into(),
+    });
+    let mut frames = 0;
+    while r.app.world().resource::<Seen>().blasts.is_empty() {
+        r.run(1, &[]);
+        frames += 1;
+        assert!(frames < 60 * 10, "no blast after 10 s");
+    }
+    r.run(2, &[]);
+    r.seen()
+}
+
+#[test]
+fn thermal_blast_falls_off_with_distance() {
+    let mut r = Range::new();
+    let p = r.app.world().resource::<WeaponLibrary>().grenades["thermal_detonator"].clone();
+    // On the floor 200 uu in front of the droid (centre at x 500, z 84),
+    // so the floor holds it still until the fuse runs out.
+    let seen = drop_grenade(&mut r, "thermal_detonator", (300.0, 0.0, 10.0));
+    let blast = &seen.blasts[0];
+    let bx = blast.point.x * 50.0;
+    assert!((bx - 300.0).abs() < 1.0, "lay still: went off at x {bx}");
+    let on_droid: Vec<_> = seen.damage.iter().filter(|d| d.target == r.droid).collect();
+    assert_eq!(on_droid.len(), 1);
+    // Blast at about (300, 0, 0.5); droid centre (500, 0, 84).
+    let c = Vec3::new(500.0, 0.0, 84.0);
+    let pt = Vec3::new(blast.point.x, blast.point.z, blast.point.y) * 50.0;
+    let dist = (c - pt).length();
+    let want = p.damage * (1.0 - (dist - 40.0) / p.radius);
+    assert!(
+        (on_droid[0].amount - want).abs() < 0.5,
+        "damage {} at {dist:.0} uu, expected {want:.1}",
+        on_droid[0].amount
+    );
+    // The player is 800 uu away: out of reach for a radius under 760.
+    if p.radius + 40.0 < 800.0 {
+        assert!(seen.damage.iter().all(|d| d.target != r.player));
+    }
+}
+
+#[test]
+fn emp_stuns_droids_and_hurts_them_more() {
+    let mut r = Range::new();
+    r.app.world_mut().entity_mut(r.droid).insert(Body::Droid);
+    let p = r.app.world().resource::<WeaponLibrary>().grenades["emp_grenade"].clone();
+    let seen = drop_grenade(&mut r, "emp_grenade", (460.0, 0.0, 10.0));
+    let d = seen
+        .damage
+        .iter()
+        .find(|d| d.target == r.droid)
+        .expect("droid hurt");
+    // The blast's falloff times the droid multiplier.
+    let pt = seen.blasts[0].point;
+    let pt = Vec3::new(pt.x, pt.z, pt.y) * 50.0;
+    let dist = (Vec3::new(500.0, 0.0, 84.0) - pt).length();
+    let want = p.damage * (1.0 - (dist - 40.0) / p.radius) * p.multiplier_vs("droid");
+    assert!((d.amount - want).abs() < 0.5, "{} vs {want}", d.amount);
+    let s = r.app.world().get::<Stunned>(r.droid).expect("stunned");
+    assert!(s.left > 0.0 && s.left <= p.stun_time);
+}
+
+#[test]
+fn player_throws_the_selected_grenade() {
+    let mut r = Range::new();
+    let before = r.app.world().get::<Grenades>(r.player).unwrap().carried[0].1;
+    assert!(before > 0);
+    r.seen();
+    r.run(1, &[Action::ThrowGrenade]);
+    r.run(1, &[]);
+    let g = r.app.world().get::<Grenades>(r.player).unwrap();
+    assert_eq!(g.carried[0].1, before - 1);
+    // In the air, moving forward and up.
+    let mut q = r.app.world_mut().query::<&rc_combat::GrenadeFlight>();
+    let f = q.single(r.app.world()).expect("one grenade in flight");
+    assert!(f.flight.velocity.x > 0.0);
+    r.seconds(6.0, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.blasts.len(), 1, "it went off");
+    let ro = r.app.world().resource::<WeaponReadout>();
+    assert_eq!(ro.grenade.as_ref().map(|g| g.1), Some(before - 1));
 }

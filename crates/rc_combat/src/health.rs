@@ -24,6 +24,10 @@ pub enum DamageKind {
     /// Blaster bolts (`CTDamageEnergy` and its variants).
     Blaster,
     Explosion,
+    /// Sonic grenades and sonic weapons (`CTDamageSonic`).
+    Sonic,
+    /// EMP grenades and electrical damage (`CTDamageElectrical`).
+    Electrical,
     Melee,
     Fall,
     Other,
@@ -34,6 +38,8 @@ impl DamageKind {
         Some(match name {
             "blaster" => DamageKind::Blaster,
             "explosion" => DamageKind::Explosion,
+            "sonic" => DamageKind::Sonic,
+            "electrical" => DamageKind::Electrical,
             "melee" => DamageKind::Melee,
             "fall" => DamageKind::Fall,
             "other" => DamageKind::Other,

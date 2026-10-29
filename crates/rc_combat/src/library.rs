@@ -3,6 +3,7 @@
 //! packages.
 
 use crate::data::Table;
+use crate::grenade::{GrenadeParams, Grenades};
 use crate::health::{Health, Shield, Team};
 use crate::weapon::{WeaponParams, WeaponState};
 use crate::{Arsenal, Hittable};
@@ -20,6 +21,8 @@ use std::time::Instant;
 #[derive(Resource, Debug, Default)]
 pub struct WeaponLibrary {
     pub weapons: BTreeMap<String, WeaponParams>,
+    /// Every grenade the data files describe (`data/grenades/*.toml`).
+    pub grenades: BTreeMap<String, GrenadeParams>,
     /// Files that didn't read, with the reason. They are left out.
     pub errors: Vec<String>,
     /// Sound name to Bevy sound. Empty when there is no audio (tests).
@@ -37,6 +40,9 @@ pub struct PlayerSetup {
     pub shield_recharge_delay: f32,
     /// Weapon ids, the first one in hand at the start.
     pub weapons: Vec<String>,
+    /// Grenade ids, in the order "next grenade" cycles; the first is
+    /// selected at the start. Each starts with its file's `start_count`.
+    pub grenades: Vec<String>,
 }
 
 impl Default for PlayerSetup {
@@ -47,6 +53,7 @@ impl Default for PlayerSetup {
             shield_recharge_rate: 20.0,
             shield_recharge_delay: 3.0,
             weapons: vec!["dc17m_blaster".into(), "dc15s_pistol".into()],
+            grenades: vec![],
         }
     }
 }
@@ -65,6 +72,7 @@ impl PlayerSetup {
                 .number("player.shield_recharge_delay")?
                 .unwrap_or(d.shield_recharge_delay),
             weapons: t.texts("player.weapons")?.unwrap_or(d.weapons),
+            grenades: t.texts("player.grenades")?.unwrap_or(d.grenades),
         };
         t.finish()?;
         Ok(p)
@@ -78,13 +86,14 @@ fn say(log: &Option<Res<GameLog>>, s: String) {
     }
 }
 
-/// Every `weapons/*.toml` across the data folders. A mod's file replaces
-/// the base file with the same name (the data folders list mods first).
-fn weapon_files(paths: &GamePaths) -> BTreeMap<String, PathBuf> {
+/// Every `<folder>/*.toml` across the data folders (`weapons`,
+/// `grenades`). A mod's file replaces the base file with the same name (the
+/// data folders list mods first).
+fn data_files(paths: &GamePaths, folder: &str) -> BTreeMap<String, PathBuf> {
     let mut out = BTreeMap::new();
     for dir in paths.data_dirs.iter().rev() {
-        // Finds `weapons` in any letter case (for Linux and Android).
-        let folder = GamePaths::new(dir.clone(), vec![]).game_file("weapons");
+        // Finds the folder in any letter case (for Linux and Android).
+        let folder = GamePaths::new(dir.clone(), vec![]).game_file(folder);
         let Ok(entries) = std::fs::read_dir(folder) else {
             continue;
         };
@@ -114,7 +123,7 @@ pub(crate) fn load(
 ) {
     let t = Instant::now();
     let mut lib = WeaponLibrary::default();
-    for (id, path) in weapon_files(&paths) {
+    for (id, path) in data_files(&paths, "weapons") {
         let read = std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|text| WeaponParams::from_text(&id, &text));
@@ -133,6 +142,30 @@ pub(crate) fn load(
             Err(e) => {
                 let e = format!("{}: {e}", path.display());
                 say(&log, format!("weapons: FAILED to read {e}"));
+                lib.errors.push(e);
+            }
+        }
+    }
+    for (id, path) in data_files(&paths, "grenades") {
+        let read = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| GrenadeParams::from_text(&id, &text));
+        match read {
+            Ok(p) => {
+                say(
+                    &log,
+                    format!(
+                        "grenades: {id} ({}): carry {} (start {}), thrown at {} uu/s +{} up, fuse {:?}, bounce {}, damage {} ({:?}) within {} uu, stun {} s {:?}, damage_vs {:?}",
+                        p.name, p.max_count, p.start_count, p.speed, p.toss_up, p.fuse,
+                        p.bounce, p.damage, p.damage_kind, p.radius, p.stun_time,
+                        p.stun_only, p.damage_vs
+                    ),
+                );
+                lib.grenades.insert(id, p);
+            }
+            Err(e) => {
+                let e = format!("{}: {e}", path.display());
+                say(&log, format!("grenades: FAILED to read {e}"));
                 lib.errors.push(e);
             }
         }
@@ -161,14 +194,22 @@ pub(crate) fn load(
             lib.errors.push(e);
         }
     }
+    for id in &lib.player.grenades {
+        if !lib.grenades.contains_key(id) {
+            let e = format!("player grenade `{id}` has no file grenades/{id}.toml");
+            say(&log, format!("grenades: {e}"));
+            lib.errors.push(e);
+        }
+    }
     if let Some(mut audio) = audio {
         load_sounds(&mut lib, &paths, &mut audio, &log);
     }
     say(
         &log,
         format!(
-            "weapons: {} weapon files read, {} failed, {} sounds, {:.0} ms",
+            "weapons: {} weapon files and {} grenade files read, {} failed, {} sounds, {:.0} ms",
             lib.weapons.len(),
+            lib.grenades.len(),
             lib.errors.len(),
             lib.sounds.len(),
             t.elapsed().as_secs_f64() * 1000.0
@@ -195,6 +236,21 @@ fn load_sounds(
             .entry(p.sound_package.to_ascii_lowercase())
             .or_default();
         for n in names {
+            if !list.contains(n) {
+                list.push(n.clone());
+            }
+        }
+    }
+    for p in lib.grenades.values() {
+        let list = wanted
+            .entry(p.sound_package.to_ascii_lowercase())
+            .or_default();
+        for n in p
+            .throw_sound
+            .iter()
+            .chain(&p.bounce_sound)
+            .chain(&p.blast_sound)
+        {
             if !list.contains(n) {
                 list.push(n.clone());
             }
@@ -283,5 +339,32 @@ pub(crate) fn equip_player(
                 current: 0,
             },
         ));
+    }
+}
+
+/// Give the player (any `Player` without them) the starting grenades. On
+/// its own, so a loaded game that restores the arsenal still gets them
+/// (or restores its own `Grenades` first).
+pub(crate) fn equip_grenades(
+    mut commands: Commands,
+    lib: Res<WeaponLibrary>,
+    players: Query<Entity, (With<Player>, Without<Grenades>)>,
+    log: Option<Res<GameLog>>,
+) {
+    for e in &players {
+        let s = &lib.player;
+        let grenades = Grenades {
+            carried: s
+                .grenades
+                .iter()
+                .filter_map(|id| lib.grenades.get(id).map(|p| (id.clone(), p.start_count)))
+                .collect(),
+            ..Default::default()
+        };
+        say(
+            &log,
+            format!("grenades: player equipped {:?}", grenades.carried),
+        );
+        commands.entity(e).insert(grenades);
     }
 }

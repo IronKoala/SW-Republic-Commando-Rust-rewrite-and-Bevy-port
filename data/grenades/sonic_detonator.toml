@@ -1,0 +1,40 @@
+# Sonic detonator: a sonic blast.
+#
+# Mods: change any value and restart. A misspelt name stops loading this
+# file with an error naming the line (see logs/rc_game.log).
+#
+# !! PLACEHOLDER NUMBERS !! Every value marked "placeholder" below is our
+# own stand-in, NOT yet read from the original game. They will be replaced
+# with the original's class defaults (class name to check: SonicDetonator in ctinventory.u, with its
+# "...Defaults" class in Properties/properties.u on top) once the game's
+# script packages can be read. See docs/RESEARCH.md, "Grenades".
+# Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
+
+name = "Sonic Detonator"
+
+[ammo]
+max_count = 4             # placeholder
+start_count = 0           # placeholder
+
+[throw]
+speed = 1200              # placeholder
+toss_up = 250             # placeholder
+offset = [40, 20, -10]    # placeholder
+delay = 1.0               # placeholder
+
+[fuse]
+kind = "impact"           # placeholder: goes off on touching something
+
+[flight]
+gravity = 950             # placeholder
+
+[blast]
+damage = 200              # placeholder
+radius = 400              # placeholder
+damage_kind = "sonic"
+
+[sound]
+package = "gen_sound"
+
+[model]
+blast_colour = [0.4, 1.0, 0.6]   # our choice
