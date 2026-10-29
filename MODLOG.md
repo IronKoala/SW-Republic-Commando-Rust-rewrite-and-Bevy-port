@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Full scan of the install on Windows
+
+- **Changed:** No code changes. Updated `README.md` and `docs/DESIGN.md` with the result.
+- **Why:** The first test only covered 50 packages, in the cloud sandbox.
+- **Tested how:** The user ran `cargo run --release -p rc_probe -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData"` on their Windows PC.
+- **Result:** `packages: 273  parsed and passed checks: 273  parsed with problems: 0  failed to parse: 0`, 962 ms. Versions: 130-159 with licensee 1 (170 files at 159), plus one file each at 99/0, 106/0 and 121/28.
+- **Still broken / not tested:** Object contents are still not decoded. Not tested: which three files carry the odd versions 99, 106 and 121.
+- **Next:** Decode one object type.
+
 ## 2026-10-29: First data loader, reads game packages (rc_probe)
 
 - **Changed:** Added a Cargo workspace (`Cargo.toml`) with two crates: `crates/rc_package` (reads Unreal Engine 2 package headers and tables, no Bevy) and `crates/rc_probe` (command-line tool that opens packages read-only and logs what it read to `logs/rc_probe.log`). Added `README.md`, `docs/DESIGN.md` and `docs/RESEARCH.md` (what exists for this game: format docs, UE Viewer, the CT headers, licenses).

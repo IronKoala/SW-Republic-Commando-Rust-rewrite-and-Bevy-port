@@ -45,8 +45,10 @@ bytes, small numbers take 1 byte.
 
 The stored version has two halves: the package version (low 16 bits) and a
 "licensee" version that the game studio sets (high 16 bits). Republic Commando
-uses licensee version 1. Package versions seen in a Steam install: 135, 138, 140,
-145, 154, 156, 157, 158 and 159.
+uses licensee version 1. A full scan of the Steam install (273 packages) found
+package versions 130 to 159 with licensee 1, mostly 157-159. Three odd files
+use other engines' versions (99 and 106 with licensee 0, and 121 with licensee
+28); they still read fine with the standard UE2 layout.
 
 From package version 151, the export table layout differs from standard UE2
 (found by UE Viewer):

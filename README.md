@@ -12,16 +12,14 @@ copy of the game.
 
 - **Reading game packages (tested).** `rc_probe` opens any of the game's package
   files (`.u .ctm .utx .uax .usx .ukx`) read-only and reads the header, the name
-  table, the import table and the export table. Tested on 50 real packages from a
-  Steam install (all 36 script packages plus maps, textures, sounds, static meshes
-  and animations, package versions 135 to 159): 50 of 50 read and passed every
-  consistency check.
+  table, the import table and the export table. Tested on Windows against a full
+  Steam install: all 273 packages read and passed every consistency check, in
+  under one second.
 
 ## What doesn't work yet
 
 - The contents of objects (textures, meshes, sounds, level geometry, scripts) are
   not decoded yet. Only the tables that list them are read.
-- Not tested yet: a full scan of all 273 packages in the install. Only 50 were tried.
 - No Bevy, no window, no game yet.
 
 ## How to run it
