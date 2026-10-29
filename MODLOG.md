@@ -3,6 +3,24 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Invisible walls (blocking volumes) are solid
+
+- **Changed:** New `rc_level::volumes` reads every `BlockingVolume`: its brush shape (a small BSP model) placed with `PrePivot`, `Rotation` and `Location`, plus whether it stops players, the AI and shots. `rc_level::collision::add_blocking_volumes` adds the ones that stop players to the collision; `rc_level::map_collision::load` (used by `rc_walk`) now does this. The viewer and `rc_level_check` log the volumes and two checks. New `crates/rc_walk/examples/volume_walk_test.rs` runs a commando into volumes with the game's movement.
+- **Why:** The level designers used these to keep the player in bounds. Without them you could walk off cliffs and through gaps the real game blocks.
+- **Tested how:** `rc_level_check` on all 79 maps; `cargo run --release -p rc_walk --example volume_walk_test -- GAMEDATA geo_01a geo_01b ras_01a yyy_01b geo_04c ras_04c`; `rc_walk --map geo_01a --script`; 2 new unit tests.
+- **Result:** 1,553 volumes in 67 maps, all read, all with scale 1. Only 11 of 8,942 AI path points are inside a volume (107 if `PrePivot` is ignored, 115 if turned a quarter wrong), and 974 volumes sit within 512 units of a path point (145 if left unplaced). Walk test: of 70 runs at a volume, 0 got inside with volumes in the collision and 18 got inside without. `rc_walk --map geo_01a --script`: 3 passed, 0 failed.
+- **Still broken / not tested:** Volumes aren't drawn (they're invisible in the game too). Shots and the AI don't use them yet; the flags are there for those threads. Not tested on Windows.
+- **Next:** The sky.
+
+## 2026-10-29: Every map loads; lightmaps fixed on 11 more maps (rc_level_check)
+
+- **Changed:** New program `rc_level_check` (in `crates/rc_level_viewer/src/bin/`) builds every map the way the viewer does, without a window, and logs each one to `logs/rc_level_check.log`. Fixed the lightmap reader (`rc_level/src/lightmap.rs`): each lightmap entry ends with a compact index and a 4-byte number, not five compact indexes. `ConstantColor` and `FadeColor` materials now show as a flat colour. Map collision loading moved from `rc_walk/src/level.rs` to `rc_level::map_collision` so the droid and squad work can share it.
+- **Why:** Only `geo_01a` and a few others had been tried. The goal is every level.
+- **Tested how:** Copied all 79 maps plus the texture, static mesh and script packages from the install (read only) into the cloud sandbox and ran `rc_level_check`.
+- **Result:** `79 of 79 maps loaded, 0 failed, in 13.2 s` (release build). Before the fix 12 maps had unreadable lightmaps (`shadow bits count ... doesn't fit`); after it 78 read and pass every lightmap check (each corner lands in its own rectangle). Missing materials dropped from 47 to 36, of which 34 are surfaces with no material at all.
+- **Still broken / not tested:** `entry.ctm` (the 6-polygon boot map) still has unreadable lightmaps: its page has no pixels and the bytes after it don't match. 21 maps have a few BSP corners 1-7 units off their plane (the check allows 1); they draw fine as far as the numbers show. One `TexPanner2D` and one odd `TexPanner` aren't shown. Not tested on Windows.
+- **Next:** Invisible walls, then the sky.
+
 ## 2026-10-29: The walker draws levels textured and lit (rc_walk, rc_level_viewer)
 
 - **Changed:** `rc_level_viewer` is now also a library (`src/lib.rs`). Its drawing code moved out of `main.rs` into a new `src/draw.rs` (`spawn_level`, `BACKGROUND`) with no change in what it does. `rc_walk --map` uses it, so the map has its textures, baked light and real-time lights instead of plain grey. The camera now uses the same exposure, no tonemapping, and a far distance of 5000 Bevy units, like the viewer. The test room keeps its own sun and ambient light. If the look can't be built, rc_walk falls back to the grey collision mesh and logs why.
