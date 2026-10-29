@@ -13,13 +13,14 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_image` | Turns raw pixel data (P8, DXT1/3/5, RGBA8, G16) into plain RGBA pictures and writes PNG files. Knows nothing about Unreal. No Bevy. |
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
 | `rc_audio` | Reads `.wav` files into samples and measures them (length, peak, loudness, checksum). Knows nothing about Unreal. No Bevy. |
-| `rc_viewer` | The first Bevy program: opens a window and shows one texture from the game. |
+| `rc_viewer` | The Bevy program: opens a window and shows one texture, or one 3D model with `--mesh`. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
-Only `rc_viewer` and `rc_soundtest` use Bevy (version 0.20.1, MIT or Apache-2.0). It turns on
-only the parts of Bevy a 2D window needs (no audio, gamepads or UI yet), which
-keeps the build smaller.
+Only `rc_viewer` and `rc_soundtest` use Bevy (version 0.20.1, MIT or Apache-2.0).
+Each turns on only the parts of Bevy it needs, which keeps the build smaller:
+`rc_viewer` a 2D window plus `bevy_pbr` for 3D models and their materials;
+`rc_soundtest` only audio and WAV decoding, with no window.
 
 ## Finding the game
 
@@ -180,6 +181,100 @@ Known quirk: in the sandbox, the first screenshot is often completely black,
 because the window hadn't been drawn yet. The check then tries again 10 frames
 later, up to 5 times. On the user's Windows PC the first capture was fine
 (3.77, PASS).
+
+## Static meshes (3D models)
+
+A "static mesh" is a model that doesn't bend or animate: weapons, props, and
+most pieces of the levels. They live in `.usx` packages. The DC-15 blaster is
+`DC15Blaster` (group `CloneWeapons`) in `GameData/StaticMeshes/weapons.usx`.
+Animated models (characters, first-person arms) are a different class in
+`.ukx` packages and aren't read yet.
+
+`rc_package::static_mesh::read_static_mesh` reads one, in this order (layout
+from UE Viewer, MIT):
+
+1. The property list. `Materials` is an array of small structs, each its own
+   property list. We keep each one's `Material` reference: one per section.
+2. A bounding box (smallest and largest x, y, z, plus a "valid" byte) and a
+   bounding sphere (centre and radius).
+3. Sections: each is a run of triangles drawn with one material (first index,
+   first and last vertex used, triangle count).
+4. The bounding box again.
+5. Vertices: position and normal, three 4-byte decimals each. A "normal" is
+   the direction the surface faces at that corner, used for lighting.
+6. Republic Commando adds two 4-byte numbers here (one from package version
+   149, another from 155). Their meaning is unknown.
+7. Vertex colours and vertex alphas (often one per vertex, sometimes empty).
+8. Texture coordinate sets ("UVs"): for each vertex, where on the texture it
+   sits, from 0 to 1 across and down.
+9. The triangle list: three vertex numbers per triangle (2 bytes each), then
+   a second index list we don't use.
+10. Collision data, which we don't read yet.
+
+Every list is a compact-index count followed by the items, and most streams
+end with a 4-byte "revision" number.
+
+**How we know the reading is right.** `StaticMesh::check` tests that every
+triangle points at real vertices, the sections add up to the triangle count,
+each section stays inside its vertex range, there is one UV per vertex, every
+vertex is inside the stored bounding box, and normals are 1 long. If any field
+were read at the wrong spot, the later lists would be garbage and these would
+fail. `rc_probe --meshes` ran this on all 58 `.usx` files: all 2,447 meshes
+pass. 11 of them have a few normals that are exactly (0, 0, 0), probably from
+triangles with no area in the artists' tools. The check allows exactly zero.
+
+**Axes.** Unreal uses x forward, y right, z up (a "left-handed" system).
+Bevy uses x right, y up, z toward the viewer ("right-handed"). Swapping y and z
+converts one to the other without mirroring the model. After the swap, all
+342 of the DC-15's triangles have their corners counter-clockwise when seen
+from the side their stored normal points to, which is the order Bevy treats as
+the front. So the triangle list goes to Bevy unchanged.
+
+**Materials.** A mesh's material reference is an import into a texture
+package: for the DC-15 it's `WeaponTextures.CloneWeapons.DC15Blaster`, so we
+open `GameData/Textures/weapontextures.utx` and decode that texture. Many
+weapons use a `Shader` instead, which combines several textures. For now we
+take the shader's `Diffuse` property (the main colour texture) and ignore the
+rest (bump maps, shine, transparency).
+
+## Showing a model in Bevy (`rc_viewer --mesh`)
+
+`rc_viewer/src/mesh.rs` reads the mesh and its texture before Bevy starts,
+moves the model's centre to (0, 0, 0), and spawns:
+
+- the model, as a Bevy `Mesh` with positions, normals and UVs, and an
+  "unlit" `StandardMaterial` (no lights: every pixel is just the texture
+  colour);
+- an orthographic camera (no perspective: far parts are drawn the same size
+  as near ones) looking at the side of the model, sized so the model fills
+  90% of the window. Colour adjustment ("tonemapping") and edge smoothing
+  ("MSAA") are off, so screen pixels are exactly texture colours.
+
+Once the on-screen check is done, the model turns slowly (6 turns a minute)
+so you can see all sides.
+
+### How we check the model without looking at it
+
+On frame 10 the window is captured, as in the texture viewer. Then
+`check_screen` draws the same model itself in plain Rust: it projects each
+corner to the screen the same way the camera does, skips triangles facing
+away, and for each pixel keeps the nearest triangle and its texture
+coordinate. It compares this with the capture in two ways:
+
+1. **Outline**: which pixels show the model at all. The score is overlap
+   divided by the area either drawing covers; 1.0 is identical. Over 0.97
+   passes.
+2. **Colour**: on pixels well inside the model, the average difference from
+   the texture colour expected there. Under 10 of 255 passes.
+
+As a control it also scores the texture flipped upside down.
+
+Results in the cloud sandbox (software rendering): DC15Blaster outline 0.996,
+colour 1.04 (flipped: 22.88), PASS in 3 of 3 runs. DC17mBlaster 0.86,
+DC15Pistol 0.32, ThermalDetonator 2.12 (flipped: 26 to 69).
+
+Known quirk: a capture can arrive before the model is drawn, showing only the
+background. That's retried like an all-black capture.
 
 ## Sounds
 

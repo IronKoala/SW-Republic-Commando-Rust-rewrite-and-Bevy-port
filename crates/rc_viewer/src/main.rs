@@ -1,17 +1,21 @@
-//! rc_viewer: the first Bevy program. Opens a window and shows one texture
-//! read from the installed game.
+//! rc_viewer: the first Bevy program. Opens a window and shows one texture,
+//! or one 3D model, read from the installed game.
 //!
 //! Usage:
 //!   rc_viewer [package] [texture name] [--frames N]
+//!   rc_viewer --mesh [package] [mesh name] [--frames N]
 //!
-//! Defaults to `DC15Blaster` from `GameData/Textures/weapontextures.utx` in the
-//! game folder (RC_GAME_DIR or the default Steam path). `--frames N` closes the
-//! window by itself after N frames, for automated tests.
+//! Defaults to the texture `DC15Blaster` from `GameData/Textures/weapontextures.utx`,
+//! or with `--mesh` the model `DC15Blaster` from `GameData/StaticMeshes/weapons.usx`,
+//! in the game folder (RC_GAME_DIR or the default Steam path). `--frames N`
+//! closes the window by itself after N frames, for automated tests.
 //!
-//! Everything it does is logged to `logs/rc_viewer.log`, so a run can be
-//! checked from the numbers without looking at the window. On frame
-//! `CHECK_FRAME` it also captures what is actually on screen and compares the
-//! middle of the window with the decoded texture, pixel by pixel.
+//! Everything it does is logged to `logs/rc_viewer.log` (`logs/rc_viewer_mesh.log`
+//! with `--mesh`), so a run can be checked from the numbers without looking at
+//! the window. On frame `CHECK_FRAME` it also captures what is actually on
+//! screen and compares it with what should be there, pixel by pixel.
+
+mod mesh;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -30,6 +34,8 @@ use std::time::Instant;
 const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Republic Commando";
 const DEFAULT_TEXTURE: &str = "DC15Blaster";
 const LOG_PATH: &str = "logs/rc_viewer.log";
+const MESH_LOG_PATH: &str = "logs/rc_viewer_mesh.log";
+const DEFAULT_MESH: &str = "DC15Blaster";
 const WINDOW_SIZE: u32 = 800;
 /// The frame on which the on-screen check captures the window. A few frames
 /// in, so the window and the texture upload have settled.
@@ -68,6 +74,13 @@ struct LoadedTexture {
 #[derive(Resource)]
 struct ExitAfter(Option<u32>);
 
+/// What the window shows, which decides how the on-screen check works.
+#[derive(Resource, Clone, Copy, PartialEq, Eq)]
+enum ViewMode {
+    Texture,
+    Mesh,
+}
+
 /// State of the on-screen check. `--frames` waits for it before closing.
 #[derive(Resource, Default)]
 struct ScreenCheck {
@@ -83,6 +96,9 @@ struct ScreenCheck {
 /// In the cloud test machine (software rendering, no real screen) the first
 /// capture is sometimes all black: the window had not been drawn yet.
 const CHECK_ATTEMPTS: u32 = 5;
+
+/// Things drawn in the scene: a sprite (texture view) or a 3D model.
+type SceneObject = Or<(With<Sprite>, With<Mesh3d>)>;
 
 #[derive(Resource, Default)]
 struct FrameStats {
@@ -205,7 +221,8 @@ fn count_frames(
     exit_after: Res<ExitAfter>,
     mut stats: ResMut<FrameStats>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    sprites: Query<&Sprite>,
+    view: Res<ViewMode>,
+    objects: Query<(), SceneObject>,
     mut exit: MessageWriter<AppExit>,
     mut commands: Commands,
     mut check: ResMut<ScreenCheck>,
@@ -219,8 +236,8 @@ fn count_frames(
             .map(|w| format!("{}x{}", w.width(), w.height()))
             .unwrap_or_else(|_| "none".into());
         log.line(format!(
-            "first frame: window {window}, sprites in scene: {}",
-            sprites.iter().count()
+            "first frame: window {window}, objects in scene: {}",
+            objects.iter().count()
         ));
         stats.last_report = now;
     } else if now - stats.last_report >= 1.0 {
@@ -242,9 +259,11 @@ fn count_frames(
             "frame {}: capturing the window for the on-screen check (attempt {} of {CHECK_ATTEMPTS})",
             stats.frames, check.attempts
         ));
-        commands
-            .spawn(Screenshot::primary_window())
-            .observe(check_screen);
+        let mut shot = commands.spawn(Screenshot::primary_window());
+        match *view {
+            ViewMode::Texture => shot.observe(check_screen),
+            ViewMode::Mesh => shot.observe(mesh::check_screen),
+        };
     }
     // Wait for the on-screen check, but give up on it after 300 extra frames.
     let check_settled =
@@ -266,24 +285,29 @@ fn count_frames(
     }
 }
 
-/// Compares the captured window with the decoded texture. The sprite fills a
-/// square in the middle of the window, so each screen pixel there is compared
-/// with the texture pixel it should show. A small average difference means
-/// the texture really is on screen, the right way up and in the right colours.
-fn check_screen(
-    captured: On<ScreenshotCaptured>,
-    loaded: Res<LoadedTexture>,
-    log: Res<RunLog>,
-    frames: Res<FrameStats>,
-    mut check: ResMut<ScreenCheck>,
-) {
-    let shot = &captured.image;
+/// A window capture as plain sRGB colours, row by row from the top left.
+struct Capture {
+    w: usize,
+    h: usize,
+    pixels: Vec<[u8; 3]>,
+    format: TextureFormat,
+}
+
+/// Turn a screenshot into a `Capture`. Returns `None` (and records the
+/// outcome in `check`) if it can't be used: no data, an unknown pixel format,
+/// or completely black, which is retried a few frames later.
+fn read_capture(
+    shot: &Image,
+    log: &RunLog,
+    frames: &FrameStats,
+    check: &mut ScreenCheck,
+) -> Option<Capture> {
     let (w, h) = (shot.width() as usize, shot.height() as usize);
     let format = shot.texture_descriptor.format;
     let Some(data) = shot.data.as_ref() else {
         log.line("on-screen check FAIL: the capture had no pixel data");
         check.passed = Some(false);
-        return;
+        return None;
     };
     let bgra = matches!(
         format,
@@ -299,17 +323,22 @@ fn check_screen(
             "on-screen check FAIL: capture format {format:?} not handled"
         ));
         check.passed = Some(false);
-        return;
+        return None;
     }
-    let screen = |x: usize, y: usize| -> [u8; 3] {
-        let p = &data[(y * w + x) * 4..];
-        if bgra {
-            [p[2], p[1], p[0]]
-        } else {
-            [p[0], p[1], p[2]]
-        }
-    };
-    if data.as_chunks::<4>().0.iter().all(|p| p[..3] == [0, 0, 0]) {
+    let pixels: Vec<[u8; 3]> = data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .take(w * h)
+        .map(|p| {
+            if bgra {
+                [p[2], p[1], p[0]]
+            } else {
+                [p[0], p[1], p[2]]
+            }
+        })
+        .collect();
+    if pixels.iter().all(|p| *p == [0, 0, 0]) {
         log.line("on-screen check: the capture is completely black (window not drawn yet)");
         if check.attempts < CHECK_ATTEMPTS {
             check.next_frame = Some(frames.frames + CHECK_FRAME);
@@ -319,8 +348,37 @@ fn check_screen(
             ));
             check.passed = Some(false);
         }
-        return;
+        return None;
     }
+    Some(Capture {
+        w,
+        h,
+        pixels,
+        format,
+    })
+}
+
+/// Compares the captured window with the decoded texture. The sprite fills a
+/// square in the middle of the window, so each screen pixel there is compared
+/// with the texture pixel it should show. A small average difference means
+/// the texture really is on screen, the right way up and in the right colours.
+fn check_screen(
+    captured: On<ScreenshotCaptured>,
+    loaded: Res<LoadedTexture>,
+    log: Res<RunLog>,
+    frames: Res<FrameStats>,
+    mut check: ResMut<ScreenCheck>,
+) {
+    let Some(Capture {
+        w,
+        h,
+        pixels,
+        format,
+    }) = read_capture(&captured.image, &log, &frames, &mut check)
+    else {
+        return;
+    };
+    let screen = |x: usize, y: usize| pixels[y * w + x];
     let tex = &loaded.image;
     let side = (w.min(h) as f32 * 0.9) as usize;
     let (x0, y0) = ((w - side) / 2, (h - side) / 2);
@@ -386,10 +444,13 @@ fn over_background(t: &[u8]) -> [u8; 3] {
 fn main() -> AppExit {
     let mut positional = Vec::new();
     let mut frames = None;
+    let mut view = ViewMode::Texture;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--frames" {
             frames = args.next().and_then(|n| n.parse().ok());
+        } else if arg == "--mesh" {
+            view = ViewMode::Mesh;
         } else {
             positional.push(arg);
         }
@@ -397,15 +458,18 @@ fn main() -> AppExit {
     let game = std::env::var_os("RC_GAME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_DIR));
-    let package = positional.first().map(PathBuf::from).unwrap_or_else(|| {
-        game.join("GameData")
-            .join("Textures")
-            .join("weapontextures.utx")
-    });
+    let (folder, file, default_name, log_path) = match view {
+        ViewMode::Texture => ("Textures", "weapontextures.utx", DEFAULT_TEXTURE, LOG_PATH),
+        ViewMode::Mesh => ("StaticMeshes", "weapons.usx", DEFAULT_MESH, MESH_LOG_PATH),
+    };
+    let package = positional
+        .first()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| game.join("GameData").join(folder).join(file));
     let wanted = positional
         .get(1)
         .cloned()
-        .unwrap_or_else(|| DEFAULT_TEXTURE.to_string());
+        .unwrap_or_else(|| default_name.to_string());
 
     // Rule: never write inside the game install. Refuse to run from in there.
     let cwd = std::env::current_dir().expect("can't read the current folder");
@@ -419,38 +483,58 @@ fn main() -> AppExit {
 
     fs::create_dir_all("logs").expect("can't create the logs folder");
     let log = RunLog {
-        file: Mutex::new(fs::File::create(LOG_PATH).expect("can't create the log file")),
+        file: Mutex::new(fs::File::create(log_path).expect("can't create the log file")),
         start: Instant::now(),
     };
     log.line(format!("rc_viewer {}", env!("CARGO_PKG_VERSION")));
     log.line(format!("package: {}", package.display()));
-    log.line(format!("texture: {wanted}"));
 
-    let loaded = match load_texture(&log, &package, &wanted) {
-        Ok(t) => t,
-        Err(e) => {
-            log.line(format!("FAILED: {e}"));
-            return AppExit::from_code(1);
+    let mut app = App::new();
+    let title = match view {
+        ViewMode::Texture => {
+            log.line(format!("texture: {wanted}"));
+            let loaded = match load_texture(&log, &package, &wanted) {
+                Ok(t) => t,
+                Err(e) => {
+                    log.line(format!("FAILED: {e}"));
+                    return AppExit::from_code(1);
+                }
+            };
+            let title = format!("Republic Commando texture: {}", loaded.name);
+            app.insert_resource(loaded).add_systems(Startup, setup);
+            title
+        }
+        ViewMode::Mesh => {
+            log.line(format!("mesh: {wanted}"));
+            let loaded = match mesh::load(&log, &game, &package, &wanted) {
+                Ok(m) => m,
+                Err(e) => {
+                    log.line(format!("FAILED: {e}"));
+                    return AppExit::from_code(1);
+                }
+            };
+            let title = format!("Republic Commando model: {wanted}");
+            app.insert_resource(loaded)
+                .add_systems(Startup, mesh::setup)
+                .add_systems(Update, mesh::spin);
+            title
         }
     };
 
-    let exit = App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: format!("Republic Commando texture: {}", loaded.name),
-                resolution: WindowResolution::new(WINDOW_SIZE, WINDOW_SIZE),
-                ..default()
-            }),
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title,
+            resolution: WindowResolution::new(WINDOW_SIZE, WINDOW_SIZE),
             ..default()
-        }))
-        .insert_resource(ClearColor(Color::srgb(0.15, 0.15, 0.15)))
-        .insert_resource(loaded)
-        .insert_resource(ExitAfter(frames))
-        .insert_resource(FrameStats::default())
-        .insert_resource(ScreenCheck::default())
-        .insert_resource(log)
-        .add_systems(Startup, setup)
-        .add_systems(Update, count_frames)
-        .run();
-    exit
+        }),
+        ..default()
+    }))
+    .insert_resource(ClearColor(Color::srgb(0.15, 0.15, 0.15)))
+    .insert_resource(view)
+    .insert_resource(ExitAfter(frames))
+    .insert_resource(FrameStats::default())
+    .insert_resource(ScreenCheck::default())
+    .insert_resource(log)
+    .add_systems(Update, count_frames)
+    .run()
 }

@@ -107,6 +107,10 @@ impl<'a> Reader<'a> {
         Ok(i32::from_le_bytes(self.bytes(4)?.try_into().unwrap()))
     }
 
+    pub fn f32(&mut self) -> Result<f32> {
+        Ok(f32::from_bits(self.u32()?))
+    }
+
     /// Unreal's variable-length "compact index" integer, 1 to 5 bytes.
     /// First byte: bit 7 is the sign, bit 6 means "another byte follows",
     /// bits 0-5 are the lowest 6 bits of the value. Each following byte:

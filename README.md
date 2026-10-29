@@ -48,17 +48,30 @@ copy of the game.
   DC-17 rifle firing over a looping battle ambience through Bevy's audio and
   checks that Bevy decodes every sample exactly as our own reader does.
 
+- **Reading 3D models (tested on every static mesh).** `rc_probe --meshes`
+  reads every static mesh (the fixed models used for weapons, props and level
+  pieces, in `.usx` files): corner points, triangles and texture coordinates.
+  All 2,447 static meshes in the install read and pass every check.
+
+- **Showing a model in 3D (tested in the cloud sandbox, not yet on Windows).**
+  `rc_viewer --mesh` shows the DC-15 blaster with its texture, turning slowly.
+  It checks itself by drawing the model on its own and comparing it with the
+  screen: outline match 0.996 and colour difference 1.04 of 255, PASS. It also
+  works for the DC-17m, the DC-15s pistol and the thermal detonator.
+
 ## What doesn't work yet
 
 - Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Other objects (meshes, level geometry, scripts) are not decoded yet.
+- Animated models (`.ukx`), level geometry and scripts are not decoded yet.
 - Sound: music (`.ogg` files in `GameData\Music`) isn't played yet, only
   found. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
   No 3D (positional) sound yet. Not tested on Windows.
-- No 3D, no levels, no game yet. The Bevy window shows one flat picture.
+- Models are drawn without lighting, bump maps or transparency. Only a
+  material's main colour texture is used.
+- No levels, no game yet.
 
 ## How to run it
 
@@ -106,6 +119,20 @@ To show a different texture, give the package and the texture's name, and add
 ```
 cargo run --release -p rc_viewer -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Textures\weapontextures.utx" WookieeMelee --frames 300
 ```
+
+To show the DC-15 blaster in 3D:
+
+```
+cargo run --release -p rc_viewer -- --mesh
+```
+
+You should see a window titled `Republic Commando model: DC15Blaster` with the
+blaster seen from the side. After a few seconds it starts turning slowly. The
+log goes to `logs\rc_viewer_mesh.log`. Look for `on-screen check PASS`. Other
+models work too, for example
+`cargo run --release -p rc_viewer -- --mesh "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\StaticMeshes\weapons.usx" DC17mBlaster`.
+To check every static mesh: `cargo run --release -p rc_probe -- --meshes`
+(log in `logs\rc_meshes.log`).
 
 To read every sound in the game:
 
