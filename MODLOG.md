@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: The squad is saved too ([squad] section)
+
+- **Changed:** New `crates/rc_squad_plugin/src/save.rs`: the `[squad]` section, holding the stance, objective, marked spots, whether the leader is down, the player's revive, and per mate (by name) their feet, facing, state (idle, moving, working, reviving and time left), goal, hold point, marker, down, who they're going to revive, health and shield. The squad appears on its first frame of play, after the save is handed out, so the section waits in `PendingSquadSave` and is put back right after `spawn_squad`, before `check_down`.
+- **Why:** Saving item, next part. The squad thread's fight-and-revive PR (#22) fixed the state to save, and it is merged.
+- **Tested how:** `cargo test -p rc_squad -p rc_squad_plugin -p rc_save`, and `xvfb-run rc_game --script` on geo_01a in the cloud sandbox with game files copied read-only.
+- **Result:** All pass. Script `SCRIPT DONE: 39 checks passed, 0 failed`. After quickload the log shows `squad: put back: stance form_up, 3 mates (0 down)`: the mates were moved from where the fresh level put them (2323, 1527) back to their saved spots, and a second save matched the first (`[squad] off by 0.000`).
+- **Still broken / not tested:** The mates stood still in the scripted run, so a save taken mid-revive or mid-job is untested. A mate's planned route starts over after a load.
+- **Next:** Doors and lifts (`[movers]`) once PR #26 is in.
+
 ## 2026-10-29: Saving, loading and checkpoints (rc_game_core::save, rc_save)
 
 - **Changed:** New `rc_game_core/src/save.rs`: the `SavePart` interface each part fills in, `add_save_part`, the messages `SaveGame`, `LoadGame`, `CheckpointReached`, `SaveResult`, and `RestoringSave` and `SaveList`. New crate `rc_save` (`SavePlugin`): readable TOML save files written safely in a save folder, quicksave and quickload, a checkpoint save at each level start and at each new `CheckpointReached`, loading by reloading the map and handing each part its section on the first frame. Sections: `[player]` (rc_game), `[combat]` (rc_combat: health, shield, weapons, ammo), `[enemies]` (rc_enemies, with new `rc_ai::Battle::snapshot`/`restore` and `Fighter::alert`), `[checkpoints]`. New actions `quick_save` (F5) and `quick_load` (F9), a `[save] folder` setting, and save steps in `rc_game --script`. New `rc_level::checkpoints` reads a map's `Checkpoint` actors and what fires them.

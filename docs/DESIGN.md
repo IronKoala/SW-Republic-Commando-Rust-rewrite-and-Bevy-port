@@ -1725,8 +1725,10 @@ section. Sections so far: `[player]` (position, speed, on the ground,
 crouched, facing; in `rc_game/src/player.rs`), `[combat]` (health, shield,
 weapons and ammo; `rc_combat/src/save.rs`), `[enemies]` (the battle clock,
 each spawner's state and each living droid; `rc_enemies/src/save.rs`, using
-`rc_ai::Battle::snapshot` and `restore`), `[checkpoints]` (checkpoints
-reached on this map; `rc_save`).
+`rc_ai::Battle::snapshot` and `restore`), `[squad]` (stance, orders, each
+mate's place, job, revive, health and shield; `rc_squad_plugin/src/save.rs`,
+applied right after the squad appears on its first frame), `[checkpoints]`
+(checkpoints reached on this map; `rc_save`).
 
 **Loading reloads the map.** Loading a save sets `CurrentLevel` to the
 save's map and goes through `Loading` exactly like the menu does, so the

@@ -4600,6 +4600,7 @@ dependencies = [
  "rc_nav",
  "rc_package",
  "rc_squad",
+ "serde",
 ]
 
 [[package]]
