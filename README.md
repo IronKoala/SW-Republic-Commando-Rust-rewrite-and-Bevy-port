@@ -82,7 +82,7 @@ copy of the game.
   start a level and they stand with you.
 
 - **Sev, Fixer and Scorch look like themselves (tested in the cloud
-  sandbox, not yet on Windows).** Each squad mate is drawn with the
+  sandbox and on Windows).** Each squad mate is drawn with the
   original commando model, their own armour (Sev's red, Fixer's green,
   Scorch's yellow) and the original's animations: standing, walking,
   running, backing up, side-stepping, firing, falling when knocked out, and
