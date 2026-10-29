@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Any screen shape, dual input, stick curves; menus marked as placeholders
+
+- **Changed:** `rc_game`'s field of view is now "Hor+": `video.fov` is the angle across a 4:3 screen (the original's 85), turned into a fixed angle up and down, so wider screens see more at the sides instead of losing the top and bottom. The HUD and menus are sized by the screen's smaller side (`Val::VMin`, `FontSize::VMin`), and the HUD stays in a centred 16:9 area on wider screens (new `video.hud_max_aspect`). Sticks: the dead zone now stretches the rest of the range back to 0..1, and a new `controls.stick_look_curve` (default 1.5) gives finer aim near the middle. `rc_game_core::ActionState` gained `last_device` (keyboard and mouse, gamepad or touch) for button prompts. The amber menus and HUD are marked as placeholders in the code, `data/ui/theme.toml`, README and DESIGN. New `docs/ORIGINAL_MENUS.md` (how the original builds its menus and HUD, and the plan to use them) and `docs/DISPLAY_AND_INPUT.md` (screen shapes, controllers, gyro).
+- **Why:** New project goals from the user: any resolution and aspect ratio with proper ultrawide, dual input, wide controller support and gyro aiming; and use the original game's menus as much as possible.
+- **Tested how:** `cargo test -p rc_game -p rc_game_core` (new tests for the field of view numbers and the stick shaping). `rc_game --script` in the cloud sandbox at 1024x768, 1280x720, 1720x720, 2560x720 and 540x960, with screenshots. For the menus: read the install's `XInterfaceCTMenus.u`, `XInterface.u`, `CTGame.u`, `GUIContent.utx`, `WarfareFonts.utx`, `OrbitFonts.utx` and `HUDTextures.utx` with a throwaway tool built on `rc_package` (not committed).
+- **Result:** Tests 18 passed. The script passed 17 of 17 at all five sizes. Logged view angles: 85.0, 101.4, 117.3, 135.5 and 42.3 degrees across, 69.0 up and down every time. Screenshots: on 32:9 the HUD sits in the centred 16:9 area; on the upright phone shape the menu and HUD fit inside the screen. Menus: `CTMenuMain`'s 34 default values read cleanly, including "MAIN MENU" at 0.24, 0.575 and its eight buttons; the HUD (`CTHUD`) is drawn by native code, so only its textures can be reused.
+- **Still broken / not tested:** At 32:9 the edges of the 3D view are visibly stretched (normal for a 135-degree view; needs an optional Panini view). No real gamepad, touch screen or gyro tested. No gyro support (gilrs can't read gyros). No in-game rebinding screen.
+- **Next:** Separate threads: the original's menus (plan in `docs/ORIGINAL_MENUS.md`), gyro and controller pictures (`docs/DISPLAY_AND_INPUT.md`).
+
 ## 2026-10-29: Recoil message, and a trial run with the weapons and squad parts
 
 - **Changed:** `rc_game_core` gained `ViewKick` (weapon recoil: pitch and yaw in radians); `rc_game`'s player adds it to the view. `docs/PLUGINS.md` lists it.

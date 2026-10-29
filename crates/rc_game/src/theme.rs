@@ -90,10 +90,11 @@ impl Theme {
         })
     }
 
-    /// Text that scales with the screen height.
+    /// Text that scales with the screen: its height, or its width when that is
+    /// smaller (a phone held upright), so text never runs off the sides.
     pub fn font(&self, size: f32) -> TextFont {
         TextFont {
-            font_size: FontSize::Vh(size),
+            font_size: FontSize::VMin(size),
             ..default()
         }
     }

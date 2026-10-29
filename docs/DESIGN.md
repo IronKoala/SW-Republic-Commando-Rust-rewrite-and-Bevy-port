@@ -969,14 +969,23 @@ or a VR mod writes `ActionState` itself instead.
 does) from `ActionState`, and puts a separate camera at its eyes. The
 camera is not a child of the body, so a VR headset can replace it.
 
-**Menus.** Each menu is a page: a title and a list of items, drawn with
+**Menus.** *Placeholders:* these menus and the display below are our own
+stand-ins until the original's menus and HUD are read from the install
+(`docs/ORIGINAL_MENUS.md`). Each menu is a page: a title and a list of items, drawn with
 Bevy's UI and the theme file's colours. Pages: main, campaign list, a
 campaign's levels, options, pause, and "game files not found". The mission
 names, order and loading text come from the game's own
 `GameData/System/LevelLoadingInfo.int` (plain text with numbered entries
 like `MapName[3]="GEO_03A"`), read at start-up, never copied into the repo.
-`data/levels/campaigns.toml` only groups them by name prefix. Text sizes are
-a share of the screen height, so the menus fit a phone or a monitor.
+`data/levels/campaigns.toml` only groups them by name prefix. Sizes are a
+share of the screen height, or of its width when that is smaller, so the
+menus fit a phone or a monitor.
+
+**Screen shapes and controls.** The view is "Hor+": `video.fov` is the
+angle across a 4:3 screen, as in the original, and wider screens see more
+at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+numbers and what is still to do (edge stretching on ultrawides, controller
+pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
 **On-screen display.** Corner brackets like the commando's visor, a
 four-bar crosshair whose gap follows the weapon's spread and turns red on a

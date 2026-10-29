@@ -41,7 +41,7 @@ the small set of types in `crates/rc_game_core`.
 | Clean up when the map ends | spawn with `DespawnOnExit(GameState::InGame)` |
 | Find a game file | `GamePaths::game_file("GameData/Sounds/x.uax")`, `map_path("geo_01a")`. Never `RC_GAME_DIR` or a Steam path. |
 | Find our own data file (moddable) | `GamePaths::data_file("weapons/dc15s.toml")`: a mod's copy wins over `data/` |
-| Player input | read `ActionState` (`pressed(Action::Fire)`, `movement`, `look`). Never read keys, mouse or gamepad. |
+| Player input | read `ActionState` (`pressed(Action::Fire)`, `movement`, `look`). Never read keys, mouse or gamepad. To show a button prompt, check `last_device` (keyboard and mouse, gamepad or touch) and show that device's button. |
 | Collide or trace | `LevelCollision` (Unreal units). The level part inserts it while loading, and may replace it at any time (moving doors) |
 | Where the player starts | the level part inserts `PlayerStart` (feet in Unreal units, yaw) while loading |
 | Recoil | send a `ViewKick { pitch, yaw }` message (radians); the player's view applies it |

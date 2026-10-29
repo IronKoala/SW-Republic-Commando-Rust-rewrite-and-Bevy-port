@@ -1,6 +1,11 @@
 //! The menus: main menu, level select, options, pause, and the loading
 //! screen.
 //!
+//! PLACEHOLDER: these amber menus are our own stand-ins. The goal is to use
+//! the original game's menus (read from the install at run time) as much as
+//! possible; see `docs/ORIGINAL_MENUS.md`. Keep the page and command logic
+//! separate from the drawing so the original's look can replace it.
+//!
 //! Every menu is a page: a title and a list of items. Arrow keys, a gamepad
 //! d-pad or the mouse pick an item; Enter, the gamepad's A button or a click
 //! choose it; Escape or B goes back. On the options page, left and right
@@ -424,6 +429,9 @@ pub fn apply_settings(
     fov.0 = settings.video.fov;
     look.mouse_sensitivity = settings.controls.mouse_sensitivity;
     look.invert_y = settings.controls.invert_y;
+    look.stick_look_speed = settings.controls.stick_look_speed;
+    look.dead_zone = settings.controls.stick_dead_zone;
+    look.look_curve = settings.controls.stick_look_curve;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -472,7 +480,7 @@ fn draw_menu(
                 align_items: AlignItems::FlexStart,
                 justify_content: JustifyContent::Center,
                 padding: UiRect::left(Val::Percent(10.0)),
-                row_gap: Val::Vh(1.2),
+                row_gap: Val::VMin(1.2),
                 ..default()
             },
             BackgroundColor(background),
@@ -488,8 +496,8 @@ fn draw_menu(
             root.spawn((
                 Node {
                     width: Val::Percent(40.0),
-                    height: Val::Vh(0.3),
-                    margin: UiRect::bottom(Val::Vh(2.0)),
+                    height: Val::VMin(0.3),
+                    margin: UiRect::bottom(Val::VMin(2.0)),
                     ..default()
                 },
                 BackgroundColor(theme.text_dim),
@@ -513,7 +521,7 @@ fn draw_menu(
                     Interaction::None,
                     ItemButton(i),
                     Node {
-                        padding: UiRect::axes(Val::Vh(1.0), Val::Vh(0.4)),
+                        padding: UiRect::axes(Val::VMin(1.0), Val::VMin(0.4)),
                         max_width: Val::Percent(85.0),
                         ..default()
                     },
@@ -583,7 +591,7 @@ fn spawn_loading_screen(
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 padding: UiRect::horizontal(Val::Percent(12.0)),
-                row_gap: Val::Vh(2.0),
+                row_gap: Val::VMin(2.0),
                 ..default()
             },
             BackgroundColor(theme.background.with_alpha(1.0)),

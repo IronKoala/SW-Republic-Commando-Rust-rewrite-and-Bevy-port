@@ -1,9 +1,13 @@
 # Colours and sizes for the menus and the on-screen display.
 #
+# PLACEHOLDER: these are our own stand-in menus and HUD. The original game's
+# menus are to replace them (see docs/ORIGINAL_MENUS.md).
+#
 # Colours are "#RRGGBB" or "#RRGGBBAA" (AA is opacity, 00 clear to FF solid).
 # The look follows the original's commando visor: amber lines and text on
-# dark glass. Sizes are a share of the screen height (4.0 = 4%), so the
-# menus scale with any screen, phone or monitor.
+# dark glass. Sizes are a share of the screen height (4.0 = 4%), or of its
+# width when that is smaller (a phone held upright), so the menus scale with
+# any screen, phone or monitor.
 
 [colours]
 text = "#F2B544"          # amber: normal text and lines
