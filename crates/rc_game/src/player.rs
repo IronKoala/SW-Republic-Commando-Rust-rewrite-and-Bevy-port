@@ -42,10 +42,21 @@ impl World for Nothing {
 
 pub struct PlayerPlugin;
 
+/// The player's movement. Parts that follow the player (the squad) order
+/// themselves after it, so they see this frame's position.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PlayerMoveSet;
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::InGame), spawn_player)
-            .add_systems(Update, move_body.in_set(GameSet::Simulate).run_if(playing))
+            .add_systems(
+                Update,
+                move_body
+                    .in_set(GameSet::Simulate)
+                    .in_set(PlayerMoveSet)
+                    .run_if(playing),
+            )
             .add_systems(
                 Update,
                 place_camera

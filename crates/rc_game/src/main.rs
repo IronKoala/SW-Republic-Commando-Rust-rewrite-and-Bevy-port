@@ -318,6 +318,11 @@ fn main() -> AppExit {
     app.add_plugins(rc_level_plugin::LevelPlugin);
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
+    app.add_plugins(rc_squad_plugin::SquadPlugin);
+    app.configure_sets(
+        Update,
+        player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),
+    );
 
     if use_script {
         app.add_plugins(script::ScriptPlugin);
