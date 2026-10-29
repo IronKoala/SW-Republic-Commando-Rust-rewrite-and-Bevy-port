@@ -44,6 +44,10 @@ pub struct WeaponReadout {
     pub spread: f32,
     /// True while the crosshair is over an enemy (the original turns it red).
     pub on_target: bool,
+    /// While zoomed in (the sniper attachment): the field of view to use,
+    /// degrees across a 4:3 screen like the video setting. `None` when not
+    /// zoomed.
+    pub zoom_fov: Option<f32>,
 }
 
 /// One squad mate on the display.

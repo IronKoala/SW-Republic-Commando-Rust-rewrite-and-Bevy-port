@@ -1,0 +1,33 @@
+# The DC-17m anti-armour attachment's round. Not thrown by hand: the
+# weapon file dc17m_antiarmor.toml fires it. It goes off when it touches
+# anything.
+#
+# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own stand-ins,
+# NOT yet read from the original game. They will be replaced with the class
+# defaults from ctinventory.u (with its "...Defaults" class in
+# Properties/properties.u on top) once the game's packages can be read.
+
+name = "Anti-Armour Round"
+
+[ammo]
+max_count = 1             # not carried by hand; the weapon's ammo counts
+
+[throw]
+speed = 3000              # not used: the weapon's shot.speed sets it
+
+[fuse]
+kind = "impact"
+
+[flight]
+gravity = 400             # placeholder: falls a little over distance
+
+[blast]
+damage = 300              # placeholder
+radius = 350              # placeholder
+damage_kind = "explosion"
+
+[damage_vs]
+droid = 1.5               # placeholder: good against armour
+
+[model]
+blast_colour = [1.0, 0.5, 0.2]   # our choice

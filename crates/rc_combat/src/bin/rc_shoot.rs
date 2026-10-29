@@ -167,7 +167,9 @@ fn script_steps() -> Vec<Step> {
         // The droid to the right, with the pistol: one shot per press,
         // 55 damage each, so two shots. The view turns a frame before the
         // trigger is pulled (the camera's position is read a frame late).
-        Hold(&[NextWeapon], 0.1),
+        // The pistol is last in the cycle (after the DC-17m's attachments),
+        // so "previous weapon" reaches it.
+        Hold(&[PrevWeapon], 0.1),
         Face(26.57, 0.0),
         Hold(&[], 0.1),
         Hold(&[Fire], 0.1),

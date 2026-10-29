@@ -43,6 +43,31 @@ pub struct PlayerSetup {
     /// Grenade ids, in the order "next grenade" cycles; the first is
     /// selected at the start. Each starts with its file's `start_count`.
     pub grenades: Vec<String>,
+    pub melee: MeleeParams,
+}
+
+/// The player's close-range hit (the melee button), from
+/// `data/combat/player.toml` `[melee]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeleeParams {
+    pub damage: f32,
+    /// How far in front of the eye it reaches, uu.
+    pub range: f32,
+    /// Seconds between hits.
+    pub delay: f32,
+    pub sound: Option<String>,
+}
+
+impl Default for MeleeParams {
+    /// Our stand-in values until the game's are read (see player.toml).
+    fn default() -> Self {
+        MeleeParams {
+            damage: 100.0,
+            range: 120.0,
+            delay: 0.8,
+            sound: None,
+        }
+    }
 }
 
 impl Default for PlayerSetup {
@@ -54,6 +79,7 @@ impl Default for PlayerSetup {
             shield_recharge_delay: 3.0,
             weapons: vec!["dc17m_blaster".into(), "dc15s_pistol".into()],
             grenades: vec![],
+            melee: MeleeParams::default(),
         }
     }
 }
@@ -73,6 +99,12 @@ impl PlayerSetup {
                 .unwrap_or(d.shield_recharge_delay),
             weapons: t.texts("player.weapons")?.unwrap_or(d.weapons),
             grenades: t.texts("player.grenades")?.unwrap_or(d.grenades),
+            melee: MeleeParams {
+                damage: t.number("melee.damage")?.unwrap_or(d.melee.damage),
+                range: t.number("melee.range")?.unwrap_or(d.melee.range),
+                delay: t.number("melee.delay")?.unwrap_or(d.melee.delay),
+                sound: t.text("melee.sound")?.or(d.melee.sound),
+            },
         };
         t.finish()?;
         Ok(p)
@@ -240,6 +272,12 @@ fn load_sounds(
                 list.push(n.clone());
             }
         }
+    }
+    if let Some(n) = &lib.player.melee.sound {
+        wanted
+            .entry("gen_sound".into())
+            .or_default()
+            .push(n.clone());
     }
     for p in lib.grenades.values() {
         let list = wanted

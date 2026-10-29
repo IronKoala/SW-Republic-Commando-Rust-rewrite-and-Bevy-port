@@ -136,7 +136,9 @@ fn every_weapon_file_reads() {
         ids,
         [
             "dc15s_pistol",
+            "dc17m_antiarmor",
             "dc17m_blaster",
+            "dc17m_sniper",
             "e5_blaster",
             "e5_blaster_tm"
         ]
@@ -272,12 +274,13 @@ fn magazine_empties_and_reloads() {
 #[test]
 fn pistol_is_one_shot_per_press_and_recharges() {
     let mut r = Range::new();
-    r.run(1, &[Action::NextWeapon]);
+    // The pistol is last in the cycle: one step back from the rifle.
+    r.run(1, &[Action::PrevWeapon]);
     r.run(1, &[]);
-    assert_eq!(r.arsenal().current, 1);
+    assert_eq!(r.arsenal().current, 3);
     r.seconds(1.0, &[Action::Fire]);
     assert_eq!(
-        r.arsenal().weapons[1].1.shots_fired,
+        r.arsenal().weapons[3].1.shots_fired,
         1,
         "holding fires once"
     );
@@ -285,10 +288,10 @@ fn pistol_is_one_shot_per_press_and_recharges() {
         r.run(1, &[Action::Fire]);
         r.seconds(0.25, &[]);
     }
-    let charge = r.arsenal().weapons[1].1.clip;
+    let charge = r.arsenal().weapons[3].1.clip;
     assert!(charge < 5.0);
     r.seconds(4.0, &[]);
-    assert_eq!(r.arsenal().weapons[1].1.clip, 5.0);
+    assert_eq!(r.arsenal().weapons[3].1.clip, 5.0);
     // Two 55-damage bolts take the 100-health droid down.
     let seen = r.seen();
     assert_eq!(seen.died.len(), 1);
@@ -411,6 +414,7 @@ fn every_grenade_file_reads_and_the_player_carries_them() {
     assert_eq!(
         ids,
         [
+            "dc17m_antiarmor_round",
             "emp_grenade",
             "flash_grenade",
             "sonic_detonator",
@@ -518,4 +522,97 @@ fn player_throws_the_selected_grenade() {
     assert_eq!(seen.blasts.len(), 1, "it went off");
     let ro = r.app.world().resource::<WeaponReadout>();
     assert_eq!(ro.grenade.as_ref().map(|g| g.1), Some(before - 1));
+}
+
+#[test]
+fn sniper_zooms_and_hits_hard() {
+    let mut r = Range::new();
+    let lib = r.app.world().resource::<WeaponLibrary>();
+    let p = lib.weapons["dc17m_sniper"].clone();
+    r.run(1, &[Action::NextWeapon]);
+    r.run(1, &[]);
+    assert_eq!(r.arsenal().weapons[r.arsenal().current].0, "dc17m_sniper");
+    r.run(1, &[Action::Zoom]);
+    r.run(1, &[]);
+    assert_eq!(
+        r.app.world().resource::<WeaponReadout>().zoom_fov,
+        p.zoom_fov
+    );
+    r.seen();
+    r.run(1, &[Action::Fire]);
+    r.seconds(1.0, &[]);
+    let seen = r.seen();
+    let d: Vec<_> = seen.damage.iter().filter(|d| d.target == r.droid).collect();
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0].amount, p.damage);
+    // Switching weapon leaves zoom.
+    r.run(1, &[Action::NextWeapon]);
+    r.run(2, &[]);
+    assert_eq!(r.app.world().resource::<WeaponReadout>().zoom_fov, None);
+}
+
+#[test]
+fn anti_armour_round_flies_and_blows_up_on_the_droid() {
+    let mut r = Range::new();
+    let round = r.app.world().resource::<WeaponLibrary>().grenades["dc17m_antiarmor_round"].clone();
+    for _ in 0..2 {
+        r.run(1, &[Action::NextWeapon]);
+        r.run(1, &[]);
+    }
+    assert_eq!(
+        r.arsenal().weapons[r.arsenal().current].0,
+        "dc17m_antiarmor"
+    );
+    r.seen();
+    r.run(1, &[Action::Fire]);
+    r.seconds(2.0, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.blasts.len(), 1, "one blast");
+    let b = &seen.blasts[0];
+    let bx = b.point.x * 50.0;
+    // It goes off on the droid's near side (x 460), not at the far wall.
+    assert!((bx - 460.0).abs() < 60.0, "went off at x {bx}");
+    let d = seen
+        .damage
+        .iter()
+        .find(|d| d.target == r.droid)
+        .expect("droid hurt");
+    assert!(
+        d.amount > 0.5 * round.damage * round.multiplier_vs("organic"),
+        "{}",
+        d.amount
+    );
+}
+
+#[test]
+fn melee_hits_only_within_reach() {
+    let mut r = Range::new();
+    let reach = r
+        .app
+        .world()
+        .resource::<WeaponLibrary>()
+        .player
+        .melee
+        .clone();
+    r.seen();
+    r.run(1, &[Action::Melee]);
+    r.run(1, &[]);
+    assert!(r.seen().damage.is_empty(), "the droid is 1000 uu away");
+    // Bring the droid within reach: 80 uu in front of the eye.
+    r.app
+        .world_mut()
+        .entity_mut(r.droid)
+        .insert(Transform::from_translation(b(
+            -500.0 + 80.0 + 40.0,
+            0.0,
+            0.0,
+        )));
+    r.seconds(reach.delay + 0.1, &[]);
+    r.run(1, &[Action::Melee]);
+    r.run(1, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.damage.len(), 1);
+    assert_eq!(seen.damage[0].target, r.droid);
+    assert_eq!(seen.damage[0].amount, reach.damage);
+    assert_eq!(seen.damage[0].kind, rc_combat::DamageKind::Melee);
 }

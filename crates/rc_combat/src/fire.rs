@@ -278,6 +278,7 @@ pub(crate) fn launch_shots(
     mut rng: ResMut<CombatRng>,
     mut damage: MessageWriter<Damage>,
     mut landed: MessageWriter<ShotLanded>,
+    mut lobbed: MessageWriter<crate::throw::ThrowGrenade>,
     looks: Option<Res<crate::view::BoltLooks>>,
     log: Option<Res<GameLog>>,
 ) {
@@ -301,7 +302,7 @@ pub(crate) fn launch_shots(
         let dir = dir_to_unreal(f.direction).normalize_or_zero();
         let range = match p.shot {
             ShotKind::Instant { range } => range,
-            ShotKind::Bolt { .. } => CROSSHAIR_RANGE,
+            ShotKind::Bolt { .. } | ShotKind::Lobbed { .. } => CROSSHAIR_RANGE,
         };
         // Aim error is added at the point the shot would land.
         let end = start + dir * range;
@@ -325,6 +326,17 @@ pub(crate) fn launch_shots(
         }
 
         match p.shot {
+            ShotKind::Lobbed { speed } => {
+                // The round flies like a grenade: the throw systems take it
+                // from here (and its blast does the damage).
+                let v = dir_to_bevy(dir) * speed / UU_PER_UNIT;
+                lobbed.write(crate::throw::ThrowGrenade {
+                    thrower: f.shooter,
+                    origin: f.origin,
+                    velocity: v,
+                    grenade: p.grenade.clone().unwrap_or_default(),
+                });
+            }
             ShotKind::Instant { range } => {
                 let end = start + dir * range;
                 let hit = trace(level, targets, start, end, Some(f.shooter));
@@ -497,6 +509,7 @@ pub(crate) fn weapon_readout(
         // over 50 (the widest weapon so far is 15).
         spread: (p.aim_error / 50.0).clamp(0.0, 1.0),
         on_target: crosshair.is_some_and(|c| c.on_target),
+        zoom_fov: out.zoom_fov,
     };
     if *out != new {
         *out = new;

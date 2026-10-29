@@ -28,6 +28,7 @@ mod fire;
 pub mod grenade;
 pub mod health;
 mod library;
+mod melee;
 pub mod shot;
 mod throw;
 mod view;
@@ -35,7 +36,7 @@ pub mod weapon;
 
 pub use grenade::{GrenadeParams, Grenades};
 pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
-pub use library::{PlayerSetup, WeaponLibrary};
+pub use library::{MeleeParams, PlayerSetup, WeaponLibrary};
 pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{WeaponParams, WeaponState};
 
@@ -185,6 +186,8 @@ impl Plugin for WeaponsPlugin {
                 (
                     fire::player_trigger,
                     fire::launch_shots,
+                    melee::player_zoom,
+                    melee::player_melee,
                     throw::player_grenades,
                     throw::launch_grenades,
                 )
@@ -202,7 +205,11 @@ impl Plugin for WeaponsPlugin {
             )
             .add_systems(
                 Update,
-                (fire::weapon_readout, throw::grenade_readout)
+                (
+                    fire::weapon_readout,
+                    throw::grenade_readout,
+                    melee::zoom_readout,
+                )
                     .chain()
                     .in_set(CombatSet::Readouts)
                     .run_if(playing)
