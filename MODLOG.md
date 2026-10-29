@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Doors and lifts move (rc_level::movers, rc_movers, rc_walk)
+
+- **Changed:** New `rc_level::movers` reads every mover (door, lift, hatch) and trigger in a map: keys, timing, easing, what it does when blocked, what sets it off, tag, event and sounds, from the map and then the class defaults (`ClassLook` now keeps all of a class's default values). New crate `rc_movers` runs them: moves them key to key, moves their collision with them, carries a player standing on a lift, pushes or backs off when the player is in the way, runs player-touch triggers and chained events. Our own choices are in `data/movers/movers.toml`. `map_collision` keeps mover triangles apart; the level viewer's scene gives movers their own draw batches (`MoverPart`); `rc_walk` moves them every frame, logs every mover event, and has `--ride`. New program `rc_mover_check` runs every mover in every map without a window.
+- **Why:** Overnight item 1 (all levels): doors and lifts stood still, so routes through levels were shut.
+- **Tested how:** `cargo test -p rc_movers` (9 tests), `rc_walk --script` in the test room, `cargo build --workspace`.
+- **Result:** 9 passed, 0 failed: a triggered door opens in 1.50 s (MoveTime 1.5), waits 2 s, closes in 1.50 s; a lift carries the player up 400 units and back down, feet never more than 1 unit off its top; a closing door turns back when the player stands in it; walking into a bump door opens it and the player gets through. Test room: `SCRIPT DONE: 21 checks passed, 0 failed`.
+- **Still broken / not tested:** Not tested on the real maps yet (no game files in the sandbox this session), so `rc_mover_check` and `rc_walk --map MAP --ride --script` haven't been run. Not tested on Windows. Sounds are logged, not played. Doors opened by scripts or squad orders, and triggers that other triggers switch on and off, aren't handled. Turning movers collide approximately. The smooth easing curve is our reading of UE2, not measured.
+- **Next:** Run `rc_mover_check` on all 79 maps and a lift ride in the walker, then fix what they show.
+
 ## 2026-10-29: Props and doors that take their model from their class (rc_level, rc_level_viewer, rc_walk)
 
 - **Changed:** New `rc_level::class_look`: when a map gives an actor no `StaticMesh`, it reads the actor's class defaults (walking the class and its parents across script packages such as `Properties/StaticPropProperties.u`, `KarmaPropProperties.u` and `CTInventory.u`) and fills in `StaticMesh`, `DrawScale`, `DrawScale3D` and `bHidden` where the map leaves them out. Classes whose `DrawType` isn't "static mesh" are left alone. The level viewer, `rc_level_check` and `rc_level::map_collision` (so `rc_walk`) use it. Added `rc_package::class_defaults`, copied unchanged from the weapons thread (commit f4d8880) so both branches carry the same file.

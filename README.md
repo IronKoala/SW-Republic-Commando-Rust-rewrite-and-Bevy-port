@@ -118,6 +118,13 @@ copy of the game.
   about 3,460 props and double doors that take their model from their
   type are now drawn and solid.
 
+- **Doors and lifts move (unit-tested, not yet tried on the real maps).**
+  Doors, lifts and hatches open, close and travel with the timings, keys
+  and triggers stored in each map, and their collision moves with them, so
+  you can ride a lift in `rc_walk`. `rc_mover_check` runs every one in every
+  map and logs the numbers. Our own settings are in
+  `data/movers/movers.toml`.
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
@@ -127,9 +134,9 @@ copy of the game.
   found. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
   No 3D (positional) sound yet.
-- Levels are drawn without characters, effects or moving parts: doors and
-  lifts stand where the map puts them and don't open. The gunship isn't
-  solid. 9 maps have windows onto a sky but no sky box, so they show a flat
+- Levels are drawn without characters or effects. Door and lift sounds are
+  logged, not played, and doors opened by the game's scripts or squad
+  orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
   colour there. The level viewer's camera flies through walls (`rc_walk`
   has collision).
 - Models are drawn without bump maps or transparency. Only a
@@ -270,6 +277,25 @@ cargo run --release -p rc_level_viewer --bin rc_level_check
 
 It takes about 15 seconds after building, writes `logs\rc_level_check.log`,
 and ends with one line per map and `79 of 79 maps loaded, 0 failed`.
+
+To check every door and lift in every level:
+
+```
+cargo run --release -p rc_movers --bin rc_mover_check
+```
+
+It writes `logs\rc_mover_check.log`: every mover and trigger with its values,
+each mover's position over time as it opens and closes, and a ride on every
+lift. The last lines are totals, ending with `timing: N of N movers opened
+and closed in MoveTime per key` and `lift rides: N of N passed`. Give map
+names to check only those, for example `... rc_mover_check -- geo_01a`.
+
+To ride a lift in first person (stands you on the map's first lift and sets
+it going; add `--script` to have it check the ride by itself):
+
+```
+cargo run --release -p rc_walk -- --map MAP --ride
+```
 
 To check every character and animation in the game:
 
