@@ -12,9 +12,15 @@ rc_movement = { path = "../rc_movement" }
 rc_nav = { path = "../rc_nav" }
 rc_package = { path = "../rc_package" }
 rc_squad = { path = "../rc_squad" }
+# The original Sev, Fixer and Scorch models, read from the game.
+rc_model = { path = "../rc_model" }
+# Reading data/squad/looks.toml. serde (MIT OR Apache-2.0),
+# https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. Game states, and the 3D
-# material types for the squad's stand-in bodies. No window: the game
+# meshes, pictures and materials for the squad's bodies. No window: the game
 # (rc_game or rc_walk) brings that.
 [dependencies.bevy]
 version = "0.20.1"

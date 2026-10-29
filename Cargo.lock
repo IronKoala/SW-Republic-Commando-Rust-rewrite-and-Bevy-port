@@ -4518,6 +4518,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_model"
+version = "0.1.0"
+dependencies = [
+ "rc_anim",
+ "rc_image",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_movement"
 version = "0.1.0"
 
@@ -4581,10 +4590,13 @@ dependencies = [
  "rc_combat",
  "rc_game_core",
  "rc_level",
+ "rc_model",
  "rc_movement",
  "rc_nav",
  "rc_package",
  "rc_squad",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]
