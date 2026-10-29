@@ -534,7 +534,9 @@ impl SkeletalMesh {
             problems.push(format!("{unweighted} points have no bone influence"));
         }
         if off > 0 {
-            let bad = sum.iter().filter(|&&s| s != 0.0 && (s - 1.0).abs() > WEIGHT_SUM_TOLERANCE);
+            let bad = sum
+                .iter()
+                .filter(|&&s| s != 0.0 && (s - 1.0).abs() > WEIGHT_SUM_TOLERANCE);
             let lo = bad.clone().fold(f32::INFINITY, |a, &b| a.min(b));
             let hi = bad.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
             problems.push(format!(
