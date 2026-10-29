@@ -1,0 +1,32 @@
+# Geonosian warrior: fast and organic.
+#
+# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own
+# stand-ins, NOT yet read from the original game. They will be replaced with
+# the class defaults from the script packages (ctcharacters.u and its
+# "...Defaults" class in Properties/properties.u) once those can be read.
+# The class names and the mesh and animation names are also unchecked.
+# Anything not listed takes the battle droid's value (battle_droid.toml).
+# Not done: the original's Geonosians fly and climb walls; ours walk.
+
+[type]
+id = "geonosian"
+name = "Geonosian"
+classes = ["Geonosian*"]  # placeholder: class name to check in the maps
+body = "organic"
+
+[movement]
+ground_speed = 500        # placeholder
+collision_radius = 30     # placeholder
+collision_height = 70     # placeholder
+base_eye_height = 55      # placeholder
+
+[combat]
+health = 80               # placeholder
+accuracy = 0.4            # placeholder
+weapon = "e5_blaster"     # placeholder: a stand-in until its sonic blaster file exists
+burst_count = 1           # placeholder
+ready_distance = 900      # placeholder
+
+[look]
+package = "GameData/Animations/geonosian.ukx"   # placeholder
+mesh = "Geonosian"                               # placeholder

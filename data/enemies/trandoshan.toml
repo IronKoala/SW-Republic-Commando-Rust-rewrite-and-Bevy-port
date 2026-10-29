@@ -1,0 +1,30 @@
+# Trandoshan mercenary: tough organic soldier.
+#
+# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own
+# stand-ins, NOT yet read from the original game. They will be replaced with
+# the class defaults from the script packages (ctcharacters.u and its
+# "...Defaults" class in Properties/properties.u) once those can be read.
+# The class names and the mesh and animation names are also unchecked.
+# Anything not listed takes the battle droid's value (battle_droid.toml).
+
+[type]
+id = "trandoshan"
+name = "Trandoshan"
+classes = ["Trandoshan*"]  # placeholder: class name to check in the maps
+body = "organic"
+
+[movement]
+ground_speed = 400        # placeholder
+collision_radius = 40     # placeholder
+collision_height = 84     # placeholder
+base_eye_height = 70      # placeholder
+
+[combat]
+health = 250              # placeholder
+accuracy = 0.5            # placeholder
+weapon = "e5_blaster"     # placeholder: a stand-in until the Trandoshan rifle file exists
+burst_count = 3           # placeholder
+
+[look]
+package = "GameData/Animations/trandoshan.ukx"  # placeholder
+mesh = "Trandoshan"                             # placeholder

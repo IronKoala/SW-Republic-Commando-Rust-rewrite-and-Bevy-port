@@ -667,6 +667,9 @@ impl Fighter {
     /// lets us shoot at it when standing.
     fn pick_cover(&self, view: &View, enemy: Vec3) -> Option<usize> {
         let c = &self.params.combat;
+        if !c.uses_cover {
+            return None;
+        }
         let mut best: Option<(usize, f32)> = None;
         for n in view
             .nav

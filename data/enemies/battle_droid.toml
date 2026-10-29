@@ -13,6 +13,16 @@
 #             BattleDroidBlasterTM). See docs/RESEARCH.md "Battle droids".
 #   "guess" = the original decides this in its compiled engine, which we
 #             don't read. Our own choice; tune freely.
+#
+# Every enemy type has a file like this one in data/enemies/. A file only
+# needs the lines that differ from the battle droid: anything left out
+# takes the battle droid's value. Add a new file to add a new enemy type.
+
+[type]
+id = "battle_droid"       # this file's name
+name = "battle droid"     # for the log
+classes = ["BattleDroid*"] # the game's classes a map's spawner may make; * matches any ending (BattleDroid, BattleDroidTM, ...)
+body = "droid"            # "droid" or "organic": EMP stuns droids, flash grenades blind organics
 
 [movement]
 ground_speed = 375        # game: BattleDroid GroundSpeed
@@ -54,6 +64,7 @@ max_maneuver_time = 10    # game: StateBattleDroidAttack MaxManuverTime
 cover_boredom_time = 15   # game: CTBot CoverBoredomTime (looks for new cover after this long)
 cover_search_radius = 1500 # guess: how far it will go to reach cover
 lost_sight_reposition = 2 # guess: seconds without a clear shot before a stationary droid moves
+uses_cover = true         # guess: looks for cover when shot in the open
 
 [spawning]
 # The original starts most spawners from level scripts. We run proximity

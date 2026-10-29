@@ -18,6 +18,8 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct Spawner {
     pub factory: Factory,
+    /// The settings of what it makes (its enemy type).
+    pub params: Arc<AiParams>,
     pub active: bool,
     /// Droids made so far.
     pub made: u32,
@@ -57,13 +59,25 @@ impl Battle {
     /// `factories` are the spawners this battle runs (the caller picks,
     /// for example only those making battle droids).
     pub fn new(params: Arc<AiParams>, nav: NavGraph, factories: Vec<Factory>) -> Self {
+        let typed = factories.into_iter().map(|f| (f, params.clone())).collect();
+        Battle::with_types(params, nav, typed)
+    }
+
+    /// Spawners making different enemy types, each with its own settings.
+    /// `params` gives the whole battle's limits (`[spawning]`).
+    pub fn with_types(
+        params: Arc<AiParams>,
+        nav: NavGraph,
+        factories: Vec<(Factory, Arc<AiParams>)>,
+    ) -> Self {
         Battle {
             params,
             nav,
             spawners: factories
                 .into_iter()
-                .map(|factory| Spawner {
+                .map(|(factory, params)| Spawner {
                     factory,
+                    params,
                     active: false,
                     made: 0,
                     next_spawn: 0.0,
@@ -263,12 +277,13 @@ impl Battle {
     /// Switch spawners on, and make at most one droid per step.
     fn spawn(&mut self, player: Vec3, out: &mut Vec<BattleEvent>) {
         let s = &self.params.spawning;
-        let radius = self.params.movement.collision_radius;
+
         let alive_total = self.alive().count() as u32;
         for i in 0..self.spawners.len() {
             let sp = &mut self.spawners[i];
             let f = &sp.factory;
             if !sp.active {
+                let radius = sp.params.movement.collision_radius;
                 let by_trigger = f
                     .triggers
                     .iter()
@@ -297,20 +312,15 @@ impl Battle {
                 && self.time >= sp.next_spawn
             {
                 let spot = f.spot(sp.made as usize);
-                let feet =
-                    spot.location - Vec3::new(0.0, 0.0, self.params.movement.collision_height);
+                let params = sp.params.clone();
+                let feet = spot.location - Vec3::new(0.0, 0.0, params.movement.collision_height);
                 let id = self.next_id;
                 self.next_id += 1;
                 sp.made += 1;
                 sp.next_spawn = self.time + f.spawn_interval.max(0.1);
                 let start_state = f.start_state.clone();
-                self.fighters.push(Fighter::new(
-                    id,
-                    self.params.clone(),
-                    feet,
-                    spot.yaw,
-                    start_state,
-                ));
+                self.fighters
+                    .push(Fighter::new(id, params, feet, spot.yaw, start_state));
                 self.made_by.push(i);
                 out.push(BattleEvent::Spawned {
                     id,

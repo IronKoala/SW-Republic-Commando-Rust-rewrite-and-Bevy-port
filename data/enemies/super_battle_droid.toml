@@ -1,0 +1,35 @@
+# Super battle droid (B2): slow, heavily armoured, fires a wrist blaster,
+# walks straight at you instead of taking cover.
+#
+# !! PLACEHOLDER NUMBERS !! Values marked "placeholder" are our own
+# stand-ins, NOT yet read from the original game. They will be replaced with
+# the class defaults from the script packages (ctcharacters.u and its
+# "...Defaults" class in Properties/properties.u) once those can be read.
+# The class names and the mesh and animation names are also unchecked.
+# Anything not listed takes the battle droid's value (battle_droid.toml).
+
+[type]
+id = "super_battle_droid"
+name = "super battle droid"
+classes = ["SuperBattleDroid*"]  # placeholder: class name to check in the maps
+body = "droid"
+
+[movement]
+ground_speed = 250        # placeholder
+collision_radius = 40     # placeholder
+collision_height = 90     # placeholder
+crouch_height = 90        # placeholder: B2s don't crouch
+base_eye_height = 70      # placeholder
+
+[combat]
+health = 400              # placeholder
+accuracy = 0.5            # placeholder
+weapon = "e5_blaster"     # placeholder: a stand-in until its wrist blaster file exists
+burst_count = 5           # placeholder
+ready_distance = 600      # placeholder
+safe_distance = 900       # placeholder
+uses_cover = false        # placeholder: walks at you instead
+
+[look]
+package = "GameData/Animations/droid.ukx"   # placeholder
+mesh = "SuperBattleDroid"                    # placeholder

@@ -490,3 +490,92 @@ fn a_stunned_droid_does_nothing() {
     }
     assert!(shots > 0, "never fired after the stun wore off");
 }
+
+#[test]
+fn every_enemy_file_reads_and_claims_its_classes() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/enemies");
+    let mut types = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "toml") {
+            let text = std::fs::read_to_string(&p).unwrap();
+            let params = AiParams::battle_droid()
+                .with_overrides(&text)
+                .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+            assert_eq!(
+                params.kind.id,
+                p.file_stem().unwrap().to_string_lossy(),
+                "[type] id should be the file's name"
+            );
+            types.push(params.kind);
+        }
+    }
+    assert!(types.len() >= 4);
+    let who = |class: &str| {
+        let m: Vec<_> = types
+            .iter()
+            .filter(|t| t.matches(class))
+            .map(|t| t.id.as_str())
+            .collect();
+        assert!(m.len() <= 1, "{class} claimed by {m:?}");
+        m.first().map(|s| s.to_string())
+    };
+    assert_eq!(who("BattleDroidTM").as_deref(), Some("battle_droid"));
+    assert_eq!(who("battledroid").as_deref(), Some("battle_droid"));
+    assert_eq!(
+        who("SuperBattleDroid").as_deref(),
+        Some("super_battle_droid")
+    );
+    assert_eq!(who("CloneCommando"), None);
+}
+
+#[test]
+fn spawners_make_their_own_enemy_type() {
+    let world = flat_floor(vec![]);
+    let base = Arc::new(AiParams::battle_droid());
+    let mut big = AiParams::battle_droid();
+    big.kind.id = "big".into();
+    big.movement.collision_height = 120.0;
+    let big = Arc::new(big);
+    let factory = |name: &str, x: f32| Factory {
+        name: name.into(),
+        tag: name.into(),
+        prototype: name.into(),
+        location: Vec3::new(x, 0.0, 200.0),
+        yaw: 0.0,
+        spots: vec![],
+        capacity: 1,
+        max_alive: 1,
+        generate_forever: false,
+        spawn_mode: 0,
+        spawn_interval: 0.1,
+        start_state: StartState::StationaryAttack,
+        team: None,
+        triggers: vec![],
+    };
+    let mut b = Battle::with_types(
+        base.clone(),
+        NavGraph::default(),
+        vec![(factory("a", 500.0), base), (factory("b", -500.0), big)],
+    );
+    for _ in 0..20 {
+        b.step(1.0 / 30.0, &world, Some(target_at(0.0, 2000.0)));
+    }
+    assert_eq!(b.fighters.len(), 2);
+    let ids: Vec<_> = b
+        .fighters
+        .iter()
+        .map(|f| f.params.kind.id.as_str())
+        .collect();
+    assert!(
+        ids.contains(&"battle_droid") && ids.contains(&"big"),
+        "{ids:?}"
+    );
+    // Placed with its own height: feet at 200 - 120 for the big one.
+    let bigf = b
+        .fighters
+        .iter()
+        .find(|f| f.params.kind.id == "big")
+        .unwrap();
+    assert!(bigf.pawn.feet().z < 81.0, "{:?}", bigf.pawn.feet());
+}
