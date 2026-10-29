@@ -68,3 +68,29 @@ inside the tables, every export's data lies inside the file, and the header's
 "generation" counts match. In `Core.u` the first export's data starts at exactly
 the byte where the export table ends, which is what we expect if the table was
 read correctly.
+
+## Object data: properties
+
+Most objects' data starts with a list of "properties", the settings you'd see in
+the Unreal editor (for a texture: `Format`, `USize`, `VSize`, `Palette`, ...).
+Each one is the property's name, one info byte (type, size, array flag) and the
+value. The list ends with the name `None`. `rc_package::properties` reads it and
+decodes the simple types (byte, int, bool, float, object, name); the rest keep
+their raw bytes for now.
+
+## Textures
+
+After the properties, a `Texture` stores its mipmaps: the picture at full size,
+then half size, quarter size, and so on. Each mipmap is a "skip position" (the
+file offset just after its pixels), the pixel bytes, the width and height, and
+two small numbers (log2 of width and height). `rc_package::texture` reads them.
+
+Three checks show the reading is right, and all pass on real files:
+- The skip position equals where the pixels really end.
+- The byte count matches what the format needs (DXT1 uses 8 bytes per 4x4
+  block, DXT3/DXT5 16, P8 one byte per pixel, RGBA8 four).
+- Nothing is left over at the end of the object.
+
+Formats are UE2's numbers: 0 P8 (8-bit with a separate palette), 3 DXT1,
+7 DXT3, 8 DXT5, 5 RGBA8, 10 G16 (terrain heightmaps). UE Viewer guesses that
+Republic Commando's format 14 is CxV8U8; we haven't seen it yet.

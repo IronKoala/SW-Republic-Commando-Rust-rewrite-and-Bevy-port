@@ -16,10 +16,17 @@ copy of the game.
   Steam install: all 273 packages read and passed every consistency check, in
   under one second.
 
+- **Reading textures (partly tested).** `rc_probe --textures` reads every `Texture`
+  object: its settings (format, size) and the raw pixel data of each mipmap.
+  Tested on the 192 textures inside 50 packages copied from the install: all 192
+  passed the size checks. Formats seen: P8, DXT1, DXT3, DXT5, RGBA8, G16.
+
 ## What doesn't work yet
 
-- The contents of objects (textures, meshes, sounds, level geometry, scripts) are
-  not decoded yet. Only the tables that list them are read.
+- Textures are read but not converted into pictures yet, and nothing is shown.
+- Not tested yet: textures in the 54 texture packages (`.utx`) that weren't in the
+  test sample, and the texture scan on Windows.
+- Other objects (meshes, sounds, level geometry, scripts) are not decoded yet.
 - No Bevy, no window, no game yet.
 
 ## How to run it
@@ -36,6 +43,14 @@ To check every package in the game:
 ```
 cargo run --release -p rc_probe -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData"
 ```
+
+To read every texture in the game:
+
+```
+cargo run --release -p rc_probe -- --textures
+```
+
+This logs to `logs\rc_textures.log` and ends with a `--- texture summary ---` line.
 
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.

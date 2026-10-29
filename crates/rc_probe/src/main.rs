@@ -8,9 +8,14 @@
 //!   rc_probe                 open GameData/System/Core.u in the game folder
 //!   rc_probe <file>          open one package and log its details
 //!   rc_probe <folder>        open every package under that folder, one line each
+//!   rc_probe --textures [path]  read every texture in a package or folder
+//!                            (default: the whole GameData folder), log to
+//!                            `logs/rc_textures.log`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
+
+mod textures;
 
 use rc_package::{ObjectRef, Package};
 use std::collections::BTreeMap;
@@ -22,13 +27,14 @@ use std::time::Instant;
 const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Republic Commando";
 const PACKAGE_EXTENSIONS: &[&str] = &["u", "ctm", "utx", "uax", "usx", "ukx"];
 const LOG_PATH: &str = "logs/rc_probe.log";
+const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
 
-struct Log {
+pub(crate) struct Log {
     file: fs::File,
 }
 
 impl Log {
-    fn line(&mut self, s: impl AsRef<str>) {
+    pub(crate) fn line(&mut self, s: impl AsRef<str>) {
         let s = s.as_ref();
         println!("{s}");
         let _ = writeln!(self.file, "{s}");
@@ -43,9 +49,20 @@ fn game_dir() -> PathBuf {
 
 fn main() {
     let game = game_dir();
-    let target = match std::env::args_os().nth(1) {
+    let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+    let texture_mode = args.first().is_some_and(|a| a == "--textures");
+    if texture_mode {
+        args.remove(0);
+    }
+    let target = match args.first() {
         Some(arg) => PathBuf::from(arg),
+        None if texture_mode => game.join("GameData"),
         None => game.join("GameData").join("System").join("Core.u"),
+    };
+    let log_path = if texture_mode {
+        TEXTURE_LOG_PATH
+    } else {
+        LOG_PATH
     };
 
     // Rule: never write inside the game install. Refuse to run from in there.
@@ -59,18 +76,20 @@ fn main() {
     }
 
     fs::create_dir_all("logs").expect("can't create the logs folder");
-    let file = fs::File::create(LOG_PATH).expect("can't create the log file");
+    let file = fs::File::create(log_path).expect("can't create the log file");
     let mut log = Log { file };
     log.line(format!("rc_probe {}", env!("CARGO_PKG_VERSION")));
     log.line(format!("game folder: {}", game.display()));
     log.line(format!("target:      {}", target.display()));
 
-    let ok = if target.is_dir() {
+    let ok = if texture_mode {
+        textures::scan(&mut log, &target)
+    } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {
         probe_one(&mut log, &target)
     };
-    log.line(format!("log written to {LOG_PATH}"));
+    log.line(format!("log written to {log_path}"));
     std::process::exit(if ok { 0 } else { 1 });
 }
 
@@ -204,7 +223,7 @@ fn report_checks(log: &mut Log, pkg: &Package) -> bool {
     }
 }
 
-fn find_packages(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn find_packages(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
