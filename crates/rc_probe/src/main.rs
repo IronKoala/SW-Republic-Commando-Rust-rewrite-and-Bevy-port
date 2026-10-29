@@ -13,11 +13,17 @@
 //!                            check its pixels, log to `logs/rc_textures.log`
 //!   rc_probe --export-textures <path>  the same, and also write each texture
 //!                            as a PNG to `extracted/textures/<package>/`
+//!   rc_probe --sounds [path] read every sound in a package or folder
+//!                            (default: GameData/Sounds), decode and measure
+//!                            it, log to `logs/rc_sounds.log`
+//!   rc_probe --export-sounds <path>  the same, and also write each sound as
+//!                            a .wav file to `extracted/sounds/<package>/`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
 
 mod pixels;
+mod sounds;
 mod textures;
 
 use rc_package::{ObjectRef, Package};
@@ -31,8 +37,10 @@ const DEFAULT_GAME_DIR: &str = r"C:\Games\Steam\steamapps\common\Star Wars Repub
 const PACKAGE_EXTENSIONS: &[&str] = &["u", "ctm", "utx", "uax", "usx", "ukx"];
 const LOG_PATH: &str = "logs/rc_probe.log";
 const TEXTURE_LOG_PATH: &str = "logs/rc_textures.log";
-/// Gitignored folder for anything extracted from the game.
+const SOUND_LOG_PATH: &str = "logs/rc_sounds.log";
+/// Gitignored folders for anything extracted from the game.
 const EXTRACT_DIR: &str = "extracted/textures";
+const SOUND_EXTRACT_DIR: &str = "extracted/sounds";
 
 pub(crate) struct Log {
     file: fs::File,
@@ -43,6 +51,11 @@ impl Log {
         let s = s.as_ref();
         println!("{s}");
         let _ = writeln!(self.file, "{s}");
+    }
+
+    /// Write to the log file only, not the screen.
+    pub(crate) fn file_only(&mut self, s: impl AsRef<str>) {
+        let _ = writeln!(self.file, "{}", s.as_ref());
     }
 }
 
@@ -57,8 +70,18 @@ fn main() {
     let mut args: Vec<_> = std::env::args_os().skip(1).collect();
     let export_mode = args.first().is_some_and(|a| a == "--export-textures");
     let texture_mode = export_mode || args.first().is_some_and(|a| a == "--textures");
-    if texture_mode {
+    let sound_export = args.first().is_some_and(|a| a == "--export-sounds");
+    let sound_mode = sound_export || args.first().is_some_and(|a| a == "--sounds");
+    if texture_mode || sound_mode {
         args.remove(0);
+    }
+    if sound_export && args.is_empty() {
+        eprintln!("--export-sounds needs a package file or folder, for example:");
+        eprintln!(
+            r#"  rc_probe --export-sounds "{}\GameData\Sounds\ui_sound.uax""#,
+            game.display()
+        );
+        std::process::exit(2);
     }
     if export_mode && args.is_empty() {
         eprintln!("--export-textures needs a package file or folder, for example:");
@@ -71,10 +94,13 @@ fn main() {
     let target = match args.first() {
         Some(arg) => PathBuf::from(arg),
         None if texture_mode => game.join("GameData"),
+        None if sound_mode => game.join("GameData").join("Sounds"),
         None => game.join("GameData").join("System").join("Core.u"),
     };
     let log_path = if texture_mode {
         TEXTURE_LOG_PATH
+    } else if sound_mode {
+        SOUND_LOG_PATH
     } else {
         LOG_PATH
     };
@@ -99,6 +125,9 @@ fn main() {
     let ok = if texture_mode {
         let export_dir = export_mode.then(|| Path::new(EXTRACT_DIR));
         textures::scan(&mut log, &target, export_dir)
+    } else if sound_mode {
+        let export_dir = sound_export.then(|| Path::new(SOUND_EXTRACT_DIR));
+        sounds::scan(&mut log, &target, &game.join("GameData"), export_dir)
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {

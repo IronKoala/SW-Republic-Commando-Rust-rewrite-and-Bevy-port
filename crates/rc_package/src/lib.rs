@@ -14,6 +14,7 @@
 
 pub mod properties;
 pub mod reader;
+pub mod sound;
 pub mod texture;
 
 pub use reader::{ReadError, Reader, Result};

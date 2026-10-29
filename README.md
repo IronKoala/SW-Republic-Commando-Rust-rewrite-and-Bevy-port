@@ -39,12 +39,25 @@ copy of the game.
   passed first time (difference 3.77 of 255) and ran at a steady 144 frames
   per second.
 
+- **Reading and playing sounds (tested in the cloud sandbox, not yet on
+  Windows).** `rc_probe --sounds` reads every sound in the game's 23 sound
+  packages (`.uax`). Every sound inside them is a normal `.wav` file
+  (uncompressed 16-bit): 7,974 sounds, about 4 hours 11 minutes in total, all
+  decoded with no failures. `rc_probe --export-sounds` saves them as `.wav`
+  files in the gitignored `extracted/sounds/` folder. `rc_soundtest` plays the
+  DC-17 rifle firing over a looping battle ambience through Bevy's audio and
+  checks that Bevy decodes every sample exactly as our own reader does.
+
 ## What doesn't work yet
 
 - Formats 12 and 14 (133 textures, probably bump maps) aren't decoded.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Other objects (meshes, sounds, level geometry, scripts) are not decoded yet.
+- Other objects (meshes, level geometry, scripts) are not decoded yet.
+- Sound: music (`.ogg` files in `GameData\Music`) isn't played yet, only
+  found. 13 "streamed" ambient loops for the RAS level name files that don't
+  exist in the PC install. `SoundMultiple` groups are read but not used yet.
+  No 3D (positional) sound yet. Not tested on Windows.
 - No 3D, no levels, no game yet. The Bevy window shows one flat picture.
 
 ## How to run it
@@ -94,6 +107,33 @@ To show a different texture, give the package and the texture's name, and add
 cargo run --release -p rc_viewer -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Textures\weapontextures.utx" WookieeMelee --frames 300
 ```
 
+To read every sound in the game:
+
+```
+cargo run --release -p rc_probe -- --sounds
+```
+
+This logs to `logs\rc_sounds.log` (one line per sound) and ends with a
+`--- summary ---` block. Expect `Sound objects: 7974  decoded: 7974  with
+problems: 0  failed: 0`. To save one package's sounds as `.wav` files you can
+play:
+
+```
+cargo run --release -p rc_probe -- --export-sounds "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Sounds\ui_sound.uax"
+```
+
+To hear a rifle firing over a looping battle ambience (no window; it stops by
+itself after 8 seconds):
+
+```
+cargo run --release -p rc_soundtest
+```
+
+The log goes to `logs\rc_soundtest.log`. Look for `numbers check ...: PASS`,
+`-> PLAYED` and an `ambience speed` close to `1.00x`. Pick other sounds with
+`--weapon NAME`, `--ambient NAME` and `--seconds N` (names are in
+`logs\rc_sounds.log`).
+
 If your game is somewhere else, set `RC_GAME_DIR` first, for example
 `set RC_GAME_DIR=D:\Games\Star Wars Republic Commando`.
 
@@ -102,9 +142,11 @@ game folder and refuses to run from inside it.
 
 ## Credits
 
-- [Bevy](https://bevy.org) game engine, MIT or Apache-2.0 license.
+- [Bevy](https://bevy.org) game engine, MIT or Apache-2.0 license. Its audio
+  uses [rodio](https://github.com/RustAudio/rodio) and
+  [hound](https://github.com/ruuda/hound) (both MIT or Apache-2.0).
 
-The package format was learned from these. No code was copied from them.
+The package and sound formats were learned from these. No code was copied from them.
 
 - [UE Viewer (UModel)](https://github.com/gildor2/UEViewer) by Konstantin Nosov, MIT
   license. Source of the Republic Commando-specific package details.

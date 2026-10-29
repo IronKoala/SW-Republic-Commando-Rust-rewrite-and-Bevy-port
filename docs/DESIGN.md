@@ -12,10 +12,12 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_package` | Reads Unreal Engine 2 packages from bytes it's given. Opens no files. No Bevy. |
 | `rc_image` | Turns raw pixel data (P8, DXT1/3/5, RGBA8, G16) into plain RGBA pictures and writes PNG files. Knows nothing about Unreal. No Bevy. |
 | `rc_probe` | Small command-line tool that opens packages from the game folder and logs what it read. |
+| `rc_audio` | Reads `.wav` files into samples and measures them (length, peak, loudness, checksum). Knows nothing about Unreal. No Bevy. |
 | `rc_viewer` | The first Bevy program: opens a window and shows one texture from the game. |
+| `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
-Only `rc_viewer` uses Bevy (version 0.20.1, MIT or Apache-2.0). It turns on
+Only `rc_viewer` and `rc_soundtest` use Bevy (version 0.20.1, MIT or Apache-2.0). It turns on
 only the parts of Bevy a 2D window needs (no audio, gamepads or UI yet), which
 keeps the build smaller.
 
@@ -178,3 +180,76 @@ Known quirk: in the sandbox, the first screenshot is often completely black,
 because the window hadn't been drawn yet. The check then tries again 10 frames
 later, up to 5 times. On the user's Windows PC the first capture was fine
 (3.77, PASS).
+
+## Sounds
+
+### Where the game keeps its sounds
+
+- `GameData\Sounds\*.uax`: 23 packages. Three classes of object matter:
+  - `Sound`: holds a complete `.wav` file. After the usual property list comes
+    the file type as a name (always `WAV`), then the file's bytes stored the
+    same way as texture mipmaps (a "skip position" telling where the bytes
+    end, then a length, then the bytes). All 7,974 are plain uncompressed PCM,
+    16-bit: 3,794 at 11,025 Hz mono (mostly voices), 4,039 at 22,050 Hz mono,
+    34 at 44,100 Hz mono, 106 at 22,050 Hz stereo (ambient loops), 1 at
+    44,100 Hz stereo. Source for the layout: UE Viewer's `UnSound.cpp` (MIT).
+  - `SoundStreamed`: holds no audio, only a file name, played from disk while
+    the game runs. Layout (worked out from the game's own bytes): the property
+    list (`Looping`, `Streaming`, fades), then the file name as a string.
+    272 of the 285 names match an `.ogg` file in `GameData\Music`
+    (case doesn't matter). The other 13 are `amb_RAS_*` ambient loops whose
+    files aren't in the PC install.
+  - `SoundMultiple`: a group of sounds the game picks from (for example the
+    13 "whisper" music pieces). Layout (worked out from the bytes): the
+    property list, a list of references to sounds, then a second list that was
+    empty in all 1,208 found. Its meaning is not known yet.
+- `GameData\Music\*.ogg`: 296 music files (Ogg Vorbis). Not decoded yet.
+
+### Checking sounds without listening
+
+`rc_audio` turns a `.wav` file into numbers: sample rate, channels, length,
+peak (loudest sample, 0 to 1, also in decibels where 0 dB is the loudest
+possible), RMS (average loudness), how many samples hit full scale, and a
+checksum that changes if any sample changes. `rc_probe --sounds` logs these
+for every sound. The only silent sound found is called `fol_GEN_silence_01`.
+
+### Playing sounds in Bevy (`rc_soundtest`)
+
+Bevy plays sounds from an `AudioSource`, which is just the bytes of a sound
+file. We hand it the `.wav` bytes straight out of the package, so nothing is
+written to disk. The program:
+
+1. Reads `gen_sound.uax` and finds `wep_GEN_dc17Fire_02` (DC-17 rifle,
+   44,100 Hz mono, 1.317 s) and `amb_KAM_siege_lp_01` (battle ambience,
+   22,050 Hz stereo, 9.977 s).
+2. Decodes each one twice: with `rc_audio`, and with Bevy's own decoder. It
+   compares every sample. They must match exactly (they do: largest
+   difference 0, same checksum).
+3. Runs Bevy without a window: the ambience loops, the rifle fires every 2
+   seconds. When Bevy actually hands a sound to the sound card it adds an
+   `AudioSink` to it; the program logs that moment, and the ambience's play
+   position each second.
+4. At the end it reports `PLAYED` or `NOT PLAYED (Bevy found no sound card)`
+   and the ambience speed: play position divided by time. On a real sound card
+   that should be about 1.00. In the cloud sandbox there is no sound card, so
+   a fake "null" one was set up; it swallows sound as fast as it can, about
+   60x.
+
+### Fitting the long-term goals
+
+- **Easy modding.** Sounds are found by name, and Bevy is given plain `.wav`
+  bytes, the same thing Bevy loads from a normal `.wav` file. So a later step
+  can let a mod folder replace a game sound by dropping in a `.wav` (or `.ogg`)
+  file with the same name, without touching the game's packages.
+- **VR.** This test plays sounds "flat" (not placed in the world). Bevy also
+  has positional sound (`SpatialListener` on the player's head, sounds placed
+  on entities). The game's sounds are mostly mono, which is what positional
+  sound needs. Placing sounds in the world comes with the level and player
+  steps.
+- **Windows, Linux and Android.** `rc_audio` and `rc_package` are plain Rust
+  with no operating-system code. Bevy's audio goes through rodio and cpal,
+  which talk to WASAPI on Windows, ALSA on Linux and AAudio on Android, and
+  WAV decoding (hound) is pure Rust. No Windows-only audio API or codec is
+  used. The sandbox runs are on Linux, so Linux is tested; building there
+  needs the ALSA development package (`libasound2-dev` on Ubuntu). Windows
+  and Android are not tested yet.

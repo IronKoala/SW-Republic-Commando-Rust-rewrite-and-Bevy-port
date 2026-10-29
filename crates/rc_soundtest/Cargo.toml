@@ -1,0 +1,16 @@
+[package]
+name = "rc_soundtest"
+version = "0.1.0"
+description = "Plays one weapon sound and one ambient loop from the game through Bevy's audio"
+edition.workspace = true
+
+[dependencies]
+rc_audio = { path = "../rc_audio" }
+rc_package = { path = "../rc_package" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Only audio and WAV decoding:
+# no window or rendering, so this program runs without a screen.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "multi_threaded", "bevy_asset", "bevy_audio", "wav"]
