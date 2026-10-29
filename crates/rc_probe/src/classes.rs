@@ -10,7 +10,7 @@ use rc_package::properties::{Property, PropertyType, Value};
 use rc_package::{Package, Reader};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 struct Loaded {
     file: String,
@@ -18,20 +18,25 @@ struct Loaded {
     pkg: Package,
 }
 
-/// Log the defaults of `class` and its parents. `system` is the game's
-/// `GameData/System` folder.
-pub fn dump(log: &mut Log, system: &Path, class: &str) -> bool {
+/// Log the defaults of `class` and its parents, looking in the `.u`
+/// packages of each folder in `folders` (the game's `GameData/System` and
+/// `GameData/Properties`, which holds many per-level variants).
+pub fn dump(log: &mut Log, folders: &[PathBuf], class: &str) -> bool {
     let mut packages = Vec::new();
-    let Ok(entries) = fs::read_dir(system) else {
-        log.line(format!("FAILED: can't read {}", system.display()));
-        return false;
-    };
-    let mut paths: Vec<_> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("u")))
-        .collect();
-    paths.sort();
+    let mut paths = Vec::new();
+    for folder in folders {
+        let Ok(entries) = fs::read_dir(folder) else {
+            log.line(format!("can't read {}, skipped", folder.display()));
+            continue;
+        };
+        let mut found: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("u")))
+            .collect();
+        found.sort();
+        paths.extend(found);
+    }
     for path in paths {
         let Ok(data) = fs::read(&path) else { continue };
         let Ok(pkg) = Package::parse(&data) else {
