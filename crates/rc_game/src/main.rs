@@ -27,8 +27,10 @@ mod panini;
 mod player;
 mod rebind;
 mod script;
+mod screenshot;
 mod settings;
 mod sound_options;
+mod subtitles;
 mod theme;
 
 use bevy::prelude::*;
@@ -429,6 +431,8 @@ fn main() -> AppExit {
         panini::PaniniViewPlugin,
         graphics::GraphicsOptionsPlugin,
         sound_options::SoundOptionsPlugin,
+        subtitles::SubtitlesPlugin,
+        screenshot::ScreenshotPlugin,
     ))
     .add_systems(Startup, |mut commands: Commands| {
         // The camera for menus and the display; the 3D view has its own.

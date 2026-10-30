@@ -33,6 +33,11 @@ pub struct GameSection {
     /// Our own data files (`data` in the project folder).
     pub data_folder: String,
     pub difficulty: Difficulty,
+    /// SUBTITLES: the words of what is said, at the bottom of the screen
+    /// (from the game's `System/subtitles*.int` files).
+    pub subtitles: bool,
+    /// PROMPT TEXT: the level's hints, such as "Press USE to open".
+    pub prompt_text: bool,
 }
 
 /// The original's three difficulties.
@@ -181,6 +186,8 @@ impl Default for Settings {
                 folder: String::new(),
                 data_folder: "data".into(),
                 difficulty: Difficulty::Medium,
+                subtitles: true,
+                prompt_text: true,
             },
             mods: ModsSection {
                 folder: "mods".into(),
@@ -272,6 +279,8 @@ folder = ''
 data_folder = 'data'
 # easy, medium or hard (how much damage reaches you: 0.25, 1, 1.75 times).
 difficulty = 'medium'
+subtitles = true     # the words of what is said, at the bottom of the screen
+prompt_text = true   # the level's hints, such as "Press USE to open"
 
 [mods]
 # One sub-folder per mod. A mod holds files with the same names as in

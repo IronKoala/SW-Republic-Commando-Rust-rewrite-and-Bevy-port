@@ -144,6 +144,20 @@ fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &str, volume: f32) {
     }
 }
 
+/// The keys for one weapon each, and a piece of that weapon's file name
+/// (`data/weapons/*.toml`).
+const WEAPON_KEYS: [(Action, &str); 4] = [
+    (Action::WeaponPistol, "dc15s"),
+    (Action::WeaponBlaster, "dc17m_blaster"),
+    (Action::WeaponSniper, "dc17m_sniper"),
+    (Action::WeaponAntiArmor, "dc17m_antiarmor"),
+];
+
+/// The first carried weapon whose name holds `part`.
+fn weapon_with<T>(weapons: &[(String, T)], part: &str) -> Option<usize> {
+    weapons.iter().position(|(id, _)| id.contains(part))
+}
+
 /// The player's trigger, reload and weapon switching, from the actions.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn player_trigger(
@@ -181,6 +195,14 @@ pub(crate) fn player_trigger(
     }
     if actions.just_pressed(Action::PrevWeapon) {
         arsenal.current = (arsenal.current + n - 1) % n;
+    }
+    // The number keys go straight to one weapon, found by its file name.
+    for (action, part) in WEAPON_KEYS {
+        if actions.just_pressed(action) {
+            if let Some(i) = weapon_with(&arsenal.weapons, part) {
+                arsenal.current = i;
+            }
+        }
     }
     if arsenal.current != before {
         if let Some((_, w)) = arsenal.weapons.get_mut(before) {

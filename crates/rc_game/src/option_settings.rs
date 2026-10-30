@@ -19,6 +19,8 @@ pub const ALL: &[&str] = &[
     "mouse_sensitivity",
     "invert_mouse",
     "difficulty",
+    "subtitles",
+    "prompt_text",
     "effects_volume",
     "music_volume",
     "voices_volume",
@@ -327,6 +329,8 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
             items.iter().position(|i| i.eq_ignore_ascii_case(&now))?
         }
         "vsync" => yes_no(s.video.vsync),
+        "subtitles" => on_off_index(items, s.game.subtitles),
+        "prompt_text" => on_off_index(items, s.game.prompt_text),
         "blur" => on_off_index(items, s.video.blur),
         "bloom" => on_off_index(items, s.video.bloom),
         "squad_shadows" => on_off_index(items, s.video.squad_shadows),
@@ -422,6 +426,8 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
             s.video.height = h;
         }
         "vsync" => s.video.vsync = first,
+        "subtitles" => s.game.subtitles = on_off_value(items, i),
+        "prompt_text" => s.game.prompt_text = on_off_value(items, i),
         "blur" => s.video.blur = on_off_value(items, i),
         "bloom" => s.video.bloom = on_off_value(items, i),
         "squad_shadows" => s.video.squad_shadows = on_off_value(items, i),
@@ -457,6 +463,8 @@ pub fn restore(name: &str, s: &mut Settings) {
         "mouse_sensitivity" => s.controls.mouse_sensitivity = d.controls.mouse_sensitivity,
         "invert_mouse" => s.controls.invert_y = d.controls.invert_y,
         "difficulty" => s.game.difficulty = d.game.difficulty,
+        "subtitles" => s.game.subtitles = d.game.subtitles,
+        "prompt_text" => s.game.prompt_text = d.game.prompt_text,
         "effects_volume" => s.audio.effects_volume = d.audio.effects_volume,
         "music_volume" => s.audio.music_volume = d.audio.music_volume,
         "voices_volume" => s.audio.voices_volume = d.audio.voices_volume,
@@ -519,7 +527,7 @@ mod tests {
             let items = items(name, &s0).unwrap_or_else(|| match *name {
                 "fsaa" => list(&["OFF", "2X", "4X"]),
                 "graphics_quality" => list(&["LOW", "MEDIUM", "HIGH", "CUSTOM"]),
-                "blur" | "bloom" | "squad_shadows" | "sound_3d" => list(&["ON", "OFF"]),
+                "blur" | "bloom" | "squad_shadows" | "sound_3d" | "subtitles" | "prompt_text" => list(&["ON", "OFF"]),
                 "sound_quality" => list(&["LOW", "HIGH"]),
                 "audio_channels" => list(&["16", "32", "64"]),
                 _ => list(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]),

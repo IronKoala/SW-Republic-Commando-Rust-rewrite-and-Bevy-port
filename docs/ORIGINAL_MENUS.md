@@ -157,8 +157,17 @@ their lists weren't checked against the install when this was written:
 | 3D SOUND | Enemy sounds are heard from their side (`rc_game_core::SoundAt`, Bevy's spatial sound from the player's eyes). Their distance fall-off was already there. |
 | AUDIO CHANNELS | The most sounds at once; the oldest effect stops for a new one. Speech and music are never stopped. |
 
-Still greyed out: subtitles, helmet and prompt options, auto pull, visor
-and its intensity, BUMPMAPPING QUALITY (bump maps aren't drawn yet),
+**GAME and CONTROLS rows (2026-10-30).** SUBTITLES shows the words of the
+level scripts' lines (`rc_game/src/subtitles.rs`, from the install's
+`System/subtitles*.int`, where `SubtitleSound[n]` names the sound and
+`SubtitleText[n]` holds the words). PROMPT TEXT hides or shows the level's
+hints (`ACTION_ShowPrompt`). CONTROLS: TURN LEFT / TURN RIGHT (no key by
+default), SCREEN SHOT (F12, a PNG in `screenshots`), and one key per weapon
+(1 to 4: DC-15s pistol, DC-17m blaster, sniper, anti-armour).
+
+Still greyed out: HELMET (the helmet frame isn't drawn), AUTO PULL
+MANEUVERS (what it does in the original isn't known yet), TACTICAL VISOR
+MODE and its INTENSITY (the visor's outline view isn't built), BUMPMAPPING QUALITY (bump maps aren't drawn yet),
 PROJECTORS (nothing projected yet), EAX (Creative's Windows-only sound
 card effects, nothing to switch), and the CONTROLS rows whose action the
 port doesn't have. Not done: the original's "keep these settings?" timer
