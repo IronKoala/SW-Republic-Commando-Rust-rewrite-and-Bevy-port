@@ -126,6 +126,71 @@ pub struct MapScripts {
     pub actors: Vec<ScriptActor>,
     /// Actors that couldn't be read, and why.
     pub failures: Vec<String>,
+    /// Every sound the map refers to, by lower-case name: which package
+    /// holds it. Script values only keep a sound's name
+    /// (`ACTION_PlaySound` `Sound=CA1G1701`); this says where to find it
+    /// (`geo_voice`).
+    pub sounds: BTreeMap<String, SoundRef>,
+}
+
+/// Where a sound the map uses lives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoundRef {
+    /// The name as the map spells it.
+    pub name: String,
+    /// The sound package (`GameData/Sounds/<package>.uax`), or `None` when
+    /// the sound is stored in the map itself.
+    pub package: Option<String>,
+    /// `Sound`, `SoundMultiple` (a group to pick from) or `SoundStreamed`.
+    pub class: String,
+}
+
+/// Sound classes a script can name.
+const SOUND_CLASSES: &[&str] = &["Sound", "SoundMultiple", "SoundStreamed"];
+
+/// Every sound object the map imports or holds, by lower-case name.
+pub fn sound_refs(pkg: &Package) -> BTreeMap<String, SoundRef> {
+    let mut out = BTreeMap::new();
+    for imp in &pkg.imports {
+        let class = pkg.name(imp.class_name);
+        if !SOUND_CLASSES.iter().any(|c| c.eq_ignore_ascii_case(class)) {
+            continue;
+        }
+        // Walk out to the top: `geo_voice.CA1G1701`, or a sound inside a
+        // group folder of the package.
+        let mut outer = imp.package_index;
+        let mut top = None;
+        for _ in 0..16 {
+            match rc_package::ObjectRef::from_index(outer) {
+                rc_package::ObjectRef::Import(i) if i < pkg.imports.len() => {
+                    top = Some(pkg.name(pkg.imports[i].object_name).to_string());
+                    outer = pkg.imports[i].package_index;
+                }
+                _ => break,
+            }
+        }
+        let name = pkg.name(imp.object_name).to_string();
+        out.insert(
+            name.to_ascii_lowercase(),
+            SoundRef {
+                name,
+                package: top,
+                class: class.to_string(),
+            },
+        );
+    }
+    for e in &pkg.exports {
+        let class = pkg.export_class_name(e);
+        if SOUND_CLASSES.iter().any(|c| c.eq_ignore_ascii_case(class)) {
+            let name = pkg.name(e.object_name).to_string();
+            out.entry(name.to_ascii_lowercase()).or_insert(SoundRef {
+                name,
+                package: None,
+                class: class.to_string(),
+            });
+        }
+    }
+    out
 }
 
 impl MapScripts {
@@ -233,7 +298,10 @@ const SKIP: &[&str] = &[
 
 /// Read every actor in the level and every script's actions.
 pub fn read(pkg: &Package, data: &[u8], level: &LevelInfo) -> MapScripts {
-    let mut out = MapScripts::default();
+    let mut out = MapScripts {
+        sounds: sound_refs(pkg),
+        ..MapScripts::default()
+    };
     // Actions are found by name in the `Actions` list; map names to exports.
     let mut by_name: HashMap<String, usize> = HashMap::new();
     for (i, e) in pkg.exports.iter().enumerate() {

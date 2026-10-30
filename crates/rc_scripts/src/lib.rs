@@ -69,6 +69,13 @@ pub enum Effect {
     Note(String),
 }
 
+/// Whether an action plays a sound by name (`ACTION_PlaySound`,
+/// `ACTION_PlayLocalSound`). Its `Sound` value is the name.
+pub fn sound_action(a: &ScriptObject) -> bool {
+    let k = action_kind(a);
+    k.eq_ignore_ascii_case("PlaySound") || k.eq_ignore_ascii_case("PlayLocalSound")
+}
+
 /// What a script is waiting for.
 #[derive(Debug, Clone, PartialEq)]
 enum Wait {
@@ -201,6 +208,10 @@ pub struct Director {
     /// Every event sent so far, in order, with the time. For the log and
     /// the self-tests.
     pub history: Vec<(f32, String)>,
+    /// How long each sound lasts, by lower-case name, as the game read it.
+    /// A script that waits for a sound to finish waits this long; a sound
+    /// not in here waits `settings.sound_seconds`.
+    sound_lengths: HashMap<String, f32>,
 }
 
 /// Read an Unreal level address like `RAS_03B.ctm#FromA`,
@@ -256,6 +267,7 @@ impl Director {
             time: 0.0,
             stats: Stats::default(),
             history: Vec::new(),
+            sound_lengths: HashMap::new(),
         };
         // Placed characters run the sequence named by their AIScriptTag.
         let placed_scripts: Vec<String> = map
@@ -402,6 +414,21 @@ impl Director {
         }
         d.stats.triggers = d.triggers.len();
         d
+    }
+
+    /// Tell the director how long a sound lasts (seconds), so a script
+    /// that waits for it (`bWaitForFinish`) waits just that long.
+    pub fn set_sound_length(&mut self, name: &str, seconds: f32) {
+        self.sound_lengths.insert(low(name), seconds.max(0.0));
+    }
+
+    /// How long a script waits for this sound: its length if the game told
+    /// us, otherwise `settings.sound_seconds`.
+    pub fn sound_length(&self, name: &str) -> f32 {
+        self.sound_lengths
+            .get(&low(name))
+            .copied()
+            .unwrap_or(self.settings.sound_seconds)
     }
 
     /// The events the map sends when the level starts (the player start's
@@ -886,7 +913,11 @@ impl Director {
                 // Everything else is for the game to carry out. Some also
                 // take time.
                 let wait = match kind.as_str() {
-                    "playsound" if a.flag("bWaitForFinish", false) => self.settings.sound_seconds,
+                    "playsound"
+                        if a.flag("bWaitForFinish", false) && !a.flag("bDisabled", false) =>
+                    {
+                        self.sound_length(a.text("Sound").unwrap_or(""))
+                    }
                     "playanim" | "playpropanim" if a.flag("bWaitUntilAnimEnd", true) => {
                         self.settings.anim_seconds
                     }

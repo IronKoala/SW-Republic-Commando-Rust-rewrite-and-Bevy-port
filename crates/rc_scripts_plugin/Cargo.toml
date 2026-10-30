@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Level scripts in the game: runs the map's own scripting (rc_scripts) in rc_game and carries out what it asks: doors, barricades, the player's health, bacta dispensers, prompts and objectives."
 
 [dependencies]
+rc_audio = { path = "../rc_audio" }
 rc_combat = { path = "../rc_combat" }
 rc_game_core = { path = "../rc_game_core" }
 rc_level = { path = "../rc_level" }
@@ -19,11 +20,11 @@ rc_scripts = { path = "../rc_scripts" }
 serde = { version = "1", features = ["derive"] }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. No window or drawing of its
-# own; it hides what the level part drew.
+# own; it hides what the level part drew, and plays the scripts' sounds.
 [dependencies.bevy]
 version = "0.20.1"
 default-features = false
-features = ["std", "bevy_state", "3d_bevy_render"]
+features = ["std", "bevy_state", "3d_bevy_render", "bevy_audio", "wav"]
 
 [dev-dependencies]
 toml = "0.8"

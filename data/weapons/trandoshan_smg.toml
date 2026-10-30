@@ -17,7 +17,7 @@ offset = [127.4, 10, -7.56] # SMG FPFireOffset
 clip_size = 40            # SMGDefaults ReloadCount
 max_ammo = 160            # SMGAmmoDefaults MaxAmmo
 start_ammo = 160          # SMGDefaults PickupAmmoCount
-reload_time = 1.5         # placeholder: its reload animation isn't read yet
+reload_time = 2.17        # game: the arms' Reload animation (HudArmsUzi), 65 frames at 30 fps
 
 [shot]
 kind = "instant"          # SMGAmmo bInstantHit
@@ -44,3 +44,11 @@ package = "weapons"
 mesh = "DroidBlaster"     # placeholder: the repeater's own model isn't looked up yet
 offset = [40, 12, -14]
 bolt_colour = [1.0, 0.6, 0.2]  # our choice, from the tracer light's hue 18
+
+[arms]
+# The first-person arms holding it: an animated model read from the game
+# at run time (Animations/hudarms.ukx). Leave this section out to show the
+# plain [model] in view instead.
+mesh = "HudArmsUzi"        # game: SMG's Mesh
+fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
+brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet

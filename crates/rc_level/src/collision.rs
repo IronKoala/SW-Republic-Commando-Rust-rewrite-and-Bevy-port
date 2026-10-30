@@ -31,9 +31,13 @@ pub struct CollisionMesh {
 /// are left out. Invisible ones are kept: in Unreal 2 invisible walls still
 /// block. Hidden actors are kept too (hidden blocking props still collide).
 ///
-/// Not handled yet: per-section "EnableCollision" flags on static meshes,
-/// simplified collision models and moving movers. Blocking volumes are
-/// added separately with `add_blocking_volumes`.
+/// Mesh sections with collision switched off (`EnableCollision`, such as a
+/// lamp's glow or hanging cables) are left out. Props that don't block at
+/// all (`bCollideActors` or `bBlockPlayers` off) are for the caller to
+/// leave out; see `crate::class_look::blocks_players`.
+///
+/// Not handled yet: simplified collision models and moving movers.
+/// Blocking volumes are added separately with `add_blocking_volumes`.
 pub fn collision_triangles(bsp: &Bsp, meshes: &[(&Placement, &StaticMesh)]) -> CollisionMesh {
     let mut out = CollisionMesh::default();
     for poly in bsp.polygons() {
@@ -52,7 +56,10 @@ pub fn collision_triangles(bsp: &Bsp, meshes: &[(&Placement, &StaticMesh)]) -> C
             .iter()
             .map(|v| p.transform_point(v.position))
             .collect();
-        for t in mesh.indices.as_chunks::<3>().0 {
+        for (k, t) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+            if !mesh.triangle_collides(k) {
+                continue;
+            }
             let get = |i: u16| world.get(i as usize).copied();
             if let (Some(a), Some(b), Some(c)) = (get(t[0]), get(t[1]), get(t[2])) {
                 out.triangles.push([a, b, c]);

@@ -575,6 +575,23 @@ edge-and-axis pair. Triangles are filed in a grid of 256 uu columns, so a
 sweep only checks the ones nearby. The test room cut into triangles gives the
 same results as the box version, within 1 uu.
 
+Keeping sweeps cheap (2026-10-30). A sweep first checks the box its whole
+move covers against the box around all the world's triangles and stops
+there if they don't touch. That matters because the level's collision is
+many `TriangleWorld`s asked one after another (the fixed level, each door,
+each prop a script can switch off): before this check a sweep far from a
+door still looked at the triangles in the door's nearest grid column. Then
+it only visits, row by row, the grid columns the move actually passes over
+(a long diagonal line of sight no longer visits the whole square around
+it), skips triangles whose own box is outside the move's box, and marks
+triangles already seen with a per-thread stamp list instead of a new hash
+set per sweep. A unit test compares the result with trying every triangle
+on 3,000 random moves. On geo_01b this took collision from about 33 ms of
+work per frame (1,000 sweeps looking at 550,000 triangles, with nobody
+fighting) to about 0.5 ms. `rc_game` logs a `speed:` line every 5 s with
+frames per second, the slowest frame, the number of entities, and the
+collision work per frame (`rc_movement::triangles::take_counts`).
+
 A 0.1 uu gap is kept between the box and surfaces, so rounding errors can't
 leave it stuck inside a wall. A move that only grazes a surface (pushes into it by less than
 1/10000 of its length) doesn't count as hitting it. Without that, sliding
@@ -589,8 +606,19 @@ level looks the same in both programs. For collision it builds a
 the BSP's polygons plus every visible static mesh prop, cut into triangles by
 `rc_level::collision`, and puts the player at the first PlayerStart (its
 centre is the start point, so feet = start z - 84). Not yet solid:
-BlockingVolumes and movers and vehicles (the gunship you start in). The
-game's per-prop collision settings are ignored: every visible prop is solid.
+vehicles (the gunship you start in).
+
+Which props are solid follows the game's settings (2026-10-30): a prop
+with `bCollideActors` or `bBlockPlayers` off (from the map, or else its
+class's defaults; on if neither says) is left out of collision
+(`rc_level::class_look::blocks_players`), and so are the triangles of mesh
+sections whose `EnableCollision` is off (`StaticMesh::section_collision`,
+read from the mesh's `Materials` list). They are still drawn. Before, every
+visible prop was solid, so you bumped into light shafts, cables and other
+decorations. geo_01b: 32 walk-through props and about 50,000 section
+triangles; its solid triangles went from 227,043 to 190,205. geo_01a: 68
+walk-through props and about 15,000 section triangles. Simplified
+collision models (the data after a mesh's streams) are still not read.
 
 ### The test room
 
@@ -1137,8 +1165,10 @@ The director runs every script one action at a time until it has to wait:
   `EndSection`; sections nest).
 - **Everything else** comes out as an `Effect::Action` for the game. Some
   also take time: a line of dialogue with `bWaitForFinish`, an animation
-  that waits for its end, a character told to walk. Their lengths are our
-  settings (sound lengths aren't read yet).
+  that waits for its end, a character told to walk. A line waits for the
+  sound's real length, which the game measures while loading and hands
+  over with `Director::set_sound_length`; animations, walks and sounds whose
+  length can't be read use our settings.
 - `HurtActor` and `DestroyActor` on a **prop** are the director's: it keeps
   each prop's `Health` and reports `PropDestroyed` (and sends the prop's
   `DestroyedState.Event`).
@@ -1190,7 +1220,32 @@ and carries out the effects:
 | walking into an open level exit, `ChangeLevel`, a debriefing's `NewLevel` | `ChangeLevel { map, portal }` (see "Going on to the next map") |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
+| `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
+
+**Script sounds** (`rc_scripts_plugin/src/sounds.rs`). A script names a
+sound only by its name (`Sound=CA1G1701`). The map's import table also
+says which package holds it (`GEO_Voice.CA1G1701`);
+`rc_level::scripts::sound_refs` keeps that as `MapScripts::sounds`. While
+the level loads, every sound its scripts can play is read from
+`GameData/Sounds/<package>.uax` with `rc_combat::read_sounds` (groups too,
+also members kept in another package, such as geo_sound's
+`arena_cloneDeaths` whose takes are in character_voice), measured with
+`rc_audio` and kept in the `ScriptSounds` resource. `SoundStreamed` ones
+(a few music stingers) play their `.ogg` from `GameData/Music`. Across the
+57 campaign maps the scripts name 1,629 sounds; `rc_script_check` finds
+every one in its package. When a script plays one, the sound starts at
+`[sound] volume` (`data/scripts/scripts.toml`) times the action's own
+`Volume`, and is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
+ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
+reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
+script) says one line of speech (a `*_voice` package) at a time, so a new
+line stops its last one unless `bDontOverrideOtherSounds`; effects never
+stop each other; nothing is placed in the world yet (every sound plays at
+full loudness); a group waits for its longest take. Lines pause with the
+game and stop when the level ends. Not done: subtitles (the game's
+`System/subtitles_*.int` files hold them, by sound name), sounds stored
+inside a map, and placing sounds at the speaker.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).
@@ -1647,7 +1702,10 @@ menus fit a phone or a monitor.
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
@@ -1686,7 +1744,8 @@ screen is drawn, then in one go:
    (so a mod can change it);
 4. if the map has a `SkyZoneInfo`, spawns the sky camera
    (`rc_level_viewer::sky`) at camera order -1, under the player's camera
-   (order 0) and the menus' camera (order 1). Once the player's camera
+   (order 0), the first-person arms' camera (order 1) and the menus'
+   camera (order 2). Once the player's camera
    exists, the plugin gives it `SkyViewer` (the sky camera copies its turn
    and field of view every frame, so it lines up at any screen shape) and
    stops it clearing the picture, so the sky shows where the level has
@@ -2051,10 +2110,75 @@ view is the droid's colour.
   `rc_shoot` it fades at exp(-8 t).
 - The fire sound is full volume for the player and quieter with distance for
   others; the game uses its 3D sound system.
-- Weapon switching is instant; the game plays holster and draw animations
-  (0.37 s and 0.67 s for the DC-17m).
-- The gun's place in view (`[model] offset`) and the bolt colour are ours.
-  The game draws the gun with first-person arms, which aren't done yet.
+- Weapon switching is instant for firing; the arms play the holster and
+  draw animations (0.37 s and 0.67 s for the DC-17m) but you can shoot the
+  new weapon before they finish. In the game you can't.
+- The bolt colour is ours. Weapons without `[arms]` (the picked-up E-5)
+  show their plain model at our `[model] offset`.
+
+### First-person arms (`rc_combat/src/arms.rs`, `arms_view.rs`)
+
+The game draws each player weapon as one animated model: the commando's
+arms and the gun together, from `GameData/Animations/hudarms.ukx`
+(`HudArmsDC17m`, `HudArmsSniper`, `HudArmsAntiArmor`, `HudArmsDC15s`,
+`HudArmsUzi` for the Trandoshan repeater, and more for turrets and the
+other pick-ups). The weapon class's `Mesh` names it, and the textures are
+in `HUDArmsTextures.utx`. A weapon file's `[arms]` section names the mesh;
+it's read at run time like the squad's models (`rc_model`), and posed on the
+CPU each frame.
+
+**Where it goes.** The game's `Weapon.RenderOverlays` puts the model at the
+eye, turned with the view, and draws it after the world with the depth
+cleared and its own field of view (`DisplayFOV`, 85 degrees across 4:3).
+The mesh's own origin is the eye: forward +X, right +Y, up +Z. Measured
+(`rc_model --example rc_arms_probe`): the DC-17m rests 5 to 68 uu in front
+of the eye, 13 left to 37 right, 4 to 50 below; `Holster` ends with
+nothing in view and `Load` starts with nothing in view; `Aim` brings the
+sights to the middle. We copy this with a second camera, a child of the
+player's camera, that sees only render layer 2 (the arms) and draws over
+the world's picture with a fresh depth buffer, so the gun never pokes into
+walls and a wider view setting or the Panini view doesn't bend it. Camera
+orders: sky -1, player 0, arms 1, menus and display 2.
+
+**Which animation** (the game's `Engine.Weapon` script, our words):
+
+| What | Animation |
+| --- | --- |
+| standing still | `ActionBreathe`, over and over |
+| still for 15 s (`PlayIdleTime`) | `Idle` once, then breathing again |
+| moving under 226 uu/s / faster | `Walk` / `Run` |
+| zoomed in | `AimBreathe`, `Aim` when moving, `AimFire` per shot (if the set has them) |
+| each shot | `Fire`, from the start |
+| reload | `Reload` |
+| grenade thrown / melee | `ThrowGrenade` / `MeleeAttack` |
+| switching | old weapon `Holster`, then new one `Load` |
+| switching between DC-17m attachments | `AttachHolster`, then `AttachLoad` |
+
+The game holds the weapon in its `Reloading` state until the `Reload`
+animation ends, so the animation length *is* the reload time. That gave
+the real reload times of the sniper (78 frames, 2.6 s), anti-armour
+(42 frames, 1.4 s) and the Trandoshan repeater (65 frames, 2.17 s), which
+were stand-ins before.
+
+The sniper attachment has `bZoomedUsesNoHUDArms`: its arms are hidden
+while zoomed (`hide_zoomed`). The arms are also hidden while the player is
+down.
+
+**Our choices:** the game changes between breathing, walking and running
+only when the current animation ends; we change at once. No blending
+between animations yet. The arms are drawn unlit at `brightness` 0.75:
+the game lights them by the player's zone, which we don't read yet. The
+DC-17m's ammo counter on the gun (`TexPanner2D` materials, a strip of
+digits the game scrolls) shows the strip unscrolled ("999").
+
+**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
+`rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,
+`Holster`, the pistol's `Fire`, and the rifle again after switching back,
+and that the gun corner of the picture is textured; `rc_game --script`
+checks the arms show the weapon in hand after loading a level.
+
+**VR:** the arms are a child of the player camera with their own camera,
+so a VR mod can hang the same posed model off a tracked hand instead.
 
 ### Fitting the long-term goals
 
@@ -2176,7 +2300,10 @@ only when it actually moves. Details and what is left are in
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 

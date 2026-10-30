@@ -535,7 +535,7 @@ pub fn apply_settings(
     if !settings.is_changed() {
         return;
     }
-    fov.0 = settings.video.fov;
+    *fov = FieldOfView::from_settings(&settings);
     *look = LookSettings::from_settings(&settings);
     *gyro = settings.gyro.clone();
 }
