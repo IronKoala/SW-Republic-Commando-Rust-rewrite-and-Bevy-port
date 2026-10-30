@@ -29,6 +29,7 @@ toml = "0.8"
 # and squad parts here (see docs/PLUGINS.md).
 rc_level_plugin = { path = "../rc_level_plugin" }
 rc_movers_plugin = { path = "../rc_movers_plugin" }
+rc_scripts = { path = "../rc_scripts" }
 rc_scripts_plugin = { path = "../rc_scripts_plugin" }
 rc_level_viewer = { path = "../rc_level_viewer" }
 rc_combat = { path = "../rc_combat" }

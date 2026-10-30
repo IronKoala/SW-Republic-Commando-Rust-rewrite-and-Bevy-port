@@ -95,6 +95,12 @@ fn main() {
         names = all;
     }
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
+    // Map -> the maps its exits lead to.
+    let mut exits: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // Map -> its teleporters' tags (places to arrive at), and every
+    // (from, to, portal) an exit names.
+    let mut arrivals: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut portals: Vec<(String, String, String)> = Vec::new();
     let (mut maps, mut failed, mut scripts, mut actions, mut unreadable) = (0, 0, 0, 0, 0);
     for name in &names {
         maps += 1;
@@ -121,9 +127,13 @@ fn main() {
         };
         let map = rc_level::scripts::read(&pkg, &bytes, &level);
         // Triggers with their class defaults, as the movers part reads them.
-        let triggers = rc_level::map_collision::load(&path, &data, 84.0)
-            .map(|l| l.movers.triggers)
+        let (triggers, tags) = rc_level::map_collision::load(&path, &data, 84.0)
+            .map(|l| {
+                let tags = l.arrivals.iter().map(|a| a.0.to_ascii_lowercase()).collect();
+                (l.movers.triggers, tags)
+            })
             .unwrap_or_default();
+        arrivals.insert(name.to_ascii_lowercase(), tags);
         unreadable += map.failures.len();
         let d = Director::new(&map, &triggers, settings.clone());
         let s = &d.stats;
@@ -166,6 +176,43 @@ fn main() {
                     })
                     .collect();
                 log.line(format!("     {i:2} {kind} {}", vals.join(" ")));
+            }
+        }
+        // Where the level can be left for: walk-in exits and scripts.
+        let mut leads = Vec::new();
+        for (tp, url, at, open) in d.exits() {
+            log.line(format!(
+                "   exit {tp} at ({:.0}, {:.0}, {:.0}) to {url}{}",
+                at[0],
+                at[1],
+                at[2],
+                if open { "" } else { " (closed until a script or event opens it)" }
+            ));
+            leads.push(url);
+        }
+        for a in map.scripts() {
+            for act in &a.actions {
+                let kind = act.class.strip_prefix("ACTION_").unwrap_or(&act.class);
+                let url = match kind {
+                    "ChangeLevel" => act.text("URL"),
+                    "ShowDebriefingScreen" => act.text("NewLevel"),
+                    _ => None,
+                };
+                if let Some(url) = url.filter(|_| !act.flag("bDisabled", false)) {
+                    log.line(format!("   exit by script {} to {url}", a.obj.name));
+                    leads.push(url.to_string());
+                }
+            }
+        }
+        for url in leads {
+            match rc_scripts::level_url(&url) {
+                Some((m, portal)) => {
+                    if let Some(p) = portal {
+                        portals.push((name.to_ascii_lowercase(), m.clone(), p));
+                    }
+                    exits.entry(name.to_ascii_lowercase()).or_default().push(m)
+                }
+                None => log.line(format!("   ERROR: can't read the level address {url:?}")),
             }
         }
         // Run it.
@@ -216,6 +263,7 @@ fn main() {
                         format!("prop {name} ({tag}) destroyed")
                     }
                     Effect::Checkpoint { name } => format!("checkpoint {name}: save"),
+                    Effect::ChangeLevel { url, by } => format!("{by}: leave for {url}"),
                 };
                 log.line(format!("   t={t:6.2} {text}"));
             }
@@ -238,6 +286,61 @@ fn main() {
             if own { "own" } else { "game" }
         ));
     }
+    // Follow the campaign from the prologue, as a player would.
+    let have: Vec<String> = names.iter().map(|n| n.to_ascii_lowercase()).collect();
+    let mut missing = 0;
+    for (from, to) in &exits {
+        for m in to {
+            if !have.contains(m) {
+                missing += 1;
+                log.line(format!("== ERROR: {from} leads to {m}, which isn't in GameData/Maps"));
+            }
+        }
+    }
+    // Where each exit's portal puts the player on the next map.
+    let (mut at_teleporter, mut at_start) = (0, 0);
+    for (from, to, p) in &portals {
+        let found = arrivals
+            .get(to)
+            .is_some_and(|t| t.contains(&p.to_ascii_lowercase()));
+        if found {
+            at_teleporter += 1;
+        } else {
+            at_start += 1;
+        }
+        log.line(format!(
+            "== {from} -> {to}#{p}: {}",
+            if found {
+                "arrives at the teleporter with that tag"
+            } else {
+                "no teleporter has that tag: arrives at the player start"
+            }
+        ));
+    }
+    println!("{at_teleporter} exits arrive at a teleporter, {at_start} at the next map's player start");
+    if have.iter().any(|n| n == "pro") {
+        let mut chain = vec!["pro".to_string()];
+        loop {
+            let last = chain.last().unwrap().clone();
+            let next = exits.get(&last).and_then(|v| v.first()).cloned();
+            match next {
+                Some(n) if !chain.contains(&n) => chain.push(n),
+                _ => break,
+            }
+        }
+        log.line(format!(
+            "== campaign from the prologue, following each map's exit: {} maps: {}",
+            chain.len(),
+            chain.join(" -> ")
+        ));
+        println!("campaign: {} maps from pro to {}", chain.len(), chain.last().unwrap());
+    }
+    let ends: Vec<&String> = have
+        .iter()
+        .filter(|n| !exits.contains_key(*n))
+        .collect();
+    log.line(format!("== maps with no exit: {ends:?}"));
+    println!("{missing} exits lead to a map that isn't there");
     let line = format!(
         "{maps} maps, {failed} unreadable; {scripts} scripts with {actions} actions; {} action kinds; {unreadable} actors or actions unreadable",
         kinds.len()

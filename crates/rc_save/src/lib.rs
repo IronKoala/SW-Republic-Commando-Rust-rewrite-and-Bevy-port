@@ -10,7 +10,12 @@
 //!   time each checkpoint is reached ([`CheckpointReached`]);
 //! - loads a save by loading its map fresh and then handing each part its
 //!   section on the first frame of play;
-//! - keeps [`SaveList`] up to date for a Load Game screen.
+//! - keeps [`SaveList`] up to date for a Load Game screen;
+//! - goes on to the next map when a level exit is reached
+//!   ([`ChangeLevel`]): the sections listed in `data/levels/travel.toml`
+//!   (the player's health, shield and weapons) are carried over, the map
+//!   is loaded fresh, the carried sections are put back on its first
+//!   frame, and its start is saved as the first checkpoint.
 //!
 //! Everything is logged with the prefix `save:`, including a short summary
 //! of each part's section, so a save and load can be checked from the log.
@@ -24,7 +29,8 @@ use rc_game_core::save::{
     SaveParts, SaveResult, SaveSlot,
 };
 use rc_game_core::{
-    playing, Action, ActionState, CurrentLevel, GameLog, GameSet, GameState, HudMessage,
+    playing, Action, ActionState, ArrivalPortal, ChangeLevel, CurrentLevel, GameLog, GamePaths,
+    GameSet, GameState, HudMessage,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -65,6 +71,49 @@ impl SavePart for Checkpoints {
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PlayTime(pub f64);
 
+/// What goes with the player from one map to the next: the save sections
+/// (by key) carried over. From `data/levels/travel.toml`
+/// ([`TRAVEL_FILE`]); without it, `combat` (health, shield, weapons and
+/// ammo).
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub struct TravelSettings {
+    pub carry: Vec<String>,
+}
+
+impl Default for TravelSettings {
+    fn default() -> Self {
+        TravelSettings {
+            carry: vec!["combat".into()],
+        }
+    }
+}
+
+/// The travel settings file in the data folders. Optional.
+pub const TRAVEL_FILE: &str = "levels/travel.toml";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TravelFile {
+    carry: Vec<String>,
+}
+
+impl TravelSettings {
+    /// Read the file's text. An unknown name is an error, so a typo in a
+    /// mod is reported.
+    pub fn from_text(text: &str) -> Result<Self, String> {
+        let f: TravelFile = toml::from_str(text).map_err(|e| e.to_string())?;
+        Ok(TravelSettings { carry: f.carry })
+    }
+}
+
+/// Sections carried from the map just left, waiting for the next one to
+/// finish loading.
+#[derive(Resource, Debug, Clone)]
+struct PendingTravel {
+    from: String,
+    sections: toml::Table,
+}
+
 /// Saves and loads asked for this frame, done in order at the end of it.
 #[derive(Resource, Debug, Default)]
 struct Requests(Vec<Request>);
@@ -76,6 +125,7 @@ enum Request {
         checkpoint: Option<String>,
     },
     Load(SaveSlot),
+    Travel(ChangeLevel),
 }
 
 /// A save read from disk, waiting for its map to finish loading.
@@ -99,12 +149,13 @@ impl Plugin for SavePlugin {
         app.init_resource::<Requests>()
             .init_resource::<Checkpoints>()
             .init_resource::<PlayTime>()
+            .init_resource::<TravelSettings>()
             .add_save_part::<Checkpoints>()
             .configure_sets(
                 Update,
                 (SaveSet::Gather, SaveSet::Run).chain().in_set(GameSet::Hud),
             )
-            .add_systems(Startup, (set_up_folder, refresh_list).chain())
+            .add_systems(Startup, (set_up_folder, refresh_list, read_travel).chain())
             .add_systems(OnEnter(GameState::MainMenu), (forget_pending, refresh_list))
             .add_systems(OnEnter(GameState::InGame), level_started)
             .add_systems(
@@ -113,6 +164,13 @@ impl Plugin for SavePlugin {
                     .before(GameSet::Input)
                     .run_if(in_state(GameState::InGame))
                     .run_if(resource_exists::<PendingLoad>),
+            )
+            .add_systems(
+                Update,
+                arrive
+                    .before(GameSet::Input)
+                    .run_if(in_state(GameState::InGame))
+                    .run_if(resource_exists::<PendingTravel>),
             )
             .add_systems(
                 Update,
@@ -165,8 +223,46 @@ fn refresh_list(folder: Option<Res<SaveFolder>>, mut list: ResMut<SaveList>, log
     list.0 = saves;
 }
 
+fn read_travel(paths: Option<Res<GamePaths>>, mut travel: ResMut<TravelSettings>, log: Res<GameLog>) {
+    let Some(path) = paths.and_then(|p| p.data_file(TRAVEL_FILE)) else {
+        log.line(format!(
+            "save: no {TRAVEL_FILE}; carrying {:?} to the next map",
+            travel.carry
+        ));
+        return;
+    };
+    match std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|t| TravelSettings::from_text(&t))
+    {
+        Ok(t) => {
+            *travel = t;
+            log.line(format!(
+                "save: {} says carry {:?} to the next map",
+                path.display(),
+                travel.carry
+            ));
+        }
+        Err(e) => log.line(format!(
+            "save: ERROR in {}: {e}; carrying {:?}",
+            path.display(),
+            travel.carry
+        )),
+    }
+}
+
 /// Back in the menu with a load still waiting means its map didn't load.
-fn forget_pending(mut commands: Commands, pending: Option<Res<PendingLoad>>, log: Res<GameLog>) {
+fn forget_pending(
+    mut commands: Commands,
+    pending: Option<Res<PendingLoad>>,
+    travel: Option<Res<PendingTravel>>,
+    log: Res<GameLog>,
+) {
+    if travel.is_some() {
+        log.line("save: gave up going on to the next map (it didn't load)");
+        commands.remove_resource::<PendingTravel>();
+        commands.remove_resource::<ArrivalPortal>();
+    }
     if let Some(p) = pending {
         log.line(format!(
             "save: gave up loading {} (its map {} didn't load)",
@@ -214,6 +310,7 @@ fn gather(
     mut saves: MessageReader<SaveGame>,
     mut loads: MessageReader<LoadGame>,
     mut reached: MessageReader<CheckpointReached>,
+    mut travel: MessageReader<ChangeLevel>,
     mut checkpoints: ResMut<Checkpoints>,
     mut requests: ResMut<Requests>,
     log: Res<GameLog>,
@@ -254,6 +351,13 @@ fn gather(
     for l in loads.read() {
         requests.0.push(Request::Load(l.slot.clone()));
     }
+    for c in travel.read() {
+        if in_game && restoring.is_none() {
+            requests.0.push(Request::Travel(c.clone()));
+        } else {
+            log.line(format!("save: leaving for {} ignored (not playing)", c.map));
+        }
+    }
 }
 
 /// Saves and loads need the whole game at once, so this has the world to
@@ -276,6 +380,18 @@ fn run_requests(world: &mut World) {
                     break;
                 }
             }
+            Request::Travel(c) => match start_travel(world, &c) {
+                Ok(()) => break,
+                Err(e) => {
+                    world
+                        .resource::<GameLog>()
+                        .line(format!("save: FAILED to go on to {}: {e}", c.map));
+                    world.write_message(HudMessage {
+                        text: format!("Couldn't go on to {}: {e}", c.map),
+                        seconds: 3.0,
+                    });
+                }
+            },
         }
     }
 }
@@ -419,6 +535,107 @@ fn start_load(world: &mut World, slot: &SaveSlot) -> Result<(), String> {
         .resource_mut::<NextState<GameState>>()
         .set(GameState::Loading);
     Ok(())
+}
+
+/// Leave this map for `c.map`: keep the sections that travel, then load
+/// the map fresh, as the menu would.
+fn start_travel(world: &mut World, c: &ChangeLevel) -> Result<(), String> {
+    if *world.resource::<State<GameState>>().get() != GameState::InGame {
+        return Err("not in a level".into());
+    }
+    let from = world
+        .resource::<CurrentLevel>()
+        .map
+        .clone()
+        .unwrap_or_default();
+    let carry = world.resource::<TravelSettings>().carry.clone();
+    let parts = world
+        .get_resource::<SaveParts>()
+        .cloned()
+        .unwrap_or_default();
+    let mut sections = toml::Table::new();
+    for key in &carry {
+        let Some(p) = parts.0.iter().find(|p| p.key == key) else {
+            world.resource::<GameLog>().line(format!(
+                "save: {TRAVEL_FILE} carries [{key}], but no part saves that; skipped"
+            ));
+            continue;
+        };
+        if let Some(t) = (p.save)(world)? {
+            sections.insert(key.clone(), toml::Value::Table(t));
+        }
+    }
+    let carried = SaveFile {
+        header: Header {
+            format: file::FORMAT,
+            game_version: env!("CARGO_PKG_VERSION").into(),
+            map: from.clone(),
+            checkpoint: None,
+            saved_at: 0,
+            saved_at_text: String::new(),
+            play_seconds: 0.0,
+        },
+        parts: sections.clone(),
+    };
+    let log = world.resource::<GameLog>();
+    log.line(format!(
+        "save: leaving {from} for {}{} (sent by {}), carrying {:?}",
+        c.map,
+        c.portal
+            .as_ref()
+            .map(|p| format!(", arriving at {p}"))
+            .unwrap_or_default(),
+        c.by,
+        sections.keys().collect::<Vec<_>>()
+    ));
+    for line in summary(&carried) {
+        log.line(format!("save:   {line}"));
+    }
+    world.insert_resource(PendingTravel { from, sections });
+    match &c.portal {
+        Some(p) => world.insert_resource(ArrivalPortal(p.clone())),
+        None => {
+            world.remove_resource::<ArrivalPortal>();
+        }
+    }
+    world.resource_mut::<CurrentLevel>().map = Some(c.map.clone());
+    world
+        .resource_mut::<NextState<GameState>>()
+        .set(GameState::Loading);
+    Ok(())
+}
+
+/// The next map is loaded: put back what the player carried. Runs on its
+/// first frame, before the level-start checkpoint is written, so that
+/// checkpoint has it too.
+fn arrive(world: &mut World) {
+    let Some(travel) = world.remove_resource::<PendingTravel>() else {
+        return;
+    };
+    let parts = world
+        .get_resource::<SaveParts>()
+        .cloned()
+        .unwrap_or_default();
+    let map = world
+        .resource::<CurrentLevel>()
+        .map
+        .clone()
+        .unwrap_or_default();
+    for (key, value) in &travel.sections {
+        let Some(p) = parts.0.iter().find(|p| p.key == key) else {
+            continue;
+        };
+        let table = value.as_table().cloned();
+        match (p.load)(world, table) {
+            Ok(()) => world
+                .resource::<GameLog>()
+                .line(format!("save: [{key}] carried from {} to {map}", travel.from)),
+            Err(e) => world.resource::<GameLog>().line(format!(
+                "save: ERROR carrying [{key}] from {} to {map}: {e}",
+                travel.from
+            )),
+        }
+    }
 }
 
 /// The save's map is loaded: hand every part its section.
