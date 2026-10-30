@@ -20,6 +20,10 @@
 //! - where every script is goes into save files (`[scripts]`, see
 //!   `save.rs`). After a load the scripts carry on from there, and the
 //!   level-start events aren't sent again.
+//! - enemy spawners (`rc_enemies`) hear every event and switch on by tag;
+//!   `ACTION_StopFactorySpawning` and `ACTION_ResetFactory` become
+//!   [`FactoryOrder`]s for them, and what they send back (a droid's death
+//!   event, a spawner running out) arrives as a `RaiseEvent`.
 //!
 //! Everything else a script does (lines of dialogue, animations,
 //! characters walking) is logged as "not done yet" with the script's own
@@ -34,7 +38,7 @@ use rc_combat::{Damage, DamageKind, Health};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
     playing, units::to_unreal, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet,
-    GameState, HudMessage, LoadingGate, Player, PlayerVitals,
+    GameState, HudMessage, LevelScriptsRun, LoadingGate, Player, PlayerVitals, RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelMoverData, LevelParts};
@@ -59,7 +63,10 @@ pub struct ScriptSystems;
 impl Plugin for ScriptsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(rc_movers_plugin::TriggersRunElsewhere)
+            .insert_resource(LevelScriptsRun)
             .add_message::<ScriptEvent>()
+            .add_message::<RaiseEvent>()
+            .add_message::<FactoryOrder>()
             .add_message::<CheckpointReached>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
@@ -79,12 +86,10 @@ impl Plugin for ScriptsPlugin {
 /// Every event the level's scripting sends, by name (`levelstart`,
 /// `SpawnBarricadeDroids`, `BactaUsed`, ...). Read it with a
 /// `MessageReader` to hook a part of the game to the map's events.
-#[derive(Message, Debug, Clone)]
-pub struct ScriptEvent {
-    pub name: String,
-    /// What sent it (a script, a trigger, `level start`).
-    pub by: String,
-}
+pub use rc_game_core::ScriptEvent;
+
+/// A script's order to the enemy spawners (see [`rc_game_core::events`]).
+pub use rc_game_core::FactoryOrder;
 
 /// A checkpoint was reached: the save part saves the game. `name` is the
 /// map's `Checkpoint` actor (unique in the map). Held while the player is
@@ -148,6 +153,10 @@ pub struct PlayStats {
     pub bacta_healed: f32,
     pub prompts: Vec<String>,
     pub checkpoints: Vec<String>,
+    /// Orders sent to enemy spawners: `stop TAG` or `reset TAG`.
+    pub factory_orders: Vec<String>,
+    /// Events sent into the scripts by other parts (droids, spawners).
+    pub raised: Vec<String>,
     pub not_done: usize,
 }
 
@@ -417,6 +426,8 @@ fn run(
     parts: Option<Res<LevelParts>>,
     mut objectives: Option<ResMut<Objectives>>,
     mut from_movers: MessageReader<MoverHappened>,
+    mut raised: MessageReader<RaiseEvent>,
+    mut factories: MessageWriter<FactoryOrder>,
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
@@ -446,6 +457,15 @@ fn run(
         if let Happened::Event { event, .. } = &m.event {
             script.director.fire(event, &format!("{} (door)", m.name));
         }
+    }
+    // Events from other parts' actors (a droid's death, a spawner done).
+    for r in raised.read() {
+        log.line(format!(
+            "{PART}: t={:.2} {} sends {}",
+            script.director.time, r.by, r.name
+        ));
+        script.stats.raised.push(r.name.clone());
+        script.director.fire(&r.name, &r.by);
     }
     let body = player.single().ok().map(|(_, t)| {
         let feet = to_unreal(t.translation);
@@ -520,6 +540,7 @@ fn run(
                     &player,
                     &mut hud,
                     &mut damage,
+                    &mut factories,
                     &log,
                 );
             }
@@ -549,6 +570,7 @@ fn carry_out(
     player: &Query<(Entity, &Transform), With<Player>>,
     hud: &mut MessageWriter<HudMessage>,
     damage: &mut MessageWriter<Damage>,
+    factories: &mut MessageWriter<FactoryOrder>,
     log: &GameLog,
 ) {
     let kind = a.class.strip_prefix("ACTION_").unwrap_or(&a.class);
@@ -675,6 +697,32 @@ fn carry_out(
                 script.stats.prompts.push(shown.clone());
                 log.line(format!("{at}: shows \"{shown}\""));
             }
+        }
+        "stopfactoryspawning" => {
+            let tag = a.text("FactoryTag").unwrap_or("").to_string();
+            let for_good = a.flag("PermanentlyDisableFactory", false);
+            let remove_offspring = a.flag("DestroyFactoryOffspring", false);
+            log.line(format!(
+                "{at}: spawners {tag} stop{}{}",
+                if for_good { " for good" } else { "" },
+                if remove_offspring {
+                    ", what they made is removed"
+                } else {
+                    ""
+                }
+            ));
+            script.stats.factory_orders.push(format!("stop {tag}"));
+            factories.write(FactoryOrder::Stop {
+                tag,
+                for_good,
+                remove_offspring,
+            });
+        }
+        "resetfactory" => {
+            let tag = a.text("FactoryTag").unwrap_or("").to_string();
+            log.line(format!("{at}: spawners {tag} refilled"));
+            script.stats.factory_orders.push(format!("reset {tag}"));
+            factories.write(FactoryOrder::Reset { tag });
         }
         "objectiveupdate" => {
             let num = a.int("ObjectiveNum").unwrap_or(0);

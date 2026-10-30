@@ -36,7 +36,11 @@ damage_type = "CTDamageExplosionDC17AA" # game: MyDamageType
 damage_kind = "explosion"
 
 [sound]
+# The blast sound is the SpawnSound of the grenade's ExplosionEffect
+# (an Emitter class in Properties/cteffects.u). Not read: the game may use
+# another effect for some surfaces (HitEffectsByMaterial).
 package = "gen_sound"
+blast = "exp_GEN_ship_01" # game: AntiArmorProj ExplosionEffect DC_17_AA_hit, its SpawnSound
 
 [model]
 mesh = "DC17mAntiArmorAmmoLow" # game: StaticMesh (not drawn yet)

@@ -6,13 +6,13 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
-use rc_ai::{AiParams, Battle, Factory, Mode, SpawnSpot, StartState};
+use rc_ai::{AiParams, Battle, Factory, Mode, Offspring, SpawnSpot, StartState};
 use rc_combat::{Body, CombatPlugin, Damage, Dead, Health, Hittable, Team};
 use rc_enemies::look::Pose;
 use rc_enemies::{Droid, EnemiesPlugin, Fight};
 use rc_game_core::{
-    Action, ActionState, CorePlugin, GameLog, GamePaths, GameState, LevelCollision, MusicMood,
-    Player, PlayerCamera,
+    Action, ActionState, CorePlugin, FactoryOrder, GameLog, GamePaths, GameState, LevelCollision,
+    MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent,
 };
 use rc_movement::Vec3 as UVec3;
 use std::collections::HashSet;
@@ -70,6 +70,10 @@ impl Room {
             spots: vec![SpawnSpot {
                 location: spot,
                 yaw: std::f32::consts::PI,
+                offspring: Offspring {
+                    start_state: StartState::StationaryAttack,
+                    ..Default::default()
+                },
             }],
             capacity: 1,
             max_alive: 1,
@@ -77,8 +81,8 @@ impl Room {
             spawn_mode: 0,
             spawn_interval: 1.0,
             start_state: StartState::StationaryAttack,
-            team: None,
             triggers: vec![(UVec3::new(-500.0, 0.0, 84.0), 300.0)],
+            ..Default::default()
         };
         let params = Arc::new(params);
         let battle = Battle::with_types(
@@ -265,4 +269,172 @@ fn a_fallen_droid_leaves_its_blaster() {
         .map(|p| p.weapon.clone())
         .collect();
     assert_eq!(drops, ["e5_blaster_pickup"]);
+}
+
+#[derive(Resource, Default)]
+struct Blasts(Vec<(String, Vec3, Option<Entity>, u32)>);
+
+fn record_blasts(
+    mut out: ResMut<Blasts>,
+    mut b: bevy::ecs::message::MessageReader<rc_combat::Blast>,
+) {
+    out.0.extend(
+        b.read()
+            .map(|b| (b.grenade.clone(), b.point, b.instigator, b.hit)),
+    );
+}
+
+#[test]
+fn a_trandoshan_throws_a_grenade_that_hurts_the_player() {
+    let mut p = enemy_file("trandoshan");
+    assert_eq!(p.grenades.grenade, "thermal_detonator_enemy");
+    assert_eq!(p.grenades.count, 2);
+    // Every chance it gets, so the test needn't wait on the dice.
+    p.grenades.probability = 1.0;
+    let mut r = Room::with(p);
+    r.app
+        .init_resource::<Blasts>()
+        .add_systems(Last, record_blasts);
+    // Spots the player at 1500 uu, throws at its first decision, the
+    // grenade lands ~0.8 s later and goes off a second after touching down.
+    r.seconds(4.0, &[]);
+    let d = r.droids()[0];
+    let w = r.app.world();
+    let fight = w.resource::<Fight>();
+    println!("{:?}", fight.stats);
+    assert_eq!(fight.stats.grenades_thrown, 1, "{:?}", fight.stats);
+    assert_eq!(fight.battle.fighters[0].grenades_left, 1);
+    let blasts = &w.resource::<Blasts>().0;
+    assert_eq!(blasts.len(), 1, "{blasts:?}");
+    let (grenade, point, by, hit) = &blasts[0];
+    assert_eq!(grenade, "thermal_detonator_enemy");
+    assert_eq!(*by, Some(d));
+    let player_at = b(-500.0, 0.0, 0.0);
+    let off = Vec2::new(point.x - player_at.x, point.z - player_at.z).length() * 50.0;
+    assert!(off < 400.0, "went off {off:.0} uu from the player");
+    assert!(*hit >= 1);
+    let h = w.get::<Health>(r.player).unwrap();
+    let sh = w.get::<rc_combat::Shield>(r.player).unwrap();
+    assert!(
+        sh.current < sh.max || h.current < h.max,
+        "player unhurt: {h:?} {sh:?}"
+    );
+    // Not a second one before MinGrenadeTime (20 s).
+    r.seconds(10.0, &[]);
+    assert_eq!(r.app.world().resource::<Fight>().stats.grenades_thrown, 1);
+}
+
+#[test]
+fn battle_droids_throw_no_grenades() {
+    let mut r = Room::new();
+    r.seconds(8.0, &[]);
+    assert_eq!(r.app.world().resource::<Fight>().stats.grenades_thrown, 0);
+}
+
+/// Events the droids sent into the level, for the checks.
+#[derive(Resource, Default)]
+struct Raised(Vec<String>);
+
+fn collect_raised(mut r: MessageReader<RaiseEvent>, mut got: ResMut<Raised>) {
+    got.0.extend(r.read().map(|e| e.name.clone()));
+}
+
+#[test]
+fn with_level_scripts_the_spawner_waits_for_its_event_and_droids_report_their_death() {
+    let mut r = Room::new();
+    r.app
+        .init_resource::<Raised>()
+        .add_systems(Update, collect_raised);
+    {
+        let mut fight = r.app.world_mut().resource_mut::<Fight>();
+        fight.battle.scripted = true;
+        fight.battle.spawners[0].factory.spots[0].offspring.event = Some("TestDroidDown".into());
+    }
+    // Standing in its walk-in trigger does nothing now: the scripts run
+    // triggers and send their events.
+    r.seconds(1.0, &[]);
+    assert!(r.droids().is_empty());
+    r.app.world_mut().write_message(ScriptEvent {
+        name: "testdroids".into(),
+        by: "test".into(),
+    });
+    r.seconds(0.5, &[]);
+    let droids = r.droids();
+    assert_eq!(droids.len(), 1, "its event switched the spawner on");
+    let d = droids[0];
+    r.app.world_mut().write_message(Damage {
+        target: d,
+        amount: 1000.0,
+        kind: rc_combat::DamageKind::Other,
+        instigator: None,
+        point: Vec3::ZERO,
+        direction: Vec3::X,
+    });
+    r.seconds(0.2, &[]);
+    assert!(r.app.world().get::<Dead>(d).is_some());
+    assert_eq!(
+        r.app.world().resource::<Raised>().0,
+        vec!["TestDroidDown".to_string()]
+    );
+    // A script stops it for good: the event no longer starts it.
+    r.app.world_mut().write_message(FactoryOrder::Stop {
+        tag: "TestDroids".into(),
+        for_good: true,
+        remove_offspring: false,
+    });
+    r.seconds(0.2, &[]);
+    assert!(r.app.world().resource::<Fight>().battle.spawners[0].disabled);
+}
+
+/// With the real game (RC_GAME_DIR, needs GameData/Sounds/character_voice.uax):
+/// the droid says its spotted line, its hurt line once per 2 s however many
+/// bolts hit it, and its death line, all the game's own.
+#[test]
+fn droid_says_the_games_lines() {
+    let Some(game) = std::env::var_os("RC_GAME_DIR") else {
+        eprintln!("RC_GAME_DIR not set: skipped (not tested)");
+        return;
+    };
+    let log_path = std::env::temp_dir().join(format!("rc_voices_{}.log", std::process::id()));
+    let mut r = Room::new();
+    let log = GameLog::create(&log_path).unwrap();
+    let paths = GamePaths::new(game, vec![]);
+    let mut audio = Assets::<bevy::audio::AudioSource>::default();
+    let mut sounds = rc_enemies::EnemySounds::default();
+    sounds.load_type(&paths, &AiParams::battle_droid(), &mut audio, &log);
+    r.app
+        .insert_resource(log)
+        .insert_resource(sounds)
+        .insert_resource(audio);
+    r.seconds(1.0, &[]);
+    r.seconds(8.0, &[Action::Fire]);
+    r.seconds(0.1, &[]);
+    let text = std::fs::read_to_string(&log_path).unwrap();
+    let said: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains(" says ") || l.contains(" sound "))
+        .collect();
+    println!("{}", said.join("\n"));
+    assert!(
+        text.contains("battle_droid sounds: 10 of 10 found"),
+        "{text}"
+    );
+    assert!(
+        said.iter().any(|l| l.contains("says BD1_SpottedEnemy")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|l| l.contains("death (blaster) sound BD1_DieSmallArms")),
+        "{said:?}"
+    );
+    let hurts = said
+        .iter()
+        .filter(|l| l.contains("hurt (blaster) sound BD1_HurtSmallArms"))
+        .count();
+    let hits = r.app.world().resource::<Fight>().stats.droids_hurt;
+    assert!(
+        hurts >= 1 && hurts < hits as usize,
+        "{hurts} hurt lines for {hits} hits"
+    );
 }

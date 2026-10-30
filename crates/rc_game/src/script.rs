@@ -449,6 +449,28 @@ fn steps() -> Vec<Step> {
             level_script_way(w, false)
         }),
         Check("the scripts' events, damage, healing and checkpoint", level_script_chain),
+        // Enemy spawners run by the level's events (rc_enemies): send the
+        // event that starts geo_01a's small-bunker droids, as the map's own
+        // trigger would later, then destroy them: each sends its death
+        // event back to the scripts.
+        Check(
+            "no enemy spawner started before its event",
+            level_spawn_none_yet,
+        ),
+        Note(level_spawn_fire),
+        Until(
+            "the level's event switches the bunker spawners on",
+            level_spawn_appeared,
+            10.0,
+        ),
+        Check("the droids stand at their spawners", level_spawn_where),
+        Note(level_spawn_destroy),
+        Until(
+            "each destroyed droid's event reaches the scripts",
+            level_spawn_deaths_heard,
+            10.0,
+        ),
+        Check("spawners and scripts agree", level_spawn_summary),
         Press(Action::Pause),
         Wait(0.3),
         Check("pause key pauses", |w| {
@@ -1432,6 +1454,157 @@ fn level_script_chain(w: &mut World) -> Result<String, String> {
         s.stats.not_done
     );
     if in_order && s.stats.player_hurt > 0.0 && s.stats.bacta_healed > 0.0 && s.stats.checkpoints.iter().any(|c| c == "checkpoint0") {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+// Enemy spawners started by the level's events, checked on geo_01a. Its
+// small bunker's spawners (tag `SpawnSmBunkerDroids`) each make one battle
+// droid at the spawner itself; three of them send `DeadGunnerDroid` when
+// their droid is destroyed.
+
+const SPAWN_EVENT: &str = "SpawnSmBunkerDroids";
+const SPAWN_DEATH_EVENT: &str = "DeadGunnerDroid";
+
+/// The bunker spawners, and the living droids they made: (id, feet,
+/// spawner location).
+fn bunker_droids(
+    w: &World,
+) -> Result<(usize, Vec<(u32, rc_movement::Vec3, rc_movement::Vec3)>), String> {
+    let fight = w
+        .get_resource::<rc_enemies::Fight>()
+        .ok_or("no fight on this map")?;
+    let b = &fight.battle;
+    let spawners = b
+        .spawners
+        .iter()
+        .filter(|s| s.factory.tag.eq_ignore_ascii_case(SPAWN_EVENT))
+        .count();
+    let droids = b
+        .alive()
+        .filter_map(|f| {
+            let sp = &b.spawners[b.spawner_of(f.id)?];
+            sp.factory
+                .tag
+                .eq_ignore_ascii_case(SPAWN_EVENT)
+                .then(|| (f.id, f.pawn.feet(), sp.factory.location))
+        })
+        .collect();
+    Ok((spawners, droids))
+}
+
+fn level_spawn_none_yet(w: &mut World) -> Result<String, String> {
+    let (n, droids) = bunker_droids(w)?;
+    let fight = w
+        .get_resource::<rc_enemies::Fight>()
+        .ok_or("no fight on this map")?;
+    let b = &fight.battle;
+    let on: Vec<&str> = b
+        .spawners
+        .iter()
+        .filter(|s| s.active)
+        .map(|s| s.factory.tag.as_str())
+        .collect();
+    let got = format!(
+        "scripted {}; {n} bunker spawners, {} of their droids; spawners on {on:?}",
+        b.scripted,
+        droids.len()
+    );
+    if b.scripted && n >= 3 && droids.is_empty() {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn level_spawn_fire(w: &mut World) {
+    if let Some(mut s) = w.get_resource_mut::<rc_scripts_plugin::LevelScript>() {
+        s.director.fire(SPAWN_EVENT, "self-test");
+    }
+}
+
+fn level_spawn_appeared(w: &mut World) -> bool {
+    bunker_droids(w).is_ok_and(|(n, d)| n > 0 && d.len() >= n)
+}
+
+fn level_spawn_where(w: &mut World) -> Result<String, String> {
+    let (_, droids) = bunker_droids(w)?;
+    let off: Vec<f32> = droids
+        .iter()
+        .map(|(_, feet, at)| (*feet - *at).length_2d())
+        .collect();
+    let got = format!(
+        "{} droids, each this far from its spawner: {off:.0?} uu",
+        droids.len()
+    );
+    if !off.is_empty() && off.iter().all(|d| *d < 50.0) {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn level_spawn_destroy(w: &mut World) {
+    let Ok((_, droids)) = bunker_droids(w) else {
+        return;
+    };
+    let entities: Vec<Entity> = {
+        let fight = w.resource::<rc_enemies::Fight>();
+        droids
+            .iter()
+            .filter_map(|(id, ..)| fight.entities.get(id).copied())
+            .collect()
+    };
+    for e in entities {
+        w.write_message(rc_combat::Damage {
+            target: e,
+            amount: 100_000.0,
+            kind: rc_combat::DamageKind::Other,
+            instigator: None,
+            point: Vec3::ZERO,
+            direction: Vec3::NEG_Y,
+        });
+    }
+}
+
+fn deaths_heard(w: &mut World) -> usize {
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .map_or(0, |s| {
+            s.director
+                .history
+                .iter()
+                .filter(|h| h.1.eq_ignore_ascii_case(SPAWN_DEATH_EVENT))
+                .count()
+        })
+}
+
+fn level_spawn_deaths_heard(w: &mut World) -> bool {
+    deaths_heard(w) >= 3
+}
+
+fn level_spawn_summary(w: &mut World) -> Result<String, String> {
+    let heard = deaths_heard(w);
+    let (n, alive) = bunker_droids(w)?;
+    let fight = w.resource::<rc_enemies::Fight>();
+    let made: u32 = fight
+        .battle
+        .spawners
+        .iter()
+        .filter(|s| s.factory.tag.eq_ignore_ascii_case(SPAWN_EVENT))
+        .map(|s| s.made)
+        .sum();
+    let destroyed = fight.stats.droids_destroyed;
+    let raised = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .map(|s| s.stats.raised.clone())
+        .unwrap_or_default();
+    let got = format!(
+        "{n} spawners made {made}, {} still alive, {destroyed} droids destroyed in all; the scripts heard {SPAWN_DEATH_EVENT} {heard} times; events from droids and spawners {raised:?}",
+        alive.len()
+    );
+    if made as usize == n && alive.is_empty() && heard == 3 {
         Ok(got)
     } else {
         Err(got)

@@ -378,20 +378,35 @@ fn main() {
 
         for e in events {
             let (id, e) = match e {
-                rc_ai::BattleEvent::SpawnerOn {
-                    spawner,
-                    by_trigger,
-                } => {
+                rc_ai::BattleEvent::SpawnerOn { spawner, by } => {
                     let f = &battle.spawners[spawner].factory;
                     log.line(format!(
                         "[{time:6.2}s] spawner {} ({}) switched on by {}",
                         f.name,
                         f.tag,
-                        if by_trigger {
-                            "its walk-in trigger"
-                        } else {
-                            "the player coming near (scripted in the original)"
+                        match by {
+                            rc_ai::SwitchedOn::WalkInTrigger => "its walk-in trigger".to_string(),
+                            rc_ai::SwitchedOn::PlayerNear =>
+                                "the player coming near (scripted in the original)".to_string(),
+                            rc_ai::SwitchedOn::Event(e) => format!("event {e}"),
                         }
+                    ));
+                    continue;
+                }
+                rc_ai::BattleEvent::SpawnerOff { spawner, why } => {
+                    let f = &battle.spawners[spawner].factory;
+                    log.line(format!(
+                        "[{time:6.2}s] spawner {} switched off ({why})",
+                        f.name
+                    ));
+                    continue;
+                }
+                rc_ai::BattleEvent::SpawnerRefused { .. } | rc_ai::BattleEvent::Removed { .. } => {
+                    continue;
+                }
+                rc_ai::BattleEvent::Event { name, by } => {
+                    log.line(format!(
+                        "[{time:6.2}s] event {name} (by {by}; no scripts here)"
                     ));
                     continue;
                 }
@@ -477,6 +492,7 @@ fn main() {
                     AiEvent::Route { .. } => "routes",
                     AiEvent::NoRoute => "no route",
                     AiEvent::Stuck => "stuck",
+                    AiEvent::Throw { .. } => "grenades thrown",
                 })
                 .or_default() += 1;
         }

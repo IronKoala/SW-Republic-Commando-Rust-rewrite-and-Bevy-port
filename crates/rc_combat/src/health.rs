@@ -36,6 +36,20 @@ pub enum DamageKind {
 }
 
 impl DamageKind {
+    /// The name data files use (the reverse of `from_name`).
+    pub fn name(self) -> &'static str {
+        match self {
+            DamageKind::Blaster => "blaster",
+            DamageKind::Explosion => "explosion",
+            DamageKind::Sonic => "sonic",
+            DamageKind::Electrical => "electrical",
+            DamageKind::Fire => "fire",
+            DamageKind::Melee => "melee",
+            DamageKind::Fall => "fall",
+            DamageKind::Other => "other",
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<DamageKind> {
         Some(match name {
             "blaster" => DamageKind::Blaster,

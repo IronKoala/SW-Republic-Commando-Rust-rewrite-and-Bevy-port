@@ -68,21 +68,58 @@ uses_cover = true         # guess: looks for cover when shot in the open
 drops = "e5_blaster_pickup" # placeholder: the weapon file it leaves when it falls ("" for none)
 damage_table = "DV_DroidsBattleDroidDamage" # game: BattleDroid DamageVariance (data/combat/damage_types.toml)
 
+[grenades]
+# Grenades it throws. The original's battle droids carry none, so grenade
+# is empty. A file that sets grenade (a file in data/grenades/) and count
+# makes that enemy throw. The rules for when are ours (the original's are
+# in its compiled engine); the numbers are the original's settings.
+grenade = ""              # game: battle droids carry no grenade (RequiredEquipment)
+count = 0                 # how many it carries
+probability = 0.3         # game: CTBot GrenadeProbability (chance at each decision while it may throw)
+min_time = 10             # game: CTBot MinGrenadeTime (seconds between one enemy's throws)
+min_range = 600           # game: ThermalDetonator ValidRange min (won't throw at anyone closer)
+max_range = 2500          # game: ThermalDetonator ValidRange max
+seen_within = 3           # guess: only throws at an enemy it saw this recently
+throw_time = 1.0          # guess: seconds the throw takes (no shooting meanwhile)
+# The arc is aimed with the grenade file's speed, gravity and radius;
+# these three are used only if that file can't be read.
+speed = 2200              # game: GrenadeProj Speed
+gravity = 1100            # game: LevelInfo gravity
+radius = 600              # game: ThermalDetonatorProjDefaults DamageRadius (no throw if a friend is this near the landing spot)
+
 [spawning]
-# The original starts most spawners from level scripts. We run proximity
-# Triggers (the player walks into one) ourselves; spawners only reachable
-# from scripts start when the player comes this close instead.
+# In the game the level's scripts switch spawners on, as in the original.
+# Only the tools that run without scripts (rc_droidsim, rc_droidview) start
+# spawners themselves: by their walk-in Triggers, or, for spawners with
+# none, when the player comes this close.
 activate_unscripted_within = 3000
 max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
 
 [sound]
-# Sound names in GameData/Sounds/<package>.uax; one is picked at random.
-# Empty lists play nothing. List a package's sounds with
+# What the droid says. Names are groups (SoundMultiple) in
+# GameData/Sounds/character_voice.uax; each time one line from the group
+# plays. List a package's sounds with
 # `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
-package = "droid_sound"   # placeholder: package name to check
-spotted = []              # placeholder: names not read yet
-hurt = []                 # placeholder: names not read yet
-death = []                # placeholder: names not read yet
+#
+# game: BattleDroid AudioTable = BattleDroidAudio (System/ctaudio.u), a table of one
+# group per event (engine.u EPawnAudioEvent). "hurt_<kind>" and
+# "death_<kind>" are used when that kind of damage did it (blaster,
+# explosion, sonic, electrical, fire, melee, fall, other); otherwise
+# "hurt" and "death". Only the kinds the game's table has are listed.
+# Its other lines (LargeArms, Quiet, HeardSomething, SearchAbort,
+# SeeGrenade, KilledExcited, Retreat, ...) aren't hooked up yet.
+package = "character_voice"
+spotted = ["BD1_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["BD1_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["BD1_DieSmallArms"]         # game: PAE_DieSmallArms
+hurt_explosion = ["BD1_HurtExplosion"]
+death_explosion = ["BD1_DieExplosion"]
+hurt_electrical = ["BD1_HurtElectricity"]
+death_electrical = ["BD1_DieElectricity"]
+hurt_melee = ["BD1_HurtMelee"]
+hurt_fall = ["BD1_HurtFall"]
+death_fall = ["BD1_DieFall"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
 
 [look]
 # The animated mesh and which of its animations to play. Names are as
@@ -100,4 +137,5 @@ fire = "Fire"
 crouch = "CrouchBreathe"
 crouch_fire = "CrouchFire"
 death = "Death"
+throw = ""                # throwing a grenade; empty: battle droids don't
 ambient = 0.5             # guess: light the droid always gets (0 to 1); the original uses each zone's ambient light, which we don't read yet

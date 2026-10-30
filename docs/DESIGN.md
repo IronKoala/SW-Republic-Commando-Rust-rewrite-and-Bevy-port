@@ -1187,6 +1187,8 @@ and carries out the effects:
 | `ShowPrompt` | `HudMessage` (`@`, the button, shows as USE for now) |
 | `ObjectiveUpdate` | kept in `Objectives` (what the numbers mean isn't worked out) |
 | checkpoint | `CheckpointReached { name }`, held while the player is down |
+| `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
+| a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
@@ -1757,16 +1759,42 @@ squad:
    - *Forgetting*: `EnemyMemoryTime` without seeing the enemy, then it
      goes to look where it was last seen.
    - *Spawning*: `PawnFactory` actors (with their `SpawnPoint`s) make the
-     droids. One switches on when the player walks into a `Trigger` whose
-     event is the factory's tag. Factories only level scripts can start
-     switch on when the player comes within `activate_unscripted_within`
-     (a stand-in until scripts run).
+     droids, following the original's rules (read from CTGame.u's class
+     defaults and script source, described in `rc_ai::spawns`): an event
+     named like the factory's tag switches it on, the same event again
+     off; it makes one at once and then one every `SpawnInterval` (to
+     `SpawnIntervalMax`) while fewer than `MaxAlive` of its own live, until
+     `Capacity` is used (unless `bGenerateForever`); at the factory itself
+     (`SpawnMode` 2, the class default) or at its spawn points in turn (0),
+     at random (1) or nearest the player (3). Each droid gets a tag and a
+     death event (and a first-hurt event) from the factory, or from the
+     spawn point when it is made at one. A factory sends `SpawnEvent` for
+     each droid and `ExhaustedEvent` once its capacity is used and all it
+     made are dead. Scripts can stop a factory (for good, and removing
+     what it made: no death events) or refill it.
+     With the level scripts running (`Battle::scripted`, set when the
+     `rc_game_core::LevelScriptsRun` resource exists) only events switch
+     factories on; the scripts run the walk-in `Trigger`s. Without them
+     (the headless tools) a factory switches on when the player walks into
+     its `Trigger`, or comes within `activate_unscripted_within` of one
+     that has none.
+     Not done: `bCovert` (only spawn out of the player's sight) is not
+     checked; `bStartTimerAfterDeath` and `bAlwaysUseFactorySettings` are
+     ignored; `SpawnEvent` is sent only when a droid is actually made (the
+     original also sends it when the player is out of the factory's range).
    `Battle` runs all of this for a map; the game plugin and `rc_droidsim`
    both use it.
 
 3. **The game (`rc_enemies`).** `EnemiesPlugin` (see `docs/PLUGINS.md`):
    - On `OnEnter(Loading)` it reads the map's paths and spawners and the
      settings file through `GamePaths::data_file`, so a mod's file wins.
+     It logs each spawner it runs (tag, type, capacity, where, its tags
+     and events).
+   - It hears the level's events (`rc_game_core::ScriptEvent`) and the
+     scripts' `FactoryOrder`s, and sends what its spawners and droids
+     send (`BattleEvent::Event`) back as `rc_game_core::RaiseEvent`; the
+     scripts pass those on, so counters and scripts waiting for "all the
+     droids are dead" carry on.
    - Each frame (`GameSet::Simulate`, before `CombatSet::Fire`) it steps
      the `Battle` with the `Player`'s position (eyes from `PlayerCamera`)
      and `LevelCollision`, spawns droid entities with `Health`,
@@ -1804,6 +1832,27 @@ left to other parts and logged. `combat.uses_cover = false` makes an enemy
 walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
+
+**Grenades.** `[grenades]` gives an enemy grenades: which file in
+`data/grenades/` and how many (the Trandoshan mercenary: two of
+`thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
+rules for when are ours, since the original decides in its compiled
+engine; the numbers are its settings. At each decision while fighting, an
+enemy that still has one, threw its last at least `min_time` ago
+(`MinGrenadeTime`), saw its enemy within `seen_within` seconds, and is
+`min_range` to `max_range` away from it (the grenade's `ValidRange`)
+throws with chance `probability` (`GrenadeProbability`), unless a friend
+stands within the blast radius of the landing spot. It aims at the floor
+by the enemy, off by the same aim error as its shots, and works out the
+arc itself (`rc_ai::brain::throw_arc`): first the gentlest lob that
+reaches (the slowest throw, which comes down steeply and rolls on little),
+then the flattest arc at full speed for under a low ceiling; if the level
+blocks both, it tries again 3 s later. It doesn't shoot for `throw_time`
+(the throw animation, `[look] throw`). The AI sends `AiEvent::Throw`;
+`rc_enemies` turns it into the same `rc_combat::ThrowGrenade` the player's
+button sends, so the grenade flies, bounces and goes off with the
+grenade's own rules. To aim, `rc_enemies` reads the grenade file's speed,
+gravity and radius. Saves keep how many each enemy has left.
 
 **Several enemies to fight.** Droids fight the player and the squad mates
 (every living `Team::Republic` character). Each keeps fighting the one it

@@ -202,6 +202,13 @@ copy of the game.
   and blows the barricade so you can reach the fight. `rc_game --script`
   checks that whole chain (37 of 37 checks). `rc_script_check` runs every
   map's scripts without a window.
+  Enemy spawners now follow the scripts too (tested in the cloud sandbox
+  with the real files, not yet on Windows or by playing): the level's
+  events switch them on and off, scripts can stop or refill them, and
+  each droid tells the scripts when it dies, so "kill these droids, then
+  the next thing happens" works. They follow the original's spawning
+  rules (where, how many, how often). `rc_game --script` checks that on
+  geo_01a's small bunker (52 of 52 checks).
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
@@ -281,7 +288,7 @@ copy of the game.
 
 - **Battle droids that fight back (tested in the cloud sandbox on
   geo_01a, not yet on Windows).** Droids appear from the map's own
-  spawners when you walk into their triggers, walk the level's own path
+  spawners when the level's scripts or triggers start them, walk the level's own path
   network, spot you (sight range, view cone, line of sight), shoot in
   bursts of three with the game's accuracy, take cover when shot in the
   open, and die to your shots through the weapons part's health and
@@ -306,6 +313,13 @@ copy of the game.
   rounds but fall to melee). Super battle droids, Geonosian warriors and
   Trandoshan mercenaries each have their own settings file in
   `data/enemies` with the game's health, speed, size and aim.
+- **Enemies throw grenades (tested in the cloud sandbox with automatic
+  tests, not yet in the real game).** Trandoshan mercenaries carry two of
+  the enemies' thermal detonators, as in the original, and now and then lob
+  one at you when you are 600 to 2500 uu away, never onto a friend of
+  theirs and never more often than every 20 seconds. Any enemy type can be
+  given grenades in its `[grenades]` section. Battle droids carry none, as
+  in the original.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -336,8 +350,9 @@ copy of the game.
   waits 3 s. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
-  exist in the PC install. `SoundMultiple` groups are read but not used yet.
-  No 3D (positional) sound yet.
+  exist in the PC install. `SoundMultiple` groups (a set of takes the game
+  picks from) are played for weapons, grenades and enemy voices. No 3D
+  (positional) sound yet: enemy sounds just get quieter with distance.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
@@ -359,12 +374,18 @@ copy of the game.
 - Weapons: no first-person arms or muzzle flash, and switching weapons is
   instant. How the view kick settles back is our own guess. The
   attachments' and the Trandoshan repeater's reload times are stand-ins,
-  grenades have no explosion sounds or models yet (a small glowing ball),
-  and nobody but the player throws grenades yet.
+  grenades have no models yet (a small glowing ball), and squad mates only
+  throw grenades at grenade markers. Grenade explosions play the game's own
+  explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
   stand-in blaster instead of using their force pike, and walk instead of
-  flying and climbing. The Trandoshan uses a stand-in model. Droid voice
-  lines are empty until the sound packages are read.
+  flying and climbing. The Trandoshan uses a stand-in model.
+- Enemy voices: battle droids, super battle droids, Trandoshans and
+  Geonosian warriors say the game's own lines when they spot you, get hurt
+  and die, with the hurt and death lines matched to explosions, EMP and
+  falls where the game has them. Their other lines (heard something, saw a
+  grenade, retreating, ...) aren't used yet. Not listened to in `rc_game`
+  yet: the test checks every line is found in the game's files.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
