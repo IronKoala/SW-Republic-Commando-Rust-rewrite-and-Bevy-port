@@ -1790,6 +1790,27 @@ walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
 
+**Grenades.** `[grenades]` gives an enemy grenades: which file in
+`data/grenades/` and how many (the Trandoshan mercenary: two of
+`thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
+rules for when are ours, since the original decides in its compiled
+engine; the numbers are its settings. At each decision while fighting, an
+enemy that still has one, threw its last at least `min_time` ago
+(`MinGrenadeTime`), saw its enemy within `seen_within` seconds, and is
+`min_range` to `max_range` away from it (the grenade's `ValidRange`)
+throws with chance `probability` (`GrenadeProbability`), unless a friend
+stands within the blast radius of the landing spot. It aims at the floor
+by the enemy, off by the same aim error as its shots, and works out the
+arc itself (`rc_ai::brain::throw_arc`): first the gentlest lob that
+reaches (the slowest throw, which comes down steeply and rolls on little),
+then the flattest arc at full speed for under a low ceiling; if the level
+blocks both, it tries again 3 s later. It doesn't shoot for `throw_time`
+(the throw animation, `[look] throw`). The AI sends `AiEvent::Throw`;
+`rc_enemies` turns it into the same `rc_combat::ThrowGrenade` the player's
+button sends, so the grenade flies, bounces and goes off with the
+grenade's own rules. To aim, `rc_enemies` reads the grenade file's speed,
+gravity and radius. Saves keep how many each enemy has left.
+
 **Several enemies to fight.** Droids fight the player and the squad mates
 (every living `Team::Republic` character). Each keeps fighting the one it
 fought last while it can still see it, otherwise picks the nearest one it

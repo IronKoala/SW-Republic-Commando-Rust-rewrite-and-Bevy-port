@@ -41,6 +41,9 @@ pub struct DroidSave {
     pub mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<[f32; 3]>,
+    /// Grenades it still carries (only enemies that carry them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grenades_left: Option<u32>,
 }
 
 fn arr(v: UVec3) -> [f32; 3] {
@@ -81,6 +84,7 @@ impl SavePart for EnemiesSave {
                     .map_or(0.0, |h| h.current),
                 mode: f.mode.name().into(),
                 last_seen_at: f.last_seen_at.map(arr),
+                grenades_left: f.grenades_left,
             })
             .collect();
         Some(EnemiesSave {
@@ -121,6 +125,7 @@ impl SavePart for EnemiesSave {
                     facing: f.facing,
                     mode: mode(&f.mode),
                     last_seen_at: f.last_seen_at.map(vec),
+                    grenades_left: f.grenades_left,
                 })
                 .collect(),
         };

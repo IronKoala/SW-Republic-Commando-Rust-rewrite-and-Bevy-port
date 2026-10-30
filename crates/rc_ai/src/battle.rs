@@ -65,6 +65,9 @@ pub struct FighterSnapshot {
     pub mode: Mode,
     /// Where it last saw (or heard) the enemy.
     pub last_seen_at: Option<Vec3>,
+    /// Grenades it still carries; `None` for its type's full count (types
+    /// without grenades, and saves from before enemies threw them).
+    pub grenades_left: Option<u32>,
 }
 
 pub struct Battle {
@@ -321,6 +324,8 @@ impl Battle {
                     facing: f.facing,
                     mode: f.mode,
                     last_seen_at: f.last_seen_at,
+                    grenades_left: (!f.params.grenades.grenade.is_empty())
+                        .then_some(f.grenades_left),
                 })
                 .collect(),
         }
@@ -357,6 +362,9 @@ impl Battle {
             // Its spawner's enemy type, not the battle's default.
             let (start, params) = (sp.factory.start_state.clone(), sp.params.clone());
             let mut fighter = Fighter::new(f.id, params, f.feet, f.facing, start);
+            if let Some(n) = f.grenades_left {
+                fighter.grenades_left = n.min(fighter.grenades_left);
+            }
             if matches!(f.mode, Mode::Alerted | Mode::Attack | Mode::Investigate) {
                 let at = f.last_seen_at.unwrap_or(fighter.pawn.location);
                 let mut ev = Vec::new();

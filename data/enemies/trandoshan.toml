@@ -6,8 +6,6 @@
 # on top, and its brain TrandoshanMercenaryBot(+Defaults). "guess" and
 # "placeholder" mark the rest. Anything not listed takes the battle droid's
 # value (battle_droid.toml).
-# Not done: it also carries thermal detonators (ThermalDetonatorEnemy) that
-# our enemies don't throw yet.
 
 [type]
 id = "trandoshan"
@@ -33,6 +31,14 @@ weapon_range = 5000       # game: SMGAmmo Range
 drops = "trandoshan_smg"  # the player can pick up its repeater
 damage_table = "DV_OrganicTrandoMercDamage" # game: MyDamageVariance
 
+[grenades]
+grenade = "thermal_detonator_enemy" # game: RequiredEquipment[1] ThermalDetonatorEnemy (data/grenades/thermal_detonator_enemy.toml)
+count = 2                 # game: ThermalDetonatorEnemyDefaults InitAmmoAmount
+probability = 0.05        # game: TrandoshanMercenaryBotDefaults GrenadeProbability
+min_time = 20             # game: TrandoshanMercenaryBotDefaults MinGrenadeTime
+throw_time = 0.87         # game: the ThrowGrenade animation's length (26 frames at 30 a second)
+
 [look]
 package = "GameData/Animations/trandoshan.ukx"  # guess: the game's mesh TrandoshanMerc isn't in this package
 mesh = "Trandoshan"                             # placeholder: the closest mesh in trandoshan.ukx
+throw = "ThrowGrenade"                           # game: the Trandoshan sets' throwing animation

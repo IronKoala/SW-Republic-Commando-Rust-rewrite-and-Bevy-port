@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Enemies throw grenades (rc_ai, rc_enemies)
+
+- **Changed:** `rc_ai`: new `[grenades]` settings (`GrenadeUse`: grenade file, count, `probability`, `min_time`, `min_range`/`max_range`, `seen_within`, `throw_time`, and the arc's speed, gravity and radius), `AiEvent::Throw`, `Fighter::grenades_left`, and `brain::throw_arc` (aims a lob, or a flat throw under a low ceiling, and checks the level doesn't block it). `[look] throw` names the throw animation. Saves keep each enemy's grenades left (`grenades_left`, only for types that carry them). `rc_enemies` turns a throw into `rc_combat::ThrowGrenade`, reads the grenade file's flight numbers to aim, plays the throw animation, and logs `droid N threw ...` and a grenade count in the summary. New `data/grenades/thermal_detonator_enemy.toml`; `data/enemies/trandoshan.toml` carries two; `battle_droid.toml` documents the section (none). Tests: 4 in `rc_ai`, 2 in `rc_enemies/tests/fight.rs`.
+- **Why:** The original's Trandoshans throw thermal detonators; ours didn't throw at all.
+- **Tested how:** `rc_probe --class` on the install's script packages and `rc_character --list` on trandoshan.ukx (copied read-only to the cloud sandbox). `cargo test --release -p rc_ai -p rc_enemies`.
+- **Result:** rc_ai 20 of 20, rc_enemies 7 of 7. In the test room a Trandoshan 1500 uu away throws at its first decision (0.5 s, a 1198 uu/s lob), the grenade bounces 4 times and goes off 147 uu from the player: `blast damage 115.0 (x0.82 by distance, x0.7 by its table)` plus 1 s of burning. No second throw within 20 s. Arcs land within 15 uu of where they are aimed; none is thrown through a wall, at under 600 or over 2500 uu, or onto a friend.
+- **Still broken / not tested:** Not tested in `rc_game` on a real map with Trandoshans, or on Windows. When to throw is our rule (the original's is compiled). The grenade leaves the hand at the start of the throw animation, not at its release point. Super battle droids' crouch rocket and the Geonosian drone's spit are not added. The Trandoshan's look still fails to load (no `Trandoshan` skeletal mesh in trandoshan.ukx; found while listing its animations), so the throw animation isn't seen yet.
+- **Next:** The Geonosian warrior's force pike (melee for enemies).
+
 ## 2026-10-30: Droids no longer spot the player right after a load (rc_game player and self-test)
 
 - **Changed:** `crates/rc_game/src/player.rs`: the player's camera now starts at the body's eyes when the player is spawned (before, it started at the map's centre, 0,0,0), and loading the `[player]` section moves the camera along with the body. `place_camera` uses the same `eye_view` helper. New unit test `loading_a_save_moves_the_camera_with_the_player`. `crates/rc_game/src/script.rs`: before the quicksave the script waits until no squad mate has moved for 3 frames ("squad mates standing still"), and a new check "no droid spots the player just after the load" fails if a droid that was idle in the save is alerted 0.3 s after loading.

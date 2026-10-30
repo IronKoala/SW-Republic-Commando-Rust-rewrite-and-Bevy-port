@@ -266,3 +266,63 @@ fn a_fallen_droid_leaves_its_blaster() {
         .collect();
     assert_eq!(drops, ["e5_blaster_pickup"]);
 }
+
+#[derive(Resource, Default)]
+struct Blasts(Vec<(String, Vec3, Option<Entity>, u32)>);
+
+fn record_blasts(
+    mut out: ResMut<Blasts>,
+    mut b: bevy::ecs::message::MessageReader<rc_combat::Blast>,
+) {
+    out.0.extend(
+        b.read()
+            .map(|b| (b.grenade.clone(), b.point, b.instigator, b.hit)),
+    );
+}
+
+#[test]
+fn a_trandoshan_throws_a_grenade_that_hurts_the_player() {
+    let mut p = enemy_file("trandoshan");
+    assert_eq!(p.grenades.grenade, "thermal_detonator_enemy");
+    assert_eq!(p.grenades.count, 2);
+    // Every chance it gets, so the test needn't wait on the dice.
+    p.grenades.probability = 1.0;
+    let mut r = Room::with(p);
+    r.app
+        .init_resource::<Blasts>()
+        .add_systems(Last, record_blasts);
+    // Spots the player at 1500 uu, throws at its first decision, the
+    // grenade lands ~0.8 s later and goes off a second after touching down.
+    r.seconds(4.0, &[]);
+    let d = r.droids()[0];
+    let w = r.app.world();
+    let fight = w.resource::<Fight>();
+    println!("{:?}", fight.stats);
+    assert_eq!(fight.stats.grenades_thrown, 1, "{:?}", fight.stats);
+    assert_eq!(fight.battle.fighters[0].grenades_left, 1);
+    let blasts = &w.resource::<Blasts>().0;
+    assert_eq!(blasts.len(), 1, "{blasts:?}");
+    let (grenade, point, by, hit) = &blasts[0];
+    assert_eq!(grenade, "thermal_detonator_enemy");
+    assert_eq!(*by, Some(d));
+    let player_at = b(-500.0, 0.0, 0.0);
+    let off = Vec2::new(point.x - player_at.x, point.z - player_at.z).length() * 50.0;
+    assert!(off < 400.0, "went off {off:.0} uu from the player");
+    assert!(*hit >= 1);
+    let h = w.get::<Health>(r.player).unwrap();
+    let sh = w.get::<rc_combat::Shield>(r.player).unwrap();
+    assert!(
+        sh.current < sh.max || h.current < h.max,
+        "player unhurt: {h:?} {sh:?}"
+    );
+    // Not a second one before MinGrenadeTime (20 s).
+    r.seconds(10.0, &[]);
+    assert_eq!(r.app.world().resource::<Fight>().stats.grenades_thrown, 1);
+}
+
+#[test]
+fn battle_droids_throw_no_grenades() {
+    let mut r = Room::new();
+    r.seconds(8.0, &[]);
+    assert_eq!(r.app.world().resource::<Fight>().stats.grenades_thrown, 0);
+}
