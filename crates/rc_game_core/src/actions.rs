@@ -42,6 +42,9 @@ pub enum Action {
     SquadFormUp,
     SquadSecurePosition,
     SquadCancel,
+    // Saving.
+    QuickSave,
+    QuickLoad,
     // Menus.
     Pause,
     MenuUp,
@@ -59,7 +62,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 32] = [
+    pub const ALL: [Action; 34] = [
         Action::MoveForward,
         Action::MoveBack,
         Action::StrafeLeft,
@@ -83,6 +86,8 @@ impl Action {
         Action::SquadFormUp,
         Action::SquadSecurePosition,
         Action::SquadCancel,
+        Action::QuickSave,
+        Action::QuickLoad,
         Action::Pause,
         Action::MenuUp,
         Action::MenuDown,
@@ -120,6 +125,8 @@ impl Action {
             Action::SquadFormUp => "squad_form_up",
             Action::SquadSecurePosition => "squad_secure_position",
             Action::SquadCancel => "squad_cancel",
+            Action::QuickSave => "quick_save",
+            Action::QuickLoad => "quick_load",
             Action::Pause => "pause",
             Action::MenuUp => "menu_up",
             Action::MenuDown => "menu_down",

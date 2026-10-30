@@ -4440,6 +4440,7 @@ dependencies = [
  "rc_level_viewer",
  "rc_movement",
  "rc_package",
+ "serde",
 ]
 
 [[package]]
@@ -4457,6 +4458,7 @@ dependencies = [
  "rc_movement",
  "rc_nav",
  "rc_package",
+ "serde",
 ]
 
 [[package]]
@@ -4474,6 +4476,7 @@ dependencies = [
  "rc_movement",
  "rc_pads",
  "rc_panini",
+ "rc_save",
  "rc_squad_plugin",
  "serde",
  "toml 0.8.23",
@@ -4485,6 +4488,8 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "rc_movement",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -4524,6 +4529,15 @@ dependencies = [
 name = "rc_menus"
 version = "0.1.0"
 dependencies = [
+ "rc_image",
+ "rc_package",
+]
+
+[[package]]
+name = "rc_model"
+version = "0.1.0"
+dependencies = [
+ "rc_anim",
  "rc_image",
  "rc_package",
 ]
@@ -4585,6 +4599,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_save"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "rc_soundtest"
 version = "0.1.0"
 dependencies = [
@@ -4611,10 +4635,13 @@ dependencies = [
  "rc_combat",
  "rc_game_core",
  "rc_level",
+ "rc_model",
  "rc_movement",
  "rc_nav",
  "rc_package",
  "rc_squad",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]

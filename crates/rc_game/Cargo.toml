@@ -31,6 +31,7 @@ rc_level_plugin = { path = "../rc_level_plugin" }
 rc_combat = { path = "../rc_combat" }
 rc_enemies = { path = "../rc_enemies" }
 rc_squad_plugin = { path = "../rc_squad_plugin" }
+rc_save = { path = "../rc_save" }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer, a window on
 # X11 or Wayland, menus and text (bevy_ui with Bevy's built-in font), audio

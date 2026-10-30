@@ -21,6 +21,7 @@ pub struct Settings {
     pub audio: AudioSection,
     pub controls: ControlsSection,
     pub gyro: GyroSettings,
+    pub save: SaveSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -97,6 +98,16 @@ pub struct AudioSection {
     pub effects_volume: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct SaveSection {
+    /// Where save files go. Empty means the system's usual place
+    /// (`%APPDATA%\rc_game\saves` on Windows, `~/.local/share/rc_game/saves`
+    /// on Linux, `saves` next to the settings file elsewhere). Never the
+    /// game's install.
+    pub folder: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ControlsSection {
@@ -167,6 +178,7 @@ impl Default for Settings {
                 trigger_threshold: 0.3,
             },
             gyro: GyroSettings::default(),
+            save: SaveSection::default(),
         }
     }
 }
@@ -272,6 +284,12 @@ invert_y = false
 smoothing_threshold = 2.0          # degrees per second; slower moves are smoothed
 tightening = 0.0                   # degrees per second; slower moves are damped (0 is off)
 auto_calibrate = true              # learn the gyro's drift while it lies still
+
+[save]
+# Where save files go (quicksave, checkpoint and named saves, as readable
+# text files). Leave empty for the usual place: %APPDATA%\rc_game\saves on
+# Windows, ~/.local/share/rc_game/saves on Linux.
+folder = ''
 "#;
 
 impl Settings {

@@ -24,7 +24,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
-| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
+| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
+| `rc_save` | Saving, loading and checkpoints: `SavePlugin` writes and reads the save files, quicksave and quickload, and saves at checkpoints. Bevy, but no window. |
 | `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 | `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
@@ -1230,9 +1231,73 @@ leader. It reads `ActionState`, the `Player` and `PlayerCamera` transforms and
 `LevelCollision`, and writes `SquadReadout`. A `SquadOrder` message lets
 anything else (a script, a touch menu, a VR gesture) give orders. Each
 member is an entity with `SquadMate` and a `Transform` at its feet, facing
-its way like the player's; with a renderer it gets a capsule in its own
-colour (`EnhancedVisionColor` from the Properties package) and a dark
-visor, until the real model is drawn.
+its way like the player's; with a renderer it gets the original model (see
+"How the squad looks" below), or, if that can't be read, a capsule in its
+own colour (`EnhancedVisionColor` from the Properties package) with a dark
+visor, as a placeholder.
+
+### How the squad looks (`rc_model`, `rc_squad_plugin/src/look.rs`)
+
+All three squad mates use the same mesh, `CloneCommando` in
+`GameData/Animations/clone.ukx` (the `Mesh` default of the `CloneCommando`
+class in CTCharacters.u). The mesh's own material is a stand-in
+(`CloneCommandoProxy`); each class's `Skins[0]` (in the Properties package,
+`CommandoNNDeltaDefaults`) replaces it with that commando's armour:
+`CloneTextures.CloneTextures.CloneCommando07_Shader` for Sev, `..40..` for
+Fixer and `..62..` for Scorch. A Shader's `Diffuse` leads to the 1024x1024
+picture. The animations are spread over two sets the mesh links to:
+everyday moves in `CloneCommandoSet`, wounded and healing ones in
+`CloneCommandoSPSet`.
+
+`data/squad/looks.toml` names the package, mesh, replacement materials
+(`skins`, by material slot) and which sequence plays for each pose. The
+poses (`look::Pose`) are picked from the squad's state each frame: knocked
+out plays `WoundedFallDown` once and holds it; reviving plays
+`HealImmobileLoop`; moving picks walk, run, back or side-step from the
+speed and the direction against the facing (as the droids do); a shot in
+the last 0.4 s plays `Fire`; otherwise `ActionBreathe`. Which animations the
+original plays for knocked-out and reviving is compiled code, so those two
+are our picks.
+
+`rc_model` is a new crate with no Bevy. It reads a skeletal mesh, the named
+sequences (looking in each animation set the mesh links to, first set
+first), and a picture for every material. A mesh's triangles are split into
+one "section" per material slot, each drawn as its own Bevy mesh with its
+own picture, so a model made of several materials (like `TrooperNoHelmet`:
+face plus armour) is drawn whole. It follows Shader -> `Diffuse`, Combiner
+-> `Material1`, FinalBlend and texture modifiers -> `Material`, including
+steps into another package (looked up in Textures, Animations and
+StaticMeshes). A material counts as see-through-in-places ("cut-out") when
+the texture is masked, a FinalBlend alpha-tests, or a Shader has an
+`Opacity`; other alpha is left alone, because Unreal often keeps
+shininess there. Posing is as for the droids: CPU skinning every frame,
+copied into each section's mesh. The model faces +X in the game's axes,
+the squad mate's body faces its local -Z, so the meshes hang under a holder
+turned a quarter turn (`look::model_turn`).
+
+The droids (`rc_enemies/src/look.rs`) and the `rc_character` viewer still
+have their own one-material readers; they can switch to `rc_model` later.
+
+Each mate reads its model once (about 0.7 s each in a debug build in the
+cloud). The three share one mesh, so reading it once and swapping only the
+picture would be quicker; not done yet.
+
+How it's checked: `rc_squad_look_check` (an example program in
+`rc_squad_plugin`) stands the three in front of a camera using the game's
+own `spawn_pieces`, plays every animation on the CPU and checks heights
+stay between 20 and 260 uu, checks each `skins` entry against the class's
+`Skins` read from the Properties package, then captures the window. For
+each squad mate and each material it projects our own posed triangles
+(nearest in front) and compares: outline overlap (0.93 or more passes; got
+0.986-0.988), and colour balance on screen against the material's picture
+sampled at each triangle's middle, weighted by size (0.04 or less passes;
+got 0.001-0.003). A capture where textures were lost (magenta or plain
+grey) fails the colour part even with a perfect outline. Finally each mate's
+colour must be nearest its own armour's (own 0.001-0.003, nearest other
+0.020-0.023). With Sev's and Scorch's armour swapped in `looks.toml` the
+original-armour check fails for both, as it should. In `rc_game --script`
+the player turns round, `logs/squad.png` is captured, and a check confirms
+all three mates have their model and pictures.
 
 ### Health and going down
 
@@ -1741,6 +1806,72 @@ The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:
   `place_camera` sets the normal field of view, `rc_game/src/panini.rs`
   widens it with `Fit::new` and updates the camera's `PaniniView`. The
   shader and `Fit::source` do the same maths, which the tests check.
+## Saving, loading and checkpoints (`rc_game_core::save`, `rc_save`)
+
+**One interface, one section per part.** A save file is a plain TOML text
+file: a `[save]` header (format number, map, last checkpoint, when, time
+played) and then one `[section]` per part of the game. Each part writes its
+own section by implementing `SavePart` (`rc_game_core/src/save.rs`): a
+struct with `Serialize`/`Deserialize`, a `save` that reads it out of the
+game and a `load` that puts it back, registered with
+`app.add_save_part::<T>()`. The save plugin never knows what's inside a
+section. Sections so far: `[player]` (position, speed, on the ground,
+crouched, facing; in `rc_game/src/player.rs`), `[combat]` (health, shield,
+weapons and ammo; `rc_combat/src/save.rs`), `[enemies]` (the battle clock,
+each spawner's state and each living droid; `rc_enemies/src/save.rs`, using
+`rc_ai::Battle::snapshot` and `restore`), `[squad]` (stance, orders, each
+mate's place, job, revive, health and shield; `rc_squad_plugin/src/save.rs`,
+applied right after the squad appears on its first frame), `[checkpoints]`
+(checkpoints reached on this map; `rc_save`).
+
+**Loading reloads the map.** Loading a save sets `CurrentLevel` to the
+save's map and goes through `Loading` exactly like the menu does, so the
+level is always built fresh. On the first frame of play, after every
+`OnEnter(InGame)` has run and before input is read, each part's `load` gets
+its section, in the order the parts were registered. So parts only put back
+what changed since the map started, and never have to undo half a level.
+While this happens the resource `RestoringSave` exists; level-start things
+(the level-start autosave, opening scripts) check for it and stay quiet. A
+section the file doesn't have calls `load_missing` (the level stays as it
+starts), and a section no part claims is logged and ignored, so older and
+newer saves still load. A file with a higher format number than ours is
+refused with a message.
+
+**Destroyed droids stay destroyed** because each spawner's count of droids
+made is saved; only living droids are listed. A droid that was fighting
+comes back alerted toward where it last saw the player. Its plan (route,
+cover spot, burst) starts over: our choice, since those plans are rebuilt
+every few seconds anyway.
+
+**Checkpoints.** Entering a map from the menu saves `checkpoint.toml`
+under the name "level start". Level scripts send `CheckpointReached { name
+}`; the first time each name arrives it is added to `[checkpoints]` and
+`checkpoint.toml` is written again. Repeats are ignored, also after a load.
+The original does this with placeable `CTGame.Checkpoint` actors. When an
+event matching a checkpoint's `Tag` fires, it waits until the player is up
+(not incapacitated) and autosaves. `rc_level::checkpoints::read` lists a
+map's checkpoints and the actors whose `Event` names each tag. The 50
+campaign maps with checkpoints hold 144: 56 fired by a walk-in `Trigger`
+and 88 by level scripts. The level scripts part fires them and sends
+`CheckpointReached` with the checkpoint actor's name (like `checkpoint1`).
+`DefaultCtrl.ini` binds quicksave to F5 and quickload to F9, as we do.
+
+**Files and folder.** `quicksave.toml`, `checkpoint.toml` and
+`save_NAME.toml` (named saves, for a save menu; only letters, digits, `-`
+and `_` reach the file name). The folder is `[save] folder` in
+`settings.toml`, else `%APPDATA%\rc_game\saves` on Windows,
+`$XDG_DATA_HOME/rc_game/saves` or `~/.local/share/rc_game/saves` on Linux,
+and `saves` beside the settings file elsewhere (the Android app will set
+its own folder). Never the game's install. Each file is written to
+`NAME.toml.writing` and then swapped in, so a crash can't leave half a save.
+`--script` runs save into `logs/script_saves`, emptied at the start.
+
+**Keys and menus.** `Action::QuickSave` (F5) and `Action::QuickLoad` (F9),
+the original's keys.
+`SaveList` lists the saves newest first for a Load Game screen; a menu
+sends `LoadGame { slot }` or `SaveGame { slot }` and gets `SaveResult` back.
+Every save and load is logged with the prefix `save:` and a one-line summary
+of each section, so a round trip can be checked from the log.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

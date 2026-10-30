@@ -308,6 +308,16 @@ impl Fighter {
         self.set_mode(Mode::Alerted, events);
     }
 
+    /// Put it straight into the alerted state toward `at`, however far
+    /// away (a saved fight being put back).
+    pub fn alert(&mut self, at: Vec3, time: f32, events: &mut Vec<AiEvent>) {
+        self.last_seen_at = Some(at);
+        self.last_seen_time = time;
+        self.alerted_at = time;
+        self.follower = None;
+        self.set_mode(Mode::Alerted, events);
+    }
+
     pub fn kill(&mut self, events: &mut Vec<AiEvent>) {
         self.set_mode(Mode::Dead, events);
         self.follower = None;
