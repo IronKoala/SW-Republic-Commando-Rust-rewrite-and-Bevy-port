@@ -2313,6 +2313,14 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   that are too long are squeezed narrower (`Text::squeeze`) rather than cut.
   `quads::text_overlaps` finds text touching other text or picture buttons;
   `rc_probe --pages` prints every overlap per page.
+- The load and save pages are original too (`CTLoadGameMenu`,
+  `CTSaveGameMenu`), using the same list. `rc_game/src/original_saves.rs`
+  fills them from `SaveList` and turns their buttons (`act:load_save`,
+  `delete_save`, `new_save`, `overwrite_save`, and the pause menu's
+  `quick_save`, `quick_load`, `load_last`) into `SaveGame`, `LoadGame` and
+  the new `DeleteSave` messages, asking first with the original question
+  box where the original does (`OriginalMenus::ask`, `Asking`). A page
+  button that opens a load or save page that can't be drawn is greyed out.
 - `rc_game/src/original_hud.rs` swaps the placeholder HUD's drawn shapes
   for the original's pictures, named in `data/ui/hud.toml` (the original
   places them in native code, so placement is ours). It reads its own

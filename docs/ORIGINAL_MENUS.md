@@ -78,8 +78,10 @@ against the install the same evening with `rc_probe --pages`:
 
 - **Pause (`CTPausePCMenu`): uses the original.** 11 buttons: LOAD LAST
   SAVE, QUICK SAVE, QUICK LOAD, RESUME GAME, RESTART LEVEL, SAVE GAME,
-  LOAD GAME, OPTIONS, ENABLE HINTS, END MISSION, QUIT PROGRAM. Saving,
-  loading and hints are greyed out until built. END MISSION goes to the
+  LOAD GAME, OPTIONS, ENABLE HINTS, END MISSION, QUIT PROGRAM. Hints are
+  greyed out until built. QUICK SAVE saves and goes back to the game;
+  QUICK LOAD and LOAD LAST SAVE load at once; SAVE GAME and LOAD GAME
+  open the original pages below. END MISSION goes to the
   main menu; QUIT PROGRAM asks the quit question. Its `Background` is a
   black square at alpha 120 over the game. Two of the night's guesses
   were wrong (QUIT was thought to mean "to the main menu").
@@ -97,6 +99,19 @@ against the install the same evening with `rc_probe --pages`:
   developer list of every map, named with the game's level titles. The
   list and scroll bar are `rc_menus::lists`; the page's script is
   `rc_menus::campaign`.
+- **Load and save (`CTLoadGameMenu`, `CTSaveGameMenu`, 2026-10-30): use
+  the original.** Both list the saves (autosave, which is our checkpoint
+  save, then the quicksave, then named saves newest first) with the
+  level's name and the time. LOAD GAME: SELECT (or Enter on a row, or a
+  double click) loads; in a level it first asks the class's `LoadConfirm`.
+  SAVE GAME: NEW saves as the campaign's name and a number
+  (`Geonosis_1`), at most `MaxSaveSlots` (5); OVERWRITE asks first and
+  refuses the autosave and quicksave with the class's own message. DELETE
+  asks "DELETE <NAME> ?" on both. Every question uses the original
+  question box; a message with one answer hides YES and words NO as the
+  page's BACK. Code: `rc_game/src/original_saves.rs`; deleting is
+  `rc_game_core::save::DeleteSave`, done by `rc_save`. LOAD GAME on the
+  main menu is greyed out only when the page can't be drawn.
 - **Options (2026-10-30): use the original.** See below.
 - `rc_game --script` picks pause items by the original's function name
   (`FocusPauseItem`), so it works with either pause page.

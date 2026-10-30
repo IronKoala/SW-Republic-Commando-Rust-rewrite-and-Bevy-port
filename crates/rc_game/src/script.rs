@@ -229,8 +229,22 @@ fn steps() -> Vec<Step> {
         Check("main menu matches the original's pictures", |w| {
             compare(w, "main_menu", 0.2)
         }),
-        FocusAfter(Action::MenuDown, "MenuOptions[2]"),
+        FocusAfter(Action::MenuDown, "MenuOptions[1]"),
         FocusAfter(Action::MenuUp, "MenuOptions[0]"),
+        FocusAfter(Action::MenuDown, "MenuOptions[1]"),
+        Press(Action::MenuAccept), // LOAD GAME
+        Wait(0.3),
+        Check("LOAD GAME opens the original load page (no saves yet)", |w| {
+            let items = save_items(w, "load_game")?;
+            match (page(w), shown_page(w)) {
+                (Page::LoadGame, Some(k)) if k == "load_game" && items.is_empty() => {
+                    Ok("load_game (original), empty".into())
+                }
+                (p, k) => Err(format!("{p:?}, original page {k:?}, {items:?}")),
+            }
+        }),
+        Press(Action::MenuBack),
+        Wait(0.2),
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         Press(Action::MenuAccept),
         Wait(0.2),
@@ -822,6 +836,123 @@ fn steps() -> Vec<Step> {
             },
         ),
         Shot("paused"),
+        // The original save and load pages, from the pause menu.
+        FocusPauseItem("SaveGameSelected", 0),
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check("SAVE GAME opens the original save page, listing the autosave and quicksave", |w| {
+            let items = save_items(w, "save_game")?;
+            let got = format!("{:?} {items:?}", page(w));
+            match items.as_slice() {
+                [a, q] if page(w) == Page::SaveGame
+                    && a.starts_with("AUTOSAVE")
+                    && q.starts_with("QUICKSAVE") => Ok(got),
+                _ => Err(got),
+            }
+        }),
+        Shot("save_game"),
+        FocusOn("YButton"),
+        Press(Action::MenuAccept), // NEW
+        Wait(0.5),
+        Check("NEW saves a new save named after the campaign", |w| {
+            let file = save_file(w, &SaveSlot::Named("Geonosis_1".into()))?;
+            let items = save_items(w, "save_game")?;
+            let got = format!("map {}, list {items:?}", file.header.map);
+            if items.len() == 3 && items[2].starts_with("GEONOSIS 1") {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        // Up from the buttons comes back to the first save; Enter on the
+        // quicksave tries to overwrite it, which the original refuses.
+        Press(Action::MenuUp),
+        Press(Action::MenuDown),
+        Press(Action::MenuAccept),
+        Wait(0.2),
+        Check("the quicksave can't be overwritten: the original's message", |w| {
+            let asking = w.resource::<OriginalMenus>().asking.clone();
+            match (&asking, question_text(w)) {
+                (Some(original_menu::Asking::Notice), Some(t)) if t.contains("QUICKSAVE") => {
+                    Ok(t)
+                }
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Shot("save_notice"),
+        Press(Action::MenuBack),
+        Wait(0.2),
+        // Down to the new save, then down to the buttons (the save stays
+        // chosen) and round to DELETE.
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        FocusOn("XButton"),
+        Press(Action::MenuAccept),
+        Wait(0.2),
+        Check("DELETE asks first, with the save's name", |w| {
+            match question_text(w) {
+                Some(t) if t.contains("DELETE GEONOSIS 1") => Ok(t),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        FocusOn("AButton"), // YES
+        Press(Action::MenuAccept),
+        Wait(0.5),
+        Check("YES deletes the save and takes it off the list", |w| {
+            let gone = save_file(w, &SaveSlot::Named("Geonosis_1".into())).is_err();
+            let items = save_items(w, "save_game")?;
+            let got = format!("file gone {gone}, list {items:?}");
+            if gone && items.len() == 2 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        FocusPauseItem("LoadGameSelected", 0),
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check("LOAD GAME opens the original load page", |w| {
+            let items = save_items(w, "load_game")?;
+            let got = format!("{:?} {items:?}", page(w));
+            if page(w) == Page::LoadGame && items.len() == 2 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Shot("load_game"),
+        Press(Action::MenuDown), // the quicksave, saved in geo_01a
+        Press(Action::MenuAccept),
+        Wait(0.2),
+        Check("loading in a level asks first (the original's question)", |w| {
+            match question_text(w) {
+                Some(t) if t.contains("UNSAVED PROGRESS") => Ok(t),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        FocusOn("AButton"), // YES
+        Press(Action::MenuAccept),
+        Until(
+            "the load page's YES loads the save",
+            |w| !in_state(w, GameState::InGame),
+            5.0,
+        ),
+        Until(
+            "the save's level is back",
+            |w| in_state(w, GameState::InGame) && !w.contains_resource::<RestoringSave>(),
+            LOAD_TIMEOUT,
+        ),
+        Wait(0.5),
+        Check("the quicksave's map is loaded", |w| {
+            match w.resource::<CurrentLevel>().map.clone() {
+                Some(m) if m == "geo_01a" => Ok(m),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::Pause),
+        Wait(0.2),
         FocusPauseItem("EndMissionSelected", 2),
         Press(Action::MenuAccept), // Quit to main menu
         Until("main menu again", |w| in_state(w, GameState::MainMenu), 5.0),
@@ -848,8 +979,8 @@ fn steps() -> Vec<Step> {
             w.resource_mut::<Settings>().audio.music_volume = 1.0;
             w.resource_mut::<Noted>().music_volume = 1.0;
         }),
-        // MULTIPLAYER, LOAD GAME, PROFILES and EXTRAS are greyed out and
-        // skipped.
+        // MULTIPLAYER, PROFILES and EXTRAS are greyed out and skipped.
+        FocusAfter(Action::MenuDown, "MenuOptions[1]"), // LOAD GAME
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         FocusAfter(Action::MenuDown, "MenuOptions[4]"),
         Press(Action::MenuAccept), // OPTIONS
@@ -1131,6 +1262,28 @@ fn shown_page(w: &mut World) -> Option<String> {
     let menu = w.resource::<Menu>();
     match w.resource::<OriginalMenus>().shown(&state, play.as_ref(), menu) {
         Some(original_menu::Shown::Page(k)) => Some(k),
+        _ => None,
+    }
+}
+
+/// What an original load or save page lists.
+fn save_items(w: &mut World, k: &str) -> Result<Vec<String>, String> {
+    let m = w.resource::<OriginalMenus>();
+    let p = m.pages.get(k).ok_or(format!("no original {k} page"))?;
+    Ok(p.screen
+        .layout
+        .lists
+        .lists
+        .first()
+        .map(|l| l.items.clone())
+        .unwrap_or_default())
+}
+
+/// The question box's question, when it shows.
+fn question_text(w: &mut World) -> Option<String> {
+    let q = w.resource::<OriginalMenus>().question.as_ref()?;
+    match &q.layout.widget("Question")?.kind {
+        rc_menus::layout::Kind::Text(t) => Some(t.text.clone()),
         _ => None,
     }
 }

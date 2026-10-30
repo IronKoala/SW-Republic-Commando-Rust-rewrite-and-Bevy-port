@@ -1,8 +1,9 @@
 //! Original pages with a scrolling list: the campaign page (planets and
-//! their missions). `original_menu.rs` draws them like any other original
-//! page; this file does what is special about them: moving along the list
-//! with the keys, the mouse wheel, picking a row, and the campaign page's
-//! planets and SELECT.
+//! their missions) and the load and save pages. `original_menu.rs` draws
+//! them like any other original page; this file does what is special about
+//! them: moving along the list with the keys, the mouse wheel, picking a
+//! row, and the campaign page's planets and SELECT. What the load and save
+//! pages' buttons do is in `original_saves.rs`.
 //!
 //! The list itself (rows, scrolling, the scroll bar's handle) is in
 //! `rc_menus::lists`, and the campaign page's script, rewritten by hand, in
@@ -166,7 +167,11 @@ pub fn keys(
         match at {
             Some(i) if i + 1 < list.items.len() => pick(screen, c, i + 1),
             Some(_) => {
-                unpick(screen, c);
+                // The campaign page forgets the mission; the save pages
+                // keep the save chosen for the buttons (DELETE...).
+                if c.is_some() {
+                    unpick(screen, c);
+                }
                 screen.focus = button(screen, "AButton");
             }
             None if screen.focus.is_none() && !list.items.is_empty() => pick(screen, c, 0),
@@ -266,15 +271,10 @@ pub fn command(
             ));
             // The accept key on a row, or a double click, opens it at once
             // (the original's `HandleInputSelect` and `OnDoubleClick`).
-            if by_key || double {
-                return command(
-                    menus,
-                    k,
-                    None,
-                    by_key,
-                    PageCmd::Act("start_level".into()),
-                    log,
-                );
+            // It does what the page's SELECT (A) button does.
+            let select = button(screen, "AButton").and_then(|a| page.buttons.command(a).cloned());
+            if let (true, Some(select)) = (by_key || double, select) {
+                return command(menus, k, None, by_key, select, log);
             }
             None
         }
@@ -329,10 +329,8 @@ pub fn command(
             ));
             Some(PageCmd::Play(map))
         }
-        PageCmd::Act(a) => {
-            log.line(format!("original menus: page {k}: nothing does {a:?}"));
-            None
-        }
+        // The rest are for the save pages (`original_saves.rs`) or the
+        // ordinary handling.
         other => Some(other),
     }
 }

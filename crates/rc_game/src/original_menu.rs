@@ -21,6 +21,7 @@ use crate::input::{BaseBindings, Bindings};
 use crate::menu::{GamePathsFound, Menu, Page};
 use crate::option_settings;
 use crate::original_lists;
+use crate::original_saves;
 use crate::rebind::{RebindDone, StartRebind, UserBindingsPath};
 use crate::settings::Settings;
 use crate::settings::SettingsPath;
@@ -48,9 +49,9 @@ const MENU_ASPECT: f32 = 4.0 / 3.0;
 /// Main menu buttons this port can't offer yet; they are greyed out the way
 /// the original greys out buttons in its demo versions. Multiplayer stays
 /// off for good: this port is single-player and offline only.
+/// LOAD GAME joins them when its page can't be shown.
 const UNAVAILABLE: &[MainAction] = &[
     MainAction::Multiplayer,
-    MainAction::LoadGame,
     MainAction::Profiles,
     MainAction::Extras,
 ];
@@ -156,6 +157,8 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::Paused => Some("paused"),
         // The port's own settings, drawn in the original GAME page's look.
         Page::MoreSettings => Some("more_settings"),
+        Page::LoadGame => Some(original_saves::LOAD),
+        Page::SaveGame => Some(original_saves::SAVE),
         Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
@@ -169,6 +172,8 @@ fn page_from_key(key: &str) -> Option<Page> {
         "options_controls" => Some(Page::OptionsControls),
         "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
+        original_saves::LOAD => Some(Page::LoadGame),
+        original_saves::SAVE => Some(Page::SaveGame),
         _ => None,
     }
 }
@@ -224,6 +229,18 @@ enum OptionWork {
     RebindAgain,
 }
 
+/// What the question box is asking.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Asking {
+    /// Quit the program? (YES quits.)
+    Quit,
+    /// Load, overwrite or delete a save? (YES does it.)
+    Confirm(original_saves::SaveDo),
+    /// A message with one answer (BACK), such as "you can't overwrite the
+    /// quicksave".
+    Notice,
+}
+
 /// The original menus, when the install has them.
 #[derive(Resource, Default)]
 pub struct OriginalMenus {
@@ -234,6 +251,12 @@ pub struct OriginalMenus {
     pub pages: HashMap<String, PageScreen>,
     /// The "are you sure?" box over the screen showing.
     pub question: Option<Screen>,
+    /// What it is asking.
+    pub asking: Option<Asking>,
+    /// The screen showing (for the question box's background).
+    showing: Option<Shown>,
+    /// The load and save pages' texts and work (`original_saves.rs`).
+    pub saves: original_saves::SavePages,
     /// The question box's layout, kept for when QUIT is chosen again.
     question_layout: Option<MenuLayout>,
     /// The "reassign button" box while it shows, and its layout.
@@ -288,6 +311,46 @@ impl OriginalMenus {
             .then(|| Shown::Page(key.to_string()))
     }
 
+    /// Redraw on the next frame.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Show the question box over the screen showing, asking `text`.
+    /// Without the box (the install's question class can't be read), a
+    /// quit quits and anything else is only logged.
+    pub fn ask(&mut self, text: &str, asking: Asking) -> bool {
+        let Some(l) = &self.question_layout else {
+            return false;
+        };
+        let mut layout = l.clone();
+        let under = self
+            .showing
+            .as_ref()
+            .and_then(|s| self.screen(s))
+            .map(|s| &s.layout);
+        let mut focus = screens::setup_question(&mut layout, text, under);
+        if asking == Asking::Notice {
+            // One answer: BACK, worded as the page's own BACK button.
+            let back = under
+                .and_then(|u| u.widget("BButton"))
+                .and_then(|w| match &w.kind {
+                    Kind::Button(b) => Some(b.blurred.text.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "BACK".into());
+            screens::set_widget_text(&mut layout, "BButton", &back);
+            if let Some(w) = layout.widget_mut("AButton") {
+                w.hidden = true;
+            }
+            focus = layout.widgets.iter().position(|w| w.name == "BButton");
+        }
+        self.question = Some(Screen { layout, focus });
+        self.asking = Some(asking);
+        self.dirty = true;
+        true
+    }
+
     fn screen(&self, shown: &Shown) -> Option<&Screen> {
         match shown {
             Shown::Main => self.main.as_ref(),
@@ -332,7 +395,14 @@ impl Plugin for OriginalMenuPlugin {
             .add_systems(OnEnter(Play::Paused), load)
             .add_systems(
                 Update,
-                (focus_new_page, navigate, apply_options, draw, fit_area)
+                (
+                    focus_new_page,
+                    navigate,
+                    apply_options,
+                    original_saves::apply_saves,
+                    draw,
+                    fit_area,
+                )
                     .chain()
                     .in_set(GameSet::Hud)
                     // Before the placeholder menu reads the same actions.
@@ -440,12 +510,49 @@ fn load(
             menus.pages.remove(original_lists::CAMPAIGNS);
         }
     }
+    // The load and save pages' texts; pages pointing at a load or save
+    // page that can't be shown grey that button out.
+    let mut class_of = |k: &str| {
+        menus
+            .pages
+            .get(k)
+            .and_then(|p| assets.library.class(&p.plan.class).ok())
+    };
+    let (load_class, save_class) = (class_of(original_saves::LOAD), class_of(original_saves::SAVE));
+    menus.saves = original_saves::read(load_class.as_deref(), save_class.as_deref());
+    let present: Vec<String> = menus.pages.keys().cloned().collect();
+    for (k, p) in menus.pages.iter_mut() {
+        let missing: Vec<usize> = p
+            .buttons
+            .commands
+            .iter()
+            .filter(|(_, c)| {
+                matches!(c, PageCmd::Open(to) | PageCmd::Switch(to)
+                    if (to == original_saves::LOAD || to == original_saves::SAVE)
+                        && !present.contains(to))
+            })
+            .map(|(i, _)| *i)
+            .collect();
+        for i in missing {
+            let name = p.screen.layout.widgets[i].name.clone();
+            log.line(format!(
+                "original menus: page {k}: {name} greyed out: its page can't be shown"
+            ));
+            screens::disable_row(&mut p.screen.layout, &name);
+            p.buttons.commands.retain(|(w, _)| *w != i);
+            p.buttons.commands.push((i, PageCmd::Unavailable));
+        }
+    }
+    let mut unavailable = UNAVAILABLE.to_vec();
+    if !present.iter().any(|k| k == original_saves::LOAD) {
+        unavailable.push(MainAction::LoadGame);
+    }
     let quit_text = match main.get("QuitGameConfirm") {
         Some(V::Str(s)) => s.clone(),
         _ => "Quit?".into(),
     };
     let mut layout = rc_menus::build(&main);
-    for l in screens::setup_main_menu(&mut layout, UNAVAILABLE) {
+    for l in screens::setup_main_menu(&mut layout, &unavailable) {
         log.line(format!("original menus: {l}"));
     }
     let map_key_layout = if menus.pages.values().any(|p| !p.buttons.keys.is_empty()) {
@@ -638,6 +745,17 @@ fn focus_new_page(
         refresh_page(p, &settings, &prompts, desktop);
         let screen = &mut p.screen;
         screen.focus = screen.buttons().first().copied();
+        // The pause menu opens on RESUME GAME (now that the save and load
+        // buttons above it work), so pause and Enter goes back to play.
+        if k == "paused" {
+            let buttons = screen.buttons();
+            if let Some(r) = buttons
+                .into_iter()
+                .find(|&i| screen.on_select(i).eq_ignore_ascii_case("ResumeGameSelected"))
+            {
+                screen.focus = Some(r);
+            }
+        }
         original_lists::focus_first(&mut menus, k);
         let screen = &menus.pages[k].screen;
         log.line(format!(
@@ -853,6 +971,7 @@ fn navigate(
         return;
     };
     let menus = &mut *menus;
+    menus.showing = Some(shown.clone());
     // While the "reassign button" box waits for a key, the key goes to the
     // rebinding, not to the menu.
     if menus.rebind.as_ref().is_some_and(|r| !r.chosen) {
@@ -991,13 +1110,19 @@ fn navigate(
         let s = menus.select_sound.clone();
         play_sound(&mut commands, menus, &mut sources, s, &log);
         // In the question box, A is YES and B is NO (MenuQuestionYesNo).
-        if answer == "OnAButton" {
-            log.line("original menus: quit question answered YES; quitting");
-            exit.write(AppExit::Success);
-        } else {
-            log.line("original menus: quit question answered NO");
-            menus.question = None;
-            menus.dirty = true;
+        let yes = answer == "OnAButton";
+        menus.question = None;
+        menus.dirty = true;
+        match (menus.asking.take(), yes) {
+            (Some(Asking::Quit) | None, true) => {
+                log.line("original menus: quit question answered YES; quitting");
+                exit.write(AppExit::Success);
+            }
+            (Some(Asking::Confirm(d)), true) => {
+                log.line(format!("original menus: question answered YES: {d:?}"));
+                menus.saves.asks.push(original_saves::SaveAsk::Do(d));
+            }
+            (asking, _) => log.line(format!("original menus: question {asking:?} answered NO")),
         }
         return;
     }
@@ -1042,6 +1167,7 @@ fn navigate(
                 MainAction::NewGame => PageCmd::Play("pro".into()),
                 MainAction::CampaignMap => PageCmd::Open("campaigns".into()),
                 MainAction::Options => PageCmd::Open("options".into()),
+                MainAction::LoadGame => PageCmd::Open(original_saves::LOAD.into()),
                 MainAction::Quit => PageCmd::QuitGame,
                 other => {
                     log.line(format!("original menus: {other:?} isn't available yet"));
@@ -1089,7 +1215,9 @@ fn navigate(
     play_sound(&mut commands, menus, &mut sources, s, &log);
     // A list's own commands, and what only one page does.
     let cmd = match &shown {
-        Shown::Page(k) => match original_lists::command(menus, k, chosen, by_key, cmd, &log) {
+        Shown::Page(k) => match original_lists::command(menus, k, chosen, by_key, cmd, &log)
+            .and_then(|c| original_saves::command(menus, k, c, &log))
+        {
             Some(c) => c,
             None => {
                 menus.dirty = true;
@@ -1134,22 +1262,14 @@ fn navigate(
         }
         PageCmd::Resume => resume(&mut next_play),
         PageCmd::QuitToMenu => next_state.set(GameState::MainMenu),
-        PageCmd::QuitGame => match &menus.question_layout {
-            Some(l) => {
-                let mut layout = l.clone();
-                let under = menus.screen(&shown).map(|s| &s.layout);
-                let focus = screens::setup_question(&mut layout, &menus.quit_text, under);
-                menus.question = Some(Screen { layout, focus });
-                menus.dirty = true;
-                log.line(format!(
-                    "original menus: question box: {:?}",
-                    menus.quit_text
-                ));
-            }
-            None => {
+        PageCmd::QuitGame => {
+            let text = menus.quit_text.clone();
+            if menus.ask(&text, Asking::Quit) {
+                log.line(format!("original menus: question box: {text:?}"));
+            } else {
                 exit.write(AppExit::Success);
             }
-        },
+        }
         PageCmd::OptionLeft | PageCmd::OptionRight => {
             let step = if cmd == PageCmd::OptionLeft { -1 } else { 1 };
             if let (Some(arrow), Some(screen)) = (chosen, menus.screen_mut(&shown)) {

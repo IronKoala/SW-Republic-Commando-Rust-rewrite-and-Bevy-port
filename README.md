@@ -274,17 +274,22 @@ copy of the game.
   select sounds. QUIT asks the original's "are you sure?" question. Keyboard,
   gamepad and mouse move the focus. A screenshot of it matches a picture
   painted straight from the original's textures (mean difference 3.4 of
-  255). LOAD GAME, PROFILES and EXTRAS are greyed out until they're built;
+  255). PROFILES and EXTRAS are greyed out until they're built;
   MULTIPLAYER is greyed out for good (offline only).
 
   **The other menus and the on-screen display are still placeholders.**
-  The campaign list, options, pause, loading screen and HUD are our own
+  The loading screen and most of the HUD are our own
   amber stand-ins, and the amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on
-  Windows): its eleven buttons, with saving, loading and hints greyed out
-  until built. **The options pages are the original's too** (tested in
+  Windows): its eleven buttons; only ENABLE HINTS is greyed out until built.
+  **LOAD GAME and SAVE GAME are the original's pages** (tested in the
+  cloud sandbox with the install, not yet on Windows): the saves in a list
+  (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
+  OVERWRITE and DELETE, with the original's questions. LOAD GAME is on the
+  main menu and the pause menu; the pause menu's QUICK SAVE, QUICK LOAD and
+  LOAD LAST SAVE work too. **The options pages are the original's too** (tested in
   the cloud sandbox with the install, not yet on Windows): GAME, SOUND,
   GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
   sensitivity, invert mouse, difficulty, effects and music volume, screen

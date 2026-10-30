@@ -25,8 +25,11 @@
 #   prev_set, next_set          flip the controls page's sets of rows
 #   scroll_up, scroll_down      the arrows beside a list
 #   list_pick     a row of a list: choose what it shows
-#   act:<what>    something only that page does (the campaign page's
-#                 planet, start_level and every_map)
+#   act:<what>    something only that page does: the campaign page's
+#                 planet, start_level and every_map; the load and save
+#                 pages' load_save, delete_save, new_save and
+#                 overwrite_save; the pause menu's quick_save, quick_load
+#                 and load_last (rc_game/src/original_saves.rs)
 #
 # Choosers (the original's MenuButtonEnum rows, such as "Options[3]") show
 # a setting: [pages.<page>.choosers] names it, or says "unavailable" (the
@@ -55,15 +58,15 @@ class = "XInterfaceCTMenus.CTPausePCMenu"
 over_game = true
 back = "resume"
 
-# In the original's order. Saving, loading and hints aren't built yet.
+# In the original's order. Hints aren't built yet.
 [pages.paused.buttons]
-LoadLastSaveSelected = "unavailable"
-QuickSaveSelected = "unavailable"
-QuickLoadSelected = "unavailable"
+LoadLastSaveSelected = "act:load_last"
+QuickSaveSelected = "act:quick_save"
+QuickLoadSelected = "act:quick_load"
 ResumeGameSelected = "resume"
 RestartMissionSelected = "restart"
-SaveGameSelected = "unavailable"
-LoadGameSelected = "unavailable"
+SaveGameSelected = "open:save_game"
+LoadGameSelected = "open:load_game"
 OptionsSelected = "open:options"
 EnableHintsSelected = "unavailable"
 EndMissionSelected = "quit_to_menu"
@@ -94,6 +97,36 @@ copy_of = "BButton"
 text = "EVERY MAP +"
 move_right = 0.35
 command = "act:every_map"
+
+# The load and save pages (checked 2026-10-30 with the install): the saves
+# in a scrolling list, newest first after the autosave and quicksave.
+# LOAD GAME is on the main menu and the pause menu, SAVE GAME on the pause
+# menu. What the buttons do is in rc_game/src/original_saves.rs; every
+# question they ask is the class's own text.
+[pages.load_game]
+class = "XInterfaceCTMenus.CTLoadGameMenu"
+back = "back"
+
+[pages.load_game.buttons]
+OnBButton = "back"
+SelectCurrentSave = "act:load_save"
+OnXButton = "act:delete_save"
+SaveListOnSelect = "list_pick"
+OnListScrollUp = "scroll_up"
+OnListScrollDown = "scroll_down"
+
+[pages.save_game]
+class = "XInterfaceCTMenus.CTSaveGameMenu"
+back = "back"
+
+[pages.save_game.buttons]
+OnBButton = "back"
+SaveNew = "act:new_save"
+SelectCurrentSave = "act:overwrite_save"
+OnXButton = "act:delete_save"
+SaveListOnSelect = "list_pick"
+OnListScrollUp = "scroll_up"
+OnListScrollDown = "scroll_down"
 
 # The four options pages (checked 2026-10-30 with the install). The GAME,
 # SOUND, GRAPHICS and CONTROLS buttons switch between them; DONE goes back
