@@ -772,3 +772,26 @@ fn sonic_sticks_and_goes_off_when_a_droid_comes_close() {
     assert_eq!(seen.blasts.len(), 1, "proximity blast");
     assert!(seen.damage.iter().any(|d| d.target == r.droid));
 }
+
+#[test]
+fn a_flash_on_the_player_sends_no_damage_and_the_shield_recharges() {
+    let mut r = Range::new();
+    r.app
+        .world_mut()
+        .get_mut::<Shield>(r.player)
+        .unwrap()
+        .current = 50.0;
+    // In front of the player (who looks along +X), so they see the flash.
+    drop_grenade(&mut r, "flash_grenade", (-300.0, 0.0, 10.0));
+    assert!(r.app.world().get::<Stunned>(r.player).is_some(), "flashed");
+    r.seconds(5.0, &[]);
+    let seen = r.seen();
+    assert!(
+        seen.damage.iter().all(|d| d.target != r.player),
+        "a stun does no damage: {:?}",
+        seen.damage.iter().filter(|d| d.target == r.player).count()
+    );
+    // 3 s delay after the last hit, then 20 a second: well above 50 by now.
+    let s = r.app.world().get::<Shield>(r.player).unwrap().current;
+    assert!(s > 70.0, "shield {s}");
+}

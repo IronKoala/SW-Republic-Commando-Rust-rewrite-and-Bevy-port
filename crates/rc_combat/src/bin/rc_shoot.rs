@@ -37,8 +37,8 @@ use bevy::render::view::Tonemapping;
 use bevy::time::TimeUpdateStrategy;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use rc_combat::{
-    Arsenal, CombatPlugin, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded, Team,
-    ViewKick, WeaponLibrary,
+    Arsenal, Body, CombatPlugin, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield,
+    ShotLanded, Team, ViewKick, WeaponLibrary,
 };
 use rc_game_core::units::{to_bevy, UU_PER_UNIT};
 use rc_game_core::{
@@ -391,6 +391,9 @@ fn setup(
                 },
                 Health::new(100.0),
                 Team::Separatist,
+                // A battle droid's body and damage table, from the game.
+                Body::Droid,
+                DamageTable("DV_DroidsBattleDroidDamage".into()),
                 size,
                 Transform::from_translation(u(x, y, 0.0)),
                 Visibility::default(),

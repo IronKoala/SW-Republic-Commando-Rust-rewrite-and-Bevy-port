@@ -514,7 +514,9 @@ pub(crate) fn wear_off_stuns(
             s.pending += s.damage_per_sec * dt.min(s.left.max(0.0));
         }
         let last = s.left - dt <= 0.0;
-        if s.pending >= s.damage_per_sec * 0.25 || (last && s.pending > 0.0) {
+        // Nothing to send for an effect that doesn't hurt (a stun): a 0-damage
+        // hit would still hold off the shield's recharge.
+        if s.pending > 0.0 && (s.pending >= s.damage_per_sec * 0.25 || last) {
             let amount = std::mem::take(&mut s.pending);
             damage.write(Damage {
                 target: e,
