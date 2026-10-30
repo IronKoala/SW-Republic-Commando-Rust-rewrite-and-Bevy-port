@@ -1572,6 +1572,16 @@ slicing, Sev sniping, as in the original). Mods can change a job or add a new on
   A grenade marker names a target area (`WeaponTarget`): the grenadier
   throws at the enemy nearest it within `target_radius`, seen or not.
   Without one, at its own target within `throw_range`.
+- **Auto pull maneuvers** (the original's GAME option, on by default;
+  `auto_pull_maneuvers` in `settings.toml`, passed to the squad as
+  `rc_squad_plugin::SquadOptions`): when an order needs more squad mates
+  than are free (one per open spot of its group), the missing ones are
+  taken off `pullable` posts (sniper, grenade, anti-armour in the shipped
+  file), the one who has held a post longest first. The log says
+  `Sev left S0 (pulled for S3)`. Off, the order is refused while
+  everyone is busy, and the log says to recall the squad. Once jobs are
+  never pulled. How the original does it is in docs/RESEARCH.md, "Auto
+  pull maneuvers".
 - **Blasts** (charges and grenades) hurt everyone near: `rc_combat::Damage`
   of kind `Explosion`, `blast_damage` at the middle falling to nothing at
   the radius, measured to the edge of each body. Friend or foe, as in the

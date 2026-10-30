@@ -122,7 +122,12 @@ copy of the game.
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
   are the game's; how long the work takes is our guess. Traps, mines and
-  turrets aren't done yet.
+  turrets aren't done yet. With "auto pull maneuvers" on (the default,
+  as in the original), ordering a new job when everyone is busy takes
+  the squad mate who has held a sniper, grenade or anti-armour position
+  longest off it; switch it off in `settings.toml`
+  (`auto_pull_maneuvers = false`) and the order is refused until you
+  recall the squad with F4. Tested by numbers only.
 
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
