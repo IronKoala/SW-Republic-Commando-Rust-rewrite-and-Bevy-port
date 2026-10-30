@@ -1,6 +1,7 @@
 //! What the director keeps for a saved game: where each script is, what it
 //! waits for, which triggers were used, what the counters and conditions
-//! say, which props are broken, and events not handed out yet. Matched by
+//! say, which props are broken, which level exits are open, and events not
+//! handed out yet. Matched by
 //! the map's actor names when loading, so a save stays readable and a
 //! changed map loads what still fits.
 //!
@@ -27,6 +28,9 @@ pub struct DirectorSave {
     pub condition: Vec<ConditionSave>,
     #[serde(default)]
     pub prop: Vec<PropSave>,
+    /// Teleporters (level exits) a script or event switched.
+    #[serde(default)]
+    pub teleporter: Vec<TeleporterSave>,
     /// Events sent but not handed out yet (normally none).
     #[serde(default)]
     pub pending: Vec<EventSave>,
@@ -45,6 +49,11 @@ pub struct ScriptSave {
     /// The scripts' clock time it waits until, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waits_until: Option<f32>,
+    /// The action it waits for the game to finish (a character walking
+    /// somewhere), if any; `waits_until` is then its time-out. After a
+    /// load the game starts that action again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for_action: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +82,14 @@ pub struct PropSave {
     pub name: String,
     pub health: f32,
     pub destroyed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TeleporterSave {
+    pub name: String,
+    pub enabled: bool,
+    /// Solid to the player (a script opened it).
+    pub collide: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,7 +153,11 @@ impl Director {
                         _ => None,
                     },
                     waits_until: match s.wait {
-                        Wait::Until(t) => Some(t),
+                        Wait::Until(t) | Wait::Game { until: t, .. } => Some(t),
+                        _ => None,
+                    },
+                    waits_for_action: match s.wait {
+                        Wait::Game { index, .. } => Some(index),
                         _ => None,
                     },
                 })
@@ -161,6 +182,15 @@ impl Director {
                     name: p.name.clone(),
                     health: p.health,
                     destroyed: p.destroyed,
+                })
+                .collect(),
+            teleporter: self
+                .teleporters
+                .iter()
+                .map(|t| TeleporterSave {
+                    name: t.name.clone(),
+                    enabled: t.enabled,
+                    collide: t.collide,
                 })
                 .collect(),
             pending: self
@@ -193,10 +223,17 @@ impl Director {
                 r.past_end.push(s.name.clone());
                 sc.finished = true;
             }
-            sc.wait = match (&s.waits_for, s.waits_until) {
-                (Some(e), _) => Wait::Event(e.to_ascii_lowercase()),
-                (None, Some(t)) => Wait::Until(t),
-                (None, None) => Wait::Nothing,
+            sc.wait = match (&s.waits_for, s.waits_until, s.waits_for_action) {
+                (Some(e), _, _) => Wait::Event(e.to_ascii_lowercase()),
+                // Run the unfinished character action again, so the game
+                // hears it (its characters were put back from the save,
+                // not mid-walk).
+                (None, _, Some(i)) if i < sc.actions.len() => {
+                    sc.pc = i;
+                    Wait::Nothing
+                }
+                (None, Some(t), _) => Wait::Until(t),
+                _ => Wait::Nothing,
             };
             r.restored += 1;
         }
@@ -248,6 +285,19 @@ impl Director {
             };
             p.health = s.health;
             p.destroyed = s.destroyed;
+            r.restored += 1;
+        }
+        for s in &save.teleporter {
+            let Some(t) = self
+                .teleporters
+                .iter_mut()
+                .find(|x| same(&x.name, &s.name))
+            else {
+                r.unknown.push(s.name.clone());
+                continue;
+            };
+            t.enabled = s.enabled;
+            t.collide = s.collide;
             r.restored += 1;
         }
         self.queue = save

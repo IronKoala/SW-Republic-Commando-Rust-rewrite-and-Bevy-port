@@ -11,7 +11,8 @@
 //!   [`Health`] and [`Shield`] and sends [`Died`]; [`WeaponsPlugin`] loads
 //!   the weapon files, lets the player fire from the input actions, turns
 //!   every [`FireShot`] into bolts or instant hits, and plays the sounds.
-//!   [`CombatPlugin`] adds both.
+//!   [`CombatPlugin`] adds both. The first-person arms follow [`arms`]
+//!   (plain rules) and are drawn by `arms_view` with their own camera.
 //!
 //! The plugins follow `docs/PLUGINS.md`: they read input only from
 //! `ActionState`, the player from `Player` and `PlayerCamera`, the level
@@ -22,6 +23,8 @@
 // Bevy queries read best written out in place.
 #![allow(clippy::type_complexity)]
 
+mod arms_view;
+pub mod arms;
 mod damage;
 pub mod damage_types;
 pub mod data;
@@ -37,13 +40,17 @@ mod throw;
 mod view;
 pub mod weapon;
 
+pub use arms_view::{ArmsCamera, ArmsReadout, ARMS_CAMERA_ORDER, ARMS_LAYER};
 pub use damage_types::{DamageTable, DamageTypes};
 pub use grenade::{GrenadeParams, Grenades};
-pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
+pub use health::{
+    CannotDie, Damage, DamageKind, Dead, Died, Difficulty, Health, Invulnerable, Shield, Team,
+};
 pub use library::{read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary};
+pub use melee::{MeleeAttack, MeleeSwing};
 pub use pickup::{spawn_pickup, WeaponPickup};
 pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
-pub use weapon::{WeaponParams, WeaponState};
+pub use weapon::{ArmsParams, WeaponParams, WeaponState};
 
 use bevy::prelude::*;
 use rc_game_core::save::SaveAppExt;
@@ -172,6 +179,8 @@ impl Plugin for WeaponsPlugin {
         app.add_message::<FireShot>()
             .add_message::<ShotLanded>()
             .add_message::<ThrowGrenade>()
+            .add_message::<MeleeAttack>()
+            .add_message::<MeleeSwing>()
             .add_message::<Blast>()
             .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
@@ -194,6 +203,7 @@ impl Plugin for WeaponsPlugin {
                     fire::launch_shots,
                     melee::player_zoom,
                     melee::player_melee,
+                    melee::melee_attacks,
                     throw::player_grenades,
                     throw::launch_grenades,
                 )
@@ -229,7 +239,13 @@ impl Plugin for WeaponsPlugin {
             .add_systems(
                 Update,
                 (
-                    view::show_weapon_model,
+                    (
+                        arms_view::add_arms_camera,
+                        arms_view::load_arms,
+                        arms_view::animate_arms,
+                        view::show_weapon_model,
+                    )
+                        .chain(),
                     view::make_bolt_looks,
                     view::make_grenade_looks,
                 )

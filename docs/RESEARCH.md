@@ -375,13 +375,62 @@ collision 40 x 84, `Accuracy` 0.65, `MaxAimYaw` 70, `SMG` repeater
 (instant hit, 10 damage `CTDamageBallisticSMG`, 0.1 s, bursts of 9, 40 a
 magazine, `AimError` 25, range 5000), plus thermal detonators.
 
+**Enemy grenades** (read 2026-10-30). Who carries one
+(`RequiredEquipment`): `TrandoshanMercenary` and `TrandoshanSlaver`
+(`ThermalDetonatorEnemy`); battle droids, Geonosian warriors and the
+squad's enemies otherwise carry none. `ThermalDetonatorEnemyDefaults`
+`InitAmmoAmount` 2. Its projectile (`ThermalDetonatorEnemyProjDefaults`):
+`FuseTime` 12, `Damage` 200, `DamageRadius` 600, the burn status
+(`StatusEffect_Immolate`, 12 s at 15/s, radius -400), and `MyDamageType`
+left at `CTDamageExplosion` (the player's version is
+`CTDamageExplosionThermalDet` with 400 damage). The grenade weapon's
+`ValidRange` is 600 to 2500 uu. The brain's settings: `CTBot`
+`GrenadeProbability` 0.3, `MinGrenadeTime` 10;
+`TrandoshanMercenaryBotDefaults` 0.05 and 20; `TrandoshanSlaverBotDefaults`
+0.1 and 20; the "Grenadier" bots 1.0 / 0.85 and 5;
+`SuperBattleDroidBot` 0.5 and 20, but its grenade slot is
+`SBDCrouchWeapon`, a straight-flying 800-damage rocket (`Speed` 5000,
+goes off on touch), not a thrown grenade; `GeonosianDroneBot` 0.7 with
+`DroneSpit`. The throw animation `ThrowGrenade` in the Trandoshan sets is 26
+frames at 30 a second, with an `AnimNotify_ReleaseGrenade` partway. The
+mercenary plays `CloneCommandoSet`'s instead (65 frames, 2.17 s; see below).
+
+**The Trandoshan mercenary's model (read 2026-10-30).** `TrandoshanMercenary`
+(ctcharacters.u) has `Mesh = TrandoshanMerc`, an import of
+`Clone.TrandoshanMerc`: the mesh is in `GameData/Animations/clone.ukx`, not
+`trandoshan.ukx` (which holds `TrandoshanSlaver`, `TrandoshanHeavy` and
+`TrandoshanScav`). It has the commandos' 65-bone skeleton (1500 points, 2956
+triangles, about 186 uu tall) and links nine animation sets in this order:
+`cYYY04MercSet`, `cRAS03MercSet`, `cYYY01MercenarySet`, `MPSet`,
+`TrandoshanMercSet`, `CloneCommandoSet`, `mHackUnlockDoorSet`,
+`mDoorBreachSet`, `CloneCommandoSPSet`. Its own sets hold only cutscenes,
+entrances and finishing moves (`TrandoshanMercSet`: climbs, rappel,
+`DeathRocket`, `EmoteSeeEnemy`...); idle, walking, firing, crouching, death and
+`ThrowGrenade` come from `CloneCommandoSet`. The mesh's material is
+`CloneTextures.TrandoshanMercTextures.TrandoshanMercProxy`, a stand-in;
+`TrandoshanMercenaryDefaults` (properties.u) sets `Skins[0]` to
+`CloneTextures.TrandoshanMercTextures.TrandoshanMerc_Shader` and
+`BurntMaterial` to `TrandoshanMerc_Burn`.
+
+How the brain uses these numbers is compiled code.
+
+**Force pike** (read 2026-10-30). `GeonosianWarrior` `RequiredEquipment`
+is only `CTInventory.ForcePike`, so it has no gun. `ForcePikeDefaults`:
+`MeleeRange` 350, `MeleeDamage` 125, `MeleeDamageType`
+`CTDamageMeleeWarrior` (a kind of `CTDamageMelee`; the player's table has
+no entry, so x1; squad mates x0.5 through `CTDamageMelee`; other warriors
+x0.75). Its ammo (`ForcePikeAmmo`) is instant-hit with `Range` 0, so
+nothing is fired. `StateGeonosianWarriorAttack`: `LungeDist` 800,
+`JumpDist` 3000, `OffensiveJumpProbability` 0.5,
+`DefensiveJumpProbability` 0.8 (the jumping and flying aren't built).
+Animations in `GeonosianWarriorSet`: `MeleeAttack` (48 frames at 30 a
+second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
+
 **Still not read or not known:**
 - The attachments' and repeater's reload times (in their animations).
 - How the original lets the player hurt droids with a picked-up E-5: its
   `CTDamageEnergyDroids` is ignored by battle droids' table. Our
   `e5_blaster_pickup.toml` uses plain `CTDamageEnergy` instead.
-- The Trandoshan's mesh `TrandoshanMerc` isn't in `trandoshan.ukx`; we
-  use the `Trandoshan` mesh there for now.
 - Which class names the maps' spawners actually use for these enemies
   (log line `spawners no enemy file claims`).
 - The other Geonosians (`GeonosianDrone`, `GeonosianElite` with its beam).

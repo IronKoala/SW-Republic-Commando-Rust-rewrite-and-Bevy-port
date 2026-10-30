@@ -18,9 +18,29 @@ use rc_movement::{Mode, MoveInput, MoveParams, Pawn, Vec3 as UVec3, World};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// Field of view across the screen, degrees (from the settings file).
+/// Field of view (from the settings file), degrees.
 #[derive(Resource, Debug, Clone, Copy)]
-pub struct FieldOfView(pub f32);
+pub struct FieldOfView {
+    /// Across a 4:3 screen (`video.fov`).
+    pub across_4_3: f32,
+    /// The longest screen shape (long side over short side) the view keeps
+    /// widening for (`video.widest_shape`); 0 for no limit. Off while the
+    /// Panini view is on, which takes the stretching out its own way.
+    pub widest_shape: f32,
+}
+
+impl FieldOfView {
+    pub fn from_settings(s: &crate::settings::Settings) -> Self {
+        Self {
+            across_4_3: s.video.fov,
+            widest_shape: if s.video.panini > 0.0 {
+                0.0
+            } else {
+                s.video.widest_shape
+            },
+        }
+    }
+}
 
 /// The player's movement and look, in Unreal terms.
 #[derive(Component)]
@@ -296,7 +316,7 @@ pub(crate) fn place_camera(
     body: Query<&Body, With<Player>>,
     window: Query<&Window>,
     log: Res<GameLog>,
-    mut logged: Local<(f32, f32)>,
+    mut logged: Local<(f32, f32, f32)>,
     mut view: Query<(&mut Transform, &mut Projection), With<PlayerCamera>>,
 ) {
     let (Ok(body), Ok((mut t, mut proj))) = (body.single(), view.single_mut()) else {
@@ -305,25 +325,67 @@ pub(crate) fn place_camera(
     *t = eye_view(body);
     // Bevy's field of view is up and down, and it widens the sides to fit
     // the window's shape: that is "Hor+" as long as the up-and-down view
-    // doesn't change with the shape.
+    // doesn't change with the shape. On screens longer than `widest_shape`,
+    // a flat view would stretch things at the sides into a fish-eye look,
+    // so there the angle across stays what it is at that shape and the
+    // view shows a little less up and down instead.
     if let Projection::Perspective(p) = &mut *proj {
+        let w = window.iter().next();
+        let aspect = w.map_or(p.aspect_ratio, |w| w.width() / w.height().max(1.0));
         // A zoomed weapon (the sniper attachment) narrows the view.
-        let across = weapon.and_then(|w| w.zoom_fov).unwrap_or(fov.0);
-        p.fov = vertical_fov(across);
-        // Log the angles whenever the window's shape or the setting changes.
-        if let Some(w) = window.iter().next() {
-            let aspect = w.width() / w.height().max(1.0);
-            if (aspect, fov.0) != *logged {
-                *logged = (aspect, fov.0);
-                log.line(format!(
-                    "player: view {:.0}x{:.0} (aspect {aspect:.3}): {:.1} degrees across, {:.1} up and down",
-                    w.width(),
-                    w.height(),
-                    horizontal_fov(p.fov, aspect),
-                    p.fov.to_degrees()
-                ));
-            }
+        let across = weapon.and_then(|w| w.zoom_fov).unwrap_or(fov.across_4_3);
+        p.fov = view_angle(across, fov.widest_shape, aspect);
+        // Log the angles whenever the window's shape or a setting changes.
+        let Some(w) = w else {
+            return;
+        };
+        if (aspect, fov.across_4_3, fov.widest_shape) != *logged {
+            *logged = (aspect, fov.across_4_3, fov.widest_shape);
+            let capped = p.fov < vertical_fov(across) - 1e-4;
+            log.line(format!(
+                "player: view {:.0}x{:.0} (aspect {aspect:.3}): {:.1} degrees across, {:.1} up and down (setting {:.0} across 4:3, widest {}{})",
+                w.width(),
+                w.height(),
+                horizontal_fov(p.fov, aspect),
+                p.fov.to_degrees(),
+                fov.across_4_3,
+                if fov.widest_shape > 0.0 { format!("shape {:.2}", fov.widest_shape) } else { "no limit".into() },
+                if capped { ", wider screen than that: held" } else { "" },
+            ));
         }
+    }
+}
+
+/// The up-and-down angle, radians, for a setting of `across_4_3` degrees
+/// across a 4:3 screen on a screen of this shape (width / height).
+///
+/// The screen's shorter side always sees the original's up-and-down angle
+/// (69.0 degrees for 85), and the longer side widens to fit: "Hor+" on a
+/// TV, monitor or ultrawide, and the same turned on its side for a phone
+/// held upright or a tall flip phone, so those see as much across as a
+/// landscape screen sees up and down instead of a narrow slit.
+///
+/// The longer side stops widening once the screen is `widest_shape` times
+/// longer than it is short (0 for no limit): past that a flat view
+/// stretches the edges into a fish-eye look, so a longer screen shows the
+/// same angle along its long side and a little less along its short one.
+/// The limit is a shape, not an angle, so the setting always changes the
+/// view on every screen.
+pub fn view_angle(across_4_3: f32, widest_shape: f32, aspect: f32) -> f32 {
+    let short_side = (vertical_fov(across_4_3) / 2.0).tan();
+    let limit = |long: f32| {
+        if widest_shape > 0.0 {
+            long.min(widest_shape)
+        } else {
+            long
+        }
+    };
+    if aspect >= 1.0 {
+        // Landscape: up and down is the short side.
+        2.0 * (short_side * limit(aspect) / aspect).atan()
+    } else {
+        // Upright: across is the short side; up and down is the long one.
+        2.0 * (short_side * limit(1.0 / aspect)).atan()
     }
 }
 
@@ -354,6 +416,70 @@ mod tests {
         assert!((horizontal_fov(v, 16.0 / 9.0) - 101.4).abs() < 0.1);
         assert!((horizontal_fov(v, 21.0 / 9.0) - 116.1).abs() < 0.1);
         assert!((horizontal_fov(v, 32.0 / 9.0) - 135.5).abs() < 0.1);
+    }
+
+    #[test]
+    fn long_screens_stop_widening() {
+        // 16:9 is under the 2.0 limit: plain Hor+.
+        assert_eq!(view_angle(85.0, 2.0, 16.0 / 9.0), vertical_fov(85.0));
+        // The user's maximized ultrawide (3440x1369) sees what a 2:1
+        // screen sees across, 107.9, and a little less up and down.
+        let aspect = 3440.0 / 1369.0;
+        let v = view_angle(85.0, 2.0, aspect);
+        assert!((horizontal_fov(v, aspect) - 107.9).abs() < 0.1);
+        assert!(v < vertical_fov(85.0));
+        // The setting still changes the view there (it didn't with the
+        // first try, a fixed 110 degrees, which held 95 to 120 all at 110).
+        let mut last = 0.0;
+        for fov in [60.0, 85.0, 95.0, 100.0, 110.0, 120.0] {
+            let across = horizontal_fov(view_angle(fov, 2.0, aspect), aspect);
+            assert!(across > last + 1.0, "{fov}: {across}");
+            last = across;
+        }
+        // 0 is no limit: 32:9 goes to 135.5 again.
+        let v = view_angle(85.0, 0.0, 32.0 / 9.0);
+        assert!((horizontal_fov(v, 32.0 / 9.0) - 135.5).abs() < 0.1);
+    }
+
+    /// Every common screen shape: (name, width, height, degrees across,
+    /// degrees up and down) at the default 85 and widest shape 2.0. The
+    /// same table is in docs/DISPLAY_AND_INPUT.md.
+    const SHAPES: [(&str, f32, f32, f32, f32); 14] = [
+        ("4:3 old monitor or iPad", 1024.0, 768.0, 85.0, 69.0),
+        ("16:10 monitor or Steam Deck", 1280.0, 800.0, 95.4, 69.0),
+        ("16:9 TV or monitor", 1920.0, 1080.0, 101.4, 69.0),
+        ("16:9 maximized window", 1920.0, 1009.0, 105.2, 69.0),
+        ("21:9 ultrawide", 2560.0, 1080.0, 107.9, 60.2),
+        (
+            "3440x1369 ultrawide, maximized",
+            3440.0,
+            1369.0,
+            107.9,
+            57.4,
+        ),
+        ("32:9 super ultrawide", 5120.0, 1440.0, 107.9, 42.3),
+        ("phone sideways 19.5:9", 2340.0, 1080.0, 107.9, 64.8),
+        ("phone upright 9:19.5", 1080.0, 2340.0, 64.8, 107.9),
+        ("phone upright 9:16", 1080.0, 1920.0, 69.0, 101.4),
+        ("flip phone open upright 9:22", 1080.0, 2640.0, 58.7, 107.9),
+        ("flip phone cover screen", 1056.0, 1066.0, 69.0, 69.5),
+        ("foldable opened", 2176.0, 1812.0, 79.1, 69.0),
+        ("square", 1000.0, 1000.0, 69.0, 69.0),
+    ];
+
+    #[test]
+    fn every_screen_shape() {
+        for (name, w, h, across, up) in SHAPES {
+            let aspect = w / h;
+            let v = view_angle(85.0, 2.0, aspect);
+            let got_across = horizontal_fov(v, aspect);
+            let got_up = v.to_degrees();
+            println!("{name} {w}x{h}: {got_across:.1} across, {got_up:.1} up and down");
+            assert!(
+                (got_across - across).abs() < 0.1 && (got_up - up).abs() < 0.1,
+                "{name}: {got_across:.1} across, {got_up:.1} up and down"
+            );
+        }
     }
 
     #[test]

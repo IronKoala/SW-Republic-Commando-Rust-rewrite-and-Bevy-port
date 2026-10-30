@@ -575,6 +575,23 @@ edge-and-axis pair. Triangles are filed in a grid of 256 uu columns, so a
 sweep only checks the ones nearby. The test room cut into triangles gives the
 same results as the box version, within 1 uu.
 
+Keeping sweeps cheap (2026-10-30). A sweep first checks the box its whole
+move covers against the box around all the world's triangles and stops
+there if they don't touch. That matters because the level's collision is
+many `TriangleWorld`s asked one after another (the fixed level, each door,
+each prop a script can switch off): before this check a sweep far from a
+door still looked at the triangles in the door's nearest grid column. Then
+it only visits, row by row, the grid columns the move actually passes over
+(a long diagonal line of sight no longer visits the whole square around
+it), skips triangles whose own box is outside the move's box, and marks
+triangles already seen with a per-thread stamp list instead of a new hash
+set per sweep. A unit test compares the result with trying every triangle
+on 3,000 random moves. On geo_01b this took collision from about 33 ms of
+work per frame (1,000 sweeps looking at 550,000 triangles, with nobody
+fighting) to about 0.5 ms. `rc_game` logs a `speed:` line every 5 s with
+frames per second, the slowest frame, the number of entities, and the
+collision work per frame (`rc_movement::triangles::take_counts`).
+
 A 0.1 uu gap is kept between the box and surfaces, so rounding errors can't
 leave it stuck inside a wall. A move that only grazes a surface (pushes into it by less than
 1/10000 of its length) doesn't count as hitting it. Without that, sliding
@@ -589,8 +606,19 @@ level looks the same in both programs. For collision it builds a
 the BSP's polygons plus every visible static mesh prop, cut into triangles by
 `rc_level::collision`, and puts the player at the first PlayerStart (its
 centre is the start point, so feet = start z - 84). Not yet solid:
-BlockingVolumes and movers and vehicles (the gunship you start in). The
-game's per-prop collision settings are ignored: every visible prop is solid.
+vehicles (the gunship you start in).
+
+Which props are solid follows the game's settings (2026-10-30): a prop
+with `bCollideActors` or `bBlockPlayers` off (from the map, or else its
+class's defaults; on if neither says) is left out of collision
+(`rc_level::class_look::blocks_players`), and so are the triangles of mesh
+sections whose `EnableCollision` is off (`StaticMesh::section_collision`,
+read from the mesh's `Materials` list). They are still drawn. Before, every
+visible prop was solid, so you bumped into light shafts, cables and other
+decorations. geo_01b: 32 walk-through props and about 50,000 section
+triangles; its solid triangles went from 227,043 to 190,205. geo_01a: 68
+walk-through props and about 15,000 section triangles. Simplified
+collision models (the data after a mesh's streams) are still not read.
 
 ### The test room
 
@@ -1164,8 +1192,10 @@ The director runs every script one action at a time until it has to wait:
   `EndSection`; sections nest).
 - **Everything else** comes out as an `Effect::Action` for the game. Some
   also take time: a line of dialogue with `bWaitForFinish`, an animation
-  that waits for its end, a character told to walk. Their lengths are our
-  settings (sound lengths aren't read yet).
+  that waits for its end, a character told to walk. A line waits for the
+  sound's real length, which the game measures while loading and hands
+  over with `Director::set_sound_length`; animations, walks and sounds whose
+  length can't be read use our settings.
 - `HurtActor` and `DestroyActor` on a **prop** are the director's: it keeps
   each prop's `Health` and reports `PropDestroyed` (and sends the prop's
   `DestroyedState.Event`).
@@ -1214,9 +1244,36 @@ and carries out the effects:
 | `ShowPrompt` | `HudMessage` (`@`, the button, shows as USE for now) |
 | `ObjectiveUpdate` | kept in `Objectives` (what the numbers mean isn't worked out) |
 | checkpoint | `CheckpointReached { name }`, held while the player is down |
+| walking into an open level exit, `ChangeLevel`, a debriefing's `NewLevel` | `ChangeLevel { map, portal }` (see "Going on to the next map") |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
+| `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
+| actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
+
+**Script sounds** (`rc_scripts_plugin/src/sounds.rs`). A script names a
+sound only by its name (`Sound=CA1G1701`). The map's import table also
+says which package holds it (`GEO_Voice.CA1G1701`);
+`rc_level::scripts::sound_refs` keeps that as `MapScripts::sounds`. While
+the level loads, every sound its scripts can play is read from
+`GameData/Sounds/<package>.uax` with `rc_combat::read_sounds` (groups too,
+also members kept in another package, such as geo_sound's
+`arena_cloneDeaths` whose takes are in character_voice), measured with
+`rc_audio` and kept in the `ScriptSounds` resource. `SoundStreamed` ones
+(a few music stingers) play their `.ogg` from `GameData/Music`. Across the
+57 campaign maps the scripts name 1,629 sounds; `rc_script_check` finds
+every one in its package. When a script plays one, the sound starts at
+`[sound] volume` (`data/scripts/scripts.toml`) times the action's own
+`Volume`, and is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
+ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
+reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
+script) says one line of speech (a `*_voice` package) at a time, so a new
+line stops its last one unless `bDontOverrideOtherSounds`; effects never
+stop each other; nothing is placed in the world yet (every sound plays at
+full loudness); a group waits for its longest take. Lines pause with the
+game and stop when the level ends. Not done: subtitles (the game's
+`System/subtitles_*.int` files hold them, by sound name), sounds stored
+inside a map, and placing sounds at the speaker.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).
@@ -1224,6 +1281,59 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 `BactaRecharging.Event` and it rests 10 s (our choice). In geo_01a those
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
+
+### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
+
+A `ScriptedSequence` belongs to the characters that run it: a placed pawn
+names it in `AIScriptTag`, and a `PawnFactory` gives it to everyone it makes
+through `AIScriptFromFactory`. An action with no target of its own acts on
+those characters. Each spawned character carries `ScriptTags { tag, script,
+follows_orders }` (in `rc_game_core`): its tag (the factory's
+`PawnTagFromFactory`, or a squad mate's class name) and the sequence it runs.
+
+The director marks these actions "the game runs them"
+(`Director::game_runs_characters`). It hands them out as `Effect::Action`
+with the sequence's tag as `owner`; the plugin turns each into a `Call` and
+`cast` finds its characters, by tag (the action's own `Tag`, `PawnTag`,
+`DestroyTag`, ...; a player tag means the player) or by owner. A character
+made by a factory appears a frame after the event that starts its script,
+so a call with nobody to act on waits `character_grace_seconds` (1 s) before
+it is logged "no character" and skipped; later calls of the same script
+wait behind it.
+
+| Action | What happens |
+|---|---|
+| `MoveToPoint`, `MoveToPlayer` | `CharacterAct::MoveTo` / `MoveToPlayer`: the enemy walks (or runs) there along the level's paths |
+| `TurnTowardPlayer` | turns to face the player |
+| `PlayAnim`, `WaitForAnimEnd` | stands still and plays the named animation from its own animation set |
+| `WaitForPlayer` | holds until the player is within the distance |
+| `TeleportToPoint` | put there at once, facing the point's way |
+| `SetHidden`, `DestroyActor`, `DestroyPawn` | hidden / removed (removed without a death event) |
+| `MakeInvulnerable`, `SetCannotDie` | `rc_combat::Invulnerable` (no damage) / `CannotDie` (health stops at 1) |
+| `HurtActor` on a character | `rc_combat` `Damage` |
+| `ChangeSquadStance` | `SquadStanceOrder` to the squad (form up, search and destroy, secure a point) |
+
+Places are every actor in the map but static meshes and lights
+(`rc_level::scripts::places`), found by tag and then by name; a missing one
+is logged. Enemies (`rc_enemies/src/scripted.rs`) carry the orders out
+through `rc_ai::Fighter::follow_script` (`ScriptGoal`): while it has one it
+doesn't fight, being hurt ends a hold, and it answers `AiEvent::ScriptDone`,
+which comes back as `CharacterOrderDone`. A walk that gets stuck for 2 s
+ends there. An enemy with `leap_speed` above 0 in its `[combat]` section
+(the Geonosian warrior, 900) leaps straight to a point it can't walk to or
+that's more than 200 uu above it, a stand-in for the original's flying.
+
+Walks, turns and animations hold the script until the game says they're
+done, with a timeout each (`move_timeout_seconds` 30, `turn_timeout_seconds`
+2, `anim_timeout_seconds` 10, in `data/scripts/scripts.toml`), so a stuck
+character can't stop a level. A save made while a script waits on one keeps
+which action it was, and after a load the action is given again.
+
+Not done yet: squad mates' own scripted moves (`ChangeSquadMember`), moving
+the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
+`GotoState` on characters, characters the game doesn't spawn yet (placed
+clone troopers and the like are logged and skipped), one sequence run
+separately per character, and `ScriptPriority`.
 
 ### geo_01a, worked through
 
@@ -1266,7 +1376,16 @@ way through is the gap where `Blockade01` stood.
   barricade to go, then checks the same sweep now passes, the volume isn't
   solid, both drawn parts of the prop are hidden, and that the chain of
   events happened in order with the player hurt, healed and checkpoint0
-  saved.
+  saved. Then it sends `SpawnTrench02` and `LoneRangerJump` and checks that
+  the lone Geonosian from `PawnFactory50` carries his tag and sequence,
+  reaches `JumpDestForLoneRanger` and `KillPointForLoneRanger`, turns,
+  plays `EmoteSeeEnemy` and is removed, each answered back to the script.
+- **Characters** (`cargo test -p rc_scripts -p rc_ai`): a walk holds its
+  script until the game answers, a timeout moves it on, and a save made
+  mid-walk gives the walk again after loading; an enemy follows walk, turn
+  and hold orders without shooting, then fights; one that can leap leaps
+  to a high point and a battle droid doesn't. `rc_script_check` also counts
+  the places scripts send characters to that it can find.
 
 ## Sounds
 
@@ -1586,9 +1705,13 @@ the target's middle, off by up to `(1 - accuracy) x max_aim_error`; the
 weapons part then adds the gun's own spread, as it does for the player and
 the droids. A standing member turns to face its target and fires only
 within `max_aim_yaw` of its facing; a moving one fires on the move. A
-member holds fire while the player or another squad mate (standing or
-lying) is within `friendly_clearance` of the line of fire, nearer than the
-target. Shots go out as `rc_combat::FireShot` with the squad mate as the
+member holds fire while the line of fire, nearer than the target, passes
+within `friendly_clearance` of the player's or another squad mate's whole
+body (the 40-wide, 168-tall commando cylinder, or a low wide shape for one
+lying down), widened by how far the shot can stray (our aim error plus
+about 2 uu per 100 for the gun's spread). Until 2026-10-30 it measured from
+the body's middle point only, so lines passing at shoulder or head height
+went through friends (`fight::shot_passes_friend`). Shots go out as `rc_combat::FireShot` with the squad mate as the
 shooter, so the weapons part flies the bolts, applies the damage, and its
 `ShotLanded` and `Died` messages count hits and kills per member
 (`SquadFightStats`).
@@ -1669,7 +1792,10 @@ menus fit a phone or a monitor.
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
@@ -1708,7 +1834,8 @@ screen is drawn, then in one go:
    (so a mod can change it);
 4. if the map has a `SkyZoneInfo`, spawns the sky camera
    (`rc_level_viewer::sky`) at camera order -1, under the player's camera
-   (order 0) and the menus' camera (order 1). Once the player's camera
+   (order 0), the first-person arms' camera (order 1) and the menus'
+   camera (order 2). Once the player's camera
    exists, the plugin gives it `SkyViewer` (the sky camera copies its turn
    and field of view every frame, so it lines up at any screen shape) and
    stops it clearing the picture, so the sky shows where the level has
@@ -1838,6 +1965,14 @@ squad:
      the scene has no ambient light, so droids get a steady share of their
      own colour (`ambient`, a guess standing in for each zone's ambient
      light, which we don't read yet).
+     Each animation comes from the first of the mesh's linked animation
+     sets that has it, in the mesh's order, so a character whose own set
+     holds only cutscenes still finds its everyday moves (the Trandoshan
+     mercenary borrows the commandos' `CloneCommandoSet`). `[look] skin`
+     names a material to wear instead of the mesh's own, as the original
+     does with a class's `Skins[0]` (the mercenary's mesh carries only a
+     grey stand-in). `rc_enemy_look_check` (an example program in
+     rc_enemies) loads every enemy file's look and checks it.
    - VR and other platforms: nothing here reads input or the screen; the
      player is found by its `Player` and `PlayerCamera` markers, so a VR
      camera works the same. No platform-specific code.
@@ -1855,6 +1990,44 @@ left to other parts and logged. `combat.uses_cover = false` makes an enemy
 walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
+
+**Grenades.** `[grenades]` gives an enemy grenades: which file in
+`data/grenades/` and how many (the Trandoshan mercenary: two of
+`thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
+rules for when are ours, since the original decides in its compiled
+engine; the numbers are its settings. At each decision while fighting, an
+enemy that still has one, threw its last at least `min_time` ago
+(`MinGrenadeTime`), saw its enemy within `seen_within` seconds, and is
+`min_range` to `max_range` away from it (the grenade's `ValidRange`)
+throws with chance `probability` (`GrenadeProbability`), unless a friend
+stands within the blast radius of the landing spot. It aims at the floor
+by the enemy, off by the same aim error as its shots, and works out the
+arc itself (`rc_ai::brain::throw_arc`): first the gentlest lob that
+reaches (the slowest throw, which comes down steeply and rolls on little),
+then the flattest arc at full speed for under a low ceiling; if the level
+blocks both, it tries again 3 s later. It doesn't shoot for `throw_time`
+(the throw animation, `[look] throw`). The AI sends `AiEvent::Throw`;
+`rc_enemies` turns it into the same `rc_combat::ThrowGrenade` the player's
+button sends, so the grenade flies, bounces and goes off with the
+grenade's own rules. To aim, `rc_enemies` reads the grenade file's speed,
+gravity and radius. Saves keep how many each enemy has left.
+
+**Melee (the Geonosian's force pike).** `combat.melee_range` above 0
+gives an enemy a close-up hit: `melee_damage` of `melee_damage_type`
+every `melee_delay` seconds. An enemy with no gun (`weapon = ""`) always
+rushes in; one with a gun only when its enemy is within
+`lunge_distance` (`LungeDist`). Rushing in (`Maneuver::Charge`) heads
+straight at the enemy when the level leaves a clear path (checked with
+its body lifted a step off the floor), else along the paths, and is
+re-planned at every decision as the enemy moves. Once within 70% of its
+reach it stops; it swings when its enemy's centre is within reach, within
+30 degrees of straight ahead, with a clear line. **Our rules**: the
+original's are compiled. The AI sends `AiEvent::Melee`; `rc_enemies`
+turns it into `rc_combat::MeleeAttack`, which `rc_combat` resolves with
+the same rule as the player's melee (a line that long against the
+characters' cylinders, walls block it, the attacker's own team is
+skipped) and the target's damage table. `[look] melee` names the
+animation.
 
 **Several enemies to fight.** Droids fight the player and the squad mates
 (every living `Team::Republic` character). Each keeps fighting the one it
@@ -2027,10 +2200,75 @@ view is the droid's colour.
   `rc_shoot` it fades at exp(-8 t).
 - The fire sound is full volume for the player and quieter with distance for
   others; the game uses its 3D sound system.
-- Weapon switching is instant; the game plays holster and draw animations
-  (0.37 s and 0.67 s for the DC-17m).
-- The gun's place in view (`[model] offset`) and the bolt colour are ours.
-  The game draws the gun with first-person arms, which aren't done yet.
+- Weapon switching is instant for firing; the arms play the holster and
+  draw animations (0.37 s and 0.67 s for the DC-17m) but you can shoot the
+  new weapon before they finish. In the game you can't.
+- The bolt colour is ours. Weapons without `[arms]` (the picked-up E-5)
+  show their plain model at our `[model] offset`.
+
+### First-person arms (`rc_combat/src/arms.rs`, `arms_view.rs`)
+
+The game draws each player weapon as one animated model: the commando's
+arms and the gun together, from `GameData/Animations/hudarms.ukx`
+(`HudArmsDC17m`, `HudArmsSniper`, `HudArmsAntiArmor`, `HudArmsDC15s`,
+`HudArmsUzi` for the Trandoshan repeater, and more for turrets and the
+other pick-ups). The weapon class's `Mesh` names it, and the textures are
+in `HUDArmsTextures.utx`. A weapon file's `[arms]` section names the mesh;
+it's read at run time like the squad's models (`rc_model`), and posed on the
+CPU each frame.
+
+**Where it goes.** The game's `Weapon.RenderOverlays` puts the model at the
+eye, turned with the view, and draws it after the world with the depth
+cleared and its own field of view (`DisplayFOV`, 85 degrees across 4:3).
+The mesh's own origin is the eye: forward +X, right +Y, up +Z. Measured
+(`rc_model --example rc_arms_probe`): the DC-17m rests 5 to 68 uu in front
+of the eye, 13 left to 37 right, 4 to 50 below; `Holster` ends with
+nothing in view and `Load` starts with nothing in view; `Aim` brings the
+sights to the middle. We copy this with a second camera, a child of the
+player's camera, that sees only render layer 2 (the arms) and draws over
+the world's picture with a fresh depth buffer, so the gun never pokes into
+walls and a wider view setting or the Panini view doesn't bend it. Camera
+orders: sky -1, player 0, arms 1, menus and display 2.
+
+**Which animation** (the game's `Engine.Weapon` script, our words):
+
+| What | Animation |
+| --- | --- |
+| standing still | `ActionBreathe`, over and over |
+| still for 15 s (`PlayIdleTime`) | `Idle` once, then breathing again |
+| moving under 226 uu/s / faster | `Walk` / `Run` |
+| zoomed in | `AimBreathe`, `Aim` when moving, `AimFire` per shot (if the set has them) |
+| each shot | `Fire`, from the start |
+| reload | `Reload` |
+| grenade thrown / melee | `ThrowGrenade` / `MeleeAttack` |
+| switching | old weapon `Holster`, then new one `Load` |
+| switching between DC-17m attachments | `AttachHolster`, then `AttachLoad` |
+
+The game holds the weapon in its `Reloading` state until the `Reload`
+animation ends, so the animation length *is* the reload time. That gave
+the real reload times of the sniper (78 frames, 2.6 s), anti-armour
+(42 frames, 1.4 s) and the Trandoshan repeater (65 frames, 2.17 s), which
+were stand-ins before.
+
+The sniper attachment has `bZoomedUsesNoHUDArms`: its arms are hidden
+while zoomed (`hide_zoomed`). The arms are also hidden while the player is
+down.
+
+**Our choices:** the game changes between breathing, walking and running
+only when the current animation ends; we change at once. No blending
+between animations yet. The arms are drawn unlit at `brightness` 0.75:
+the game lights them by the player's zone, which we don't read yet. The
+DC-17m's ammo counter on the gun (`TexPanner2D` materials, a strip of
+digits the game scrolls) shows the strip unscrolled ("999").
+
+**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
+`rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,
+`Holster`, the pistol's `Fire`, and the rifle again after switching back,
+and that the gun corner of the picture is textured; `rc_game --script`
+checks the arms show the weapon in hand after loading a level.
+
+**VR:** the arms are a child of the player camera with their own camera,
+so a VR mod can hang the same posed model off a tracked hand instead.
 
 ### Fitting the long-term goals
 
@@ -2136,7 +2374,10 @@ only when it actually moves. Details and what is left are in
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
@@ -2288,6 +2529,71 @@ the original's keys.
 sends `LoadGame { slot }` or `SaveGame { slot }` and gets `SaveResult` back.
 Every save and load is logged with the prefix `save:` and a one-line summary
 of each section, so a round trip can be checked from the log.
+
+## Going on to the next map (`rc_scripts`, `rc_save`, `rc_level_plugin`)
+
+**How the original's maps end.** We read every campaign map with
+`rc_script_check`. Three ways, all from the map itself:
+
+- Most maps (37 of 56) have a `Teleporter` actor with a `URL`, like
+  `GEO_01B.ctm#playerstart`: walking into it (the arrows; geo_01a's hint
+  says "Walking through the arrows will load the next level") loads that
+  map. Many are closed at first (`bCollideActors=false`) until the
+  mission's last script runs `ACTION_SetCollision` on their tag; geo_04c's
+  starts switched off (`bEnabled=false`) and an event with its tag
+  switches it on, as UE2 teleporters do. Their size is the map's
+  `CollisionRadius`/`CollisionHeight`, or the game's own defaults (80 and
+  100, from engine.u's NavigationPoint; `data/scripts/scripts.toml`
+  `[exits]`).
+- Briefings, cutscenes and a few levels end with a script action,
+  `ACTION_ChangeLevel` (`URL`).
+- The last level of each campaign shows the debriefing,
+  `ACTION_ShowDebriefingScreen` with a `NewLevel` (the same action with
+  only `Text` is a hint screen, and doesn't leave). The screen itself isn't
+  shown yet; the game goes straight on to `NewLevel`.
+
+Following the first exit of each map from `pro` visits all 56 campaign
+maps in order and ends at `epilogue`; no exit names a missing map.
+
+**Script actions switched off in the map.** 371 actions in the 57 campaign maps carry
+`bDisabled=true` (designers switched them off: debug messages, an
+`ACTION_SetCollision EndPort` at the start of ras_01c that would open the
+exit at once). The director skips them, logged as "switched off in the
+map, skipped". This is our reading of the flag's name; the class that
+uses it is compiled.
+
+**Leaving.** `rc_scripts::Director` sends `Effect::ChangeLevel { url }`
+once and then stops running the map's scripts. `rc_scripts::level_url`
+reads the address into a map name (lower case, no `.ctm`) and a portal
+(after `#`). The scripts part sends `rc_game_core::ChangeLevel { map,
+portal, by }`.
+
+**Carrying the player over.** `rc_save` handles `ChangeLevel` like a load
+of a save, but with only some sections: the ones `data/levels/travel.toml`
+lists (`carry = ["combat"]`: health, shield, weapons and ammo) are read out
+of the game with each part's own `SavePart::save`, the map is loaded fresh
+(`CurrentLevel`, `GameState::Loading`), and on its first frame each
+carried section goes back in with that part's `SavePart::load`, before
+the level-start checkpoint is written, so that checkpoint has them. Not
+carried: the player's place (they arrive), the squad (their places belong
+to the old map; they arrive fresh), doors, scripts and enemies. A mod can
+change the list.
+
+**Arriving.** `rc_save` inserts `ArrivalPortal(portal)`. The level part
+looks for a `Teleporter` with that `Tag` in the new map
+(`MapCollision::arrivals`) and starts the player there, as UE2 does;
+otherwise (`#playerstart`, and 12 of the original's addresses like
+`Geo_04B.ctm#FromA`, whose map has no teleporter by that name) at the map's
+first `PlayerStart`. `rc_script_check` lists which is which: 5 exits
+arrive at a teleporter, 38 at the start.
+
+**Checked by** `rc_scripts` tests (an exit a script opens; one switched on
+by its tag; `ChangeLevel` and the debriefing; disabled actions; an opened
+exit through a save; address reading), `rc_save`'s
+`level_exit_carries_sections_to_the_next_map`, and `rc_game --script`,
+which puts the player into geo_01a's exit with 13 health taken off and
+checks that geo_01b loads with the same health and magazine, the player at
+its start, and its start saved as a checkpoint with that health.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

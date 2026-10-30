@@ -13,7 +13,7 @@ use rc_anim::math::Transform;
 use rc_anim::{globals, skin, weights_per_point, Clip, Convention, Skeleton};
 use rc_game_core::GamePaths;
 use rc_image::{PixelFormat, Rgba};
-use rc_package::animation::read_mesh_animation;
+use rc_package::animation::{read_mesh_animation, MeshAnimation};
 use rc_package::properties::Value;
 use rc_package::skeletal::{read_skeletal_mesh, SkeletalMesh};
 use rc_package::{texture, ObjectRef, Package};
@@ -32,10 +32,14 @@ pub enum Pose {
     Crouch,
     CrouchFire,
     Death,
+    /// Throwing a grenade.
+    Throw,
+    /// A close-up hit (a force pike).
+    Melee,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 10] = [
+    pub const ALL: [Pose; 12] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Run,
@@ -46,9 +50,12 @@ impl Pose {
         Pose::Crouch,
         Pose::CrouchFire,
         Pose::Death,
+        Pose::Throw,
+        Pose::Melee,
     ];
 
-    fn sequence(self, l: &Look) -> &str {
+    /// The animation `l` names for this pose (empty: none).
+    pub fn sequence(self, l: &Look) -> &str {
         match self {
             Pose::Idle => &l.idle,
             Pose::Walk => &l.walk,
@@ -60,6 +67,8 @@ impl Pose {
             Pose::Crouch => &l.crouch,
             Pose::CrouchFire => &l.crouch_fire,
             Pose::Death => &l.death,
+            Pose::Throw => &l.throw,
+            Pose::Melee => &l.melee,
         }
     }
 
@@ -83,6 +92,9 @@ pub struct DroidLook {
     pub skeleton: Skeleton,
     pub weights: Vec<Vec<(usize, f32)>>,
     pub clips: HashMap<Pose, Clip>,
+    /// The mesh's whole animation sets, for animations a level script
+    /// names (`ACTION_PlayAnim`).
+    pub anims: Vec<MeshAnimation>,
     pub skin: Option<(String, Rgba)>,
     /// Triangle corners as wedge numbers, already in Bevy's winding.
     pub indices: Vec<u32>,
@@ -129,30 +141,55 @@ impl DroidLook {
             })
             .ok_or_else(|| format!("no SkeletalMesh called {} in {}", look.mesh, file.display()))?;
         let mesh = read_skeletal_mesh(&pkg, &data, export).map_err(|e| e.to_string())?;
-        let set = mesh
+        // Every animation set the mesh links to in its package, in the
+        // mesh's order; each animation comes from the first set that has
+        // it. A Trandoshan mercenary's mesh lists its cutscene sets first
+        // and borrows the commandos' everyday moves (CloneCommandoSet).
+        let sets: Vec<&rc_package::Export> = mesh
             .animations
             .iter()
-            .find_map(|&a| match ObjectRef::from_index(a) {
+            .filter_map(|&a| match ObjectRef::from_index(a) {
                 ObjectRef::Export(i) => pkg.exports.get(i),
                 _ => None,
             })
-            .ok_or("the mesh has no animation set in its package")?;
-        let anim = read_mesh_animation(&pkg, &data, set).map_err(|e| e.to_string())?;
+            .collect();
+        if sets.is_empty() {
+            return Err("the mesh has no animation set in its package".into());
+        }
+        let mut anims = Vec::with_capacity(sets.len());
+        for set in &sets {
+            match read_mesh_animation(&pkg, &data, set) {
+                Ok(a) => anims.push((pkg.name(set.object_name).to_string(), a)),
+                Err(e) => notes.push(format!(
+                    "animation set {} not read: {e}",
+                    pkg.name(set.object_name)
+                )),
+            }
+        }
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
+        let mut used_sets: Vec<&str> = Vec::new();
         for pose in Pose::ALL {
             let name = pose.sequence(look);
-            match anim
-                .sequences
-                .iter()
-                .find(|s| s.name.eq_ignore_ascii_case(name))
-            {
-                Some(seq) => {
-                    clips.insert(pose, Clip::new(&anim, seq, &skeleton));
+            if name.is_empty() {
+                continue; // this character has none: it plays the idle one
+            }
+            let found = anims.iter().find_map(|(set_name, anim)| {
+                anim.sequences
+                    .iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+                    .map(|seq| (set_name, anim, seq))
+            });
+            match found {
+                Some((set_name, anim, seq)) => {
+                    clips.insert(pose, Clip::new(anim, seq, &skeleton));
+                    if !used_sets.contains(&set_name.as_str()) {
+                        used_sets.push(set_name);
+                    }
                 }
                 None => notes.push(format!(
-                    "no animation called {name} in {}; {pose:?} uses the idle one",
-                    pkg.name(set.object_name)
+                    "no animation called {name} in the mesh's {} animation sets; {pose:?} uses the idle one",
+                    anims.len()
                 )),
             }
         }
@@ -184,7 +221,7 @@ impl DroidLook {
             indices.extend(if flip { [a, c, b] } else { [a, b, c] });
         }
 
-        let skin = match load_skin(paths, &pkg, &mesh) {
+        let skin = match load_skin(paths, &pkg, &mesh, &look.skin) {
             Ok(s) => Some(s),
             Err(e) => {
                 notes.push(format!("skin not loaded, droids are plain grey: {e}"));
@@ -196,6 +233,7 @@ impl DroidLook {
             skeleton,
             weights,
             clips,
+            anims: anims.iter().map(|(_, a)| a.clone()).collect(),
             skin,
             indices,
             lift: 0.0,
@@ -209,7 +247,7 @@ impl DroidLook {
             });
         look.lift = -lo;
         notes.push(format!(
-            "mesh {}: {} bones, {} points, {} triangles ({}), {} of {} animations found, idle pose {:.0} uu tall (lowest point {lo:.0} uu, lifted to the floor), skin {}",
+            "mesh {}: {} bones, {} points, {} triangles ({}), {} of {} animations found (from {}), idle pose {:.0} uu tall (lowest point {lo:.0} uu, lifted to the floor), skin {}",
             pkg.name(export.object_name),
             look.mesh.bones.len(),
             look.mesh.points.len(),
@@ -217,6 +255,7 @@ impl DroidLook {
             if flip { "flipped" } else { "kept as stored" },
             look.clips.len(),
             Pose::ALL.len(),
+            used_sets.join(", "),
             hi - lo,
             look.skin.as_ref().map_or("none".to_string(), |(n, i)| {
                 let [r, g, b, _] = i.mean();
@@ -230,16 +269,31 @@ impl DroidLook {
         self.clips.get(&pose).unwrap_or(&self.clips[&Pose::Idle])
     }
 
-    /// Each bone's local transform at `frame` of `pose`. The root bone's
+    /// An animation from the set by name (any case), for a level script.
+    pub fn named_clip(&self, name: &str) -> Option<Clip> {
+        self.anims.iter().find_map(|anim| {
+            anim.sequences
+                .iter()
+                .find(|s| s.name.eq_ignore_ascii_case(name))
+                .map(|seq| Clip::new(anim, seq, &self.skeleton))
+        })
+    }
+
+    /// Each bone's local transform at `frame` of `clip`. The root bone's
     /// sideways travel is removed: the droid's body moves the droid, not
     /// the animation.
-    pub fn local_pose(&self, pose: Pose, frame: f32) -> Vec<Transform> {
-        let mut local = self.clip(pose).sample(&self.skeleton, frame);
+    pub fn local_clip(&self, clip: &Clip, frame: f32) -> Vec<Transform> {
+        let mut local = clip.sample(&self.skeleton, frame);
         if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
             l.pos[0] = rest.pos[0];
             l.pos[1] = rest.pos[1];
         }
         local
+    }
+
+    /// Each bone's local transform at `frame` of `pose`.
+    pub fn local_pose(&self, pose: Pose, frame: f32) -> Vec<Transform> {
+        self.local_clip(self.clip(pose), frame)
     }
 
     /// Points for bones placed at `local`, Unreal units relative to the
@@ -270,6 +324,12 @@ impl DroidLook {
     /// droid's feet, before its facing is applied.
     pub fn posed(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
         self.posed_local(&self.local_pose(pose, frame))
+    }
+
+    /// Like [`Self::posed`], for a named animation (see
+    /// [`Self::named_clip`]).
+    pub fn posed_clip(&self, clip: &Clip, frame: f32) -> Vec<[f32; 3]> {
+        self.posed_local(&self.local_clip(clip, frame))
     }
 
     /// Per-wedge positions and smooth normals for the Bevy mesh.
@@ -314,38 +374,56 @@ impl DroidLook {
     }
 }
 
-/// Follows the mesh's first material to a picture and decodes it. Copied
-/// from `rc_character/src/load.rs`.
+/// Follows the mesh's first material, or `over` when it isn't empty
+/// (`Package.Group.Object`), to a picture and decodes it. Copied from
+/// `rc_character/src/load.rs`.
 fn load_skin(
     paths: &GamePaths,
     pkg: &Package,
     mesh: &SkeletalMesh,
+    over: &str,
 ) -> Result<(String, Rgba), String> {
-    let first = *mesh.textures.first().ok_or("the mesh lists no materials")?;
-    let ObjectRef::Import(i) = ObjectRef::from_index(first) else {
-        return Err("material stored inside the mesh package is not supported yet".into());
+    let (top, material, class_wanted) = if over.is_empty() {
+        let first = *mesh.textures.first().ok_or("the mesh lists no materials")?;
+        let ObjectRef::Import(i) = ObjectRef::from_index(first) else {
+            return Err("material stored inside the mesh package is not supported yet".into());
+        };
+        let material = pkg.name(pkg.imports[i].object_name).to_string();
+        let mut outer = pkg.imports[i].package_index;
+        let mut top = String::new();
+        while let ObjectRef::Import(j) = ObjectRef::from_index(outer) {
+            top = pkg.name(pkg.imports[j].object_name).to_string();
+            outer = pkg.imports[j].package_index;
+        }
+        let class = pkg.name(pkg.imports[i].class_name).to_string();
+        (top, material, Some(class))
+    } else {
+        let top = over.split('.').next().unwrap_or(over).to_string();
+        let material = over.rsplit('.').next().unwrap_or(over).to_string();
+        (top, material, None)
     };
-    let material = pkg.name(pkg.imports[i].object_name).to_string();
-    let mut outer = pkg.imports[i].package_index;
-    let mut top = String::new();
-    while let ObjectRef::Import(j) = ObjectRef::from_index(outer) {
-        top = pkg.name(pkg.imports[j].object_name).to_string();
-        outer = pkg.imports[j].package_index;
-    }
     let path = paths.game_file(&format!("GameData/Textures/{top}.utx"));
     let data = std::fs::read(&path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
     let tpkg = Package::parse(&data).map_err(|e| format!("{}: {e}", path.display()))?;
-    let class_wanted = pkg.name(pkg.imports[i].class_name).to_string();
+    // By name and class: a group and a texture can share a name. A skin
+    // named in the settings file has no class, so any material matches.
     let mut index = tpkg
         .exports
         .iter()
         .position(|e| {
             tpkg.name(e.object_name).eq_ignore_ascii_case(&material)
-                && tpkg
-                    .export_class_name(e)
-                    .eq_ignore_ascii_case(&class_wanted)
+                && class_wanted
+                    .as_ref()
+                    .map_or(tpkg.export_class_name(e) != "Package", |c| {
+                        tpkg.export_class_name(e).eq_ignore_ascii_case(c)
+                    })
         })
-        .ok_or_else(|| format!("no {class_wanted} called {material} in {top}"))?;
+        .ok_or_else(|| {
+            format!(
+                "no {} called {material} in {top}",
+                class_wanted.as_deref().unwrap_or("material")
+            )
+        })?;
     for _ in 0..6 {
         let export = &tpkg.exports[index];
         let name = tpkg.name(export.object_name).to_string();

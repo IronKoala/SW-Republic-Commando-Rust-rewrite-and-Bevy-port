@@ -712,6 +712,7 @@ fn tagged_factory(tag: &str, x: f32) -> Factory {
             first_damaged_event: Some(format!("{tag}DroidHurt")),
             start_state: StartState::StationaryAttack,
             team: None,
+            script: Some(format!("{tag}AI")),
         },
         ..Default::default()
     }
@@ -911,4 +912,388 @@ fn spawn_points_take_turns_and_give_their_own_tags() {
     let mut again = scripted_battle(vec![f2]);
     again.restore(&snap).unwrap();
     assert_eq!(again.tagged("A").len(), 2);
+}
+
+/// A battle droid that throws grenades every chance it gets.
+fn grenadier(count: u32) -> Fighter {
+    let mut p = AiParams::battle_droid();
+    p.grenades.grenade = "thermal_detonator_enemy".into();
+    p.grenades.count = count;
+    p.grenades.probability = 1.0;
+    Fighter::new(
+        1,
+        Arc::new(p),
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    )
+}
+
+fn throws(ev: &[(f32, AiEvent)]) -> Vec<(f32, Vec3, Vec3, Vec3)> {
+    ev.iter()
+        .filter_map(|(t, e)| match e {
+            AiEvent::Throw {
+                origin,
+                velocity,
+                aim_at,
+                ..
+            } => Some((*t, *origin, *velocity, *aim_at)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Where a throw comes back down to `z`, flying under `gravity`.
+fn lands_at(origin: Vec3, v: Vec3, gravity: f32, z: f32) -> Vec3 {
+    let dt = 1.0 / 1000.0;
+    let (mut p, mut v) = (origin, v);
+    loop {
+        p = p + v * dt;
+        v = v - Vec3::new(0.0, 0.0, gravity * dt);
+        if v.z < 0.0 && p.z <= z {
+            return p;
+        }
+    }
+}
+
+#[test]
+fn a_throw_arc_lands_where_it_is_aimed() {
+    let world = flat_floor(vec![]);
+    let from = Vec3::new(0.0, 0.0, 120.0);
+    for to in [
+        Vec3::new(1500.0, 0.0, 24.0),
+        Vec3::new(-400.0, 900.0, 24.0),
+        Vec3::new(2400.0, 300.0, 300.0),
+    ] {
+        let v = brain::throw_arc(&world, from, to, 2200.0, 1100.0).expect("an arc");
+        assert!(v.length() <= 2200.0 + 0.1, "{}", v.length());
+        let landed = lands_at(from, v, 1100.0, to.z);
+        assert!(
+            (landed - to).length_2d() < 15.0,
+            "aimed at {to:?}, lands at {landed:?}"
+        );
+    }
+    // Too far for the fastest throw.
+    assert!(brain::throw_arc(&world, from, Vec3::new(6000.0, 0.0, 24.0), 2200.0, 1100.0).is_none());
+    // A low ceiling over the whole floor: no lob, but a flat throw fits.
+    let low = flat_floor(vec![Brush::cuboid(
+        Vec3::new(-5000.0, -5000.0, 400.0),
+        Vec3::new(5000.0, 5000.0, 420.0),
+    )]);
+    let v = brain::throw_arc(&low, from, Vec3::new(1500.0, 0.0, 24.0), 2200.0, 1100.0)
+        .expect("a flat arc under the ceiling");
+    assert!(v.length() > 2199.0, "full speed: {}", v.length());
+    // A tall wall in the way: nothing.
+    let wall = flat_floor(vec![Brush::cuboid(
+        Vec3::new(700.0, -5000.0, 0.0),
+        Vec3::new(740.0, 5000.0, 3000.0),
+    )]);
+    assert!(brain::throw_arc(&wall, from, Vec3::new(1500.0, 0.0, 24.0), 2200.0, 1100.0).is_none());
+}
+
+#[test]
+fn throws_grenades_by_the_rules() {
+    let world = flat_floor(vec![]);
+    // 1500 uu away: in range. It throws at its first decision in the
+    // fight, then no sooner than min_time (10 s) after, until it has none.
+    let mut f = grenadier(2);
+    let ev = run(&mut f, &world, Some(target_at(1500.0, 0.0)), 30.0);
+    let t = throws(&ev);
+    assert_eq!(t.len(), 2, "{t:?}");
+    assert!(t[0].0 < 1.0, "first throw at {}", t[0].0);
+    assert!(t[1].0 - t[0].0 >= 10.0 - 1e-3, "{} then {}", t[0].0, t[1].0);
+    assert_eq!(f.grenades_left, 0);
+    for &(_, origin, v, aim) in &t {
+        // Within the aim error of (1 - 0.4) x 10 = 6 degrees: 158 uu.
+        assert!(
+            (aim - Vec3::new(1500.0, 0.0, 24.0)).length_2d() <= 160.0,
+            "{aim:?}"
+        );
+        let landed = lands_at(origin, v, 1100.0, aim.z);
+        assert!((landed - aim).length_2d() < 15.0, "{landed:?} vs {aim:?}");
+    }
+    // No shots while throwing.
+    let shots_near = ev.iter().filter(|(time, e)| {
+        matches!(e, AiEvent::Fire { .. }) && *time >= t[0].0 && *time < t[0].0 + 0.99
+    });
+    assert_eq!(shots_near.count(), 0);
+
+    // Too close (300 uu) or too far (3000 uu): no throw, but it shoots.
+    for x in [300.0, 3000.0] {
+        let mut f = grenadier(2);
+        let ev = run(&mut f, &world, Some(target_at(x, 0.0)), 5.0);
+        assert!(throws(&ev).is_empty(), "threw at {x} uu");
+        assert!(ev.iter().any(|(_, e)| matches!(e, AiEvent::Fire { .. })));
+    }
+    // Battle droids carry none.
+    let mut d = droid(0.0);
+    let ev = run(&mut d, &world, Some(target_at(1500.0, 0.0)), 5.0);
+    assert!(throws(&ev).is_empty());
+}
+
+#[test]
+fn does_not_throw_onto_a_friend() {
+    let world = flat_floor(vec![]);
+    let nav = NavGraph::default();
+    let taken = HashSet::new();
+    let mut f = grenadier(2);
+    // A friend standing 200 uu from the target.
+    let allies = [Vec3::new(0.0, 0.0, 80.0), Vec3::new(1400.0, 150.0, 80.0)];
+    let mut thrown = 0;
+    let mut t = 0.0;
+    while t < 5.0 {
+        let view = View {
+            world: &world,
+            nav: &nav,
+            time: t,
+            target: Some(target_at(1500.0, 0.0)),
+            cover_taken: &taken,
+            allies: &allies,
+        };
+        thrown += f
+            .tick(1.0 / 30.0, &view)
+            .iter()
+            .filter(|e| matches!(e, AiEvent::Throw { .. }))
+            .count();
+        t += 1.0 / 30.0;
+    }
+    assert_eq!(thrown, 0);
+}
+
+#[test]
+fn grenades_left_are_saved() {
+    let world = flat_floor(vec![]);
+    let mut p = AiParams::battle_droid();
+    p.grenades.grenade = "thermal_detonator_enemy".into();
+    p.grenades.count = 2;
+    p.grenades.probability = 1.0;
+    let params = Arc::new(p);
+    let make = || Battle::new(params.clone(), NavGraph::default(), vec![factory(0.0)]);
+    let mut b = make();
+    // The spawner switches on (the player is within 3000 uu), makes two,
+    // and each throws once in the 9 s (the next waits 10 s).
+    for _ in 0..270 {
+        b.step(1.0 / 30.0, &world, Some(target_at(1500.0, 0.0)));
+    }
+    let snap = b.snapshot();
+    let left: Vec<_> = snap.fighters.iter().map(|f| f.grenades_left).collect();
+    assert_eq!(left, vec![Some(1), Some(1)], "one throw each");
+    let mut fresh = make();
+    fresh.restore(&snap).unwrap();
+    let again: Vec<_> = fresh
+        .snapshot()
+        .fighters
+        .iter()
+        .map(|f| f.grenades_left)
+        .collect();
+    assert_eq!(again, left);
+    // Battle droids' saves don't mention grenades.
+    let plain = Battle::new(
+        Arc::new(AiParams::battle_droid()),
+        NavGraph::default(),
+        vec![factory(0.0)],
+    );
+    assert!(plain
+        .snapshot()
+        .fighters
+        .iter()
+        .all(|f| f.grenades_left.is_none()));
+}
+
+/// A pike fighter like the Geonosian warrior: no gun, 350 uu reach.
+fn warrior() -> Fighter {
+    let mut p = AiParams::battle_droid();
+    p.combat.weapon = String::new();
+    p.combat.melee_range = 350.0;
+    p.combat.melee_damage = 125.0;
+    p.combat.melee_delay = 1.6;
+    p.combat.lunge_distance = 800.0;
+    p.movement.ground_speed = 450.0;
+    Fighter::new(
+        1,
+        Arc::new(p),
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    )
+}
+
+fn melee_times(ev: &[(f32, AiEvent)]) -> Vec<f32> {
+    ev.iter()
+        .filter(|(_, e)| matches!(e, AiEvent::Melee { .. }))
+        .map(|(t, _)| *t)
+        .collect()
+}
+
+#[test]
+fn a_pike_fighter_rushes_in_and_hits() {
+    let world = flat_floor(vec![]);
+    let mut f = warrior();
+    let ev = run(&mut f, &world, Some(target_at(1500.0, 0.0)), 8.0);
+    assert!(
+        !ev.iter().any(|(_, e)| matches!(e, AiEvent::Fire { .. })),
+        "no gun, no shots"
+    );
+    let hits = melee_times(&ev);
+    // About 1150 uu to run at 450 uu/s after 0.5 s of reacting: the first
+    // hit by about 3.5 s, then one every 1.6 s.
+    assert!(!hits.is_empty(), "never hit");
+    assert!(hits[0] < 4.0, "first hit at {}", hits[0]);
+    for w in hits.windows(2) {
+        assert!(w[1] - w[0] >= 1.6 - 1e-3, "{hits:?}");
+    }
+    assert!(hits.len() >= 3, "{hits:?}");
+    let gap = (Vec3::new(1500.0, 0.0, 0.0) - f.pawn.location).length_2d();
+    assert!(gap <= 350.0 && gap > 100.0, "stands {gap:.0} uu away");
+    for (_, e) in &ev {
+        if let AiEvent::Melee {
+            direction, range, ..
+        } = e
+        {
+            assert!(direction.x > 0.9 && *range == 350.0, "{direction:?}");
+        }
+    }
+}
+
+#[test]
+fn a_fighter_with_a_gun_only_lunges_when_close() {
+    let world = flat_floor(vec![]);
+    let make = || {
+        let mut p = (*warrior().params).clone();
+        p.combat.weapon = "e5_blaster".into();
+        Fighter::new(
+            1,
+            Arc::new(p),
+            Vec3::ZERO,
+            0.0,
+            StartState::StationaryAttack,
+        )
+    };
+    // 1500 uu: beyond its lunge distance, it stays and shoots.
+    let mut f = make();
+    let ev = run(&mut f, &world, Some(target_at(1500.0, 0.0)), 5.0);
+    assert!(melee_times(&ev).is_empty());
+    assert!(ev.iter().any(|(_, e)| matches!(e, AiEvent::Fire { .. })));
+    assert!(f.pawn.location.length_2d() < 50.0, "stayed put");
+    // 700 uu: within 800, it rushes in and hits.
+    let mut f = make();
+    let ev = run(&mut f, &world, Some(target_at(700.0, 0.0)), 5.0);
+    assert!(!melee_times(&ev).is_empty());
+}
+
+#[test]
+fn a_pike_doesnt_reach_through_a_wall() {
+    // A wall between them, too wide to walk round with no path network.
+    let world = flat_floor(vec![Brush::cuboid(
+        Vec3::new(140.0, -5000.0, 0.0),
+        Vec3::new(160.0, 5000.0, 400.0),
+    )]);
+    let mut f = warrior();
+    // It heard the enemy behind the wall.
+    let mut ev = Vec::new();
+    f.alert(Vec3::new(300.0, 0.0, 84.0), 0.0, &mut ev);
+    let ev = run(&mut f, &world, Some(target_at(300.0, 0.0)), 4.0);
+    assert!(melee_times(&ev).is_empty());
+}
+
+/// A level script's orders: walk to a point and turn there, turn to the
+/// player, hold still until a time; each ends with `ScriptDone`, and the
+/// droid doesn't shoot while it follows them.
+#[test]
+fn follows_script_orders() {
+    let world = flat_floor(vec![]);
+    let mut f = droid(0.0);
+    let to = Vec3::new(600.0, 300.0, 84.0);
+    f.follow_script(ScriptGoal::MoveTo {
+        to,
+        walk: false,
+        tolerance: 0.0,
+        face: Some(std::f32::consts::PI),
+    });
+    let ev = run(&mut f, &world, None, 8.0);
+    let done: Vec<f32> = ev
+        .iter()
+        .filter(|(_, e)| *e == AiEvent::ScriptDone)
+        .map(|(t, _)| *t)
+        .collect();
+    assert_eq!(done.len(), 1, "{ev:?}");
+    assert!(f.script.is_none());
+    let at = f.pawn.location;
+    assert!((at - to).length_2d() < 60.0, "ended at {at:?}");
+    assert!(
+        brain::angle_diff(f.facing, std::f32::consts::PI).abs() < 0.1,
+        "facing {} {ev:?}",
+        f.facing
+    );
+    // With the player in plain sight the script still comes first: no
+    // shots until it has arrived.
+    let mut g = droid(0.0);
+    g.follow_script(ScriptGoal::MoveTo {
+        to,
+        walk: false,
+        tolerance: 0.0,
+        face: Some(std::f32::consts::PI),
+    });
+    let ev = run(&mut g, &world, Some(target_at(-800.0, 0.0)), 8.0);
+    let done = ev
+        .iter()
+        .find(|(_, e)| *e == AiEvent::ScriptDone)
+        .map(|(t, _)| *t)
+        .unwrap();
+    assert!(!ev
+        .iter()
+        .any(|(t, e)| matches!(e, AiEvent::Fire { .. }) && *t < done));
+    // ... and fights after (it ends facing the player).
+    assert!(ev
+        .iter()
+        .any(|(t, e)| matches!(e, AiEvent::Fire { .. }) && *t > done));
+
+    // Turn to the player, at (600, -500): straight "down" in y.
+    f.follow_script(ScriptGoal::TurnToTarget);
+    let ev = run(&mut f, &world, Some(target_at(600.0, -500.0)), 2.0);
+    assert!(ev.iter().any(|(_, e)| *e == AiEvent::ScriptDone));
+    assert!(brain::angle_diff(f.facing, -std::f32::consts::FRAC_PI_2).abs() < 0.1);
+
+    // Hold until t = 1.0 (the test's clock starts at 0 each run).
+    f.follow_script(ScriptGoal::Hold { until: 1.0 });
+    let ev = run(&mut f, &world, None, 2.0);
+    let t = ev
+        .iter()
+        .find(|(_, e)| *e == AiEvent::ScriptDone)
+        .map(|(t, _)| *t)
+        .unwrap();
+    assert!((1.0..1.1).contains(&t), "{t}");
+
+    // Being hurt ends a hold at once.
+    f.follow_script(ScriptGoal::Hold { until: 100.0 });
+    let mut ev = Vec::new();
+    f.on_damaged(Some(Vec3::new(0.0, 0.0, 84.0)), 0.0, &mut ev);
+    assert!(ev.contains(&AiEvent::ScriptDone));
+    assert!(f.script.is_none());
+}
+
+/// A scripted point well above it: a character that can leap
+/// (`leap_speed`) leaps there; a battle droid (can't) doesn't.
+#[test]
+fn leaps_to_high_script_points() {
+    let world = flat_floor(vec![]);
+    let to = Vec3::new(500.0, 0.0, 600.0);
+    let order = ScriptGoal::MoveTo {
+        to,
+        walk: false,
+        tolerance: 0.0,
+        face: None,
+    };
+    let mut f = droid(0.0);
+    std::sync::Arc::make_mut(&mut f.params).combat.leap_speed = 900.0;
+    f.follow_script(order.clone());
+    let ev = run(&mut f, &world, None, 4.0);
+    assert!(ev.iter().any(|(_, e)| *e == AiEvent::Leapt), "{ev:?}");
+    assert!(ev.iter().any(|(_, e)| *e == AiEvent::ScriptDone));
+    assert!((f.pawn.location - to).length_2d() < 60.0);
+
+    let mut g = droid(0.0);
+    g.follow_script(order);
+    let ev = run(&mut g, &world, None, 4.0);
+    assert!(!ev.iter().any(|(_, e)| *e == AiEvent::Leapt));
 }

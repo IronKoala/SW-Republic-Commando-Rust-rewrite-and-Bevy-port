@@ -5,12 +5,28 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
-    /// How long a line of dialogue lasts when a script waits for it.
+    /// How long a line of dialogue lasts when a script waits for it and
+    /// the game couldn't read the sound's own length.
     pub sound_seconds: f32,
+    /// Loudness of the sounds and lines scripts play, 0 to 1 (times the
+    /// action's own `Volume`).
+    pub sound_volume: f32,
     /// How long an animation lasts when a script waits for its end.
     pub anim_seconds: f32,
-    /// How long a character takes to walk where a script sends it.
+    /// How long a character takes to walk where a script sends it, when
+    /// no game carries it out (the headless tools).
     pub move_seconds: f32,
+    /// In the game: the longest a script waits for a character to arrive
+    /// where it sent it before it carries on anyway.
+    pub move_timeout_seconds: f32,
+    /// In the game: the longest a script waits for an animation to end.
+    pub anim_timeout_seconds: f32,
+    /// In the game: the longest a script waits for a character to turn.
+    pub turn_timeout_seconds: f32,
+    /// In the game: how long an action waits for its characters to appear
+    /// (a factory's character comes a frame after its event) before it is
+    /// skipped.
+    pub character_grace_seconds: f32,
     /// Seed for random waits.
     pub random_seed: u64,
     /// Tags that mean the player.
@@ -25,14 +41,22 @@ pub struct Settings {
     pub bacta_heal_per_second: f32,
     /// Seconds before a used dispenser works again.
     pub bacta_recharge_seconds: f32,
+    /// Size (uu) of a level exit (`Teleporter`) the map gives none.
+    pub teleporter_radius: f32,
+    pub teleporter_height: f32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             sound_seconds: 3.0,
+            sound_volume: 1.0,
             anim_seconds: 1.5,
             move_seconds: 2.0,
+            move_timeout_seconds: 30.0,
+            anim_timeout_seconds: 10.0,
+            turn_timeout_seconds: 2.0,
+            character_grace_seconds: 1.0,
             random_seed: 1138,
             player_tags: vec!["PlayerCommando".into(), "Player".into()],
             prop_health: 100.0,
@@ -40,6 +64,9 @@ impl Default for Settings {
             bacta_range: 256.0,
             bacta_heal_per_second: 50.0,
             bacta_recharge_seconds: 10.0,
+            // engine.u's Teleporter defaults (from NavigationPoint).
+            teleporter_radius: 80.0,
+            teleporter_height: 100.0,
         }
     }
 }
@@ -53,6 +80,23 @@ struct File {
     actors: Actors,
     #[serde(default)]
     bacta: Bacta,
+    #[serde(default)]
+    sound: Sound,
+    #[serde(default)]
+    exits: Exits,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct Sound {
+    volume: Option<f32>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct Exits {
+    teleporter_radius: Option<f32>,
+    teleporter_height: Option<f32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -69,6 +113,10 @@ struct Timing {
     sound_seconds: Option<f32>,
     anim_seconds: Option<f32>,
     move_seconds: Option<f32>,
+    move_timeout_seconds: Option<f32>,
+    anim_timeout_seconds: Option<f32>,
+    turn_timeout_seconds: Option<f32>,
+    character_grace_seconds: Option<f32>,
     random_seed: Option<u64>,
 }
 
@@ -96,6 +144,18 @@ impl Settings {
         if let Some(v) = t.move_seconds {
             self.move_seconds = v;
         }
+        if let Some(v) = t.move_timeout_seconds {
+            self.move_timeout_seconds = v;
+        }
+        if let Some(v) = t.anim_timeout_seconds {
+            self.anim_timeout_seconds = v;
+        }
+        if let Some(v) = t.turn_timeout_seconds {
+            self.turn_timeout_seconds = v;
+        }
+        if let Some(v) = t.character_grace_seconds {
+            self.character_grace_seconds = v;
+        }
         if let Some(v) = t.random_seed {
             self.random_seed = v;
         }
@@ -117,6 +177,15 @@ impl Settings {
         }
         if let Some(v) = b.recharge_seconds {
             self.bacta_recharge_seconds = v;
+        }
+        if let Some(v) = f.sound.volume {
+            self.sound_volume = v.clamp(0.0, 1.0);
+        }
+        if let Some(v) = f.exits.teleporter_radius {
+            self.teleporter_radius = v;
+        }
+        if let Some(v) = f.exits.teleporter_height {
+            self.teleporter_height = v;
         }
         Ok(self)
     }

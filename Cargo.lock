@@ -4438,6 +4438,7 @@ dependencies = [
  "bevy",
  "rc_game_core",
  "rc_level_viewer",
+ "rc_model",
  "rc_movement",
  "rc_package",
  "serde",
@@ -4479,6 +4480,7 @@ dependencies = [
  "rc_pads",
  "rc_panini",
  "rc_save",
+ "rc_scripts",
  "rc_scripts_plugin",
  "rc_squad_plugin",
  "serde",
@@ -4643,6 +4645,7 @@ name = "rc_scripts_plugin"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rc_audio",
  "rc_combat",
  "rc_game_core",
  "rc_level",

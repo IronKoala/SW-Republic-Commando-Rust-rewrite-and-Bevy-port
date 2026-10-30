@@ -74,13 +74,54 @@ fn log_states(
     }
 }
 
+/// Frame times over the last few seconds, for the speed readout.
+#[derive(Default)]
+struct FrameTimes {
+    since: f64,
+    frames: u32,
+    total: f64,
+    worst: f64,
+}
+
+/// Seconds between speed readouts in the log.
+const SPEED_EVERY: f64 = 5.0;
+
 fn count_frames(
     mut frames: Local<u32>,
+    mut times: Local<FrameTimes>,
+    time: Res<Time<Real>>,
+    entities: Query<()>,
     exit_after: Res<ExitAfter>,
     mut exit: MessageWriter<AppExit>,
     log: Res<GameLog>,
 ) {
     *frames += 1;
+    // Speed readout: frames per second, average and slowest frame, and how
+    // many things (entities) the game holds, every few seconds.
+    let dt = time.delta_secs_f64();
+    times.frames += 1;
+    times.total += dt;
+    times.worst = times.worst.max(dt);
+    let now = time.elapsed_secs_f64();
+    if now - times.since >= SPEED_EVERY && times.frames > 1 {
+        let (sweeps, tested, ms) = rc_movement::triangles::take_counts();
+        let per = |x: f64| x / times.frames as f64;
+        log.line(format!(
+            "speed: {:.0} frames per second, average {:.1} ms, slowest {:.1} ms ({} frames), {} entities; collision per frame: {:.0} sweeps, {:.0} triangles looked at, {:.1} ms",
+            times.frames as f64 / times.total.max(1e-6),
+            times.total / times.frames as f64 * 1000.0,
+            times.worst * 1000.0,
+            times.frames,
+            entities.iter().count(),
+            per(sweeps as f64),
+            per(tested as f64),
+            per(ms)
+        ));
+        *times = FrameTimes {
+            since: now,
+            ..default()
+        };
+    }
     if let Some(n) = exit_after.0 {
         if *frames >= n {
             log.line(format!("{n} frames done, closing"));
@@ -353,7 +394,7 @@ fn main() -> AppExit {
     .insert_resource(paths)
     .insert_resource(rc_save::SaveFolder(save_folder))
     .insert_resource(menu::GamePathsFound(found.is_some()))
-    .insert_resource(player::FieldOfView(settings.video.fov))
+    .insert_resource(player::FieldOfView::from_settings(&settings))
     .insert_resource(input::LookSettings::from_settings(&settings))
     .insert_resource(settings.gyro.clone())
     .insert_resource(button_names)
@@ -383,7 +424,7 @@ fn main() -> AppExit {
         commands.spawn((
             Camera2d,
             Camera {
-                order: 1,
+                order: 2,
                 clear_color: ClearColorConfig::None,
                 ..default()
             },

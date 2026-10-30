@@ -368,9 +368,11 @@ fn load_sounds(
 
 /// Read sounds by name from one of the game's sound packages
 /// (`GameData/Sounds/<package>.uax`) into Bevy sounds. A name can be a
-/// `Sound` or a `SoundMultiple` group (every sound in the group is read).
+/// `Sound` or a `SoundMultiple` group (every sound in the group is read,
+/// also members kept in another package, such as geo_sound's
+/// `arena_cloneDeaths`, whose lines are in character_voice).
 /// Returns what was found and a note for each problem. Any part can use it
-/// (enemies do).
+/// (enemies and level scripts do).
 pub fn read_sounds(
     paths: &GamePaths,
     package: &str,
@@ -421,6 +423,9 @@ pub fn read_sounds(
             }
         }
     };
+    // Group members kept in another package: (package, member) for each
+    // group, read after the rest.
+    let mut elsewhere: Vec<(String, Vec<(String, String)>)> = Vec::new();
     for name in names {
         let export = pkg.exports.iter().position(|e| {
             matches!(pkg.export_class_name(e), "Sound" | "SoundMultiple")
@@ -444,6 +449,22 @@ pub fn read_sounds(
                             {
                                 sound.variants.extend(one(j, &mut notes));
                             }
+                            ObjectRef::Import(j) if j < pkg.imports.len() => {
+                                match top_package(&pkg, pkg.imports[j].package_index) {
+                                    Some(other) => {
+                                        let member = pkg.object_name(r).to_string();
+                                        match elsewhere.iter_mut().find(|(g, _)| g == name) {
+                                            Some((_, list)) => list.push((other, member)),
+                                            None => elsewhere
+                                                .push((name.clone(), vec![(other, member)])),
+                                        }
+                                    }
+                                    None => notes.push(format!(
+                                        "group {name}: {} has no package",
+                                        pkg.object_name(r)
+                                    )),
+                                }
+                            }
                             _ => notes.push(format!(
                                 "group {name}: {} is not a sound in {package}",
                                 pkg.object_name(r)
@@ -454,13 +475,64 @@ pub fn read_sounds(
                 Err(e) => notes.push(format!("group {name} didn't read: {e}")),
             }
         }
-        if sound.variants.is_empty() {
+        let waits = elsewhere.iter().any(|(g, _)| g == name);
+        if sound.variants.is_empty() && !waits {
             notes.push(format!("sound {name} in {package} has nothing to play"));
             continue;
         }
         found.insert(name.clone(), sound);
     }
+    // Read the members kept elsewhere, one package at a time.
+    let mut by_package: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (_, list) in &elsewhere {
+        for (p, m) in list {
+            let l = by_package.entry(p.to_ascii_lowercase()).or_default();
+            if !l.contains(m) {
+                l.push(m.clone());
+            }
+        }
+    }
+    let mut members: HashMap<(String, String), GameSound> = HashMap::new();
+    for (p, list) in by_package {
+        // A group pointing back into this package was already handled.
+        if p.eq_ignore_ascii_case(package) {
+            continue;
+        }
+        let (got, more) = read_sounds(paths, &p, &list, audio);
+        notes.extend(more);
+        for (m, s) in got {
+            members.insert((p.clone(), m.to_ascii_lowercase()), s);
+        }
+    }
+    for (group, list) in elsewhere {
+        let sound = found.entry(group.clone()).or_default();
+        for (p, m) in list {
+            if let Some(s) = members.get(&(p.to_ascii_lowercase(), m.to_ascii_lowercase())) {
+                sound.variants.extend(s.variants.iter().cloned());
+            }
+        }
+        if sound.variants.is_empty() {
+            found.remove(&group);
+            notes.push(format!("sound {group} in {package} has nothing to play"));
+        }
+    }
     (found, notes)
+}
+
+/// The outermost package an object reference sits in (`GEO_Voice` for
+/// `GEO_Voice.CA1G1701`), or `None` for something in this package.
+fn top_package(pkg: &Package, mut outer: i32) -> Option<String> {
+    let mut top = None;
+    for _ in 0..16 {
+        match ObjectRef::from_index(outer) {
+            ObjectRef::Import(i) if i < pkg.imports.len() => {
+                top = Some(pkg.name(pkg.imports[i].object_name).to_string());
+                outer = pkg.imports[i].package_index;
+            }
+            _ => break,
+        }
+    }
+    top
 }
 
 /// Give the player (any new `Player` entity) the game's health, shield,

@@ -20,7 +20,7 @@ zoom_damage = 1.72        # game: ZoomDamageMultiplier (shots while zoomed)
 clip_size = 5             # game: ReloadCount
 max_ammo = 20             # game: DC17mSniperAmmoDefaults MaxAmmo
 start_ammo = 20           # game: PickupAmmoCount
-reload_time = 2.0         # placeholder: the attachment's reload animation isn't read yet
+reload_time = 2.6         # game: the arms' Reload animation, 78 frames at 30 fps
 
 [shot]
 kind = "instant"          # game: an instant-hit trace
@@ -48,3 +48,13 @@ package = "weapons"
 mesh = "DC17mBlaster"     # placeholder: the rifle's model until the attachment's is read
 offset = [40, 12, -14]
 bolt_colour = [0.3, 0.7, 1.0]
+
+[arms]
+# The first-person arms holding it: an animated model read from the game
+# at run time (Animations/hudarms.ukx). Leave this section out to show the
+# plain [model] in view instead.
+mesh = "HudArmsSniper"     # game: DC17mSniper's Mesh
+fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
+attachment_group = "dc17m" # our name: weapons that swap with AttachHolster/AttachLoad
+hide_zoomed = true        # game: bZoomedUsesNoHUDArms (the scope covers the view)
+brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet

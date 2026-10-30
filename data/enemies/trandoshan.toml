@@ -6,8 +6,6 @@
 # on top, and its brain TrandoshanMercenaryBot(+Defaults). "guess" and
 # "placeholder" mark the rest. Anything not listed takes the battle droid's
 # value (battle_droid.toml).
-# Not done: it also carries thermal detonators (ThermalDetonatorEnemy) that
-# our enemies don't throw yet.
 
 [type]
 id = "trandoshan"
@@ -32,6 +30,13 @@ shot_delay = 0.1          # game: SMGDefaults ShotDelay
 weapon_range = 5000       # game: SMGAmmo Range
 drops = "trandoshan_smg"  # the player can pick up its repeater
 damage_table = "DV_OrganicTrandoMercDamage" # game: MyDamageVariance
+
+[grenades]
+grenade = "thermal_detonator_enemy" # game: RequiredEquipment[1] ThermalDetonatorEnemy (data/grenades/thermal_detonator_enemy.toml)
+count = 2                 # game: ThermalDetonatorEnemyDefaults InitAmmoAmount
+probability = 0.05        # game: TrandoshanMercenaryBotDefaults GrenadeProbability
+min_time = 20             # game: TrandoshanMercenaryBotDefaults MinGrenadeTime
+throw_time = 2.17         # game: the length of CloneCommandoSet ThrowGrenade, which the mercenary plays (65 frames at 30 a second)
 
 [sound]
 # What the mercenary says. Names are groups (SoundMultiple) in
@@ -61,5 +66,11 @@ death_fall = ["TMC_DieFall"]
 hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
 
 [look]
-package = "GameData/Animations/trandoshan.ukx"  # guess: the game's mesh TrandoshanMerc isn't in this package
-mesh = "Trandoshan"                             # placeholder: the closest mesh in trandoshan.ukx
+# game: TrandoshanMercenary Mesh = Clone.TrandoshanMerc. The mercenary is
+# built on the commandos' skeleton, so its mesh lives in clone.ukx (not
+# trandoshan.ukx, which holds the slaver, heavy and scavenger) and its
+# everyday moves come from CloneCommandoSet, one of the sets it links to.
+package = "GameData/Animations/clone.ukx"
+mesh = "TrandoshanMerc"
+skin = "CloneTextures.TrandoshanMercTextures.TrandoshanMerc_Shader" # game: TrandoshanMercenaryDefaults Skins[0] (the mesh's own material is a grey stand-in, TrandoshanMercProxy)
+throw = "ThrowGrenade"                           # game: CloneCommandoSet's throwing animation

@@ -298,6 +298,7 @@ pub struct SquadPlugin;
 impl Plugin for SquadPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SquadOrder>()
+            .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<SquadJobDone>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
@@ -551,6 +552,14 @@ fn spawn_squad(
                 m.settings.shield_recharge_delay,
             ),
             Team::Republic,
+            // Level scripts name squad mates by their class
+            // (`MakeInvulnerable Tag=Commando62Delta`). Their own scripted
+            // walks aren't carried out yet.
+            rc_game_core::ScriptTags {
+                tag: Some(m.settings.class.clone()),
+                script: None,
+                follows_orders: false,
+            },
             Hittable::COMMANDO,
             // The original's squad damage table: droid bolts x0.15,
             // explosions x0.4, stuns x0.
@@ -625,6 +634,7 @@ fn take_orders(
     mut state: ResMut<SquadState>,
     actions: Option<Res<ActionState>>,
     mut orders: MessageReader<SquadOrder>,
+    mut from_scripts: MessageReader<rc_game_core::SquadStanceOrder>,
     player: Query<&Transform, With<Player>>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     collision: Option<Res<LevelCollision>>,
@@ -632,10 +642,22 @@ fn take_orders(
 ) {
     let (Some(squad), Ok(pt)) = (state.squad.as_mut(), player.single()) else {
         orders.clear();
+        from_scripts.clear();
         return;
     };
     let leader = leader_from(pt);
     let mut wanted: Vec<Order> = orders.read().map(|o| o.0).collect();
+    // The level's scripts give squad orders too.
+    for o in from_scripts.read() {
+        use rc_game_core::SquadStanceOrder as S;
+        let order = match *o {
+            S::FormUp => Order::FormUp,
+            S::SearchAndDestroy => Order::SearchAndDestroy,
+            S::SecurePosition(p) => Order::SecurePosition(UVec3::new(p[0], p[1], p[2])),
+        };
+        log_line(&log, format!("the level's script orders: {order}"));
+        wanted.push(order);
+    }
     if let Some(a) = actions {
         let aimed = || -> Option<(UVec3, UVec3)> { aim(&camera) };
         let spot = |eye: UVec3, dir: UVec3| {
@@ -974,6 +996,7 @@ fn count_hits(
     mut landed: MessageReader<ShotLanded>,
     mut died: MessageReader<Died>,
     mates: Query<&SquadMate>,
+    players: Query<(), With<Player>>,
     names: Query<&Name>,
     log: Option<Res<GameLog>>,
 ) {
@@ -982,10 +1005,20 @@ fn count_hits(
         let (Ok(m), Some(t)) = (mates.get(l.shooter), l.target) else {
             continue;
         };
-        if mates.contains(t) {
+        if let Ok(other) = mates.get(t) {
             log_line(
                 &log,
-                format!("t={time:.2} {} hit a squad mate by mistake", m.name),
+                format!(
+                    "t={time:.2} {} hit a squad mate ({}) by mistake",
+                    m.name, other.name
+                ),
+            );
+            continue;
+        }
+        if players.contains(t) {
+            log_line(
+                &log,
+                format!("t={time:.2} {} hit the player by mistake", m.name),
             );
             continue;
         }

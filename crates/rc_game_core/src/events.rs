@@ -51,3 +51,103 @@ pub enum FactoryOrder {
     /// `ACTION_ResetFactory`: its whole capacity is available again.
     Reset { tag: String },
 }
+
+/// What a character answers to in the level's scripts. Put it on every
+/// character's entity (squad mates, enemies; the player is found by
+/// `Player`). `tag` is the name scripts aim actions at (`PawnTag`, or a
+/// squad mate's class like `Commando62Delta`); `script` is the
+/// `ScriptedSequence` it follows (`AIScriptTag` / `AIScriptFromFactory`):
+/// that sequence's own actions act on it.
+#[derive(Component, Debug, Clone, Default)]
+pub struct ScriptTags {
+    pub tag: Option<String>,
+    pub script: Option<String>,
+    /// Its part carries out [`CharacterOrder`]s (walks it, plays its
+    /// animations). Characters without it still take what needs no part
+    /// of their own (damage, can't-be-hurt).
+    pub follows_orders: bool,
+}
+
+/// A level script's order to one character (from the level scripts part;
+/// the part that owns the character carries it out). Positions are Unreal
+/// units, angles radians (Unreal's yaw convention).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct CharacterOrder {
+    pub target: Entity,
+    pub act: CharacterAct,
+    /// The script and action it comes from. When `waits`, the script waits
+    /// for a [`CharacterOrderDone`] naming them.
+    pub script: String,
+    pub index: usize,
+    pub waits: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CharacterAct {
+    /// `ACTION_MoveToPoint`: walk (or run) to `to`; turn to `face` there
+    /// when given (`OrientToPoint`).
+    MoveTo {
+        to: [f32; 3],
+        walk: bool,
+        face: Option<f32>,
+    },
+    /// `ACTION_MoveToPlayer`: go until within `tolerance` uu of the player.
+    MoveToPlayer { tolerance: f32 },
+    /// `ACTION_TurnTowardPlayer`.
+    TurnToPlayer,
+    /// `ACTION_TeleportToPoint`: be at `to` at once, facing `yaw`.
+    Teleport { to: [f32; 3], yaw: f32 },
+    /// `ACTION_PlayAnim`: play the animation `name` from the character's
+    /// own set, looping or once.
+    PlayAnim { name: String, looping: bool },
+    /// `ACTION_WaitForAnimEnd`: done when the animation playing ends.
+    WaitForAnimEnd,
+    /// `ACTION_WaitForPlayer`: done when the player is within `distance`.
+    WaitForPlayer { distance: f32 },
+    /// `ACTION_DestroyPawn` / `ACTION_DestroyActor`: removed from the level
+    /// (not killed: no death event).
+    Remove,
+    /// `ACTION_SetHidden`.
+    Hidden(bool),
+}
+
+/// A character finished a [`CharacterOrder`] (arrived, turned, the
+/// animation ended). The level scripts carry on.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct CharacterOrderDone {
+    pub script: String,
+    pub index: usize,
+}
+
+/// A level script's squad order (`ACTION_ChangeSquadStance`), carried out
+/// by the squad part like the player's own. Unreal units.
+#[derive(Message, Debug, Clone, Copy, PartialEq)]
+pub enum SquadStanceOrder {
+    FormUp,
+    SearchAndDestroy,
+    SecurePosition([f32; 3]),
+}
+/// Leave this map for another one: a level exit was reached (a
+/// `Teleporter` with a `URL`, `ACTION_ChangeLevel`, or the end-of-campaign
+/// debriefing's `NewLevel`). Sent by the level scripts part; the save part
+/// (`rc_save`) carries the player's state over, loads `map` and saves the
+/// new map's start as a checkpoint.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct ChangeLevel {
+    /// The map, as in `GameData/Maps` (`geo_01b`).
+    pub map: String,
+    /// Where on the new map to arrive: the `Tag` of a `Teleporter` there
+    /// (`FromA`). `rc_scripts::level_url` reads both out of the map's
+    /// address (`RAS_03B.ctm#FromA`). `None`, or a name no teleporter has (`playerstart`),
+    /// means the map's player start.
+    pub portal: Option<String>,
+    /// What sent it, for the log.
+    pub by: String,
+}
+
+/// Where the player should arrive on the map being loaded: a `Teleporter`'s
+/// `Tag` (see [`ChangeLevel::portal`]). Put in by the save part before
+/// loading; the level part reads it, uses that teleporter's place as the
+/// player start if there is one, and removes it.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub struct ArrivalPortal(pub String);

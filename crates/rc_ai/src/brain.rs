@@ -89,6 +89,8 @@ pub enum Maneuver {
     ToCover(usize),
     /// At cover point `node`: crouch, stand up to fire.
     InCover(usize),
+    /// Rushing at the enemy to hit it up close.
+    Charge,
 }
 
 impl Maneuver {
@@ -100,6 +102,7 @@ impl Maneuver {
             Maneuver::Reposition => "reposition",
             Maneuver::ToCover(_) => "to cover",
             Maneuver::InCover(_) => "in cover",
+            Maneuver::Charge => "charge",
         }
     }
 }
@@ -158,6 +161,57 @@ pub enum AiEvent {
     },
     /// Couldn't make progress along a route for 2 s; gave up on it.
     Stuck,
+    /// A close-up hit (a force pike): along `direction` (length 1) from
+    /// `origin`, reaching `range` uu.
+    Melee {
+        origin: Vec3,
+        direction: Vec3,
+        range: f32,
+    },
+    /// Threw a grenade (`grenade` is its file id): it leaves the hand at
+    /// `origin` with `velocity` (uu/s), aimed to land near `aim_at`.
+    /// `left` is how many it still carries.
+    Throw {
+        grenade: String,
+        origin: Vec3,
+        velocity: Vec3,
+        aim_at: Vec3,
+        left: u32,
+    },
+    /// Finished what a level script told it to do ([`ScriptGoal`]):
+    /// arrived, turned, or the animation's time is up.
+    ScriptDone,
+    /// Leapt to a point a level script sent it to but it couldn't walk to
+    /// (`leap_speed` in its file).
+    Leapt,
+}
+
+/// What a level script has a fighter do (`ACTION_MoveToPoint`,
+/// `ACTION_TurnTowardPlayer`, ...). While it has one, the fighter does
+/// that instead of its own plans (it still looks, and shoots only once
+/// done); it sends [`AiEvent::ScriptDone`] when finished.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScriptGoal {
+    /// Walk (or run) to `to` along the path network, within `tolerance`
+    /// uu, then turn to `face` (radians) if given.
+    MoveTo {
+        to: Vec3,
+        walk: bool,
+        tolerance: f32,
+        face: Option<f32>,
+    },
+    /// Go to the target (the player) until within `tolerance` uu.
+    MoveToTarget { tolerance: f32 },
+    /// Turn to face the target.
+    TurnToTarget,
+    /// Turn to `yaw`, radians.
+    Face(f32),
+    /// Stand still until battle time `until`: a scripted animation (the
+    /// game plays it), or a pause.
+    Hold { until: f32 },
+    /// Stand until the target is within `distance` uu
+    /// (`ACTION_WaitForPlayer`).
+    WaitForTarget { distance: f32 },
 }
 
 /// One fighter.
@@ -200,10 +254,40 @@ pub struct Fighter {
     pub stunned_until: f32,
     /// Which of the battle's targets it fought last (0 is the player).
     pub target_index: Option<usize>,
+    /// Grenades it still carries.
+    pub grenades_left: u32,
+    /// No grenade before this battle time.
+    next_throw: f32,
+    /// Battle time of its last throw (for the animation).
+    pub last_throw: f32,
+    /// No close-up hit before this battle time.
+    next_melee: f32,
+    /// Battle time of its last close-up hit (for the animation).
+    pub last_melee: f32,
+    /// What a level script has it doing, if anything.
+    pub script: Option<ScriptGoal>,
+    /// A level script made it unable to be hurt (`ACTION_MakeInvulnerable`).
+    pub invulnerable: bool,
+    /// The scripted walk has been planned (a route asked for).
+    script_planned: bool,
+    /// Leaping to a scripted point it can't walk to: (from, to, battle
+    /// time it left, seconds the leap takes).
+    leap: Option<(Vec3, Vec3, f32, f32)>,
     rng: Rng,
 }
 
 const STUCK_SECONDS: f32 = 2.0;
+/// A scripted point this much higher than a character that can leap is
+/// leapt to rather than walked to, uu. Our own (a guess).
+const LEAP_CLIMB: f32 = 200.0;
+/// How high a leap arcs above its straight line, uu. Our own.
+const LEAP_ARC: f32 = 120.0;
+/// A scripted walk ends this near its point at the latest, uu (maps often
+/// give no tolerance). Our own.
+const SCRIPT_NEAR: f32 = 48.0;
+/// How far off the floor a charge's straight-line check starts, uu (about
+/// a stair step).
+const STEP_LIFT: f32 = 24.0;
 /// A new spot closer than this isn't worth walking to, uu.
 const MIN_MOVE: f32 = 150.0;
 /// After failing to find a route or spot, wait this long before trying
@@ -221,6 +305,11 @@ impl Fighter {
     ) -> Self {
         let pawn = Pawn::new(params.movement.clone(), feet);
         let home = pawn.location;
+        let grenades_left = if params.grenades.grenade.is_empty() {
+            0
+        } else {
+            params.grenades.count
+        };
         Fighter {
             id,
             burst_left: params.combat.burst_count,
@@ -247,6 +336,15 @@ impl Fighter {
             ally_in_way_since: None,
             stunned_until: f32::NEG_INFINITY,
             target_index: None,
+            grenades_left,
+            next_throw: 0.0,
+            last_throw: f32::NEG_INFINITY,
+            next_melee: 0.0,
+            last_melee: f32::NEG_INFINITY,
+            script: None,
+            invulnerable: false,
+            script_planned: false,
+            leap: None,
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -279,6 +377,14 @@ impl Fighter {
     pub fn on_damaged(&mut self, from: Option<Vec3>, time: f32, events: &mut Vec<AiEvent>) {
         if self.mode == Mode::Dead {
             return;
+        }
+        // Standing about for a script (an animation, waiting for the
+        // player) ends when it's hurt: it fights. A scripted walk goes on.
+        if matches!(
+            self.script,
+            Some(ScriptGoal::Hold { .. } | ScriptGoal::WaitForTarget { .. })
+        ) {
+            self.script_done(events);
         }
         if let Some(p) = from {
             if self.last_seen_at.is_none() || time - self.last_seen_time > 1.0 {
@@ -444,6 +550,12 @@ impl Fighter {
             events.push(AiEvent::LostSight);
         }
 
+        // A level script's order comes first.
+        if let Some(goal) = self.script.clone() {
+            self.script_tick(dt, view, goal, &mut events);
+            return events;
+        }
+
         // 2. Decide.
         match self.mode {
             Mode::Alerted if now - self.alerted_at >= senses.reaction_time => {
@@ -466,6 +578,18 @@ impl Fighter {
                 self.set_mode(Mode::Idle, &mut events);
             }
             _ => {}
+        }
+
+        // Charging and now within reach: stop and hit.
+        if self.maneuver == Maneuver::Charge {
+            if let Some(t) = saw {
+                if (t.centre - self.pawn.location).length_2d()
+                    <= self.params.combat.melee_range * 0.7
+                {
+                    self.follower = None;
+                    self.set_maneuver(Maneuver::Hold, now, &mut events);
+                }
+            }
         }
 
         // 3. Turn and move.
@@ -507,13 +631,208 @@ impl Fighter {
         input.crouch = self.crouch;
         self.pawn.step(dt, &input, view.world);
 
-        // 4. Shoot.
+        // 4. Shoot, or hit up close.
         if self.mode == Mode::Attack {
             if let (Some(t), true) = (saw, self.enemy_seen_now) {
-                self.shoot(view.world, view.allies, now, &t, &mut events);
+                if !self.melee(view.world, now, &t, &mut events)
+                    && !self.params.combat.weapon.is_empty()
+                {
+                    self.shoot(view.world, view.allies, now, &t, &mut events);
+                }
             }
         }
         events
+    }
+
+    /// A level script gives it something to do (replacing any earlier
+    /// order). It drops its own plans.
+    pub fn follow_script(&mut self, goal: ScriptGoal) {
+        self.script = Some(goal);
+        self.script_planned = false;
+        self.leap = None;
+        self.follower = None;
+        self.crouch = false;
+    }
+
+    /// Be at `centre` (the middle of its body) at once, facing `yaw`
+    /// (`ACTION_TeleportToPoint`). It falls to the floor from there.
+    pub fn teleport(&mut self, centre: Vec3, yaw: f32) {
+        self.pawn.location = centre;
+        self.pawn.velocity = Vec3::ZERO;
+        self.pawn.mode = rc_movement::Mode::Falling;
+        self.facing = yaw;
+        self.follower = None;
+        self.script_planned = false;
+        self.leap = None;
+    }
+
+    /// Drop the script's order (the script moved on, or was stopped).
+    pub fn stop_script(&mut self) {
+        if self.script.take().is_some() {
+            self.follower = None;
+            self.leap = None;
+        }
+    }
+
+    fn script_done(&mut self, events: &mut Vec<AiEvent>) {
+        self.script = None;
+        self.follower = None;
+        events.push(AiEvent::ScriptDone);
+    }
+
+    fn start_leap(&mut self, from: Vec3, to: Vec3, now: f32) {
+        let secs = ((to - from).length() / self.params.combat.leap_speed).max(0.3);
+        self.leap = Some((from, to, now, secs));
+        self.follower = None;
+    }
+
+    /// One frame of following a level script's order.
+    fn script_tick(&mut self, dt: f32, view: &View, goal: ScriptGoal, events: &mut Vec<AiEvent>) {
+        let now = view.time;
+        let mut input = MoveInput::default();
+        let mut want_yaw = self.facing;
+        let here = self.pawn.location;
+        // Where to walk, how near is near enough, and what to face after.
+        let walk = match &goal {
+            ScriptGoal::MoveTo {
+                to,
+                walk,
+                tolerance,
+                face,
+            } => Some((*to, *walk, *tolerance, *face)),
+            ScriptGoal::MoveToTarget { tolerance } => {
+                view.target.map(|t| (t.centre, false, *tolerance, None))
+            }
+            _ => None,
+        };
+        match &goal {
+            ScriptGoal::MoveTo { .. } | ScriptGoal::MoveToTarget { .. } => {
+                let Some((to, walking, tolerance, face)) = walk else {
+                    // No target to go to: nothing to do.
+                    self.script_done(events);
+                    return;
+                };
+                if let Some((from, end, left, secs)) = self.leap {
+                    // Flying there: a straight line with a little arc,
+                    // through anything in the way. Stands in for the
+                    // original's flying, which isn't done.
+                    let k = ((now - left) / secs).clamp(0.0, 1.0);
+                    let lift = (k * std::f32::consts::PI).sin() * LEAP_ARC;
+                    self.pawn.location = from + (end - from) * k + Vec3::new(0.0, 0.0, lift);
+                    self.pawn.velocity = Vec3::ZERO;
+                    self.facing = rc_nav::steer::yaw_towards(from, end);
+                    if k >= 1.0 {
+                        self.leap = None;
+                        self.pawn.mode = rc_movement::Mode::Falling;
+                        self.follower = None;
+                        self.distance_walked += (end - from).length();
+                        events.push(AiEvent::Leapt);
+                        match face {
+                            Some(y) => self.script = Some(ScriptGoal::Face(y)),
+                            None => self.script_done(events),
+                        }
+                    }
+                    return;
+                }
+                if (to - here).length_2d() <= tolerance.max(SCRIPT_NEAR) {
+                    self.distance_walked += self.follower.as_ref().map_or(0.0, |f| f.travelled);
+                    match face {
+                        Some(y) => {
+                            self.follower = None;
+                            self.script = Some(ScriptGoal::Face(y));
+                        }
+                        None => self.script_done(events),
+                    }
+                    return;
+                }
+                // Going after the player: plan again when they've moved.
+                let stale = matches!(goal, ScriptGoal::MoveToTarget { .. })
+                    && self
+                        .destination()
+                        .is_some_and(|d| (d - to).length_2d() > tolerance.max(128.0));
+                let leaps = self.params.combat.leap_speed > 0.0;
+                // A point well above it: the original flies up there.
+                if leaps && !self.script_planned && to.z - here.z > LEAP_CLIMB {
+                    self.start_leap(here, to, now);
+                    return;
+                }
+                if !self.script_planned || stale {
+                    self.script_planned = true;
+                    if !self.walk_to(view, to, events) {
+                        // No route on the path network: straight there.
+                        self.follower = Some(PathFollower::new(vec![to]));
+                    }
+                    if let Some(f) = self.follower.as_mut() {
+                        f.walk = walking;
+                    }
+                }
+                match self
+                    .follower
+                    .as_mut()
+                    .map(|f| (f.update(&self.pawn, dt), f.stuck_time))
+                {
+                    Some((Some(mut i), stuck)) => {
+                        want_yaw = i.yaw;
+                        let off = angle_diff(want_yaw, self.facing).abs();
+                        i.forward = (1.0 - off / std::f32::consts::FRAC_PI_2).clamp(0.0, 1.0);
+                        i.walk = walking;
+                        i.yaw = self.facing;
+                        input = i;
+                        if stuck > STUCK_SECONDS {
+                            events.push(AiEvent::Stuck);
+                            if leaps {
+                                self.start_leap(here, to, now);
+                            } else {
+                                self.script_done(events);
+                            }
+                        }
+                    }
+                    Some((None, _)) | None => {
+                        // End of the route, but not near enough: the
+                        // route ends at the nearest node. Go straight on.
+                        self.follower = Some(PathFollower::new(vec![to]));
+                        if let Some(f) = self.follower.as_mut() {
+                            f.walk = walking;
+                        }
+                    }
+                }
+            }
+            ScriptGoal::TurnToTarget | ScriptGoal::Face(_) => {
+                let y = match goal {
+                    ScriptGoal::Face(y) => Some(y),
+                    _ => view
+                        .target
+                        .map(|t| rc_nav::steer::yaw_towards(here, t.centre)),
+                };
+                match y {
+                    Some(y) if angle_diff(y, self.facing).abs() > 0.05 => want_yaw = y,
+                    _ => {
+                        self.script_done(events);
+                        return;
+                    }
+                }
+            }
+            ScriptGoal::Hold { until } => {
+                if now >= *until {
+                    self.script_done(events);
+                    return;
+                }
+            }
+            ScriptGoal::WaitForTarget { distance } => {
+                if view
+                    .target
+                    .is_some_and(|t| (t.centre - here).length() <= *distance)
+                {
+                    self.script_done(events);
+                    return;
+                }
+            }
+        }
+        let max_turn = self.params.senses.turn_rate.to_radians() * dt;
+        self.facing =
+            wrap(self.facing + angle_diff(want_yaw, self.facing).clamp(-max_turn, max_turn));
+        input.yaw = self.facing;
+        self.pawn.step(dt, &input, view.world);
     }
 
     /// Reached the end of a route.
@@ -583,6 +902,29 @@ impl Fighter {
             self.follower = None;
             self.set_maneuver(Maneuver::Hold, now, events);
             return;
+        }
+        // A grenade, now and then, at an enemy it knows the place of.
+        if self.try_grenade(view, enemy, events) {
+            return;
+        }
+        // A melee fighter rushes in when the enemy is close enough (always,
+        // if it has no gun), following it as it moves.
+        if c.melee_range > 0.0
+            && now - self.last_seen_time < 1.0
+            && (c.weapon.is_empty() || dist <= c.lunge_distance)
+        {
+            if dist <= c.melee_range * 0.7 {
+                self.follower = None;
+                self.set_maneuver(Maneuver::Hold, now, events);
+            } else if self.charge(view, enemy, events) {
+                self.set_maneuver(Maneuver::Charge, now, events);
+            }
+            return;
+        }
+        if self.maneuver == Maneuver::Charge {
+            // Lost it: stop rushing.
+            self.follower = None;
+            self.set_maneuver(Maneuver::Hold, now, events);
         }
         // Walking somewhere for a clear shot, and now it has one: stop and
         // shoot.
@@ -666,6 +1008,128 @@ impl Fighter {
             }
         }
         self.set_maneuver(Maneuver::Hold, now, events);
+    }
+
+    /// Maybe throw a grenade at the enemy last seen at `enemy`. **Our
+    /// rules** (the original decides in its compiled engine; the numbers
+    /// are its `GrenadeProbability`, `MinGrenadeTime` and the grenade's
+    /// `ValidRange`): it must carry one, its last throw must be
+    /// `min_time` ago, it must have seen the enemy within `seen_within`
+    /// seconds, between `min_range` and `max_range` away, and no friend
+    /// may stand where the grenade will land. Then it throws with chance
+    /// `probability`, if it finds an arc the level doesn't block.
+    fn try_grenade(&mut self, view: &View, enemy: Vec3, events: &mut Vec<AiEvent>) -> bool {
+        let g = self.params.grenades.clone();
+        let now = view.time;
+        if self.grenades_left == 0 || g.grenade.is_empty() || now < self.next_throw {
+            return false;
+        }
+        if now - self.last_seen_time > g.seen_within {
+            return false;
+        }
+        let dist = (enemy - self.pawn.location).length_2d();
+        if dist < g.min_range || dist > g.max_range {
+            return false;
+        }
+        // Aim at the floor by the enemy: `enemy` is the middle of its body.
+        let aim_at = enemy - Vec3::new(0.0, 0.0, 60.0);
+        let me = self.pawn.location;
+        if view
+            .allies
+            .iter()
+            .any(|&p| (p - me).length() >= 1.0 && (p - aim_at).length_2d() < g.radius + 50.0)
+        {
+            return false;
+        }
+        if self.rng.unit() >= g.probability {
+            return false;
+        }
+        let (fwd, right) = rc_movement::axes(self.facing);
+        let origin = self.eye() - Vec3::new(0.0, 0.0, 10.0) + fwd * 30.0 + right * 10.0;
+        // A little aim error, as with its shots.
+        let c = &self.params.combat;
+        let miss = (1.0 - c.accuracy).clamp(0.0, 1.0) * c.max_aim_error;
+        let spread = dist * miss.to_radians().tan();
+        let spin = self.rng.unit() * std::f32::consts::TAU;
+        let r = spread * self.rng.unit().sqrt();
+        let aim_at = aim_at + Vec3::new(r * spin.cos(), r * spin.sin(), 0.0);
+        let Some(velocity) = throw_arc(view.world, origin, aim_at, g.speed, g.gravity) else {
+            // Blocked or too far: try again later rather than every decision.
+            self.next_throw = now + RETRY_AFTER;
+            return false;
+        };
+        self.grenades_left -= 1;
+        self.next_throw = now + g.min_time;
+        self.last_throw = now;
+        // Busy throwing: no shots for a moment.
+        self.next_shot = self.next_shot.max(now + g.throw_time);
+        self.burst_left = c.burst_count;
+        events.push(AiEvent::Throw {
+            grenade: g.grenade.clone(),
+            origin,
+            velocity,
+            aim_at,
+            left: self.grenades_left,
+        });
+        true
+    }
+
+    /// Head straight at the enemy if nothing is in the way, else along
+    /// the paths. Re-planned at every decision, since the enemy moves.
+    fn charge(&mut self, view: &View, enemy: Vec3, events: &mut Vec<AiEvent>) -> bool {
+        let here = self.pawn.location;
+        let goal = Vec3::new(enemy.x, enemy.y, here.z);
+        // The body, lifted off the floor by a step's height (so standing on
+        // the floor, or a small step, doesn't count as in the way).
+        let lift = Vec3::new(0.0, 0.0, STEP_LIFT);
+        let e = self.pawn.extent();
+        let body = Vec3::new(e.x, e.y, (e.z - STEP_LIFT / 2.0).max(1.0));
+        let up = lift * 0.5;
+        if view.world.sweep(body, here + up, goal + up).is_none() {
+            self.follower = Some(PathFollower::new(vec![goal]));
+            return true;
+        }
+        self.walk_to(view, enemy, events)
+    }
+
+    /// A close-up hit, if it has a melee weapon, the target is within
+    /// reach and in front of it, nothing is in the way, and the last hit
+    /// was `melee_delay` ago. **Our rule** (the original's is compiled):
+    /// the reach is measured between the two bodies' centres.
+    fn melee(
+        &mut self,
+        world: &dyn World,
+        now: f32,
+        t: &Target,
+        events: &mut Vec<AiEvent>,
+    ) -> bool {
+        let c = &self.params.combat;
+        if c.melee_range <= 0.0 {
+            return false;
+        }
+        let to = t.centre - self.pawn.location;
+        if to.length_2d() > c.melee_range {
+            return false;
+        }
+        let off = angle_diff(to.y.atan2(to.x), self.facing).abs().to_degrees();
+        if off > 30.0 {
+            return true; // turning to face it: no shooting meanwhile
+        }
+        if now < self.next_melee {
+            return true;
+        }
+        let origin = self.pawn.location + Vec3::new(0.0, 0.0, 20.0);
+        if !clear_line(world, origin, t.centre) {
+            return false;
+        }
+        self.next_melee = now + c.melee_delay;
+        self.last_melee = now;
+        events.push(AiEvent::Melee {
+            origin,
+            direction: (t.centre - origin).normalize_or_zero(),
+            range: c.melee_range,
+        });
+        true
     }
 
     fn destination_far_enough(&self) -> bool {
@@ -829,6 +1293,58 @@ pub fn ally_in_line(a: Vec3, b: Vec3, allies: &[Vec3], me: Vec3) -> bool {
         let closest = a + d * t;
         let off = p - closest;
         (off.x * off.x + off.y * off.y).sqrt() < ALLY_CLEARANCE && off.z.abs() < 90.0
+    })
+}
+
+/// The starting velocity for a throw from `from` that lands at `to`, with
+/// `gravity` pulling down (uu/s²) and at most `max_speed` (uu/s), whose
+/// path the level doesn't block (`None` if there is none). **Our choice**:
+/// it tries the gentlest lob first (the slowest throw that reaches,
+/// which comes down steeply and rolls on little), then the flattest arc at
+/// full speed (for under a low ceiling).
+pub fn throw_arc(
+    world: &dyn World,
+    from: Vec3,
+    to: Vec3,
+    max_speed: f32,
+    gravity: f32,
+) -> Option<Vec3> {
+    let d = to - from;
+    let flat = d.length_2d();
+    if flat < 1.0 || gravity <= 0.0 {
+        return None;
+    }
+    let dir = d.flat() * (1.0 / flat);
+    let h = d.z;
+    let mut arcs = Vec::new();
+    // Slowest throw: speed² = g (h + r), at tan(angle) = (h + r) / flat.
+    let r = d.length();
+    let v = (gravity * (h + r)).sqrt();
+    if v <= max_speed {
+        arcs.push((v, ((h + r) / flat).atan()));
+    }
+    // Flattest arc at full speed.
+    let v = max_speed;
+    let disc = v.powi(4) - gravity * (gravity * flat * flat + 2.0 * h * v * v);
+    if disc >= 0.0 {
+        arcs.push((v, ((v * v - disc.sqrt()) / (gravity * flat)).atan()));
+    }
+    arcs.into_iter().find_map(|(speed, angle)| {
+        let vel = dir * (speed * angle.cos()) + Vec3::UP * (speed * angle.sin());
+        arc_clear(world, from, vel, gravity, flat / (speed * angle.cos())).then_some(vel)
+    })
+}
+
+/// Does the level leave the arc from `from` at `vel` clear for the first
+/// 90% of its `flight_time` (the end lands on the floor, so isn't checked)?
+fn arc_clear(world: &dyn World, from: Vec3, vel: Vec3, gravity: f32, flight_time: f32) -> bool {
+    const PIECES: usize = 12;
+    let at = |t: f32| from + vel * t - Vec3::new(0.0, 0.0, 0.5 * gravity * t * t);
+    let end = flight_time * 0.9;
+    (0..PIECES).all(|i| {
+        let t0 = end * i as f32 / PIECES as f32;
+        let t1 = end * (i + 1) as f32 / PIECES as f32;
+        clear_line(world, at(t0), at(t1))
     })
 }
 

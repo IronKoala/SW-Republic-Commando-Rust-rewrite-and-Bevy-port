@@ -28,7 +28,7 @@
 use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 use rc_game_core::{
-    CurrentLevel, GameLog, GamePaths, GameState, LevelCollision, LoadingGate, PlayerCamera,
+    ArrivalPortal, CurrentLevel, GameLog, GamePaths, GameState, LevelCollision, LoadingGate, PlayerCamera,
     PlayerStart,
 };
 use rc_level_viewer::draw::{self, BACKGROUND};
@@ -263,12 +263,13 @@ fn load(world: &mut World) {
     };
     let load_ms = t.elapsed().as_secs_f64() * 1000.0;
     log.line(format!(
-        "{PART}: {} loaded: {} collision triangles, {} props ({} with their class's model, {} unreadable), {} blocking volumes ({} unreadable), {:.0} ms",
+        "{PART}: {} loaded: {} collision triangles, {} solid props ({} with their class's model, {} unreadable, {} you can walk through left out), {} blocking volumes ({} unreadable), {:.0} ms",
         path.display(),
         lvl.triangles.len(),
         lvl.mesh_actors,
         lvl.class_mesh_actors,
         lvl.mesh_failures,
+        lvl.not_solid_props,
         lvl.blocking_volumes,
         lvl.volume_failures,
         load_ms
@@ -286,7 +287,23 @@ fn load(world: &mut World) {
     };
     let v = |p: [f32; 3]| Vec3::new(p[0], p[1], p[2]);
     let tw = TriangleWorld::new(lvl.triangles.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect());
-    let (feet, yaw) = match lvl.start {
+    // Coming from another map's exit: arrive at the teleporter it names,
+    // if this map has one (`#playerstart` and the like mean the start).
+    let portal = world.remove_resource::<ArrivalPortal>();
+    let arrival = portal.as_ref().and_then(|p| {
+        let found = lvl.arrival(&p.0);
+        log.line(format!(
+            "{PART}: arriving through {:?}: {}",
+            p.0,
+            if found.is_some() {
+                "a teleporter with that tag"
+            } else {
+                "no teleporter has that tag; the player start"
+            }
+        ));
+        found
+    });
+    let (feet, yaw) = match arrival.or(lvl.start) {
         Some((f, yaw)) => (v(f), yaw),
         None => {
             let (lo, hi) = tw.bounds();
@@ -336,8 +353,8 @@ fn load(world: &mut World) {
                 let bg = Color::srgb_u8(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]);
                 let mut commands = world.commands();
                 let cam = sky::spawn_sky_camera(&mut commands, s, bg);
-                // Under the player's camera (order 0) and the menus' and
-                // display's camera (order 1).
+                // Under the player's camera (order 0), the first-person
+                // arms' (1) and the menus' and display's camera (2).
                 commands.entity(cam).insert(Camera {
                     order: -1,
                     clear_color: ClearColorConfig::Custom(bg),

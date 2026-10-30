@@ -15,10 +15,16 @@
 //! droids are fighting. Each droid is the game's animated `BattleDroid`
 //! mesh, posed on the CPU every frame.
 //!
+//! Level scripts can take a character over (`scripted.rs`): walk it
+//! somewhere, turn it to the player, play one of its own animations,
+//! teleport, hide or remove it, as `rc_game_core::CharacterOrder`s from
+//! the level scripts part, which waits for `CharacterOrderDone`.
+//!
 //! Everything it does is logged to the game log with the prefix `enemies:`.
 
 pub mod look;
 pub mod save;
+pub mod scripted;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -28,14 +34,14 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
-    Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, Health, Hittable,
-    ShotLanded, Stunned, Team,
+    Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
+    Hittable, MeleeAttack, ShotLanded, Stunned, Team, ThrowGrenade,
 };
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, CurrentLevel, FactoryOrder, GameLog, GamePaths, GameSet, GameState, LevelCollision,
-    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent,
+    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
 };
 use rc_nav::NavGraph;
 use rc_package::Package;
@@ -47,6 +53,9 @@ const PART: &str = "enemies";
 const SUMMARY_EVERY: f32 = 5.0;
 /// A droid counts as "just fired" (for its animation) this long, seconds.
 const FIRE_POSE_TIME: f32 = 0.35;
+/// A close-up hit plays its animation this long at most, seconds (the
+/// Geonosian warrior's `MeleeAttack` is 48 frames at 30 a second).
+const MELEE_POSE_TIME: f32 = 1.6;
 
 pub struct EnemiesPlugin;
 
@@ -58,11 +67,13 @@ impl Plugin for EnemiesPlugin {
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
             .add_message::<FactoryOrder>()
+            .add_message::<rc_game_core::CharacterOrder>()
+            .add_message::<rc_game_core::CharacterOrderDone>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
                 Update,
-                (hear_level, think, place_droids)
+                (hear_level, scripted::follow_orders, think, place_droids)
                     .chain()
                     .in_set(GameSet::Simulate)
                     .before(CombatSet::Fire)
@@ -103,6 +114,11 @@ pub struct Fight {
     /// What the level's events did to the spawners, handled with the
     /// battle's own events on the next step.
     pub queued: Vec<BattleEvent>,
+    /// Level scripts waiting for a droid to finish an order: by droid id,
+    /// the script and action.
+    pub script_waits: HashMap<u32, (String, usize)>,
+    /// Droids that finished a script's order this frame.
+    pub script_done: Vec<u32>,
 }
 
 /// Counts for the log and for tests.
@@ -122,6 +138,14 @@ pub struct FightStats {
     pub bolts_on_droids: u32,
     pub bolts_on_level: u32,
     pub bolts_nowhere: u32,
+    /// Grenades enemies threw.
+    pub grenades_thrown: u32,
+    /// Close-up hits enemies swung (force pikes), hit or miss.
+    pub melee_swings: u32,
+    /// What level scripts had enemies do, in order, for the log and the
+    /// self-tests: `walk ID TO`, `anim ID NAME SECONDS`, `no anim ID
+    /// NAME`, `done ID SCRIPT#INDEX at X Y Z`, `removed ID`, ...
+    pub scripted: Vec<String>,
 }
 
 impl Fight {
@@ -134,6 +158,8 @@ impl Fight {
             restored: Vec::new(),
             restored_health: HashMap::new(),
             queued: Vec::new(),
+            script_waits: HashMap::new(),
+            script_done: Vec::new(),
         }
     }
 }
@@ -149,9 +175,14 @@ pub struct Droid {
     pub frame: f32,
     /// Smooths the change from one animation to the next.
     pub blend: rc_anim::Crossfade,
+    /// A level script's animation was shown last frame.
+    showing_script: bool,
     /// Battle time of its last shot.
     last_fire: f32,
     mesh: Option<Handle<Mesh>>,
+    /// An animation a level script is playing on it, in place of the one
+    /// its moves choose.
+    pub scripted: Option<scripted::ScriptedAnim>,
 }
 
 /// Each enemy type's mesh, read once from the game and kept between maps.
@@ -272,6 +303,9 @@ fn enemy_types(paths: &GamePaths, log: &GameLog) -> Vec<Arc<AiParams>> {
         match read {
             Ok(mut p) => {
                 p.kind.id = id;
+                if !p.grenades.grenade.is_empty() {
+                    aim_with_grenade_file(&mut p, paths, log);
+                }
                 log.line(format!(
                     "{PART}: enemy type {} ({}, {}) for classes {:?} from {}: health {}, speed {}, weapon {}, accuracy {}, cover {}",
                     p.kind.id,
@@ -301,6 +335,35 @@ fn enemy_types(paths: &GamePaths, log: &GameLog) -> Vec<Arc<AiParams>> {
     }
     out.sort_by_key(|p| p.kind.id != "battle_droid");
     out
+}
+
+/// An enemy aims its throws with its grenade's own flight numbers (speed,
+/// gravity, blast radius), read from `grenades/<id>.toml` in the data
+/// folders (a mod's file first). If the file can't be read, it keeps the
+/// values in its own `[grenades]` section and the log says so.
+fn aim_with_grenade_file(p: &mut AiParams, paths: &GamePaths, log: &GameLog) {
+    let id = p.grenades.grenade.clone();
+    let file = paths.data_dirs.iter().find_map(|dir| {
+        let f = GamePaths::new(dir.clone(), vec![])
+            .game_file("grenades")
+            .join(format!("{id}.toml"));
+        std::fs::read_to_string(&f).ok()
+    });
+    match file.map(|t| GrenadeParams::from_text(&id, &t)) {
+        Some(Ok(g)) => {
+            p.grenades.speed = g.speed;
+            p.grenades.gravity = g.gravity;
+            p.grenades.radius = g.radius;
+        }
+        Some(Err(e)) => log.line(format!(
+            "{PART}: {}: grenades/{id}.toml: {e}; aiming with the [grenades] values",
+            p.kind.id
+        )),
+        None => log.line(format!(
+            "{PART}: {}: no grenades/{id}.toml; aiming with the [grenades] values",
+            p.kind.id
+        )),
+    }
 }
 
 /// Read the map's spawners and paths. A map that can't be read gives no
@@ -547,7 +610,7 @@ fn end_fight(
 fn summary(f: &Fight, log: &GameLog) {
     let s = &f.stats;
     log.line(format!(
-        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hit the player for {:.0} damage ({} hit other droids, {} the level, {} nothing); droids hurt {} times; first spotted at {}",
+        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hits on the player for {:.0} damage ({} bolts hit other droids, {} the level, {} nothing); {} grenades thrown, {} melee swings; droids hurt {} times; first spotted at {}",
         f.battle.time,
         f.battle.alive().count(),
         s.spawned,
@@ -558,6 +621,8 @@ fn summary(f: &Fight, log: &GameLog) {
         s.bolts_on_droids,
         s.bolts_on_level,
         s.bolts_nowhere,
+        s.grenades_thrown,
+        s.melee_swings,
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
@@ -593,7 +658,12 @@ fn think(
     camera: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
     allies: Query<(&Transform, &Hittable, &Team), (Without<Player>, Without<Dead>, Without<Droid>)>,
     mut droids: Query<&mut Droid>,
-    mut fire: MessageWriter<FireShot>,
+    // One tuple: Bevy takes at most 16 inputs per system.
+    (mut fire, mut throws, mut melee): (
+        MessageWriter<FireShot>,
+        MessageWriter<ThrowGrenade>,
+        MessageWriter<MeleeAttack>,
+    ),
     mut mood: ResMut<MusicMood>,
     looks: Res<Looks>,
     mut sounds: ResMut<EnemySounds>,
@@ -698,8 +768,10 @@ fn think(
                         pose: Pose::Idle,
                         frame: 0.0,
                         blend: rc_anim::Crossfade::default(),
+                        showing_script: false,
                         last_fire: f32::NEG_INFINITY,
                         mesh: mesh.clone(),
+                        scripted: None,
                     },
                     match fight.restored_health.remove(&id) {
                         Some(h) => Health {
@@ -727,6 +799,14 @@ fn think(
                 if !p.combat.damage_table.is_empty() {
                     e.insert(DamageTable(p.combat.damage_table.clone()));
                 }
+                // What the level's scripts call it, and the script it
+                // follows.
+                let o = fight.battle.offspring(id).unwrap_or_default();
+                e.insert(ScriptTags {
+                    tag: o.tag,
+                    script: o.script,
+                    follows_orders: true,
+                });
                 if let (Some(mesh), Some(material)) = (mesh, tl.and_then(|t| t.material.as_ref())) {
                     // The points move every frame, so Bevy's stored outline
                     // would be wrong: don't let it skip drawing by it.
@@ -776,6 +856,58 @@ fn think(
                                 ),
                         });
                     }
+                    AiEvent::Throw {
+                        grenade,
+                        origin,
+                        velocity,
+                        aim_at,
+                        left,
+                    } => {
+                        fight.stats.grenades_thrown += 1;
+                        let from = fight
+                            .battle
+                            .fighters
+                            .iter()
+                            .find(|f| f.id == id)
+                            .map_or(origin, |f| f.pawn.location);
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} threw {grenade} at {:.0} uu/s toward ({:.0}, {:.0}, {:.0}), {:.0} uu away ({left} left)",
+                            velocity.length(),
+                            aim_at.x,
+                            aim_at.y,
+                            aim_at.z,
+                            (aim_at - from).length_2d()
+                        ));
+                        throws.write(ThrowGrenade {
+                            thrower: entity,
+                            origin: to_bevy(origin),
+                            velocity: to_bevy(velocity),
+                            grenade,
+                        });
+                    }
+                    AiEvent::Melee {
+                        origin,
+                        direction,
+                        range,
+                    } => {
+                        fight.stats.melee_swings += 1;
+                        let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) else {
+                            continue;
+                        };
+                        let c = &f.params.combat;
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} swings at the enemy ({range:.0} uu reach, {} {})",
+                            c.melee_damage, c.melee_damage_type
+                        ));
+                        melee.write(MeleeAttack {
+                            attacker: entity,
+                            origin: to_bevy(origin),
+                            direction: to_bevy(direction).normalize_or_zero(),
+                            range,
+                            damage: c.melee_damage,
+                            damage_type: c.melee_damage_type.clone(),
+                        });
+                    }
                     AiEvent::Spotted { distance } => {
                         fight.stats.first_spotted.get_or_insert(now);
                         if let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) {
@@ -802,6 +934,18 @@ fn think(
                     AiEvent::Route { nodes, length } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: route of {nodes} nodes, {length:.0} uu"
                     )),
+                    AiEvent::ScriptDone => {
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} finished the script's order"
+                        ));
+                        fight.script_done.push(id);
+                    }
+                    AiEvent::Leapt => {
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} leapt to the script's point"
+                        ));
+                        fight.stats.scripted.push(format!("leapt {id}"));
+                    }
                     other => log.line(format!("{PART}: t={now:.1}s droid {id}: {other:?}")),
                 }
             }
@@ -1012,9 +1156,15 @@ fn react_to_combat(
 }
 
 /// Which animation a droid should be playing.
-fn choose_pose(f: &rc_ai::Fighter, just_fired: bool) -> Pose {
+fn choose_pose(f: &rc_ai::Fighter, just_fired: bool, now: f32) -> Pose {
     if f.mode == Mode::Dead {
         return Pose::Death;
+    }
+    if now - f.last_throw < f.params.grenades.throw_time {
+        return Pose::Throw;
+    }
+    if now - f.last_melee < f.params.combat.melee_delay.min(MELEE_POSE_TIME) {
+        return Pose::Melee;
     }
     let v = f.pawn.velocity;
     let speed = (v.x * v.x + v.y * v.y).sqrt();
@@ -1067,8 +1217,43 @@ fn animate(
         let Ok(mut d) = droids.get_mut(e) else {
             continue;
         };
-        let pose = choose_pose(f, now - d.last_fire < FIRE_POSE_TIME);
-        if pose != d.pose {
+        let d = &mut *d;
+        // A level script's animation, while the script holds it still.
+        if d.scripted.is_some() {
+            let holding = matches!(f.script, Some(rc_ai::ScriptGoal::Hold { .. }));
+            if !holding || f.mode == Mode::Dead {
+                d.scripted = None;
+                d.frame = 0.0;
+            }
+        }
+        if let Some(sa) = d.scripted.as_mut() {
+            sa.advance(dt);
+            // Blend into the script's animation as into any other.
+            if d.showing_script {
+                d.blend.advance(dt);
+            } else {
+                d.showing_script = true;
+                d.blend.start(f.params.look.blend_time);
+            }
+            let (Some(look), Some(handle), Some(meshes)) = (
+                looks.by_type.get(&d.kind).map(|t| &t.look),
+                &d.mesh,
+                meshes.as_mut(),
+            ) else {
+                continue;
+            };
+            let target = look.local_clip(&sa.clip, sa.frame);
+            let points = look.posed_local(d.blend.apply(target));
+            let (pos, normals) = look.wedge_attributes(&points);
+            if let Some(mut m) = meshes.get_mut(handle) {
+                m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+                m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            }
+            continue;
+        }
+        let pose = choose_pose(f, now - d.last_fire < FIRE_POSE_TIME, now);
+        if pose != d.pose || d.showing_script {
+            d.showing_script = false;
             d.pose = pose;
             d.frame = 0.0;
             d.blend.start(pose.blend_time(&f.params.look));

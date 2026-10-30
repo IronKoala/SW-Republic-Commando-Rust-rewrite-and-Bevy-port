@@ -492,6 +492,10 @@ fn main() {
                     AiEvent::Route { .. } => "routes",
                     AiEvent::NoRoute => "no route",
                     AiEvent::Stuck => "stuck",
+                    AiEvent::Throw { .. } => "grenades thrown",
+                    AiEvent::Melee { .. } => "melee hits",
+                    AiEvent::ScriptDone => "script orders done",
+                    AiEvent::Leapt => "scripted leaps",
                 })
                 .or_default() += 1;
         }

@@ -1,6 +1,8 @@
 //! Applying damage, recharging shields, and the player's health readout.
 
-use crate::health::{take_damage, Damage, Dead, Died, Difficulty, Health, Shield};
+use crate::health::{
+    take_damage, CannotDie, Damage, Dead, Died, Difficulty, Health, Invulnerable, Shield,
+};
 use bevy::prelude::*;
 use rc_game_core::{GameLog, Player, PlayerVitals};
 
@@ -9,17 +11,26 @@ use rc_game_core::{GameLog, Player, PlayerVitals};
 pub(crate) fn apply_damage(
     mut commands: Commands,
     mut hurt: MessageReader<Damage>,
-    mut targets: Query<(&mut Health, Option<&mut Shield>, Has<Player>, Has<Dead>)>,
+    mut targets: Query<(
+        &mut Health,
+        Option<&mut Shield>,
+        Has<Player>,
+        Has<Dead>,
+        Has<Invulnerable>,
+        Has<CannotDie>,
+    )>,
     names: Query<&Name>,
     difficulty: Res<Difficulty>,
     mut died: MessageWriter<Died>,
     log: Option<Res<GameLog>>,
 ) {
     for d in hurt.read() {
-        let Ok((mut health, shield, is_player, dead)) = targets.get_mut(d.target) else {
+        let Ok((mut health, shield, is_player, dead, invulnerable, cannot_die)) =
+            targets.get_mut(d.target)
+        else {
             continue;
         };
-        if dead {
+        if dead || invulnerable {
             continue;
         }
         let amount = if is_player {
@@ -28,13 +39,29 @@ pub(crate) fn apply_damage(
             d.amount
         };
         let mut shield = shield;
-        let taken = take_damage(&mut health, shield.as_deref_mut(), amount);
+        let mut taken = take_damage(&mut health, shield.as_deref_mut(), amount);
+        if cannot_die && taken.killed {
+            health.current = 1.0;
+            taken.killed = false;
+        }
         let who = names
             .get(d.target)
             .map_or_else(|_| format!("{:?}", d.target), |n| n.to_string());
+        // Who did it, so a health drop can be traced from the log alone.
+        // No instigator means a level script, a fall or the like.
+        let from = match d.instigator {
+            Some(e) if e == d.target => " from itself".to_string(),
+            Some(e) => format!(
+                " from {}",
+                names
+                    .get(e)
+                    .map_or_else(|_| format!("{e:?}"), |n| n.to_string())
+            ),
+            None => " from no one (script, fall or level)".to_string(),
+        };
         let line =
             format!(
-            "combat: {who} took {amount} {:?} damage (shield {}, health {}), health now {}/{}{}",
+            "combat: {who} took {amount} {:?} damage{from} (shield {}, health {}), health now {}/{}{}",
             d.kind,
             taken.to_shield,
             taken.to_health,
