@@ -336,8 +336,8 @@ fn load(world: &mut World) {
                 let bg = Color::srgb_u8(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]);
                 let mut commands = world.commands();
                 let cam = sky::spawn_sky_camera(&mut commands, s, bg);
-                // Under the player's camera (order 0) and the menus' and
-                // display's camera (order 1).
+                // Under the player's camera (order 0), the first-person
+                // arms' (1) and the menus' and display's camera (2).
                 commands.entity(cam).insert(Camera {
                     order: -1,
                     clear_color: ClearColorConfig::Custom(bg),

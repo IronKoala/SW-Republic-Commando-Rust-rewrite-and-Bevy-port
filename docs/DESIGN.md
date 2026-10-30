@@ -1681,7 +1681,8 @@ screen is drawn, then in one go:
    (so a mod can change it);
 4. if the map has a `SkyZoneInfo`, spawns the sky camera
    (`rc_level_viewer::sky`) at camera order -1, under the player's camera
-   (order 0) and the menus' camera (order 1). Once the player's camera
+   (order 0), the first-person arms' camera (order 1) and the menus'
+   camera (order 2). Once the player's camera
    exists, the plugin gives it `SkyViewer` (the sky camera copies its turn
    and field of view every frame, so it lines up at any screen shape) and
    stops it clearing the picture, so the sky shows where the level has
@@ -2038,10 +2039,75 @@ view is the droid's colour.
   `rc_shoot` it fades at exp(-8 t).
 - The fire sound is full volume for the player and quieter with distance for
   others; the game uses its 3D sound system.
-- Weapon switching is instant; the game plays holster and draw animations
-  (0.37 s and 0.67 s for the DC-17m).
-- The gun's place in view (`[model] offset`) and the bolt colour are ours.
-  The game draws the gun with first-person arms, which aren't done yet.
+- Weapon switching is instant for firing; the arms play the holster and
+  draw animations (0.37 s and 0.67 s for the DC-17m) but you can shoot the
+  new weapon before they finish. In the game you can't.
+- The bolt colour is ours. Weapons without `[arms]` (the picked-up E-5)
+  show their plain model at our `[model] offset`.
+
+### First-person arms (`rc_combat/src/arms.rs`, `arms_view.rs`)
+
+The game draws each player weapon as one animated model: the commando's
+arms and the gun together, from `GameData/Animations/hudarms.ukx`
+(`HudArmsDC17m`, `HudArmsSniper`, `HudArmsAntiArmor`, `HudArmsDC15s`,
+`HudArmsUzi` for the Trandoshan repeater, and more for turrets and the
+other pick-ups). The weapon class's `Mesh` names it, and the textures are
+in `HUDArmsTextures.utx`. A weapon file's `[arms]` section names the mesh;
+it's read at run time like the squad's models (`rc_model`), and posed on the
+CPU each frame.
+
+**Where it goes.** The game's `Weapon.RenderOverlays` puts the model at the
+eye, turned with the view, and draws it after the world with the depth
+cleared and its own field of view (`DisplayFOV`, 85 degrees across 4:3).
+The mesh's own origin is the eye: forward +X, right +Y, up +Z. Measured
+(`rc_model --example rc_arms_probe`): the DC-17m rests 5 to 68 uu in front
+of the eye, 13 left to 37 right, 4 to 50 below; `Holster` ends with
+nothing in view and `Load` starts with nothing in view; `Aim` brings the
+sights to the middle. We copy this with a second camera, a child of the
+player's camera, that sees only render layer 2 (the arms) and draws over
+the world's picture with a fresh depth buffer, so the gun never pokes into
+walls and a wider view setting or the Panini view doesn't bend it. Camera
+orders: sky -1, player 0, arms 1, menus and display 2.
+
+**Which animation** (the game's `Engine.Weapon` script, our words):
+
+| What | Animation |
+| --- | --- |
+| standing still | `ActionBreathe`, over and over |
+| still for 15 s (`PlayIdleTime`) | `Idle` once, then breathing again |
+| moving under 226 uu/s / faster | `Walk` / `Run` |
+| zoomed in | `AimBreathe`, `Aim` when moving, `AimFire` per shot (if the set has them) |
+| each shot | `Fire`, from the start |
+| reload | `Reload` |
+| grenade thrown / melee | `ThrowGrenade` / `MeleeAttack` |
+| switching | old weapon `Holster`, then new one `Load` |
+| switching between DC-17m attachments | `AttachHolster`, then `AttachLoad` |
+
+The game holds the weapon in its `Reloading` state until the `Reload`
+animation ends, so the animation length *is* the reload time. That gave
+the real reload times of the sniper (78 frames, 2.6 s), anti-armour
+(42 frames, 1.4 s) and the Trandoshan repeater (65 frames, 2.17 s), which
+were stand-ins before.
+
+The sniper attachment has `bZoomedUsesNoHUDArms`: its arms are hidden
+while zoomed (`hide_zoomed`). The arms are also hidden while the player is
+down.
+
+**Our choices:** the game changes between breathing, walking and running
+only when the current animation ends; we change at once. No blending
+between animations yet. The arms are drawn unlit at `brightness` 0.75:
+the game lights them by the player's zone, which we don't read yet. The
+DC-17m's ammo counter on the gun (`TexPanner2D` materials, a strip of
+digits the game scrolls) shows the strip unscrolled ("999").
+
+**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
+`rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,
+`Holster`, the pistol's `Fire`, and the rifle again after switching back,
+and that the gun corner of the picture is textured; `rc_game --script`
+checks the arms show the weapon in hand after loading a level.
+
+**VR:** the arms are a child of the player camera with their own camera,
+so a VR mod can hang the same posed model off a tracked hand instead.
 
 ### Fitting the long-term goals
 

@@ -107,6 +107,7 @@ pub(crate) fn player_melee(
     level: Option<Res<rc_game_core::LevelCollision>>,
     mut cooldown: Local<f32>,
     mut damage: MessageWriter<Damage>,
+    mut swings: MessageWriter<MeleeSwing>,
     log: Option<Res<GameLog>>,
 ) {
     *cooldown = (*cooldown - time.delta_secs()).max(0.0);
@@ -116,6 +117,7 @@ pub(crate) fn player_melee(
     let (Ok((me, arsenal)), Ok(cam)) = (players.single(), camera.single()) else {
         return;
     };
+    swings.write(MeleeSwing { attacker: me });
     let m = &lib.player.melee;
     let (range, base) = arsenal
         .and_then(|a| a.current())
@@ -175,6 +177,13 @@ pub(crate) fn player_melee(
         }
         None => say(&log, "weapons: melee hit nothing".into()),
     }
+}
+
+/// Someone swung a melee hit, whether or not it landed (the first-person
+/// arms play their `MeleeAttack` on the player's).
+#[derive(Message, Debug, Clone, Copy)]
+pub struct MeleeSwing {
+    pub attacker: Entity,
 }
 
 /// "Hit up close from here, this way." For computer-controlled characters
