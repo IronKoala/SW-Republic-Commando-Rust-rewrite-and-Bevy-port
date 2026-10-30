@@ -136,9 +136,9 @@ pub(crate) fn against(
 }
 
 fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &str, volume: f32) {
-    if let Some(h) = lib.sounds.get(name) {
+    if let Some(h) = lib.sounds.get(name).and_then(|s| s.pick()) {
         commands.spawn((
-            AudioPlayer(h.clone()),
+            AudioPlayer(h),
             PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
         ));
     }

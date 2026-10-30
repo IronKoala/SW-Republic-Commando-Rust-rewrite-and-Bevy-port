@@ -247,7 +247,15 @@ copy of the game.
   The campaign list, options, pause, loading screen and HUD are our own
   amber stand-ins, and the amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
-  turn; see `docs/ORIGINAL_MENUS.md`.
+  turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
+  original's** (tested in the cloud sandbox with the install, not yet on
+  Windows): its eleven buttons, with saving, loading and hints greyed out
+  until built. The campaign page keeps the placeholder until its planet
+  buttons and level list can be drawn; `logs/rc_game.log` says why
+  ("original menus: page campaigns kept the placeholder: ..."). Which
+  original menu draws which page is in `data/ui/original_menus.toml`. The
+  crosshair is the original's reticle picture (`data/ui/hud.toml`); its
+  size is our guess.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
   sides, the view up and down stays the original's), and the HUD stays in a
@@ -317,7 +325,10 @@ copy of the game.
   save. A save holds where you are and where you look, your health, shield,
   weapons and ammo, and the droids: which spawners have started, which
   droids are still alive, where they are and their health, and the squad:
-  where each mate is, what they're doing, who is down. Saves are
+  where each mate is, what they're doing, who is down, and the level:
+  which doors and lifts are open or moving, and where each of the level's
+  scripts has got to (after a load they carry on instead of starting the
+  level over). Saves are
   readable text files in `%APPDATA%\rc_game\saves` on Windows or
   `~/.local/share/rc_game/saves` on Linux (change it with `[save] folder` in
   `settings.toml`), never in the game's folder. The scripted run saves,
@@ -337,8 +348,9 @@ copy of the game.
   waits 3 s. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
-  exist in the PC install. `SoundMultiple` groups are read but not used yet.
-  No 3D (positional) sound yet.
+  exist in the PC install. `SoundMultiple` groups (a set of takes the game
+  picks from) are played for weapons, grenades and enemy voices. No 3D
+  (positional) sound yet: enemy sounds just get quieter with distance.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
@@ -360,11 +372,17 @@ copy of the game.
 - Weapons: no first-person arms or muzzle flash, and switching weapons is
   instant. How the view kick settles back is our own guess. The
   attachments' and the Trandoshan repeater's reload times are stand-ins,
-  grenades have no explosion sounds or models yet (a small glowing ball).
-  Squad mates only throw grenades at grenade markers.
+  grenades have no models yet (a small glowing ball), and squad mates only
+  throw grenades at grenade markers. Grenade explosions play the game's own
+  explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors walk
-  instead of flying, jumping and climbing. The Trandoshan uses a stand-in model. Droid voice
-  lines are empty until the sound packages are read.
+  instead of flying, jumping and climbing. The Trandoshan uses a stand-in model.
+- Enemy voices: battle droids, super battle droids, Trandoshans and
+  Geonosian warriors say the game's own lines when they spot you, get hurt
+  and die, with the hurt and death lines matched to explosions, EMP and
+  falls where the game has them. Their other lines (heard something, saw a
+  grenade, retreating, ...) aren't used yet. Not listened to in `rc_game`
+  yet: the test checks every line is found in the game's files.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
@@ -379,11 +397,8 @@ copy of the game.
   question are the original's so far. Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
-  being built to plug into it). No briefings or cut scenes. Saving: doors
-  and lifts aren't saved yet, there's no Load Game screen yet (the
-  menu's LOAD GAME stays greyed out), and the original's own checkpoints
-  (144 found in the campaign maps) wait on the level scripts part to fire
-  them, so for now each level has only its level-start checkpoint. Options are a short list. Not tested on Windows,
+  being built to plug into it). No briefings or cut scenes. Saving: there's no Load Game screen yet (the
+  menu's LOAD GAME stays greyed out). Options are a short list. Not tested on Windows,
   with a real controller, or with a touch screen.
 - Controllers: no button pictures yet (words only), no rebinding screen
   yet, no rumble or aim assist. Gyro on phones isn't started. Building with
@@ -431,7 +446,9 @@ cargo run --release -p rc_probe -- --menu
 
 This paints the main menu to `extracted\menus\CTMenuMain.png` and logs every
 picture, text and button to `logs\rc_menu.log`. Add a class name, such as
-`--menu XInterface.MenuQuestionYesNo`, for another menu.
+`--menu XInterface.MenuQuestionYesNo`, for another menu. `rc_probe --pages` does
+this for every page in `data/ui/original_menus.toml` and ends with a
+summary of which would use their original menu in the game, and why not.
 
 The other programs test one piece each:
 

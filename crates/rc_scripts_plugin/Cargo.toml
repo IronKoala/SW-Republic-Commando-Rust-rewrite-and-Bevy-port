@@ -14,6 +14,9 @@ rc_movement = { path = "../rc_movement" }
 rc_movers_plugin = { path = "../rc_movers_plugin" }
 rc_package = { path = "../rc_package" }
 rc_scripts = { path = "../rc_scripts" }
+# The [scripts] section of save files. serde (MIT OR Apache-2.0),
+# https://serde.rs.
+serde = { version = "1", features = ["derive"] }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. No window or drawing of its
 # own; it hides what the level part drew.
@@ -21,3 +24,6 @@ rc_scripts = { path = "../rc_scripts" }
 version = "0.20.1"
 default-features = false
 features = ["std", "bevy_state", "3d_bevy_render"]
+
+[dev-dependencies]
+toml = "0.8"

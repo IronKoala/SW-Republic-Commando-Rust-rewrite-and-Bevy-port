@@ -36,8 +36,8 @@ spring = 4                # SMGDefaults RecoilConstant
 damping = 0.1             # SMG RecoilDampening
 
 [sound]
-package = "gen_sound"     # not checked: the sound packages weren't read in the cloud
-fire = ["Uzi_Fire"]       # SMGDefaults FireSound
+package = "gen_sound"     # checked: Uzi_Fire is in gen_sound.uax
+fire = ["Uzi_Fire"]       # SMGDefaults FireSound: a group (SoundMultiple) holding wep_GEN_UziFireNew_04
 
 [model]
 package = "weapons"

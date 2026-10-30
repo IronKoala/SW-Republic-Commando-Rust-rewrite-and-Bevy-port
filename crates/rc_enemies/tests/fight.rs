@@ -373,3 +373,56 @@ fn a_geonosian_rushes_in_with_its_force_pike() {
         "the warrior stands {gap:.0} uu from the player"
     );
 }
+
+/// With the real game (RC_GAME_DIR, needs GameData/Sounds/character_voice.uax):
+/// the droid says its spotted line, its hurt line once per 2 s however many
+/// bolts hit it, and its death line, all the game's own.
+#[test]
+fn droid_says_the_games_lines() {
+    let Some(game) = std::env::var_os("RC_GAME_DIR") else {
+        eprintln!("RC_GAME_DIR not set: skipped (not tested)");
+        return;
+    };
+    let log_path = std::env::temp_dir().join(format!("rc_voices_{}.log", std::process::id()));
+    let mut r = Room::new();
+    let log = GameLog::create(&log_path).unwrap();
+    let paths = GamePaths::new(game, vec![]);
+    let mut audio = Assets::<bevy::audio::AudioSource>::default();
+    let mut sounds = rc_enemies::EnemySounds::default();
+    sounds.load_type(&paths, &AiParams::battle_droid(), &mut audio, &log);
+    r.app
+        .insert_resource(log)
+        .insert_resource(sounds)
+        .insert_resource(audio);
+    r.seconds(1.0, &[]);
+    r.seconds(8.0, &[Action::Fire]);
+    r.seconds(0.1, &[]);
+    let text = std::fs::read_to_string(&log_path).unwrap();
+    let said: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains(" says ") || l.contains(" sound "))
+        .collect();
+    println!("{}", said.join("\n"));
+    assert!(
+        text.contains("battle_droid sounds: 10 of 10 found"),
+        "{text}"
+    );
+    assert!(
+        said.iter().any(|l| l.contains("says BD1_SpottedEnemy")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|l| l.contains("death (blaster) sound BD1_DieSmallArms")),
+        "{said:?}"
+    );
+    let hurts = said
+        .iter()
+        .filter(|l| l.contains("hurt (blaster) sound BD1_HurtSmallArms"))
+        .count();
+    let hits = r.app.world().resource::<Fight>().stats.droids_hurt;
+    assert!(
+        hurts >= 1 && hurts < hits as usize,
+        "{hurts} hurt lines for {hits} hits"
+    );
+}

@@ -71,6 +71,33 @@ fn settings_file_matches_built_in_values() {
 }
 
 #[test]
+fn sound_lines_by_damage_kind() {
+    let p = AiParams::battle_droid()
+        .with_overrides("[sound]\nhurt = [\"A\"]\nhurt_explosion = [\"B\"]\n")
+        .unwrap();
+    assert_eq!(p.sounds.for_damage("hurt", "explosion"), ["B".to_string()]);
+    assert_eq!(p.sounds.for_damage("hurt", "blaster"), ["A".to_string()]);
+    // The file's [sound] section replaced the built-in by-kind lines.
+    assert_eq!(
+        p.sounds.for_damage("death", "electrical"),
+        ["BD1_DieSmallArms".to_string()]
+    );
+    let built_in = AiParams::battle_droid();
+    assert_eq!(
+        built_in.sounds.for_damage("death", "electrical"),
+        ["BD1_DieElectricity".to_string()]
+    );
+    assert_eq!(
+        built_in.sounds.for_damage("death", "sonic"),
+        ["BD1_DieSmallArms".to_string()]
+    );
+    let e = AiParams::battle_droid()
+        .with_overrides("[sound]\nhurt_lazer = [\"B\"]\n")
+        .unwrap_err();
+    assert!(e.contains("line 2") && e.contains("hurt_lazer"), "{e}");
+}
+
+#[test]
 fn settings_errors_name_the_line() {
     let e = AiParams::battle_droid()
         .with_overrides("[combat]\naccuracy = 0.5\nacuracy = 1\n")

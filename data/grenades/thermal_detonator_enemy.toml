@@ -49,6 +49,7 @@ stops = false             # our reading: burning hurts but doesn't stop anyone
 
 [sound]
 package = "gen_sound"
+blast = "exp_GEN_MedWhistle_01" # game: ThermalDetonatorEnemyProjDefaults ExplosionEffect is the same Grenade_ThermDet_Explo_Metal as the player's
 bounce = "imp_GEN_grenadeBounce_01" # placeholder: the player's bounce sound (the enemy version names none)
 
 [model]
