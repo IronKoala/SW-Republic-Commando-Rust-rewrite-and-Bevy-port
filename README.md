@@ -292,9 +292,15 @@ copy of the game.
   size is our guess.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
-  sides, the view up and down stays the original's), and the HUD stays in a
-  centred 16:9 area on ultrawides (`hud_max_aspect` in `settings.toml`).
-  Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
+  sides, the view up and down stays the original's; upright phones see more
+  above and below), until the screen is twice as long as it is short,
+  so a maximized window or an ultrawide doesn't look fish-eyed
+  (`widest_shape` in `settings.toml`; the field of view setting still
+  works on every screen). The HUD stays in a centred 16:9 area on ultrawides
+  (`hud_max_aspect`). The angles are checked by a test at 14 shapes, from
+  4:3 to 32:9 and from upright and flip phones to foldables; in the game
+  itself the script run was checked at 4:3, 16:9, 21:9, 32:9 and an upright
+  phone shape before this limit was added (not re-run since). Keyboard and
   mouse and a gamepad work at the same time.
 
 - **Controllers and gyro aiming (tested with pretend controllers only, no

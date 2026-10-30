@@ -1674,7 +1674,10 @@ menus fit a phone or a monitor.
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
@@ -2253,7 +2256,10 @@ only when it actually moves. Details and what is left are in
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
