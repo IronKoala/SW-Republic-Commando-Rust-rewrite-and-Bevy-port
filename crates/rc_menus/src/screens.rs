@@ -238,6 +238,76 @@ pub fn move_widget(layout: &mut MenuLayout, name: &str, by: f32) -> bool {
     true
 }
 
+/// Shrink each options row's label that would run into its own row's
+/// arrow or value (long names such as AUTO PULL MANEUVERS), keeping a small
+/// gap, so text never overlaps whatever the screen size: everything is
+/// laid out in the same 4:3 area, so fitting once fits every resolution.
+/// Returns the names of the labels shrunk.
+pub fn fit_row_labels(layout: &mut MenuLayout, sizes: &mut dyn crate::quads::Sizes) -> Vec<String> {
+    use crate::quads::{sprite_box, text_box};
+    const GAP: f32 = 0.006;
+    let mut shrunk = Vec::new();
+    let rows: Vec<usize> = (0..layout.widgets.len())
+        .filter(|&i| {
+            let w = &layout.widgets[i];
+            w.name.contains('[') && matches!(&w.kind, Kind::Button(b) if !b.mouse_only)
+        })
+        .collect();
+    for r in rows {
+        let row = row_widgets(layout, &layout.widgets[r].name);
+        // Where each button in the row starts (the value bar, the arrows).
+        let starts: Vec<f32> = row
+            .iter()
+            .filter_map(|&j| match &layout.widgets[j].kind {
+                Kind::Button(o) if layout.widgets[j].shown_on_pc() => {
+                    sprite_box(&o.background_blurred, sizes)
+                        .map(|x| x[0])
+                        .or_else(|| {
+                            text_box(&o.blurred, sizes)
+                                .filter(|_| !o.blurred.text.is_empty())
+                                .map(|x| x[0])
+                        })
+                }
+                _ => None,
+            })
+            .collect();
+        for &i in &row {
+            let w = &layout.widgets[i];
+            let Kind::Text(t) = &w.kind else { continue };
+            if t.text.is_empty() || !w.shown_on_pc() {
+                continue;
+            }
+            let Some(b) = text_box(t, sizes) else {
+                continue;
+            };
+            let limit = starts
+                .iter()
+                .filter(|&&x| x > b[0] + 0.01)
+                .fold(f32::MAX, |m, &x| m.min(x - GAP));
+            if limit == f32::MAX || b[2] <= limit {
+                continue;
+            }
+            let factor = (limit - b[0]) / (b[2] - b[0]);
+            if !(0.3..1.0).contains(&factor) {
+                continue;
+            }
+            let name = w.name.clone();
+            if let Kind::Text(t) = &mut layout.widgets[i].kind {
+                // Shrink from the label's left edge, keeping its middle line.
+                let (px, py) = pivot_fraction(t.pivot);
+                let mid = b[1] + (b[3] - b[1]) / 2.0;
+                t.scale[0] *= factor;
+                t.scale[1] *= factor;
+                let (nw, nh) = ((b[2] - b[0]) * factor, (b[3] - b[1]) * factor);
+                t.pos[0] = b[0] + nw * px;
+                t.pos[1] = mid - nh / 2.0 + nh * py;
+            }
+            shrunk.push(name);
+        }
+    }
+    shrunk
+}
+
 /// Every menu with a title strip (`MenuTemplateTitled` and its children)
 /// hides its Xbox Live name and controller number on a PC.
 pub fn setup_titled(layout: &mut MenuLayout) {

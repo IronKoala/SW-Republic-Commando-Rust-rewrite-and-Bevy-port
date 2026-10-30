@@ -2283,7 +2283,15 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   look and gyro) borrows the original GAME page with `texts`, `moves` and
   `hidden_rows`. The screen size opens a drop-down list made from the
   page's own pieces (`screens::drop_down`); other values change only with
-  their arrows. A row naming `unavailable` is greyed
+  their arrows. The size list starts with FULL SCREEN and holds only sizes
+  that fit the primary monitor (`option_settings::items`, monitor read in
+  `focus_new_page`). `screens::fit_row_labels` shrinks row labels that would
+  reach their row's first button. Changing the size in a level marks every
+  camera's `Projection` changed (`menu::apply_video`): Bevy only re-reads a
+  camera's target size on a resize event or a projection change, so before
+  this the player camera resized while the arms and sky cameras kept the old
+  size, and the GPU refused to draw ("Attachments have differing sizes").
+  A row naming `unavailable` is greyed
   out and skipped, as the original greys options it can't offer. Key rows
   open the original's REASSIGN BUTTON box (`CTMapKeyMenu`), which uses
   `rebind.rs` for the actual capture. The effects volume now scales every

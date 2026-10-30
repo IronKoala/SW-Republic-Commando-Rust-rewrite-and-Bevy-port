@@ -291,7 +291,9 @@ copy of the game.
   size and vsync work; key rows open the original's REASSIGN BUTTON box.
   Rows the port can't do yet (subtitles, brightness, detail levels and so
   on) are greyed out. Values change with the arrows; the screen size
-  also has a drop-down list. Our own extra settings (field of view, full
+  also has a drop-down list, starting with FULL SCREEN and then the window
+  sizes that fit your monitor. Long setting names shrink to fit before
+  their arrows. Our own extra settings (field of view, full
   screen, controller and gyro) are on a fifth tab, "PORT +", in the same
   original look. **The campaign page is the original's too** (tested in the
   cloud sandbox with the install, not yet on Windows): the three planets,

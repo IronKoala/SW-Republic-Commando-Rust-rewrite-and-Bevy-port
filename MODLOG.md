@@ -9,8 +9,17 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Why:** User: replace every placeholder menu with the original, and no text overlapping at any resolution.
 - **Tested how:** `cargo test -p rc_menus`; `rc_probe --pages` and `--menu`; `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script` in the cloud with the game files copied read-only from the PC.
 - **Result:** rc_menus tests pass. `rc_probe --pages`: campaigns "USES THE ORIGINAL", 0 overlaps (pause 0). Script: campaign screenshot matches the `rc_probe` painting (mean difference 4.8 of 255); Geonosis lists its 6 missions, the assault ship 4; Enter on PROLOGUE: GEONOSIS opens geo_01a and the level plays. Main menu picture unchanged (3.4).
-- **Still broken / not tested:** Not tested on Windows, with a mouse on the planets, or with a controller. Every mission is listed (the original lists only those reached; no profile progress yet). Briefing maps (`GEO_01Briefing`...) opened from the list are not checked. The options pages still have a few labels touching their arrows (found by the new overlap check; belongs to the options pull request). Load and save pages are still placeholders.
+- **Still broken / not tested:** Not tested on Windows, with a mouse on the planets, or with a controller. Every mission is listed (the original lists only those reached; no profile progress yet). Briefing maps (`GEO_01Briefing`...) opened from the list are not checked. Load and save pages are still placeholders.
 - **Next:** The original load and save pages (`CTLoadGameMenu`, `CTSaveGameMenu`).
+
+## 2026-10-30: No crash on a resolution change in a level; FULL SCREEN in the size list; labels fit before their arrows (rc_menus, rc_game)
+
+- **Changed:** `menu::apply_video` marks every camera's `Projection` changed when the window size changes. `option_settings`: the screen size list starts with FULL SCREEN and then lists only window sizes that fit the primary monitor (read in `original_menu::focus_new_page`), plus the current size. `rc_menus::screens::fit_row_labels` shrinks any row label that would reach its row's first button; `original_menu::load` runs it on every page.
+- **Why:** The user: changing the resolution in a level crashed, changing it from the main menu "didn't do anything" (they picked 3440x1440, their whole monitor, which a window can't exceed), and text overlapped the arrows.
+- **Tested how:** In the cloud: Xvfb at 3440x1440, changed the size twice inside geo_01a and went back to play; screenshots of GAME, GRAPHICS, CONTROLS and PORT + pages; `cargo test -p rc_menus -p rc_package -p rc_game`; `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script`.
+- **Result:** Before the fix the log ended with "Attachments have differing sizes: depth (1280,720) vs color (1280,960)" and the game quit; after it, no error and play goes on. Log: "labels shrunk to fit before their arrows: OptionLabels[6], OptionLabels[7], OptionLabels[8]" (GAME) and "OptionLabels[5]" (GRAPHICS); screenshots show no label touching an arrow. Tests 32 + 11 + 19 pass. Script `SCRIPT DONE: 71 checks passed, 0 failed`.
+- **Still broken / not tested:** Not tested on Windows or a real graphics card; full screen switching only tested in the cloud's virtual screen. Text size not yet compared with the real game. Campaign screens, HUD and making every greyed setting work are in their own threads.
+- **Next:** The user tries a resolution change in a level and FULL SCREEN from the main menu on the PC.
 
 ## 2026-10-30: The original options pages (rc_package, rc_menus, rc_game)
 

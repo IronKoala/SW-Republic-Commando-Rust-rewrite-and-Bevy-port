@@ -241,6 +241,9 @@ pub struct OriginalMenus {
     map_key_layout: Option<MenuLayout>,
     /// The drop-down list while it shows.
     pub list: Option<ListBox>,
+    /// The main screen's size in pixels: window sizes bigger than it
+    /// aren't offered.
+    pub desktop: Option<(u32, u32)>,
     /// Options work for `apply_options`.
     work: Vec<OptionWork>,
     quit_text: String,
@@ -391,6 +394,14 @@ fn load(
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {
                 check_names(&mut layout, &mut buttons, &plan.page, &log);
+                let shrunk = screens::fit_row_labels(&mut layout, &mut assets);
+                if !shrunk.is_empty() {
+                    log.line(format!(
+                        "original menus: page {}: labels shrunk to fit before their arrows: {}",
+                        plan.page,
+                        shrunk.join(", ")
+                    ));
+                }
                 log.line(format!(
                     "original menus: page {} uses {} ({} buttons)",
                     plan.page,
@@ -532,12 +543,17 @@ fn check_names(layout: &mut MenuLayout, buttons: &mut PageButtons, page: &str, l
 
 /// Show each chooser's setting and each key button's keys (for the device
 /// used last).
-fn refresh_page(p: &mut PageScreen, settings: &Settings, prompts: &InputPrompts) {
+fn refresh_page(
+    p: &mut PageScreen,
+    settings: &Settings,
+    prompts: &InputPrompts,
+    desktop: Option<(u32, u32)>,
+) {
     for (i, name) in &p.buttons.choosers {
         let Kind::Button(b) = &mut p.screen.layout.widgets[*i].kind else {
             continue;
         };
-        if let Some(items) = option_settings::items(name, settings) {
+        if let Some(items) = option_settings::items(name, settings, desktop) {
             b.items = items;
         }
         if let Some(at) = option_settings::read(name, settings, &b.items) {
@@ -591,8 +607,13 @@ fn focus_new_page(
     mut last: Local<Option<Shown>>,
     settings: Res<Settings>,
     prompts: Res<InputPrompts>,
+    monitors: Query<&bevy::window::Monitor, With<bevy::window::PrimaryMonitor>>,
     log: Res<GameLog>,
 ) {
+    if let Ok(m) = monitors.single() {
+        menus.desktop = Some((m.physical_width, m.physical_height));
+    }
+    let desktop = menus.desktop;
     let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
     if shown == *last {
         // The controls page follows the device used last.
@@ -600,7 +621,7 @@ fn focus_new_page(
             if let Some(Shown::Page(k)) = &shown {
                 let p = menus.pages.get_mut(k).unwrap();
                 if !p.buttons.keys.is_empty() {
-                    refresh_page(p, &settings, &prompts);
+                    refresh_page(p, &settings, &prompts, desktop);
                     menus.dirty = true;
                 }
             }
@@ -614,7 +635,7 @@ fn focus_new_page(
     menus.dirty = true;
     if let Some(Shown::Page(k)) = &shown {
         let p = menus.pages.get_mut(k).unwrap();
-        refresh_page(p, &settings, &prompts);
+        refresh_page(p, &settings, &prompts, desktop);
         let screen = &mut p.screen;
         screen.focus = screen.buttons().first().copied();
         original_lists::focus_first(&mut menus, k);
@@ -1207,6 +1228,7 @@ fn apply_options(
         return;
     };
     let menus = &mut *menus;
+    let desktop = menus.desktop;
     let Some(page) = menus.pages.get_mut(&k) else {
         return;
     };
@@ -1267,7 +1289,7 @@ fn apply_options(
                     }
                 }
                 log.line(format!("original menus: page {k}: defaults restored"));
-                refresh_page(page, &settings, &prompts);
+                refresh_page(page, &settings, &prompts, desktop);
                 menus.dirty = true;
             }
             OptionWork::Rebind(i) => {
@@ -1401,13 +1423,13 @@ fn apply_options(
             screens::map_key_chosen(&mut r.screen.layout, &key_text(&prompts, r.action));
         }
         if !page.buttons.keys.is_empty() {
-            refresh_page(page, &settings, &prompts);
+            refresh_page(page, &settings, &prompts, desktop);
         }
         menus.dirty = true;
     }
     if settings_changed {
         // Re-read, so a chooser shows what the setting really became.
-        refresh_page(page, &settings, &prompts);
+        refresh_page(page, &settings, &prompts, desktop);
         crate::menu::save_settings(&settings, &settings_path, &log);
     }
 }

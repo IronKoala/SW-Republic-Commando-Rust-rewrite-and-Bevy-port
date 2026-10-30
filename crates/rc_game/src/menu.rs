@@ -546,6 +546,7 @@ pub fn apply_settings(
 pub fn apply_video(
     settings: Res<Settings>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut projections: Query<&mut Projection>,
     mut last: Local<Option<crate::settings::VideoSection>>,
     log: Res<GameLog>,
 ) {
@@ -564,6 +565,15 @@ pub fn apply_video(
     if (before.width, before.height) != (v.width, v.height) {
         w.resolution.set(v.width as f32, v.height as f32);
         log.line(format!("menu: window size now {}x{}", v.width, v.height));
+        // Every camera must take the new size in the same frame. Bevy
+        // only re-reads a camera's size when its window reports a resize
+        // or its projection changes; the player's camera changes its
+        // projection at once (the view widens), so without this the arms'
+        // and sky's cameras keep the old size for a frame and the GPU
+        // stops the game ("attachments have differing sizes").
+        for mut p in &mut projections {
+            p.set_changed();
+        }
     }
     if before.fullscreen != v.fullscreen {
         w.mode = if v.fullscreen {
