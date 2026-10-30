@@ -1854,6 +1854,23 @@ button sends, so the grenade flies, bounces and goes off with the
 grenade's own rules. To aim, `rc_enemies` reads the grenade file's speed,
 gravity and radius. Saves keep how many each enemy has left.
 
+**Melee (the Geonosian's force pike).** `combat.melee_range` above 0
+gives an enemy a close-up hit: `melee_damage` of `melee_damage_type`
+every `melee_delay` seconds. An enemy with no gun (`weapon = ""`) always
+rushes in; one with a gun only when its enemy is within
+`lunge_distance` (`LungeDist`). Rushing in (`Maneuver::Charge`) heads
+straight at the enemy when the level leaves a clear path (checked with
+its body lifted a step off the floor), else along the paths, and is
+re-planned at every decision as the enemy moves. Once within 70% of its
+reach it stops; it swings when its enemy's centre is within reach, within
+30 degrees of straight ahead, with a clear line. **Our rules**: the
+original's are compiled. The AI sends `AiEvent::Melee`; `rc_enemies`
+turns it into `rc_combat::MeleeAttack`, which `rc_combat` resolves with
+the same rule as the player's melee (a line that long against the
+characters' cylinders, walls block it, the attacker's own team is
+skipped) and the target's damage table. `[look] melee` names the
+animation.
+
 **Several enemies to fight.** Droids fight the player and the squad mates
 (every living `Team::Republic` character). Each keeps fighting the one it
 fought last while it can still see it, otherwise picks the nearest one it

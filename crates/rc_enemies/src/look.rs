@@ -33,10 +33,12 @@ pub enum Pose {
     Death,
     /// Throwing a grenade.
     Throw,
+    /// A close-up hit (a force pike).
+    Melee,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 11] = [
+    pub const ALL: [Pose; 12] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Run,
@@ -48,6 +50,7 @@ impl Pose {
         Pose::CrouchFire,
         Pose::Death,
         Pose::Throw,
+        Pose::Melee,
     ];
 
     fn sequence(self, l: &Look) -> &str {
@@ -63,6 +66,7 @@ impl Pose {
             Pose::CrouchFire => &l.crouch_fire,
             Pose::Death => &l.death,
             Pose::Throw => &l.throw,
+            Pose::Melee => &l.melee,
         }
     }
 

@@ -320,6 +320,11 @@ copy of the game.
   theirs and never more often than every 20 seconds. Any enemy type can be
   given grenades in its `[grenades]` section. Battle droids carry none, as
   in the original.
+- **Geonosian warriors fight with their force pike (tested in the cloud
+  sandbox with automatic tests, not yet in the real game).** Like the
+  original, they carry no gun: they rush at you and hit up close (350 uu
+  reach, 125 damage, about one hit every 1.6 s). Any enemy type can get a
+  melee weapon in its `[combat]` section.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -377,9 +382,8 @@ copy of the game.
   grenades have no models yet (a small glowing ball), and squad mates only
   throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
-- Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
-  stand-in blaster instead of using their force pike, and walk instead of
-  flying and climbing. The Trandoshan uses a stand-in model.
+- Enemy types: not yet checked on the real maps. Geonosian warriors walk
+  instead of flying, jumping and climbing. The Trandoshan uses a stand-in model.
 - Enemy voices: battle droids, super battle droids, Trandoshans and
   Geonosian warriors say the game's own lines when they spot you, get hurt
   and die, with the hurt and death lines matched to explosions, EMP and
