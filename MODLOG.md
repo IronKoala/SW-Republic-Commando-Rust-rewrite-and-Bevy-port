@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Auto pull maneuvers (rc_squad, rc_squad_plugin, rc_game)
+
+- **Changed:** `rc_squad`: jobs gain `pullable` (sniper, grenade and anti-armour posts in `data/squad/squad.toml`); `Squad::auto_pull` (on by default) and `Member::marker_since`; a marker order that needs more squad mates than are free takes the missing ones off pullable posts, longest-held first (`Squad::pull_for`, new `SquadEvent::MarkerPulled`). Off, the order is refused with "recall the squad first". `rc_squad_plugin::SquadOptions` carries the setting; `rc_game` reads `auto_pull_maneuvers` from `[game]` in `settings.toml` and passes it on at start and whenever settings change. Docs: RESEARCH ("Auto pull maneuvers"), DESIGN (Context orders), README. 4 new tests.
+- **Why:** The GAME options page has AUTO PULL MANEUVERS greyed out because nobody knew what it did. Thread "Make auto pull maneuvers work".
+- **Tested how:** Read the game's files from the PC, read only: `User.ini` (`bAutoPullManeuvers=True`), Engine.u and XInterfaceCTMenus.u script text, class defaults with `rc_probe --classes`, and the exported function names and machine code of `ASquadMarker::GetMarkerUsability` and `FillParticipants` in Engine.dll (nothing copied). Then `cargo test -p rc_squad -p rc_squad_plugin -p rc_game` in the cloud.
+- **Result:** The setting lets a new maneuver take squad mates off sniper, grenade, anti-armour (and turret) markers, the longest-running first; off, the helmet says "RECALL SQUAD BEFORE ENGAGING MANEUVER". Tests: rc_squad 34 passed (new: pulls the longest-held post, off refuses until recalled, once jobs are never pulled, shipped posts are pullable).
+- **Still broken / not tested:** Not tested on Windows or by playing; not tested in a real level. The GAME options row is still greyed: the options rows live in draft PR #47, which hooks it up once both are in. The helmet's refusal text isn't shown on screen yet (only the log says it). Turret markers aren't a port job yet, so they can't be pulled.
+- **Next:** Turn on the AUTO PULL MANEUVERS row in the options code (#47's `option_settings.rs`, reading and writing `game.auto_pull_maneuvers`).
+
 ## 2026-10-30: Smooth blending between animations (rc_anim, squad and enemies)
 
 - **Changed:** `crates/rc_anim/src/lib.rs`: new `blend_poses` and `Crossfade` (remembers the pose on screen when the animation changes and mixes it into the new one with an S curve). `rc_model::Model` and `rc_enemies::look::DroidLook` gained `local_pose` and `posed_local`, so a mixed pose can be skinned. Squad mates (`rc_squad_plugin/src/look.rs`) and enemies (`rc_enemies/src/lib.rs`) now blend whenever their animation changes. Blend times are data: `[blend]` in `data/squad/looks.toml` and `blend_time`, `blend_time_fire`, `blend_time_death` in `[look]` of `data/enemies/battle_droid.toml` (other enemies inherit them). New check `crates/rc_model/examples/rc_blend_check.rs`.

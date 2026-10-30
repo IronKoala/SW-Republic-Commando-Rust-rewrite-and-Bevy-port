@@ -1009,3 +1009,143 @@ fn a_shot_over_a_friends_shoulder_counts_as_through_them() {
         0.0375
     ));
 }
+
+/// Three squad mates on three posts (ordered a second apart), and a
+/// fourth post.
+fn squad_on_three_posts(world: &BrushWorld, start: Leader) -> Squad {
+    let mut squad = new_squad(world, start);
+    assert_eq!(squad.members.len(), 3);
+    squad.set_markers(vec![
+        spot(
+            "S0",
+            "MarkerSnipe0",
+            "MarkerSnipe",
+            Vec3::new(-400.0, 0.0, 0.0),
+        ),
+        spot(
+            "S1",
+            "MarkerGrenade0",
+            "MarkerGrenade",
+            Vec3::new(-400.0, 200.0, 0.0),
+        ),
+        spot(
+            "S2",
+            "MarkerAntiArmor0",
+            "MarkerAntiArmor",
+            Vec3::new(-400.0, -200.0, 0.0),
+        ),
+        spot(
+            "S3",
+            "MarkerSnipe1",
+            "MarkerSnipe",
+            Vec3::new(400.0, 0.0, 0.0),
+        ),
+    ]);
+    for k in 0..3 {
+        squad.command(Order::Marker(k), start, world);
+        run(&mut squad, start, 1.0, world);
+    }
+    assert!(squad.members.iter().all(|m| m.marker.is_some()));
+    squad
+}
+
+#[test]
+fn auto_pull_takes_the_longest_held_post_for_a_new_order() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = squad_on_three_posts(&world, start);
+    let first = squad
+        .members
+        .iter()
+        .position(|m| m.marker == Some(0))
+        .unwrap();
+    let ev = squad.command(Order::Marker(3), start, &world);
+    assert!(
+        has(&ev, |e| matches!(
+            e,
+            SquadEvent::MarkerPulled { marker, for_marker, .. } if marker == "S0" && for_marker == "S3"
+        )),
+        "{ev:?}"
+    );
+    assert_eq!(squad.members[first].marker, Some(3));
+    assert_eq!(squad.markers[0].1, MarkerState::Open);
+    assert_eq!(squad.markers[3].1, MarkerState::Assigned(first));
+    // The other two keep their posts.
+    assert_eq!(
+        ev.iter()
+            .filter(|e| matches!(e, SquadEvent::MarkerPulled { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn auto_pull_off_refuses_the_order_until_recalled() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = squad_on_three_posts(&world, start);
+    squad.auto_pull = false;
+    let ev = squad.command(Order::Marker(3), start, &world);
+    assert!(
+        has(&ev, |e| matches!(
+            e,
+            SquadEvent::OrderIgnored { why, .. } if why.contains("recall")
+        )),
+        "{ev:?}"
+    );
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::MarkerPulled { .. })));
+    assert_eq!(squad.markers[3].1, MarkerState::Open);
+    // After a recall the order goes through.
+    squad.command(Order::Cancel, start, &world);
+    let ev = squad.command(Order::Marker(3), start, &world);
+    assert!(has(&ev, |e| matches!(e, SquadEvent::MarkerAssigned { .. })));
+}
+
+#[test]
+fn auto_pull_leaves_jobs_that_are_not_posts() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.set_markers(vec![
+        spot(
+            "S0",
+            "HackDoor0",
+            "MarkerHackDoor",
+            Vec3::new(-400.0, 0.0, 0.0),
+        ),
+        spot(
+            "S1",
+            "HackDoor1",
+            "MarkerHackDoor",
+            Vec3::new(-400.0, 200.0, 0.0),
+        ),
+        spot(
+            "S2",
+            "HackDoor2",
+            "MarkerHackDoor",
+            Vec3::new(-400.0, -200.0, 0.0),
+        ),
+        spot(
+            "S3",
+            "MarkerSnipe1",
+            "MarkerSnipe",
+            Vec3::new(400.0, 0.0, 0.0),
+        ),
+    ]);
+    for k in 0..3 {
+        squad.command(Order::Marker(k), start, &world);
+    }
+    let ev = squad.command(Order::Marker(3), start, &world);
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::MarkerPulled { .. })));
+    assert!(
+        has(&ev, |e| matches!(e, SquadEvent::OrderIgnored { .. })),
+        "{ev:?}"
+    );
+}
+
+#[test]
+fn shipped_posts_are_pullable_and_once_jobs_are_not() {
+    for j in crate::jobs::default_jobs() {
+        assert_eq!(j.pullable, j.kind == JobKind::Post, "{}", j.key);
+    }
+}
