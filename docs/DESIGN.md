@@ -25,6 +25,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
+| `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
 | `rc_save` | Saving, loading and checkpoints: `SavePlugin` writes and reads the save files, quicksave and quickload, and saves at checkpoints. Bevy, but no window. |
 | `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
@@ -1028,7 +1029,28 @@ where the map placed the mover; `rc_walk` sets their `Transform` each
 frame to the mover's move from there (Unreal to Bevy swaps Y and Z, so the
 turn's rows and columns swap the same way).
 
-### How we check movers without looking
+### In the game (`rc_movers_plugin`)
+
+The level part hands over the map's movers and their triangles
+(`LevelMoverData`) while loading. `MoversPlugin` builds the same
+`MoverSet` the walker uses, then swaps `LevelCollision` for "the level plus
+the movers where they are now", so everything that moves or shoots (the
+player, shots, later droids and the squad) runs into doors and stands on
+lifts without knowing about movers. The set sits behind a read-write lock
+inside the `LevelMovers` resource: sweeps read it, and stepping writes it.
+
+Each frame the player's movement calls `LevelMovers::step` just before its
+own step, as in the walker: movers move first (UE2 ticks movers before
+pawns), carrying or pushing the player, then the player moves among them.
+A `MoverSystems` set (in `GameSet::View`) then logs what happened
+(`movers: t=... MoverDB_GEO2 starts opening`), sends each as a
+`MoverHappened` message for sounds and level scripts, and moves the drawn
+`MoverPart`s.
+
+Other parts open a door the way the original's scripts do: by event name.
+`LevelMovers::send("D_Exit")` sets off every mover whose `Tag` is `D_Exit`.
+
+
 
 - **Unit tests** (`cargo test -p rc_movers`): a triggered door opens in its
   `MoveTime`, waits `StayOpenTime` and closes; the smooth curve is at 15.6%

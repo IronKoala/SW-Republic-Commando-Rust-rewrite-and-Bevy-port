@@ -169,7 +169,9 @@ copy of the game.
   and triggers stored in each map, and their collision moves with them, so
   you can ride a lift in `rc_walk`. `rc_mover_check` runs every one in every
   map and logs the numbers: all 863 that could be timed opened and closed
-  on time, and all 33 rideable lifts carried the player. Doors that the
+  on time, and all 33 rideable lifts carried the player. They also run
+  in the game itself (`rc_game`, tested in the cloud sandbox on geo_01a):
+  doors are solid where they stand and move when set off. Doors that the
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
 

@@ -4465,6 +4465,7 @@ dependencies = [
  "rc_level_plugin",
  "rc_menus",
  "rc_movement",
+ "rc_movers_plugin",
  "rc_save",
  "rc_squad_plugin",
  "serde",
@@ -4542,6 +4543,19 @@ dependencies = [
  "rc_level",
  "rc_movement",
  "rc_package",
+]
+
+[[package]]
+name = "rc_movers_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "rc_level",
+ "rc_level_plugin",
+ "rc_level_viewer",
+ "rc_movement",
+ "rc_movers",
 ]
 
 [[package]]
