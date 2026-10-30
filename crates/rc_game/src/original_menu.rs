@@ -546,6 +546,10 @@ fn refresh_page(
         };
         if let Some(items) = option_settings::items(name, settings, desktop) {
             b.items = items;
+        } else if b.items.len() < 2 {
+            if let Some(items) = option_settings::fallback_items(name) {
+                b.items = items;
+            }
         }
         if let Some(at) = option_settings::read(name, settings, &b.items) {
             b.choose(at);

@@ -281,6 +281,26 @@ fn says_low(text: &str) -> bool {
     text.to_ascii_uppercase().contains("LOW")
 }
 
+/// Values to use when the original's list for a row has fewer than two
+/// (the original fills some lists, such as FSAA, from the graphics card
+/// while the game runs, so the stored list can be empty).
+pub fn fallback_items(name: &str) -> Option<Vec<String>> {
+    let l = |v: &[&str]| Some(v.iter().map(|s| s.to_string()).collect());
+    match name {
+        "fsaa" => l(&["OFF", "2X", "4X"]),
+        "vsync" | "subtitles" | "prompt_text" | "blur" | "bloom" | "squad_shadows" | "sound_3d" => {
+            l(&["ON", "OFF"])
+        }
+        "graphics_quality" => l(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST"]),
+        "texture_detail" | "character_detail" | "sound_quality" => l(&["LOW", "MEDIUM", "HIGH"]),
+        "audio_channels" => l(&["16", "32", "64"]),
+        "brightness" | "voices_volume" | "effects_volume" | "music_volume" => l(&[
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+        ]),
+        _ => None,
+    }
+}
+
 /// Which of `items` the setting is now.
 pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
     let n = items.len();
