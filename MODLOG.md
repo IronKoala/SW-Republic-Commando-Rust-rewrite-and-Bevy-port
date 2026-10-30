@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Finishing a level goes on to the next one (rc_scripts, rc_save, rc_level_plugin)
+
+- **Changed:** `rc_scripts`: the director reads every `Teleporter` (URL, tag, size, `bEnabled`, `bCollideActors`); walking into an open one with a URL, `ACTION_ChangeLevel`, or `ACTION_ShowDebriefingScreen` with a `NewLevel` gives the new `Effect::ChangeLevel` once, then the map's scripts stop. `ACTION_SetCollision` opens and closes exits by tag; an event with an exit's tag switches it on or off. Actions marked `bDisabled` in the map are skipped. Exits are in the `[scripts]` save section. New `level_url`, `[exits]` in `data/scripts/scripts.toml` (engine.u's Teleporter size 80 x 100). `rc_game_core`: `ChangeLevel` message and `ArrivalPortal`. `rc_scripts_plugin` sends `ChangeLevel`. `rc_save` carries the sections listed in the new `data/levels/travel.toml` (`combat`) to the next map and puts them back on its first frame, before the level-start checkpoint. `rc_level::map_collision` lists teleporters as arrival points; `rc_level_plugin` starts the player at the one the address names. `rc_script_check` lists each map's exits and follows the campaign. `rc_game --script`: 4 new checks.
+- **Why:** Thread "Move on to the next level": finishing a level should load the next one, keep the player's state and save a checkpoint.
+- **Tested how:** `cargo test -p rc_scripts -p rc_save -p rc_game_core -p rc_level -p rc_scripts_plugin -p rc_level_plugin` (6 new tests); `rc_script_check` on all 57 campaign maps; `rc_probe --class Teleporter`; `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script`, all with game files copied read-only from the PC to the cloud sandbox.
+- **Result:** `campaign: 56 maps from pro to epilogue`, `0 exits lead to a map that isn't there`. Self-test `SCRIPT DONE: 56 checks passed, 0 failed`: `Teleporter0: the level is over; on to geo_01b`, `[combat] carried from geo_01a to geo_01b`, health 187 -> 187 (of 200), magazine 57 -> 57, feet 0 uu from geo_01b's start, checkpoint on geo_01b with health 187.
+- **Still broken / not tested:** Not tested on Windows or by playing to an exit by hand. Not tested past geo_01b (other maps' exits only checked from the files). The squad isn't carried (they arrive fresh, up and at full health); not sure the original does the same. The debriefing screen isn't shown. Skipping `bDisabled` actions is our reading of the name. Briefing and cutscene maps may wait for events nothing sends yet.
+- **Next:** Show the original debriefing screen (`CTDebriefingInfo*`), and check a whole campaign stretch by playing it.
+
 ## 2026-10-30: Grenade log says why each one went off (rc_combat)
 
 - **Changed:** `crates/rc_combat/src/throw.rs`: the `grenades: X went off ...` log line now says why: "on touching a character", "on touching the level", "when a character came near" or "when its fuse ran out".

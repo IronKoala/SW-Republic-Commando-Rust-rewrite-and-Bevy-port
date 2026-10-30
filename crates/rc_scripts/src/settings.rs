@@ -25,6 +25,9 @@ pub struct Settings {
     pub bacta_heal_per_second: f32,
     /// Seconds before a used dispenser works again.
     pub bacta_recharge_seconds: f32,
+    /// Size (uu) of a level exit (`Teleporter`) the map gives none.
+    pub teleporter_radius: f32,
+    pub teleporter_height: f32,
 }
 
 impl Default for Settings {
@@ -40,6 +43,9 @@ impl Default for Settings {
             bacta_range: 256.0,
             bacta_heal_per_second: 50.0,
             bacta_recharge_seconds: 10.0,
+            // engine.u's Teleporter defaults (from NavigationPoint).
+            teleporter_radius: 80.0,
+            teleporter_height: 100.0,
         }
     }
 }
@@ -53,6 +59,15 @@ struct File {
     actors: Actors,
     #[serde(default)]
     bacta: Bacta,
+    #[serde(default)]
+    exits: Exits,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct Exits {
+    teleporter_radius: Option<f32>,
+    teleporter_height: Option<f32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -117,6 +132,12 @@ impl Settings {
         }
         if let Some(v) = b.recharge_seconds {
             self.bacta_recharge_seconds = v;
+        }
+        if let Some(v) = f.exits.teleporter_radius {
+            self.teleporter_radius = v;
+        }
+        if let Some(v) = f.exits.teleporter_height {
+            self.teleporter_height = v;
         }
         Ok(self)
     }

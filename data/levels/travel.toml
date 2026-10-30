@@ -1,0 +1,16 @@
+# Going on to the next map.
+#
+# Most maps end where you walk into the exit arrows (a "Teleporter" in the
+# map with the next map's name in it); a few end from a script. The next
+# map then loads fresh, and these parts of a save file come with you, so
+# you keep them. The names are the save file's section names:
+#
+#   combat  - your health, shield, the weapons you carry and their ammo
+#
+# Not carried (the next map starts them fresh): where you stand (you
+# arrive at the next map's start or the teleporter the exit names), the
+# squad (their places belong to the old map: they arrive with you, up and
+# at full health), doors, scripts and enemies.
+#
+# A mod can carry more or less by listing other names.
+carry = ["combat"]
