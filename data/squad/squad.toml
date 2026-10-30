@@ -130,9 +130,11 @@ burst_pause_max = 1.2
 # A standing commando shoots only this far off where it faces, degrees.
 # Our own (droids: 60, BattleDroid MaxAimYaw).
 max_aim_yaw = 60
-# Hold fire while the player or a squad mate is this close to the line of
-# fire, uu. Our own.
-friendly_clearance = 60
+# Hold fire while the line of fire passes this close to the player's or a
+# squad mate's body (the whole 168-tall commando), uu, on top of how far
+# the shot can stray. Our own. It used to be measured from the body's
+# middle only, which let shots pass over shoulders into friends.
+friendly_clearance = 20
 
 # Reviving a downed commando. Squad mates can't die in the original
 # (bCannotDie): at 0 health they go down until someone revives them. Who

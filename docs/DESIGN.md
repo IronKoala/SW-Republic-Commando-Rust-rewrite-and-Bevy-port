@@ -1189,6 +1189,7 @@ and carries out the effects:
 | `ShowPrompt` | `HudMessage` (`@`, the button, shows as USE for now) |
 | `ObjectiveUpdate` | kept in `Objectives` (what the numbers mean isn't worked out) |
 | checkpoint | `CheckpointReached { name }`, held while the player is down |
+| walking into an open level exit, `ChangeLevel`, a debriefing's `NewLevel` | `ChangeLevel { map, portal }` (see "Going on to the next map") |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
@@ -1586,9 +1587,13 @@ the target's middle, off by up to `(1 - accuracy) x max_aim_error`; the
 weapons part then adds the gun's own spread, as it does for the player and
 the droids. A standing member turns to face its target and fires only
 within `max_aim_yaw` of its facing; a moving one fires on the move. A
-member holds fire while the player or another squad mate (standing or
-lying) is within `friendly_clearance` of the line of fire, nearer than the
-target. Shots go out as `rc_combat::FireShot` with the squad mate as the
+member holds fire while the line of fire, nearer than the target, passes
+within `friendly_clearance` of the player's or another squad mate's whole
+body (the 40-wide, 168-tall commando cylinder, or a low wide shape for one
+lying down), widened by how far the shot can stray (our aim error plus
+about 2 uu per 100 for the gun's spread). Until 2026-10-30 it measured from
+the body's middle point only, so lines passing at shoulder or head height
+went through friends (`fight::shot_passes_friend`). Shots go out as `rc_combat::FireShot` with the squad mate as the
 shooter, so the weapons part flies the bolts, applies the damage, and its
 `ShotLanded` and `Died` messages count hits and kills per member
 (`SquadFightStats`).
@@ -2326,6 +2331,71 @@ the original's keys.
 sends `LoadGame { slot }` or `SaveGame { slot }` and gets `SaveResult` back.
 Every save and load is logged with the prefix `save:` and a one-line summary
 of each section, so a round trip can be checked from the log.
+
+## Going on to the next map (`rc_scripts`, `rc_save`, `rc_level_plugin`)
+
+**How the original's maps end.** We read every campaign map with
+`rc_script_check`. Three ways, all from the map itself:
+
+- Most maps (37 of 56) have a `Teleporter` actor with a `URL`, like
+  `GEO_01B.ctm#playerstart`: walking into it (the arrows; geo_01a's hint
+  says "Walking through the arrows will load the next level") loads that
+  map. Many are closed at first (`bCollideActors=false`) until the
+  mission's last script runs `ACTION_SetCollision` on their tag; geo_04c's
+  starts switched off (`bEnabled=false`) and an event with its tag
+  switches it on, as UE2 teleporters do. Their size is the map's
+  `CollisionRadius`/`CollisionHeight`, or the game's own defaults (80 and
+  100, from engine.u's NavigationPoint; `data/scripts/scripts.toml`
+  `[exits]`).
+- Briefings, cutscenes and a few levels end with a script action,
+  `ACTION_ChangeLevel` (`URL`).
+- The last level of each campaign shows the debriefing,
+  `ACTION_ShowDebriefingScreen` with a `NewLevel` (the same action with
+  only `Text` is a hint screen, and doesn't leave). The screen itself isn't
+  shown yet; the game goes straight on to `NewLevel`.
+
+Following the first exit of each map from `pro` visits all 56 campaign
+maps in order and ends at `epilogue`; no exit names a missing map.
+
+**Script actions switched off in the map.** 371 actions in the 57 campaign maps carry
+`bDisabled=true` (designers switched them off: debug messages, an
+`ACTION_SetCollision EndPort` at the start of ras_01c that would open the
+exit at once). The director skips them, logged as "switched off in the
+map, skipped". This is our reading of the flag's name; the class that
+uses it is compiled.
+
+**Leaving.** `rc_scripts::Director` sends `Effect::ChangeLevel { url }`
+once and then stops running the map's scripts. `rc_scripts::level_url`
+reads the address into a map name (lower case, no `.ctm`) and a portal
+(after `#`). The scripts part sends `rc_game_core::ChangeLevel { map,
+portal, by }`.
+
+**Carrying the player over.** `rc_save` handles `ChangeLevel` like a load
+of a save, but with only some sections: the ones `data/levels/travel.toml`
+lists (`carry = ["combat"]`: health, shield, weapons and ammo) are read out
+of the game with each part's own `SavePart::save`, the map is loaded fresh
+(`CurrentLevel`, `GameState::Loading`), and on its first frame each
+carried section goes back in with that part's `SavePart::load`, before
+the level-start checkpoint is written, so that checkpoint has them. Not
+carried: the player's place (they arrive), the squad (their places belong
+to the old map; they arrive fresh), doors, scripts and enemies. A mod can
+change the list.
+
+**Arriving.** `rc_save` inserts `ArrivalPortal(portal)`. The level part
+looks for a `Teleporter` with that `Tag` in the new map
+(`MapCollision::arrivals`) and starts the player there, as UE2 does;
+otherwise (`#playerstart`, and 12 of the original's addresses like
+`Geo_04B.ctm#FromA`, whose map has no teleporter by that name) at the map's
+first `PlayerStart`. `rc_script_check` lists which is which: 5 exits
+arrive at a teleporter, 38 at the start.
+
+**Checked by** `rc_scripts` tests (an exit a script opens; one switched on
+by its tag; `ChangeLevel` and the debriefing; disabled actions; an opened
+exit through a save; address reading), `rc_save`'s
+`level_exit_carries_sections_to_the_next_map`, and `rc_game --script`,
+which puts the player into geo_01a's exit with 13 health taken off and
+checks that geo_01b loads with the same health and magazine, the player at
+its start, and its start saved as a checkpoint with that health.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

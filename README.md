@@ -215,7 +215,15 @@ copy of the game.
   from the game's own sound files, and a script waiting for a line waits
   exactly as long as the line lasts. Every one of the 1,629 sounds the
   campaign maps' scripts name is found. `rc_game --script` checks that
-  geo_01a's intro plays its lines (53 of 53 checks).
+  geo_01a's intro plays its lines (57 of 57 checks with level changes).
+  Finishing a level now takes you to the next one (tested in the cloud
+  sandbox with the real files, not yet on Windows or by playing through):
+  walking into the exit arrows, or a script's "change level", loads the
+  next map in the campaign, and you keep your health, shield, weapons and
+  ammo. You arrive where the original puts you, and the new map's start is
+  saved as your checkpoint. Following the exits from the prologue goes
+  through all 56 campaign maps to the epilogue. `rc_game --script` walks
+  into geo_01a's exit and checks geo_01b (56 of 56 checks).
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
@@ -355,13 +363,15 @@ copy of the game.
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
   doors, barricades, damage to the player, bacta dispensers, prompts,
-  objectives (kept, not shown), checkpoints, enemy spawners, and lines of
-  dialogue and sounds (the game's own, read from its sound files; a script
-  waiting for a line waits for its real length). No subtitles yet, and
-  every scripted sound plays at full loudness wherever its speaker is.
-  Music cues, characters walking or animating, the squad joining and
-  leaving, camera moves and level changes are logged as "not done yet".
-  Not tested on Windows.
+  objectives (kept, not shown), checkpoints, enemy spawners, level
+  changes, and lines of dialogue and sounds (the game's own, read from its
+  sound files; a script waiting for a line waits for its real length). No
+  subtitles yet, and every scripted sound plays at full loudness wherever
+  its speaker is. Music cues, characters walking or animating, the squad
+  joining and leaving and camera moves are logged as "not done yet". The
+  end-of-campaign debriefing screen isn't shown: the game goes straight
+  on. Briefings and cutscene maps may wait for events nothing sends yet,
+  so you may get stuck in one. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game

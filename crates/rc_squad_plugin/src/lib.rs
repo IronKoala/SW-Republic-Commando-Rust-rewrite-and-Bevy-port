@@ -37,11 +37,11 @@ pub mod look;
 pub mod save;
 
 use bevy::prelude::*;
-use rc_game_core::save::SaveAppExt;
 use rc_combat::{
     CombatSet, Damage, DamageKind, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield,
     ShotLanded, Team, WeaponLibrary,
 };
+use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
@@ -964,6 +964,7 @@ fn count_hits(
     mut landed: MessageReader<ShotLanded>,
     mut died: MessageReader<Died>,
     mates: Query<&SquadMate>,
+    players: Query<(), With<Player>>,
     names: Query<&Name>,
     log: Option<Res<GameLog>>,
 ) {
@@ -972,10 +973,20 @@ fn count_hits(
         let (Ok(m), Some(t)) = (mates.get(l.shooter), l.target) else {
             continue;
         };
-        if mates.contains(t) {
+        if let Ok(other) = mates.get(t) {
             log_line(
                 &log,
-                format!("t={time:.2} {} hit a squad mate by mistake", m.name),
+                format!(
+                    "t={time:.2} {} hit a squad mate ({}) by mistake",
+                    m.name, other.name
+                ),
+            );
+            continue;
+        }
+        if players.contains(t) {
+            log_line(
+                &log,
+                format!("t={time:.2} {} hit the player by mistake", m.name),
             );
             continue;
         }

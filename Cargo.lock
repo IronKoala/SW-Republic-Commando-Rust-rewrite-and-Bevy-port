@@ -4479,6 +4479,7 @@ dependencies = [
  "rc_pads",
  "rc_panini",
  "rc_save",
+ "rc_scripts",
  "rc_scripts_plugin",
  "rc_squad_plugin",
  "serde",
