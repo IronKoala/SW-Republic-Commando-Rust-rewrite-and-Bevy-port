@@ -2288,6 +2288,23 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   open the original's REASSIGN BUTTON box (`CTMapKeyMenu`), which uses
   `rebind.rs` for the actual capture. The effects volume now scales every
   sound that isn't music (`music.rs`, `effects_volume`).
+- The campaign page is original too (`CTCampaignMenu`). `rc_menus::lists`
+  draws the original's scrolling list (`MenuStringList`: its template row
+  copied once per visible row, spaced between the list's two corners), its
+  scroll bar's handle (`MenuScrollBar`, sized by how much of the list
+  shows), and its wheel area (`MenuScrollArea`). `rc_menus::campaign` is
+  the page's script rewritten by hand: the three planets with their rings
+  and mission blips, dimming the others, the planet name, and the missions
+  read from the class's own `GEO_SubMissions`/`GEO_SubMissionDescs` (and
+  `RAS_`, `YYY_`). `rc_game/src/original_lists.rs` does the keys (up and
+  down along the list, left and right change planet), the wheel, double
+  clicks and SELECT. New page commands: `scroll_up`, `scroll_down`,
+  `list_pick` and `act:<name>` (page-specific actions). An "EVERY MAP +"
+  button (an `extra_buttons` copy of BACK, moved right with `move_right`)
+  swaps the list for the class's developer list of every map. List rows
+  that are too long are squeezed narrower (`Text::squeeze`) rather than cut.
+  `quads::text_overlaps` finds text touching other text or picture buttons;
+  `rc_probe --pages` prints every overlap per page.
 - `rc_game/src/original_hud.rs` swaps the placeholder HUD's drawn shapes
   for the original's pictures, named in `data/ui/hud.toml` (the original
   places them in native code, so placement is ours). It reads its own

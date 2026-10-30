@@ -5,7 +5,8 @@
 //! ignored, so moving it over the window doesn't change the route.
 //!
 //! The route: the original main menu (colours checked against the
-//! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
+//! original's pictures), CAMPAIGN MAP (the original campaign page: its
+//! missions, the planets left and right, EVERY MAP +), geo_01a, loading,
 //! the level's walls and sky (looking up), walk forward, pause (nothing
 //! moves), resume, saving (the level-start checkpoint, a checkpoint, a
 //! quicksave), walking away, quickload (the player is back where they
@@ -16,7 +17,6 @@
 //! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
 //! then QUIT again and YES).
 
-use crate::levels::LevelList;
 use crate::menu::{Menu, Page};
 use crate::original_menu::{self, OriginalMenus};
 use crate::player::Body;
@@ -50,8 +50,6 @@ enum Step {
     Check(&'static str, Probe),
     /// Remember something for a later check.
     Note(fn(&mut World)),
-    /// Press menu-down until the item the function names is selected.
-    SelectItem(&'static str, fn(&mut World) -> Option<usize>),
     /// On the pause menu, press menu-down until the button is focused: on
     /// the original's page the one calling this function, on the
     /// placeholder the item at this index.
@@ -236,33 +234,82 @@ fn steps() -> Vec<Step> {
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         Press(Action::MenuAccept),
         Wait(0.2),
-        Check("CAMPAIGN MAP opens the campaign list", |w| match page(w) {
-            Page::Campaigns => Ok("campaigns".into()),
-            p => Err(format!("{p:?}")),
+        Check("CAMPAIGN MAP opens the original campaign page", |w| {
+            match (page(w), shown_page(w)) {
+                (Page::Campaigns, Some(k)) if k == "campaigns" => Ok("campaigns (original)".into()),
+                (p, k) => Err(format!("{p:?}, original page {k:?}")),
+            }
         }),
-        // Geonosis' first level (the Prologue is a cut scene where the
-        // player falls; the first Geonosis level is the one rc_walk tests).
-        SelectItem("Geonosis", |w| {
-            w.resource::<LevelList>()
-                .campaigns
-                .iter()
-                .position(|c| c.name == "Geonosis")
-        }),
-        Press(Action::MenuAccept),
-        Wait(0.2),
-        Check("the campaign opens its levels", |w| match page(w) {
-            Page::Levels(i) => Ok(format!("levels of campaign {i}")),
-            p => Err(format!("{p:?}")),
-        }),
-        // Go down to the next item and up again, to test moving around.
-        Press(Action::MenuDown),
-        Press(Action::MenuUp),
-        Check("selection back on the first level", |w| {
-            let s = w.resource::<Menu>().selected;
-            if s == 0 {
-                Ok("0".into())
+        Wait(0.5),
+        Check("Geonosis is chosen and its missions are listed", |w| {
+            let (title, items) = campaign_list(w)?;
+            let focus = focus(w);
+            if title == "GEONOSIS"
+                && items.first().map(String::as_str) == Some("PROLOGUE")
+                && focus.as_deref() == Some("LevelList[0]")
+            {
+                Ok(format!("{title}: {items:?}, focus on {focus:?}"))
             } else {
-                Err(s.to_string())
+                Err(format!("{title}: {items:?}, focus on {focus:?}"))
+            }
+        }),
+        Shot("campaign"),
+        Check("campaign page matches the original's pictures", |w| {
+            compare(w, "campaign", 0.2)
+        }),
+        FocusAfter(Action::MenuDown, "LevelList[1]"),
+        FocusAfter(Action::MenuUp, "LevelList[0]"),
+        Press(Action::MenuRight),
+        Wait(0.1),
+        Check("right goes to the assault ship", |w| {
+            let (title, items) = campaign_list(w)?;
+            if title == "ASSAULT SHIP" && items.len() == 4 {
+                Ok(format!("{title}: {items:?}"))
+            } else {
+                Err(format!("{title}: {items:?}"))
+            }
+        }),
+        Press(Action::MenuLeft),
+        Wait(0.1),
+        Check("left comes back to Geonosis", |w| {
+            let (title, _) = campaign_list(w)?;
+            if title == "GEONOSIS" {
+                Ok(title)
+            } else {
+                Err(title)
+            }
+        }),
+        // Down the six missions to SELECT, then round the buttons to the
+        // port's EVERY MAP +, which lists every Geonosis map.
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        FocusAfter(Action::MenuDown, "LevelList[5]"),
+        FocusAfter(Action::MenuDown, "AButton"),
+        FocusAfter(Action::MenuDown, "BButton"),
+        FocusAfter(Action::MenuDown, "EveryMap"),
+        Press(Action::MenuAccept),
+        Wait(0.1),
+        Check("EVERY MAP + lists every Geonosis map", |w| {
+            let (_, items) = campaign_list(w)?;
+            if items.len() > 10 {
+                Ok(format!("{} maps: {items:?}", items.len()))
+            } else {
+                Err(format!("{items:?}"))
+            }
+        }),
+        // Up comes back to the list's first map; the third is geo_01a,
+        // the level the rest of the route walks.
+        FocusAfter(Action::MenuUp, "LevelList[0]"),
+        Press(Action::MenuDown),
+        FocusAfter(Action::MenuDown, "LevelList[2]"),
+        Check("the third map is geo_01a", |w| {
+            let m = w.resource::<OriginalMenus>();
+            let c = m.campaign.as_ref().ok_or("no campaign")?;
+            match c.map(2) {
+                Some(map) if map.eq_ignore_ascii_case("geo_01a") => Ok(map.to_string()),
+                other => Err(format!("{other:?}")),
             }
         }),
         Press(Action::MenuAccept),
@@ -1077,6 +1124,36 @@ fn pause_item_focused(w: &mut World, func: &str, index: usize) -> bool {
 
 /// The focused button of the original screen showing: a box over the
 /// page (question, reassign button), else the page, else the main menu.
+/// The original page showing, by its name in `original_menus.toml`.
+fn shown_page(w: &mut World) -> Option<String> {
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    match w.resource::<OriginalMenus>().shown(&state, play.as_ref(), menu) {
+        Some(original_menu::Shown::Page(k)) => Some(k),
+        _ => None,
+    }
+}
+
+/// The original campaign page's planet name and list.
+fn campaign_list(w: &mut World) -> Result<(String, Vec<String>), String> {
+    let m = w.resource::<OriginalMenus>();
+    let p = m.pages.get("campaigns").ok_or("no original campaign page")?;
+    let title = match p.screen.layout.widget("Campaign").map(|w| &w.kind) {
+        Some(rc_menus::layout::Kind::Text(t)) => t.text.clone(),
+        _ => String::new(),
+    };
+    let items = p
+        .screen
+        .layout
+        .lists
+        .lists
+        .first()
+        .map(|l| l.items.clone())
+        .unwrap_or_default();
+    Ok((title, items))
+}
+
 fn focus(w: &mut World) -> Option<String> {
     let state = *w.resource::<State<GameState>>().get();
     let play = w.get_resource::<State<Play>>().map(|p| *p.get());
@@ -1411,21 +1488,6 @@ fn run(world: &mut World) {
                 }
             }
             Step::Note(f) => f(world),
-            Step::SelectItem(what, target) => match target(world) {
-                None => {
-                    log.line(format!("CHECK find {what} in the menu: not there -> FAIL"));
-                    world.resource_mut::<Script>().failed += 1;
-                }
-                Some(i) => {
-                    if world.resource::<Menu>().selected != i {
-                        // Down on even frames, released on odd ones.
-                        if frames % 2 == 0 {
-                            held.insert(Action::MenuDown);
-                        }
-                        done = frames > 200;
-                    }
-                }
-            },
             Step::FocusPauseItem(func, index) => {
                 if !pause_item_focused(world, func, index) {
                     // Down on even frames, released on odd ones.

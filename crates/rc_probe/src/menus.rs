@@ -6,7 +6,7 @@
 use crate::Log;
 use rc_menus::layout::Kind;
 use rc_menus::quads::{self, Sizes};
-use rc_menus::{render, screens, Assets, Library};
+use rc_menus::{campaign, render, screens, Assets, Library};
 use std::path::Path;
 
 pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path) -> bool {
@@ -48,6 +48,25 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
         .any(|c| c.ends_with(".MenuTemplateTitled"))
     {
         screens::setup_titled(&mut layout);
+    }
+    if class.eq_ignore_ascii_case(campaign::CAMPAIGN_MENU) {
+        // As the game shows it: Geonosis chosen, its third mission picked.
+        if let Some(mut c) = campaign::read(&data) {
+            campaign::setup(&mut layout, &c);
+            campaign::choose(&mut layout, &mut c, 0);
+            for p in &c.planets {
+                log.line(format!(
+                    "planet {} {:?}: {} missions {:?}, {} maps in the every-map list",
+                    p.button,
+                    p.title,
+                    p.missions.len(),
+                    p.missions,
+                    p.every_map.len()
+                ));
+            }
+            campaign::highlight(&mut layout, &c, Some(2));
+            focus = rc_menus::lists::widget_of(&layout, 0, 2);
+        }
     }
     log.line(format!(
         "{} widgets ({} shown on PC), skipped: {:?}",
@@ -160,12 +179,32 @@ pub(crate) fn pages(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path
     for plan in &plans {
         log.line(format!("=== page {}: {} ===", plan.page, plan.class));
         probe(log, game_data, &plan.class, out_dir);
-        let mut library = Library::new(game_data);
-        let verdict = match library.class(&plan.class) {
+        let mut assets = Assets::new(Library::new(game_data));
+        let verdict = match assets.library.class(&plan.class) {
             Ok(c) => {
                 let mut layout = rc_menus::build(&c);
                 match rc_menus::pages::check(&mut layout, plan) {
-                    Ok(b) => format!("USES THE ORIGINAL ({} buttons)", b.commands.len()),
+                    Ok(b) => {
+                        // Fill the campaign page's list as the game does,
+                        // so its rows are checked too.
+                        if let Some(mut camp) = campaign::read(&c) {
+                            campaign::setup(&mut layout, &camp);
+                            campaign::choose(&mut layout, &mut camp, 0);
+                        }
+                        let overlaps = quads::text_overlaps(&layout, &mut assets);
+                        for (a, b, by) in &overlaps {
+                            log.line(format!(
+                                "  OVERLAP page {}: {a} and {b} cross by {:.1}% of the width",
+                                plan.page,
+                                by * 100.0
+                            ));
+                        }
+                        format!(
+                            "USES THE ORIGINAL ({} buttons), {} overlapping texts",
+                            b.commands.len(),
+                            overlaps.len()
+                        )
+                    }
                     Err(why) => format!("keeps the placeholder: {}", why.join("; ")),
                 }
             }

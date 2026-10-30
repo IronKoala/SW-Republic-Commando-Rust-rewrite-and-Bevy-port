@@ -20,6 +20,7 @@
 use crate::input::{BaseBindings, Bindings};
 use crate::menu::{GamePathsFound, Menu, Page};
 use crate::option_settings;
+use crate::original_lists;
 use crate::rebind::{RebindDone, StartRebind, UserBindingsPath};
 use crate::settings::Settings;
 use crate::settings::SettingsPath;
@@ -63,7 +64,7 @@ pub struct Screen {
 
 impl Screen {
     /// The buttons keys and controllers move between.
-    fn buttons(&self) -> Vec<usize> {
+    pub(crate) fn buttons(&self) -> Vec<usize> {
         self.layout
             .focusable_on_pc()
             .into_iter()
@@ -253,6 +254,11 @@ pub struct OriginalMenus {
     dirty: bool,
     /// The quads last drawn, for the script's colour check.
     pub drawn: Vec<Quad>,
+    /// The campaign page's planets and missions, when it uses the
+    /// original (`original_lists.rs`).
+    pub campaign: Option<rc_menus::campaign::Campaign>,
+    /// The list row last clicked, and when (for double clicks).
+    pub(crate) last_click: Option<(usize, std::time::Instant)>,
     /// This frame's button press was used here (for example to open the
     /// campaign page), so the placeholder pages must not act on it too.
     pub used_input: bool,
@@ -336,6 +342,7 @@ fn load(
     mut menus: ResMut<OriginalMenus>,
     paths: Res<GamePaths>,
     found: Res<GamePathsFound>,
+    levels: Option<Res<crate::levels::LevelList>>,
     log: Res<GameLog>,
 ) {
     if menus.tried {
@@ -411,6 +418,15 @@ fn load(
                     ));
                 }
             }
+        }
+    }
+    if let Some(plan) = menus.pages.get(original_lists::CAMPAIGNS).map(|p| p.plan.clone()) {
+        let ok = assets
+            .library
+            .class(&plan.class)
+            .is_ok_and(|c| original_lists::setup_campaign(&mut menus, &c, levels.as_deref(), &log));
+        if !ok {
+            menus.pages.remove(original_lists::CAMPAIGNS);
         }
     }
     let quit_text = match main.get("QuitGameConfirm") {
@@ -601,6 +617,8 @@ fn focus_new_page(
         refresh_page(p, &settings, &prompts);
         let screen = &mut p.screen;
         screen.focus = screen.buttons().first().copied();
+        original_lists::focus_first(&mut menus, k);
+        let screen = &menus.pages[k].screen;
         log.line(format!(
             "original menus: page {k} opened, focus on {}",
             screen.focused_name().unwrap_or("none")
@@ -852,7 +870,20 @@ fn navigate(
     let in_question = menus.question.is_some();
     let in_rebind = menus.rebind.is_some();
     let in_overlay = in_question || in_rebind;
+    // Pages with a list move along it with the keys and the wheel.
+    if let (false, Shown::Page(k)) = (in_overlay, &shown) {
+        if let Some(moved) = original_lists::keys(menus, k, &actions, wheel_y, &log) {
+            menus.used_input = true;
+            if moved {
+                menus.dirty = true;
+                let s = menus.focus_sound.clone();
+                play_sound(&mut commands, menus, &mut sources, s, &log);
+            }
+            return;
+        }
+    }
     let mut chosen = None;
+    let mut by_key = false;
     let mut moved = false;
     // A chooser stepped by left or right: (widget, step).
     let mut stepped = None;
@@ -892,6 +923,10 @@ fn navigate(
             match i {
                 Interaction::Hovered | Interaction::Pressed => {
                     let pointing = mouse_moved || *i == Interaction::Pressed;
+                    // A list row takes focus only when clicked, not under
+                    // a moving pointer (the original's bNoMouseOverFocus).
+                    let row = rc_menus::lists::row_of(&screen.layout, hit.1).is_some();
+                    let pointing = pointing && (!row || *i == Interaction::Pressed);
                     if pointing && screen.focus != Some(hit.1) && screen.buttons().contains(&hit.1)
                     {
                         screen.focus = Some(hit.1);
@@ -905,6 +940,7 @@ fn navigate(
             }
         }
         if actions.just_pressed(Action::MenuAccept) {
+            by_key = chosen.is_none();
             chosen = chosen.or(screen.focus);
         }
         if moved {
@@ -1030,6 +1066,17 @@ fn navigate(
     menus.used_input = true;
     let s = menus.select_sound.clone();
     play_sound(&mut commands, menus, &mut sources, s, &log);
+    // A list's own commands, and what only one page does.
+    let cmd = match &shown {
+        Shown::Page(k) => match original_lists::command(menus, k, chosen, by_key, cmd, &log) {
+            Some(c) => c,
+            None => {
+                menus.dirty = true;
+                return;
+            }
+        },
+        Shown::Main => cmd,
+    };
     let resume = |next_play: &mut Option<ResMut<NextState<Play>>>| {
         if let Some(n) = next_play.as_mut() {
             n.set(Play::Running);
@@ -1123,8 +1170,12 @@ fn navigate(
                 menus.dirty = true;
             }
         }
-        // Handled above: they belong to the row.
-        PageCmd::Rebind => {}
+        // Handled above: they belong to the row, or to the page's list.
+        PageCmd::Rebind
+        | PageCmd::ScrollUp
+        | PageCmd::ScrollDown
+        | PageCmd::ListPick
+        | PageCmd::Act(_) => {}
         PageCmd::Unavailable => {}
     }
 }

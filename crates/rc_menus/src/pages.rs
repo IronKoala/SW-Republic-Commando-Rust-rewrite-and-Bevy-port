@@ -48,13 +48,23 @@ pub enum PageCmd {
     /// Show the previous or next set of rows (the controls page).
     PrevSet,
     NextSet,
+    /// The arrows beside a list: scroll it one row.
+    ScrollUp,
+    ScrollDown,
+    /// A row of a list: choose the item it shows.
+    ListPick,
+    /// Something only this page does, by name (the campaign page's
+    /// `planet` and `start_level`, for example); the game's code for the
+    /// page acts on it.
+    Act(String),
 }
 
 impl PageCmd {
     /// Read a command as written in the data file: `resume`, `restart`,
     /// `back`, `quit_to_menu`, `quit_game`, `unavailable`, `open:<page>`,
     /// `play:<map>`, `switch:<page>`, `option_left`, `option_right`,
-    /// `restore_defaults`, `rebind`, `prev_set`, `next_set`.
+    /// `restore_defaults`, `rebind`, `prev_set`, `next_set`, `scroll_up`,
+    /// `scroll_down`, `list_pick`, `act:<what>`.
     pub fn parse(s: &str) -> Option<PageCmd> {
         let s = s.trim();
         if let Some(p) = s.strip_prefix("open:") {
@@ -62,6 +72,9 @@ impl PageCmd {
         }
         if let Some(p) = s.strip_prefix("switch:") {
             return Some(PageCmd::Switch(p.trim().to_ascii_lowercase()));
+        }
+        if let Some(a) = s.strip_prefix("act:") {
+            return Some(PageCmd::Act(a.trim().to_ascii_lowercase()));
         }
         if let Some(m) = s.strip_prefix("play:") {
             return Some(PageCmd::Play(m.trim().to_string()));
@@ -79,6 +92,9 @@ impl PageCmd {
             "rebind" => PageCmd::Rebind,
             "prev_set" => PageCmd::PrevSet,
             "next_set" => PageCmd::NextSet,
+            "scroll_up" => PageCmd::ScrollUp,
+            "scroll_down" => PageCmd::ScrollDown,
+            "list_pick" => PageCmd::ListPick,
             _ => return None,
         })
     }
@@ -128,6 +144,8 @@ pub struct ExtraButton {
     pub text: String,
     /// How far down from the copied button, as a fraction of the screen.
     pub move_down: f32,
+    /// How far right (left when negative), as a fraction of the screen.
+    pub move_right: f32,
     pub command: PageCmd,
 }
 
@@ -221,7 +239,15 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
     let mut keys = Vec::new();
     let mut greyed = Vec::new();
     let mut greyed_rows = Vec::new();
-    for i in layout.buttons_on_pc() {
+    // A list's rows are hidden until the list is filled, but get their
+    // command now.
+    let mut candidates = layout.buttons_on_pc();
+    for i in 0..layout.widgets.len() {
+        if crate::lists::row_of(layout, i).is_some() && !candidates.contains(&i) {
+            candidates.push(i);
+        }
+    }
+    for i in candidates {
         let w = &layout.widgets[i];
         let Kind::Button(b) = &w.kind else { continue };
         if b.disabled {
@@ -320,6 +346,8 @@ struct ExtraDef {
     text: String,
     #[serde(default)]
     move_down: f32,
+    #[serde(default)]
+    move_right: f32,
     command: String,
 }
 
@@ -342,6 +370,7 @@ pub fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
                 copy_of: e.copy_of,
                 text: e.text,
                 move_down: e.move_down,
+                move_right: e.move_right,
             });
         }
         out.push(PagePlan {
@@ -387,6 +416,7 @@ mod tests {
             sounds: Sounds::default(),
             background_movie: String::new(),
             music: None,
+            lists: Default::default(),
         }
     }
 
@@ -417,6 +447,11 @@ mod tests {
             PageCmd::parse("play:geo_01a"),
             Some(PageCmd::Play("geo_01a".into()))
         );
+        assert_eq!(
+            PageCmd::parse("act:Start_Level"),
+            Some(PageCmd::Act("start_level".into()))
+        );
+        assert_eq!(PageCmd::parse("scroll_down"), Some(PageCmd::ScrollDown));
         assert_eq!(PageCmd::parse("fly"), None);
     }
 

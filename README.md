@@ -293,9 +293,11 @@ copy of the game.
   on) are greyed out. Values change with the arrows; the screen size
   also has a drop-down list. Our own extra settings (field of view, full
   screen, controller and gyro) are on a fifth tab, "PORT +", in the same
-  original look. The campaign page keeps the placeholder until its planet
-  buttons and level list can be drawn; `logs/rc_game.log` says why
-  ("original menus: page campaigns kept the placeholder: ..."). Which
+  original look. **The campaign page is the original's too** (tested in the
+  cloud sandbox with the install, not yet on Windows): the three planets,
+  the mission list with its scroll bar, BACK and SELECT; every mission is
+  listed because the port doesn't track progress yet, and "EVERY MAP +"
+  lists every map instead. Which
   original menu draws which page is in `data/ui/original_menus.toml`. The
   crosshair is the original's reticle picture (`data/ui/hud.toml`); its
   size is our guess.

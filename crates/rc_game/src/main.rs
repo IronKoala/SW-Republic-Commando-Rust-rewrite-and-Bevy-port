@@ -21,6 +21,7 @@ mod menu;
 mod music;
 mod option_settings;
 mod original_hud;
+mod original_lists;
 mod original_menu;
 mod panini;
 mod player;

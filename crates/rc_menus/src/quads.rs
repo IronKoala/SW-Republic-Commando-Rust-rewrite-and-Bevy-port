@@ -64,11 +64,12 @@ pub fn menu_quads(layout: &MenuLayout, focused: Option<usize>, sizes: &mut dyn S
             Kind::Sprite(s) => sprite_quads(s, &w.name, sizes, &mut out),
             Kind::Text(t) => text_quads(t, &w.name, sizes, &mut out),
             Kind::Button(b) => {
-                let (bg, t) = if focused == Some(i) {
-                    (&b.background_focused, &b.focused)
+                let (under, bg, t) = if focused == Some(i) {
+                    (&b.under_focused, &b.background_focused, &b.focused)
                 } else {
-                    (&b.background_blurred, &b.blurred)
+                    (&b.under_blurred, &b.background_blurred, &b.blurred)
                 };
+                sprite_quads(under, &w.name, sizes, &mut out);
                 sprite_quads(bg, &w.name, sizes, &mut out);
                 text_quads(t, &w.name, sizes, &mut out);
             }
@@ -170,7 +171,7 @@ fn advance(font: &FontData, c: char, kerning: i32) -> f32 {
 /// not handled). With word wrap, the text breaks at spaces into lines that
 /// fit; a single word wider than the limit keeps its own line.
 fn lines(t: &Text, font: &FontData) -> Vec<String> {
-    if t.max_size_x <= 0.0 {
+    if t.max_size_x <= 0.0 || t.squeeze {
         return vec![t.text.clone()];
     }
     let max = t.max_size_x * BASE_WIDTH / t.scale[0];
@@ -215,10 +216,26 @@ fn block_size(t: &Text, font: &FontData, lines: &[String]) -> (f32, f32) {
     )
 }
 
+/// A squeezed text (`Text::squeeze`) narrowed just enough to fit its
+/// `max_size_x`; other texts unchanged.
+fn squeezed<'a>(t: &'a Text, font: &FontData) -> std::borrow::Cow<'a, Text> {
+    if !t.squeeze || t.max_size_x <= 0.0 {
+        return std::borrow::Cow::Borrowed(t);
+    }
+    let wide = line_width(font, &t.text, t.kerning) * t.scale[0] / BASE_WIDTH;
+    if wide <= t.max_size_x {
+        return std::borrow::Cow::Borrowed(t);
+    }
+    let mut n = t.clone();
+    n.scale[0] *= t.max_size_x / wide;
+    std::borrow::Cow::Owned(n)
+}
+
 fn text_quads(t: &Text, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Quad>) {
     let Some(font) = t.font.as_deref().and_then(|f| sizes.font(f)) else {
         return;
     };
+    let t = &*squeezed(t, &font);
     let lines = lines(t, &font);
     if lines.iter().all(|l| l.is_empty()) {
         return;
@@ -264,10 +281,61 @@ fn text_quads(t: &Text, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Quad>
 /// The box a text covers (used for logs and checks).
 pub fn text_box(t: &Text, sizes: &mut dyn Sizes) -> Option<[f32; 4]> {
     let font = sizes.font(t.font.as_deref()?)?;
+    let t = &*squeezed(t, &font);
     let lines = lines(t, &font);
     let (w, h) = block_size(t, &font, &lines);
     let (px, py) = pivot_fraction(t.pivot);
     let x0 = t.pos[0] - w * px;
     let y0 = t.pos[1] - h * py;
     Some([x0, y0, x0 + w, y0 + h])
+}
+
+/// Texts on a page that run into each other or into a picture button (the
+/// arrows beside a chooser): every pair of shown texts (labels, and button
+/// texts), or text and picture button, from different widgets whose boxes
+/// cross,
+/// with how much they cross as a fraction of the menu width. The menu is
+/// always drawn in a 4:3 area scaled to the window, so what overlaps here
+/// overlaps at every window size and shape, and what doesn't, doesn't.
+pub fn text_overlaps(layout: &MenuLayout, sizes: &mut dyn Sizes) -> Vec<(String, String, f32)> {
+    let mut boxes: Vec<(String, [f32; 4])> = Vec::new();
+    let mut pictures: Vec<(String, [f32; 4])> = Vec::new();
+    for w in &layout.widgets {
+        if !w.shown_on_pc() {
+            continue;
+        }
+        if let Kind::Button(b) = &w.kind {
+            if b.blurred.text.is_empty() && b.background_blurred.color[3] > 0 {
+                if let Some(bx) = sprite_box(&b.background_blurred, sizes) {
+                    pictures.push((w.name.clone(), bx));
+                }
+            }
+        }
+        let t = match &w.kind {
+            Kind::Text(t) => t,
+            Kind::Button(b) => &b.blurred,
+            Kind::Sprite(_) => continue,
+        };
+        if t.text.trim().is_empty() || t.color[3] == 0 {
+            continue;
+        }
+        if let Some(b) = text_box(t, sizes) {
+            boxes.push((w.name.clone(), b));
+        }
+    }
+    let mut out = Vec::new();
+    let texts = boxes.len();
+    boxes.extend(pictures);
+    for (i, (a, ab)) in boxes[..texts].iter().enumerate() {
+        for (b, bb) in &boxes[i + 1..] {
+            let x = ab[2].min(bb[2]) - ab[0].max(bb[0]);
+            let y = ab[3].min(bb[3]) - ab[1].max(bb[1]);
+            // Letters' boxes include a little space above and below, so
+            // rows that only touch aren't counted.
+            if x > 0.002 && y > 0.004 {
+                out.push((a.clone(), b.clone(), x));
+            }
+        }
+    }
+    out
 }

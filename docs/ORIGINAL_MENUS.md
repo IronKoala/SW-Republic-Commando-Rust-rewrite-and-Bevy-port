@@ -83,11 +83,20 @@ against the install the same evening with `rc_probe --pages`:
   main menu; QUIT PROGRAM asks the quit question. Its `Background` is a
   black square at alpha 120 over the game. Two of the night's guesses
   were wrong (QUIT was thought to mean "to the main menu").
-- **Campaign (`CTCampaignMenu`): keeps the placeholder.** It needs widget
-  kinds the reader doesn't draw yet: `MenuButtonSprite` (the planets and
-  arrows), `MenuStringList` (the level list), `MenuScrollBar`,
-  `MenuScrollArea`, `MenuActiveWidget`. Its buttons are BACK
-  (`OnBButton`) and SELECT (`SelectCurrentLevel`).
+- **Campaign (`CTCampaignMenu`, 2026-10-30): uses the original.** The
+  three planets (Geonosis, the assault ship, Kashyyyk) with their rings
+  and mission blips, the planet's name, the mission list with its scroll
+  bar, BACK and SELECT. Clicking a planet (or left and right) changes
+  planet; up and down move along the list (the chosen mission's blip
+  lights green); Enter, a double click or SELECT opens the mission's
+  first map. The missions and their names come from the class itself
+  (`GEO_SubMissions` and `GEO_SubMissionDescs`, and the same for `RAS_`
+  and `YYY_`). The original lists only the missions the profile has
+  reached; the port has no profile progress yet, so it lists them all.
+  Our own "EVERY MAP +" button (a copy of BACK) swaps in the class's
+  developer list of every map, named with the game's level titles. The
+  list and scroll bar are `rc_menus::lists`; the page's script is
+  `rc_menus::campaign`.
 - **Options (2026-10-30): use the original.** See below.
 - `rc_game --script` picks pause items by the original's function name
   (`FocusPauseItem`), so it works with either pause page.
