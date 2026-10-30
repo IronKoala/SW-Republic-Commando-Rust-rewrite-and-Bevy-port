@@ -135,3 +135,41 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
 fn round(b: [f32; 4]) -> [f32; 4] {
     b.map(|v| (v * 1000.0).round() / 1000.0)
 }
+
+/// `rc_probe --pages [file]`: for every page in `data/ui/original_menus.toml`
+/// (or the file given), probe and paint its menu as `--menu` does, then say
+/// whether the game would use it or keep the placeholder, and why.
+pub(crate) fn pages(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) -> bool {
+    let plans = match std::fs::read_to_string(file)
+        .map_err(|e| e.to_string())
+        .and_then(|t| rc_menus::pages::parse_plans(&t))
+    {
+        Ok(p) => p,
+        Err(e) => {
+            log.line(format!("FAILED: {}: {e}", file.display()));
+            return false;
+        }
+    };
+    let mut verdicts = Vec::new();
+    for plan in &plans {
+        log.line(format!("=== page {}: {} ===", plan.page, plan.class));
+        probe(log, game_data, &plan.class, out_dir);
+        let mut library = Library::new(game_data);
+        let verdict = match library.class(&plan.class) {
+            Ok(c) => {
+                let mut layout = rc_menus::build(&c);
+                match rc_menus::pages::check(&mut layout, plan) {
+                    Ok(b) => format!("USES THE ORIGINAL ({} buttons)", b.commands.len()),
+                    Err(why) => format!("keeps the placeholder: {}", why.join("; ")),
+                }
+            }
+            Err(e) => format!("keeps the placeholder: can't read the class: {e}"),
+        };
+        verdicts.push(format!("page {}: {verdict}", plan.page));
+    }
+    log.line("=== summary ===");
+    for v in verdicts {
+        log.line(v);
+    }
+    true
+}

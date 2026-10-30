@@ -247,7 +247,15 @@ copy of the game.
   The campaign list, options, pause, loading screen and HUD are our own
   amber stand-ins, and the amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
-  turn; see `docs/ORIGINAL_MENUS.md`.
+  turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
+  original's** (tested in the cloud sandbox with the install, not yet on
+  Windows): its eleven buttons, with saving, loading and hints greyed out
+  until built. The campaign page keeps the placeholder until its planet
+  buttons and level list can be drawn; `logs/rc_game.log` says why
+  ("original menus: page campaigns kept the placeholder: ..."). Which
+  original menu draws which page is in `data/ui/original_menus.toml`. The
+  crosshair is the original's reticle picture (`data/ui/hud.toml`); its
+  size is our guess.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
   sides, the view up and down stays the original's), and the HUD stays in a
@@ -305,7 +313,10 @@ copy of the game.
   save. A save holds where you are and where you look, your health, shield,
   weapons and ammo, and the droids: which spawners have started, which
   droids are still alive, where they are and their health, and the squad:
-  where each mate is, what they're doing, who is down. Saves are
+  where each mate is, what they're doing, who is down, and the level:
+  which doors and lifts are open or moving, and where each of the level's
+  scripts has got to (after a load they carry on instead of starting the
+  level over). Saves are
   readable text files in `%APPDATA%\rc_game\saves` on Windows or
   `~/.local/share/rc_game/saves` on Linux (change it with `[save] folder` in
   `settings.toml`), never in the game's folder. The scripted run saves,
@@ -368,11 +379,8 @@ copy of the game.
   question are the original's so far. Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
-  being built to plug into it). No briefings or cut scenes. Saving: doors
-  and lifts aren't saved yet, there's no Load Game screen yet (the
-  menu's LOAD GAME stays greyed out), and the original's own checkpoints
-  (144 found in the campaign maps) wait on the level scripts part to fire
-  them, so for now each level has only its level-start checkpoint. Options are a short list. Not tested on Windows,
+  being built to plug into it). No briefings or cut scenes. Saving: there's no Load Game screen yet (the
+  menu's LOAD GAME stays greyed out). Options are a short list. Not tested on Windows,
   with a real controller, or with a touch screen.
 - Controllers: no button pictures yet (words only), no rebinding screen
   yet, no rumble or aim assist. Gyro on phones isn't started. Building with
@@ -420,7 +428,9 @@ cargo run --release -p rc_probe -- --menu
 
 This paints the main menu to `extracted\menus\CTMenuMain.png` and logs every
 picture, text and button to `logs\rc_menu.log`. Add a class name, such as
-`--menu XInterface.MenuQuestionYesNo`, for another menu.
+`--menu XInterface.MenuQuestionYesNo`, for another menu. `rc_probe --pages` does
+this for every page in `data/ui/original_menus.toml` and ends with a
+summary of which would use their original menu in the game, and why not.
 
 The other programs test one piece each:
 

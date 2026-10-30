@@ -38,6 +38,7 @@ impl Plugin for HudPlugin {
                     log_hud,
                 )
                     .in_set(GameSet::Hud)
+                    .in_set(HudSystems)
                     .run_if(in_state(GameState::InGame)),
             );
     }
@@ -48,7 +49,11 @@ struct ShieldFill;
 #[derive(Component)]
 struct HealthFill;
 #[derive(Component)]
-struct CrossBar(Vec2);
+pub(crate) struct CrossBar(pub(crate) Vec2);
+
+/// The HUD's update systems (the original HUD pictures run after them).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HudSystems;
 #[derive(Component)]
 struct WeaponName;
 #[derive(Component)]
