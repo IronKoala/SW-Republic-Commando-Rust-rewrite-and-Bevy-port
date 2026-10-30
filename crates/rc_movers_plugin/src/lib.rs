@@ -17,10 +17,16 @@
 //! Other parts open doors by event name with [`LevelMovers::send`], the way
 //! the original's scripts do (`TriggerEvent` with the door's `Tag`).
 //!
+//! Where every door and lift is goes into save files (`[movers]`, see
+//! `save.rs`), so a load puts them back.
+//!
 //! Our own choices (how close counts as a bump, what each `InitialState`
 //! does) are in the data file `movers/movers.toml`.
 
+pub mod save;
+
 use bevy::prelude::*;
+use rc_game_core::save::SaveAppExt;
 use rc_game_core::{
     units::to_bevy, GameLog, GamePaths, GameSet, GameState, LevelCollision, LoadingGate,
 };
@@ -50,6 +56,7 @@ pub struct MoverSystems;
 impl Plugin for MoversPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MoverHappened>()
+            .add_save_part::<save::MoversSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
@@ -157,6 +164,13 @@ impl LevelMovers {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         p.extend(events.into_iter().map(|e| (t, e)));
+    }
+
+    /// Put the movers back as a saved game had them (see
+    /// [`MoverSet::restore`]).
+    pub fn restore(&self, snap: &rc_movers::SetSnapshot) -> rc_movers::RestoreReport {
+        let mut set = self.shared.set.write().unwrap_or_else(|e| e.into_inner());
+        set.restore(snap)
     }
 
     /// The movers as they are now (for reading; don't hold on to it).
