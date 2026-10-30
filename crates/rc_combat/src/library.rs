@@ -11,8 +11,8 @@ use crate::{Arsenal, Hittable};
 use bevy::audio::AudioSource;
 use bevy::prelude::*;
 use rc_game_core::{GameLog, GamePaths, Player};
-use rc_package::sound::read_sound;
-use rc_package::Package;
+use rc_package::sound::{read_multiple, read_sound};
+use rc_package::{ObjectRef, Package};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -30,8 +30,34 @@ pub struct WeaponLibrary {
     /// Files that didn't read, with the reason. They are left out.
     pub errors: Vec<String>,
     /// Sound name to Bevy sound. Empty when there is no audio (tests).
-    pub sounds: HashMap<String, Handle<AudioSource>>,
+    pub sounds: HashMap<String, GameSound>,
     pub player: PlayerSetup,
+}
+
+/// One sound name from a game package, ready to play. A plain `Sound` has
+/// one variant; a `SoundMultiple` (a group, such as `Uzi_Fire` or a droid's
+/// `BD1_SpottedEnemy`) has several, and each playing picks the next one.
+#[derive(Debug, Clone, Default)]
+pub struct GameSound {
+    pub variants: Vec<Handle<AudioSource>>,
+}
+
+impl GameSound {
+    /// The variant to play this time. **Our choice:** the game picks from a
+    /// group at random in compiled code we don't read; we step through the
+    /// group in a shuffled order that is the same on every run, so logs and
+    /// tests repeat.
+    pub fn pick(&self) -> Option<Handle<AudioSource>> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static PICKS: AtomicU32 = AtomicU32::new(0);
+        if self.variants.is_empty() {
+            return None;
+        }
+        let n = PICKS.fetch_add(1, Ordering::Relaxed);
+        // A fixed odd multiplier walks the group in a scrambled order.
+        let i = (n.wrapping_mul(2_654_435_761) >> 16) as usize % self.variants.len();
+        Some(self.variants[i].clone())
+    }
 }
 
 /// The player's numbers, from `data/combat/player.toml`. Defaults are the
@@ -341,14 +367,16 @@ fn load_sounds(
 }
 
 /// Read sounds by name from one of the game's sound packages
-/// (`GameData/Sounds/<package>.uax`) into Bevy sounds. Returns what was
-/// found and a note for each problem. Any part can use it (enemies do).
+/// (`GameData/Sounds/<package>.uax`) into Bevy sounds. A name can be a
+/// `Sound` or a `SoundMultiple` group (every sound in the group is read).
+/// Returns what was found and a note for each problem. Any part can use it
+/// (enemies do).
 pub fn read_sounds(
     paths: &GamePaths,
     package: &str,
     names: &[String],
     audio: &mut Assets<AudioSource>,
-) -> (HashMap<String, Handle<AudioSource>>, Vec<String>) {
+) -> (HashMap<String, GameSound>, Vec<String>) {
     let mut found = HashMap::new();
     let mut notes = Vec::new();
     if names.is_empty() {
@@ -369,27 +397,68 @@ pub fn read_sounds(
             return (found, notes);
         }
     };
+    // Each export's sound, read at most once even when groups share it.
+    let mut cache: HashMap<usize, Handle<AudioSource>> = HashMap::new();
+    let mut one = |i: usize, notes: &mut Vec<String>| -> Option<Handle<AudioSource>> {
+        if let Some(h) = cache.get(&i) {
+            return Some(h.clone());
+        }
+        let export = &pkg.exports[i];
+        match read_sound(&pkg, &data, export) {
+            Ok(snd) => {
+                let h = audio.add(AudioSource {
+                    bytes: snd.bytes(&data).to_vec().into(),
+                });
+                cache.insert(i, h.clone());
+                Some(h)
+            }
+            Err(e) => {
+                notes.push(format!(
+                    "sound {} didn't read: {e}",
+                    pkg.name(export.object_name)
+                ));
+                None
+            }
+        }
+    };
     for name in names {
-        let export = pkg.exports.iter().find(|e| {
-            pkg.export_class_name(e) == "Sound"
+        let export = pkg.exports.iter().position(|e| {
+            matches!(pkg.export_class_name(e), "Sound" | "SoundMultiple")
                 && pkg.name(e.object_name).eq_ignore_ascii_case(name)
         });
-        let Some(export) = export else {
+        let Some(i) = export else {
             notes.push(format!("sound {name} not in {package}"));
             continue;
         };
-        match read_sound(&pkg, &data, export) {
-            Ok(snd) => {
-                let bytes: Vec<u8> = snd.bytes(&data).to_vec();
-                found.insert(
-                    name.clone(),
-                    audio.add(AudioSource {
-                        bytes: bytes.into(),
-                    }),
-                );
+        let mut sound = GameSound::default();
+        if pkg.export_class_name(&pkg.exports[i]) == "Sound" {
+            sound.variants.extend(one(i, &mut notes));
+        } else {
+            match read_multiple(&pkg, &data, &pkg.exports[i]) {
+                Ok(group) => {
+                    for r in group.sounds {
+                        match ObjectRef::from_index(r) {
+                            ObjectRef::Export(j)
+                                if j < pkg.exports.len()
+                                    && pkg.export_class_name(&pkg.exports[j]) == "Sound" =>
+                            {
+                                sound.variants.extend(one(j, &mut notes));
+                            }
+                            _ => notes.push(format!(
+                                "group {name}: {} is not a sound in {package}",
+                                pkg.object_name(r)
+                            )),
+                        }
+                    }
+                }
+                Err(e) => notes.push(format!("group {name} didn't read: {e}")),
             }
-            Err(e) => notes.push(format!("sound {name} didn't read: {e}")),
         }
+        if sound.variants.is_empty() {
+            notes.push(format!("sound {name} in {package} has nothing to play"));
+            continue;
+        }
+        found.insert(name.clone(), sound);
     }
     (found, notes)
 }

@@ -24,6 +24,7 @@
 //! sound lasts, the random seed) are in `data/scripts/scripts.toml`
 //! ([`Settings`]).
 
+pub mod save;
 pub mod settings;
 
 use rc_level::movers::TriggerInfo;

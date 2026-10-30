@@ -15,6 +15,7 @@ pub mod assets;
 pub mod gpu;
 pub mod layout;
 pub mod library;
+pub mod pages;
 pub mod quads;
 pub mod render;
 pub mod screens;

@@ -60,7 +60,7 @@ pub fn pivot_fraction(pivot: u8) -> (f32, f32) {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sprite {
     /// Full object path of the picture, if any.
     pub texture: Option<String>,
@@ -77,7 +77,7 @@ pub struct Sprite {
     pub scale_mode: u8,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Text {
     pub font: Option<String>,
     pub text: String,
@@ -95,7 +95,7 @@ pub struct Text {
     pub word_wrap: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Button {
     pub blurred: Text,
     pub focused: Text,
