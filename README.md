@@ -343,8 +343,9 @@ copy of the game.
   waits 3 s. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
-  exist in the PC install. `SoundMultiple` groups are read but not used yet.
-  No 3D (positional) sound yet.
+  exist in the PC install. `SoundMultiple` groups (a set of takes the game
+  picks from) are played for weapons, grenades and enemy voices. No 3D
+  (positional) sound yet: enemy sounds just get quieter with distance.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
@@ -366,12 +367,18 @@ copy of the game.
 - Weapons: no first-person arms or muzzle flash, and switching weapons is
   instant. How the view kick settles back is our own guess. The
   attachments' and the Trandoshan repeater's reload times are stand-ins,
-  grenades have no explosion sounds or models yet (a small glowing ball),
-  and nobody but the player throws grenades yet.
+  grenades have no models yet (a small glowing ball), and nobody but the
+  player throws grenades yet. Grenade explosions play the game's own
+  explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
   stand-in blaster instead of using their force pike, and walk instead of
-  flying and climbing. The Trandoshan uses a stand-in model. Droid voice
-  lines are empty until the sound packages are read.
+  flying and climbing. The Trandoshan uses a stand-in model.
+- Enemy voices: battle droids, super battle droids, Trandoshans and
+  Geonosian warriors say the game's own lines when they spot you, get hurt
+  and die, with the hurt and death lines matched to explosions, EMP and
+  falls where the game has them. Their other lines (heard something, saw a
+  grenade, retreating, ...) aren't used yet. Not listened to in `rc_game`
+  yet: the test checks every line is found in the game's files.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our

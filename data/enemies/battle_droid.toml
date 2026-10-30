@@ -77,13 +77,30 @@ activate_unscripted_within = 3000
 max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
 
 [sound]
-# Sound names in GameData/Sounds/<package>.uax; one is picked at random.
-# Empty lists play nothing. List a package's sounds with
+# What the droid says. Names are groups (SoundMultiple) in
+# GameData/Sounds/character_voice.uax; each time one line from the group
+# plays. List a package's sounds with
 # `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
-package = "droid_sound"   # placeholder: package name to check
-spotted = []              # placeholder: names not read yet
-hurt = []                 # placeholder: names not read yet
-death = []                # placeholder: names not read yet
+#
+# game: BattleDroid AudioTable = BattleDroidAudio (System/ctaudio.u), a table of one
+# group per event (engine.u EPawnAudioEvent). "hurt_<kind>" and
+# "death_<kind>" are used when that kind of damage did it (blaster,
+# explosion, sonic, electrical, fire, melee, fall, other); otherwise
+# "hurt" and "death". Only the kinds the game's table has are listed.
+# Its other lines (LargeArms, Quiet, HeardSomething, SearchAbort,
+# SeeGrenade, KilledExcited, Retreat, ...) aren't hooked up yet.
+package = "character_voice"
+spotted = ["BD1_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["BD1_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["BD1_DieSmallArms"]         # game: PAE_DieSmallArms
+hurt_explosion = ["BD1_HurtExplosion"]
+death_explosion = ["BD1_DieExplosion"]
+hurt_electrical = ["BD1_HurtElectricity"]
+death_electrical = ["BD1_DieElectricity"]
+hurt_melee = ["BD1_HurtMelee"]
+hurt_fall = ["BD1_HurtFall"]
+death_fall = ["BD1_DieFall"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
 
 [look]
 # The animated mesh and which of its animations to play. Names are as

@@ -96,9 +96,9 @@ fn say(log: &Option<Res<GameLog>>, s: String) {
 }
 
 fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &Option<String>, volume: f32) {
-    if let Some(h) = name.as_ref().and_then(|n| lib.sounds.get(n)) {
+    if let Some(h) = name.as_ref().and_then(|n| lib.sounds.get(n)?.pick()) {
         commands.spawn((
-            AudioPlayer(h.clone()),
+            AudioPlayer(h),
             PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
         ));
     }

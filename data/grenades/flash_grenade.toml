@@ -45,7 +45,11 @@ damage_type = "CTDamageStun" # game: StatusEffect_Stun DamageType
 player_must_face = true   # game: the player is only stunned facing the flash
 
 [sound]
+# The blast sound is the SpawnSound of the grenade's ExplosionEffect
+# (an Emitter class in Properties/cteffects.u). Not read: the game may use
+# another effect for some surfaces (HitEffectsByMaterial).
 package = "gen_sound"
+blast = "exp_GEN_tanker_01" # game: FlashBangProjDefaults ExplosionEffect Grenade_Flashbang_Explo, its SpawnSound
 bounce = "imp_GEN_grenadeBounce_01" # game: ImpactSound
 
 [model]
