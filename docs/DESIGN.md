@@ -575,6 +575,23 @@ edge-and-axis pair. Triangles are filed in a grid of 256 uu columns, so a
 sweep only checks the ones nearby. The test room cut into triangles gives the
 same results as the box version, within 1 uu.
 
+Keeping sweeps cheap (2026-10-30). A sweep first checks the box its whole
+move covers against the box around all the world's triangles and stops
+there if they don't touch. That matters because the level's collision is
+many `TriangleWorld`s asked one after another (the fixed level, each door,
+each prop a script can switch off): before this check a sweep far from a
+door still looked at the triangles in the door's nearest grid column. Then
+it only visits, row by row, the grid columns the move actually passes over
+(a long diagonal line of sight no longer visits the whole square around
+it), skips triangles whose own box is outside the move's box, and marks
+triangles already seen with a per-thread stamp list instead of a new hash
+set per sweep. A unit test compares the result with trying every triangle
+on 3,000 random moves. On geo_01b this took collision from about 33 ms of
+work per frame (1,000 sweeps looking at 550,000 triangles, with nobody
+fighting) to about 0.5 ms. `rc_game` logs a `speed:` line every 5 s with
+frames per second, the slowest frame, the number of entities, and the
+collision work per frame (`rc_movement::triangles::take_counts`).
+
 A 0.1 uu gap is kept between the box and surfaces, so rounding errors can't
 leave it stuck inside a wall. A move that only grazes a surface (pushes into it by less than
 1/10000 of its length) doesn't count as hitting it. Without that, sliding
@@ -589,8 +606,19 @@ level looks the same in both programs. For collision it builds a
 the BSP's polygons plus every visible static mesh prop, cut into triangles by
 `rc_level::collision`, and puts the player at the first PlayerStart (its
 centre is the start point, so feet = start z - 84). Not yet solid:
-BlockingVolumes and movers and vehicles (the gunship you start in). The
-game's per-prop collision settings are ignored: every visible prop is solid.
+vehicles (the gunship you start in).
+
+Which props are solid follows the game's settings (2026-10-30): a prop
+with `bCollideActors` or `bBlockPlayers` off (from the map, or else its
+class's defaults; on if neither says) is left out of collision
+(`rc_level::class_look::blocks_players`), and so are the triangles of mesh
+sections whose `EnableCollision` is off (`StaticMesh::section_collision`,
+read from the mesh's `Materials` list). They are still drawn. Before, every
+visible prop was solid, so you bumped into light shafts, cables and other
+decorations. geo_01b: 32 walk-through props and about 50,000 section
+triangles; its solid triangles went from 227,043 to 190,205. geo_01a: 68
+walk-through props and about 15,000 section triangles. Simplified
+collision models (the data after a mesh's streams) are still not read.
 
 ### The test room
 

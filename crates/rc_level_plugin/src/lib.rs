@@ -263,12 +263,13 @@ fn load(world: &mut World) {
     };
     let load_ms = t.elapsed().as_secs_f64() * 1000.0;
     log.line(format!(
-        "{PART}: {} loaded: {} collision triangles, {} props ({} with their class's model, {} unreadable), {} blocking volumes ({} unreadable), {:.0} ms",
+        "{PART}: {} loaded: {} collision triangles, {} solid props ({} with their class's model, {} unreadable, {} you can walk through left out), {} blocking volumes ({} unreadable), {:.0} ms",
         path.display(),
         lvl.triangles.len(),
         lvl.mesh_actors,
         lvl.class_mesh_actors,
         lvl.mesh_failures,
+        lvl.not_solid_props,
         lvl.blocking_volumes,
         lvl.volume_failures,
         load_ms
