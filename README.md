@@ -254,7 +254,15 @@ copy of the game.
   The campaign list, options, pause, loading screen and HUD are our own
   amber stand-ins, and the amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
-  turn; see `docs/ORIGINAL_MENUS.md`.
+  turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
+  original's** (tested in the cloud sandbox with the install, not yet on
+  Windows): its eleven buttons, with saving, loading and hints greyed out
+  until built. The campaign page keeps the placeholder until its planet
+  buttons and level list can be drawn; `logs/rc_game.log` says why
+  ("original menus: page campaigns kept the placeholder: ..."). Which
+  original menu draws which page is in `data/ui/original_menus.toml`. The
+  crosshair is the original's reticle picture (`data/ui/hud.toml`); its
+  size is our guess.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
   sides, the view up and down stays the original's), and the HUD stays in a
@@ -427,7 +435,9 @@ cargo run --release -p rc_probe -- --menu
 
 This paints the main menu to `extracted\menus\CTMenuMain.png` and logs every
 picture, text and button to `logs\rc_menu.log`. Add a class name, such as
-`--menu XInterface.MenuQuestionYesNo`, for another menu.
+`--menu XInterface.MenuQuestionYesNo`, for another menu. `rc_probe --pages` does
+this for every page in `data/ui/original_menus.toml` and ends with a
+summary of which would use their original menu in the game, and why not.
 
 The other programs test one piece each:
 

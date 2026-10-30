@@ -1,0 +1,59 @@
+# Which of the original game's menus draws each page, and what its buttons
+# do. The menus themselves (pictures, text, positions, sounds) are read
+# from the player's install at run time; nothing from the game is here.
+#
+# A page uses its original menu only when every widget on it is a kind we
+# can draw and every button it shows has a command below. Otherwise the
+# placeholder page is used, and logs/rc_game.log says why
+# ("original menus: page paused kept the placeholder: ...").
+#
+# Button names are the original's function names (its OnSelect), any case.
+# Commands:
+#   resume        close the pause menu
+#   restart       load the current level again
+#   open:<page>   open another page below (or its placeholder)
+#   back          go back a page
+#   quit_to_menu  leave the level for the main menu
+#   quit_game     ask "are you sure?", then quit
+#   play:<map>    start a map
+#   unavailable   greyed out, can't be chosen (not built yet)
+#
+# Checked 2026-10-29 with `rc_probe --pages` against the install: these are
+# the original's function names. `rc_probe --pages` lists every menu's
+# buttons and says which pages would use their original menu.
+
+[pages.paused]
+class = "XInterfaceCTMenus.CTPausePCMenu"
+over_game = true
+back = "resume"
+
+# In the original's order. Saving, loading and hints aren't built yet.
+[pages.paused.buttons]
+LoadLastSaveSelected = "unavailable"
+QuickSaveSelected = "unavailable"
+QuickLoadSelected = "unavailable"
+ResumeGameSelected = "resume"
+RestartMissionSelected = "restart"
+SaveGameSelected = "unavailable"
+LoadGameSelected = "unavailable"
+OptionsSelected = "open:options"
+EnableHintsSelected = "unavailable"
+EndMissionSelected = "quit_to_menu"
+QuitSelected = "quit_game"
+
+# The campaign menu (checked): its planets, level list and scroll bar are
+# widget kinds the menu reader can't draw yet (MenuButtonSprite,
+# MenuStringList, MenuScrollBar, MenuScrollArea, MenuActiveWidget), so it
+# keeps the placeholder until they are built.
+[pages.campaigns]
+class = "XInterfaceCTMenus.CTCampaignMenu"
+back = "back"
+
+[pages.campaigns.buttons]
+OnBButton = "back"
+SelectCurrentLevel = "unavailable"
+
+# The options pages (CTGraphicsOptionsPCMenu, CTSoundOptionsPCMenu,
+# CTControlsOptionsPCMenu, CTMapKeyMenu) use sliders, check boxes and key
+# lists, which the menu reader can't draw yet, so they would keep the
+# placeholder anyway. They are left out until those widgets are built.

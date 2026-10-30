@@ -22,6 +22,33 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not tested on Windows. Parts are saved by map export number, which is only right for the same map file. Drawn parts a script showed again (`SetHidden` off) aren't un-hidden on screen (that was so before). The log counters (`history`, `stats`) restart after a load.
 - **Next:** The user runs `rc_game --script` on the PC; it should end `47 checks passed, 0 failed`.
 
+
+## 2026-10-29: Checked against the install: the original pause menu and crosshair are in
+
+- **Changed:** `data/ui/original_menus.toml`: the pause menu's real function names (11 buttons; LOAD LAST SAVE, QUICK SAVE, QUICK LOAD, SAVE GAME, LOAD GAME and ENABLE HINTS greyed out; END MISSION to the main menu; QUIT PROGRAM asks the quit question). The campaign entry notes why it keeps the placeholder. `data/ui/hud.toml`: the PC reticles (`HUD_WeaponDefaultPC`, `HUD_WeaponPistolPC`). `original_hud.rs`: the picture is now added once the HUD exists (it was added before, so it never appeared). `script.rs`: the crosshair check accepts the original's white reticle; a new `FocusPauseItem` step picks pause items by function name; a check that the pause page is the original's; a screenshot of the pause menu.
+- **Why:** The overnight version was built without the game files.
+- **Tested how:** With 421 MB copied read-only from the install into the cloud sandbox: `rc_probe --pages`, `rc_probe --export-textures HUDTextures.utx` (outside the repo), then `xvfb-run rc_game --script` at 1280x720. `cargo test -p rc_game -p rc_menus`.
+- **Result:** `rc_probe --pages`: paused USES THE ORIGINAL; campaigns keeps the placeholder (14 widgets of 5 kinds we don't draw: MenuButtonSprite, MenuStringList, MenuScrollBar, MenuScrollArea, MenuActiveWidget). Script: `SCRIPT DONE: 33 checks passed, 0 failed`, including "the pause menu is the original's: original CTPausePCMenu", RESUME GAME resuming, END MISSION leaving the level, and "original reticle: 461 white pixels at the centre". The first run showed the reticle never appeared (log had no `original hud` lines and the old amber check failed with 0 amber pixels); fixed by adding it after the HUD exists.
+- **Still broken / not tested:** Not tested on Windows. The pause menu isn't colour-compared with a software picture (it's drawn over the game). The reticle's size and on-target red aren't compared with the real game. Campaign and options pages are still placeholders. Mouse on the pause menu not tested by the script.
+- **Next:** Draw `MenuButtonSprite` and `MenuStringList` for the campaign menu.
+
+## 2026-10-29: The crosshair can use the original's reticle pictures (original_hud.rs)
+
+- **Changed:** New `crates/rc_game/src/original_hud.rs` (`OriginalHudPlugin`) and `data/ui/hud.toml` (default reticle, one per weapon name, size). `hud.rs` exposes `CrossBar` and a `HudSystems` set; `main.rs` adds the plugin.
+- **Why:** Next-steps item 2: use the original HUD pictures. The original's HUD is native code, so only its pictures can be reused, placed by us.
+- **Tested how:** `cargo test -p rc_game` (3 new tests: the shipped file reads; with a picture loaded the bars hide, the picture shows centred at 10% of screen height for a 48-pixel-wide picture, and turns red on target; a missing picture keeps the bars). **Not tested with the game files** (no access overnight) and not looked at in a window.
+- **Result:** rc_game tests: 18 passed, 0 failed.
+- **Still broken / not tested:** The picture paths and the size are unchecked guesses. The picture doesn't spread with the weapon yet. Shield, health, ammo and squad still use the placeholder shapes. Colours over the 3D view weren't compared with the original.
+- **Next:** On the PC: `rc_probe --textures ...HUDTextures.utx` for the real names and sizes, a screenshot compare, then the shield and health pictures.
+
+## 2026-10-29: Pause and campaign pages can use their original menus (rc_menus::pages)
+
+- **Changed:** New `crates/rc_menus/src/pages.rs` and data file `data/ui/original_menus.toml` (which class draws each page, and what each button's function does). `rc_game/src/original_menu.rs` now draws any page that passes `pages::check`, not only the main menu; the pause page draws over the game; the quit question works from any page; RESTART reloads the current level. `menu.rs` steps aside for any page the original draws. New `rc_probe --pages` probes and paints every listed page and says which would be used and why not; the file's reader lives in `rc_menus::pages` (rc_menus now uses serde and toml). `Sprite`, `Text` and `Button` in `rc_menus::layout` gained `Default` (for tests).
+- **Why:** Next-steps item 2: replace the amber placeholder screens with the original's, read from the install.
+- **Tested how:** `cargo test -p rc_menus -p rc_game` (4 new tests in `pages.rs`, 2 in `original_menu.rs`), `cargo build`, `cargo clippy` (no new warnings). **Not tested with the game files**: the PC connection wasn't approved overnight, so no game data was available.
+- **Result:** Tests pass: rc_menus 11, rc_game 15. A page with an unknown button or an undrawable widget keeps the placeholder and lists both reasons; unavailable buttons grey out; hidden and console-only buttons are ignored.
+- **Still broken / not tested:** Not run with the install at all. Button function names are guesses (see `docs/ORIGINAL_MENUS.md`). Options pages are left out (sliders and key lists aren't drawn yet). The script's pause steps assume the placeholder's button order.
+- **Next:** One run on the PC to read the real button names from the log, then fix the names and the script.
 ## 2026-10-30: Droids no longer spot the player right after a load (rc_game player and self-test)
 
 - **Changed:** `crates/rc_game/src/player.rs`: the player's camera now starts at the body's eyes when the player is spawned (before, it started at the map's centre, 0,0,0), and loading the `[player]` section moves the camera along with the body. `place_camera` uses the same `eye_view` helper. New unit test `loading_a_save_moves_the_camera_with_the_player`. `crates/rc_game/src/script.rs`: before the quicksave the script waits until no squad mate has moved for 3 frames ("squad mates standing still"), and a new check "no droid spots the player just after the load" fails if a droid that was idle in the save is alerted 0.3 s after loading.
