@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Droids no longer spot the player right after a load (rc_game player)
+
+- **Changed:** `crates/rc_game/src/player.rs`: the player's camera now starts at the body's eyes when the player is spawned (before, it started at the map's centre, 0,0,0), and loading the `[player]` section moves the camera along with the body. `place_camera` uses the same `eye_view` helper. New unit test `loading_a_save_moves_the_camera_with_the_player`.
+- **Why:** Droids look for the player at the camera's position (`rc_enemies::player_target`). The camera only follows the body at the end of each frame, so on the first frame after a quickload the droids looked at the old camera spot, could "see" the player from about 3000 uu away, and switched to alerted. That made the self-test check "saving again after the load gives the same state" fail in about 1 of 3-5 runs.
+- **Tested how:** `cargo test -p rc_game` (14 tests pass, including the new one).
+- **Still broken / not tested:** The full `rc_game --script` run many times over with the game files: not tested yet in this change. Aiming (`rc_combat` fire, squad orders) also reads the camera; they now get the right spot after a load too, but that isn't checked separately.
+- **Next:** Run `rc_game --script` 20 times and count the passes.
+
 ## 2026-10-29: Levels run their own scripts (rc_level::scripts, rc_scripts, rc_scripts_plugin)
 
 - **Changed:** New `rc_level::scripts` reads every actor's values and every script's action list from a map. `map_collision` and the level drawing keep props and blocking volumes with a tag of their own apart (`part_triangles`, own `MoverPart` batches); `rc_level_plugin` makes them `LevelParts`, solid until switched off. New crate `rc_scripts` (no Bevy): `Director` runs scripted triggers and sequences, touch triggers, counters, conditions, checkpoints and destructible props as events and tags; tool `rc_script_check`. New crate `rc_scripts_plugin`: `ScriptsPlugin` runs it in `rc_game` and carries out doors, barricades, damage to the player, bacta dispensers, prompts, objectives and checkpoints; `ScriptEvent` and `CheckpointReached` messages. `rc_movers` gained `release`; `rc_movers_plugin` gained `release` and `TriggersRunElsewhere`. Settings in `data/scripts/scripts.toml`. Script checks added to `rc_game --script`. Docs: DESIGN ("Level scripts"), PLUGINS, README.
