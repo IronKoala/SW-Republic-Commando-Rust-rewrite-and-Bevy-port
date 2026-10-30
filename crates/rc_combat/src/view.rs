@@ -1,12 +1,13 @@
 //! What combat looks like: the weapon in the player's view, and glowing
 //! bolts. Only runs when the game has a renderer; tests without one skip it.
 //!
-//! **Our choice, not the game's:** the game draws first-person weapons as
-//! animated "HUD arms" (skeletal meshes in `hudarms.ukx`) with a muzzle
-//! flash, and bolts as particle effects (`DC_17_Bolt_Proj`). For now we
-//! show the weapon's plain 3D model (the static mesh the game uses when the
-//! weapon lies on the ground) at a fixed spot in view, and each bolt as a
-//! thin glowing box in the weapon's colour.
+//! Weapons with first-person arms (`[arms]` in their file) are drawn by
+//! `arms_view`. **Our choice, not the game's:** for a weapon without them
+//! (or whose arms can't be read) we show its plain 3D model (the static
+//! mesh the game uses when the weapon lies on the ground) at a fixed spot
+//! in view. The game draws bolts as particle effects (`DC_17_Bolt_Proj`);
+//! we draw each as a thin glowing box in the weapon's colour. No muzzle
+//! flash yet.
 
 use crate::library::WeaponLibrary;
 use crate::Arsenal;
@@ -134,6 +135,7 @@ pub(crate) fn show_weapon_model(
     players: Query<&Arsenal, With<Player>>,
     cameras: Query<(Entity, Option<&Children>), With<PlayerCamera>>,
     held: Query<&HeldModel>,
+    arms: Option<Res<crate::arms_view::ArmsModels>>,
     mut cache: Local<Option<ModelCache>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
@@ -151,7 +153,12 @@ pub(crate) fn show_weapon_model(
     let Ok((camera, children)) = cameras.single() else {
         return;
     };
-    let want = arsenal.current().map(|w| w.0.clone());
+    // Weapons with first-person arms show those instead (`arms_view`),
+    // unless the arms couldn't be read.
+    let want = arsenal.current().map(|w| w.0.clone()).filter(|id| {
+        let has_arms = lib.weapons.get(id).is_some_and(|p| p.arms.is_some());
+        !(has_arms && arms.as_ref().is_none_or(|a| a.covers(id)))
+    });
     let mut showing = None;
     for c in children.into_iter().flatten() {
         if let Ok(h) = held.get(*c) {

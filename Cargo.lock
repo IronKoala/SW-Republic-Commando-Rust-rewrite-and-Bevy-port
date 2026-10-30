@@ -4438,6 +4438,7 @@ dependencies = [
  "bevy",
  "rc_game_core",
  "rc_level_viewer",
+ "rc_model",
  "rc_movement",
  "rc_package",
  "serde",

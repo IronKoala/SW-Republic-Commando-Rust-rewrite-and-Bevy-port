@@ -45,3 +45,11 @@ package = "weapons"
 mesh = "DC15Pistol"
 offset = [35, 10, -12]    # our choice
 bolt_colour = [0.3, 0.6, 1.0]  # our choice, from the bolt light's hue 141 (blue)
+
+[arms]
+# The first-person arms holding it: an animated model read from the game
+# at run time (Animations/hudarms.ukx). Leave this section out to show the
+# plain [model] in view instead.
+mesh = "HudArmsDC15s"      # game: DC15s's Mesh
+fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
+brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet
