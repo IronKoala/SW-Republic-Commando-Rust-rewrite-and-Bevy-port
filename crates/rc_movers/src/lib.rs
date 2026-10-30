@@ -665,6 +665,55 @@ struct TriggerState {
     cooldown: f32,
 }
 
+/// One mover's state, for a saved game. The pose isn't kept: it follows
+/// from the key and the move under way.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoverSnapshot {
+    /// The mover's name in the map (`Mover37`).
+    pub name: String,
+    pub key: usize,
+    pub phase: Phase,
+    pub opening: bool,
+    /// `TriggerControl`, `TriggerPound`, `TriggerLoop`: still set off.
+    pub held: bool,
+    /// Has been set off once (for `bTriggerOnceOnly`).
+    pub used: bool,
+    /// The player was touching it.
+    pub touched: bool,
+    /// When the run under way started, in the set's seconds.
+    pub run_started: f32,
+}
+
+/// One touch trigger's state, for a saved game.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerSnapshot {
+    pub name: String,
+    pub touching: bool,
+    pub used: bool,
+    pub cooldown: f32,
+}
+
+/// Every mover's and trigger's state, for a saved game.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SetSnapshot {
+    pub time: f32,
+    /// The mover the player stood on, by name.
+    pub riding: Option<String>,
+    pub movers: Vec<MoverSnapshot>,
+    pub triggers: Vec<TriggerSnapshot>,
+}
+
+/// What [`MoverSet::restore`] couldn't match up.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RestoreReport {
+    pub movers: usize,
+    pub triggers: usize,
+    /// Names in the snapshot that this map doesn't have.
+    pub unknown: Vec<String>,
+    /// Key numbers past a mover's last key (the map changed); clamped.
+    pub bad_keys: Vec<String>,
+}
+
 /// Every mover and trigger in a map, run together.
 pub struct MoverSet {
     pub movers: Vec<Mover>,
@@ -776,6 +825,106 @@ impl MoverSet {
             }
         }
         set
+    }
+
+    /// Everything that changes while the level is played, for a saved
+    /// game. Counts (`stats`) aren't kept.
+    pub fn snapshot(&self) -> SetSnapshot {
+        SetSnapshot {
+            time: self.time,
+            riding: self
+                .riding
+                .and_then(|i| self.movers.get(i))
+                .map(|m| m.info.place.name.clone()),
+            movers: self
+                .movers
+                .iter()
+                .map(|m| MoverSnapshot {
+                    name: m.info.place.name.clone(),
+                    key: m.key,
+                    phase: m.phase,
+                    opening: m.opening,
+                    held: m.held,
+                    used: m.used,
+                    touched: m.was_touched,
+                    run_started: m.run_started,
+                })
+                .collect(),
+            triggers: self
+                .triggers
+                .iter()
+                .map(|t| TriggerSnapshot {
+                    name: t.info.name.clone(),
+                    touching: t.touching,
+                    used: t.used,
+                    cooldown: t.cooldown,
+                })
+                .collect(),
+        }
+    }
+
+    /// Put back a [`Self::snapshot`] taken on the same map. Movers and
+    /// triggers are matched by name; ones the snapshot doesn't name stay
+    /// as the map starts them.
+    pub fn restore(&mut self, snap: &SetSnapshot) -> RestoreReport {
+        let mut report = RestoreReport::default();
+        self.time = snap.time;
+        for s in &snap.movers {
+            let Some(m) = self
+                .movers
+                .iter_mut()
+                .find(|m| m.info.place.name.eq_ignore_ascii_case(&s.name))
+            else {
+                report.unknown.push(s.name.clone());
+                continue;
+            };
+            let last = m.last_key();
+            let clamp = |k: usize| k.min(last);
+            if s.key > last {
+                report.bad_keys.push(s.name.clone());
+            }
+            m.key = clamp(s.key);
+            m.phase = match s.phase {
+                Phase::Moving { from, to, t } if from != to => Phase::Moving {
+                    from: clamp(from),
+                    to: clamp(to),
+                    t: t.clamp(0.0, 1.0),
+                },
+                Phase::Moving { .. } => Phase::Rest,
+                p => p,
+            };
+            m.opening = s.opening;
+            m.held = s.held;
+            m.used = s.used;
+            m.was_touched = s.touched;
+            m.run_started = s.run_started;
+            m.to_send.clear();
+            m.pose = match m.phase {
+                Phase::Moving { .. } => m.advance(0.0).0,
+                _ => key_pose(&m.info, m.key),
+            };
+            report.movers += 1;
+        }
+        for s in &snap.triggers {
+            let Some(t) = self
+                .triggers
+                .iter_mut()
+                .find(|t| t.info.name.eq_ignore_ascii_case(&s.name))
+            else {
+                report.unknown.push(s.name.clone());
+                continue;
+            };
+            t.touching = s.touching;
+            t.used = s.used;
+            t.cooldown = s.cooldown.max(0.0);
+            report.triggers += 1;
+        }
+        self.riding = snap.riding.as_ref().and_then(|r| {
+            self.movers
+                .iter()
+                .position(|m| m.info.place.name.eq_ignore_ascii_case(r))
+        });
+        report
     }
 
     /// Triggers that run (touch sets off their event).
