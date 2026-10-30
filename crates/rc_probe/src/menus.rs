@@ -77,13 +77,19 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
                 t.color
             ),
             Kind::Button(b) => format!(
-                "button {:?} -> {} {}box {:?} text colour {:?} focused {:?}",
+                "button {:?} -> {} {}{}box {:?} text colour {:?} focused {:?}{}",
                 b.blurred.text,
                 b.on_select,
                 if b.disabled { "(disabled) " } else { "" },
+                if b.mouse_only { "(mouse only) " } else { "" },
                 quads::sprite_box(&b.background_blurred, &mut assets).map(round),
                 b.blurred.color,
-                b.focused.color
+                b.focused.color,
+                if b.is_chooser() {
+                    format!(" choices {:?}", b.items)
+                } else {
+                    String::new()
+                }
             ),
         };
         log.line(format!("  [{shown}] pass {} {}: {line}", w.pass, w.name));

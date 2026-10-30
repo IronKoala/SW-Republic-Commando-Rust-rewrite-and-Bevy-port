@@ -2132,6 +2132,22 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   otherwise the placeholder page stays and every reason is logged. So a
   mod can switch a page to another class, or teach it a button, without
   code, and an unfinished page never shows half-working.
+- The options pages (GAME, SOUND, GRAPHICS, CONTROLS) are original too.
+  `rc_menus::layout` draws the original's choosers (`MenuButtonEnum`: a
+  row with a list of values and arrows) and its picture buttons
+  (`MenuButtonSprite`; the arrows are mouse only, as in the original), and
+  fills fixed-size arrays to their full length. In
+  `data/ui/original_menus.toml` each page's `choosers` table names the
+  setting behind each row (`rc_game/src/option_settings.rs` turns a
+  setting into "which value" and back), `keys` names the action behind
+  each key row of CONTROLS, and `extra_buttons` adds a copy of an original
+  button (here "PORT +", which opens our clearly marked placeholder page
+  for settings the original never had: FOV, Panini, full screen, master
+  volume, controller look and gyro). A row naming `unavailable` is greyed
+  out and skipped, as the original greys options it can't offer. Key rows
+  open the original's REASSIGN BUTTON box (`CTMapKeyMenu`), which uses
+  `rebind.rs` for the actual capture. The effects volume now scales every
+  sound that isn't music (`music.rs`, `effects_volume`).
 - `rc_game/src/original_hud.rs` swaps the placeholder HUD's drawn shapes
   for the original's pictures, named in `data/ui/hud.toml` (the original
   places them in native code, so placement is ours). It reads its own

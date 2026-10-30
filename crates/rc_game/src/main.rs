@@ -19,6 +19,7 @@ mod input;
 mod levels;
 mod menu;
 mod music;
+mod option_settings;
 mod original_hud;
 mod original_menu;
 mod panini;
@@ -226,7 +227,10 @@ fn main() -> AppExit {
     let bindings = match std::fs::read_to_string(&user_bindings) {
         Ok(t) => match base_bindings.with_changes(&t) {
             Ok(b) => {
-                log.line(format!("controls: your changes from {}", user_bindings.display()));
+                log.line(format!(
+                    "controls: your changes from {}",
+                    user_bindings.display()
+                ));
                 b
             }
             Err(e) => {
@@ -253,7 +257,10 @@ fn main() -> AppExit {
         {
             Ok(n) => n,
             Err(e) => {
-                log.line(format!("ERROR in {}: {e}; prompts use plain names", p.display()));
+                log.line(format!(
+                    "ERROR in {}: {e}; prompts use plain names",
+                    p.display()
+                ));
                 rc_pads::ButtonNames::default()
             }
         },
@@ -396,6 +403,7 @@ fn main() -> AppExit {
         (
             log_states,
             menu::apply_settings,
+            menu::apply_video,
             count_frames,
             menu_camera_clear,
         )
@@ -429,8 +437,18 @@ fn main() -> AppExit {
     #[cfg(not(all(feature = "sdl", not(target_os = "android"))))]
     app.insert_resource(rc_pads::PadReader::Gilrs);
 
+    // Changing a key (the controls page); the script uses it too.
+    app.add_plugins(rebind::RebindPlugin);
     if use_script {
         app.add_plugins(script::ScriptPlugin);
+        // The scripted run has no real devices, but the controls page still
+        // shows the keyboard's names.
+        app.add_systems(
+            Update,
+            input::update_prompts
+                .in_set(GameSet::Input)
+                .after(rebind::RebindSet),
+        );
     } else {
         app.add_plugins(input::DeviceInputPlugin);
     }

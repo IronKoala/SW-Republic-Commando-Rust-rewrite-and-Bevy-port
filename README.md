@@ -257,7 +257,15 @@ copy of the game.
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on
   Windows): its eleven buttons, with saving, loading and hints greyed out
-  until built. The campaign page keeps the placeholder until its planet
+  until built. **The options pages are the original's too** (tested in
+  the cloud sandbox with the install, not yet on Windows): GAME, SOUND,
+  GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
+  sensitivity, invert mouse, difficulty, effects and music volume, screen
+  size and vsync work; key rows open the original's REASSIGN BUTTON box.
+  Rows the port can't do yet (subtitles, brightness, detail levels and so
+  on) are greyed out. Our own extra settings (field of view, full screen,
+  controller and gyro) are behind a "PORT +" button on each page, on a
+  page marked as a placeholder. The campaign page keeps the placeholder until its planet
   buttons and level list can be drawn; `logs/rc_game.log` says why
   ("original menus: page campaigns kept the placeholder: ..."). Which
   original menu draws which page is in `data/ui/original_menus.toml`. The
@@ -400,12 +408,14 @@ copy of the game.
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
 - Original menus: the main menu's moving background video isn't played
   (it uses a video format with no Rust decoder yet), and the sides of
-  screens wider than 4:3 stay black. Only the main menu and its quit
-  question are the original's so far. Mouse use wasn't tested by the
+  screens wider than 4:3 stay black. The campaign, load and save
+  pages are still placeholders. On the options pages, rows the port can't
+  do yet are greyed out, and the original's "keep these settings?" timer
+  after changing screen size isn't there (changes apply at once). Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
   being built to plug into it). No briefings or cut scenes. Saving: there's no Load Game screen yet (the
-  menu's LOAD GAME stays greyed out). Options are a short list. Not tested on Windows,
+  menu's LOAD GAME stays greyed out). Not tested on Windows,
   with a real controller, or with a touch screen.
 - Controllers: no button pictures yet (words only), no rebinding screen
   yet, no rumble or aim assist. Gyro on phones isn't started. Building with

@@ -34,6 +34,8 @@ pub struct ClassData {
     /// Lowercase property name -> editor category ("MenuDefault" marks
     /// style templates, which are never drawn).
     pub categories: HashMap<String, String>,
+    /// Lowercase property name -> fixed array size (1 for a plain value).
+    pub array_sizes: HashMap<String, u32>,
 }
 
 impl ClassData {
@@ -56,6 +58,16 @@ impl ClassData {
             .iter()
             .position(|d| *d == n)
             .unwrap_or(usize::MAX)
+    }
+
+    /// How many elements a fixed array property has (1 if not an array or
+    /// unknown).
+    pub fn array_size(&self, name: &str) -> u32 {
+        self.array_sizes
+            .get(&name.to_ascii_lowercase())
+            .copied()
+            .unwrap_or(1)
+            .max(1)
     }
 
     pub fn category(&self, name: &str) -> &str {
@@ -193,12 +205,14 @@ impl Library {
         let own = class::read_class_defaults(pkg, data, e).map_err(|e| e.to_string())?;
         let own_fields = decode_all(pkg, &own.properties);
         let mut categories = HashMap::new();
+        let mut array_sizes = HashMap::new();
         let mut declared = Vec::new();
         for p in &pkg.exports {
             if p.package_index == i as i32 + 1 && pkg.export_class_name(p).ends_with("Property") {
                 let name = pkg.name(p.object_name).to_ascii_lowercase();
-                if let Ok(c) = class::read_property_category(pkg, data, p) {
+                if let Ok((dim, c)) = class::read_property_info(pkg, data, p) {
                     categories.insert(name.clone(), c);
+                    array_sizes.insert(name.clone(), dim as u32);
                 }
                 declared.push(name);
             }
@@ -224,6 +238,7 @@ impl Library {
                 defaults: vec![],
                 declared: vec![],
                 categories: HashMap::new(),
+                array_sizes: HashMap::new(),
             },
         };
         data.path = path.to_string();
@@ -240,6 +255,7 @@ impl Library {
             }
         }
         data.categories.extend(categories);
+        data.array_sizes.extend(array_sizes);
         // A class may declare a property with the same name as a parent's
         // (CTMenuMain has its own `Border`); the class's own one is the one
         // that counts, at its own place in the order.

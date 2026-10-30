@@ -1,5 +1,8 @@
 //! The menus: main menu, level select, options, pause, and the loading
-//! screen.
+//! screen. The original menus (`original_menu.rs`) draw the main menu,
+//! pause menu and options pages when the install has them; the pages here
+//! are then used only where an original can't be (and for MORE SETTINGS,
+//! this port's own extra settings: field of view, controllers, gyro).
 //!
 //! PLACEHOLDER: these amber menus are our own stand-ins. The goal is to use
 //! the original game's menus (read from the install at run time) as much as
@@ -35,7 +38,16 @@ pub enum Page {
     Main,
     Campaigns,
     Levels(usize),
+    /// The options pages: GAME (also the placeholder options page), SOUND,
+    /// GRAPHICS and CONTROLS.
     Options,
+    OptionsSound,
+    OptionsGraphics,
+    OptionsControls,
+    /// This port's own settings that the original has no page for (field
+    /// of view, wide-screen view, controllers, gyro). A placeholder page,
+    /// marked as one.
+    MoreSettings,
     /// The game folder wasn't found.
     NoGame,
     Paused,
@@ -61,6 +73,13 @@ pub enum Opt {
     InvertY,
     FieldOfView,
     Difficulty,
+    MasterVolume,
+    Fullscreen,
+    Panini,
+    StickLookSpeed,
+    LookStickDeadZone,
+    GyroMode,
+    GyroSensitivity,
 }
 
 pub struct Item {
@@ -97,6 +116,15 @@ impl Menu {
 
     pub(crate) fn go(&mut self, page: Page) {
         self.history.push((self.page, self.selected));
+        self.page = page;
+        self.selected = 0;
+        self.scroll = 0;
+        self.dirty = true;
+    }
+
+    /// Show another page in this one's place: going back skips it (the
+    /// options pages' tabs).
+    pub(crate) fn switch(&mut self, page: Page) {
         self.page = page;
         self.selected = 0;
         self.scroll = 0;
@@ -221,7 +249,7 @@ pub fn items(
             v.push(it("Back", Cmd::Back));
             (camp.name.to_uppercase(), v)
         }
-        Page::Options => {
+        Page::Options | Page::OptionsSound | Page::OptionsGraphics | Page::OptionsControls => {
             let a = &settings.audio;
             let c = &settings.controls;
             (
@@ -231,8 +259,29 @@ pub fn items(
                     it(&format!("Effects volume   < {:.0}% >", a.effects_volume * 100.0), Cmd::Setting(Opt::EffectsVolume)),
                     it(&format!("Mouse sensitivity   < {:.2} >", c.mouse_sensitivity * 400.0), Cmd::Setting(Opt::MouseSensitivity)),
                     it(&format!("Invert look   < {} >", if c.invert_y { "on" } else { "off" }), Cmd::Setting(Opt::InvertY)),
-                    it(&format!("Field of view   < {:.0} >", settings.video.fov), Cmd::Setting(Opt::FieldOfView)),
                     it(&format!("Difficulty   < {:?} >", settings.game.difficulty), Cmd::Setting(Opt::Difficulty)),
+                    it("More settings", Cmd::Go(Page::MoreSettings)),
+                    it("Back (saves)", Cmd::Back),
+                ],
+            )
+        }
+        Page::MoreSettings => {
+            let v = &settings.video;
+            let c = &settings.controls;
+            let g = &settings.gyro;
+            let on = |b: bool| if b { "on" } else { "off" };
+            (
+                // Marked: this page is ours, not the original's.
+                "MORE SETTINGS (PLACEHOLDER)".into(),
+                vec![
+                    it(&format!("Field of view   < {:.0} >", v.fov), Cmd::Setting(Opt::FieldOfView)),
+                    it(&format!("Wide-screen correction (Panini)   < {:.0}% >", v.panini * 100.0), Cmd::Setting(Opt::Panini)),
+                    it(&format!("Full screen   < {} >", on(v.fullscreen)), Cmd::Setting(Opt::Fullscreen)),
+                    it(&format!("Master volume   < {:.0}% >", settings.audio.master_volume * 100.0), Cmd::Setting(Opt::MasterVolume)),
+                    it(&format!("Controller look speed   < {:.1} >", c.stick_look_speed), Cmd::Setting(Opt::StickLookSpeed)),
+                    it(&format!("Controller look dead zone   < {:.2} >", c.look_stick_dead_zone), Cmd::Setting(Opt::LookStickDeadZone)),
+                    it(&format!("Gyro aiming   < {:?} >", g.mode), Cmd::Setting(Opt::GyroMode)),
+                    it(&format!("Gyro sensitivity   < {:.1} >", g.sensitivity), Cmd::Setting(Opt::GyroSensitivity)),
                     it("Back (saves)", Cmd::Back),
                 ],
             )
@@ -376,7 +425,7 @@ fn navigate(
     match cmd {
         Cmd::Go(p) => menu.go(p),
         Cmd::Back => {
-            if menu.page == Page::Options {
+            if is_options(menu.page) {
                 save_settings(&settings, &settings_path, &log);
             }
             if !menu.back() && menu.page == Page::Paused {
@@ -432,10 +481,41 @@ fn change_setting(s: &mut Settings, o: Opt, step: i32) {
                 .unwrap_or(1) as i32;
             s.game.difficulty = all[(i + step).rem_euclid(3) as usize];
         }
+        Opt::MasterVolume => {
+            s.audio.master_volume = (s.audio.master_volume + 0.1 * f).clamp(0.0, 1.0)
+        }
+        Opt::Fullscreen => s.video.fullscreen = !s.video.fullscreen,
+        Opt::Panini => s.video.panini = (s.video.panini + 0.1 * f).clamp(0.0, 1.0),
+        Opt::StickLookSpeed => {
+            s.controls.stick_look_speed = (s.controls.stick_look_speed + 0.25 * f).clamp(0.5, 8.0)
+        }
+        Opt::LookStickDeadZone => {
+            s.controls.look_stick_dead_zone =
+                (s.controls.look_stick_dead_zone + 0.01 * f).clamp(0.0, 0.5)
+        }
+        Opt::GyroMode => {
+            use rc_pads::GyroMode::*;
+            let all = [Off, Always, Aiming];
+            let i = all.iter().position(|m| *m == s.gyro.mode).unwrap_or(0) as i32;
+            s.gyro.mode = all[(i + step).rem_euclid(3) as usize];
+        }
+        Opt::GyroSensitivity => s.gyro.sensitivity = (s.gyro.sensitivity + 0.1 * f).clamp(0.1, 5.0),
     }
 }
 
-fn save_settings(settings: &Settings, path: &SettingsPath, log: &GameLog) {
+/// The options pages (each saves the settings on the way out).
+pub fn is_options(page: Page) -> bool {
+    matches!(
+        page,
+        Page::Options
+            | Page::OptionsSound
+            | Page::OptionsGraphics
+            | Page::OptionsControls
+            | Page::MoreSettings
+    )
+}
+
+pub fn save_settings(settings: &Settings, path: &SettingsPath, log: &GameLog) {
     match settings.save(&path.0) {
         Ok(()) => log.line(format!("menu: options saved to {}", path.0.display())),
         Err(e) => log.line(format!(
@@ -458,6 +538,49 @@ pub fn apply_settings(
     fov.0 = settings.video.fov;
     *look = LookSettings::from_settings(&settings);
     *gyro = settings.gyro.clone();
+}
+
+/// Screen size, full screen and vsync changed in the options take effect at
+/// once. The window keeps a size the player dragged it to until the
+/// setting itself changes.
+pub fn apply_video(
+    settings: Res<Settings>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut last: Local<Option<crate::settings::VideoSection>>,
+    log: Res<GameLog>,
+) {
+    use bevy::window::{MonitorSelection, PresentMode, WindowMode};
+    let v = &settings.video;
+    let Some(before) = last.replace(v.clone()) else {
+        // The window was made from these settings.
+        return;
+    };
+    if !settings.is_changed() {
+        return;
+    }
+    let Ok(mut w) = windows.single_mut() else {
+        return;
+    };
+    if (before.width, before.height) != (v.width, v.height) {
+        w.resolution.set(v.width as f32, v.height as f32);
+        log.line(format!("menu: window size now {}x{}", v.width, v.height));
+    }
+    if before.fullscreen != v.fullscreen {
+        w.mode = if v.fullscreen {
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        } else {
+            WindowMode::Windowed
+        };
+        log.line(format!("menu: full screen {}", v.fullscreen));
+    }
+    if before.vsync != v.vsync {
+        w.present_mode = if v.vsync {
+            PresentMode::AutoVsync
+        } else {
+            PresentMode::AutoNoVsync
+        };
+        log.line(format!("menu: vsync {}", v.vsync));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

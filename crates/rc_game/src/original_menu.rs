@@ -1,7 +1,7 @@
 //! The original game's menus, drawn from the player's install (see
 //! `rc_menus` and `docs/ORIGINAL_MENUS.md`). The main menu replaces the
 //! placeholder main page in `menu.rs`. The other pages (pause, campaign,
-//! options) use the original menu named for them in
+//! the four options pages) use the original menu named for them in
 //! `data/ui/original_menus.toml` when every widget and button on it can
 //! work here (`rc_menus::pages::check`); otherwise the placeholder page
 //! stays and the log says why.
@@ -17,15 +17,20 @@
 //! picks a button by pointing at it.
 #![allow(deprecated)]
 
+use crate::input::{BaseBindings, Bindings};
 use crate::menu::{GamePathsFound, Menu, Page};
+use crate::option_settings;
+use crate::rebind::{RebindDone, StartRebind, UserBindingsPath};
 use crate::settings::Settings;
+use crate::settings::SettingsPath;
 use bevy::asset::RenderAssetUsages;
-use bevy::audio::{AudioSource, PlaybackSettings, Volume};
+use bevy::audio::{AudioSource, PlaybackSettings};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 use rc_game_core::{
-    Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LoadingGate, Play,
+    Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, InputDevice,
+    InputPrompts, LoadingGate, Play,
 };
 use rc_menus::gpu::{self, Variant};
 use rc_menus::layout::{Kind, MenuLayout};
@@ -56,7 +61,20 @@ pub struct Screen {
 }
 
 impl Screen {
+    /// The buttons keys and controllers move between.
     fn buttons(&self) -> Vec<usize> {
+        self.layout
+            .focusable_on_pc()
+            .into_iter()
+            .filter(|&i| match &self.layout.widgets[i].kind {
+                Kind::Button(b) => !b.disabled,
+                _ => false,
+            })
+            .collect()
+    }
+
+    /// The buttons the mouse can use (also the arrows beside choosers).
+    fn clickable(&self) -> Vec<usize> {
         self.layout
             .buttons_on_pc()
             .into_iter()
@@ -64,6 +82,21 @@ impl Screen {
                 Kind::Button(b) => !b.disabled,
                 _ => false,
             })
+            .collect()
+    }
+
+    /// The focused widget is a chooser (left and right change its value).
+    fn focus_is_chooser(&self) -> bool {
+        self.focus.is_some_and(
+            |f| matches!(&self.layout.widgets[f].kind, Kind::Button(b) if b.is_chooser()),
+        )
+    }
+
+    /// The names of the buttons keys and controllers can reach.
+    pub fn reachable_names(&self) -> Vec<String> {
+        self.buttons()
+            .into_iter()
+            .map(|i| self.layout.widgets[i].name.clone())
             .collect()
     }
 
@@ -115,8 +148,12 @@ pub fn page_key(page: Page) -> Option<&'static str> {
     match page {
         Page::Campaigns => Some("campaigns"),
         Page::Options => Some("options"),
+        Page::OptionsSound => Some("options_sound"),
+        Page::OptionsGraphics => Some("options_graphics"),
+        Page::OptionsControls => Some("options_controls"),
         Page::Paused => Some("paused"),
-        Page::Main | Page::Levels(_) | Page::NoGame => None,
+        // MORE SETTINGS is this port's own page: always the placeholder.
+        Page::Main | Page::Levels(_) | Page::NoGame | Page::MoreSettings => None,
     }
 }
 
@@ -124,9 +161,39 @@ fn page_from_key(key: &str) -> Option<Page> {
     match key {
         "campaigns" => Some(Page::Campaigns),
         "options" => Some(Page::Options),
+        "options_sound" => Some(Page::OptionsSound),
+        "options_graphics" => Some(Page::OptionsGraphics),
+        "options_controls" => Some(Page::OptionsControls),
+        "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
         _ => None,
     }
+}
+
+/// The original "reassign button" box over the controls page.
+pub struct RebindBox {
+    pub screen: Screen,
+    pub action: Action,
+    pub device: InputDevice,
+    /// The bindings before, for CANCEL.
+    before: Bindings,
+    /// A key has been pressed; ACCEPT, CANCEL and CLEAR show.
+    pub chosen: bool,
+}
+
+/// What the options pages asked for this frame, done by `apply_options`
+/// (which has the settings and bindings).
+#[derive(Debug, Clone, PartialEq)]
+enum OptionWork {
+    /// Step a chooser (widget index) left or right.
+    Step(usize, i32),
+    RestoreDefaults,
+    /// Open the "reassign button" box for a key button (widget index).
+    Rebind(usize),
+    RebindAccept,
+    RebindCancel,
+    /// CLEAR: forget the key pressed and wait for another.
+    RebindAgain,
 }
 
 /// The original menus, when the install has them.
@@ -141,6 +208,11 @@ pub struct OriginalMenus {
     pub question: Option<Screen>,
     /// The question box's layout, kept for when QUIT is chosen again.
     question_layout: Option<MenuLayout>,
+    /// The "reassign button" box while it shows, and its layout.
+    pub rebind: Option<RebindBox>,
+    map_key_layout: Option<MenuLayout>,
+    /// Options work for `apply_options`.
+    work: Vec<OptionWork>,
     quit_text: String,
     pub assets: Option<rc_menus::Assets>,
     /// Bevy images by texture path (lower case), render style and tint.
@@ -222,7 +294,7 @@ impl Plugin for OriginalMenuPlugin {
             .add_systems(OnEnter(Play::Paused), load)
             .add_systems(
                 Update,
-                (focus_new_page, navigate, draw, fit_area)
+                (focus_new_page, navigate, apply_options, draw, fit_area)
                     .chain()
                     .in_set(GameSet::Hud)
                     // Before the placeholder menu reads the same actions.
@@ -281,7 +353,8 @@ fn load(
             }
         }
         match pages::check(&mut layout, &plan) {
-            Ok(buttons) => {
+            Ok(mut buttons) => {
+                check_names(&mut layout, &mut buttons, &plan.page, &log);
                 log.line(format!(
                     "original menus: page {} uses {} ({} buttons)",
                     plan.page,
@@ -319,6 +392,19 @@ fn load(
     for l in screens::setup_main_menu(&mut layout, UNAVAILABLE) {
         log.line(format!("original menus: {l}"));
     }
+    let map_key_layout = if menus.pages.values().any(|p| !p.buttons.keys.is_empty()) {
+        match assets.library.class(screens::MAP_KEY) {
+            Ok(c) => Some(rc_menus::build(&c)),
+            Err(e) => {
+                log.line(format!(
+                    "original menus: no reassign button box ({e}); keys can't be changed here"
+                ));
+                None
+            }
+        }
+    } else {
+        None
+    };
     let question_layout = match assets.library.class(screens::QUESTION) {
         Ok(c) => Some(rc_menus::build(&c)),
         Err(e) => {
@@ -332,6 +418,9 @@ fn load(
     paths_needed.extend(assets.textures_of(&layout));
     if let Some(q) = &question_layout {
         paths_needed.extend(assets.textures_of(q));
+    }
+    if let Some(m) = &map_key_layout {
+        paths_needed.extend(assets.textures_of(m));
     }
     let mut pictures = 0;
     for p in paths_needed {
@@ -363,8 +452,75 @@ fn load(
         focus: None,
     });
     menus.question_layout = question_layout;
+    menus.map_key_layout = map_key_layout;
     menus.quit_text = quit_text;
     menus.assets = Some(assets);
+}
+
+/// Grey out choosers whose setting, and key buttons whose action, this
+/// game doesn't know (a typing mistake in `original_menus.toml`), and say
+/// so in the log.
+fn check_names(layout: &mut MenuLayout, buttons: &mut PageButtons, page: &str, log: &GameLog) {
+    let mut bad = Vec::new();
+    buttons.choosers.retain(|(i, name)| {
+        let ok = option_settings::known(name);
+        if !ok {
+            bad.push((*i, format!("chooser setting {name:?} isn't a setting")));
+        }
+        ok
+    });
+    buttons.keys.retain(|(i, name)| {
+        let ok = Action::from_name(name).is_some();
+        if !ok {
+            bad.push((*i, format!("key button action {name:?} isn't an action")));
+        }
+        ok
+    });
+    for (i, why) in bad {
+        let name = layout.widgets[i].name.clone();
+        log.line(format!(
+            "original menus: page {page}: {name} greyed out: {why} (see original_menus.toml)"
+        ));
+        screens::disable_row(layout, &name);
+    }
+}
+
+/// Show each chooser's setting and each key button's keys (for the device
+/// used last).
+fn refresh_page(p: &mut PageScreen, settings: &Settings, prompts: &InputPrompts) {
+    for (i, name) in &p.buttons.choosers {
+        let Kind::Button(b) = &mut p.screen.layout.widgets[*i].kind else {
+            continue;
+        };
+        if let Some(items) = option_settings::items(name, settings) {
+            b.items = items;
+        }
+        if let Some(at) = option_settings::read(name, settings, &b.items) {
+            b.choose(at);
+        }
+    }
+    for (i, name) in &p.buttons.keys {
+        let Some(action) = Action::from_name(name) else {
+            continue;
+        };
+        let Kind::Button(b) = &mut p.screen.layout.widgets[*i].kind else {
+            continue;
+        };
+        let text = key_text(prompts, action);
+        b.blurred.text = text.clone();
+        b.focused.text = text;
+    }
+}
+
+/// An action's keys as the controls page shows them: "W, UP", or "???" for
+/// none (as the original does).
+fn key_text(prompts: &InputPrompts, action: Action) -> String {
+    let labels = prompts.labels(action);
+    if labels.is_empty() {
+        "???".into()
+    } else {
+        labels.join(", ").to_uppercase()
+    }
 }
 
 /// Each time the main menu opens: focus on the first button, no question.
@@ -381,23 +537,39 @@ fn reset(mut menus: ResMut<OriginalMenus>, log: Res<GameLog>) {
 
 /// When an original page comes on screen, focus its first button (the
 /// main menu does this in `reset`).
+#[allow(clippy::too_many_arguments)]
 fn focus_new_page(
     state: Res<State<GameState>>,
     play: Option<Res<State<Play>>>,
     menu: Res<Menu>,
     mut menus: ResMut<OriginalMenus>,
     mut last: Local<Option<Shown>>,
+    settings: Res<Settings>,
+    prompts: Res<InputPrompts>,
     log: Res<GameLog>,
 ) {
     let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
     if shown == *last {
+        // The controls page follows the device used last.
+        if prompts.is_changed() {
+            if let Some(Shown::Page(k)) = &shown {
+                let p = menus.pages.get_mut(k).unwrap();
+                if !p.buttons.keys.is_empty() {
+                    refresh_page(p, &settings, &prompts);
+                    menus.dirty = true;
+                }
+            }
+        }
         return;
     }
     *last = shown.clone();
     menus.question = None;
+    menus.rebind = None;
     menus.dirty = true;
     if let Some(Shown::Page(k)) = &shown {
-        let screen = &mut menus.pages.get_mut(k).unwrap().screen;
+        let p = menus.pages.get_mut(k).unwrap();
+        refresh_page(p, &settings, &prompts);
+        let screen = &mut p.screen;
         screen.focus = screen.buttons().first().copied();
         log.line(format!(
             "original menus: page {k} opened, focus on {}",
@@ -412,7 +584,8 @@ struct MenuArea;
 #[derive(Component)]
 struct OriginalRoot;
 
-/// A mouse target for one button: (is the question box, widget index).
+/// A mouse target for one button: (is on a box over the page, such as the
+/// question box, widget index).
 #[derive(Component)]
 struct HitBox(bool, usize);
 
@@ -420,7 +593,6 @@ fn play_sound(
     commands: &mut Commands,
     menus: &mut OriginalMenus,
     sources: &mut Assets<AudioSource>,
-    settings: &Settings,
     path: Option<String>,
     log: &GameLog,
 ) {
@@ -442,11 +614,8 @@ fn play_sound(
         menus.sounds.insert(key.clone(), handle);
     }
     if let Some(Some(h)) = menus.sounds.get(&key) {
-        let v = (settings.audio.master_volume * settings.audio.effects_volume).clamp(0.0, 1.0);
-        commands.spawn((
-            AudioPlayer(h.clone()),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(v)),
-        ));
+        // Turned down by the SOUND FX volume in music.rs, as every sound is.
+        commands.spawn((AudioPlayer(h.clone()), PlaybackSettings::DESPAWN));
     }
 }
 
@@ -459,14 +628,12 @@ fn navigate(
     mut menu: ResMut<Menu>,
     mut menus: ResMut<OriginalMenus>,
     hits: Query<(&Interaction, &HitBox), Changed<Interaction>>,
-    mut current: ResMut<CurrentLevel>,
-    mut gate: ResMut<LoadingGate>,
+    (mut current, mut gate): (ResMut<CurrentLevel>, ResMut<LoadingGate>),
     mut next_state: ResMut<NextState<GameState>>,
     mut next_play: Option<ResMut<NextState<Play>>>,
     mut exit: MessageWriter<AppExit>,
     mut sources: ResMut<Assets<AudioSource>>,
     mut cursor: MessageReader<CursorMoved>,
-    settings: Res<Settings>,
     log: Res<GameLog>,
 ) {
     // Pointing at a button moves focus only when the mouse itself moves,
@@ -477,23 +644,50 @@ fn navigate(
         return;
     };
     let menus = &mut *menus;
+    // While the "reassign button" box waits for a key, the key goes to the
+    // rebinding, not to the menu.
+    if menus.rebind.as_ref().is_some_and(|r| !r.chosen) {
+        menus.used_input = true;
+        return;
+    }
     let in_question = menus.question.is_some();
+    let in_rebind = menus.rebind.is_some();
+    let in_overlay = in_question || in_rebind;
     let mut chosen = None;
     let mut moved = false;
+    // A chooser stepped by left or right: (widget, step).
+    let mut stepped = None;
     {
         let screen = if in_question {
             menus.question.as_mut().unwrap()
+        } else if in_rebind {
+            &mut menus.rebind.as_mut().unwrap().screen
         } else {
             menus.screen_mut(&shown).unwrap()
         };
-        if actions.just_pressed(Action::MenuDown) || actions.just_pressed(Action::MenuRight) {
+        let chooser = screen.focus_is_chooser();
+        if actions.just_pressed(Action::MenuDown) {
             moved |= screen.step(1);
         }
-        if actions.just_pressed(Action::MenuUp) || actions.just_pressed(Action::MenuLeft) {
+        if actions.just_pressed(Action::MenuUp) {
             moved |= screen.step(-1);
         }
+        if actions.just_pressed(Action::MenuRight) {
+            if chooser {
+                stepped = screen.focus.map(|f| (f, 1));
+            } else {
+                moved |= screen.step(1);
+            }
+        }
+        if actions.just_pressed(Action::MenuLeft) {
+            if chooser {
+                stepped = screen.focus.map(|f| (f, -1));
+            } else {
+                moved |= screen.step(-1);
+            }
+        }
         for (i, hit) in &hits {
-            if hit.0 != in_question {
+            if hit.0 != in_overlay {
                 continue;
             }
             match i {
@@ -504,7 +698,7 @@ fn navigate(
                         screen.focus = Some(hit.1);
                         moved = true;
                     }
-                    if *i == Interaction::Pressed && screen.buttons().contains(&hit.1) {
+                    if *i == Interaction::Pressed && screen.clickable().contains(&hit.1) {
                         chosen = Some(hit.1);
                     }
                 }
@@ -524,7 +718,7 @@ fn navigate(
     if moved {
         menus.dirty = true;
         let s = menus.focus_sound.clone();
-        play_sound(&mut commands, menus, &mut sources, &settings, s, &log);
+        play_sound(&mut commands, menus, &mut sources, s, &log);
     }
     let back = actions.just_pressed(Action::MenuBack);
     if in_question {
@@ -539,7 +733,7 @@ fn navigate(
         };
         menus.used_input = true;
         let s = menus.select_sound.clone();
-        play_sound(&mut commands, menus, &mut sources, &settings, s, &log);
+        play_sound(&mut commands, menus, &mut sources, s, &log);
         // In the question box, A is YES and B is NO (MenuQuestionYesNo).
         if answer == "OnAButton" {
             log.line("original menus: quit question answered YES; quitting");
@@ -549,6 +743,33 @@ fn navigate(
             menus.question = None;
             menus.dirty = true;
         }
+        return;
+    }
+    if in_rebind {
+        // The key has been pressed: ACCEPT (A) keeps it, CANCEL (B, or
+        // back) puts the old keys back, CLEAR (X) waits for another key.
+        let r = menus.rebind.as_ref().unwrap();
+        let answer = match chosen {
+            Some(i) => Some(r.screen.on_select(i)),
+            None if back => Some("OnBButton".into()),
+            None => None,
+        };
+        let Some(answer) = answer else {
+            return;
+        };
+        menus.used_input = true;
+        let s = menus.select_sound.clone();
+        play_sound(&mut commands, menus, &mut sources, s, &log);
+        menus.work.push(match answer.as_str() {
+            "OnAButton" => OptionWork::RebindAccept,
+            "OnXButton" => OptionWork::RebindAgain,
+            _ => OptionWork::RebindCancel,
+        });
+        return;
+    }
+    if let Some((w, step)) = stepped {
+        menus.used_input = true;
+        menus.work.push(OptionWork::Step(w, step));
         return;
     }
     let cmd = match &shown {
@@ -574,6 +795,19 @@ fn navigate(
         }
         Shown::Page(k) => {
             let p = &menus.pages[k];
+            // Choosing a chooser steps it on, like its right arrow.
+            if let Some(i) = chosen.filter(|i| p.buttons.chooser(*i).is_some()) {
+                menus.used_input = true;
+                menus.work.push(OptionWork::Step(i, 1));
+                return;
+            }
+            if let Some(i) = chosen.filter(|i| p.buttons.key(*i).is_some()) {
+                menus.used_input = true;
+                let s = menus.select_sound.clone();
+                play_sound(&mut commands, menus, &mut sources, s, &log);
+                menus.work.push(OptionWork::Rebind(i));
+                return;
+            }
             let cmd = match chosen {
                 Some(i) => p.buttons.command(i).cloned(),
                 None if back => Some(p.plan.back.clone().unwrap_or(PageCmd::Back)),
@@ -591,7 +825,7 @@ fn navigate(
     };
     menus.used_input = true;
     let s = menus.select_sound.clone();
-    play_sound(&mut commands, menus, &mut sources, &settings, s, &log);
+    play_sound(&mut commands, menus, &mut sources, s, &log);
     let resume = |next_play: &mut Option<ResMut<NextState<Play>>>| {
         if let Some(n) = next_play.as_mut() {
             n.set(Play::Running);
@@ -617,6 +851,10 @@ fn navigate(
             Some(p) => menu.go(p),
             None => log.line(format!("original menus: no page called {key:?}")),
         },
+        PageCmd::Switch(key) => match page_from_key(&key) {
+            Some(p) => menu.switch(p),
+            None => log.line(format!("original menus: no page called {key:?}")),
+        },
         PageCmd::Back => {
             if !menu.back() && menu.page == Page::Paused {
                 resume(&mut next_play);
@@ -640,7 +878,262 @@ fn navigate(
                 exit.write(AppExit::Success);
             }
         },
+        PageCmd::OptionLeft | PageCmd::OptionRight => {
+            let step = if cmd == PageCmd::OptionLeft { -1 } else { 1 };
+            if let (Some(arrow), Some(screen)) = (chosen, menus.screen_mut(&shown)) {
+                if let Some(c) = screens::chooser_for(&screen.layout, arrow) {
+                    screen.focus = Some(c);
+                    menus.work.push(OptionWork::Step(c, step));
+                }
+            }
+        }
+        PageCmd::RestoreDefaults => menus.work.push(OptionWork::RestoreDefaults),
+        PageCmd::PrevSet | PageCmd::NextSet => {
+            if let Some(screen) = menus.screen_mut(&shown) {
+                let set = screens::current_set(&screen.layout);
+                let set = if cmd == PageCmd::PrevSet {
+                    set.saturating_sub(1)
+                } else {
+                    set + 1
+                };
+                screens::show_set(&mut screen.layout, set);
+                // Stay on the set buttons where possible, else the first.
+                let list = screen.buttons();
+                let keep = screen.focus.filter(|f| list.contains(f));
+                screen.focus = keep.or_else(|| {
+                    let other = if cmd == PageCmd::PrevSet {
+                        "NextSet"
+                    } else {
+                        "PrevSet"
+                    };
+                    list.iter()
+                        .copied()
+                        .find(|&i| screen.layout.widgets[i].name == other)
+                        .or(list.first().copied())
+                });
+                log.line(format!(
+                    "original menus: controls set {} of {}",
+                    screens::current_set(&screen.layout) + 1,
+                    screens::set_count(&screen.layout)
+                ));
+                menus.dirty = true;
+            }
+        }
+        // Handled above: they belong to the row.
+        PageCmd::Rebind => {}
         PageCmd::Unavailable => {}
+    }
+}
+
+/// Do what the options pages asked for: change a setting (and save it,
+/// as the original saves each change), put defaults back, and run the
+/// "reassign button" box.
+#[allow(clippy::too_many_arguments)]
+fn apply_options(
+    state: Res<State<GameState>>,
+    play: Option<Res<State<Play>>>,
+    menu: Res<Menu>,
+    mut menus: ResMut<OriginalMenus>,
+    mut settings: ResMut<Settings>,
+    settings_path: Res<SettingsPath>,
+    (mut bindings, base, user_path): (
+        ResMut<Bindings>,
+        Option<Res<BaseBindings>>,
+        Option<Res<UserBindingsPath>>,
+    ),
+    (mut start, mut done): (MessageWriter<StartRebind>, MessageReader<RebindDone>),
+    prompts: Res<InputPrompts>,
+    log: Res<GameLog>,
+) {
+    let work = std::mem::take(&mut menus.work);
+    let results: Vec<RebindDone> = done.read().cloned().collect();
+    let Some(Shown::Page(k)) = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu)
+    else {
+        return;
+    };
+    let menus = &mut *menus;
+    let Some(page) = menus.pages.get_mut(&k) else {
+        return;
+    };
+    let save_bindings = |b: &Bindings| {
+        if let (Some(base), Some(path)) = (base.as_deref(), user_path.as_deref()) {
+            crate::rebind::save_user_bindings(b, base, path, &log);
+        }
+    };
+    let mut settings_changed = false;
+    for w in work {
+        match w {
+            OptionWork::Step(i, step) => {
+                let Some(name) = page.buttons.chooser(i).map(str::to_string) else {
+                    continue;
+                };
+                let Kind::Button(b) = &mut page.screen.layout.widgets[i].kind else {
+                    continue;
+                };
+                if !b.step(step) {
+                    continue;
+                }
+                let (at, text, items) = (b.current, b.items[b.current].clone(), b.items.clone());
+                if option_settings::write(&name, &mut settings, at, &items) {
+                    log.line(format!("original menus: page {k}: {name} is now {text}"));
+                    settings_changed = true;
+                }
+                menus.dirty = true;
+            }
+            OptionWork::RestoreDefaults => {
+                for (_, name) in &page.buttons.choosers {
+                    option_settings::restore(name, &mut settings);
+                    settings_changed = true;
+                }
+                if !page.buttons.keys.is_empty() {
+                    if let Some(base) = base.as_deref() {
+                        *bindings = base.0.clone();
+                        save_bindings(&bindings);
+                    }
+                }
+                log.line(format!("original menus: page {k}: defaults restored"));
+                refresh_page(page, &settings, &prompts);
+                menus.dirty = true;
+            }
+            OptionWork::Rebind(i) => {
+                let Some(action) = page.buttons.key(i).and_then(Action::from_name) else {
+                    continue;
+                };
+                let Some(layout) = menus.map_key_layout.clone() else {
+                    log.line("original menus: no reassign button box in the install");
+                    continue;
+                };
+                let row = &page.screen.layout;
+                let label = screens::row_widgets(row, &row.widgets[i].name)
+                    .into_iter()
+                    .find_map(|r| match &row.widgets[r].kind {
+                        Kind::Text(t) => Some(t.text.to_uppercase()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| action.name().to_uppercase());
+                let device = if prompts.device == InputDevice::Gamepad {
+                    InputDevice::Gamepad
+                } else {
+                    InputDevice::KeyboardMouse
+                };
+                let mut layout = layout;
+                screens::setup_map_key(
+                    &mut layout,
+                    &label,
+                    &key_text(&prompts, action),
+                    device == InputDevice::Gamepad,
+                );
+                log.line(format!(
+                    "original menus: reassign {label} ({}) on {device:?}",
+                    action.name()
+                ));
+                menus.rebind = Some(RebindBox {
+                    screen: Screen {
+                        layout,
+                        focus: None,
+                    },
+                    action,
+                    device,
+                    before: bindings.clone(),
+                    chosen: false,
+                });
+                start.write(StartRebind { action, device });
+                menus.dirty = true;
+            }
+            OptionWork::RebindAccept => {
+                if let Some(r) = menus.rebind.take() {
+                    log.line(format!(
+                        "original menus: kept the new key for {}",
+                        r.action.name()
+                    ));
+                }
+                menus.dirty = true;
+            }
+            OptionWork::RebindCancel => {
+                if let Some(r) = menus.rebind.take() {
+                    *bindings = r.before;
+                    save_bindings(&bindings);
+                    log.line(format!(
+                        "original menus: {} keeps its old keys",
+                        r.action.name()
+                    ));
+                }
+                menus.dirty = true;
+            }
+            OptionWork::RebindAgain => {
+                if let Some(r) = menus.rebind.as_mut() {
+                    *bindings = r.before.clone();
+                    save_bindings(&bindings);
+                    r.chosen = false;
+                    r.screen.focus = None;
+                    screens::map_key_waiting(&mut r.screen.layout, true);
+                    start.write(StartRebind {
+                        action: r.action,
+                        device: r.device,
+                    });
+                    log.line(format!(
+                        "original menus: choose another key for {}",
+                        r.action.name()
+                    ));
+                }
+                menus.dirty = true;
+            }
+        }
+    }
+    for d in results {
+        let Some(r) = menus.rebind.as_mut() else {
+            continue;
+        };
+        if d.action != r.action || d.device != r.device {
+            continue;
+        }
+        match &d.button {
+            Some(name) => {
+                screens::map_key_chosen(&mut r.screen.layout, &name.to_uppercase());
+                r.chosen = true;
+                // Focus ACCEPT, as the original's A button.
+                r.screen.focus = r
+                    .screen
+                    .buttons()
+                    .into_iter()
+                    .find(|&i| r.screen.layout.widgets[i].name == "AButton");
+                if !d.also_used_by.is_empty() {
+                    log.line(format!(
+                        "original menus: {name} is also used by {}",
+                        d.also_used_by
+                            .iter()
+                            .map(|a| a.name())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+            None => {
+                // Escape, or nothing pressed in time: as CANCEL.
+                log.line(format!(
+                    "original menus: no new key for {}",
+                    r.action.name()
+                ));
+                menus.rebind = None;
+            }
+        }
+        menus.dirty = true;
+    }
+    // The box shows the key by its friendly name once the prompts follow
+    // the new bindings, and the page's rows follow too.
+    if prompts.is_changed() {
+        if let Some(r) = menus.rebind.as_mut().filter(|r| r.chosen) {
+            screens::map_key_chosen(&mut r.screen.layout, &key_text(&prompts, r.action));
+        }
+        if !page.buttons.keys.is_empty() {
+            refresh_page(page, &settings, &prompts);
+        }
+        menus.dirty = true;
+    }
+    if settings_changed {
+        // Re-read, so a chooser shows what the setting really became.
+        refresh_page(page, &settings, &prompts);
+        crate::menu::save_settings(&settings, &settings_path, &log);
     }
 }
 
@@ -679,32 +1172,43 @@ fn draw(
         return;
     };
     // The question box replaces the screen under it (it borrows only
-    // its background picture), as in the original.
-    let (is_question, screen) = match &menus.question {
-        Some(q) => (true, q),
+    // its background picture), as in the original. The "reassign button"
+    // box is drawn over the controls page.
+    let mut screens: Vec<(bool, &Screen)> = match &menus.question {
+        Some(q) => vec![(true, q)],
         None => match &shown {
-            Shown::Main => (false, menus.main.as_ref().unwrap()),
-            Shown::Page(k) => (false, &menus.pages[k].screen),
+            Shown::Main => vec![(false, menus.main.as_ref().unwrap())],
+            Shown::Page(k) => vec![(false, &menus.pages[k].screen)],
         },
     };
-    // (question box?, pictures, mouse areas by widget index)
+    if let (None, Some(r)) = (&menus.question, &menus.rebind) {
+        screens.push((true, &r.screen));
+    }
+    let overlay = screens.len() > 1;
+    // (on top?, pictures, mouse areas by widget index)
     type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>);
     let mut list: Vec<Drawn> = Vec::new();
-    {
-        let focus = screen.focus;
+    for (on_top, screen) in screens {
+        // The page under a box shows no focus and takes no clicks.
+        let under = overlay && !on_top;
+        let focus = if under { None } else { screen.focus };
         let q = quads::menu_quads(&screen.layout, focus, assets);
-        let boxes = screen
-            .layout
-            .buttons_on_pc()
-            .into_iter()
-            .filter_map(|i| match &screen.layout.widgets[i].kind {
-                Kind::Button(b) => quads::sprite_box(&b.background_blurred, assets)
-                    .or_else(|| quads::text_box(&b.blurred, assets))
-                    .map(|bx| (i, bx)),
-                _ => None,
-            })
-            .collect();
-        list.push((is_question, q, boxes));
+        let boxes = if under {
+            Vec::new()
+        } else {
+            screen
+                .layout
+                .buttons_on_pc()
+                .into_iter()
+                .filter_map(|i| match &screen.layout.widgets[i].kind {
+                    Kind::Button(b) => quads::sprite_box(&b.background_blurred, assets)
+                        .or_else(|| quads::text_box(&b.blurred, assets))
+                        .map(|bx| (i, bx)),
+                    _ => None,
+                })
+                .collect()
+        };
+        list.push((on_top, q, boxes));
     }
     menus.drawn = list.iter().flat_map(|l| l.1.clone()).collect();
     for q in &menus.drawn {

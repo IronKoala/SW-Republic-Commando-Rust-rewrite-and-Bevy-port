@@ -32,8 +32,6 @@ pub struct StartRebind {
 
 /// The result of a [`StartRebind`].
 #[derive(Message, Debug, Clone)]
-// Read by the options screen's controls page, which the menus part makes.
-#[allow(dead_code)]
 pub struct RebindDone {
     pub action: Action,
     pub device: InputDevice,
@@ -219,11 +217,7 @@ fn capture(
         }
     ));
     if let (Some(base), Some(path)) = (base, path) {
-        let text = bindings.changes_from(&base.0);
-        match std::fs::write(&path.0, text) {
-            Ok(()) => log.line(format!("rebind: saved to {}", path.0.display())),
-            Err(e) => log.line(format!("rebind: ERROR saving {}: {e}", path.0.display())),
-        }
+        save_user_bindings(&bindings, &base, &path, &log);
     }
     done.write(RebindDone {
         action,
@@ -232,6 +226,21 @@ fn capture(
         also_used_by: also,
     });
     wait.0 = Wait::LetGo;
+}
+
+/// Save the player's changes from the game's own bindings to
+/// `my_bindings.toml`.
+pub fn save_user_bindings(
+    bindings: &Bindings,
+    base: &BaseBindings,
+    path: &UserBindingsPath,
+    log: &GameLog,
+) {
+    let text = bindings.changes_from(&base.0);
+    match std::fs::write(&path.0, text) {
+        Ok(()) => log.line(format!("rebind: saved to {}", path.0.display())),
+        Err(e) => log.line(format!("rebind: ERROR saving {}: {e}", path.0.display())),
+    }
 }
 
 /// Make `chosen` the only button for `action` on its device. Returns the

@@ -88,8 +88,7 @@ against the install the same evening with `rc_probe --pages`:
   arrows), `MenuStringList` (the level list), `MenuScrollBar`,
   `MenuScrollArea`, `MenuActiveWidget`. Its buttons are BACK
   (`OnBButton`) and SELECT (`SelectCurrentLevel`).
-- The options classes use sliders and key lists too, so they aren't
-  listed yet.
+- **Options (2026-10-30): use the original.** See below.
 - `rc_game --script` picks pause items by the original's function name
   (`FocusPauseItem`), so it works with either pause page.
 
@@ -99,6 +98,53 @@ button's function in `logs/rc_menu.log`, a painting in `extracted/menus/`),
 then ends with a summary saying which pages would use the original and
 why the others wouldn't. In the game, the same reasons are in
 `logs\rc_game.log` on lines starting `original menus: page`.
+
+## The options pages (2026-10-30)
+
+The four PC options classes are drawn from the install: `CTGameOptionsPCMenu`
+(GAME, 9 rows), `CTSoundOptionsPCMenu` (SOUND, 7), `CTGraphicsOptionsPCMenu`
+(GRAPHICS, 12) and `CTControlsOptionsPCMenu` (CONTROLS, three sets of key
+rows with PREV/NEXT). The tabs on the left switch pages, DONE goes back.
+
+New in the reader:
+
+- `rc_package::class::string_list_value` reads arrays of strings (each
+  chooser's `Items`), and `read_property_info` gives each property's fixed
+  array size, so arrays such as `OptionSet0[14]` are filled to their full
+  length the way the engine does.
+- `MenuButtonEnum` (a row with a list of values, `Current`, `bNoWrap`) and
+  `MenuButtonSprite` (picture buttons; the small arrows have
+  `bIgnoreController`, so they're for the mouse only) are drawn. A chooser's
+  value text uses `DefaultMenuButtonText` when it has no style of its own.
+- Sub-widgets are copied (Blurred to Focused) both before and after the
+  style is applied, as `MenuBase`'s own comments describe. The main, pause
+  and question pictures are byte-for-byte unchanged by this.
+
+What each row does is in `data/ui/original_menus.toml`: `choosers` maps a row
+to a setting in `rc_game/src/option_settings.rs` (mouse sensitivity is value
+times 0.5 in the original, default 6 of 10; volumes are value / 10), `keys`
+maps a CONTROLS row to an action, and `unavailable` greys a row out. Working:
+mouse sensitivity, invert mouse, difficulty, effects volume, music volume,
+screen size (the original's list plus wide and ultrawide sizes) and vsync,
+plus RESTORE DEFAULTS / SET RECOMMENDED. Key rows open `CTMapKeyMenu`
+("REASSIGN BUTTON"): press a key, then ACCEPT, CANCEL or press again.
+
+Greyed out for now: subtitles, helmet and prompt options, auto pull, visor
+and its intensity, sound quality, 3D sound, EAX, channels, graphics quality
+presets, brightness, texture, character and bump detail, blur, bloom,
+projectors, squad shadows, FSAA, and the CONTROLS rows whose action the
+port doesn't have. Not done: the original's "keep these settings?" timer
+after a screen change (ours applies at once).
+
+Our own settings the original doesn't have (FOV, Panini, full screen, master
+volume, controller look speed and dead zone, gyro) are on a page titled
+"MORE SETTINGS (PLACEHOLDER)", reached by a "PORT +" button added under
+the tabs on every options page (`extra_buttons`, a copy of an original
+button so it looks like the others).
+
+`rc_game --script` checks GAME, SOUND and CONTROLS, changes the music volume
+with an arrow, checks greyed rows can't be reached, rebinds JUMP to K and
+cancels, and compares screenshots with `rc_probe` paintings.
 
 ## What the original's menus are made of (checked 2026-10-29)
 

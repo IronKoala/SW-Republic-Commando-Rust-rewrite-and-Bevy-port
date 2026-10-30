@@ -22,11 +22,11 @@ use crate::settings::Settings;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GameSet, GameState, LevelCollision, Play, Player,
     PlayerCamera,
 };
-use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use std::collections::HashSet;
 
 /// How long to wait for a level to load before failing, seconds.
@@ -56,6 +56,12 @@ enum Step {
     FocusPauseItem(&'static str, usize),
     /// Press an action, then check which original menu button has focus.
     FocusAfter(Action, &'static str),
+    /// On an original page, press menu-down until the widget with this
+    /// name has focus.
+    FocusOn(&'static str),
+    /// Press and release a key on the keyboard itself (for choosing a new
+    /// key, which reads the keyboard, not the actions).
+    Key(KeyCode),
     /// Capture the window, save it to `logs/<name>.png` and measure its
     /// colours (retried while the capture comes back black).
     Shot(&'static str),
@@ -307,7 +313,10 @@ fn steps() -> Vec<Step> {
                     "{:.0}% lit, {}",
                     s.lit * 100.0,
                     if original {
-                        format!("original reticle: {} white pixels at the centre", s.centre_white)
+                        format!(
+                            "original reticle: {} white pixels at the centre",
+                            s.centre_white
+                        )
                     } else {
                         format!("{} amber pixels at the centre", s.centre_amber)
                     }
@@ -316,11 +325,13 @@ fn steps() -> Vec<Step> {
                 Err(format!("original reticle {original}: {s:?}"))
             }
         }),
-        Check("the level part loaded walls, props, doors and invisible walls", |w| {
-            let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
-                return Err("no LevelInfo".into());
-            };
-            let got = format!(
+        Check(
+            "the level part loaded walls, props, doors and invisible walls",
+            |w| {
+                let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
+                    return Err("no LevelInfo".into());
+                };
+                let got = format!(
                 "{}: {} collision triangles, {} props ({} with their class's model), {} blocking volumes, start {}",
                 i.map,
                 i.collision_triangles,
@@ -329,12 +340,17 @@ fn steps() -> Vec<Step> {
                 i.blocking_volumes,
                 if i.has_player_start { "from the map" } else { "MISSING" }
             );
-            if i.collision_triangles > 10_000 && i.props > 0 && i.class_props > 0 && i.has_player_start {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+                if i.collision_triangles > 10_000
+                    && i.props > 0
+                    && i.class_props > 0
+                    && i.has_player_start
+                {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Check("the map's doors and lifts run", |w| {
             let Some(m) = w.get_resource::<rc_movers_plugin::LevelMovers>() else {
                 return Err("no LevelMovers".into());
@@ -355,10 +371,9 @@ fn steps() -> Vec<Step> {
         }),
         Check("the sky camera turns with the player's camera", |w| {
             let sky = count::<rc_level_plugin::SkyCamera>(w);
-            let mut q = w.query_filtered::<&Camera, (
-                With<PlayerCamera>,
-                With<rc_level_plugin::SkyFollows>,
-            )>();
+            let mut q = w
+                .query_filtered::<&Camera, (With<PlayerCamera>, With<rc_level_plugin::SkyFollows>)>(
+                );
             let follows = q
                 .iter(w)
                 .filter(|c| matches!(c.clear_color, ClearColorConfig::None))
@@ -366,7 +381,9 @@ fn steps() -> Vec<Step> {
             if sky == 1 && follows == 1 {
                 Ok("1 sky camera; the player's camera lets it through".into())
             } else {
-                Err(format!("{sky} sky cameras, {follows} player cameras following"))
+                Err(format!(
+                    "{sky} sky cameras, {follows} player cameras following"
+                ))
             }
         }),
         // Look up 60 degrees: geo_01a shows open sky above the spires there.
@@ -392,30 +409,35 @@ fn steps() -> Vec<Step> {
         Note(|w| turn(w, std::f32::consts::PI)),
         Wait(0.5),
         Shot("squad"),
-        Check("the squad mates wear their original models and armour", |w| {
-            let mut q =
-                w.query::<(&rc_squad_plugin::SquadMate, &rc_squad_plugin::look::MateModel)>();
-            let mut got: Vec<String> = q
-                .iter(w)
-                .map(|(m, mm)| {
-                    let skins: Vec<&str> = mm
-                        .model
-                        .sections
-                        .iter()
-                        .map(|s| s.skin.as_ref().map_or("none", |k| k.texture.as_str()))
-                        .collect();
-                    format!("{} {} {}", m.name, mm.model.name, skins.join("+"))
-                })
-                .collect();
-            got.sort();
-            let mates = count::<rc_squad_plugin::SquadMate>(w);
-            let all_skinned = got.iter().all(|g| !g.contains("none"));
-            if mates == 3 && got.len() == 3 && all_skinned {
-                Ok(got.join(", "))
-            } else {
-                Err(format!("{mates} squad mates, with models: {got:?}"))
-            }
-        }),
+        Check(
+            "the squad mates wear their original models and armour",
+            |w| {
+                let mut q = w.query::<(
+                    &rc_squad_plugin::SquadMate,
+                    &rc_squad_plugin::look::MateModel,
+                )>();
+                let mut got: Vec<String> = q
+                    .iter(w)
+                    .map(|(m, mm)| {
+                        let skins: Vec<&str> = mm
+                            .model
+                            .sections
+                            .iter()
+                            .map(|s| s.skin.as_ref().map_or("none", |k| k.texture.as_str()))
+                            .collect();
+                        format!("{} {} {}", m.name, mm.model.name, skins.join("+"))
+                    })
+                    .collect();
+                got.sort();
+                let mates = count::<rc_squad_plugin::SquadMate>(w);
+                let all_skinned = got.iter().all(|g| !g.contains("none"));
+                if mates == 3 && got.len() == 3 && all_skinned {
+                    Ok(got.join(", "))
+                } else {
+                    Err(format!("{mates} squad mates, with models: {got:?}"))
+                }
+            },
+        ),
         Note(|w| turn(w, std::f32::consts::PI)),
         Wait(0.2),
         Note(|w| {
@@ -438,17 +460,27 @@ fn steps() -> Vec<Step> {
         // landing-zone barricade opens once the player heals at the bacta
         // dispenser the scripts switch on.
         Check("the level's scripts run", level_script_running),
-        Check("the start barricade blocks the way", |w| level_script_way(w, true)),
-        Until("the scripts switch the bacta dispenser on", level_script_dispenser_on, 300.0),
+        Check("the start barricade blocks the way", |w| {
+            level_script_way(w, true)
+        }),
+        Until(
+            "the scripts switch the bacta dispenser on",
+            level_script_dispenser_on,
+            300.0,
+        ),
         Note(level_script_stand_at_dispenser),
         Wait(0.5),
         Hold(Action::Use, 5.0),
         Until("the barricade opens", level_script_barricade_gone, 60.0),
         Wait(3.0),
-        Check("the barricade is gone: not solid, not drawn, the way through is open", |w| {
-            level_script_way(w, false)
-        }),
-        Check("the scripts' events, damage, healing and checkpoint", level_script_chain),
+        Check(
+            "the barricade is gone: not solid, not drawn, the way through is open",
+            |w| level_script_way(w, false),
+        ),
+        Check(
+            "the scripts' events, damage, healing and checkpoint",
+            level_script_chain,
+        ),
         // Enemy spawners run by the level's events (rc_enemies): send the
         // event that starts geo_01a's small-bunker droids, as the map's own
         // trigger would later, then destroy them: each sends its death
@@ -617,7 +649,10 @@ fn steps() -> Vec<Step> {
             let before = droid_modes(quick.parts.get("enemies"));
             let after = droid_modes(again.parts.get("enemies"));
             let got = format!("droids saved {before:?}, now {after:?}");
-            let woke = before.iter().zip(&after).any(|(b, a)| b == "idle" && a != "idle");
+            let woke = before
+                .iter()
+                .zip(&after)
+                .any(|(b, a)| b == "idle" && a != "idle");
             if woke || before.len() != after.len() {
                 Err(got)
             } else {
@@ -627,7 +662,10 @@ fn steps() -> Vec<Step> {
         Check("quickload gives back the ammo used before saving", |w| {
             let quick = save_file(w, &SaveSlot::Quick)?;
             let c = quick.part("combat").ok_or("no [combat] section")?;
-            let saved = c["weapons"].as_array().and_then(|a| a.first()).ok_or("no weapons")?;
+            let saved = c["weapons"]
+                .as_array()
+                .and_then(|a| a.first())
+                .ok_or("no weapons")?;
             let saved_clip = saved["clip"].as_float().ok_or("no clip")? as f32;
             let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
             let a = q.iter(w).next().ok_or("player has no weapons")?;
@@ -638,14 +676,20 @@ fn steps() -> Vec<Step> {
                 .get(id)
                 .map(|p| rc_combat::WeaponState::new(p).clip)
                 .unwrap_or(0.0);
-            let got = format!("{id}: {:.0} in the magazine now, {saved_clip:.0} saved, {full:.0} when full", now.clip);
+            let got = format!(
+                "{id}: {:.0} in the magazine now, {saved_clip:.0} saved, {full:.0} when full",
+                now.clip
+            );
             if (now.clip - saved_clip).abs() < 0.01 && saved_clip < full {
                 Ok(got)
             } else {
                 Err(got)
             }
         }),
-        Check("quickload keeps the scripts' progress: no level start again, barricade still gone", level_script_after_load),
+        Check(
+            "quickload keeps the scripts' progress: no level start again, barricade still gone",
+            level_script_after_load,
+        ),
         Check("quickload puts the doors and lifts back", movers_after_load),
         Check("saving again after the load gives the same state", |w| {
             let quick = save_file(w, &SaveSlot::Quick)?;
@@ -678,14 +722,17 @@ fn steps() -> Vec<Step> {
         }),
         Press(Action::Pause),
         Wait(0.2),
-        Check("the pause menu is the original's when the install has it", |w| {
-            let m = w.resource::<OriginalMenus>();
-            match (m.active(), m.pages.contains_key("paused")) {
-                (true, true) => Ok("original CTPausePCMenu".into()),
-                (false, _) => Ok("no original menus: placeholder".into()),
-                (true, false) => Err("placeholder, see the log for why".into()),
-            }
-        }),
+        Check(
+            "the pause menu is the original's when the install has it",
+            |w| {
+                let m = w.resource::<OriginalMenus>();
+                match (m.active(), m.pages.contains_key("paused")) {
+                    (true, true) => Ok("original CTPausePCMenu".into()),
+                    (false, _) => Ok("no original menus: placeholder".into()),
+                    (true, false) => Err("placeholder, see the log for why".into()),
+                }
+            },
+        ),
         Shot("paused"),
         FocusPauseItem("EndMissionSelected", 2),
         Press(Action::MenuAccept), // Quit to main menu
@@ -700,12 +747,13 @@ fn steps() -> Vec<Step> {
                 Err(format!("{p} players, {c} cameras, {meshes} meshes left"))
             }
         }),
-        Check("the original main menu is back, focus on NEW GAME", |w| {
-            match (w.resource::<OriginalMenus>().active(), focus(w)) {
+        Check(
+            "the original main menu is back, focus on NEW GAME",
+            |w| match (w.resource::<OriginalMenus>().active(), focus(w)) {
                 (true, Some(f)) if f == "MenuOptions[0]" => Ok(f),
                 other => Err(format!("{other:?}")),
-            }
-        }),
+            },
+        ),
         Note(|w| {
             // Each run saves the lowered volume to the script's own settings
             // file; start from full so it never runs down to zero.
@@ -717,27 +765,113 @@ fn steps() -> Vec<Step> {
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         FocusAfter(Action::MenuDown, "MenuOptions[4]"),
         Press(Action::MenuAccept), // OPTIONS
-        Wait(0.2),
-        Check("OPTIONS opens the options page", |w| match page(w) {
-            Page::Options => Ok("options".into()),
-            p => Err(format!("{p:?}")),
+        Wait(0.3),
+        Check("OPTIONS opens the original GAME options page", |w| {
+            match (page(w), original_page_shown(w)) {
+                (Page::Options, Some(k)) if k == "options" => Ok("options (original)".into()),
+                other => Err(format!("{other:?}")),
+            }
         }),
+        Check(
+            "mouse sensitivity shows the setting (default 6)",
+            |w| match button_text(w, "Options[0]") {
+                Some(t) if t == "6" => Ok(t),
+                other => Err(format!("{other:?}")),
+            },
+        ),
+        Shot("options_game"),
+        Check("GAME options page matches the original's pictures", |w| {
+            compare(w, "options_game", 0.03)
+        }),
+        FocusOn("Sound"),
+        Press(Action::MenuAccept), // SOUND
+        Wait(0.3),
+        Check(
+            "SOUND switches to the original SOUND page",
+            |w| match page(w) {
+                Page::OptionsSound => Ok("options_sound".into()),
+                p => Err(format!("{p:?}")),
+            },
+        ),
+        FocusOn("Options[2]"),   // MUSIC VOLUME
         Press(Action::MenuLeft), // music volume down a step
         Wait(0.2),
         Check("left lowers the music volume", |w| {
             let before = w.resource::<Noted>().music_volume;
             let now = w.resource::<Settings>().audio.music_volume;
-            if now < before {
-                Ok(format!("{before:.1} -> {now:.1}"))
+            let shown = button_text(w, "Options[2]").unwrap_or_default();
+            if now < before && shown == format!("{:.0}", now * 10.0) {
+                Ok(format!("{before:.1} -> {now:.1}, shows {shown}"))
             } else {
-                Err(format!("{before:.1} -> {now:.1}"))
+                Err(format!("{before:.1} -> {now:.1}, shows {shown}"))
             }
         }),
-        Press(Action::MenuBack),
-        Wait(0.2),
-        Check("Back returns to the original main menu", |w| match page(w) {
-            Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
-            p => Err(format!("{p:?}")),
+        Check("greyed-out rows can't be reached (VOICES, EAX...)", |w| {
+            let focusable = original_focusable(w);
+            if focusable
+                .iter()
+                .any(|n| n == "Options[0]" || n == "Options[5]")
+            {
+                Err(format!("{focusable:?}"))
+            } else {
+                Ok(format!("{} buttons reachable", focusable.len()))
+            }
+        }),
+        FocusOn("Controls"),
+        Press(Action::MenuAccept), // CONTROLS
+        Wait(0.3),
+        Check("CONTROLS shows each action's keys", |w| {
+            match (page(w), button_text(w, "OptionSet0[7]")) {
+                (Page::OptionsControls, Some(t)) if t.contains("SPACE") => {
+                    Ok(format!("JUMP is {t}"))
+                }
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Shot("options_controls"),
+        Check("CONTROLS page matches the original's pictures", |w| {
+            compare(w, "options_controls", 0.03)
+        }),
+        FocusOn("OptionSet0[7]"), // JUMP
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check(
+            "choosing JUMP opens the original reassign box",
+            |w| match &w.resource::<OriginalMenus>().rebind {
+                Some(r) if !r.chosen && r.action == Action::Jump => Ok("waiting for a key".into()),
+                Some(r) => Err(format!("{:?} chosen={}", r.action, r.chosen)),
+                None => Err("no box".into()),
+            },
+        ),
+        Key(KeyCode::KeyK),
+        Wait(0.3),
+        Check("pressing K makes K the jump key", |w| {
+            let chosen = w
+                .resource::<OriginalMenus>()
+                .rebind
+                .as_ref()
+                .map(|r| r.chosen);
+            match (chosen, keys_of(w, Action::Jump).as_slice()) {
+                (Some(true), [KeyCode::KeyK]) => Ok("K, ACCEPT/CANCEL/CLEAR showing".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuBack), // CANCEL
+        Wait(0.3),
+        Check("CANCEL puts SPACE back and closes the box", |w| {
+            let open = w.resource::<OriginalMenus>().rebind.is_some();
+            match (open, keys_of(w, Action::Jump).as_slice()) {
+                (false, [KeyCode::Space]) => Ok("Space".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuBack), // DONE
+        Wait(0.3),
+        Check("Back returns to the original main menu", |w| {
+            match page(w) {
+                Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
+                p => Err(format!("{p:?}")),
+            }
         }),
         FocusAfter(Action::MenuDown, "MenuOptions[7]"),
         Press(Action::MenuAccept), // QUIT
@@ -785,6 +919,29 @@ fn steps() -> Vec<Step> {
     ]
 }
 
+fn original_page_shown(w: &mut World) -> Option<String> {
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    match w
+        .resource::<OriginalMenus>()
+        .shown(&state, play.as_ref(), menu)
+    {
+        Some(original_menu::Shown::Page(k)) => Some(k),
+        _ => None,
+    }
+}
+
+/// The buttons keys and controllers can reach on the original page
+/// showing.
+fn original_focusable(w: &mut World) -> Vec<String> {
+    let Some(k) = original_page_shown(w) else {
+        return vec![];
+    };
+    let m = w.resource::<OriginalMenus>();
+    m.pages[&k].screen.reachable_names()
+}
+
 fn pause_item_focused(w: &mut World, func: &str, index: usize) -> bool {
     let state = *w.resource::<State<GameState>>().get();
     let play = w.get_resource::<State<Play>>().map(|p| *p.get());
@@ -799,11 +956,53 @@ fn pause_item_focused(w: &mut World, func: &str, index: usize) -> bool {
     }
 }
 
+/// The focused button of the original screen showing: a box over the
+/// page (question, reassign button), else the page, else the main menu.
 fn focus(w: &mut World) -> Option<String> {
-    w.resource::<OriginalMenus>()
-        .main
-        .as_ref()
-        .and_then(|m| m.focused_name().map(str::to_string))
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    let m = w.resource::<OriginalMenus>();
+    if let Some(q) = &m.question {
+        return q.focused_name().map(str::to_string);
+    }
+    if let Some(r) = &m.rebind {
+        return r.screen.focused_name().map(str::to_string);
+    }
+    match m.shown(&state, play.as_ref(), menu) {
+        Some(original_menu::Shown::Page(k)) => {
+            m.pages[&k].screen.focused_name().map(str::to_string)
+        }
+        _ => m
+            .main
+            .as_ref()
+            .and_then(|s| s.focused_name().map(str::to_string)),
+    }
+}
+
+/// The text a button on the original page showing has now.
+fn button_text(w: &mut World, name: &str) -> Option<String> {
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    let m = w.resource::<OriginalMenus>();
+    let Some(original_menu::Shown::Page(k)) = m.shown(&state, play.as_ref(), menu) else {
+        return None;
+    };
+    match &m.pages[&k].screen.layout.widget(name)?.kind {
+        rc_menus::layout::Kind::Button(b) => Some(b.blurred.text.clone()),
+        _ => None,
+    }
+}
+
+/// The keys bound to an action on the keyboard.
+fn keys_of(w: &mut World, action: Action) -> Vec<KeyCode> {
+    w.resource::<crate::input::Bindings>()
+        .keys
+        .iter()
+        .filter(|(a, _)| *a == action)
+        .map(|(_, k)| *k)
+        .collect()
 }
 
 /// Compare the menu area of a screenshot with the same menu painted in
@@ -823,12 +1022,15 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
     let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
     let ours = shrink(&shot, area, W, H);
     let mut menus = w.resource_mut::<OriginalMenus>();
-    let reference =
-        original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
     let mut total = 0.0f64;
     let mut worst = 0.0f64;
     let mut far = 0usize;
-    for (a, b) in ours.pixels.chunks_exact(4).zip(reference.pixels.chunks_exact(4)) {
+    for (a, b) in ours
+        .pixels
+        .chunks_exact(4)
+        .zip(reference.pixels.chunks_exact(4))
+    {
         let d = (0..3)
             .map(|k| (a[k] as f64 - b[k] as f64).abs())
             .sum::<f64>()
@@ -995,7 +1197,10 @@ fn squad_still(w: &mut World) -> bool {
     let mut n = w.resource_mut::<Noted>();
     // Bevy units are metres-ish; 0.01 is about half an Unreal unit.
     let moved = feet.len() != n.squad_feet.len()
-        || feet.iter().zip(&n.squad_feet).any(|(a, b)| a.distance(*b) > 0.01);
+        || feet
+            .iter()
+            .zip(&n.squad_feet)
+            .any(|(a, b)| a.distance(*b) > 0.01);
     n.squad_still_frames = if moved { 0 } else { n.squad_still_frames + 1 };
     n.squad_feet = feet;
     n.squad_still_frames >= 3
@@ -1003,7 +1208,9 @@ fn squad_still(w: &mut World) -> bool {
 
 /// Each droid's mode ("idle", "alerted", ...) in an `[enemies]` section.
 fn droid_modes(section: Option<&toml::Value>) -> Vec<String> {
-    let droids = section.and_then(|e| e.get("droids")).and_then(|d| d.as_array());
+    let droids = section
+        .and_then(|e| e.get("droids"))
+        .and_then(|d| d.as_array());
     droids
         .map(|a| {
             a.iter()
@@ -1105,10 +1312,47 @@ fn run(world: &mut World) {
                     }
                     done = frames > 200;
                     if done {
-                        log.line(format!("CHECK focus {func} on the pause menu: not reached -> FAIL"));
+                        log.line(format!(
+                            "CHECK focus {func} on the pause menu: not reached -> FAIL"
+                        ));
                         world.resource_mut::<Script>().failed += 1;
                     }
                 }
+            }
+            Step::FocusOn(want) => {
+                if focus(world).as_deref() != Some(want) {
+                    if frames % 2 == 0 {
+                        held.insert(Action::MenuDown);
+                    }
+                    done = frames > 200;
+                    if done {
+                        log.line(format!("CHECK focus reaches {want}: not reached -> FAIL"));
+                        world.resource_mut::<Script>().failed += 1;
+                    }
+                }
+            }
+            Step::Key(key) => {
+                use bevy::input::keyboard::{Key, KeyboardInput, NativeKey};
+                use bevy::input::ButtonState;
+                let window = world
+                    .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+                    .iter(world)
+                    .next();
+                if let (Some(window), true) = (window, frames < 2) {
+                    world.write_message(KeyboardInput {
+                        key_code: key,
+                        logical_key: Key::Unidentified(NativeKey::Unidentified),
+                        state: if frames == 0 {
+                            ButtonState::Pressed
+                        } else {
+                            ButtonState::Released
+                        },
+                        text: None,
+                        repeat: false,
+                        window,
+                    });
+                }
+                done = frames >= 2;
             }
             Step::FocusAfter(a, want) => {
                 if frames == 0 {
@@ -1170,7 +1414,11 @@ fn run(world: &mut World) {
             // wait ends this frame's turn.
             if matches!(
                 step,
-                Step::Press(_) | Step::Hold(..) | Step::Wait(_) | Step::FocusAfter(..)
+                Step::Press(_)
+                    | Step::Hold(..)
+                    | Step::Wait(_)
+                    | Step::FocusAfter(..)
+                    | Step::Key(_)
             ) {
                 break;
             }
@@ -1207,7 +1455,11 @@ fn level_script_running(w: &mut World) -> Result<String, String> {
         d.stats.events_sent,
         d.history.first().map(|h| &h.1)
     );
-    if d.stats.scripts > 10 && d.history.iter().any(|h| h.1.eq_ignore_ascii_case("levelstart")) {
+    if d.stats.scripts > 10
+        && d.history
+            .iter()
+            .any(|h| h.1.eq_ignore_ascii_case("levelstart"))
+    {
         Ok(got)
     } else {
         Err(got)
@@ -1296,7 +1548,9 @@ fn level_script_way(w: &mut World, blocked: bool) -> Result<String, String> {
 /// finished.
 fn level_script_after_load(w: &mut World) -> Result<String, String> {
     let quick = save_file(w, &SaveSlot::Quick)?;
-    let saved = quick.part("scripts").ok_or("no [scripts] section in the quicksave")?;
+    let saved = quick
+        .part("scripts")
+        .ok_or("no [scripts] section in the quicksave")?;
     let saved_finished: Vec<String> = saved
         .get("director")
         .and_then(|d| d.get("script"))
@@ -1321,7 +1575,11 @@ fn level_script_after_load(w: &mut World) -> Result<String, String> {
     let states = d.script_states();
     let unfinished: Vec<&String> = saved_finished
         .iter()
-        .filter(|n| !states.iter().any(|(name, _, what)| name == *n && what == "finished"))
+        .filter(|n| {
+            !states
+                .iter()
+                .any(|(name, _, what)| name == *n && what == "finished")
+        })
         .collect();
     let got = format!(
         "clock {:.1} s; {} events since the load, level start sent {} times; {} scripts finished in the save, {} not finished now; barricade gone {gone}; {}",
@@ -1343,7 +1601,9 @@ fn level_script_after_load(w: &mut World) -> Result<String, String> {
 /// the same key, and the movers' clock carried on from the save's.
 fn movers_after_load(w: &mut World) -> Result<String, String> {
     let quick = save_file(w, &SaveSlot::Quick)?;
-    let saved = quick.part("movers").ok_or("no [movers] section in the quicksave")?;
+    let saved = quick
+        .part("movers")
+        .ok_or("no [movers] section in the quicksave")?;
     let saved_time = saved.get("time").and_then(|t| t.as_float()).unwrap_or(0.0) as f32;
     let list = saved
         .get("movers")
@@ -1380,7 +1640,8 @@ fn movers_after_load(w: &mut World) -> Result<String, String> {
         set.time,
         if wrong.is_empty() { String::new() } else { format!("; {}", wrong.join(", ")) }
     );
-    if !list.is_empty() && wrong.is_empty() && set.time >= saved_time && set.time < saved_time + 5.0 {
+    if !list.is_empty() && wrong.is_empty() && set.time >= saved_time && set.time < saved_time + 5.0
+    {
         Ok(got)
     } else {
         Err(got)
@@ -1396,7 +1657,10 @@ fn level_script_dispenser_on(w: &mut World) -> bool {
         .history
         .iter()
         .any(|h| h.1.eq_ignore_ascii_case("StartBactaReminderTimer"));
-    told && s.dispensers().iter().any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
+    told && s
+        .dispensers()
+        .iter()
+        .any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
 }
 
 /// Put the player where a squad mate would stand to use the dispenser.
@@ -1425,7 +1689,12 @@ fn level_script_stand_at_dispenser(w: &mut World) {
 
 fn level_script_barricade_gone(w: &mut World) -> bool {
     w.get_resource::<rc_scripts_plugin::LevelScript>()
-        .is_some_and(|s| s.stats.props_destroyed.iter().any(|p| p.eq_ignore_ascii_case(BARRICADE_PROP)))
+        .is_some_and(|s| {
+            s.stats
+                .props_destroyed
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case(BARRICADE_PROP))
+        })
 }
 
 fn level_script_chain(w: &mut World) -> Result<String, String> {
@@ -1434,7 +1703,16 @@ fn level_script_chain(w: &mut World) -> Result<String, String> {
     };
     let h = &s.director.history;
     let when = |e: &str| h.iter().find(|x| x.1.eq_ignore_ascii_case(e)).map(|x| x.0);
-    let chain = ["levelstart", "Rappel", "CheckpointLevelStart", "StartBactaTraining", "BactaDispenserActive", "BactaUsed", "RetreatToGammaSector", "DialogGetToGunship"];
+    let chain = [
+        "levelstart",
+        "Rappel",
+        "CheckpointLevelStart",
+        "StartBactaTraining",
+        "BactaDispenserActive",
+        "BactaUsed",
+        "RetreatToGammaSector",
+        "DialogGetToGunship",
+    ];
     let times: Vec<String> = chain
         .iter()
         .map(|e| format!("{e} {}", when(e).map_or("-".into(), |t| format!("{t:.1}s"))))
@@ -1453,7 +1731,11 @@ fn level_script_chain(w: &mut World) -> Result<String, String> {
         s.stats.checkpoints,
         s.stats.not_done
     );
-    if in_order && s.stats.player_hurt > 0.0 && s.stats.bacta_healed > 0.0 && s.stats.checkpoints.iter().any(|c| c == "checkpoint0") {
+    if in_order
+        && s.stats.player_hurt > 0.0
+        && s.stats.bacta_healed > 0.0
+        && s.stats.checkpoints.iter().any(|c| c == "checkpoint0")
+    {
         Ok(got)
     } else {
         Err(got)
