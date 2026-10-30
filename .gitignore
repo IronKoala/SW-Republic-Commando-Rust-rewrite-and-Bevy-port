@@ -19,6 +19,7 @@
 !*.md
 # Our own shaders (GPU programs).
 !crates/**/*.wgsl
+!crates/**/*.wesl
 # Game settings files that mods can edit (our own, never the game's).
 !data/**/*.toml
 # Automatic checks on GitHub (our own workflow files).

@@ -109,8 +109,8 @@ OnRight = "option_right"
 "Options[4]" = "prompt_text"        # the level scripts' hints
 "Options[5]" = "difficulty"
 "Options[6]" = "auto_pull_maneuvers" # squad orders take mates off posts
-"Options[7]" = "unavailable"        # TACTICAL VISOR MODE
-"Options[8]" = "unavailable"        # TACTICAL MODE INTENSITY
+"Options[7]" = "tactical_visor"     # ON, OFF, CYCLE: which modes CYCLE VISOR MODE (X) steps through
+"Options[8]" = "tactical_intensity" # 0 to 10: how strongly squad mates and pickups glow
 
 # Not in the original: our own tab ("PORT +", short enough to fit) for the
 # port's extra settings, on [pages.more_settings] below.

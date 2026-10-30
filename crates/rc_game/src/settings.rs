@@ -43,6 +43,43 @@ pub struct GameSection {
     /// anti-armour posts. Off, the order is refused until you recall the
     /// squad. On by default, as in the original's `User.ini`.
     pub auto_pull_maneuvers: bool,
+    /// TACTICAL VISOR MODE: which visor modes CYCLE VISOR MODE (X) steps
+    /// through (see rc_visor).
+    pub tactical_visor: TacticalVisor,
+    /// TACTICAL MODE INTENSITY: how strongly squad mates and pickups glow
+    /// in tactical mode, 0 to 1 (the original's default is 0.2).
+    pub tactical_intensity: f32,
+}
+
+/// The TACTICAL VISOR MODE option, as the original's menu lists it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TacticalVisor {
+    /// Tactical and low light, never the plain view.
+    On,
+    /// Normal and low light, never tactical.
+    Off,
+    /// Normal, tactical and low light (the original's default).
+    #[default]
+    Cycle,
+}
+
+impl TacticalVisor {
+    pub fn choice(self) -> rc_visor::VisorChoice {
+        match self {
+            TacticalVisor::On => rc_visor::VisorChoice::TacticalOnly,
+            TacticalVisor::Off => rc_visor::VisorChoice::Off,
+            TacticalVisor::Cycle => rc_visor::VisorChoice::Cycle,
+        }
+    }
+
+    pub fn from_choice(c: rc_visor::VisorChoice) -> TacticalVisor {
+        match c {
+            rc_visor::VisorChoice::TacticalOnly => TacticalVisor::On,
+            rc_visor::VisorChoice::Off => TacticalVisor::Off,
+            rc_visor::VisorChoice::Cycle => TacticalVisor::Cycle,
+        }
+    }
 }
 
 /// The original's three difficulties.
@@ -217,6 +254,8 @@ impl Default for Settings {
                 subtitles: true,
                 prompt_text: true,
                 auto_pull_maneuvers: true,
+                tactical_visor: TacticalVisor::Cycle,
+                tactical_intensity: 0.2,
             },
             mods: ModsSection {
                 folder: "mods".into(),
@@ -316,6 +355,11 @@ prompt_text = true   # the level's hints, such as "Press USE to open"
 # the order is refused until you recall the squad. The original's AUTO
 # PULL MANEUVERS (GAME options page), on by default.
 auto_pull_maneuvers = true
+# The visor (CYCLE VISOR MODE, X). In tactical mode squad mates glow in
+# their colour and pickups glow pale blue. on: tactical and low light only;
+# off: normal and low light only; cycle: all three (the original's default).
+tactical_visor = 'cycle'
+tactical_intensity = 0.2   # how strong the glow is, 0 to 1
 
 [mods]
 # One sub-folder per mod. A mod holds files with the same names as in

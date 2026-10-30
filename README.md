@@ -424,6 +424,16 @@ copy of the game.
   walks 422 units away and quickloads, and the player comes back 0.00
   units from the saved spot with the ammo as it was.
 
+- The visor's modes. Press X (CYCLE VISOR MODE) to step through normal,
+  tactical and low light. Levels start in tactical mode, where Sev glows
+  red, Fixer green, Scorch yellow and weapons on the ground pale blue, in
+  the colours the original gives them (read from the install). The GAME
+  options page's TACTICAL VISOR MODE (ON, OFF, CYCLE: which modes X steps
+  through) and TACTICAL MODE INTENSITY (how strong the glow is) work, as in
+  the original. Low light mode only switches on a helmet lamp for now (a
+  placeholder). Checked by `cargo run -p rc_visor --example visor_check`
+  and `rc_game --script`.
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
