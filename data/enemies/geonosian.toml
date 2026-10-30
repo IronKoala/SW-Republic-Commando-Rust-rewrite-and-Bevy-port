@@ -33,6 +33,7 @@ melee_damage = 125        # game: ForcePikeDefaults MeleeDamage
 melee_damage_type = "CTDamageMeleeWarrior" # game: ForcePikeDefaults MeleeDamageType
 melee_delay = 1.6         # game: the MeleeAttack animation's length (48 frames at 30 a second)
 lunge_distance = 800      # game: StateGeonosianWarriorAttack LungeDist
+leap_speed = 900          # guess: stands in for its flying when a level script sends it up a ledge
 burst_count = 1           # game: GeonosianWarriorBotDefaults BurstCount
 ready_distance = 900      # guess
 drops = ""                # game: the force pike isn't a pick-up

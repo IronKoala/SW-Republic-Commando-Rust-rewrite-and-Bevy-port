@@ -24,11 +24,11 @@ use crate::settings::Settings;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GameSet, GameState, LevelCollision, Play, Player,
     PlayerCamera,
 };
-use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use std::collections::HashSet;
 
 /// How long to wait for a level to load before failing, seconds.
@@ -312,7 +312,10 @@ fn steps() -> Vec<Step> {
                     "{:.0}% lit, {}",
                     s.lit * 100.0,
                     if original {
-                        format!("original reticle: {} white pixels at the centre", s.centre_white)
+                        format!(
+                            "original reticle: {} white pixels at the centre",
+                            s.centre_white
+                        )
                     } else {
                         format!("{} amber pixels at the centre", s.centre_amber)
                     }
@@ -353,12 +356,17 @@ fn steps() -> Vec<Step> {
                 i.blocking_volumes,
                 if i.has_player_start { "from the map" } else { "MISSING" }
             );
-            if i.collision_triangles > 10_000 && i.props > 0 && i.class_props > 0 && i.has_player_start {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+                if i.collision_triangles > 10_000
+                    && i.props > 0
+                    && i.class_props > 0
+                    && i.has_player_start
+                {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Check("the map's doors and lifts run", |w| {
             let Some(m) = w.get_resource::<rc_movers_plugin::LevelMovers>() else {
                 return Err("no LevelMovers".into());
@@ -379,10 +387,9 @@ fn steps() -> Vec<Step> {
         }),
         Check("the sky camera turns with the player's camera", |w| {
             let sky = count::<rc_level_plugin::SkyCamera>(w);
-            let mut q = w.query_filtered::<&Camera, (
-                With<PlayerCamera>,
-                With<rc_level_plugin::SkyFollows>,
-            )>();
+            let mut q = w
+                .query_filtered::<&Camera, (With<PlayerCamera>, With<rc_level_plugin::SkyFollows>)>(
+                );
             let follows = q
                 .iter(w)
                 .filter(|c| matches!(c.clear_color, ClearColorConfig::None))
@@ -390,7 +397,9 @@ fn steps() -> Vec<Step> {
             if sky == 1 && follows == 1 {
                 Ok("1 sky camera; the player's camera lets it through".into())
             } else {
-                Err(format!("{sky} sky cameras, {follows} player cameras following"))
+                Err(format!(
+                    "{sky} sky cameras, {follows} player cameras following"
+                ))
             }
         }),
         // Look up 60 degrees: geo_01a shows open sky above the spires there.
@@ -416,30 +425,35 @@ fn steps() -> Vec<Step> {
         Note(|w| turn(w, std::f32::consts::PI)),
         Wait(0.5),
         Shot("squad"),
-        Check("the squad mates wear their original models and armour", |w| {
-            let mut q =
-                w.query::<(&rc_squad_plugin::SquadMate, &rc_squad_plugin::look::MateModel)>();
-            let mut got: Vec<String> = q
-                .iter(w)
-                .map(|(m, mm)| {
-                    let skins: Vec<&str> = mm
-                        .model
-                        .sections
-                        .iter()
-                        .map(|s| s.skin.as_ref().map_or("none", |k| k.texture.as_str()))
-                        .collect();
-                    format!("{} {} {}", m.name, mm.model.name, skins.join("+"))
-                })
-                .collect();
-            got.sort();
-            let mates = count::<rc_squad_plugin::SquadMate>(w);
-            let all_skinned = got.iter().all(|g| !g.contains("none"));
-            if mates == 3 && got.len() == 3 && all_skinned {
-                Ok(got.join(", "))
-            } else {
-                Err(format!("{mates} squad mates, with models: {got:?}"))
-            }
-        }),
+        Check(
+            "the squad mates wear their original models and armour",
+            |w| {
+                let mut q = w.query::<(
+                    &rc_squad_plugin::SquadMate,
+                    &rc_squad_plugin::look::MateModel,
+                )>();
+                let mut got: Vec<String> = q
+                    .iter(w)
+                    .map(|(m, mm)| {
+                        let skins: Vec<&str> = mm
+                            .model
+                            .sections
+                            .iter()
+                            .map(|s| s.skin.as_ref().map_or("none", |k| k.texture.as_str()))
+                            .collect();
+                        format!("{} {} {}", m.name, mm.model.name, skins.join("+"))
+                    })
+                    .collect();
+                got.sort();
+                let mates = count::<rc_squad_plugin::SquadMate>(w);
+                let all_skinned = got.iter().all(|g| !g.contains("none"));
+                if mates == 3 && got.len() == 3 && all_skinned {
+                    Ok(got.join(", "))
+                } else {
+                    Err(format!("{mates} squad mates, with models: {got:?}"))
+                }
+            },
+        ),
         Note(|w| turn(w, std::f32::consts::PI)),
         Wait(0.2),
         Note(|w| {
@@ -478,10 +492,14 @@ fn steps() -> Vec<Step> {
         Hold(Action::Use, 5.0),
         Until("the barricade opens", level_script_barricade_gone, 60.0),
         Wait(3.0),
-        Check("the barricade is gone: not solid, not drawn, the way through is open", |w| {
-            level_script_way(w, false)
-        }),
-        Check("the scripts' events, damage, healing and checkpoint", level_script_chain),
+        Check(
+            "the barricade is gone: not solid, not drawn, the way through is open",
+            |w| level_script_way(w, false),
+        ),
+        Check(
+            "the scripts' events, damage, healing and checkpoint",
+            level_script_chain,
+        ),
         // Enemy spawners run by the level's events (rc_enemies): send the
         // event that starts geo_01a's small-bunker droids, as the map's own
         // trigger would later, then destroy them: each sends its death
@@ -504,6 +522,27 @@ fn steps() -> Vec<Step> {
             10.0,
         ),
         Check("spawners and scripts agree", level_spawn_summary),
+        // Script actions on characters: geo_01a's "LoneRanger", a
+        // Geonosian warrior whose spawner gives him the sequence
+        // LoneRangerAI. On LoneRangerJump he walks to a point, turns to
+        // the player, plays EmoteSeeEnemy, walks on, and is removed; the
+        // sequence waits for each walk and the animation.
+        Note(cast_spawn),
+        Until(
+            "the lone Geonosian appears with his script",
+            cast_appeared,
+            10.0,
+        ),
+        Check(
+            "he answers to his tag and follows LoneRangerAI",
+            cast_tagged,
+        ),
+        Note(cast_go),
+        Until("his sequence finishes", cast_finished, 90.0),
+        Check(
+            "he walked, turned, played his animation and was removed, each when the script said",
+            cast_summary,
+        ),
         Press(Action::Pause),
         Wait(0.3),
         Check("pause key pauses", |w| {
@@ -650,7 +689,10 @@ fn steps() -> Vec<Step> {
             let before = droid_modes(quick.parts.get("enemies"));
             let after = droid_modes(again.parts.get("enemies"));
             let got = format!("droids saved {before:?}, now {after:?}");
-            let woke = before.iter().zip(&after).any(|(b, a)| b == "idle" && a != "idle");
+            let woke = before
+                .iter()
+                .zip(&after)
+                .any(|(b, a)| b == "idle" && a != "idle");
             if woke || before.len() != after.len() {
                 Err(got)
             } else {
@@ -660,7 +702,10 @@ fn steps() -> Vec<Step> {
         Check("quickload gives back the ammo used before saving", |w| {
             let quick = save_file(w, &SaveSlot::Quick)?;
             let c = quick.part("combat").ok_or("no [combat] section")?;
-            let saved = c["weapons"].as_array().and_then(|a| a.first()).ok_or("no weapons")?;
+            let saved = c["weapons"]
+                .as_array()
+                .and_then(|a| a.first())
+                .ok_or("no weapons")?;
             let saved_clip = saved["clip"].as_float().ok_or("no clip")? as f32;
             let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
             let a = q.iter(w).next().ok_or("player has no weapons")?;
@@ -671,14 +716,20 @@ fn steps() -> Vec<Step> {
                 .get(id)
                 .map(|p| rc_combat::WeaponState::new(p).clip)
                 .unwrap_or(0.0);
-            let got = format!("{id}: {:.0} in the magazine now, {saved_clip:.0} saved, {full:.0} when full", now.clip);
+            let got = format!(
+                "{id}: {:.0} in the magazine now, {saved_clip:.0} saved, {full:.0} when full",
+                now.clip
+            );
             if (now.clip - saved_clip).abs() < 0.01 && saved_clip < full {
                 Ok(got)
             } else {
                 Err(got)
             }
         }),
-        Check("quickload keeps the scripts' progress: no level start again, barricade still gone", level_script_after_load),
+        Check(
+            "quickload keeps the scripts' progress: no level start again, barricade still gone",
+            level_script_after_load,
+        ),
         Check("quickload puts the doors and lifts back", movers_after_load),
         Check("saving again after the load gives the same state", |w| {
             let quick = save_file(w, &SaveSlot::Quick)?;
@@ -727,14 +778,17 @@ fn steps() -> Vec<Step> {
         Check("the next map's start is saved as a checkpoint, with the health", level_exit_checkpoint),
         Press(Action::Pause),
         Wait(0.2),
-        Check("the pause menu is the original's when the install has it", |w| {
-            let m = w.resource::<OriginalMenus>();
-            match (m.active(), m.pages.contains_key("paused")) {
-                (true, true) => Ok("original CTPausePCMenu".into()),
-                (false, _) => Ok("no original menus: placeholder".into()),
-                (true, false) => Err("placeholder, see the log for why".into()),
-            }
-        }),
+        Check(
+            "the pause menu is the original's when the install has it",
+            |w| {
+                let m = w.resource::<OriginalMenus>();
+                match (m.active(), m.pages.contains_key("paused")) {
+                    (true, true) => Ok("original CTPausePCMenu".into()),
+                    (false, _) => Ok("no original menus: placeholder".into()),
+                    (true, false) => Err("placeholder, see the log for why".into()),
+                }
+            },
+        ),
         Shot("paused"),
         FocusPauseItem("EndMissionSelected", 2),
         Press(Action::MenuAccept), // Quit to main menu
@@ -749,12 +803,13 @@ fn steps() -> Vec<Step> {
                 Err(format!("{p} players, {c} cameras, {meshes} meshes left"))
             }
         }),
-        Check("the original main menu is back, focus on NEW GAME", |w| {
-            match (w.resource::<OriginalMenus>().active(), focus(w)) {
+        Check(
+            "the original main menu is back, focus on NEW GAME",
+            |w| match (w.resource::<OriginalMenus>().active(), focus(w)) {
                 (true, Some(f)) if f == "MenuOptions[0]" => Ok(f),
                 other => Err(format!("{other:?}")),
-            }
-        }),
+            },
+        ),
         Note(|w| {
             // Each run saves the lowered volume to the script's own settings
             // file; start from full so it never runs down to zero.
@@ -784,9 +839,11 @@ fn steps() -> Vec<Step> {
         }),
         Press(Action::MenuBack),
         Wait(0.2),
-        Check("Back returns to the original main menu", |w| match page(w) {
-            Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
-            p => Err(format!("{p:?}")),
+        Check("Back returns to the original main menu", |w| {
+            match page(w) {
+                Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
+                p => Err(format!("{p:?}")),
+            }
         }),
         FocusAfter(Action::MenuDown, "MenuOptions[7]"),
         Press(Action::MenuAccept), // QUIT
@@ -872,12 +929,15 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
     let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
     let ours = shrink(&shot, area, W, H);
     let mut menus = w.resource_mut::<OriginalMenus>();
-    let reference =
-        original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
     let mut total = 0.0f64;
     let mut worst = 0.0f64;
     let mut far = 0usize;
-    for (a, b) in ours.pixels.chunks_exact(4).zip(reference.pixels.chunks_exact(4)) {
+    for (a, b) in ours
+        .pixels
+        .chunks_exact(4)
+        .zip(reference.pixels.chunks_exact(4))
+    {
         let d = (0..3)
             .map(|k| (a[k] as f64 - b[k] as f64).abs())
             .sum::<f64>()
@@ -1044,7 +1104,10 @@ fn squad_still(w: &mut World) -> bool {
     let mut n = w.resource_mut::<Noted>();
     // Bevy units are metres-ish; 0.01 is about half an Unreal unit.
     let moved = feet.len() != n.squad_feet.len()
-        || feet.iter().zip(&n.squad_feet).any(|(a, b)| a.distance(*b) > 0.01);
+        || feet
+            .iter()
+            .zip(&n.squad_feet)
+            .any(|(a, b)| a.distance(*b) > 0.01);
     n.squad_still_frames = if moved { 0 } else { n.squad_still_frames + 1 };
     n.squad_feet = feet;
     n.squad_still_frames >= 3
@@ -1052,7 +1115,9 @@ fn squad_still(w: &mut World) -> bool {
 
 /// Each droid's mode ("idle", "alerted", ...) in an `[enemies]` section.
 fn droid_modes(section: Option<&toml::Value>) -> Vec<String> {
-    let droids = section.and_then(|e| e.get("droids")).and_then(|d| d.as_array());
+    let droids = section
+        .and_then(|e| e.get("droids"))
+        .and_then(|d| d.as_array());
     droids
         .map(|a| {
             a.iter()
@@ -1154,7 +1219,9 @@ fn run(world: &mut World) {
                     }
                     done = frames > 200;
                     if done {
-                        log.line(format!("CHECK focus {func} on the pause menu: not reached -> FAIL"));
+                        log.line(format!(
+                            "CHECK focus {func} on the pause menu: not reached -> FAIL"
+                        ));
                         world.resource_mut::<Script>().failed += 1;
                     }
                 }
@@ -1256,7 +1323,11 @@ fn level_script_running(w: &mut World) -> Result<String, String> {
         d.stats.events_sent,
         d.history.first().map(|h| &h.1)
     );
-    if d.stats.scripts > 10 && d.history.iter().any(|h| h.1.eq_ignore_ascii_case("levelstart")) {
+    if d.stats.scripts > 10
+        && d.history
+            .iter()
+            .any(|h| h.1.eq_ignore_ascii_case("levelstart"))
+    {
         Ok(got)
     } else {
         Err(got)
@@ -1389,7 +1460,9 @@ fn level_script_way(w: &mut World, blocked: bool) -> Result<String, String> {
 /// finished.
 fn level_script_after_load(w: &mut World) -> Result<String, String> {
     let quick = save_file(w, &SaveSlot::Quick)?;
-    let saved = quick.part("scripts").ok_or("no [scripts] section in the quicksave")?;
+    let saved = quick
+        .part("scripts")
+        .ok_or("no [scripts] section in the quicksave")?;
     let saved_finished: Vec<String> = saved
         .get("director")
         .and_then(|d| d.get("script"))
@@ -1414,7 +1487,11 @@ fn level_script_after_load(w: &mut World) -> Result<String, String> {
     let states = d.script_states();
     let unfinished: Vec<&String> = saved_finished
         .iter()
-        .filter(|n| !states.iter().any(|(name, _, what)| name == *n && what == "finished"))
+        .filter(|n| {
+            !states
+                .iter()
+                .any(|(name, _, what)| name == *n && what == "finished")
+        })
         .collect();
     let got = format!(
         "clock {:.1} s; {} events since the load, level start sent {} times; {} scripts finished in the save, {} not finished now; barricade gone {gone}; {}",
@@ -1436,7 +1513,9 @@ fn level_script_after_load(w: &mut World) -> Result<String, String> {
 /// the same key, and the movers' clock carried on from the save's.
 fn movers_after_load(w: &mut World) -> Result<String, String> {
     let quick = save_file(w, &SaveSlot::Quick)?;
-    let saved = quick.part("movers").ok_or("no [movers] section in the quicksave")?;
+    let saved = quick
+        .part("movers")
+        .ok_or("no [movers] section in the quicksave")?;
     let saved_time = saved.get("time").and_then(|t| t.as_float()).unwrap_or(0.0) as f32;
     let list = saved
         .get("movers")
@@ -1473,7 +1552,8 @@ fn movers_after_load(w: &mut World) -> Result<String, String> {
         set.time,
         if wrong.is_empty() { String::new() } else { format!("; {}", wrong.join(", ")) }
     );
-    if !list.is_empty() && wrong.is_empty() && set.time >= saved_time && set.time < saved_time + 5.0 {
+    if !list.is_empty() && wrong.is_empty() && set.time >= saved_time && set.time < saved_time + 5.0
+    {
         Ok(got)
     } else {
         Err(got)
@@ -1489,7 +1569,10 @@ fn level_script_dispenser_on(w: &mut World) -> bool {
         .history
         .iter()
         .any(|h| h.1.eq_ignore_ascii_case("StartBactaReminderTimer"));
-    told && s.dispensers().iter().any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
+    told && s
+        .dispensers()
+        .iter()
+        .any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
 }
 
 /// Put the player where a squad mate would stand to use the dispenser.
@@ -1518,7 +1601,12 @@ fn level_script_stand_at_dispenser(w: &mut World) {
 
 fn level_script_barricade_gone(w: &mut World) -> bool {
     w.get_resource::<rc_scripts_plugin::LevelScript>()
-        .is_some_and(|s| s.stats.props_destroyed.iter().any(|p| p.eq_ignore_ascii_case(BARRICADE_PROP)))
+        .is_some_and(|s| {
+            s.stats
+                .props_destroyed
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case(BARRICADE_PROP))
+        })
 }
 
 fn level_script_chain(w: &mut World) -> Result<String, String> {
@@ -1527,7 +1615,16 @@ fn level_script_chain(w: &mut World) -> Result<String, String> {
     };
     let h = &s.director.history;
     let when = |e: &str| h.iter().find(|x| x.1.eq_ignore_ascii_case(e)).map(|x| x.0);
-    let chain = ["levelstart", "Rappel", "CheckpointLevelStart", "StartBactaTraining", "BactaDispenserActive", "BactaUsed", "RetreatToGammaSector", "DialogGetToGunship"];
+    let chain = [
+        "levelstart",
+        "Rappel",
+        "CheckpointLevelStart",
+        "StartBactaTraining",
+        "BactaDispenserActive",
+        "BactaUsed",
+        "RetreatToGammaSector",
+        "DialogGetToGunship",
+    ];
     let times: Vec<String> = chain
         .iter()
         .map(|e| format!("{e} {}", when(e).map_or("-".into(), |t| format!("{t:.1}s"))))
@@ -1546,7 +1643,11 @@ fn level_script_chain(w: &mut World) -> Result<String, String> {
         s.stats.checkpoints,
         s.stats.not_done
     );
-    if in_order && s.stats.player_hurt > 0.0 && s.stats.bacta_healed > 0.0 && s.stats.checkpoints.iter().any(|c| c == "checkpoint0") {
+    if in_order
+        && s.stats.player_hurt > 0.0
+        && s.stats.bacta_healed > 0.0
+        && s.stats.checkpoints.iter().any(|c| c == "checkpoint0")
+    {
         Ok(got)
     } else {
         Err(got)
@@ -1563,6 +1664,149 @@ const SPAWN_DEATH_EVENT: &str = "DeadGunnerDroid";
 
 /// The bunker spawners, and the living droids they made: (id, feet,
 /// spawner location).
+const CAST_SPAWN: &str = "SpawnTrench02";
+const CAST_GO: &str = "LoneRangerJump";
+const CAST_TAG: &str = "LoneRanger";
+const CAST_SCRIPT: &str = "LoneRangerAI";
+const CAST_SEQUENCE: &str = "ScriptedSequence21";
+
+fn cast_spawn(w: &mut World) {
+    if let Some(mut s) = w.get_resource_mut::<rc_scripts_plugin::LevelScript>() {
+        s.director.fire(CAST_SPAWN, "self-test");
+    }
+}
+
+fn cast_go(w: &mut World) {
+    if let Some(mut s) = w.get_resource_mut::<rc_scripts_plugin::LevelScript>() {
+        s.director.fire(CAST_GO, "self-test");
+    }
+}
+
+/// The living characters tagged LoneRanger: (entity, what scripts call
+/// them).
+fn cast_members(w: &mut World) -> Vec<(Entity, rc_game_core::ScriptTags)> {
+    let mut q = w.query_filtered::<(Entity, &rc_game_core::ScriptTags), Without<rc_combat::Dead>>();
+    q.iter(w)
+        .filter(|(_, t)| {
+            t.tag
+                .as_deref()
+                .is_some_and(|x| x.eq_ignore_ascii_case(CAST_TAG))
+        })
+        .map(|(e, t)| (e, t.clone()))
+        .collect()
+}
+
+fn cast_appeared(w: &mut World) -> bool {
+    !cast_members(w).is_empty()
+}
+
+fn cast_state(w: &mut World) -> String {
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .and_then(|s| {
+            s.director
+                .script_states()
+                .into_iter()
+                .find(|(n, ..)| n.eq_ignore_ascii_case(CAST_SEQUENCE))
+        })
+        .map_or("no such sequence".into(), |(_, next, what)| {
+            format!("at {next}, {what}")
+        })
+}
+
+fn cast_tagged(w: &mut World) -> Result<String, String> {
+    let m = cast_members(w);
+    let state = cast_state(w);
+    let got = format!(
+        "{} tagged {CAST_TAG}, scripts {:?}, follow orders {:?}; {CAST_SEQUENCE} {state}",
+        m.len(),
+        m.iter().map(|(_, t)| t.script.clone()).collect::<Vec<_>>(),
+        m.iter().map(|(_, t)| t.follows_orders).collect::<Vec<_>>()
+    );
+    let ok = m.len() == 1
+        && m[0]
+            .1
+            .script
+            .as_deref()
+            .is_some_and(|s| s.eq_ignore_ascii_case(CAST_SCRIPT))
+        && m[0].1.follows_orders
+        && state.contains(&CAST_GO.to_ascii_lowercase());
+    if ok {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// His sequence is over and its last order (removing him) has landed.
+fn cast_finished(w: &mut World) -> bool {
+    cast_state(w).contains("finished") && cast_members(w).is_empty()
+}
+
+fn cast_summary(w: &mut World) -> Result<String, String> {
+    let left = cast_members(w).len();
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no level scripts".into());
+    };
+    let place = |t: &str| s.places.find(t).map(|p| p.location);
+    let (jump, kill) = (
+        place("JumpDestForLoneRanger"),
+        place("KillPointForLoneRanger"),
+    );
+    let done: Vec<String> = s
+        .stats
+        .character_done
+        .iter()
+        .filter(|d| d.starts_with(CAST_SEQUENCE))
+        .cloned()
+        .collect();
+    let orders: Vec<String> = s
+        .stats
+        .character_orders
+        .iter()
+        .filter(|o| o.contains(CAST_SCRIPT) || o.contains(CAST_TAG))
+        .cloned()
+        .collect();
+    let fight = w.resource::<rc_enemies::Fight>();
+    let log: Vec<String> = fight
+        .stats
+        .scripted
+        .iter()
+        .filter(|l| l.contains(CAST_SEQUENCE))
+        .cloned()
+        .collect();
+    // Where he was when each walk was reported done, against the map's
+    // points.
+    let at = |index: usize| -> Option<rc_movement::Vec3> {
+        let l = log
+            .iter()
+            .find(|l| l.contains(&format!("{CAST_SEQUENCE}#{index} at")))?;
+        let n: Vec<f32> = l
+            .rsplit(" at ")
+            .next()?
+            .split(' ')
+            .filter_map(|x| x.parse().ok())
+            .collect();
+        (n.len() == 3).then(|| rc_movement::Vec3::new(n[0], n[1], n[2]))
+    };
+    let off = |p: Option<rc_movement::Vec3>, q: Option<[f32; 3]>| match (p, q) {
+        (Some(p), Some(q)) => (p - rc_movement::Vec3::new(q[0], q[1], q[2])).length_2d(),
+        _ => f32::INFINITY,
+    };
+    let (d1, d4) = (off(at(1), jump), off(at(4), kill));
+    let got = format!(
+        "done by the character {done:?}; walks ended {d1:.0} and {d4:.0} uu from their points; orders {orders:?}; enemies part {log:?}; {left} still in the level"
+    );
+    let has = |i: usize| done.iter().any(|d| d.ends_with(&format!("#{i}")));
+    // #1 and #4 walks, #2 turn, #3 animation: each finished by him, not by
+    // the time-out; then #5 removed him.
+    let anim_ok = log.iter().any(|l| l.starts_with("anim EmoteSeeEnemy"));
+    if has(1) && has(2) && has(3) && has(4) && d1 < 100.0 && d4 < 100.0 && anim_ok && left == 0 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 fn bunker_droids(
     w: &World,
 ) -> Result<(usize, Vec<(u32, rc_movement::Vec3, rc_movement::Vec3)>), String> {

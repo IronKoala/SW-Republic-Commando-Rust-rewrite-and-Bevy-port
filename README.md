@@ -236,6 +236,15 @@ copy of the game.
   saved as your checkpoint. Following the exits from the prologue goes
   through all 56 campaign maps to the epilogue. `rc_game --script` walks
   into geo_01a's exit and checks geo_01b (56 of 56 checks).
+  Scripts now direct the enemies too (tested in the cloud sandbox with the
+  real files, not yet on Windows or by playing): they walk where the
+  level sends them, turn to you, play their scripted animations, wait for
+  you, appear, vanish, and can be made unkillable or hurt. Geonosians leap
+  up to ledges they can't walk to (a stand-in for flying). Scripts can also
+  set Delta Squad's stance. On geo_01a the lone Geonosian in the trench
+  leaps up, turns to you, plays his "seen an enemy" animation and runs off.
+  Squad mates' own scripted moves aren't done yet. `rc_game --script`
+  checks the Geonosian's whole scene (60 of 60 checks).
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It

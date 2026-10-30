@@ -1221,6 +1221,7 @@ and carries out the effects:
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
+| actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
 
 **Script sounds** (`rc_scripts_plugin/src/sounds.rs`). A script names a
@@ -1253,6 +1254,59 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 `BactaRecharging.Event` and it rests 10 s (our choice). In geo_01a those
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
+
+### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
+
+A `ScriptedSequence` belongs to the characters that run it: a placed pawn
+names it in `AIScriptTag`, and a `PawnFactory` gives it to everyone it makes
+through `AIScriptFromFactory`. An action with no target of its own acts on
+those characters. Each spawned character carries `ScriptTags { tag, script,
+follows_orders }` (in `rc_game_core`): its tag (the factory's
+`PawnTagFromFactory`, or a squad mate's class name) and the sequence it runs.
+
+The director marks these actions "the game runs them"
+(`Director::game_runs_characters`). It hands them out as `Effect::Action`
+with the sequence's tag as `owner`; the plugin turns each into a `Call` and
+`cast` finds its characters, by tag (the action's own `Tag`, `PawnTag`,
+`DestroyTag`, ...; a player tag means the player) or by owner. A character
+made by a factory appears a frame after the event that starts its script,
+so a call with nobody to act on waits `character_grace_seconds` (1 s) before
+it is logged "no character" and skipped; later calls of the same script
+wait behind it.
+
+| Action | What happens |
+|---|---|
+| `MoveToPoint`, `MoveToPlayer` | `CharacterAct::MoveTo` / `MoveToPlayer`: the enemy walks (or runs) there along the level's paths |
+| `TurnTowardPlayer` | turns to face the player |
+| `PlayAnim`, `WaitForAnimEnd` | stands still and plays the named animation from its own animation set |
+| `WaitForPlayer` | holds until the player is within the distance |
+| `TeleportToPoint` | put there at once, facing the point's way |
+| `SetHidden`, `DestroyActor`, `DestroyPawn` | hidden / removed (removed without a death event) |
+| `MakeInvulnerable`, `SetCannotDie` | `rc_combat::Invulnerable` (no damage) / `CannotDie` (health stops at 1) |
+| `HurtActor` on a character | `rc_combat` `Damage` |
+| `ChangeSquadStance` | `SquadStanceOrder` to the squad (form up, search and destroy, secure a point) |
+
+Places are every actor in the map but static meshes and lights
+(`rc_level::scripts::places`), found by tag and then by name; a missing one
+is logged. Enemies (`rc_enemies/src/scripted.rs`) carry the orders out
+through `rc_ai::Fighter::follow_script` (`ScriptGoal`): while it has one it
+doesn't fight, being hurt ends a hold, and it answers `AiEvent::ScriptDone`,
+which comes back as `CharacterOrderDone`. A walk that gets stuck for 2 s
+ends there. An enemy with `leap_speed` above 0 in its `[combat]` section
+(the Geonosian warrior, 900) leaps straight to a point it can't walk to or
+that's more than 200 uu above it, a stand-in for the original's flying.
+
+Walks, turns and animations hold the script until the game says they're
+done, with a timeout each (`move_timeout_seconds` 30, `turn_timeout_seconds`
+2, `anim_timeout_seconds` 10, in `data/scripts/scripts.toml`), so a stuck
+character can't stop a level. A save made while a script waits on one keeps
+which action it was, and after a load the action is given again.
+
+Not done yet: squad mates' own scripted moves (`ChangeSquadMember`), moving
+the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
+`GotoState` on characters, characters the game doesn't spawn yet (placed
+clone troopers and the like are logged and skipped), one sequence run
+separately per character, and `ScriptPriority`.
 
 ### geo_01a, worked through
 
@@ -1295,7 +1349,16 @@ way through is the gap where `Blockade01` stood.
   barricade to go, then checks the same sweep now passes, the volume isn't
   solid, both drawn parts of the prop are hidden, and that the chain of
   events happened in order with the player hurt, healed and checkpoint0
-  saved.
+  saved. Then it sends `SpawnTrench02` and `LoneRangerJump` and checks that
+  the lone Geonosian from `PawnFactory50` carries his tag and sequence,
+  reaches `JumpDestForLoneRanger` and `KillPointForLoneRanger`, turns,
+  plays `EmoteSeeEnemy` and is removed, each answered back to the script.
+- **Characters** (`cargo test -p rc_scripts -p rc_ai`): a walk holds its
+  script until the game answers, a timeout moves it on, and a save made
+  mid-walk gives the walk again after loading; an enemy follows walk, turn
+  and hold orders without shooting, then fights; one that can leap leaps
+  to a high point and a battle droid doesn't. `rc_script_check` also counts
+  the places scripts send characters to that it can find.
 
 ## Sounds
 

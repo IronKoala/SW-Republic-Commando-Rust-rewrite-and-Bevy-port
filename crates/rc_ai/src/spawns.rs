@@ -27,7 +27,9 @@
 //!   (`PawnEventFromFactory` / `PawnEvent`), an event sent the first time
 //!   it is hurt (`FirstDamagedEventFromFactory` / `FirstDamagedEvent`),
 //!   its first behaviour (`StartStateFromFactory` / `StartState`; 6 is
-//!   "stationary attack", hold a position and shoot) and its team.
+//!   "stationary attack", hold a position and shoot), its team, and the
+//!   level script it follows (`AIScriptFromFactory` / `AIScriptTag`, a
+//!   `ScriptedSequence`'s tag).
 //! - A `Trigger` actor fires its `Event` when the player walks within its
 //!   `CollisionRadius`; many spawners are switched on that way, the rest
 //!   by level scripts. In the game the level scripts part runs both; the
@@ -80,6 +82,9 @@ pub struct Offspring {
     /// Its first behaviour.
     pub start_state: StartState,
     pub team: Option<i32>,
+    /// The level script it runs: the tag of a `ScriptedSequence`
+    /// (`AIScriptFromFactory` / `AIScriptTag`).
+    pub script: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -279,6 +284,7 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
                     first_damaged_event: label(a, "FirstDamagedEvent"),
                     start_state: state(a, "StartState"),
                     team: team(a, "TeamIndex"),
+                    script: label(a, "AIScriptTag"),
                 },
             })
             .collect();
@@ -324,6 +330,7 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
                 first_damaged_event: label(f, "FirstDamagedEventFromFactory"),
                 start_state: state(f, "StartStateFromFactory"),
                 team: team(f, "TeamIndexFromFactory"),
+                script: label(f, "AIScriptFromFactory"),
             },
             start_state: state(f, "StartStateFromFactory"),
             team: int(f, "TeamIndexFromFactory"),
