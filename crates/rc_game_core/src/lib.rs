@@ -24,6 +24,8 @@
 //! - [`MusicMood`]: calm or battle music; whoever knows a fight started
 //!   sets it.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
+//! - [`events`]: the level's named events ([`ScriptEvent`] out of the level
+//!   scripts, [`RaiseEvent`] into them).
 //! - [`save`]: the interface each part fills in so it is saved and loaded
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
 //!
@@ -31,6 +33,7 @@
 //! tests run anywhere.
 
 mod actions;
+pub mod events;
 mod hud;
 mod log;
 pub mod paths;
@@ -39,6 +42,7 @@ mod state;
 pub mod units;
 
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
+pub use events::{FactoryOrder, LevelScriptsRun, RaiseEvent, ScriptEvent};
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
@@ -70,6 +74,9 @@ impl Plugin for CorePlugin {
             .init_resource::<MusicMood>()
             .add_message::<HudMessage>()
             .add_message::<ViewKick>()
+            .add_message::<ScriptEvent>()
+            .add_message::<RaiseEvent>()
+            .add_message::<FactoryOrder>()
             .init_resource::<save::SaveList>()
             .add_message::<save::SaveGame>()
             .add_message::<save::LoadGame>()

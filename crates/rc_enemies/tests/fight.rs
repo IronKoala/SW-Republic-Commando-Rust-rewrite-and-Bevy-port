@@ -6,13 +6,13 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
-use rc_ai::{AiParams, Battle, Factory, Mode, SpawnSpot, StartState};
+use rc_ai::{AiParams, Battle, Factory, Mode, Offspring, SpawnSpot, StartState};
 use rc_combat::{Body, CombatPlugin, Damage, Dead, Health, Hittable, Team};
 use rc_enemies::look::Pose;
 use rc_enemies::{Droid, EnemiesPlugin, Fight};
 use rc_game_core::{
-    Action, ActionState, CorePlugin, GameLog, GamePaths, GameState, LevelCollision, MusicMood,
-    Player, PlayerCamera,
+    Action, ActionState, CorePlugin, FactoryOrder, GameLog, GamePaths, GameState, LevelCollision,
+    MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent,
 };
 use rc_movement::Vec3 as UVec3;
 use std::collections::HashSet;
@@ -70,6 +70,10 @@ impl Room {
             spots: vec![SpawnSpot {
                 location: spot,
                 yaw: std::f32::consts::PI,
+                offspring: Offspring {
+                    start_state: StartState::StationaryAttack,
+                    ..Default::default()
+                },
             }],
             capacity: 1,
             max_alive: 1,
@@ -77,8 +81,8 @@ impl Room {
             spawn_mode: 0,
             spawn_interval: 1.0,
             start_state: StartState::StationaryAttack,
-            team: None,
             triggers: vec![(UVec3::new(-500.0, 0.0, 84.0), 300.0)],
+            ..Default::default()
         };
         let params = Arc::new(params);
         let battle = Battle::with_types(
@@ -265,4 +269,59 @@ fn a_fallen_droid_leaves_its_blaster() {
         .map(|p| p.weapon.clone())
         .collect();
     assert_eq!(drops, ["e5_blaster_pickup"]);
+}
+
+/// Events the droids sent into the level, for the checks.
+#[derive(Resource, Default)]
+struct Raised(Vec<String>);
+
+fn collect_raised(mut r: MessageReader<RaiseEvent>, mut got: ResMut<Raised>) {
+    got.0.extend(r.read().map(|e| e.name.clone()));
+}
+
+#[test]
+fn with_level_scripts_the_spawner_waits_for_its_event_and_droids_report_their_death() {
+    let mut r = Room::new();
+    r.app
+        .init_resource::<Raised>()
+        .add_systems(Update, collect_raised);
+    {
+        let mut fight = r.app.world_mut().resource_mut::<Fight>();
+        fight.battle.scripted = true;
+        fight.battle.spawners[0].factory.spots[0].offspring.event = Some("TestDroidDown".into());
+    }
+    // Standing in its walk-in trigger does nothing now: the scripts run
+    // triggers and send their events.
+    r.seconds(1.0, &[]);
+    assert!(r.droids().is_empty());
+    r.app.world_mut().write_message(ScriptEvent {
+        name: "testdroids".into(),
+        by: "test".into(),
+    });
+    r.seconds(0.5, &[]);
+    let droids = r.droids();
+    assert_eq!(droids.len(), 1, "its event switched the spawner on");
+    let d = droids[0];
+    r.app.world_mut().write_message(Damage {
+        target: d,
+        amount: 1000.0,
+        kind: rc_combat::DamageKind::Other,
+        instigator: None,
+        point: Vec3::ZERO,
+        direction: Vec3::X,
+    });
+    r.seconds(0.2, &[]);
+    assert!(r.app.world().get::<Dead>(d).is_some());
+    assert_eq!(
+        r.app.world().resource::<Raised>().0,
+        vec!["TestDroidDown".to_string()]
+    );
+    // A script stops it for good: the event no longer starts it.
+    r.app.world_mut().write_message(FactoryOrder::Stop {
+        tag: "TestDroids".into(),
+        for_good: true,
+        remove_offspring: false,
+    });
+    r.seconds(0.2, &[]);
+    assert!(r.app.world().resource::<Fight>().battle.spawners[0].disabled);
 }

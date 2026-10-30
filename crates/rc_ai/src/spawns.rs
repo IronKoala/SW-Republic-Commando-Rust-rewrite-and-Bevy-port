@@ -1,31 +1,46 @@
 //! Where enemies come from: the map's spawners ("pawn factories"), the
 //! spawn points they use, and the walk-in triggers that switch them on.
 //!
-//! How the original works, from the property names and the script source in
-//! CTGame.u (read only; described in our own words):
+//! How the original works, from the property names, the class defaults and
+//! the script source in CTGame.u (read only; described in our own words):
 //! - A `PawnFactory` makes characters of one class (`Prototype`, for
-//!   example `Properties.BattleDroidTM`). It starts switched off and is
-//!   switched on by an event whose name is the factory's `Tag`.
-//! - It places each new character at one of the `SpawnPoint`s that share
-//!   its `Tag` (in turn, or at random when `SpawnMode` is 1), or at the
-//!   factory itself when `SpawnMode` is 2 or there are no spawn points.
-//! - `Capacity` is how many it makes in all (UE default 1 when not stored
-//!   is our assumption), `MaxAlive` how many may be alive at once,
-//!   `bGenerateForever` keeps replacing them.
-//! - `StartStateFromFactory` is the character's first behaviour; 6 is
-//!   "stationary attack" (hold a position and shoot), used by every
-//!   battle droid spawner in geo_01a.
+//!   example `Properties.BattleDroidTM`). It starts switched off. An event
+//!   whose name is the factory's `Tag` switches it on, and the same event
+//!   again switches it off. It only switches on if it has somewhere to
+//!   put characters.
+//! - `SpawnMode`: 0 puts each new character at the next `SpawnPoint`
+//!   sharing its `Tag` in turn, 1 at a random one, 2 (the class default)
+//!   at the factory itself, 3 at the spawn point nearest the player.
+//! - While on, it makes one straight away and then tries again every
+//!   `SpawnInterval` seconds (a random time up to `SpawnIntervalMax` when
+//!   that is larger). It makes one if fewer than `MaxAlive` of its own are
+//!   alive (class default 1), it has some of its `Capacity` left (class
+//!   default 2) or `bGenerateForever` is set, fewer than `MaxInWorld` of
+//!   that class are alive anywhere (when set), and the player is between
+//!   `MinPlayerRange` and `MaxPlayerRange` (when set).
+//! - It sends `SpawnEvent` each time it makes one, and `ExhaustedEvent`
+//!   (then switches off) once its capacity is used up and everything it
+//!   made is dead.
+//! - What it makes gets the factory's settings when it puts them at the
+//!   factory, otherwise the spawn point's: a tag (`PawnTagFromFactory` /
+//!   `PawnTag`) that scripts name it by, an event sent when it dies
+//!   (`PawnEventFromFactory` / `PawnEvent`), an event sent the first time
+//!   it is hurt (`FirstDamagedEventFromFactory` / `FirstDamagedEvent`),
+//!   its first behaviour (`StartStateFromFactory` / `StartState`; 6 is
+//!   "stationary attack", hold a position and shoot) and its team.
 //! - A `Trigger` actor fires its `Event` when the player walks within its
-//!   `CollisionRadius`. Many spawners are switched on that way; the rest by
-//!   level scripts (`ScriptedTrigger`), which we don't run yet.
+//!   `CollisionRadius`; many spawners are switched on that way, the rest
+//!   by level scripts. In the game the level scripts part runs both; the
+//!   headless tools (no scripts) use the walk-in triggers directly.
 
 use rc_level::actors;
 use rc_movement::Vec3;
 use rc_package::properties::{self, Property, Value};
 use rc_package::Package;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum StartState {
+    #[default]
     Idle,
     Wander,
     Perched,
@@ -52,11 +67,28 @@ impl StartState {
     }
 }
 
+/// What a factory gives each character it makes: from the factory itself
+/// when it puts them at the factory, otherwise from the spawn point.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Offspring {
+    /// The name scripts use for it (`PawnTag...`).
+    pub tag: Option<String>,
+    /// Sent when it dies (`PawnEvent...`).
+    pub event: Option<String>,
+    /// Sent the first time it is hurt (`FirstDamagedEvent...`).
+    pub first_damaged_event: Option<String>,
+    /// Its first behaviour.
+    pub start_state: StartState,
+    pub team: Option<i32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SpawnSpot {
     pub location: Vec3,
     /// Facing, radians (Unreal convention).
     pub yaw: f32,
+    /// What characters made here get.
+    pub offspring: Offspring,
 }
 
 #[derive(Debug, Clone)]
@@ -71,21 +103,84 @@ pub struct Factory {
     pub capacity: u32,
     pub max_alive: u32,
     pub generate_forever: bool,
+    /// 0 spawn points in turn, 1 random spawn point, 2 at the factory,
+    /// 3 the spawn point nearest the player.
     pub spawn_mode: u8,
     pub spawn_interval: f32,
+    /// When larger than `spawn_interval`, the wait is random between them.
+    pub spawn_interval_max: f32,
+    /// At most this many of its class alive in the whole level (0: no
+    /// limit).
+    pub max_in_world: f32,
+    /// Only makes characters while the player is this far away, Unreal
+    /// units (no limit unless `min_player_range < max_player_range`).
+    pub min_player_range: f32,
+    pub max_player_range: f32,
+    /// Only makes characters where the player can't see (not checked yet).
+    pub covert: bool,
+    /// Sent each time it makes one.
+    pub spawn_event: Option<String>,
+    /// Sent once its capacity is used and all it made are dead.
+    pub exhausted_event: Option<String>,
+    /// What it gives characters it puts at the factory itself.
+    pub offspring: Offspring,
     pub start_state: StartState,
     pub team: Option<i32>,
     /// Walk-in triggers that switch it on: (centre, radius).
     pub triggers: Vec<(Vec3, f32)>,
 }
 
+impl Default for Factory {
+    /// The class defaults (CTGame.u `Factory`), with no spawn points.
+    fn default() -> Self {
+        Factory {
+            name: String::new(),
+            tag: String::new(),
+            prototype: String::new(),
+            location: Vec3::ZERO,
+            yaw: 0.0,
+            spots: Vec::new(),
+            capacity: 2,
+            max_alive: 1,
+            generate_forever: false,
+            spawn_mode: 2,
+            spawn_interval: 1.0,
+            spawn_interval_max: 0.0,
+            max_in_world: 0.0,
+            min_player_range: 0.0,
+            max_player_range: 0.0,
+            covert: false,
+            spawn_event: None,
+            exhausted_event: None,
+            offspring: Offspring::default(),
+            start_state: StartState::Idle,
+            team: None,
+            triggers: Vec::new(),
+        }
+    }
+}
+
 impl Factory {
-    /// Where the n-th character goes.
+    /// Whether it puts characters at the factory itself rather than at
+    /// spawn points.
+    pub fn at_factory(&self) -> bool {
+        self.spawn_mode == 2
+    }
+
+    /// Whether switching it on does anything: the original refuses when
+    /// it has no spawn points and doesn't spawn at the factory.
+    pub fn can_spawn(&self) -> bool {
+        self.at_factory() || !self.spots.is_empty()
+    }
+
+    /// Where the n-th character goes in turn (spawn mode 0), or at the
+    /// factory.
     pub fn spot(&self, n: usize) -> SpawnSpot {
-        if self.spots.is_empty() || self.spawn_mode == 2 {
+        if self.spots.is_empty() || self.at_factory() {
             SpawnSpot {
                 location: self.location,
                 yaw: self.yaw,
+                offspring: self.offspring.clone(),
             }
         } else {
             self.spots[n % self.spots.len()].clone()
@@ -145,6 +240,18 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
         Some(Value::Int(i)) => Some(i),
         _ => None,
     };
+    let float = |a: &Actor, n: &str| match get(a, n) {
+        Some(Value::Float(x)) => Some(x),
+        _ => None,
+    };
+    // A name property, with `None` (the empty name) as no name.
+    let label = |a: &Actor, n: &str| name_of(a, n).filter(|s| !s.eq_ignore_ascii_case("None"));
+    let state = |a: &Actor, n: &str| match get(a, n) {
+        Some(Value::Byte(b)) => StartState::from_byte(b),
+        _ => StartState::Idle,
+    };
+    // TeamIndex: -1 (the default) leaves the character's own team.
+    let team = |a: &Actor, n: &str| int(a, n).filter(|&t| t >= 0);
     let loc = |a: &Actor| {
         get(a, "Location")
             .and_then(|v| vec3(&v))
@@ -166,6 +273,13 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
             .map(|a| SpawnSpot {
                 location: loc(a),
                 yaw: yaw(get(a, "Rotation").as_ref()),
+                offspring: Offspring {
+                    tag: label(a, "PawnTag"),
+                    event: label(a, "PawnEvent"),
+                    first_damaged_event: label(a, "FirstDamagedEvent"),
+                    start_state: state(a, "StartState"),
+                    team: team(a, "TeamIndex"),
+                },
             })
             .collect();
         let triggers = list
@@ -188,21 +302,30 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
             location: loc(f),
             yaw: yaw(get(f, "Rotation").as_ref()),
             spots,
-            capacity: int(f, "Capacity").unwrap_or(1).max(0) as u32,
+            // Not stored means the class default (see `Factory::default`).
+            capacity: int(f, "Capacity").unwrap_or(2).max(0) as u32,
             max_alive: int(f, "MaxAlive").unwrap_or(1).max(1) as u32,
             generate_forever: matches!(get(f, "bGenerateForever"), Some(Value::Bool(true))),
             spawn_mode: match get(f, "SpawnMode") {
                 Some(Value::Byte(b)) => b,
-                _ => 0,
+                _ => 2,
             },
-            spawn_interval: match get(f, "SpawnInterval") {
-                Some(Value::Float(x)) => x,
-                _ => 1.0,
+            spawn_interval: float(f, "SpawnInterval").unwrap_or(1.0),
+            spawn_interval_max: float(f, "SpawnIntervalMax").unwrap_or(0.0),
+            max_in_world: float(f, "MaxInWorld").unwrap_or(0.0),
+            min_player_range: float(f, "MinPlayerRange").unwrap_or(0.0),
+            max_player_range: float(f, "MaxPlayerRange").unwrap_or(0.0),
+            covert: matches!(get(f, "bCovert"), Some(Value::Bool(true))),
+            spawn_event: label(f, "SpawnEvent"),
+            exhausted_event: label(f, "ExhaustedEvent"),
+            offspring: Offspring {
+                tag: label(f, "PawnTagFromFactory"),
+                event: label(f, "PawnEventFromFactory"),
+                first_damaged_event: label(f, "FirstDamagedEventFromFactory"),
+                start_state: state(f, "StartStateFromFactory"),
+                team: team(f, "TeamIndexFromFactory"),
             },
-            start_state: match get(f, "StartStateFromFactory") {
-                Some(Value::Byte(b)) => StartState::from_byte(b),
-                _ => StartState::Idle,
-            },
+            start_state: state(f, "StartStateFromFactory"),
             team: int(f, "TeamIndexFromFactory"),
             triggers,
         });

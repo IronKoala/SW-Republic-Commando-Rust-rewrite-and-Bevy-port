@@ -4,8 +4,10 @@
 //! map's spawners and path network (`rc_ai`, `rc_nav`) and every enemy
 //! type's settings (`data/enemies/*.toml`, which mods can replace or add
 //! to; each file names the game classes it is for).
-//! During play it runs the fight (`rc_ai::Battle`): spawners switch on,
-//! droids appear, see the player, take cover, keep their distance and
+//! During play it runs the fight (`rc_ai::Battle`): spawners switch on
+//! (by the level's events when the level scripts run, see
+//! `rc_game_core::events`; by walk-in triggers and the player coming near
+//! when they don't), droids appear, see the player, take cover, keep their distance and
 //! shoot. Their shots go through the weapons part (`rc_combat::FireShot`),
 //! which flies the bolts and applies the damage; droids get `Health`,
 //! `Team::Separatist` and `Hittable`, so the player's shots hurt them, and
@@ -24,7 +26,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
-use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, Target};
+use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, Health, Hittable,
     ShotLanded, Stunned, Team,
@@ -32,8 +34,8 @@ use rc_combat::{
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
-    playing, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LevelCollision, MusicMood,
-    Player, PlayerCamera,
+    playing, CurrentLevel, FactoryOrder, GameLog, GamePaths, GameSet, GameState, LevelCollision,
+    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent,
 };
 use rc_nav::NavGraph;
 use rc_package::Package;
@@ -53,11 +55,14 @@ impl Plugin for EnemiesPlugin {
         app.init_resource::<Looks>()
             .init_resource::<EnemySounds>()
             .add_save_part::<save::EnemiesSave>()
+            .add_message::<ScriptEvent>()
+            .add_message::<RaiseEvent>()
+            .add_message::<FactoryOrder>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
                 Update,
-                (think, place_droids)
+                (hear_level, think, place_droids)
                     .chain()
                     .in_set(GameSet::Simulate)
                     .before(CombatSet::Fire)
@@ -95,6 +100,9 @@ pub struct Fight {
     /// (see `save.rs`), and their health by id.
     pub restored: Vec<BattleEvent>,
     pub restored_health: HashMap<u32, f32>,
+    /// What the level's events did to the spawners, handled with the
+    /// battle's own events on the next step.
+    pub queued: Vec<BattleEvent>,
 }
 
 /// Counts for the log and for tests.
@@ -125,6 +133,7 @@ impl Fight {
             next_summary: 0.0,
             restored: Vec::new(),
             restored_health: HashMap::new(),
+            queued: Vec::new(),
         }
     }
 }
@@ -266,6 +275,7 @@ fn load_fight(
     audio: Option<ResMut<Assets<AudioSource>>>,
     images: Option<ResMut<Assets<Image>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
+    scripts: Option<Res<LevelScriptsRun>>,
 ) {
     commands.remove_resource::<Fight>();
     let Some(map) = level.map.clone() else { return };
@@ -308,15 +318,51 @@ fn load_fight(
     log.line(format!(
         "{PART}: {map}: spawners by enemy type {per_type:?}; spawners no enemy file claims {unclaimed:?}"
     ));
+    let scripted = scripts.is_some();
+    let how = if scripted {
+        "the level's events switch them on".to_string()
+    } else {
+        format!(
+            "no level scripts: those without a trigger start when the player comes within {:.0} uu",
+            params.spawning.activate_unscripted_within
+        )
+    };
     log.line(format!(
-        "{PART}: {map}: {} path points, {} links ({} blocked until scripts open them), {all} spawners, {} make enemies ({triggered} with walk-in triggers, the rest start when the player comes within {:.0} uu), {:.0} ms",
+        "{PART}: {map}: {} path points, {} links ({} blocked until scripts open them), {all} spawners, {} make enemies ({triggered} with walk-in triggers; {how}), {:.0} ms",
         nav.nodes.len(),
         nav.link_count(),
         nav.blocked.len(),
         droids.len(),
-        params.spawning.activate_unscripted_within,
         t.elapsed().as_secs_f64() * 1000.0
     ));
+    for (f, t) in &droids {
+        let o = &f.offspring;
+        log.line(format!(
+            "{PART}:   spawner {} (tag {}) makes {} {}: capacity {}{}, {} alive at once, every {:.1}{} s, {}{}{}{}{}",
+            f.name,
+            f.tag,
+            t.kind.id,
+            f.prototype,
+            f.capacity,
+            if f.generate_forever { " (forever)" } else { "" },
+            f.max_alive,
+            f.spawn_interval,
+            if f.spawn_interval_max > f.spawn_interval {
+                format!("-{:.1}", f.spawn_interval_max)
+            } else {
+                String::new()
+            },
+            if f.at_factory() || f.spots.is_empty() {
+                "at the factory".to_string()
+            } else {
+                format!("at {} spawn points (mode {})", f.spots.len(), f.spawn_mode)
+            },
+            o.tag.as_ref().map(|t| format!(", tags them {t}")).unwrap_or_default(),
+            o.event.as_ref().map(|e| format!(", each sends {e} when destroyed")).unwrap_or_default(),
+            f.spawn_event.as_ref().map(|e| format!(", sends {e} on each spawn")).unwrap_or_default(),
+            f.exhausted_event.as_ref().map(|e| format!(", sends {e} when all are gone")).unwrap_or_default(),
+        ));
+    }
 
     let mut images = images;
     let mut materials = materials;
@@ -414,7 +460,51 @@ fn load_fight(
             )),
         }
     }
-    commands.insert_resource(Fight::new(Battle::with_types(params, nav, droids)));
+    let mut battle = Battle::with_types(params, nav, droids);
+    battle.scripted = scripted;
+    commands.insert_resource(Fight::new(battle));
+}
+
+/// The level's events switch spawners on and off; the scripts' orders stop
+/// or refill them. What happens is handled in `think`.
+fn hear_level(
+    mut fight: ResMut<Fight>,
+    mut events: MessageReader<ScriptEvent>,
+    mut orders: MessageReader<FactoryOrder>,
+    log: Res<GameLog>,
+) {
+    let fight = &mut *fight;
+    let now = fight.battle.time;
+    for e in events.read() {
+        if fight.battle.scripted {
+            let out = fight.battle.trigger(&e.name);
+            fight.queued.extend(out);
+        }
+    }
+    for o in orders.read() {
+        match o {
+            FactoryOrder::Stop {
+                tag,
+                for_good,
+                remove_offspring,
+            } => {
+                // Stops for spawners that aren't ours (troopers, effects)
+                // change nothing and aren't logged here.
+                let out = fight.battle.stop(tag, *for_good, *remove_offspring);
+                fight.queued.extend(out);
+            }
+            FactoryOrder::Reset { tag } => {
+                // Most resets are for effect spawners (explosions), which
+                // aren't ours: only log ours.
+                let n = fight.battle.reset(tag);
+                if n > 0 {
+                    log.line(format!(
+                        "{PART}: t={now:.1}s {tag}: {n} enemy spawners refilled"
+                    ));
+                }
+            }
+        }
+    }
 }
 
 fn end_fight(
@@ -486,6 +576,7 @@ fn think(
     looks: Res<Looks>,
     mut sounds: ResMut<EnemySounds>,
     meshes: Option<ResMut<Assets<Mesh>>>,
+    mut raise: MessageWriter<RaiseEvent>,
     log: Res<GameLog>,
 ) {
     let Some(collision) = collision else { return };
@@ -507,26 +598,51 @@ fn think(
         .collect();
     let fight = &mut *fight;
     let mut events = std::mem::take(&mut fight.restored);
+    events.append(&mut fight.queued);
     events.extend(fight.battle.step_with(dt, &*collision.0, target, &others));
     let now = fight.battle.time;
     let mut meshes = meshes;
     for e in events {
         match e {
-            BattleEvent::SpawnerOn {
-                spawner,
-                by_trigger,
-            } => {
+            BattleEvent::SpawnerOn { spawner, by } => {
                 let f = &fight.battle.spawners[spawner].factory;
                 log.line(format!(
                     "{PART}: t={now:.1}s spawner {} ({}) switched on by {}",
                     f.name,
                     f.tag,
-                    if by_trigger {
-                        "its walk-in trigger"
-                    } else {
-                        "the player coming near (scripted in the original)"
+                    match by {
+                        SwitchedOn::Event(e) => format!("the level's event {e}"),
+                        SwitchedOn::WalkInTrigger => "its walk-in trigger".into(),
+                        SwitchedOn::PlayerNear =>
+                            "the player coming near (no level scripts)".into(),
                     }
                 ));
+            }
+            BattleEvent::SpawnerOff { spawner, why } => {
+                let sp = &fight.battle.spawners[spawner];
+                log.line(format!(
+                    "{PART}: t={now:.1}s spawner {} ({}) switched off ({why}); made {}",
+                    sp.factory.name, sp.factory.tag, sp.made
+                ));
+            }
+            BattleEvent::SpawnerRefused { spawner } => {
+                let f = &fight.battle.spawners[spawner].factory;
+                log.line(format!(
+                    "{PART}: t={now:.1}s spawner {} ({}) has no spawn points: stays off",
+                    f.name, f.tag
+                ));
+            }
+            BattleEvent::Removed { id } => {
+                if let Some(e) = fight.entities.remove(&id) {
+                    commands.entity(e).despawn();
+                }
+                log.line(format!(
+                    "{PART}: t={now:.1}s droid {id} removed by a script"
+                ));
+            }
+            BattleEvent::Event { name, by } => {
+                log.line(format!("{PART}: t={now:.1}s {by} sends {name}"));
+                raise.write(RaiseEvent { name, by });
             }
             BattleEvent::Spawned {
                 id,
@@ -723,6 +839,7 @@ fn react_to_combat(
     transforms: Query<&Transform>,
     camera: Query<&Transform, With<PlayerCamera>>,
     mut sounds: ResMut<EnemySounds>,
+    mut raise: MessageWriter<RaiseEvent>,
     log: Res<GameLog>,
 ) {
     let fight = &mut *fight;
@@ -764,11 +881,16 @@ fn react_to_combat(
             .and_then(|i| transforms.get(i).ok())
             .map(|t| to_unreal(t.translation) + rc_movement::Vec3::new(0.0, 0.0, 84.0));
         for e in fight.battle.damaged(droid.id, from) {
-            if let BattleEvent::Ai { event, .. } = e {
-                log.line(format!(
+            match e {
+                BattleEvent::Ai { event, .. } => log.line(format!(
                     "{PART}: t={now:.1}s droid {} hurt ({:.0} damage): {event:?}",
                     droid.id, d.amount
-                ));
+                )),
+                BattleEvent::Event { name, by } => {
+                    log.line(format!("{PART}: t={now:.1}s {by} sends {name}"));
+                    raise.write(RaiseEvent { name, by });
+                }
+                _ => {}
             }
         }
     }
@@ -776,7 +898,12 @@ fn react_to_combat(
         let Ok(droid) = droids.get(d.entity) else {
             continue;
         };
-        fight.battle.killed(droid.id);
+        for e in fight.battle.killed(droid.id) {
+            if let BattleEvent::Event { name, by } = e {
+                log.line(format!("{PART}: t={now:.1}s {by} sends {name}"));
+                raise.write(RaiseEvent { name, by });
+            }
+        }
         fight.stats.droids_destroyed += 1;
         say(&mut commands, fight, droid.id, "death");
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);

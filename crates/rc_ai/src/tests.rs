@@ -547,11 +547,15 @@ fn spawners_make_their_own_enemy_type() {
         capacity: 1,
         max_alive: 1,
         generate_forever: false,
-        spawn_mode: 0,
+        spawn_mode: 2, // at the factory: it has no spawn points
         spawn_interval: 0.1,
+        offspring: Offspring {
+            start_state: StartState::StationaryAttack,
+            ..Default::default()
+        },
         start_state: StartState::StationaryAttack,
-        team: None,
         triggers: vec![],
+        ..Default::default()
     };
     let mut b = Battle::with_types(
         base.clone(),
@@ -591,11 +595,15 @@ fn factory(x: f32) -> Factory {
         capacity: 2,
         max_alive: 2,
         generate_forever: false,
-        spawn_mode: 0,
+        spawn_mode: 2, // at the factory: it has no spawn points
         spawn_interval: 1.0,
+        offspring: Offspring {
+            start_state: StartState::StationaryAttack,
+            ..Default::default()
+        },
         start_state: StartState::StationaryAttack,
-        team: None,
         triggers: vec![],
+        ..Default::default()
     }
 }
 
@@ -603,7 +611,13 @@ fn factory(x: f32) -> Factory {
 fn a_battle_carries_on_from_a_snapshot() {
     let world = flat_floor(vec![]);
     let params = Arc::new(AiParams::battle_droid());
-    let make = || Battle::new(params.clone(), NavGraph::default(), vec![factory(0.0), factory(50_000.0)]);
+    let make = || {
+        Battle::new(
+            params.clone(),
+            NavGraph::default(),
+            vec![factory(0.0), factory(50_000.0)],
+        )
+    };
     let mut b = make();
     // The player stands by the first spawner (it switches on) until it has
     // made its droids, then one droid is destroyed.
@@ -616,7 +630,7 @@ fn a_battle_carries_on_from_a_snapshot() {
     b.killed(first);
     let snap = b.snapshot();
     assert_eq!(snap.fighters.len(), 1, "the dead droid isn't saved");
-    assert!(snap.spawners[0].0 && !snap.spawners[1].0);
+    assert!(snap.spawners[0].active && !snap.spawners[1].active);
 
     let mut fresh = make();
     let events = fresh.restore(&snap).unwrap();
@@ -628,7 +642,12 @@ fn a_battle_carries_on_from_a_snapshot() {
     assert_eq!(again.fighters.len(), 1);
     let (a, z) = (&snap.fighters[0], &again.fighters[0]);
     assert_eq!((a.id, a.spawner), (z.id, z.spawner));
-    assert!((a.feet - z.feet).length() < 0.5, "{:?} vs {:?}", a.feet, z.feet);
+    assert!(
+        (a.feet - z.feet).length() < 0.5,
+        "{:?} vs {:?}",
+        a.feet,
+        z.feet
+    );
     // A droid that was fighting is fighting again.
     if a.mode != Mode::Idle {
         assert_eq!(z.mode, Mode::Alerted);
@@ -642,4 +661,227 @@ fn a_battle_carries_on_from_a_snapshot() {
     // A snapshot from another map is refused.
     let mut other = Battle::new(params.clone(), NavGraph::default(), vec![factory(0.0)]);
     assert!(other.restore(&snap).is_err());
+}
+
+// Spawners run by the level's scripts (see `spawns` for the rules).
+
+fn scripted_battle(factories: Vec<Factory>) -> Battle {
+    let params = Arc::new(AiParams::battle_droid());
+    let mut b = Battle::new(params, NavGraph::default(), factories);
+    b.scripted = true;
+    b
+}
+
+fn tagged_factory(tag: &str, x: f32) -> Factory {
+    Factory {
+        name: format!("{tag} factory"),
+        tag: tag.into(),
+        prototype: "BattleDroidTM".into(),
+        location: Vec3::new(x, 0.0, 60.0),
+        capacity: 1,
+        offspring: Offspring {
+            tag: Some(format!("{tag}Droids")),
+            event: Some(format!("{tag}DroidDead")),
+            first_damaged_event: Some(format!("{tag}DroidHurt")),
+            start_state: StartState::StationaryAttack,
+            team: None,
+        },
+        ..Default::default()
+    }
+}
+
+fn steps(b: &mut Battle, n: usize) -> Vec<BattleEvent> {
+    let world = flat_floor(vec![]);
+    let mut out = Vec::new();
+    for _ in 0..n {
+        // The player far away, so nothing fights.
+        out.extend(b.step(1.0 / 30.0, &world, Some(target_at(-4500.0, -4500.0))));
+    }
+    out
+}
+
+fn names(events: &[BattleEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            BattleEvent::Event { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_class_defaults_are_the_originals() {
+    let f = Factory::default();
+    assert_eq!((f.capacity, f.max_alive, f.spawn_mode), (2, 1, 2));
+    assert!(f.at_factory() && f.can_spawn());
+}
+
+#[test]
+fn scripted_spawners_wait_for_their_event() {
+    let mut b = scripted_battle(vec![tagged_factory("Bunker", 0.0)]);
+    // Standing right next to it does nothing: only its event starts it.
+    let world = flat_floor(vec![]);
+    for _ in 0..60 {
+        b.step(1.0 / 30.0, &world, Some(target_at(100.0, 0.0)));
+    }
+    assert_eq!(b.fighters.len(), 0);
+    let on = b.trigger("bunker"); // event names ignore case
+    assert!(
+        matches!(
+            &on[..],
+            [BattleEvent::SpawnerOn {
+                spawner: 0,
+                by: SwitchedOn::Event(_)
+            }]
+        ),
+        "{on:?}"
+    );
+    let ev = steps(&mut b, 2);
+    assert_eq!(b.fighters.len(), 1, "made straight away: {ev:?}");
+    // At the factory itself (the default), feet on the floor below it.
+    let f = &b.fighters[0];
+    assert!(
+        (f.pawn.feet() - Vec3::new(0.0, 0.0, 60.0 - 50.0)).length_2d() < 1.0,
+        "{:?}",
+        f.pawn.feet()
+    );
+    assert_eq!(b.tagged("BunkerDroids"), vec![f.id]);
+    assert_eq!(f.start_state, StartState::StationaryAttack);
+}
+
+#[test]
+fn the_same_event_again_switches_a_spawner_off() {
+    let mut f = tagged_factory("Wave", 0.0);
+    f.generate_forever = true;
+    let mut b = scripted_battle(vec![f]);
+    b.trigger("Wave");
+    steps(&mut b, 2);
+    let off = b.trigger("Wave");
+    assert!(
+        matches!(&off[..], [BattleEvent::SpawnerOff { why: "event", .. }]),
+        "{off:?}"
+    );
+    let id = b.fighters[0].id;
+    b.killed(id);
+    steps(&mut b, 90);
+    assert_eq!(b.alive().count(), 0, "off: no replacement");
+}
+
+#[test]
+fn droids_send_their_death_and_first_hurt_events() {
+    let mut b = scripted_battle(vec![tagged_factory("Gunner", 0.0)]);
+    b.trigger("Gunner");
+    steps(&mut b, 2);
+    let id = b.fighters[0].id;
+    let hurt = names(&b.damaged(id, None));
+    assert_eq!(hurt, vec!["GunnerDroidHurt".to_string()]);
+    assert!(
+        names(&b.damaged(id, None)).is_empty(),
+        "only the first time"
+    );
+    assert_eq!(names(&b.killed(id)), vec!["GunnerDroidDead".to_string()]);
+    assert!(names(&b.killed(id)).is_empty(), "only once");
+}
+
+#[test]
+fn a_spent_spawner_sends_its_exhausted_event_once_all_are_gone() {
+    let mut f = tagged_factory("Canyon", 0.0);
+    f.capacity = 2;
+    f.max_alive = 1;
+    f.spawn_event = Some("OneMore".into());
+    f.exhausted_event = Some("CanyonClear".into());
+    let mut b = scripted_battle(vec![f]);
+    b.trigger("Canyon");
+    let mut ev = steps(&mut b, 2);
+    assert_eq!(b.fighters.len(), 1);
+    // The second waits for the first to die (one alive at once).
+    ev.extend(steps(&mut b, 60));
+    assert_eq!(b.fighters.len(), 1);
+    let first = b.fighters[0].id;
+    b.killed(first);
+    ev.extend(steps(&mut b, 45));
+    assert_eq!(b.fighters.len(), 2);
+    assert!(
+        !names(&ev).contains(&"CanyonClear".to_string()),
+        "one still alive"
+    );
+    let second = b.fighters[1].id;
+    b.killed(second);
+    ev.extend(steps(&mut b, 45));
+    let n = names(&ev);
+    assert_eq!(n.iter().filter(|e| *e == "OneMore").count(), 2, "{n:?}");
+    assert_eq!(n.iter().filter(|e| *e == "CanyonClear").count(), 1, "{n:?}");
+    assert!(!b.spawners[0].active);
+    // A script refills it; its event starts it again.
+    assert_eq!(b.reset("canyon"), 1);
+    b.trigger("Canyon");
+    steps(&mut b, 2);
+    assert_eq!(b.fighters.len(), 3);
+}
+
+#[test]
+fn a_script_can_stop_a_spawner_for_good_and_remove_its_droids() {
+    let mut f = tagged_factory("Trench", 0.0);
+    f.generate_forever = true;
+    f.max_alive = 2;
+    f.spawn_interval = 0.2;
+    let mut b = scripted_battle(vec![f]);
+    b.trigger("Trench");
+    steps(&mut b, 30);
+    assert_eq!(b.alive().count(), 2);
+    let out = b.stop("TRENCH", true, true);
+    let removed = out
+        .iter()
+        .filter(|e| matches!(e, BattleEvent::Removed { .. }))
+        .count();
+    assert_eq!(removed, 2, "{out:?}");
+    assert!(
+        names(&out).is_empty(),
+        "removed, not destroyed: no death events"
+    );
+    assert_eq!(b.alive().count(), 0);
+    assert!(b.trigger("Trench").is_empty(), "off for good");
+    steps(&mut b, 30);
+    assert_eq!(b.alive().count(), 0);
+    // Saved and put back, it stays off for good.
+    let snap = b.snapshot();
+    let mut again = scripted_battle(vec![tagged_factory("Trench", 0.0)]);
+    again.restore(&snap).unwrap();
+    assert!(again.spawners[0].disabled);
+}
+
+#[test]
+fn spawn_points_take_turns_and_give_their_own_tags() {
+    let spot = |x: f32, tag: &str| SpawnSpot {
+        location: Vec3::new(x, 0.0, 60.0),
+        yaw: 0.0,
+        offspring: Offspring {
+            tag: Some(tag.into()),
+            event: Some(format!("{tag}Dead")),
+            ..Default::default()
+        },
+    };
+    let mut f = tagged_factory("Points", 0.0);
+    f.spawn_mode = 0;
+    f.capacity = 3;
+    f.max_alive = 3;
+    f.spawn_interval = 0.1;
+    f.spots = vec![spot(1000.0, "A"), spot(2000.0, "B")];
+    let mut b = scripted_battle(vec![f]);
+    b.trigger("Points");
+    steps(&mut b, 30);
+    let xs: Vec<f32> = b.fighters.iter().map(|f| f.pawn.feet().x.round()).collect();
+    assert_eq!(xs, vec![1000.0, 2000.0, 1000.0]);
+    assert_eq!(b.tagged("A").len(), 2);
+    let id = b.tagged("B")[0];
+    assert_eq!(names(&b.killed(id)), vec!["BDead".to_string()]);
+    // The spawn point is saved with the droid, so it keeps its tag.
+    let snap = b.snapshot();
+    let mut f2 = tagged_factory("Points", 0.0);
+    f2.spawn_mode = 0;
+    f2.spots = vec![spot(1000.0, "A"), spot(2000.0, "B")];
+    let mut again = scripted_battle(vec![f2]);
+    again.restore(&snap).unwrap();
+    assert_eq!(again.tagged("A").len(), 2);
 }
