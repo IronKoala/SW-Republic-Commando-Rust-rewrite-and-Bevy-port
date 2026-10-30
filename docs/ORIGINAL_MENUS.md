@@ -181,6 +181,31 @@ tint were not compared with the real game. Not done:
 spread (the bars move apart; the picture doesn't grow yet), shield,
 health, ammo and squad pictures.
 
+**Done (2026-10-30): the rest of the HUD.** Shield and health (bottom
+left), the squad (top left: a portrait frame, number, name, order and a
+small health bar per squad mate, red when down), weapon, magazine count,
+spare ammo, a magazine bar and the selected grenade (bottom right) and
+short messages (top middle) are drawn from `Icons.CloneIcons` and
+`Icons.CloneVisorIcons` (sheets of many small pictures) and the
+`OrbitFonts` fonts. `rc_menus::hud` lays them out from `[layout]` and the
+`[[element]]` list in `data/ui/hud.toml`: each element is a part of a
+picture or a line of text, pinned to a corner or edge of the HUD area,
+measured in units of a 640 x 480 design area. One unit is
+`min(height / 480, width / 640)` pixels (the width being the HUD area, at
+most `hud_max_aspect` wide), so the design area always fits the screen:
+wider screens push the corners apart, taller ones (phones held upright)
+push top and bottom apart, and groups that don't overlap in the design
+area can't overlap anywhere. A test checks it at 22 shapes, from flip
+phones to 32:9. Each text is cut short with "..." to its box, and is drawn
+with the smallest original font at least as tall as it is on screen.
+`rc_probe --hud` paints the HUD without a GPU at six shapes to
+`extracted/menus/hud_*.png`. **Our choice, not the original's:** where
+each part goes and which part of the sheets is the shield or health bar
+(the original's placement is native code); the sheets' squad numbers and
+order icons aren't used yet. The visor frame (the `Helmet` static mesh
+with `CloneVisor`), visor damage and blood, and the original's
+console-style order icons are not drawn.
+
 The plan for the HUD is to place these original pictures where the original
 shows them, matched by eye and by measuring against screenshots of the
 real game, with the helmet model drawn the way the original does once the

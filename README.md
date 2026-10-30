@@ -301,7 +301,15 @@ copy of the game.
   ("original menus: page campaigns kept the placeholder: ..."). Which
   original menu draws which page is in `data/ui/original_menus.toml`. The
   crosshair is the original's reticle picture (`data/ui/hud.toml`); its
-  size is our guess.
+  size is our guess. **The HUD now uses the original's pictures and
+  fonts** (tested in the cloud sandbox with the install, not yet on
+  Windows): shield and health bars, the squad with numbers, names, orders
+  and health, weapon, ammo, magazine bar, grenade and short messages. Where
+  each part sits is our choice (the original places them in code we can't
+  read), set in `data/ui/hud.toml`, and a test checks nothing overlaps at
+  22 screen shapes from flip phones to 32:9. Not drawn yet: the visor
+  frame, visor cracks and blood. If the HUD pictures can't be read the
+  amber placeholder HUD comes back and `logs/rc_game.log` says why.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
   sides, the view up and down stays the original's; upright phones see more
