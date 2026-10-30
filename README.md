@@ -208,7 +208,7 @@ copy of the game.
   each droid tells the scripts when it dies, so "kill these droids, then
   the next thing happens" works. They follow the original's spawning
   rules (where, how many, how often). `rc_game --script` checks that on
-  geo_01a's small bunker (51 of 51 checks).
+  geo_01a's small bunker (52 of 52 checks).
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
