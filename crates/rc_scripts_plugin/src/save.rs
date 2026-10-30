@@ -250,6 +250,7 @@ mod tests {
                 ),
             ],
             failures: vec![],
+            sounds: Default::default(),
         }
     }
 
@@ -274,6 +275,7 @@ mod tests {
             dispensers: vec![],
             hidden: HashSet::new(),
             held: vec![],
+            sounds: vec![],
             started: false,
             stats: PlayStats::default(),
         });

@@ -1,6 +1,7 @@
 //! What the director keeps for a saved game: where each script is, what it
 //! waits for, which triggers were used, what the counters and conditions
-//! say, which props are broken, and events not handed out yet. Matched by
+//! say, which props are broken, which level exits are open, and events not
+//! handed out yet. Matched by
 //! the map's actor names when loading, so a save stays readable and a
 //! changed map loads what still fits.
 //!
@@ -27,6 +28,9 @@ pub struct DirectorSave {
     pub condition: Vec<ConditionSave>,
     #[serde(default)]
     pub prop: Vec<PropSave>,
+    /// Teleporters (level exits) a script or event switched.
+    #[serde(default)]
+    pub teleporter: Vec<TeleporterSave>,
     /// Events sent but not handed out yet (normally none).
     #[serde(default)]
     pub pending: Vec<EventSave>,
@@ -73,6 +77,14 @@ pub struct PropSave {
     pub name: String,
     pub health: f32,
     pub destroyed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TeleporterSave {
+    pub name: String,
+    pub enabled: bool,
+    /// Solid to the player (a script opened it).
+    pub collide: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +175,15 @@ impl Director {
                     destroyed: p.destroyed,
                 })
                 .collect(),
+            teleporter: self
+                .teleporters
+                .iter()
+                .map(|t| TeleporterSave {
+                    name: t.name.clone(),
+                    enabled: t.enabled,
+                    collide: t.collide,
+                })
+                .collect(),
             pending: self
                 .queue
                 .iter()
@@ -248,6 +269,19 @@ impl Director {
             };
             p.health = s.health;
             p.destroyed = s.destroyed;
+            r.restored += 1;
+        }
+        for s in &save.teleporter {
+            let Some(t) = self
+                .teleporters
+                .iter_mut()
+                .find(|x| same(&x.name, &s.name))
+            else {
+                r.unknown.push(s.name.clone());
+                continue;
+            };
+            t.enabled = s.enabled;
+            t.collide = s.collide;
             r.restored += 1;
         }
         self.queue = save

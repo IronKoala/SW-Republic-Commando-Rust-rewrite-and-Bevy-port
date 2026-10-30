@@ -138,6 +138,10 @@ pub struct Look {
     /// The animation package, relative to the game folder.
     pub package: String,
     pub mesh: String,
+    /// The skin to wear instead of the mesh's own first material, written
+    /// `Package.Group.Object` as UnrealEd shows it (the original swaps
+    /// skins this way per class, with `Skins[0]`). Empty: the mesh's own.
+    pub skin: String,
     pub idle: String,
     pub walk: String,
     pub run: String,
@@ -318,6 +322,7 @@ impl AiParams {
             look: Look {
                 package: "GameData/Animations/droid.ukx".into(),
                 mesh: "BattleDroid".into(),
+                skin: String::new(),
                 idle: "ActionBreathe".into(),
                 walk: "WalkForward".into(),
                 run: "RunForward".into(),
@@ -474,6 +479,7 @@ impl AiParams {
             ("spawning", "max_alive_total") => p.max_alive_total = num()?.max(0.0) as u32,
             ("look", "package") => l.package = text(),
             ("look", "mesh") => l.mesh = text(),
+            ("look", "skin") => l.skin = text(),
             ("look", "idle") => l.idle = text(),
             ("look", "walk") => l.walk = text(),
             ("look", "run") => l.run = text(),
