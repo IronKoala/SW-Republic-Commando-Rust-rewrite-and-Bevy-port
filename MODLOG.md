@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: The HUD uses the original's pictures and fonts (rc_menus, rc_game, rc_probe)
+
+- **Changed:** New `crates/rc_menus/src/hud.rs`: lays out the HUD from `[layout]` and `[[element]]` in `data/ui/hud.toml` (parts of `HUDTextures.Icons.CloneVisorIcons`, numbers in the `OrbitFonts` fonts), in units of a 640 x 480 design area pinned to the corners and edges of the HUD area, with `check_plan` (no two groups overlap, nothing off screen) and text cut to its box. `crates/rc_game/src/original_hud.rs` draws it and hides the placeholder's drawings (`PlaceholderPart` in `hud.rs`); new script check "the original HUD is drawn in its own colours". `rc_probe --hud` paints it without a GPU at six shapes. `quads::line_width` is public. Docs: ORIGINAL_MENUS, README.
+- **Why:** The user wants every placeholder replaced with the original's look, the HUD included, and no overlapping at any resolution. A first layout (bars and names) was redone the same day after the user shared a screenshot of the original HUD; phones held upright are dropped at the user's word (the game is played sideways).
+- **Tested how:** `cargo test -p rc_menus -p rc_game`; `rc_probe --hud` with the install's HUDTextures and OrbitFonts copied read only from the PC; `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script` in the cloud with the game files staged.
+- **Result:** `SCRIPT DONE: 61 checks passed, 0 failed`; `original hud: drawn at 1280x720 with 34 pictures`; colour check: 4310 of 9454 pixels inside the shield meter are green. Overlap test passes at 18 shapes (4:3 to 32:9, phones and flip phones on their side) with `hud_max_aspect` 16:9, 21:9 and off. The first try at the screenshot's layout overlapped (squad panels and shield meter by 1 unit) and the test caught it.
+- **Still broken / not tested:** Not tested on Windows or by playing. Which meter shows shield, health and ammo is our guess. Visor frame (a 3D helmet model in the original), visor cracks/blood and objective markers are not drawn.
+- **Next:** The user compares with the original; the DC-17m's 999 counter on the gun (its own thread).
+
 ## 2026-10-30: Smooth blending between animations (rc_anim, squad and enemies)
 
 - **Changed:** `crates/rc_anim/src/lib.rs`: new `blend_poses` and `Crossfade` (remembers the pose on screen when the animation changes and mixes it into the new one with an S curve). `rc_model::Model` and `rc_enemies::look::DroidLook` gained `local_pose` and `posed_local`, so a mixed pose can be skinned. Squad mates (`rc_squad_plugin/src/look.rs`) and enemies (`rc_enemies/src/lib.rs`) now blend whenever their animation changes. Blend times are data: `[blend]` in `data/squad/looks.toml` and `blend_time`, `blend_time_fire`, `blend_time_death` in `[look]` of `data/enemies/battle_droid.toml` (other enemies inherit them). New check `crates/rc_model/examples/rc_blend_check.rs`.

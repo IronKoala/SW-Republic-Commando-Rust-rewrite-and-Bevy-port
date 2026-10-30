@@ -181,6 +181,35 @@ tint were not compared with the real game. Not done:
 spread (the bars move apart; the picture doesn't grow yet), shield,
 health, ammo and squad pictures.
 
+**Done (2026-10-30): the rest of the HUD**, matched by eye to a
+screenshot of the original the user took. Bottom left: the squad mates'
+numbers (07 40 62) over three panels, each showing an order icon (form up,
+search and destroy, secure area, hold; a red X when down). Either side of
+the bottom middle: two green stepped meters, the left one the shield
+(with health as the column of ticks beside it) and the right one, mirrored,
+the magazine, with shots and spare ammo over it. Bottom right: the
+selected grenade in a panel with its count above. Short messages at the
+top middle. The pictures are parts of `Icons.CloneVisorIcons` (a sheet of
+many small pictures); the numbers use the `OrbitFonts` fonts.
+`rc_menus::hud` lays them out from `[layout]` and the `[[element]]` list
+in `data/ui/hud.toml`: each element is a part of a picture or a line of
+text, pinned to a corner or edge of the HUD area, measured in units of a
+640 x 480 design area. One unit is `min(height / 480, width / 640)`
+pixels (the width being the HUD area, at most `hud_max_aspect` wide), so
+the design area always fits the screen and groups that don't overlap in
+it can't overlap anywhere. A test checks that at 18 shapes from 4:3 to
+32:9, phones and flip phones on their side (phones held upright are not
+supported: the user said the game is played sideways). Each text is cut
+short with "..." to its box and drawn with the smallest original font at
+least as tall as it is on screen. `rc_probe --hud` paints the HUD without
+a GPU at six shapes to `extracted/menus/hud_*.png`. **Our choice, not
+the original's:** which meter is shield, health and magazine, the ammo
+numbers and the green tint. The original's screenshot looks like 4:3
+stretched to 16:9; we pin the squad and grenade to the corners and the
+meters to the bottom middle instead of stretching. Not drawn: the visor
+frame (the `Helmet` static mesh with `CloneVisor`), visor cracks and
+blood.
+
 The plan for the HUD is to place these original pictures where the original
 shows them, matched by eye and by measuring against screenshots of the
 real game, with the helmet model drawn the way the original does once the

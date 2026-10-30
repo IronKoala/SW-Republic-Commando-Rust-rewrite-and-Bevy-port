@@ -173,3 +173,78 @@ pub(crate) fn pages(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path
     }
     true
 }
+
+/// `rc_probe --hud [hud.toml]`: paints the HUD from the original's
+/// pictures and fonts, with made-up numbers, at several screen shapes, to
+/// `extracted/menus/hud_<width>x<height>.png`, over a grey background
+/// standing in for the game. Logs any overlap `check_plan` finds.
+pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) -> bool {
+    use rc_menus::hud::{check_plan, hud_quads, HudLayout, HudValues, SquadLine};
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) => {
+            log.line(format!("FAILED: can't read {}: {e}", file.display()));
+            return false;
+        }
+    };
+    let layout = match HudLayout::parse(&text) {
+        Ok(l) => l,
+        Err(e) => {
+            log.line(format!("FAILED: {}: {e}", file.display()));
+            return false;
+        }
+    };
+    let mut assets = Assets::new(Library::new(game_data));
+    let member = |number: &str, name: &str, health: f32, down: bool, order: &str| SquadLine {
+        number: number.into(),
+        name: name.into(),
+        health,
+        down,
+        order: order.into(),
+    };
+    let values = HudValues {
+        shield: 0.7,
+        health: 0.45,
+        weapon: "DC-17m Blaster".into(),
+        clip: Some(42),
+        clip_size: Some(60),
+        reserve: Some(180),
+        grenade: Some(("Thermal Detonator".into(), 2)),
+        squad: vec![
+            member("07", "Sev", 1.0, false, "Form up"),
+            member("40", "Fixer", 0.6, false, "Search and destroy"),
+            member("62", "Scorch", 0.0, true, ""),
+        ],
+        messages: vec![
+            "Picked up 2 thermal detonators".into(),
+            "Objective: find a way into the hive".into(),
+        ],
+    };
+    let mut ok = true;
+    for (w, h) in [
+        (1024, 768),
+        (1920, 1080),
+        (3440, 1440),
+        (3840, 1080),
+        (2400, 1080),
+        (2208, 1768),
+    ] {
+        let (wf, hf) = (w as f32, h as f32);
+        for p in check_plan(&layout, wf, hf, 16.0 / 9.0, 3) {
+            log.line(format!("  OVERLAP {p}"));
+            ok = false;
+        }
+        let quads = hud_quads(&layout, &values, wf, hf, 16.0 / 9.0, &mut assets);
+        let picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);
+        let _ = std::fs::create_dir_all(out_dir);
+        let path = out_dir.join(format!("hud_{w}x{h}.png"));
+        match std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f)) {
+            Ok(()) => log.line(format!("{w}x{h}: {} pictures, painted to {}", quads.len(), path.display())),
+            Err(e) => log.line(format!("couldn't write {}: {e}", path.display())),
+        }
+    }
+    for p in &assets.problems {
+        log.line(format!("  PROBLEM {p}"));
+    }
+    ok && assets.problems.is_empty()
+}

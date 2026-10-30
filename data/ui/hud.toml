@@ -19,3 +19,236 @@ scale = 1.0
 # Weapon name, as in its file in data/weapons/, to its reticle.
 [crosshair.weapons]
 "DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistolPC"
+
+# ---------------------------------------------------------------------------
+# The rest of the HUD: shield, health, ammunition, grenades, squad and
+# messages, from the original's pictures (HUDTextures.Icons.CloneIcons and
+# CloneVisorIcons, sheets of many small pictures) and fonts (OrbitFonts).
+#
+# The original places these in native code we can't read, so the places
+# below were matched by eye to a screenshot of the original (2026-10-30):
+# squad numbers over three order panels at the bottom left, two green
+# stepped meters either side of the bottom middle, the grenade panel and
+# count at the bottom right. OUR CHOICE: which meter is which (left =
+# shield with health as the ticks beside it, right = magazine), the ammo
+# numbers, the messages, and the colours. Change them freely.
+#
+# Units: the HUD is designed on a 640 x 480 area. One unit is as many
+# pixels as fit that area on the screen (the height / 480 on a wide
+# screen, the width / 640 on a tall one). Each element is pinned to a
+# corner or edge (`anchor`) and `at` moves its top-left corner from there
+# (x right, y down; use negative numbers from the right or bottom). Its
+# `size` is width and height. Texts are cut short with "..." to fit their
+# width, so they can't run into anything else.
+#
+# Groups (`group`) must not overlap each other; `cargo test -p rc_menus`
+# checks that at 18 screen shapes, from 4:3 and flip phones on their side
+# to 32:9 (phones held upright are not supported).
+#
+# Texts: {weapon} {clip} {reserve} {grenade} {grenades} {message1}
+# (newest) {message2} {message3}; for squad rows {number} {name} {order}.
+# Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
+# clip, reserve, grenade, shield_low, health_low, squad_down.
+# Bars (`fill`): shield, health, clip, squad_health.
+
+[layout]
+enabled = true
+# Bigger or smaller: 1 = as designed, down to 0.5.
+scale = 1.0
+fonts = [
+    "OrbitFonts.OrbitBold8",
+    "OrbitFonts.OrbitBold12",
+    "OrbitFonts.OrbitBold15",
+    "OrbitFonts.OrbitBold18",
+    "OrbitFonts.OrbitBold24",
+]
+
+# --- Squad, bottom left: each squad mate's number over a panel showing
+# what they're doing ------------------------------------------------------
+
+[[element]]
+group = "squad"
+anchor = "bottom_left"
+at = [64, -134]
+size = [34, 14]
+repeat_squad = [37, 0]
+text = "{number}"
+align = "centre"
+colour = [205, 220, 225, 255]
+alert_when = "squad_down"
+alert_colour = [255, 80, 60, 255]
+
+[[element]]
+group = "squad"
+anchor = "bottom_left"
+at = [64, -112]
+size = [34, 31]
+repeat_squad = [37, 0]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [147, 399, 191, 442]
+colour = [150, 215, 150, 255]
+alert_when = "squad_down"
+alert_colour = [255, 80, 60, 255]
+
+# The order icon inside the panel, by what the squad mate is doing.
+[[element]]
+group = "squad"
+anchor = "bottom_left"
+at = [72, -105]
+size = [18, 17]
+repeat_squad = [37, 0]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [202, 431, 228, 457]
+choose_by = "{order}"
+choices = { "FORM UP" = [202, 377, 228, 403], "SEARCH AND DESTROY" = [202, 350, 228, 376], "SECURE AREA" = [202, 404, 228, 430], "HOLD" = [202, 323, 228, 349], "DOWN" = [202, 458, 228, 484] }
+colour = [110, 235, 95, 255]
+alert_when = "squad_down"
+alert_colour = [255, 80, 60, 255]
+
+# --- Shield and health: the stepped meter left of the middle (pinned to
+# the bottom middle, like the magazine meter) ------------------------------
+# A dim empty meter with the bright full one over it, emptying from the
+# top. Health is the column of ticks beside it.
+
+[[element]]
+group = "vitals"
+anchor = "bottom"
+at = [-172, -80]
+size = [50, 39]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 36, 239, 94]
+colour = [110, 160, 105, 200]
+
+[[element]]
+group = "vitals"
+anchor = "bottom"
+at = [-172, -80]
+size = [50, 39]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 180, 241, 237]
+fill = "shield"
+fill_toward = "down"
+colour = [110, 235, 95, 255]
+alert_when = "shield_low"
+alert_colour = [255, 210, 90, 255]
+
+[[element]]
+group = "vitals"
+anchor = "bottom"
+at = [-120, -80]
+size = [9, 39]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [233, 38, 251, 94]
+fill = "health"
+fill_toward = "down"
+colour = [110, 235, 95, 255]
+alert_when = "health_low"
+alert_colour = [255, 80, 60, 255]
+
+# --- Ammunition: the same meter, mirrored, right of the middle -----------
+
+[[element]]
+group = "ammo"
+anchor = "bottom"
+at = [118, -80]
+size = [50, 39]
+when = "clip"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 36, 239, 94]
+mirror = true
+colour = [110, 160, 105, 200]
+
+[[element]]
+group = "ammo"
+anchor = "bottom"
+at = [118, -80]
+size = [50, 39]
+when = "clip"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 180, 241, 237]
+mirror = true
+fill = "clip"
+fill_toward = "down"
+colour = [110, 235, 95, 255]
+
+# Shots in the magazine, and spare ammo, over the meter.
+[[element]]
+group = "ammo"
+anchor = "bottom"
+at = [118, -100]
+size = [28, 14]
+when = "weapon"
+text = "{clip}"
+align = "right"
+colour = [205, 220, 225, 255]
+
+[[element]]
+group = "ammo"
+anchor = "bottom"
+at = [149, -97]
+size = [24, 10]
+when = "reserve"
+text = "{reserve}"
+colour = [150, 175, 180, 255]
+
+# --- Grenade: its picture in a panel, the count above it, bottom right ---
+
+[[element]]
+group = "grenade"
+anchor = "bottom_right"
+at = [-103, -134]
+size = [38, 14]
+when = "grenade"
+text = "{grenades}"
+align = "right"
+colour = [205, 220, 225, 255]
+
+[[element]]
+group = "grenade"
+anchor = "bottom_right"
+at = [-103, -112]
+size = [38, 31]
+when = "grenade"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [147, 353, 191, 396]
+colour = [190, 205, 210, 255]
+
+[[element]]
+group = "grenade"
+anchor = "bottom_right"
+at = [-91, -106]
+size = [14, 19]
+when = "grenade"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [152, 242, 170, 268]
+choose_by = "{grenade}"
+choices = { "THERMAL DETONATOR" = [152, 242, 170, 268], "SONIC DETONATOR" = [152, 269, 170, 295], "EC DETONATOR" = [152, 296, 170, 322], "FLASH DETONATOR" = [148, 323, 174, 349] }
+
+# --- Short messages, top middle (newest at the bottom) ----------------------
+
+[[element]]
+group = "messages"
+anchor = "top"
+at = [-130, 16]
+size = [260, 11]
+text = "{message3}"
+align = "centre"
+colour = [190, 235, 245, 255]
+
+[[element]]
+group = "messages"
+anchor = "top"
+at = [-130, 29]
+size = [260, 11]
+text = "{message2}"
+align = "centre"
+colour = [190, 235, 245, 255]
+
+[[element]]
+group = "messages"
+anchor = "top"
+at = [-130, 42]
+size = [260, 11]
+text = "{message1}"
+align = "centre"
+colour = [190, 235, 245, 255]

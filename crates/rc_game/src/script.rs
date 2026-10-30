@@ -324,6 +324,54 @@ fn steps() -> Vec<Step> {
                 Err(format!("original reticle {original}: {s:?}"))
             }
         }),
+        Check("the original HUD is drawn in its own colours", |w| {
+            let quads = crate::original_hud::layout_drawn(w);
+            if quads.is_empty() {
+                return Err("the original HUD isn't drawn (placeholder shown)".into());
+            }
+            let pic = w
+                .resource::<Shots>()
+                .pictures
+                .get("in_game")
+                .cloned()
+                .ok_or("no screenshot")?;
+            // The shield meter is tinted the original's green: count
+            // pixels inside it that are clearly greener than red and blue
+            // (a missing picture shows black, white or magenta).
+            let (pw, ph) = (pic.width as f32, pic.height as f32);
+            let (mut inside, mut green) = (0u32, 0u32);
+            for q in quads.iter().filter(|q| q.widget == "vitals") {
+                let x0 = (q.dst[0] * pw) as usize;
+                let x1 = ((q.dst[2] * pw) as usize).min(pic.width);
+                let y0 = (q.dst[1] * ph) as usize;
+                let y1 = ((q.dst[3] * ph) as usize).min(pic.height);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        let i = (y * pic.width + x) * 4;
+                        let (r, g, b) = (
+                            pic.pixels[i] as i32,
+                            pic.pixels[i + 1] as i32,
+                            pic.pixels[i + 2] as i32,
+                        );
+                        inside += 1;
+                        if g > r + 30 && g > b + 30 {
+                            green += 1;
+                        }
+                    }
+                }
+            }
+            let groups: std::collections::BTreeSet<_> =
+                quads.iter().map(|q| q.widget.as_str()).collect();
+            let got = format!(
+                "{} pictures in {groups:?}; {green} of {inside} shield/health pixels are green",
+                quads.len()
+            );
+            if inside > 0 && green * 5 >= inside {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check("the first-person arms hold the weapon in hand", |w| {
             let arms = w
                 .get_resource::<rc_combat::ArmsReadout>()
