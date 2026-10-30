@@ -603,6 +603,8 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
+        Check("quickload keeps the scripts' progress: no level start again, barricade still gone", level_script_after_load),
+        Check("quickload puts the doors and lifts back", movers_after_load),
         Check("saving again after the load gives the same state", |w| {
             let quick = save_file(w, &SaveSlot::Quick)?;
             let again = rc_save::collect(w, None)?;
@@ -611,6 +613,13 @@ fn steps() -> Vec<Step> {
                 let Some(b) = again.parts.get(k) else {
                     return Err(format!("[{k}] missing after the load"));
                 };
+                // Doors, lifts and scripts run on clocks (looping movers,
+                // random timers), so a few frames later their numbers
+                // differ; the two checks above compare what matters.
+                if matches!(k.as_str(), "movers" | "scripts") {
+                    notes.push(format!("[{k}] checked above"));
+                    continue;
+                }
                 let diff = rc_save::file::largest_difference(v, b)
                     .ok_or(format!("[{k}] changed shape: {v} vs {b}"))?;
                 notes.push(format!("[{k}] off by {diff:.3}"));
@@ -1187,6 +1196,104 @@ fn level_script_way(w: &mut World, blocked: bool) -> Result<String, String> {
         hit.is_none_or(|h| h.time > 0.5) && solid.iter().all(|s| !*s) && hidden == drawn
     };
     if ok {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// After the quickload: the scripts carried on from the save. The level
+/// start isn't sent again (the director is rebuilt at the load, so its
+/// history only holds what was sent since), the barricade blown up before
+/// the save is still gone, and every script finished in the save is still
+/// finished.
+fn level_script_after_load(w: &mut World) -> Result<String, String> {
+    let quick = save_file(w, &SaveSlot::Quick)?;
+    let saved = quick.part("scripts").ok_or("no [scripts] section in the quicksave")?;
+    let saved_finished: Vec<String> = saved
+        .get("director")
+        .and_then(|d| d.get("script"))
+        .and_then(|s| s.as_array())
+        .ok_or("no scripts in [scripts.director]")?
+        .iter()
+        .filter(|s| s.get("finished").and_then(|f| f.as_bool()) == Some(true))
+        .filter_map(|s| s.get("name").and_then(|n| n.as_str()).map(str::to_string))
+        .collect();
+    let gone = level_script_barricade_gone(w);
+    let way = level_script_way(w, false);
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no LevelScript".into());
+    };
+    let d = &s.director;
+    let starts: Vec<&String> = d
+        .history
+        .iter()
+        .map(|h| &h.1)
+        .filter(|e| d.start_events().iter().any(|s| s.eq_ignore_ascii_case(e)))
+        .collect();
+    let states = d.script_states();
+    let unfinished: Vec<&String> = saved_finished
+        .iter()
+        .filter(|n| !states.iter().any(|(name, _, what)| name == *n && what == "finished"))
+        .collect();
+    let got = format!(
+        "clock {:.1} s; {} events since the load, level start sent {} times; {} scripts finished in the save, {} not finished now; barricade gone {gone}; {}",
+        d.time,
+        d.history.len(),
+        starts.len(),
+        saved_finished.len(),
+        unfinished.len(),
+        way.as_ref().unwrap_or_else(|e| e)
+    );
+    if starts.is_empty() && unfinished.is_empty() && gone && way.is_ok() {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// After the quickload: every mover the quicksave had standing still is at
+/// the same key, and the movers' clock carried on from the save's.
+fn movers_after_load(w: &mut World) -> Result<String, String> {
+    let quick = save_file(w, &SaveSlot::Quick)?;
+    let saved = quick.part("movers").ok_or("no [movers] section in the quicksave")?;
+    let saved_time = saved.get("time").and_then(|t| t.as_float()).unwrap_or(0.0) as f32;
+    let list = saved
+        .get("movers")
+        .and_then(|m| m.as_array())
+        .ok_or("no movers in [movers]")?
+        .clone();
+    let Some(m) = w.get_resource::<rc_movers_plugin::LevelMovers>() else {
+        return Err("no LevelMovers".into());
+    };
+    let set = m.read();
+    let (mut resting, mut same, mut open, mut wrong) = (0, 0, 0, Vec::new());
+    for s in &list {
+        let (Some(name), Some(key), Some(phase)) = (
+            s.get("name").and_then(|v| v.as_str()),
+            s.get("key").and_then(|v| v.as_integer()),
+            s.get("phase").and_then(|v| v.as_str()),
+        ) else {
+            return Err(format!("unreadable mover {s}"));
+        };
+        if phase != "rest" {
+            continue;
+        }
+        resting += 1;
+        open += (key > 0) as usize;
+        match set.movers.iter().find(|m| m.info.place.name == name) {
+            Some(m) if m.key as i64 == key => same += 1,
+            Some(m) => wrong.push(format!("{name} key {key} saved, {} now", m.key)),
+            None => wrong.push(format!("{name} missing")),
+        }
+    }
+    let got = format!(
+        "{} movers saved, {resting} standing still ({open} of them open), {same} at the same key now; clock {saved_time:.1} s saved, {:.1} s now{}",
+        list.len(),
+        set.time,
+        if wrong.is_empty() { String::new() } else { format!("; {}", wrong.join(", ")) }
+    );
+    if !list.is_empty() && wrong.is_empty() && set.time >= saved_time && set.time < saved_time + 5.0 {
         Ok(got)
     } else {
         Err(got)

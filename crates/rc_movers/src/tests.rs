@@ -319,3 +319,57 @@ fn trigger_loop_runs_until_triggered_again() {
     }
     assert!(set.movers[0].is_closed());
 }
+
+#[test]
+fn snapshot_restores_a_door_half_open_and_it_carries_on_the_same() {
+    let door = box_tris(Vec3::new(-10.0, -100.0, 0.0), Vec3::new(10.0, 100.0, 200.0));
+    let info = mover("TriggerOpenTimed", &[[0.0; 3], [0.0, 0.0, 190.0]], 1.5, 2.0);
+    let mut a = set_of(info.clone(), door.clone());
+    let fixed = floor();
+    let mut p = far_player();
+    let mut ev = Vec::new();
+    a.send("door1", &mut ev);
+    for _ in 0..45 {
+        a.step(DT, &fixed, &mut p);
+    }
+    let snap = a.snapshot();
+    assert!(matches!(snap.movers[0].phase, Phase::Moving { .. }), "{snap:?}");
+
+    // A fresh map, as after loading: the door is shut until restored.
+    let mut b = set_of(info, door);
+    assert!(b.movers[0].is_closed());
+    let report = b.restore(&snap);
+    assert_eq!(report.movers, 1);
+    assert!(report.unknown.is_empty() && report.bad_keys.is_empty(), "{report:?}");
+    assert_eq!(b.snapshot(), snap);
+    assert!((b.movers[0].pose.pos.z - a.movers[0].pose.pos.z).abs() < 1e-3);
+
+    // Both carry on the same way: open, wait, close.
+    let mut q = far_player();
+    for _ in 0..400 {
+        let ea = a.step(DT, &fixed, &mut p);
+        let eb = b.step(DT, &fixed, &mut q);
+        assert_eq!(ea, eb);
+        assert!((a.movers[0].pose.pos.z - b.movers[0].pose.pos.z).abs() < 1e-3);
+    }
+    assert_eq!(b.movers[0].stats.closed, 1);
+    assert!(b.movers[0].is_closed());
+}
+
+#[test]
+fn restore_skips_names_the_map_does_not_have() {
+    let mut set = set_of(mover("TriggerToggle", &[[0.0; 3], [0.0, 0.0, 100.0]], 1.0, 0.0), vec![]);
+    let mut snap = set.snapshot();
+    snap.movers[0].name = "Mover99".into();
+    snap.movers[0].key = 1;
+    let report = set.restore(&snap);
+    assert_eq!(report.unknown, vec!["Mover99".to_string()]);
+    assert_eq!(set.movers[0].key, 0);
+    // A key past the last one is clamped.
+    let mut snap = set.snapshot();
+    snap.movers[0].key = 9;
+    let report = set.restore(&snap);
+    assert_eq!(report.bad_keys, vec!["Mover0".to_string()]);
+    assert_eq!(set.movers[0].key, 1);
+    assert!((set.movers[0].pose.pos.z - 100.0).abs() < 1e-3);
+}
