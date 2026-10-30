@@ -443,6 +443,15 @@ fn steps() -> Vec<Step> {
         // landing-zone barricade opens once the player heals at the bacta
         // dispenser the scripts switch on.
         Check("the level's scripts run", level_script_running),
+        Until(
+            "the scripts start playing the level's lines",
+            |w| level_script_lines(w).is_ok(),
+            60.0,
+        ),
+        Check(
+            "the scripts play the game's own lines, as long as each one lasts",
+            level_script_lines,
+        ),
         Check("the start barricade blocks the way", |w| level_script_way(w, true)),
         Until("the scripts switch the bacta dispenser on", level_script_dispenser_on, 300.0),
         Note(level_script_stand_at_dispenser),
@@ -1229,6 +1238,50 @@ fn level_script_running(w: &mut World) -> Result<String, String> {
         d.history.first().map(|h| &h.1)
     );
     if d.stats.scripts > 10 && d.history.iter().any(|h| h.1.eq_ignore_ascii_case("levelstart")) {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The level's lines and sounds (`rc_scripts_plugin::sounds`): every sound
+/// geo_01a's scripts name was read from the game's packages with its
+/// length, at least two lines have played and reached the sound card, and
+/// nothing asked for was missing.
+fn level_script_lines(w: &mut World) -> Result<String, String> {
+    let Some(sounds) = w.get_resource::<rc_scripts_plugin::ScriptSounds>() else {
+        return Err("no ScriptSounds (sounds not read)".into());
+    };
+    let (read, measured, missing, packages) = (
+        sounds.sounds.len(),
+        sounds.lengths.len(),
+        sounds.missing.len(),
+        format!("{:?}", sounds.packages),
+    );
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no LevelScript".into());
+    };
+    let st = &s.stats;
+    let line = st
+        .sounds_played
+        .iter()
+        .find(|n| sounds.speech.contains(&n.to_ascii_lowercase()))
+        .cloned()
+        .unwrap_or_default();
+    let got = format!(
+        "{read} sounds read from {packages}, {measured} measured, {missing} missing; played {:?}, {} started on the sound card, {} not loaded; first line of speech {line} lasts {:.1} s",
+        st.sounds_played,
+        st.sounds_started,
+        st.sounds_missing.len(),
+        s.director.sound_length(&line),
+    );
+    if read > 50
+        && missing == 0
+        && !line.is_empty()
+        && st.sounds_played.len() >= 2
+        && st.sounds_started >= 2
+        && st.sounds_missing.is_empty()
+    {
         Ok(got)
     } else {
         Err(got)
