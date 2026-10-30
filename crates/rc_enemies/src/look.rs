@@ -9,6 +9,7 @@
 //! lower case.
 
 use rc_ai::params::Look;
+use rc_anim::math::Transform;
 use rc_anim::{globals, skin, weights_per_point, Clip, Convention, Skeleton};
 use rc_game_core::GamePaths;
 use rc_image::{PixelFormat, Rgba};
@@ -74,6 +75,15 @@ impl Pose {
     /// Played once and held on the last frame, instead of looping.
     pub fn once(self) -> bool {
         self == Pose::Death
+    }
+
+    /// Seconds to blend into this animation from the one before.
+    pub fn blend_time(self, l: &Look) -> f32 {
+        match self {
+            Pose::Fire | Pose::CrouchFire => l.blend_time_fire,
+            Pose::Death => l.blend_time_death,
+            _ => l.blend_time,
+        }
     }
 }
 
@@ -269,42 +279,57 @@ impl DroidLook {
         })
     }
 
-    fn pose_unreal(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
-        self.clip_unreal(self.clip(pose), frame)
-    }
-
-    /// Points posed at `frame` of `clip`, Unreal units relative to the
-    /// mesh origin (feet not yet lifted). The root bone's sideways travel
-    /// is removed: the droid's body moves the droid, not the animation.
-    fn clip_unreal(&self, clip: &Clip, frame: f32) -> Vec<[f32; 3]> {
+    /// Each bone's local transform at `frame` of `clip`. The root bone's
+    /// sideways travel is removed: the droid's body moves the droid, not
+    /// the animation.
+    pub fn local_clip(&self, clip: &Clip, frame: f32) -> Vec<Transform> {
         let mut local = clip.sample(&self.skeleton, frame);
         if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
             l.pos[0] = rest.pos[0];
             l.pos[1] = rest.pos[1];
         }
-        let pose = globals(&self.skeleton.parents, &local);
+        local
+    }
+
+    /// Each bone's local transform at `frame` of `pose`.
+    pub fn local_pose(&self, pose: Pose, frame: f32) -> Vec<Transform> {
+        self.local_clip(self.clip(pose), frame)
+    }
+
+    /// Points for bones placed at `local`, Unreal units relative to the
+    /// mesh origin (feet not yet lifted).
+    fn unreal_points(&self, local: &[Transform]) -> Vec<[f32; 3]> {
+        let pose = globals(&self.skeleton.parents, local);
         skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
             .into_iter()
             .map(|p| mesh_point(&self.mesh, p))
             .collect()
     }
 
-    /// Points posed at `frame` of `pose`, in Bevy units relative to the
-    /// droid's feet, before its facing is applied.
-    pub fn posed(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
-        self.pose_unreal(pose, frame)
+    fn pose_unreal(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
+        self.unreal_points(&self.local_pose(pose, frame))
+    }
+
+    /// Points for bones placed at `local` (from `local_pose`, perhaps
+    /// blended), in Bevy units relative to the droid's feet, before its
+    /// facing is applied.
+    pub fn posed_local(&self, local: &[Transform]) -> Vec<[f32; 3]> {
+        self.unreal_points(local)
             .into_iter()
             .map(|p| to_bevy([p[0], p[1], p[2] + self.lift]))
             .collect()
     }
 
+    /// Points posed at `frame` of `pose`, in Bevy units relative to the
+    /// droid's feet, before its facing is applied.
+    pub fn posed(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
+        self.posed_local(&self.local_pose(pose, frame))
+    }
+
     /// Like [`Self::posed`], for a named animation (see
     /// [`Self::named_clip`]).
     pub fn posed_clip(&self, clip: &Clip, frame: f32) -> Vec<[f32; 3]> {
-        self.clip_unreal(clip, frame)
-            .into_iter()
-            .map(|p| to_bevy([p[0], p[1], p[2] + self.lift]))
-            .collect()
+        self.posed_local(&self.local_clip(clip, frame))
     }
 
     /// Per-wedge positions and smooth normals for the Bevy mesh.

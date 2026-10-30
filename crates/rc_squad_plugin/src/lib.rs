@@ -216,6 +216,7 @@ pub struct SquadJobQueue(pub Vec<SquadEvent>);
 pub struct SquadLooks {
     tried: bool,
     pub ambient: f32,
+    pub blend: look::BlendTimes,
     pub models: HashMap<String, Option<Arc<rc_model::Model>>>,
 }
 
@@ -234,6 +235,14 @@ impl SquadLooks {
         };
         log_line(log, format!("looks from {}", file.display()));
         self.ambient = looks.ambient;
+        self.blend = looks.blend;
+        log_line(
+            log,
+            format!(
+                "animation blend times: {:.2} s, into firing {:.2} s, into falling down {:.2} s",
+                looks.blend.time, looks.blend.fire, looks.blend.down
+            ),
+        );
         let Some(paths) = paths else {
             log_line(log, "no game folder; squad mates get stand-in bodies");
             return;
@@ -560,7 +569,7 @@ fn spawn_squad(
             continue;
         };
         if let Some(Some(model)) = looks.models.get(&m.settings.key) {
-            let mm = look::spawn_pieces(
+            let mut mm = look::spawn_pieces(
                 model.clone(),
                 looks.ambient,
                 &mut e,
@@ -568,6 +577,7 @@ fn spawn_squad(
                 materials,
                 images,
             );
+            mm.blend_times = looks.blend;
             e.insert(mm);
         } else {
             stand_in_body(&mut e, m.settings.colour, meshes, materials);

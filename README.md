@@ -89,7 +89,10 @@ copy of the game.
   kneeling to revive. Everything is read from the install when the level
   starts; which model and animations are used is in
   `data/squad/looks.toml`. A squad mate whose model can't be read is drawn
-  as a coloured capsule (a placeholder) and the log says why. They don't
+  as a coloured capsule (a placeholder) and the log says why.
+  Squad mates and enemies blend smoothly from one animation into the next
+  instead of snapping (checked from logged numbers with
+  `rc_blend_check`, not looked at). They don't
   hold a weapon yet, and the helmet extras the original adds
   (`AvailableAccessories`) aren't drawn.
 
@@ -445,8 +448,9 @@ copy of the game.
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
   own choice. See `docs/DESIGN.md`.
-- Characters: only the first material slot, no blending between
-  animations, no sounds or effects from animation events.
+- Characters: only the first material slot (`rc_character` viewer), no
+  sounds or effects from animation events. Blending between animations
+  uses our own times; the original's are in its compiled engine.
 - Android: the game compiles for Android phones but is not an app yet;
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
 - Original menus: the main menu's moving background video isn't played

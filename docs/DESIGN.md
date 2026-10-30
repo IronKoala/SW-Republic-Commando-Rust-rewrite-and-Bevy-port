@@ -706,6 +706,33 @@ one, not only the game's animations: a mod's new animation, a physics
 ragdoll, or tracked VR hands could set some bones and leave the rest to an
 animation.
 
+**Changing animation smoothly** (`rc_anim::Crossfade`). When a character
+switches animation (standing to running, say) the new animation's first
+frame can be far from the pose on screen, so without help the body jumps
+in one frame. Each squad mate and enemy keeps a `Crossfade`: when the
+animation changes it remembers the pose on screen, and for the next
+fraction of a second mixes that pose with the new animation, bone by bone
+(`blend_poses`: straight line for positions, slerp for rotations). The mix
+goes from 0 to 1 along an S curve ("ease in and out"), so it starts and
+ends gently. If the animation changes again halfway, the new blend starts
+from whatever mix was showing, so there is never a jump. The original
+engine blends inside its compiled code (its `PlayAnim` and `LoopAnim` in
+`Engine.u` have no blend-time setting, and no script passes one), so the
+times are ours, kept in data files for mods: `[blend]` in
+`data/squad/looks.toml` and `blend_time*` in each enemy's `[look]`.
+Defaults: 0.2 s, 0.05 s into the very short firing animation, 0.25 s into
+a squad mate falling down wounded, 0.1 s into a droid's death. It costs one
+extra pose mix per character per frame, nothing on the GPU.
+
+`rc_model --example rc_blend_check` measures it from the numbers: for 18
+animation changes of the commando and the battle droid it plays half a
+second of each at 30 frames a second and records how far the fastest
+moving point travels each frame. Walk to run snapped by 130 uu (about
+2.6 m) in one frame before; blended, the biggest step is 25 uu, less than
+the run animation's own fastest step (28.5 uu). The surface stretch while
+two poses are mixed stays at the animations' own level (commando 0.06,
+droid 0.005), so limbs don't fold or tear.
+
 **How we check without looking:**
 - `rc_probe --characters` reads every mesh and animation set, checks the bone tree,
   the index ranges and the weights, and plays every sequence of each mesh's
