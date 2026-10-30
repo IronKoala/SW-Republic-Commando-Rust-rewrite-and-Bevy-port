@@ -18,10 +18,13 @@ pub mod brain;
 pub mod params;
 pub mod spawns;
 
-pub use battle::{Battle, BattleEvent, BattleSnapshot, FighterSnapshot, Spawner};
+pub use battle::{
+    Battle, BattleEvent, BattleSnapshot, Birth, FighterSnapshot, Spawner, SpawnerSnapshot,
+    SwitchedOn,
+};
 pub use brain::{AiEvent, Fighter, Maneuver, Mode, Target, View};
 pub use params::{AiParams, EnemyType, Sounds};
-pub use spawns::{read_factories, Factory, SpawnSpot, StartState};
+pub use spawns::{read_factories, Factory, Offspring, SpawnSpot, StartState};
 
 #[cfg(test)]
 mod tests;

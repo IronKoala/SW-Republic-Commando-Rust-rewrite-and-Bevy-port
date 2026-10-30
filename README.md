@@ -205,6 +205,13 @@ copy of the game.
   and blows the barricade so you can reach the fight. `rc_game --script`
   checks that whole chain (37 of 37 checks). `rc_script_check` runs every
   map's scripts without a window.
+  Enemy spawners now follow the scripts too (tested in the cloud sandbox
+  with the real files, not yet on Windows or by playing): the level's
+  events switch them on and off, scripts can stop or refill them, and
+  each droid tells the scripts when it dies, so "kill these droids, then
+  the next thing happens" works. They follow the original's spawning
+  rules (where, how many, how often). `rc_game --script` checks that on
+  geo_01a's small bunker (52 of 52 checks).
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
@@ -284,7 +291,7 @@ copy of the game.
 
 - **Battle droids that fight back (tested in the cloud sandbox on
   geo_01a, not yet on Windows).** Droids appear from the map's own
-  spawners when you walk into their triggers, walk the level's own path
+  spawners when the level's scripts or triggers start them, walk the level's own path
   network, spot you (sight range, view cone, line of sight), shoot in
   bursts of three with the game's accuracy, take cover when shot in the
   open, and die to your shots through the weapons part's health and
