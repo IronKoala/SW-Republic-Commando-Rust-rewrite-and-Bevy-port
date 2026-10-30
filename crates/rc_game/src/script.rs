@@ -97,6 +97,10 @@ struct Shots {
 #[derive(Resource, Default)]
 struct Noted {
     feet: Option<rc_movement::Vec3>,
+    /// Squad mates' feet last frame, and for how many frames in a row none
+    /// of them moved.
+    squad_feet: Vec<Vec3>,
+    squad_still_frames: u32,
     music_volume: f32,
     /// The player's centre and facing when the quicksave was made.
     saved: Option<(rc_movement::Vec3, f32)>,
@@ -493,6 +497,10 @@ fn steps() -> Vec<Step> {
         // Use some ammo first, so the save differs from a fresh start.
         Hold(Action::Fire, 0.5),
         Wait(0.2),
+        // Save while nobody is walking: a squad mate saved mid-step walks on
+        // after the load, and the "same state" check below would see how far
+        // they got.
+        Until("squad mates standing still", squad_still, 15.0),
         Note(|w| {
             let b = body(w);
             w.resource_mut::<Noted>().saved = b;
@@ -556,6 +564,22 @@ fn steps() -> Vec<Step> {
                 Ok(got)
             } else {
                 Err(got)
+            }
+        }),
+        Check("no droid spots the player just after the load", |w| {
+            // Droids look for the player at the camera. It used to lag a
+            // frame behind the body after a load, so droids could spot the
+            // player from across the map.
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let again = rc_save::collect(w, None)?;
+            let before = droid_modes(quick.parts.get("enemies"));
+            let after = droid_modes(again.parts.get("enemies"));
+            let got = format!("droids saved {before:?}, now {after:?}");
+            let woke = before.iter().zip(&after).any(|(b, a)| b == "idle" && a != "idle");
+            if woke || before.len() != after.len() {
+                Err(got)
+            } else {
+                Ok(got)
             }
         }),
         Check("quickload gives back the ammo used before saving", |w| {
@@ -879,6 +903,32 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         }
     ));
     shots.stats.insert(name, stats);
+}
+
+/// True once no squad mate has moved for a few frames in a row.
+fn squad_still(w: &mut World) -> bool {
+    let mut q = w.query_filtered::<&Transform, With<rc_squad_plugin::SquadMate>>();
+    let feet: Vec<Vec3> = q.iter(w).map(|t| t.translation).collect();
+    let mut n = w.resource_mut::<Noted>();
+    // Bevy units are metres-ish; 0.01 is about half an Unreal unit.
+    let moved = feet.len() != n.squad_feet.len()
+        || feet.iter().zip(&n.squad_feet).any(|(a, b)| a.distance(*b) > 0.01);
+    n.squad_still_frames = if moved { 0 } else { n.squad_still_frames + 1 };
+    n.squad_feet = feet;
+    n.squad_still_frames >= 3
+}
+
+/// Each droid's mode ("idle", "alerted", ...) in an `[enemies]` section.
+fn droid_modes(section: Option<&toml::Value>) -> Vec<String> {
+    let droids = section.and_then(|e| e.get("droids")).and_then(|d| d.as_array());
+    droids
+        .map(|a| {
+            a.iter()
+                .map(|d| d.get("mode").and_then(|m| m.as_str()).unwrap_or("?"))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn run(world: &mut World) {

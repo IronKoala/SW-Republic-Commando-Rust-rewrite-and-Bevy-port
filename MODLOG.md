@@ -3,13 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
-## 2026-10-30: Droids no longer spot the player right after a load (rc_game player)
+## 2026-10-30: Droids no longer spot the player right after a load (rc_game player and self-test)
 
-- **Changed:** `crates/rc_game/src/player.rs`: the player's camera now starts at the body's eyes when the player is spawned (before, it started at the map's centre, 0,0,0), and loading the `[player]` section moves the camera along with the body. `place_camera` uses the same `eye_view` helper. New unit test `loading_a_save_moves_the_camera_with_the_player`.
-- **Why:** Droids look for the player at the camera's position (`rc_enemies::player_target`). The camera only follows the body at the end of each frame, so on the first frame after a quickload the droids looked at the old camera spot, could "see" the player from about 3000 uu away, and switched to alerted. That made the self-test check "saving again after the load gives the same state" fail in about 1 of 3-5 runs.
-- **Tested how:** `cargo test -p rc_game` (14 tests pass, including the new one).
-- **Still broken / not tested:** The full `rc_game --script` run many times over with the game files: not tested yet in this change. Aiming (`rc_combat` fire, squad orders) also reads the camera; they now get the right spot after a load too, but that isn't checked separately.
-- **Next:** Run `rc_game --script` 20 times and count the passes.
+- **Changed:** `crates/rc_game/src/player.rs`: the player's camera now starts at the body's eyes when the player is spawned (before, it started at the map's centre, 0,0,0), and loading the `[player]` section moves the camera along with the body. `place_camera` uses the same `eye_view` helper. New unit test `loading_a_save_moves_the_camera_with_the_player`. `crates/rc_game/src/script.rs`: before the quicksave the script waits until no squad mate has moved for 3 frames ("squad mates standing still"), and a new check "no droid spots the player just after the load" fails if a droid that was idle in the save is alerted 0.3 s after loading.
+- **Why:** Droids look for the player at the camera's position (`rc_enemies::player_target`). The camera only follows the body at the end of each frame, so on the first frame after a quickload the droids looked at the old camera spot, "saw" the player from about 4100 uu away and switched to alerted. That made the self-test check "saving again after the load gives the same state" fail in some runs. On the user's PC the same check failed for a second reason: a squad mate was saved mid-step and walked on 56 uu after the load.
+- **Tested how:** `cargo test -p rc_game` (14 tests). `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script` in the cloud with the game files copied read-only from the PC, 10 runs of each build, one at a time.
+- **Result:** With this change: `SCRIPT DONE: 46 checks passed, 0 failed` in 10 of 10 runs. Same script on main's player code: droids spotted the player ("droid 1 spotted the player 4079 uu away", 0.1 s after the load) and 2 checks failed in 6 of 10 runs. An earlier try ran the "same state" check in the same frame as the load: that always failed, because the squad and droids are put back during the next frame, so it was dropped.
+- **Still broken / not tested:** Not re-run on Windows yet. Aiming (`rc_combat` fire, squad orders) also reads the camera; they now get the right spot after a load too, but that isn't checked separately. On the PC run no droids had spawned by the time of the save, so the droid check passes there without testing much.
+- **Next:** The user re-runs the self-test on the PC.
 
 ## 2026-10-29: Levels run their own scripts (rc_level::scripts, rc_scripts, rc_scripts_plugin)
 
