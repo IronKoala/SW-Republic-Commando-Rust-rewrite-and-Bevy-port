@@ -128,6 +128,10 @@ mouse sensitivity, invert mouse, difficulty, effects volume, music volume,
 screen size (the original's list plus wide and ultrawide sizes) and vsync,
 plus RESTORE DEFAULTS / SET RECOMMENDED. Key rows open `CTMapKeyMenu`
 ("REASSIGN BUTTON"): press a key, then ACCEPT, CANCEL or press again.
+With the mouse, a click anywhere on a row (its name or its value) steps it
+on, a right click steps it back, the wheel steps either way, and the small
+arrows work as in the original. (At first only the value and the arrows took
+clicks, so clicking a setting's name did nothing; the user found this.)
 
 Greyed out for now: subtitles, helmet and prompt options, auto pull, visor
 and its intensity, sound quality, 3D sound, EAX, channels, graphics quality

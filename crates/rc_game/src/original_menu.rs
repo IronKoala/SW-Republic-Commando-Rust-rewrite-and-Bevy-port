@@ -25,6 +25,7 @@ use crate::settings::Settings;
 use crate::settings::SettingsPath;
 use bevy::asset::RenderAssetUsages;
 use bevy::audio::{AudioSource, PlaybackSettings};
+use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
@@ -633,12 +634,26 @@ fn navigate(
     mut next_play: Option<ResMut<NextState<Play>>>,
     mut exit: MessageWriter<AppExit>,
     mut sources: ResMut<Assets<AudioSource>>,
-    mut cursor: MessageReader<CursorMoved>,
+    (mut cursor, mut wheel, mouse): (
+        MessageReader<CursorMoved>,
+        MessageReader<MouseWheel>,
+        Res<ButtonInput<MouseButton>>,
+    ),
     log: Res<GameLog>,
 ) {
     // Pointing at a button moves focus only when the mouse itself moves,
     // not when the menu is redrawn under a still pointer.
     let mouse_moved = cursor.read().count() > 0;
+    // The wheel and the right button also step the row under the pointer
+    // (a left click steps it forwards, as its right arrow does).
+    let wheel_step: f32 = wheel.read().map(|w| w.y).sum();
+    let mouse_step = if wheel_step > 0.0 {
+        1
+    } else if wheel_step < 0.0 || mouse.just_pressed(MouseButton::Right) {
+        -1
+    } else {
+        0
+    };
     menus.used_input = false;
     let Some(shown) = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu) else {
         return;
@@ -685,6 +700,9 @@ fn navigate(
             } else {
                 moved |= screen.step(-1);
             }
+        }
+        if chooser && mouse_step != 0 && !in_overlay {
+            stepped = screen.focus.map(|f| (f, mouse_step));
         }
         for (i, hit) in &hits {
             if hit.0 != in_overlay {
@@ -1196,17 +1214,42 @@ fn draw(
         let boxes = if under {
             Vec::new()
         } else {
-            screen
-                .layout
+            let layout = &screen.layout;
+            let mut boxes: Vec<(usize, [f32; 4])> = layout
                 .buttons_on_pc()
                 .into_iter()
-                .filter_map(|i| match &screen.layout.widgets[i].kind {
+                .filter_map(|i| match &layout.widgets[i].kind {
                     Kind::Button(b) => quads::sprite_box(&b.background_blurred, assets)
                         .or_else(|| quads::text_box(&b.blurred, assets))
-                        .map(|bx| (i, bx)),
+                        .map(|mut bx| {
+                            // An options row (chooser or key) also takes
+                            // clicks on its label, so the whole row works,
+                            // not only the value on the right.
+                            if b.is_chooser() || !b.mouse_only {
+                                for j in screens::row_widgets(layout, &layout.widgets[i].name) {
+                                    if let Kind::Text(t) = &layout.widgets[j].kind {
+                                        if let Some(l) = quads::text_box(t, assets) {
+                                            bx = [
+                                                bx[0].min(l[0]),
+                                                bx[1].min(l[1]),
+                                                bx[2].max(l[2]),
+                                                bx[3].max(l[3]),
+                                            ];
+                                        }
+                                    }
+                                }
+                            }
+                            (i, bx)
+                        }),
                     _ => None,
                 })
-                .collect()
+                .collect();
+            // Mouse-only buttons (the arrows beside a row) last, so they sit
+            // on top and keep their own clicks.
+            boxes.sort_by_key(
+                |(i, _)| matches!(&layout.widgets[*i].kind, Kind::Button(b) if b.mouse_only),
+            );
+            boxes
         };
         list.push((on_top, q, boxes));
     }
