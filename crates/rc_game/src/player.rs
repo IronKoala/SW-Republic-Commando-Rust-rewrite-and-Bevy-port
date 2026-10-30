@@ -314,7 +314,7 @@ pub(crate) fn place_camera(
     fov: Res<FieldOfView>,
     weapon: Option<Res<rc_game_core::WeaponReadout>>,
     body: Query<&Body, With<Player>>,
-    window: Query<&Window>,
+    area: Option<Res<crate::display::PlayArea>>,
     log: Res<GameLog>,
     mut logged: Local<(f32, f32, f32)>,
     mut view: Query<(&mut Transform, &mut Projection), With<PlayerCamera>>,
@@ -330,8 +330,9 @@ pub(crate) fn place_camera(
     // so there the angle across stays what it is at that shape and the
     // view shows a little less up and down instead.
     if let Projection::Perspective(p) = &mut *proj {
-        let w = window.iter().next();
-        let aspect = w.map_or(p.aspect_ratio, |w| w.width() / w.height().max(1.0));
+        // The picture's shape: the window's, or the box inside black bars.
+        let w = area.as_deref().map(|a| a.size.as_vec2());
+        let aspect = w.map_or(p.aspect_ratio, |w| w.x / w.y.max(1.0));
         // A zoomed weapon (the sniper attachment) narrows the view.
         let across = weapon.and_then(|w| w.zoom_fov).unwrap_or(fov.across_4_3);
         p.fov = view_angle(across, fov.widest_shape, aspect);
@@ -344,8 +345,8 @@ pub(crate) fn place_camera(
             let capped = p.fov < vertical_fov(across) - 1e-4;
             log.line(format!(
                 "player: view {:.0}x{:.0} (aspect {aspect:.3}): {:.1} degrees across, {:.1} up and down (setting {:.0} across 4:3, widest {}{})",
-                w.width(),
-                w.height(),
+                w.x,
+                w.y,
                 horizontal_fov(p.fov, aspect),
                 p.fov.to_degrees(),
                 fov.across_4_3,

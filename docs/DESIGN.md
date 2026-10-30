@@ -706,6 +706,33 @@ one, not only the game's animations: a mod's new animation, a physics
 ragdoll, or tracked VR hands could set some bones and leave the rest to an
 animation.
 
+**Changing animation smoothly** (`rc_anim::Crossfade`). When a character
+switches animation (standing to running, say) the new animation's first
+frame can be far from the pose on screen, so without help the body jumps
+in one frame. Each squad mate and enemy keeps a `Crossfade`: when the
+animation changes it remembers the pose on screen, and for the next
+fraction of a second mixes that pose with the new animation, bone by bone
+(`blend_poses`: straight line for positions, slerp for rotations). The mix
+goes from 0 to 1 along an S curve ("ease in and out"), so it starts and
+ends gently. If the animation changes again halfway, the new blend starts
+from whatever mix was showing, so there is never a jump. The original
+engine blends inside its compiled code (its `PlayAnim` and `LoopAnim` in
+`Engine.u` have no blend-time setting, and no script passes one), so the
+times are ours, kept in data files for mods: `[blend]` in
+`data/squad/looks.toml` and `blend_time*` in each enemy's `[look]`.
+Defaults: 0.2 s, 0.05 s into the very short firing animation, 0.25 s into
+a squad mate falling down wounded, 0.1 s into a droid's death. It costs one
+extra pose mix per character per frame, nothing on the GPU.
+
+`rc_model --example rc_blend_check` measures it from the numbers: for 18
+animation changes of the commando and the battle droid it plays half a
+second of each at 30 frames a second and records how far the fastest
+moving point travels each frame. Walk to run snapped by 130 uu (about
+2.6 m) in one frame before; blended, the biggest step is 25 uu, less than
+the run animation's own fastest step (28.5 uu). The surface stretch while
+two poses are mixed stays at the animations' own level (commando 0.06,
+droid 0.005), so limbs don't fold or tear.
+
 **How we check without looking:**
 - `rc_probe --characters` reads every mesh and animation set, checks the bone tree,
   the index ranges and the weights, and plays every sequence of each mesh's
@@ -1221,6 +1248,7 @@ and carries out the effects:
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
+| actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
 
 **Script sounds** (`rc_scripts_plugin/src/sounds.rs`). A script names a
@@ -1253,6 +1281,59 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 `BactaRecharging.Event` and it rests 10 s (our choice). In geo_01a those
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
+
+### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
+
+A `ScriptedSequence` belongs to the characters that run it: a placed pawn
+names it in `AIScriptTag`, and a `PawnFactory` gives it to everyone it makes
+through `AIScriptFromFactory`. An action with no target of its own acts on
+those characters. Each spawned character carries `ScriptTags { tag, script,
+follows_orders }` (in `rc_game_core`): its tag (the factory's
+`PawnTagFromFactory`, or a squad mate's class name) and the sequence it runs.
+
+The director marks these actions "the game runs them"
+(`Director::game_runs_characters`). It hands them out as `Effect::Action`
+with the sequence's tag as `owner`; the plugin turns each into a `Call` and
+`cast` finds its characters, by tag (the action's own `Tag`, `PawnTag`,
+`DestroyTag`, ...; a player tag means the player) or by owner. A character
+made by a factory appears a frame after the event that starts its script,
+so a call with nobody to act on waits `character_grace_seconds` (1 s) before
+it is logged "no character" and skipped; later calls of the same script
+wait behind it.
+
+| Action | What happens |
+|---|---|
+| `MoveToPoint`, `MoveToPlayer` | `CharacterAct::MoveTo` / `MoveToPlayer`: the enemy walks (or runs) there along the level's paths |
+| `TurnTowardPlayer` | turns to face the player |
+| `PlayAnim`, `WaitForAnimEnd` | stands still and plays the named animation from its own animation set |
+| `WaitForPlayer` | holds until the player is within the distance |
+| `TeleportToPoint` | put there at once, facing the point's way |
+| `SetHidden`, `DestroyActor`, `DestroyPawn` | hidden / removed (removed without a death event) |
+| `MakeInvulnerable`, `SetCannotDie` | `rc_combat::Invulnerable` (no damage) / `CannotDie` (health stops at 1) |
+| `HurtActor` on a character | `rc_combat` `Damage` |
+| `ChangeSquadStance` | `SquadStanceOrder` to the squad (form up, search and destroy, secure a point) |
+
+Places are every actor in the map but static meshes and lights
+(`rc_level::scripts::places`), found by tag and then by name; a missing one
+is logged. Enemies (`rc_enemies/src/scripted.rs`) carry the orders out
+through `rc_ai::Fighter::follow_script` (`ScriptGoal`): while it has one it
+doesn't fight, being hurt ends a hold, and it answers `AiEvent::ScriptDone`,
+which comes back as `CharacterOrderDone`. A walk that gets stuck for 2 s
+ends there. An enemy with `leap_speed` above 0 in its `[combat]` section
+(the Geonosian warrior, 900) leaps straight to a point it can't walk to or
+that's more than 200 uu above it, a stand-in for the original's flying.
+
+Walks, turns and animations hold the script until the game says they're
+done, with a timeout each (`move_timeout_seconds` 30, `turn_timeout_seconds`
+2, `anim_timeout_seconds` 10, in `data/scripts/scripts.toml`), so a stuck
+character can't stop a level. A save made while a script waits on one keeps
+which action it was, and after a load the action is given again.
+
+Not done yet: squad mates' own scripted moves (`ChangeSquadMember`), moving
+the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
+`GotoState` on characters, characters the game doesn't spawn yet (placed
+clone troopers and the like are logged and skipped), one sequence run
+separately per character, and `ScriptPriority`.
 
 ### geo_01a, worked through
 
@@ -1295,7 +1376,16 @@ way through is the gap where `Blockade01` stood.
   barricade to go, then checks the same sweep now passes, the volume isn't
   solid, both drawn parts of the prop are hidden, and that the chain of
   events happened in order with the player hurt, healed and checkpoint0
-  saved.
+  saved. Then it sends `SpawnTrench02` and `LoneRangerJump` and checks that
+  the lone Geonosian from `PawnFactory50` carries his tag and sequence,
+  reaches `JumpDestForLoneRanger` and `KillPointForLoneRanger`, turns,
+  plays `EmoteSeeEnemy` and is removed, each answered back to the script.
+- **Characters** (`cargo test -p rc_scripts -p rc_ai`): a walk holds its
+  script until the game answers, a timeout moves it on, and a save made
+  mid-walk gives the walk again after loading; an enemy follows walk, turn
+  and hold orders without shooting, then fights; one that can leap leaps
+  to a high point and a battle droid doesn't. `rc_script_check` also counts
+  the places scripts send characters to that it can find.
 
 ## Sounds
 
@@ -2283,11 +2373,13 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   look and gyro) borrows the original GAME page with `texts`, `moves` and
   `hidden_rows`. The screen size opens a drop-down list made from the
   page's own pieces (`screens::drop_down`); other values change only with
-  their arrows. The size list starts with FULL SCREEN and holds only sizes
-  that fit the primary monitor (`option_settings::items`, monitor read in
-  `focus_new_page`). `screens::fit_row_labels` shrinks row labels that would
-  reach their row's first button. Changing the size in a level marks every
-  camera's `Projection` changed (`menu::apply_video`): Bevy only re-reads a
+  their arrows. The size list holds only sizes that fit the primary monitor
+  (`option_settings::items`, monitor in `display::Desktop`). On screens
+  wider than 4:3 `rc_menus::fit::spread` moves the menus apart rather than
+  shrinking anything (`docs/ORIGINAL_MENUS.md`, "Wide screens");
+  `screens::fit_row_labels` shrinks row labels that would reach their row's
+  first button only where that isn't enough (4:3). Changing the size in a
+  level marks every camera's `Projection` changed (`display::apply_video`): Bevy only re-reads a
   camera's target size on a resize event or a projection change, so before
   this the player camera resized while the arms and sky cameras kept the old
   size, and the GPU refused to draw ("Attachments have differing sizes").

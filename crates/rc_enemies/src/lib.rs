@@ -15,10 +15,16 @@
 //! droids are fighting. Each droid is the game's animated `BattleDroid`
 //! mesh, posed on the CPU every frame.
 //!
+//! Level scripts can take a character over (`scripted.rs`): walk it
+//! somewhere, turn it to the player, play one of its own animations,
+//! teleport, hide or remove it, as `rc_game_core::CharacterOrder`s from
+//! the level scripts part, which waits for `CharacterOrderDone`.
+//!
 //! Everything it does is logged to the game log with the prefix `enemies:`.
 
 pub mod look;
 pub mod save;
+pub mod scripted;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -35,7 +41,7 @@ use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, CurrentLevel, FactoryOrder, GameLog, GamePaths, GameSet, GameState, LevelCollision,
-    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent,
+    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
 };
 use rc_nav::NavGraph;
 use rc_package::Package;
@@ -61,11 +67,13 @@ impl Plugin for EnemiesPlugin {
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
             .add_message::<FactoryOrder>()
+            .add_message::<rc_game_core::CharacterOrder>()
+            .add_message::<rc_game_core::CharacterOrderDone>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
                 Update,
-                (hear_level, think, place_droids)
+                (hear_level, scripted::follow_orders, think, place_droids)
                     .chain()
                     .in_set(GameSet::Simulate)
                     .before(CombatSet::Fire)
@@ -106,6 +114,11 @@ pub struct Fight {
     /// What the level's events did to the spawners, handled with the
     /// battle's own events on the next step.
     pub queued: Vec<BattleEvent>,
+    /// Level scripts waiting for a droid to finish an order: by droid id,
+    /// the script and action.
+    pub script_waits: HashMap<u32, (String, usize)>,
+    /// Droids that finished a script's order this frame.
+    pub script_done: Vec<u32>,
 }
 
 /// Counts for the log and for tests.
@@ -129,6 +142,10 @@ pub struct FightStats {
     pub grenades_thrown: u32,
     /// Close-up hits enemies swung (force pikes), hit or miss.
     pub melee_swings: u32,
+    /// What level scripts had enemies do, in order, for the log and the
+    /// self-tests: `walk ID TO`, `anim ID NAME SECONDS`, `no anim ID
+    /// NAME`, `done ID SCRIPT#INDEX at X Y Z`, `removed ID`, ...
+    pub scripted: Vec<String>,
 }
 
 impl Fight {
@@ -141,6 +158,8 @@ impl Fight {
             restored: Vec::new(),
             restored_health: HashMap::new(),
             queued: Vec::new(),
+            script_waits: HashMap::new(),
+            script_done: Vec::new(),
         }
     }
 }
@@ -154,9 +173,16 @@ pub struct Droid {
     pub pose: Pose,
     /// Frame of the current animation.
     pub frame: f32,
+    /// Smooths the change from one animation to the next.
+    pub blend: rc_anim::Crossfade,
+    /// A level script's animation was shown last frame.
+    showing_script: bool,
     /// Battle time of its last shot.
     last_fire: f32,
     mesh: Option<Handle<Mesh>>,
+    /// An animation a level script is playing on it, in place of the one
+    /// its moves choose.
+    pub scripted: Option<scripted::ScriptedAnim>,
 }
 
 /// Each enemy type's mesh, read once from the game and kept between maps.
@@ -741,8 +767,11 @@ fn think(
                         kind: p.kind.id.clone(),
                         pose: Pose::Idle,
                         frame: 0.0,
+                        blend: rc_anim::Crossfade::default(),
+                        showing_script: false,
                         last_fire: f32::NEG_INFINITY,
                         mesh: mesh.clone(),
+                        scripted: None,
                     },
                     match fight.restored_health.remove(&id) {
                         Some(h) => Health {
@@ -770,6 +799,14 @@ fn think(
                 if !p.combat.damage_table.is_empty() {
                     e.insert(DamageTable(p.combat.damage_table.clone()));
                 }
+                // What the level's scripts call it, and the script it
+                // follows.
+                let o = fight.battle.offspring(id).unwrap_or_default();
+                e.insert(ScriptTags {
+                    tag: o.tag,
+                    script: o.script,
+                    follows_orders: true,
+                });
                 if let (Some(mesh), Some(material)) = (mesh, tl.and_then(|t| t.material.as_ref())) {
                     // The points move every frame, so Bevy's stored outline
                     // would be wrong: don't let it skip drawing by it.
@@ -897,6 +934,18 @@ fn think(
                     AiEvent::Route { nodes, length } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: route of {nodes} nodes, {length:.0} uu"
                     )),
+                    AiEvent::ScriptDone => {
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} finished the script's order"
+                        ));
+                        fight.script_done.push(id);
+                    }
+                    AiEvent::Leapt => {
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} leapt to the script's point"
+                        ));
+                        fight.stats.scripted.push(format!("leapt {id}"));
+                    }
                     other => log.line(format!("{PART}: t={now:.1}s droid {id}: {other:?}")),
                 }
             }
@@ -1168,10 +1217,48 @@ fn animate(
         let Ok(mut d) = droids.get_mut(e) else {
             continue;
         };
+        let d = &mut *d;
+        // A level script's animation, while the script holds it still.
+        if d.scripted.is_some() {
+            let holding = matches!(f.script, Some(rc_ai::ScriptGoal::Hold { .. }));
+            if !holding || f.mode == Mode::Dead {
+                d.scripted = None;
+                d.frame = 0.0;
+            }
+        }
+        if let Some(sa) = d.scripted.as_mut() {
+            sa.advance(dt);
+            // Blend into the script's animation as into any other.
+            if d.showing_script {
+                d.blend.advance(dt);
+            } else {
+                d.showing_script = true;
+                d.blend.start(f.params.look.blend_time);
+            }
+            let (Some(look), Some(handle), Some(meshes)) = (
+                looks.by_type.get(&d.kind).map(|t| &t.look),
+                &d.mesh,
+                meshes.as_mut(),
+            ) else {
+                continue;
+            };
+            let target = look.local_clip(&sa.clip, sa.frame);
+            let points = look.posed_local(d.blend.apply(target));
+            let (pos, normals) = look.wedge_attributes(&points);
+            if let Some(mut m) = meshes.get_mut(handle) {
+                m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+                m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            }
+            continue;
+        }
         let pose = choose_pose(f, now - d.last_fire < FIRE_POSE_TIME, now);
-        if pose != d.pose {
+        if pose != d.pose || d.showing_script {
+            d.showing_script = false;
             d.pose = pose;
             d.frame = 0.0;
+            d.blend.start(pose.blend_time(&f.params.look));
+        } else {
+            d.blend.advance(dt);
         }
         let Some(look) = looks.by_type.get(&d.kind).map(|t| &t.look) else {
             continue;
@@ -1185,15 +1272,16 @@ fn animate(
             (d.frame + dt * clip.rate).rem_euclid(clip.num_frames.max(1.0))
         };
         // A body that finished falling doesn't need posing again.
-        if d.pose.once() && before == last && d.frame == last {
+        if d.pose.once() && before == last && d.frame == last && !d.blend.blending() {
             continue;
         }
-        let (Some(handle), Some(meshes)) = (&d.mesh, meshes.as_mut()) else {
+        let (Some(handle), Some(meshes)) = (d.mesh.clone(), meshes.as_mut()) else {
             continue;
         };
-        let points = look.posed(d.pose, d.frame);
+        let target = look.local_pose(d.pose, d.frame);
+        let points = look.posed_local(d.blend.apply(target));
         let (pos, normals) = look.wedge_attributes(&points);
-        if let Some(mut m) = meshes.get_mut(handle) {
+        if let Some(mut m) = meshes.get_mut(&handle) {
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
             m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         }

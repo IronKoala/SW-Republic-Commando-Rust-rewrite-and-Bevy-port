@@ -589,6 +589,27 @@ fn steps() -> Vec<Step> {
             10.0,
         ),
         Check("spawners and scripts agree", level_spawn_summary),
+        // Script actions on characters: geo_01a's "LoneRanger", a
+        // Geonosian warrior whose spawner gives him the sequence
+        // LoneRangerAI. On LoneRangerJump he walks to a point, turns to
+        // the player, plays EmoteSeeEnemy, walks on, and is removed; the
+        // sequence waits for each walk and the animation.
+        Note(cast_spawn),
+        Until(
+            "the lone Geonosian appears with his script",
+            cast_appeared,
+            10.0,
+        ),
+        Check(
+            "he answers to his tag and follows LoneRangerAI",
+            cast_tagged,
+        ),
+        Note(cast_go),
+        Until("his sequence finishes", cast_finished, 90.0),
+        Check(
+            "he walked, turned, played his animation and was removed, each when the script said",
+            cast_summary,
+        ),
         Press(Action::Pause),
         Wait(0.3),
         Check("pause key pauses", |w| {
@@ -1371,7 +1392,8 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
         .get(name)
         .cloned()
         .ok_or("no screenshot")?;
-    let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
+    let across = w.resource::<OriginalMenus>().across;
+    let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32), across);
     let ours = shrink(&shot, area, W, H);
     let mut menus = w.resource_mut::<OriginalMenus>();
     let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
@@ -2133,6 +2155,149 @@ const SPAWN_DEATH_EVENT: &str = "DeadGunnerDroid";
 
 /// The bunker spawners, and the living droids they made: (id, feet,
 /// spawner location).
+const CAST_SPAWN: &str = "SpawnTrench02";
+const CAST_GO: &str = "LoneRangerJump";
+const CAST_TAG: &str = "LoneRanger";
+const CAST_SCRIPT: &str = "LoneRangerAI";
+const CAST_SEQUENCE: &str = "ScriptedSequence21";
+
+fn cast_spawn(w: &mut World) {
+    if let Some(mut s) = w.get_resource_mut::<rc_scripts_plugin::LevelScript>() {
+        s.director.fire(CAST_SPAWN, "self-test");
+    }
+}
+
+fn cast_go(w: &mut World) {
+    if let Some(mut s) = w.get_resource_mut::<rc_scripts_plugin::LevelScript>() {
+        s.director.fire(CAST_GO, "self-test");
+    }
+}
+
+/// The living characters tagged LoneRanger: (entity, what scripts call
+/// them).
+fn cast_members(w: &mut World) -> Vec<(Entity, rc_game_core::ScriptTags)> {
+    let mut q = w.query_filtered::<(Entity, &rc_game_core::ScriptTags), Without<rc_combat::Dead>>();
+    q.iter(w)
+        .filter(|(_, t)| {
+            t.tag
+                .as_deref()
+                .is_some_and(|x| x.eq_ignore_ascii_case(CAST_TAG))
+        })
+        .map(|(e, t)| (e, t.clone()))
+        .collect()
+}
+
+fn cast_appeared(w: &mut World) -> bool {
+    !cast_members(w).is_empty()
+}
+
+fn cast_state(w: &mut World) -> String {
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .and_then(|s| {
+            s.director
+                .script_states()
+                .into_iter()
+                .find(|(n, ..)| n.eq_ignore_ascii_case(CAST_SEQUENCE))
+        })
+        .map_or("no such sequence".into(), |(_, next, what)| {
+            format!("at {next}, {what}")
+        })
+}
+
+fn cast_tagged(w: &mut World) -> Result<String, String> {
+    let m = cast_members(w);
+    let state = cast_state(w);
+    let got = format!(
+        "{} tagged {CAST_TAG}, scripts {:?}, follow orders {:?}; {CAST_SEQUENCE} {state}",
+        m.len(),
+        m.iter().map(|(_, t)| t.script.clone()).collect::<Vec<_>>(),
+        m.iter().map(|(_, t)| t.follows_orders).collect::<Vec<_>>()
+    );
+    let ok = m.len() == 1
+        && m[0]
+            .1
+            .script
+            .as_deref()
+            .is_some_and(|s| s.eq_ignore_ascii_case(CAST_SCRIPT))
+        && m[0].1.follows_orders
+        && state.contains(&CAST_GO.to_ascii_lowercase());
+    if ok {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// His sequence is over and its last order (removing him) has landed.
+fn cast_finished(w: &mut World) -> bool {
+    cast_state(w).contains("finished") && cast_members(w).is_empty()
+}
+
+fn cast_summary(w: &mut World) -> Result<String, String> {
+    let left = cast_members(w).len();
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no level scripts".into());
+    };
+    let place = |t: &str| s.places.find(t).map(|p| p.location);
+    let (jump, kill) = (
+        place("JumpDestForLoneRanger"),
+        place("KillPointForLoneRanger"),
+    );
+    let done: Vec<String> = s
+        .stats
+        .character_done
+        .iter()
+        .filter(|d| d.starts_with(CAST_SEQUENCE))
+        .cloned()
+        .collect();
+    let orders: Vec<String> = s
+        .stats
+        .character_orders
+        .iter()
+        .filter(|o| o.contains(CAST_SCRIPT) || o.contains(CAST_TAG))
+        .cloned()
+        .collect();
+    let fight = w.resource::<rc_enemies::Fight>();
+    let log: Vec<String> = fight
+        .stats
+        .scripted
+        .iter()
+        .filter(|l| l.contains(CAST_SEQUENCE))
+        .cloned()
+        .collect();
+    // Where he was when each walk was reported done, against the map's
+    // points.
+    let at = |index: usize| -> Option<rc_movement::Vec3> {
+        let l = log
+            .iter()
+            .find(|l| l.contains(&format!("{CAST_SEQUENCE}#{index} at")))?;
+        let n: Vec<f32> = l
+            .rsplit(" at ")
+            .next()?
+            .split(' ')
+            .filter_map(|x| x.parse().ok())
+            .collect();
+        (n.len() == 3).then(|| rc_movement::Vec3::new(n[0], n[1], n[2]))
+    };
+    let off = |p: Option<rc_movement::Vec3>, q: Option<[f32; 3]>| match (p, q) {
+        (Some(p), Some(q)) => (p - rc_movement::Vec3::new(q[0], q[1], q[2])).length_2d(),
+        _ => f32::INFINITY,
+    };
+    let (d1, d4) = (off(at(1), jump), off(at(4), kill));
+    let got = format!(
+        "done by the character {done:?}; walks ended {d1:.0} and {d4:.0} uu from their points; orders {orders:?}; enemies part {log:?}; {left} still in the level"
+    );
+    let has = |i: usize| done.iter().any(|d| d.ends_with(&format!("#{i}")));
+    // #1 and #4 walks, #2 turn, #3 animation: each finished by him, not by
+    // the time-out; then #5 removed him.
+    let anim_ok = log.iter().any(|l| l.starts_with("anim EmoteSeeEnemy"));
+    if has(1) && has(2) && has(3) && has(4) && d1 < 100.0 && d4 < 100.0 && anim_ok && left == 0 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 fn bunker_droids(
     w: &World,
 ) -> Result<(usize, Vec<(u32, rc_movement::Vec3, rc_movement::Vec3)>), String> {

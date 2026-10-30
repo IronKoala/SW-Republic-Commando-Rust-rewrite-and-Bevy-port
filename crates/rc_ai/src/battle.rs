@@ -227,6 +227,29 @@ impl Battle {
             .collect()
     }
 
+    /// The living fighters that follow the level script `script` (a
+    /// `ScriptedSequence`'s tag, given by their spawner).
+    pub fn following(&self, script: &str) -> Vec<u32> {
+        self.alive()
+            .filter(|f| {
+                self.offspring(f.id)
+                    .and_then(|o| o.script)
+                    .is_some_and(|t| t.eq_ignore_ascii_case(script))
+            })
+            .map(|f| f.id)
+            .collect()
+    }
+
+    /// A script removed a fighter (`ACTION_DestroyPawn`): gone without
+    /// dying, so no death event. Returns the [`BattleEvent::Removed`] for
+    /// the game to remove its body, if it was alive.
+    pub fn remove(&mut self, id: u32) -> Option<BattleEvent> {
+        let f = self.fighter_mut(id).filter(|f| f.mode != Mode::Dead)?;
+        let mut ev = Vec::new();
+        f.kill(&mut ev);
+        Some(BattleEvent::Removed { id })
+    }
+
     /// An event was sent in the level: every spawner whose tag it names
     /// switches on, or off if it was on (as in the original). Spawners a
     /// script switched off for good ignore it.

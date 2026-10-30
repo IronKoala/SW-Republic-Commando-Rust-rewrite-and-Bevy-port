@@ -12,9 +12,20 @@
 sound_seconds = 3.0
 # A script that plays an animation and waits for its end waits this long.
 anim_seconds = 1.5
-# A character told to walk somewhere (ACTION_MoveToPoint) is taken to be
-# there after this long. Characters don't follow scripts yet.
+# Without the game (rc_script_check), a character told to walk somewhere
+# (ACTION_MoveToPoint) is taken to be there after this long.
 move_seconds = 2.0
+# In the game the characters really walk, turn and play animations, and a
+# script waits until they're done. These are the longest it waits before
+# carrying on anyway (a character stuck on the way, an animation the game
+# can't play yet). Our own choices.
+move_timeout_seconds = 30.0
+anim_timeout_seconds = 10.0
+turn_timeout_seconds = 2.0
+# A character a spawner makes appears a frame after the event that switched
+# the spawner on, while its script may already be running. An action that
+# finds nobody waits this long for them before it is skipped.
+character_grace_seconds = 1.0
 # Random waits (ACTION_WaitForRandomTimer) use this seed, so a run can be
 # repeated exactly.
 random_seed = 1138

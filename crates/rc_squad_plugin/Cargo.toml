@@ -13,6 +13,7 @@ rc_nav = { path = "../rc_nav" }
 rc_package = { path = "../rc_package" }
 rc_squad = { path = "../rc_squad" }
 # The original Sev, Fixer and Scorch models, read from the game.
+rc_anim = { path = "../rc_anim" }
 rc_model = { path = "../rc_model" }
 # Reading data/squad/looks.toml, and the [squad] section of save files. serde (MIT OR Apache-2.0),
 # https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.

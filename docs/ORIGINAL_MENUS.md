@@ -42,9 +42,12 @@ How it works:
   rewritten by hand: the border grows by one row for QUIT, Xbox Live and
   controller items are hidden, NEW GAME starts `PRO`, QUIT asks "are you
   sure?" (starting on NO), and so on. No script text is copied.
+- `rc_menus::fit` spreads a menu over a screen wider than 4:3 (see
+  "Wide screens" below).
 - `rc_game/src/original_menu.rs` draws the rectangles with Bevy UI in the
-  largest centred 4:3 area of the window (black at the sides), and moves
-  focus with the menu actions, so keyboard, gamepad and mouse all work.
+  menu area (the whole screen up to 21.5:9, a centred 4:3 area on taller
+  screens), and moves focus with the menu actions, so keyboard, gamepad
+  and mouse all work.
 - Colours: the original multiplied and blended colours in sRGB numbers,
   Bevy does it in linear light. `rc_menus::gpu` bakes each tint into its
   own copy of the picture and adjusts transparency so the result matches
@@ -159,17 +162,61 @@ or Enter / A) opens a drop-down list, which the original doesn't have. It is
 built only from pieces of the page (`rc_menus::screens::drop_down`): the
 page's own display box over a black square, and copies of the chooser for
 its rows. It shows 10 sizes and scrolls with the keys or the mouse wheel; a
-click outside or Back closes it. The list starts with FULL SCREEN and then
-only offers window sizes that fit the monitor (a window can't be bigger than
-the screen it is on), plus the current size.
+click outside or Back closes it. The list offers the sizes that fit the
+monitor (a window can't be bigger than the screen it is on), the monitor's
+own size and the current size. Full screen is not in this list: it is the
+DISPLAY MODE row on PORT + (WINDOWED, BORDERLESS, FULL SCREEN; see
+`rc_game/src/display.rs`).
 
 Long setting names (AUTO PULL MANEUVERS, TACTICAL VISOR MODE, BUMPMAPPING
-QUALITY and others) can run into the arrows, because our font is wider than
-the original's. `rc_menus::screens::fit_row_labels` shrinks any label that
-would reach the first button of its row, keeping its left edge and middle
-line. It works on the 4:3 menu area, so it holds at any window shape. The
+QUALITY and others) can run into the arrows on a 4:3 screen, because our
+font is wider than the original's. On wider screens the names and the
+arrows move apart (below). Only where that isn't enough (4:3 and taller)
+does `rc_menus::screens::fit_row_labels` shrink a label that would reach
+the first button of its row, keeping its left edge and middle line. The
 log names the labels it shrank ("labels shrunk to fit before their
-arrows").
+arrows") and any text still running into a button ("STILL OVERLAPPING").
+
+## Wide screens: moving apart, not shrinking
+
+The user asked (2026-10-30) for the menus to fit every screen shape we
+support, preferring to move things apart over shrinking them. Phones only
+need landscape. `rc_menus::fit::spread` does it, on a copy of each page
+every time it is drawn:
+
+- Every picture and letter keeps the size it has on a 4:3 screen of the
+  same height. The menu is `across` 4:3 widths wide: the screen's shape
+  over 4:3, at least 1, up to `[fit] widest_shape` in
+  `data/ui/original_menus.toml` (2.4, which covers 21:9 monitors; wider
+  screens get black at the sides).
+- Widgets that touch form groups. A text joins only pictures it touches,
+  never a button or another text, so an option's name and its value are
+  separate groups.
+- Each group keeps its middle at the same fraction of the width (so gaps
+  grow, nothing overlaps that didn't, and nothing leaves the screen).
+- Big stretchable boxes ("frames": `MSCM_Stretch`/`FitStretch` sprites at
+  least 0.3 wide and 0.15 high) widen when they hold groups at both their
+  left and right edges: groups at the left edge stay with it, groups at
+  the right edge go with the right edge, others keep their fraction. A
+  frame lined up with a widening frame widens too (the help box under the
+  options box). Groups touching a widening frame from outside (the tabs
+  and their connectors) keep touching it, and the frame's edges are placed
+  so those groups keep the same share of the screen at the sides as on
+  4:3. A centred text on its own (the help line) counts as middle, so the
+  layout doesn't change with the button in focus.
+- A frame that doesn't widen moves as one with what it holds (the main
+  menu's button box). A stretchable bar joining a group to such a frame
+  (the main menu's MAIN MENU bar) grows to keep joining it.
+- Backdrops (pictures covering the whole menu) grow to cover the screen,
+  keeping their shape (a little is cut off at the top and bottom).
+- The drop-down list moves with the value it opened from.
+
+The game logs each page once per screen shape: "original menus: options
+at 2.37 wide: 14 groups spread over 1.78 4:3 widths, widened OptionsBorder,
+OptionsDescBorder (OptionsBorder holds [...] at its left and [...] at its
+right)". `rc_probe --pages` and `rc_probe --menu` paint every page at 16:9,
+21:9 and 32:9 as well as 4:3 (`extracted/menus/<class>_16x9.png` and so on)
+and log the same, plus any text still running into a button.
 
 Greyed out for now: subtitles, helmet and prompt options, auto pull, visor
 and its intensity, sound quality, 3D sound, EAX, channels, graphics quality

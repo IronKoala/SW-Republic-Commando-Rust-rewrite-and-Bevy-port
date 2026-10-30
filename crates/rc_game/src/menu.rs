@@ -78,7 +78,7 @@ pub enum Opt {
     FieldOfView,
     Difficulty,
     MasterVolume,
-    Fullscreen,
+    DisplayMode,
     Panini,
     StickLookSpeed,
     LookStickDeadZone,
@@ -273,14 +273,13 @@ pub fn items(
             let v = &settings.video;
             let c = &settings.controls;
             let g = &settings.gyro;
-            let on = |b: bool| if b { "on" } else { "off" };
             (
                 // Marked: this page is ours, not the original's.
                 "MORE SETTINGS (PLACEHOLDER)".into(),
                 vec![
                     it(&format!("Field of view   < {:.0} >", v.fov), Cmd::Setting(Opt::FieldOfView)),
                     it(&format!("Wide-screen correction (Panini)   < {:.0}% >", v.panini * 100.0), Cmd::Setting(Opt::Panini)),
-                    it(&format!("Full screen   < {} >", on(v.fullscreen)), Cmd::Setting(Opt::Fullscreen)),
+                    it(&format!("Display mode   < {:?} >", v.display_mode), Cmd::Setting(Opt::DisplayMode)),
                     it(&format!("Master volume   < {:.0}% >", settings.audio.master_volume * 100.0), Cmd::Setting(Opt::MasterVolume)),
                     it(&format!("Controller look speed   < {:.1} >", c.stick_look_speed), Cmd::Setting(Opt::StickLookSpeed)),
                     it(&format!("Controller look dead zone   < {:.2} >", c.look_stick_dead_zone), Cmd::Setting(Opt::LookStickDeadZone)),
@@ -492,7 +491,12 @@ fn change_setting(s: &mut Settings, o: Opt, step: i32) {
         Opt::MasterVolume => {
             s.audio.master_volume = (s.audio.master_volume + 0.1 * f).clamp(0.0, 1.0)
         }
-        Opt::Fullscreen => s.video.fullscreen = !s.video.fullscreen,
+        Opt::DisplayMode => {
+            use crate::settings::DisplayMode::*;
+            let all = [Windowed, Borderless, Fullscreen];
+            let i = all.iter().position(|m| *m == s.video.display_mode).unwrap_or(0) as i32;
+            s.video.display_mode = all[(i + step).rem_euclid(3) as usize];
+        }
         Opt::Panini => s.video.panini = (s.video.panini + 0.1 * f).clamp(0.0, 1.0),
         Opt::StickLookSpeed => {
             s.controls.stick_look_speed = (s.controls.stick_look_speed + 0.25 * f).clamp(0.5, 8.0)
@@ -546,59 +550,6 @@ pub fn apply_settings(
     *fov = FieldOfView::from_settings(&settings);
     *look = LookSettings::from_settings(&settings);
     *gyro = settings.gyro.clone();
-}
-
-/// Screen size, full screen and vsync changed in the options take effect at
-/// once. The window keeps a size the player dragged it to until the
-/// setting itself changes.
-pub fn apply_video(
-    settings: Res<Settings>,
-    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
-    mut projections: Query<&mut Projection>,
-    mut last: Local<Option<crate::settings::VideoSection>>,
-    log: Res<GameLog>,
-) {
-    use bevy::window::{MonitorSelection, PresentMode, WindowMode};
-    let v = &settings.video;
-    let Some(before) = last.replace(v.clone()) else {
-        // The window was made from these settings.
-        return;
-    };
-    if !settings.is_changed() {
-        return;
-    }
-    let Ok(mut w) = windows.single_mut() else {
-        return;
-    };
-    if (before.width, before.height) != (v.width, v.height) {
-        w.resolution.set(v.width as f32, v.height as f32);
-        log.line(format!("menu: window size now {}x{}", v.width, v.height));
-        // Every camera must take the new size in the same frame. Bevy
-        // only re-reads a camera's size when its window reports a resize
-        // or its projection changes; the player's camera changes its
-        // projection at once (the view widens), so without this the arms'
-        // and sky's cameras keep the old size for a frame and the GPU
-        // stops the game ("attachments have differing sizes").
-        for mut p in &mut projections {
-            p.set_changed();
-        }
-    }
-    if before.fullscreen != v.fullscreen {
-        w.mode = if v.fullscreen {
-            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-        } else {
-            WindowMode::Windowed
-        };
-        log.line(format!("menu: full screen {}", v.fullscreen));
-    }
-    if before.vsync != v.vsync {
-        w.present_mode = if v.vsync {
-            PresentMode::AutoVsync
-        } else {
-            PresentMode::AutoNoVsync
-        };
-        log.line(format!("menu: vsync {}", v.vsync));
-    }
 }
 
 #[allow(clippy::too_many_arguments)]

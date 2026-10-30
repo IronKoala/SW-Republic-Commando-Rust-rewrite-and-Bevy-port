@@ -314,6 +314,33 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
 #[serde(default, deny_unknown_fields)]
 struct PagesFile {
     pages: BTreeMap<String, PageDef>,
+    fit: FitDef,
+}
+
+/// `[fit]`: how menus use screens wider than 4:3 (`fit.rs`).
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FitDef {
+    widest_shape: f32,
+}
+
+impl Default for FitDef {
+    fn default() -> Self {
+        FitDef {
+            widest_shape: DEFAULT_WIDEST_SHAPE,
+        }
+    }
+}
+
+/// The widest screen shape (width over height) menus spread out to; on a
+/// wider screen they stay in a centred area this shape. 21.5:9 covers the
+/// usual ultrawide monitors.
+pub const DEFAULT_WIDEST_SHAPE: f32 = 2.4;
+
+/// `[fit] widest_shape` from `data/ui/original_menus.toml` (0 is no limit).
+pub fn parse_widest_shape(text: &str) -> Result<f32, String> {
+    let f: PagesFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    Ok(f.fit.widest_shape.max(0.0))
 }
 
 #[derive(Deserialize)]
