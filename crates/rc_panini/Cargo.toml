@@ -1,0 +1,23 @@
+[package]
+name = "rc_panini"
+version = "0.1.0"
+edition.workspace = true
+description = "The optional Panini view: bends a very wide 3D view so things near the screen's sides aren't stretched."
+
+[dependencies]
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The renderer's full-screen
+# pass (FullscreenMaterial) for the bend.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["default_app", "std", "3d_bevy_render"]
+
+[dev-dependencies]
+# Saving the check's screenshots. image (MIT OR Apache-2.0),
+# https://github.com/image-rs/image.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["default_app", "std", "3d_bevy_render", "bevy_winit", "x11", "wayland", "png"]
