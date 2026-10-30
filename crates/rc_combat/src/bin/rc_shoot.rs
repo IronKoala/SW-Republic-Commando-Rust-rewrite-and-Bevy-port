@@ -5,9 +5,12 @@
 //! Usage:
 //!   rc_shoot [--script] [--frames N]
 //!
-//! Controls: the mouse aims, left button fires, R reloads, Q or the mouse
-//! wheel switches weapon. Click the window to capture the mouse, Escape to
-//! let it go. The window's title shows the ammo, health and shield.
+//! Controls (the same as the game's `data/input/bindings.toml`): the mouse
+//! aims, left button fires, right button throws a grenade, Q picks the next
+//! grenade, the mouse wheel or / switches weapon (rifle, sniper,
+//! anti-armour, pistol), Z or the middle button zooms (sniper), V hits with
+//! melee, R reloads. Click the window to capture the mouse, Escape to let
+//! it go. The window's title shows the ammo, health and shield.
 //!
 //! Keys are mapped to the game's actions here only for this test program;
 //! the game itself (rc_game) reads them from `data/input/bindings.toml`.
@@ -242,7 +245,10 @@ fn main() {
         Update,
         (count_shots, targets_fall_and_stand, targets_shoot_back).in_set(GameSet::Simulate),
     )
-    .add_systems(Update, (show_readouts, count_frames).in_set(GameSet::Hud));
+    .add_systems(
+        Update,
+        (show_readouts, count_frames, apply_zoom).in_set(GameSet::Hud),
+    );
     if script {
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
             SCRIPT_DT,
@@ -434,10 +440,22 @@ fn keyboard_mouse_input(
         if buttons.pressed(MouseButton::Left) {
             now.insert(Action::Fire);
         }
+        if buttons.pressed(MouseButton::Right) {
+            now.insert(Action::ThrowGrenade);
+        }
         if keys.pressed(KeyCode::KeyR) {
             now.insert(Action::Reload);
         }
-        if keys.pressed(KeyCode::KeyQ) || scroll.delta.y < 0.0 {
+        if keys.pressed(KeyCode::KeyQ) {
+            now.insert(Action::NextGrenade);
+        }
+        if keys.pressed(KeyCode::KeyZ) || buttons.pressed(MouseButton::Middle) {
+            now.insert(Action::Zoom);
+        }
+        if keys.pressed(KeyCode::KeyV) {
+            now.insert(Action::Melee);
+        }
+        if keys.pressed(KeyCode::Slash) || scroll.delta.y < 0.0 {
             now.insert(Action::NextWeapon);
         }
         if scroll.delta.y > 0.0 {
@@ -603,6 +621,21 @@ fn targets_shoot_back(
     }
 }
 
+/// The sniper's zoom: narrow the view to the weapon's zoom step.
+fn apply_zoom(weapon: Res<WeaponReadout>, mut camera: Query<&mut Projection, With<PlayerCamera>>) {
+    let Ok(mut proj) = camera.single_mut() else {
+        return;
+    };
+    if let Projection::Perspective(p) = &mut *proj {
+        let across = weapon.zoom_fov.unwrap_or(FOV_DEGREES);
+        let aspect = 1280.0 / 720.0;
+        let fov = 2.0 * ((across.to_radians() * 0.5).tan() / aspect).atan();
+        if (p.fov - fov).abs() > 1e-5 {
+            p.fov = fov;
+        }
+    }
+}
+
 /// The window title as a simple display: weapon, ammo, health, shield.
 fn show_readouts(
     weapon: Res<WeaponReadout>,
@@ -618,8 +651,12 @@ fn show_readouts(
         (Some(c), None) => format!("{c}/{}", weapon.clip_size.unwrap_or(0)),
         _ => String::new(),
     };
+    let grenade = match &weapon.grenade {
+        Some((name, n)) => format!(" | {name} x{n}"),
+        None => String::new(),
+    };
     let title = format!(
-        "rc_shoot | {} {ammo}{} | health {:.0} shield {:.0} | droids down {}",
+        "rc_shoot | {} {ammo}{}{grenade} | health {:.0} shield {:.0} | droids down {}",
         weapon.name,
         if weapon.on_target { " [on target]" } else { "" },
         vitals.health,

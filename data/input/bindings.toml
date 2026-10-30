@@ -27,6 +27,7 @@ reload = ["KeyR"]
 next_grenade = ["KeyQ"]
 next_weapon = ["Slash"]
 zoom = ["KeyZ"]
+melee = ["KeyV"]          # our choice: the PC original's melee key isn't read yet
 use = ["KeyF", "Enter"]
 squad_command = ["KeyF"]
 flashlight = ["KeyX"]
