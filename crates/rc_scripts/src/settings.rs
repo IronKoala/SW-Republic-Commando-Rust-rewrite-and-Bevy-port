@@ -13,8 +13,20 @@ pub struct Settings {
     pub sound_volume: f32,
     /// How long an animation lasts when a script waits for its end.
     pub anim_seconds: f32,
-    /// How long a character takes to walk where a script sends it.
+    /// How long a character takes to walk where a script sends it, when
+    /// no game carries it out (the headless tools).
     pub move_seconds: f32,
+    /// In the game: the longest a script waits for a character to arrive
+    /// where it sent it before it carries on anyway.
+    pub move_timeout_seconds: f32,
+    /// In the game: the longest a script waits for an animation to end.
+    pub anim_timeout_seconds: f32,
+    /// In the game: the longest a script waits for a character to turn.
+    pub turn_timeout_seconds: f32,
+    /// In the game: how long an action waits for its characters to appear
+    /// (a factory's character comes a frame after its event) before it is
+    /// skipped.
+    pub character_grace_seconds: f32,
     /// Seed for random waits.
     pub random_seed: u64,
     /// Tags that mean the player.
@@ -41,6 +53,10 @@ impl Default for Settings {
             sound_volume: 1.0,
             anim_seconds: 1.5,
             move_seconds: 2.0,
+            move_timeout_seconds: 30.0,
+            anim_timeout_seconds: 10.0,
+            turn_timeout_seconds: 2.0,
+            character_grace_seconds: 1.0,
             random_seed: 1138,
             player_tags: vec!["PlayerCommando".into(), "Player".into()],
             prop_health: 100.0,
@@ -97,6 +113,10 @@ struct Timing {
     sound_seconds: Option<f32>,
     anim_seconds: Option<f32>,
     move_seconds: Option<f32>,
+    move_timeout_seconds: Option<f32>,
+    anim_timeout_seconds: Option<f32>,
+    turn_timeout_seconds: Option<f32>,
+    character_grace_seconds: Option<f32>,
     random_seed: Option<u64>,
 }
 
@@ -123,6 +143,18 @@ impl Settings {
         }
         if let Some(v) = t.move_seconds {
             self.move_seconds = v;
+        }
+        if let Some(v) = t.move_timeout_seconds {
+            self.move_timeout_seconds = v;
+        }
+        if let Some(v) = t.anim_timeout_seconds {
+            self.anim_timeout_seconds = v;
+        }
+        if let Some(v) = t.turn_timeout_seconds {
+            self.turn_timeout_seconds = v;
+        }
+        if let Some(v) = t.character_grace_seconds {
+            self.character_grace_seconds = v;
         }
         if let Some(v) = t.random_seed {
             self.random_seed = v;

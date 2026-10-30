@@ -240,6 +240,84 @@ fn key_pair(times: &[f32], frame: f32, num_frames: f32) -> (usize, usize, f32) {
     (a, b, t.clamp(0.0, 1.0))
 }
 
+/// Mix two poses (each bone's local transform), `t` = 0 is all `a`, 1 is
+/// all `b`. Positions are blended in a straight line and rotations the
+/// short way round.
+pub fn blend_poses(a: &[Transform], b: &[Transform], t: f32) -> Vec<Transform> {
+    let t = t.clamp(0.0, 1.0);
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| Transform {
+            rot: x.rot.slerp(y.rot, t).normalize(),
+            pos: lerp(x.pos, y.pos, t),
+        })
+        .collect()
+}
+
+/// Smooth switching from one animation to the next ("cross-fade").
+///
+/// Without it a character jumps from the last frame shown to the first
+/// frame of the new animation in one step. With it, when the animation
+/// changes the pose on screen is remembered, and over the next
+/// `duration` seconds the new animation is mixed in on top of it, slow at
+/// first and last ("ease in and out"). Switching again halfway through
+/// starts from whatever mix was on screen, so there is never a jump.
+///
+/// The original engine does this inside its compiled code; the times used
+/// are ours, set per character in its data file.
+#[derive(Debug, Clone, Default)]
+pub struct Crossfade {
+    /// The pose shown last.
+    shown: Vec<Transform>,
+    /// The pose shown when the change started.
+    from: Vec<Transform>,
+    elapsed: f32,
+    duration: f32,
+}
+
+impl Crossfade {
+    /// The animation just changed: blend into it over `duration` seconds
+    /// (0 switches at once).
+    pub fn start(&mut self, duration: f32) {
+        if duration > 0.0 && !self.shown.is_empty() {
+            self.from = self.shown.clone();
+            self.elapsed = 0.0;
+            self.duration = duration;
+        } else {
+            self.duration = 0.0;
+        }
+    }
+
+    pub fn advance(&mut self, dt: f32) {
+        self.elapsed += dt.max(0.0);
+    }
+
+    /// How much of the new animation shows, 0 to 1 (1 when not blending).
+    pub fn weight(&self) -> f32 {
+        if self.duration <= 0.0 {
+            return 1.0;
+        }
+        let x = (self.elapsed / self.duration).clamp(0.0, 1.0);
+        x * x * (3.0 - 2.0 * x)
+    }
+
+    /// Still mixing the old pose in.
+    pub fn blending(&self) -> bool {
+        self.duration > 0.0 && self.elapsed < self.duration
+    }
+
+    /// The pose to show, given the new animation's pose this frame.
+    pub fn apply(&mut self, target: Vec<Transform>) -> &[Transform] {
+        self.shown = if self.blending() && self.from.len() == target.len() {
+            blend_poses(&self.from, &target, self.weight())
+        } else {
+            self.duration = 0.0;
+            target
+        };
+        &self.shown
+    }
+}
+
 /// Per point, the bones that move it and how much (weights add up to 1).
 pub fn weights_per_point(mesh: &SkeletalMesh) -> Vec<Vec<(usize, f32)>> {
     let mut out = vec![Vec::new(); mesh.points.len()];
@@ -358,6 +436,43 @@ mod tests {
         // After the last key: blend back to the first over the last frame.
         assert_eq!(key_pair(&times, 5.5, 6.0), (2, 0, 0.5));
         assert_eq!(key_pair(&[0.0], 3.0, 6.0), (0, 0, 0.0));
+    }
+
+    #[test]
+    fn crossfade_moves_smoothly() {
+        let at = |x: f32| {
+            vec![Transform {
+                rot: Quat::IDENTITY,
+                pos: [x, 0.0, 0.0],
+            }]
+        };
+        let mut c = Crossfade::default();
+        // Nothing shown yet: the first pose shows at once.
+        c.start(0.2);
+        assert_eq!(c.apply(at(0.0))[0].pos[0], 0.0);
+        // Switch to a pose 10 units away over 0.2 s, 0.05 s a step.
+        c.start(0.2);
+        let mut shown = vec![c.apply(at(10.0))[0].pos[0]];
+        for _ in 0..5 {
+            c.advance(0.05);
+            shown.push(c.apply(at(10.0))[0].pos[0]);
+        }
+        assert_eq!(shown[0], 0.0);
+        assert!((shown[2] - 5.0).abs() < 1e-4, "halfway is half: {shown:?}");
+        assert_eq!(shown[4], 10.0);
+        assert!(!c.blending());
+        let steps: Vec<f32> = shown.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(steps.iter().all(|d| (0.0..4.0).contains(d)), "{steps:?}");
+        // Switch back halfway through another change: starts from what was
+        // on screen, not from either animation.
+        c.start(0.2);
+        c.advance(0.1);
+        let mid = c.apply(at(0.0))[0].pos[0];
+        c.start(0.2);
+        assert_eq!(c.apply(at(10.0))[0].pos[0], mid);
+        // Zero time switches at once.
+        c.start(0.0);
+        assert_eq!(c.apply(at(3.0))[0].pos[0], 3.0);
     }
 
     #[test]

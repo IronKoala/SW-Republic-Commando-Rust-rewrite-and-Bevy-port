@@ -404,6 +404,8 @@ mod tests {
             dispensers: vec![],
             hidden: Default::default(),
             held: vec![],
+            calls: vec![],
+            places: Default::default(),
             sounds: vec![],
             started: true,
             stats: Default::default(),

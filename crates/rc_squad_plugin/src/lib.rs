@@ -216,6 +216,7 @@ pub struct SquadJobQueue(pub Vec<SquadEvent>);
 pub struct SquadLooks {
     tried: bool,
     pub ambient: f32,
+    pub blend: look::BlendTimes,
     pub models: HashMap<String, Option<Arc<rc_model::Model>>>,
 }
 
@@ -234,6 +235,14 @@ impl SquadLooks {
         };
         log_line(log, format!("looks from {}", file.display()));
         self.ambient = looks.ambient;
+        self.blend = looks.blend;
+        log_line(
+            log,
+            format!(
+                "animation blend times: {:.2} s, into firing {:.2} s, into falling down {:.2} s",
+                looks.blend.time, looks.blend.fire, looks.blend.down
+            ),
+        );
         let Some(paths) = paths else {
             log_line(log, "no game folder; squad mates get stand-in bodies");
             return;
@@ -289,6 +298,7 @@ pub struct SquadPlugin;
 impl Plugin for SquadPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SquadOrder>()
+            .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<SquadJobDone>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
@@ -542,6 +552,14 @@ fn spawn_squad(
                 m.settings.shield_recharge_delay,
             ),
             Team::Republic,
+            // Level scripts name squad mates by their class
+            // (`MakeInvulnerable Tag=Commando62Delta`). Their own scripted
+            // walks aren't carried out yet.
+            rc_game_core::ScriptTags {
+                tag: Some(m.settings.class.clone()),
+                script: None,
+                follows_orders: false,
+            },
             Hittable::COMMANDO,
             // The original's squad damage table: droid bolts x0.15,
             // explosions x0.4, stuns x0.
@@ -551,7 +569,7 @@ fn spawn_squad(
             continue;
         };
         if let Some(Some(model)) = looks.models.get(&m.settings.key) {
-            let mm = look::spawn_pieces(
+            let mut mm = look::spawn_pieces(
                 model.clone(),
                 looks.ambient,
                 &mut e,
@@ -559,6 +577,7 @@ fn spawn_squad(
                 materials,
                 images,
             );
+            mm.blend_times = looks.blend;
             e.insert(mm);
         } else {
             stand_in_body(&mut e, m.settings.colour, meshes, materials);
@@ -615,6 +634,7 @@ fn take_orders(
     mut state: ResMut<SquadState>,
     actions: Option<Res<ActionState>>,
     mut orders: MessageReader<SquadOrder>,
+    mut from_scripts: MessageReader<rc_game_core::SquadStanceOrder>,
     player: Query<&Transform, With<Player>>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     collision: Option<Res<LevelCollision>>,
@@ -622,10 +642,22 @@ fn take_orders(
 ) {
     let (Some(squad), Ok(pt)) = (state.squad.as_mut(), player.single()) else {
         orders.clear();
+        from_scripts.clear();
         return;
     };
     let leader = leader_from(pt);
     let mut wanted: Vec<Order> = orders.read().map(|o| o.0).collect();
+    // The level's scripts give squad orders too.
+    for o in from_scripts.read() {
+        use rc_game_core::SquadStanceOrder as S;
+        let order = match *o {
+            S::FormUp => Order::FormUp,
+            S::SearchAndDestroy => Order::SearchAndDestroy,
+            S::SecurePosition(p) => Order::SecurePosition(UVec3::new(p[0], p[1], p[2])),
+        };
+        log_line(&log, format!("the level's script orders: {order}"));
+        wanted.push(order);
+    }
     if let Some(a) = actions {
         let aimed = || -> Option<(UVec3, UVec3)> { aim(&camera) };
         let spot = |eye: UVec3, dir: UVec3| {

@@ -106,6 +106,41 @@ impl Animations {
     }
 }
 
+/// Seconds to blend smoothly from one animation into the next (`[blend]`
+/// in the looks file; 0 snaps). Our choice: the original blends inside its
+/// compiled engine code.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct BlendTimes {
+    /// Into any animation not named below.
+    pub time: f32,
+    /// Into the firing animation, which is very short.
+    pub fire: f32,
+    /// Into falling down wounded.
+    pub down: f32,
+}
+
+impl Default for BlendTimes {
+    fn default() -> Self {
+        BlendTimes {
+            time: 0.2,
+            fire: 0.05,
+            down: 0.25,
+        }
+    }
+}
+
+impl BlendTimes {
+    pub fn for_pose(&self, p: Pose) -> f32 {
+        match p {
+            Pose::Fire => self.fire,
+            Pose::Down => self.down,
+            _ => self.time,
+        }
+        .max(0.0)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemberLook {
@@ -124,6 +159,8 @@ pub struct LooksFile {
     /// Light every squad mate always gets, 0 to 1 of its own colour.
     pub ambient: f32,
     pub animations: Animations,
+    #[serde(default)]
+    pub blend: BlendTimes,
     #[serde(default)]
     pub member: HashMap<String, MemberLook>,
 }
@@ -187,6 +224,9 @@ pub struct MateModel {
     pub pieces: Vec<Piece>,
     pub pose: Pose,
     pub frame: f32,
+    /// Smooths the change from one animation to the next.
+    pub blend: rc_anim::Crossfade,
+    pub blend_times: BlendTimes,
     /// Shots fired when last looked at, and the time of the last one.
     shots: u32,
     since_shot: f32,
@@ -280,6 +320,8 @@ pub fn spawn_pieces(
         pieces,
         pose: Pose::Idle,
         frame: 0.0,
+        blend: rc_anim::Crossfade::default(),
+        blend_times: BlendTimes::default(),
         shots: 0,
         since_shot: f32::INFINITY,
     }
@@ -361,6 +403,10 @@ fn animate_one(
     if pose != mm.pose {
         mm.pose = pose;
         mm.frame = 0.0;
+        let t = mm.blend_times.for_pose(pose);
+        mm.blend.start(t);
+    } else {
+        mm.blend.advance(dt);
     }
     let (rate, frames) = match mm.model.clip(pose.key()) {
         Some(c) => (c.rate, c.num_frames),
@@ -374,13 +420,14 @@ fn animate_one(
         (mm.frame + dt * rate).rem_euclid(frames.max(1.0))
     };
     // A body that finished falling doesn't need posing again.
-    if pose.once() && before == last && mm.frame == last {
+    if pose.once() && before == last && mm.frame == last && !mm.blend.blending() {
         return;
     }
     let Some(meshes) = meshes else {
         return;
     };
-    let points = mm.model.posed(pose.key(), mm.frame);
+    let target = mm.model.local_pose(pose.key(), mm.frame);
+    let points = mm.model.posed_local(mm.blend.apply(target));
     let normals = mm.model.normals(&points);
     for p in &mm.pieces {
         let (pos, nrm) =

@@ -12,6 +12,7 @@
 //! moves the mesh's points on the CPU ("skinning"), and the caller copies
 //! the new positions into its meshes.
 
+use rc_anim::math::Transform;
 use rc_anim::{globals, skin, weights_per_point, Clip, Convention, Skeleton};
 use rc_image::{PixelFormat, Rgba};
 use rc_package::animation::read_mesh_animation;
@@ -586,27 +587,42 @@ impl Model {
         self.clips.get(key)
     }
 
-    /// Points posed at `frame` of animation `key` (the mesh's own pose if
-    /// it wasn't found), Unreal units relative to the mesh origin (feet not
-    /// yet lifted). The root bone's sideways travel is removed: the body
-    /// moves the character, not the animation.
-    fn pose_unreal(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {
+    /// Each bone's local transform at `frame` of animation `key` (the
+    /// mesh's own pose if it wasn't found). The root bone's sideways
+    /// travel is removed: the body moves the character, not the animation.
+    pub fn local_pose(&self, key: &str, frame: f32) -> Vec<Transform> {
         let Some(clip) = self.clips.get(key) else {
-            let pose = globals(&self.skeleton.parents, &self.skeleton.local);
-            return skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
-                .into_iter()
-                .map(|p| mesh_point(&self.mesh, p))
-                .collect();
+            return self.skeleton.local.clone();
         };
         let mut local = clip.sample(&self.skeleton, frame);
         if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
             l.pos[0] = rest.pos[0];
             l.pos[1] = rest.pos[1];
         }
-        let pose = globals(&self.skeleton.parents, &local);
+        local
+    }
+
+    /// Points posed at `frame` of `key`, Unreal units relative to the mesh
+    /// origin (feet not yet lifted).
+    fn pose_unreal(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {
+        let pose = globals(&self.skeleton.parents, &self.local_pose(key, frame));
         skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
             .into_iter()
             .map(|p| mesh_point(&self.mesh, p))
+            .collect()
+    }
+
+    /// Points for bones placed at `local` (from `local_pose`, perhaps
+    /// blended), in Bevy units relative to the feet, before the
+    /// character's facing is applied.
+    pub fn posed_local(&self, local: &[Transform]) -> Vec<[f32; 3]> {
+        let pose = globals(&self.skeleton.parents, local);
+        skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
+            .into_iter()
+            .map(|p| {
+                let p = mesh_point(&self.mesh, p);
+                to_bevy([p[0], p[1], p[2] + self.lift])
+            })
             .collect()
     }
 
@@ -630,10 +646,7 @@ impl Model {
     /// Points posed at `frame` of animation `key`, in Bevy units relative
     /// to the feet, before the character's facing is applied.
     pub fn posed(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {
-        self.pose_unreal(key, frame)
-            .into_iter()
-            .map(|p| to_bevy([p[0], p[1], p[2] + self.lift]))
-            .collect()
+        self.posed_local(&self.local_pose(key, frame))
     }
 
     /// Smooth normals per mesh point, for posed `points`.

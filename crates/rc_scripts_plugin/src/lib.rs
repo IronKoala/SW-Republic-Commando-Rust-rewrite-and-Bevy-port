@@ -33,12 +33,19 @@
 //!   `ACTION_PlayLocalSound`) play from the game's own sound packages, read
 //!   while the level loads; a script waiting for a line waits for its real
 //!   length (see `sounds.rs`).
+//! - characters: actions that name a character, or that belong to the
+//!   `ScriptedSequence` a character runs, go to that character (walk
+//!   there, turn to the player, play an animation, can't be hurt, ...;
+//!   see `characters.rs`). The script waits for walks and animations to
+//!   finish.
 //!
-//! Everything else a script does (animations, characters walking) is logged as "not done yet" with the script's own
-//! comment. Every event and effect is logged with a `scripts:` prefix, and
+//! Everything else a script does (camera moves, ...) is logged as "not
+//! done yet" with the script's own comment. Every event and effect is
+//! logged with a `scripts:` prefix, and
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
+pub mod characters;
 pub mod save;
 pub mod sounds;
 
@@ -78,13 +85,16 @@ impl Plugin for ScriptsPlugin {
             .add_message::<RaiseEvent>()
             .add_message::<FactoryOrder>()
             .add_message::<CheckpointReached>()
+            .add_message::<rc_game_core::CharacterOrder>()
+            .add_message::<rc_game_core::CharacterOrderDone>()
+            .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<ChangeLevel>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
                 Update,
-                (bacta, run, sounds::play, hide_parts)
+                (bacta, run, characters::cast, sounds::play, hide_parts)
                     .chain()
                     .in_set(ScriptSystems)
                     .in_set(GameSet::Simulate)
@@ -153,6 +163,10 @@ pub struct LevelScript {
     hidden: HashSet<usize>,
     /// Checkpoints waiting for the player to be up.
     held: Vec<String>,
+    /// Actions on characters waiting to be carried out.
+    pub calls: Vec<characters::Call>,
+    /// Where scripts can send characters.
+    pub places: characters::Places,
     /// Sounds the scripts asked for this frame.
     sounds: Vec<sounds::SoundRequest>,
     started: bool,
@@ -182,6 +196,17 @@ pub struct PlayStats {
     /// Sounds asked for that weren't loaded.
     pub sounds_missing: Vec<String>,
     pub not_done: usize,
+    /// Orders sent to characters: `KIND WHO`.
+    pub character_orders: Vec<String>,
+    /// Characters that finished an order the script waited for:
+    /// `SCRIPT #INDEX`.
+    pub character_done: Vec<String>,
+    /// `MakeInvulnerable`: `WHO true|false`.
+    pub invulnerable: Vec<String>,
+    pub characters_hurt: usize,
+    pub squad_orders: Vec<String>,
+    /// Characters an action named that weren't found.
+    pub no_character: Vec<String>,
 }
 
 impl LevelScript {
@@ -203,7 +228,7 @@ impl LevelScript {
 /// The map's scripting as read while loading, waiting for the movers'
 /// triggers.
 #[derive(Resource)]
-struct Loaded(MapScripts, Settings);
+struct Loaded(MapScripts, Settings, Vec<rc_level::scripts::Place>);
 
 fn begin(
     mut commands: Commands,
@@ -228,15 +253,20 @@ fn begin(
         })
         .and_then(|(p, d)| {
             rc_level::actors::read_level(&p, &d)
-                .map(|l| rc_level::scripts::read(&p, &d, &l))
+                .map(|l| {
+                    (
+                        rc_level::scripts::read(&p, &d, &l),
+                        rc_level::scripts::places(&p, &d, &l),
+                    )
+                })
                 .map_err(|e| e.to_string())
         });
     match read {
-        Ok(m) => {
+        Ok((m, places)) => {
             for f in &m.failures {
                 log.line(format!("{PART}: unreadable: {f}"));
             }
-            commands.insert_resource(Loaded(m, settings));
+            commands.insert_resource(Loaded(m, settings, places));
         }
         Err(e) => {
             // No scripts is not fatal: the level plays without them.
@@ -292,8 +322,11 @@ fn build(
     let (Some(loaded), Some(movers)) = (loaded, movers) else {
         return;
     };
-    let Loaded(map, settings) = &*loaded;
+    let Loaded(map, settings, places) = &*loaded;
     let mut director = Director::new(map, &movers.movers.triggers, settings.clone());
+    // Characters really walk and animate in the game: scripts wait for them.
+    director.game_runs_characters = true;
+    let places = characters::Places::new(places.clone());
     // The lines and sounds the scripts play, and how long each lasts.
     // Without audio (tests) there's nothing to read them into.
     match audio {
@@ -364,11 +397,17 @@ fn build(
             d.name, d.tag, d.location[0], d.location[1], d.location[2], d.active_event, d.used_event
         ));
     }
+    log.line(format!(
+        "{PART}: {} places characters can be sent to",
+        places.len()
+    ));
     commands.insert_resource(LevelScript {
         director,
         dispensers,
         hidden: HashSet::new(),
         held: Vec::new(),
+        calls: Vec::new(),
+        places,
         sounds: Vec::new(),
         started: false,
         stats: PlayStats::default(),
@@ -475,7 +514,11 @@ fn run(
     parts: Option<Res<LevelParts>>,
     mut objectives: Option<ResMut<Objectives>>,
     mut from_movers: MessageReader<MoverHappened>,
-    mut raised: MessageReader<RaiseEvent>,
+    // One tuple: Bevy takes at most 16 inputs per system.
+    (mut raised, mut finished): (
+        MessageReader<RaiseEvent>,
+        MessageReader<rc_game_core::CharacterOrderDone>,
+    ),
     mut factories: MessageWriter<FactoryOrder>,
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
@@ -508,6 +551,19 @@ fn run(
     for m in from_movers.read() {
         if let Happened::Event { event, .. } = &m.event {
             script.director.fire(event, &format!("{} (door)", m.name));
+        }
+    }
+    // Characters that finished what a script waits for.
+    for d in finished.read() {
+        if script.director.action_done(&d.script, d.index) {
+            log.line(format!(
+                "{PART}: t={:.2} {} #{}: the character is done; the script carries on",
+                script.director.time, d.script, d.index
+            ));
+            script
+                .stats
+                .character_done
+                .push(format!("{} #{}", d.script, d.index));
         }
     }
     // Events from other parts' actors (a droid's death, a spawner done).
@@ -596,12 +652,29 @@ fn run(
                 script: who,
                 index,
                 action,
+                owner,
+                waits,
             } => {
+                let call = characters::Call {
+                    script: who,
+                    index,
+                    kind: action
+                        .class
+                        .strip_prefix("ACTION_")
+                        .unwrap_or(&action.class)
+                        .to_ascii_lowercase(),
+                    action,
+                    owner,
+                    waits,
+                    deadline: now + script.director.settings.character_grace_seconds,
+                };
+                if characters::KINDS.contains(&call.kind.as_str()) {
+                    script.calls.push(call);
+                    continue;
+                }
                 carry_out(
                     script,
-                    &who,
-                    index,
-                    &action,
+                    call,
                     now,
                     &parts,
                     &mut objectives,
@@ -629,9 +702,7 @@ fn run(
 #[allow(clippy::too_many_arguments)]
 fn carry_out(
     script: &mut LevelScript,
-    who: &str,
-    index: usize,
-    a: &ScriptObject,
+    call: characters::Call,
     now: f32,
     parts: &Option<Res<LevelParts>>,
     objectives: &mut Option<ResMut<Objectives>>,
@@ -641,8 +712,9 @@ fn carry_out(
     factories: &mut MessageWriter<FactoryOrder>,
     log: &GameLog,
 ) {
+    let a = &call.action;
     let kind = a.class.strip_prefix("ACTION_").unwrap_or(&a.class);
-    let at = format!("{PART}: t={now:.2} {who} #{index} {kind}");
+    let at = format!("{PART}: t={now:.2} {} #{} {kind}", call.script, call.index);
     match kind.to_ascii_lowercase().as_str() {
         "setcollision" => {
             let tag = a.text("CollideActorTag").unwrap_or("");
@@ -695,10 +767,8 @@ fn carry_out(
                     .iter()
                     .any(|p| p.eq_ignore_ascii_case(tag))
             {
-                script.stats.not_done += 1;
-                log.line(format!(
-                    "{at}: {tag} takes {amount} (characters not done yet)"
-                ));
+                // Not a prop: characters with that tag.
+                script.calls.push(call.clone());
             }
         }
         "destroyactor" | "sethidden" => {
@@ -726,8 +796,8 @@ fn carry_out(
                 }
             }
             if n == 0 {
-                script.stats.not_done += 1;
-                log.line(format!("{at}: {tag} (characters not done yet)"));
+                // Not a level part: characters with that tag.
+                script.calls.push(call.clone());
             } else {
                 log.line(format!(
                     "{at}: {tag} {} ({n} parts)",
@@ -802,7 +872,9 @@ fn carry_out(
                 log.line(format!("{at}: switched off in the map; not played"));
             } else {
                 let volume = script.director.settings.sound_volume;
-                script.sounds.push(sounds::request(who, index, a, volume));
+                script
+                    .sounds
+                    .push(sounds::request(&call.script, call.index, a, volume));
             }
         }
         "changelevel" => {
