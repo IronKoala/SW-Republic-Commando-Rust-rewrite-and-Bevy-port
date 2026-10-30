@@ -12,10 +12,10 @@
 //! HUD area (the screen, or a centred part of it no wider than
 //! `max_aspect`). So the design area always fits inside the screen, and
 //! each group is pinned to a corner or edge of the HUD area. On a wider
-//! screen the corners move apart (Hor+); on a taller one (a phone held
-//! upright) they move apart up and down. Groups that don't overlap in the
+//! screen the corners move apart (Hor+). Groups that don't overlap in the
 //! 640 x 480 design area can't overlap on any screen; `check_plan` tests
-//! that, and the tests run it at many screen shapes.
+//! that, and the tests run it at many screen shapes. Phones held upright
+//! are not supported (the game is played sideways).
 //!
 //! Text never runs into its neighbours: every text has a box (`width`
 //! units wide) and is cut short with "..." when it would not fit.
@@ -704,7 +704,9 @@ mod tests {
         HudLayout::parse(SHIPPED).unwrap()
     }
 
-    /// Screen shapes from phones held upright to 32:9 monitors.
+    /// Screen shapes from 4:3 to 32:9, phones and flip phones on their
+    /// side. Phones held upright are not supported (the game is played
+    /// sideways).
     const SCREENS: &[(f32, f32)] = &[
         (640.0, 480.0),
         (800.0, 600.0),
@@ -721,12 +723,8 @@ mod tests {
         (3840.0, 2160.0),
         (1280.0, 800.0),  // Steam Deck
         (2400.0, 1080.0), // phone on its side
-        (1080.0, 2400.0), // phone upright
-        (1080.0, 2640.0), // tall flip phone, open
-        (1080.0, 1080.0), // square
-        (1768.0, 2208.0), // foldable, open
-        (2208.0, 1768.0),
-        (720.0, 748.0), // flip phone cover screen
+        (2640.0, 1080.0), // tall flip phone, open, on its side
+        (2208.0, 1768.0), // foldable, open
         (480.0, 320.0),
     ];
 

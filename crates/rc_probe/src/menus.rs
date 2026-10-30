@@ -226,8 +226,8 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         (1920, 1080),
         (3440, 1440),
         (3840, 1080),
-        (1080, 2400),
-        (720, 748),
+        (2400, 1080),
+        (2208, 1768),
     ] {
         let (wf, hf) = (w as f32, h as f32);
         for p in check_plan(&layout, wf, hf, 16.0 / 9.0, 3) {

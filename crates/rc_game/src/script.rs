@@ -335,11 +335,11 @@ fn steps() -> Vec<Step> {
                 .get("in_game")
                 .cloned()
                 .ok_or("no screenshot")?;
-            // The shield and health bars are pale cyan in the original's
-            // pictures: count pixels inside them that are clearly bluer
-            // than red (a missing picture shows black, white or magenta).
+            // The shield meter is tinted the original's green: count
+            // pixels inside it that are clearly greener than red and blue
+            // (a missing picture shows black, white or magenta).
             let (pw, ph) = (pic.width as f32, pic.height as f32);
-            let (mut inside, mut cyan) = (0u32, 0u32);
+            let (mut inside, mut green) = (0u32, 0u32);
             for q in quads.iter().filter(|q| q.widget == "vitals") {
                 let x0 = (q.dst[0] * pw) as usize;
                 let x1 = ((q.dst[2] * pw) as usize).min(pic.width);
@@ -354,8 +354,8 @@ fn steps() -> Vec<Step> {
                             pic.pixels[i + 2] as i32,
                         );
                         inside += 1;
-                        if b > r + 25 && g > r + 15 {
-                            cyan += 1;
+                        if g > r + 30 && g > b + 30 {
+                            green += 1;
                         }
                     }
                 }
@@ -363,10 +363,10 @@ fn steps() -> Vec<Step> {
             let groups: std::collections::BTreeSet<_> =
                 quads.iter().map(|q| q.widget.as_str()).collect();
             let got = format!(
-                "{} pictures in {groups:?}; {cyan} of {inside} shield/health pixels are cyan",
+                "{} pictures in {groups:?}; {green} of {inside} shield/health pixels are green",
                 quads.len()
             );
-            if inside > 0 && cyan * 5 >= inside {
+            if inside > 0 && green * 5 >= inside {
                 Ok(got)
             } else {
                 Err(got)
