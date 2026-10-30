@@ -346,6 +346,10 @@ copy of the game.
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
   picks from) are played for weapons, grenades and enemy voices. No 3D
   (positional) sound yet: enemy sounds just get quieter with distance.
+- Collision follows each prop's "can be walked through" settings and
+  each mesh part's collision switch (since 2026-10-30; before, every prop
+  was solid). Simplified collision shapes aren't read, so solid props
+  block by their drawn shape. Not tested on Windows or by playing.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat

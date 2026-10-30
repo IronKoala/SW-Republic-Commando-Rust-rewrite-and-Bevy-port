@@ -12,7 +12,7 @@ use crate::bsp::{self, Vec3};
 use crate::collision::{add_blocking_volumes, collision_triangles, Source};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
-use crate::class_look::{apply_class_look, ClassLooks, Loaded};
+use crate::class_look::{apply_class_look, blocks_players, ClassLooks, Loaded};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -27,6 +27,9 @@ pub struct MapCollision {
     pub mesh_failures: usize,
     /// Props whose model comes from their class, not the map.
     pub class_mesh_actors: usize,
+    /// Props left out of collision because the game doesn't let them
+    /// block (`bCollideActors` or `bBlockPlayers` off). Still drawn.
+    pub not_solid_props: usize,
     /// Blocking volumes added (the ones that stop players), and ones that
     /// couldn't be read.
     pub blocking_volumes: usize,
@@ -147,6 +150,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut start = None;
     let mut mesh_failures = 0;
     let mut class_mesh_actors = 0;
+    let mut not_solid = 0;
     for &a in level.actors.iter().flatten() {
         let Ok(mut p) = actors::read_placement(&map.0, &map.1, a) else {
             continue;
@@ -170,6 +174,11 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         }
         // Hidden props are left out, as in the level viewer.
         if p.hidden {
+            continue;
+        }
+        // So are props the game lets you walk through.
+        if !blocks_players(&mut looks, &map.0, &map.1, a, &mut |n| pkgs.get(n)) {
+            not_solid += 1;
             continue;
         }
         let key = (Rc::as_ptr(&owner) as usize, p.static_mesh);
@@ -218,6 +227,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         mesh_actors: pairs.len(),
         mesh_failures,
         class_mesh_actors,
+        not_solid_props: not_solid,
         blocking_volumes,
         volume_failures: volumes.failures.len(),
     })

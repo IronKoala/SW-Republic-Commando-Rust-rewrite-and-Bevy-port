@@ -298,3 +298,34 @@ pub fn apply_class_look(
     }
     Some(owner)
 }
+
+/// Whether an actor stops the player: `bCollideActors` and `bBlockPlayers`
+/// both on. Each comes from the map if the map sets it, otherwise from the
+/// actor's class defaults; if neither says, it counts as on (as before
+/// these flags were read). Props with either off, such as light shafts,
+/// fog cards or foliage, can be walked and shot through in the game.
+pub fn blocks_players(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    actor: usize,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> bool {
+    let props = crate::actors::read_actor_properties(map, map_data, actor).unwrap_or_default();
+    let mut look = None;
+    let mut flag = |name: &str| -> bool {
+        if let Some(Value::Bool(b)) = props
+            .iter()
+            .find(|p| map.name(p.name).eq_ignore_ascii_case(name))
+            .map(|p| &p.value)
+        {
+            return *b;
+        }
+        let look = look.get_or_insert_with(|| looks.for_actor(map, actor, open));
+        match look.as_ref().and_then(|l| l.find(name, 0)).map(|(_, p)| &p.value) {
+            Some(Value::Bool(b)) => *b,
+            _ => true,
+        }
+    };
+    flag("bCollideActors") && flag("bBlockPlayers")
+}
