@@ -3,6 +3,17 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-29: Levels run their own scripts (rc_level::scripts, rc_scripts, rc_scripts_plugin)
+
+- **Changed:** New `rc_level::scripts` reads every actor's values and every script's action list from a map. `map_collision` and the level drawing keep props and blocking volumes with a tag of their own apart (`part_triangles`, own `MoverPart` batches); `rc_level_plugin` makes them `LevelParts`, solid until switched off. New crate `rc_scripts` (no Bevy): `Director` runs scripted triggers and sequences, touch triggers, counters, conditions, checkpoints and destructible props as events and tags; tool `rc_script_check`. New crate `rc_scripts_plugin`: `ScriptsPlugin` runs it in `rc_game` and carries out doors, barricades, damage to the player, bacta dispensers, prompts, objectives and checkpoints; `ScriptEvent` and `CheckpointReached` messages. `rc_movers` gained `release`; `rc_movers_plugin` gained `release` and `TriggersRunElsewhere`. Settings in `data/scripts/scripts.toml`. Script checks added to `rc_game --script`. Docs: DESIGN ("Level scripts"), PLUGINS, README.
+- **Why:** Next-steps item 1: levels should play as missions. geo_01a's landing-zone barricade never opened, so the player couldn't reach the droids.
+- **Tested how:** `cargo test -p rc_scripts` (7 tests), `rc_script_check` on all 79 maps, `rc_script_check geo_01a --secs 90 --fire BactaUsed@60`, and `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script` in the cloud sandbox with the game files copied read-only.
+- **Result:** All 79 maps read: 2,842 scripts, 19,041 actions, 87 action kinds, 0 unreadable (25 empty action slots skipped). 144 checkpoints, matching the save thread's count. In the game: `SCRIPT DONE: 37 checks passed, 0 failed`. Chain on geo_01a: `levelstart 0.0s, Rappel 7.9s, CheckpointLevelStart 18.8s, StartBactaTraining 30.0s, BactaDispenserActive 51.9s, BactaUsed 53.3s, RetreatToGammaSector 57.6s, DialogGetToGunship 61.6s`; player hurt 175, healed 75; `BactaBarricadeBlockingVolume` switched off; `PathToGunshipBarricade` destroyed and hidden (2 of 2 parts); a box swept through the gap stopped at 41% before and passes after.
+- **Found in the game's data:** the barricade is a prop (`Blockade01`, health 49,000) plus a blocking volume, opened by `BactaUsed`, which the bacta dispenser sends from its `BactaRecharging` struct. Dispensers also send `BactaActive.Event`. The first PlayerStart's `Event` starts the level (`levelstart`, `Startup`, `SetupLevel`, ...).
+- **Still broken / not tested:** Not tested on Windows. About 100 actions in geo_01a's first minute are logged "not done yet" (dialogue, animation, characters, factories, squad changes, camera, music). Droid factories don't spawn on their events yet (the droids part spawns its own way), so later fights aren't paced by the script. Sound lengths are a fixed 3 s. Objective numbers aren't shown. The script's player is moved to the dispenser, not walked there. Not compared with the real game by eye.
+- **Next:** Hook factories (`ScriptEvent`) into the droids part, `ChangeLevel` to go on to the next map, and real sound lengths.
+- **Merged with save and load (#21):** the map's checkpoints now send the save part's `rc_game_core::save::CheckpointReached`, so reaching one really saves (geo_01a's `checkpoint0` saves 19 s in). The self-test's "level's start was saved" check accepts that a later checkpoint saved over the start. After a load the level scripts still start from the beginning: they aren't saved yet (a `scripts` save section is the next step).
+
 ## 2026-10-29: Doors and lifts run in the game (rc_movers_plugin)
 
 - **Changed:** New crate `crates/rc_movers_plugin` (`MoversPlugin`, `LevelMovers`, `MoverHappened`). `rc_level_plugin` now hands over the map's movers and their triangles as `LevelMoverData`. `rc_game` adds the plugin, its player movement calls `LevelMovers::step` before its own step, and the script checks that the map's movers run. Docs: DESIGN ("In the game"), PLUGINS (doors and lifts row), README.
@@ -11,6 +22,14 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** `SCRIPT DONE: 33 checks passed, 0 failed` (32 before, plus the new one: `geo_01a: 2 movers (2 solid), 42 triggers, clock 2.4 s`). The log lists both movers (`MoverDB_GEO2` and its slave, tag `D_Exit`, `TriggerControl`) and the 7 triggers we don't run yet (`OtherTriggerTurnsOn`/`Off`).
 - **Still broken / not tested:** Not tested on Windows. The script doesn't walk to a door, so opening one in `rc_game` isn't checked yet (the walker's tests cover the mover code). Droids and the squad use their own collision and don't see doors. Sounds still not played.
 - **Next:** Level scripts: the shared event and tag system, starting with geo_01a.
+
+## 2026-10-29: The self-test ignores the real mouse (rc_game --script)
+
+- **Changed:** `crates/rc_game/src/script.rs`: a scripted run clears the window's pointer position and mouse clicks every frame before the menus look at them, so only the script moves the menus. The music-volume step starts from full volume, rather than from whatever the last run saved.
+- **Why:** On the user's PC, `rc_game --script` chose Resume instead of "Quit to main menu" and 12 checks after it failed. The mouse was over the window, and pointing at a menu button selects it. Each run also saved a lower music volume, so after about ten runs the "left lowers the music volume" check would always fail.
+- **Tested how:** In the cloud sandbox, `xdotool` moved and clicked the mouse over the menus every 40 ms during `rc_game --script`. Before the fix, the route went astray (it opened the wrong level). After it, `SCRIPT DONE: 32 checks passed, 0 failed`, also when starting from a saved music volume of 0.
+- **Still broken / not tested:** Not tested on Windows yet.
+- **Next:** The user re-runs the self-test on the PC.
 
 ## 2026-10-29: Sev, Fixer and Scorch drawn with their original models (rc_model, rc_squad_plugin)
 

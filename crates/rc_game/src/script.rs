@@ -1,7 +1,8 @@
 //! `--script`: a fixed route through the game, in place of the keyboard and
 //! mouse. It presses the same actions a player would (menu down, accept,
 //! pause...), checks the result of each step, logs `CHECK ... PASS/FAIL`,
-//! and exits with code 0 only if every check passed.
+//! and exits with code 0 only if every check passed. The real mouse is
+//! ignored, so moving it over the window doesn't change the route.
 //!
 //! The route: the original main menu (colours checked against the
 //! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
@@ -115,8 +116,26 @@ impl Plugin for ScriptPlugin {
         })
         .init_resource::<Noted>()
         .init_resource::<Shots>()
-        .add_systems(Update, run.in_set(GameSet::Input));
+        .add_systems(Update, run.in_set(GameSet::Input))
+        .add_systems(
+            PreUpdate,
+            ignore_pointer
+                .after(bevy::input::InputSystems)
+                .before(bevy::ui::UiSystems::Focus),
+        );
     }
+}
+
+/// The script alone drives the menus: a real mouse moving over the window
+/// (or resting on a button) must not change what is selected, or the route
+/// goes astray. So the menus never see where the pointer is or a click.
+fn ignore_pointer(mut windows: Query<&mut Window>, mut mouse: ResMut<ButtonInput<MouseButton>>) {
+    for mut w in &mut windows {
+        if w.physical_cursor_position().is_some() {
+            w.set_physical_cursor_position(None);
+        }
+    }
+    mouse.reset_all();
 }
 
 fn in_state(w: &mut World, s: GameState) -> bool {
@@ -391,6 +410,21 @@ fn steps() -> Vec<Step> {
                 Err(format!("only {d:.0} uu"))
             }
         }),
+        // The level's own scripts (see level_script_* below): geo_01a's
+        // landing-zone barricade opens once the player heals at the bacta
+        // dispenser the scripts switch on.
+        Check("the level's scripts run", level_script_running),
+        Check("the start barricade blocks the way", |w| level_script_way(w, true)),
+        Until("the scripts switch the bacta dispenser on", level_script_dispenser_on, 300.0),
+        Note(level_script_stand_at_dispenser),
+        Wait(0.5),
+        Hold(Action::Use, 5.0),
+        Until("the barricade opens", level_script_barricade_gone, 60.0),
+        Wait(3.0),
+        Check("the barricade is gone: not solid, not drawn, the way through is open", |w| {
+            level_script_way(w, false)
+        }),
+        Check("the scripts' events, damage, healing and checkpoint", level_script_chain),
         Press(Action::Pause),
         Wait(0.3),
         Check("pause key pauses", |w| {
@@ -425,10 +459,22 @@ fn steps() -> Vec<Step> {
         }),
         Check("the level's start was saved as a checkpoint", |w| {
             let f = save_file(w, &SaveSlot::Checkpoint)?;
-            let got = format!("{} at {:?}", f.header.map, f.header.checkpoint);
-            match f.header.checkpoint.as_deref() {
-                Some(rc_save::LEVEL_START) => Ok(got),
-                _ => Err(got),
+            // The level's own checkpoints (geo_01a's first comes 19 s in)
+            // may have saved over it since; the start is then the first
+            // checkpoint reached.
+            let first = f
+                .part("checkpoints")
+                .and_then(|c| c["reached"].as_array()?.first()?.as_str().map(String::from));
+            let got = format!(
+                "{} at {:?}, first checkpoint {first:?}",
+                f.header.map, f.header.checkpoint
+            );
+            if f.header.checkpoint.as_deref() == Some(rc_save::LEVEL_START)
+                || first.as_deref() == Some(rc_save::LEVEL_START)
+            {
+                Ok(got)
+            } else {
+                Err(got)
             }
         }),
         Note(|w| {
@@ -578,8 +624,10 @@ fn steps() -> Vec<Step> {
             }
         }),
         Note(|w| {
-            let v = w.resource::<Settings>().audio.music_volume;
-            w.resource_mut::<Noted>().music_volume = v;
+            // Each run saves the lowered volume to the script's own settings
+            // file; start from full so it never runs down to zero.
+            w.resource_mut::<Settings>().audio.music_volume = 1.0;
+            w.resource_mut::<Noted>().music_volume = 1.0;
         }),
         // MULTIPLAYER, LOAD GAME, PROFILES and EXTRAS are greyed out and
         // skipped.
@@ -993,4 +1041,177 @@ fn run(world: &mut World) {
     world
         .resource_mut::<ActionState>()
         .update(held, movement, Vec2::ZERO);
+}
+
+// Level scripts (`rc_scripts_plugin`), checked on geo_01a.
+
+const BARRICADE_VOLUME: &str = "BactaBarricadeBlockingVolume";
+const BARRICADE_PROP: &str = "PathToGunshipBarricade";
+
+fn level_script_running(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no LevelScript".into());
+    };
+    let d = &s.director;
+    let got = format!(
+        "{} scripted triggers, {} sequences, {} actions; {} events sent so far, first {:?}",
+        d.stats.scripts,
+        d.stats.sequences,
+        d.stats.actions,
+        d.stats.events_sent,
+        d.history.first().map(|h| &h.1)
+    );
+    if d.stats.scripts > 10 && d.history.iter().any(|h| h.1.eq_ignore_ascii_case("levelstart")) {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// Sweep a small box straight through the barricade, across the blocking
+/// volume's thin side, where the prop the scripts blow up stands (the
+/// barricade's other piece, `Blockade02`, stays, as in the original).
+/// `blocked`: whether it should stop.
+fn level_script_way(w: &mut World, blocked: bool) -> Result<String, String> {
+    let Some(parts) = w.get_resource::<rc_level_plugin::LevelParts>().cloned() else {
+        return Err("no LevelParts".into());
+    };
+    let Some((lo, hi)) = parts.bounds(BARRICADE_VOLUME).first().copied() else {
+        return Err(format!("no {BARRICADE_VOLUME} in the level parts"));
+    };
+    let size = hi - lo;
+    let Some((plo, phi)) = parts.bounds(BARRICADE_PROP).first().copied() else {
+        return Err(format!("no {BARRICADE_PROP} in the level parts"));
+    };
+    let c = (plo + phi) * 0.5;
+    let along_x = size.x < size.y;
+    let reach = if along_x { size.x } else { size.y } * 0.5 + 60.0;
+    let dir = if along_x {
+        rc_movement::Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        rc_movement::Vec3::new(0.0, 1.0, 0.0)
+    };
+    let (a, b) = (c - dir * reach, c + dir * reach);
+    let ext = rc_movement::Vec3::new(10.0, 10.0, 10.0);
+    let world = w.resource::<LevelCollision>().0.clone();
+    let hit = world.sweep(ext, a, b);
+    let solid: Vec<bool> = parts
+        .list()
+        .into_iter()
+        .filter(|p| p.2.eq_ignore_ascii_case(BARRICADE_VOLUME))
+        .map(|p| p.3)
+        .collect();
+    let mut hidden = 0;
+    let mut drawn = 0;
+    let props: Vec<usize> = parts
+        .list()
+        .into_iter()
+        .filter(|p| p.2.eq_ignore_ascii_case(BARRICADE_PROP))
+        .map(|p| p.0)
+        .collect();
+    let mut q = w.query::<(&rc_level_viewer::draw::MoverPart, &Visibility)>();
+    for (p, v) in q.iter(w) {
+        if props.contains(&p.0) {
+            drawn += 1;
+            hidden += (*v == Visibility::Hidden) as usize;
+        }
+    }
+    let got = format!(
+        "{BARRICADE_VOLUME} {:.0}x{:.0}x{:.0}, solid {solid:?}; sweep through it at {BARRICADE_PROP} ({:.0}, {:.0}, {:.0}) {}; {BARRICADE_PROP}: {hidden} of {drawn} drawn parts hidden",
+        size.x,
+        size.y,
+        size.z,
+        c.x,
+        c.y,
+        c.z,
+        match hit {
+            Some(h) => format!("stops at {:.0}%", h.time * 100.0),
+            None => "passes".into(),
+        }
+    );
+    let ok = if blocked {
+        hit.is_some() && solid.iter().all(|s| *s) && hidden == 0
+    } else {
+        // Something else may lie beyond (the floor slopes); the volume
+        // itself must no longer be what stops the box near its middle.
+        hit.is_none_or(|h| h.time > 0.5) && solid.iter().all(|s| !*s) && hidden == drawn
+    };
+    if ok {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn level_script_dispenser_on(w: &mut World) -> bool {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return false;
+    };
+    let told = s
+        .director
+        .history
+        .iter()
+        .any(|h| h.1.eq_ignore_ascii_case("StartBactaReminderTimer"));
+    told && s.dispensers().iter().any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
+}
+
+/// Put the player where a squad mate would stand to use the dispenser.
+fn level_script_stand_at_dispenser(w: &mut World) {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return;
+    };
+    let Some(d) = s
+        .dispensers()
+        .into_iter()
+        .find(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ"))
+    else {
+        return;
+    };
+    let spot = d.stand.unwrap_or(d.location);
+    let log = w.resource::<GameLog>().clone();
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.pawn.location = rc_movement::Vec3::new(spot[0], spot[1], spot[2] + 10.0);
+        log.line(format!(
+            "script: player moved to {}'s marker ({:.0}, {:.0}, {:.0})",
+            d.name, spot[0], spot[1], spot[2]
+        ));
+    }
+}
+
+fn level_script_barricade_gone(w: &mut World) -> bool {
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| s.stats.props_destroyed.iter().any(|p| p.eq_ignore_ascii_case(BARRICADE_PROP)))
+}
+
+fn level_script_chain(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no LevelScript".into());
+    };
+    let h = &s.director.history;
+    let when = |e: &str| h.iter().find(|x| x.1.eq_ignore_ascii_case(e)).map(|x| x.0);
+    let chain = ["levelstart", "Rappel", "CheckpointLevelStart", "StartBactaTraining", "BactaDispenserActive", "BactaUsed", "RetreatToGammaSector", "DialogGetToGunship"];
+    let times: Vec<String> = chain
+        .iter()
+        .map(|e| format!("{e} {}", when(e).map_or("-".into(), |t| format!("{t:.1}s"))))
+        .collect();
+    let in_order = chain.windows(2).all(|p| match (when(p[0]), when(p[1])) {
+        (Some(a), Some(b)) => a <= b,
+        _ => false,
+    });
+    let got = format!(
+        "{}; player hurt {:.0}, healed {:.0}; switched off {:?}; destroyed {:?}; checkpoints {:?}; {} actions not done yet",
+        times.join(", "),
+        s.stats.player_hurt,
+        s.stats.bacta_healed,
+        s.stats.parts_switched_off,
+        s.stats.props_destroyed,
+        s.stats.checkpoints,
+        s.stats.not_done
+    );
+    if in_order && s.stats.player_hurt > 0.0 && s.stats.bacta_healed > 0.0 && s.stats.checkpoints.iter().any(|c| c == "checkpoint0") {
+        Ok(got)
+    } else {
+        Err(got)
+    }
 }

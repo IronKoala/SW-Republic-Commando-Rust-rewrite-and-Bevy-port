@@ -37,6 +37,12 @@ pub struct MapCollision {
     /// they can move.
     pub movers: crate::movers::MapMovers,
     pub mover_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
+    /// Props and blocking volumes with a `Tag` of their own (barricades,
+    /// bunker walls): a level script may switch them off or blow them up,
+    /// so their triangles are kept apart too, by export index, with their
+    /// (class, tag). See `crate::scripts::tagged_actors`.
+    pub part_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
+    pub parts: HashMap<usize, (String, String)>,
 }
 
 /// Every package file under the game's data folder, by lower-case name.
@@ -187,10 +193,17 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let movers = crate::movers::read_movers(&mut looks, &map.0, &map.1, &level.actors, &mut |n| pkgs.get(n));
     let is_mover: std::collections::HashSet<usize> = movers.movers.iter().map(|m| m.place.export).collect();
     let mut mover_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
+    // And the parts scripts can switch off.
+    let mut parts = crate::scripts::tagged_actors(&map.0, &map.1, &level);
+    parts.retain(|a, _| !is_mover.contains(a));
+    let mut part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     let mut triangles = Vec::with_capacity(mesh.triangles.len());
     for (t, src) in mesh.triangles.into_iter().zip(mesh.sources) {
         match src {
             Source::Actor(a) if is_mover.contains(&a) => mover_triangles.entry(a).or_default().push(t),
+            Source::Actor(a) | Source::Volume(a) if parts.contains_key(&a) => {
+                part_triangles.entry(a).or_default().push(t)
+            }
             _ => triangles.push(t),
         }
     }
@@ -198,6 +211,8 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         triangles,
         movers,
         mover_triangles,
+        part_triangles,
+        parts,
         start,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),

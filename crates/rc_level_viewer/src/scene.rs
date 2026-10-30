@@ -552,8 +552,11 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             mats.package(n)
         })
     };
-    let mover_exports: std::collections::HashSet<usize> =
+    let mut mover_exports: std::collections::HashSet<usize> =
         movers.movers.iter().map(|m| m.place.export).collect();
+    // So do props with a tag of their own, which level scripts may remove
+    // (barricades, bunker walls). They are tagged `MoverPart` too.
+    mover_exports.extend(rc_level::scripts::tagged_actors(pkg, data, &level).into_keys());
     ctx.stats.movers = movers.movers.len();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
     for &a in level.actors.iter().flatten() {
@@ -638,7 +641,7 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 let in_sky = sky_zone.is_some() && bsp.point_zone(p.location) == sky_zone;
                 ctx.stats.sky_props += in_sky as usize;
                 let mover = mover_exports.contains(&p.export).then_some(p.export);
-                ctx.stats.movers_drawn += mover.is_some() as usize;
+                ctx.stats.movers_drawn += mover.is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m)) as usize;
                 add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref(), mover);
                 placed.push((p, m));
             }
