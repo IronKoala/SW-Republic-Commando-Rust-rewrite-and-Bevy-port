@@ -95,9 +95,10 @@ gravity = 1100            # game: LevelInfo gravity
 radius = 600              # game: ThermalDetonatorProjDefaults DamageRadius (no throw if a friend is this near the landing spot)
 
 [spawning]
-# The original starts most spawners from level scripts. We run proximity
-# Triggers (the player walks into one) ourselves; spawners only reachable
-# from scripts start when the player comes this close instead.
+# In the game the level's scripts switch spawners on, as in the original.
+# Only the tools that run without scripts (rc_droidsim, rc_droidview) start
+# spawners themselves: by their walk-in Triggers, or, for spawners with
+# none, when the player comes this close.
 activate_unscripted_within = 3000
 max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
 

@@ -5,7 +5,7 @@
 
 use crate::Fight;
 use bevy::prelude::*;
-use rc_ai::{BattleSnapshot, FighterSnapshot, Mode};
+use rc_ai::{BattleSnapshot, Birth, FighterSnapshot, Mode, SpawnerSnapshot};
 use rc_combat::Health;
 use rc_game_core::save::SavePart;
 use rc_game_core::GameLog;
@@ -25,8 +25,18 @@ pub struct EnemiesSave {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpawnerSave {
     pub on: bool,
+    /// Switched off for good by a script.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
     pub made: u32,
     pub next_spawn: f32,
+    /// The spawn point it uses next.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub next_spot: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,6 +54,13 @@ pub struct DroidSave {
     /// Grenades it still carries (only enemies that carry them).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grenades_left: Option<u32>,
+    /// The spawn point it was made at (its tag and events come from
+    /// there); none: at its spawner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spot: Option<usize>,
+    /// Already hurt once (its first-hurt event was sent).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hurt: bool,
 }
 
 fn arr(v: UVec3) -> [f32; 3] {
@@ -85,6 +102,8 @@ impl SavePart for EnemiesSave {
                 mode: f.mode.name().into(),
                 last_seen_at: f.last_seen_at.map(arr),
                 grenades_left: f.grenades_left,
+                spot: f.birth.spot,
+                hurt: f.birth.hurt,
             })
             .collect();
         Some(EnemiesSave {
@@ -93,10 +112,12 @@ impl SavePart for EnemiesSave {
             spawners: snap
                 .spawners
                 .iter()
-                .map(|&(on, made, next_spawn)| SpawnerSave {
-                    on,
-                    made,
-                    next_spawn,
+                .map(|s| SpawnerSave {
+                    on: s.active,
+                    disabled: s.disabled,
+                    made: s.made,
+                    next_spawn: s.next_spawn,
+                    next_spot: s.next_spot,
                 })
                 .collect(),
             droids,
@@ -113,7 +134,13 @@ impl SavePart for EnemiesSave {
             spawners: d
                 .spawners
                 .iter()
-                .map(|s| (s.on, s.made, s.next_spawn))
+                .map(|s| SpawnerSnapshot {
+                    active: s.on,
+                    disabled: s.disabled,
+                    made: s.made,
+                    next_spawn: s.next_spawn,
+                    next_spot: s.next_spot,
+                })
                 .collect(),
             fighters: d
                 .droids
@@ -126,6 +153,10 @@ impl SavePart for EnemiesSave {
                     mode: mode(&f.mode),
                     last_seen_at: f.last_seen_at.map(vec),
                     grenades_left: f.grenades_left,
+                    birth: Birth {
+                        spot: f.spot,
+                        hurt: f.hurt,
+                    },
                 })
                 .collect(),
         };
