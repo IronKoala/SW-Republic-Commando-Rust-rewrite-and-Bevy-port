@@ -53,7 +53,8 @@ impl Pose {
         Pose::Melee,
     ];
 
-    fn sequence(self, l: &Look) -> &str {
+    /// The animation `l` names for this pose (empty: none).
+    pub fn sequence(self, l: &Look) -> &str {
         match self {
             Pose::Idle => &l.idle,
             Pose::Walk => &l.walk,
@@ -127,33 +128,55 @@ impl DroidLook {
             })
             .ok_or_else(|| format!("no SkeletalMesh called {} in {}", look.mesh, file.display()))?;
         let mesh = read_skeletal_mesh(&pkg, &data, export).map_err(|e| e.to_string())?;
-        let set = mesh
+        // Every animation set the mesh links to in its package, in the
+        // mesh's order; each animation comes from the first set that has
+        // it. A Trandoshan mercenary's mesh lists its cutscene sets first
+        // and borrows the commandos' everyday moves (CloneCommandoSet).
+        let sets: Vec<&rc_package::Export> = mesh
             .animations
             .iter()
-            .find_map(|&a| match ObjectRef::from_index(a) {
+            .filter_map(|&a| match ObjectRef::from_index(a) {
                 ObjectRef::Export(i) => pkg.exports.get(i),
                 _ => None,
             })
-            .ok_or("the mesh has no animation set in its package")?;
-        let anim = read_mesh_animation(&pkg, &data, set).map_err(|e| e.to_string())?;
+            .collect();
+        if sets.is_empty() {
+            return Err("the mesh has no animation set in its package".into());
+        }
+        let mut anims = Vec::with_capacity(sets.len());
+        for set in &sets {
+            match read_mesh_animation(&pkg, &data, set) {
+                Ok(a) => anims.push((pkg.name(set.object_name).to_string(), a)),
+                Err(e) => notes.push(format!(
+                    "animation set {} not read: {e}",
+                    pkg.name(set.object_name)
+                )),
+            }
+        }
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
+        let mut used_sets: Vec<&str> = Vec::new();
         for pose in Pose::ALL {
             let name = pose.sequence(look);
             if name.is_empty() {
                 continue; // this character has none: it plays the idle one
             }
-            match anim
-                .sequences
-                .iter()
-                .find(|s| s.name.eq_ignore_ascii_case(name))
-            {
-                Some(seq) => {
-                    clips.insert(pose, Clip::new(&anim, seq, &skeleton));
+            let found = anims.iter().find_map(|(set_name, anim)| {
+                anim.sequences
+                    .iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+                    .map(|seq| (set_name, anim, seq))
+            });
+            match found {
+                Some((set_name, anim, seq)) => {
+                    clips.insert(pose, Clip::new(anim, seq, &skeleton));
+                    if !used_sets.contains(&set_name.as_str()) {
+                        used_sets.push(set_name);
+                    }
                 }
                 None => notes.push(format!(
-                    "no animation called {name} in {}; {pose:?} uses the idle one",
-                    pkg.name(set.object_name)
+                    "no animation called {name} in the mesh's {} animation sets; {pose:?} uses the idle one",
+                    anims.len()
                 )),
             }
         }
@@ -185,7 +208,7 @@ impl DroidLook {
             indices.extend(if flip { [a, c, b] } else { [a, b, c] });
         }
 
-        let skin = match load_skin(paths, &pkg, &mesh) {
+        let skin = match load_skin(paths, &pkg, &mesh, &look.skin) {
             Ok(s) => Some(s),
             Err(e) => {
                 notes.push(format!("skin not loaded, droids are plain grey: {e}"));
@@ -210,7 +233,7 @@ impl DroidLook {
             });
         look.lift = -lo;
         notes.push(format!(
-            "mesh {}: {} bones, {} points, {} triangles ({}), {} of {} animations found, idle pose {:.0} uu tall (lowest point {lo:.0} uu, lifted to the floor), skin {}",
+            "mesh {}: {} bones, {} points, {} triangles ({}), {} of {} animations found (from {}), idle pose {:.0} uu tall (lowest point {lo:.0} uu, lifted to the floor), skin {}",
             pkg.name(export.object_name),
             look.mesh.bones.len(),
             look.mesh.points.len(),
@@ -218,6 +241,7 @@ impl DroidLook {
             if flip { "flipped" } else { "kept as stored" },
             look.clips.len(),
             Pose::ALL.len(),
+            used_sets.join(", "),
             hi - lo,
             look.skin.as_ref().map_or("none".to_string(), |(n, i)| {
                 let [r, g, b, _] = i.mean();
@@ -298,38 +322,56 @@ impl DroidLook {
     }
 }
 
-/// Follows the mesh's first material to a picture and decodes it. Copied
-/// from `rc_character/src/load.rs`.
+/// Follows the mesh's first material, or `over` when it isn't empty
+/// (`Package.Group.Object`), to a picture and decodes it. Copied from
+/// `rc_character/src/load.rs`.
 fn load_skin(
     paths: &GamePaths,
     pkg: &Package,
     mesh: &SkeletalMesh,
+    over: &str,
 ) -> Result<(String, Rgba), String> {
-    let first = *mesh.textures.first().ok_or("the mesh lists no materials")?;
-    let ObjectRef::Import(i) = ObjectRef::from_index(first) else {
-        return Err("material stored inside the mesh package is not supported yet".into());
+    let (top, material, class_wanted) = if over.is_empty() {
+        let first = *mesh.textures.first().ok_or("the mesh lists no materials")?;
+        let ObjectRef::Import(i) = ObjectRef::from_index(first) else {
+            return Err("material stored inside the mesh package is not supported yet".into());
+        };
+        let material = pkg.name(pkg.imports[i].object_name).to_string();
+        let mut outer = pkg.imports[i].package_index;
+        let mut top = String::new();
+        while let ObjectRef::Import(j) = ObjectRef::from_index(outer) {
+            top = pkg.name(pkg.imports[j].object_name).to_string();
+            outer = pkg.imports[j].package_index;
+        }
+        let class = pkg.name(pkg.imports[i].class_name).to_string();
+        (top, material, Some(class))
+    } else {
+        let top = over.split('.').next().unwrap_or(over).to_string();
+        let material = over.rsplit('.').next().unwrap_or(over).to_string();
+        (top, material, None)
     };
-    let material = pkg.name(pkg.imports[i].object_name).to_string();
-    let mut outer = pkg.imports[i].package_index;
-    let mut top = String::new();
-    while let ObjectRef::Import(j) = ObjectRef::from_index(outer) {
-        top = pkg.name(pkg.imports[j].object_name).to_string();
-        outer = pkg.imports[j].package_index;
-    }
     let path = paths.game_file(&format!("GameData/Textures/{top}.utx"));
     let data = std::fs::read(&path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
     let tpkg = Package::parse(&data).map_err(|e| format!("{}: {e}", path.display()))?;
-    let class_wanted = pkg.name(pkg.imports[i].class_name).to_string();
+    // By name and class: a group and a texture can share a name. A skin
+    // named in the settings file has no class, so any material matches.
     let mut index = tpkg
         .exports
         .iter()
         .position(|e| {
             tpkg.name(e.object_name).eq_ignore_ascii_case(&material)
-                && tpkg
-                    .export_class_name(e)
-                    .eq_ignore_ascii_case(&class_wanted)
+                && class_wanted
+                    .as_ref()
+                    .map_or(tpkg.export_class_name(e) != "Package", |c| {
+                        tpkg.export_class_name(e).eq_ignore_ascii_case(c)
+                    })
         })
-        .ok_or_else(|| format!("no {class_wanted} called {material} in {top}"))?;
+        .ok_or_else(|| {
+            format!(
+                "no {} called {material} in {top}",
+                class_wanted.as_deref().unwrap_or("material")
+            )
+        })?;
     for _ in 0..6 {
         let export = &tpkg.exports[index];
         let name = tpkg.name(export.object_name).to_string();
