@@ -1,6 +1,6 @@
 //! The GRAPHICS options that change how the 3D view is drawn: brightness,
 //! texture and character detail, blur, bloom, squad shadows and FSAA (the
-//! screen size and vsync are in `menu::apply_video`).
+//! screen size and vsync are in `display.rs`).
 //!
 //! Every camera gets the same edge smoothing and colour range, because the
 //! cameras draw on top of one another (sky, level, arms, then menus and the
@@ -26,7 +26,10 @@ pub struct GraphicsOptionsPlugin;
 
 impl Plugin for GraphicsOptionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (apply_detail, apply_to_cameras, apply_shadows));
+        app.add_systems(
+            Update,
+            (apply_detail, apply_to_cameras, apply_shadows, squad_blobs),
+        );
     }
 }
 
@@ -170,6 +173,95 @@ fn apply_to_cameras(
         } else {
             c.remove::<MotionBlur>();
         }
+    }
+}
+
+/// A soft dark patch on the ground under a squad mate (SQUAD SHADOWS).
+#[derive(Component)]
+struct Blob;
+
+/// Size of the patch, Bevy units across (a commando's shoulders are about
+/// 0.7).
+const BLOB_SIZE: f32 = 1.1;
+/// How dark its middle is (0 clear, 1 black).
+const BLOB_DARKNESS: f32 = 0.55;
+
+/// A round picture, dark in the middle and fading to clear at the edge.
+fn blob_picture() -> Image {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    const N: usize = 64;
+    let mut px = Vec::with_capacity(N * N * 4);
+    for y in 0..N {
+        for x in 0..N {
+            let d = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) / N as f32 * 2.0 - Vec2::ONE;
+            let fade = (1.0 - d.length()).clamp(0.0, 1.0);
+            // Smooth edge, darker middle.
+            let a = fade * fade * (3.0 - 2.0 * fade) * BLOB_DARKNESS;
+            px.extend([0, 0, 0, (a * 255.0) as u8]);
+        }
+    }
+    Image::new(
+        Extent3d {
+            width: N as u32,
+            height: N as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        px,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
+/// SQUAD SHADOWS also puts a soft shadow under each squad mate, as the
+/// original's squad shadows do (it projects one onto the ground). Ours is
+/// a flat patch at their feet, which needs no light and costs almost
+/// nothing; it doesn't follow slopes or stairs. Moving lights casting
+/// shadows (above) only shows where the level has one, which is rare.
+#[allow(clippy::too_many_arguments)]
+fn squad_blobs(
+    mut commands: Commands,
+    settings: Res<Settings>,
+    mates: Query<(Entity, Has<Children>), With<rc_squad_plugin::SquadMate>>,
+    blobs: Query<(Entity, &ChildOf), With<Blob>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut look: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
+) {
+    if !settings.video.squad_shadows {
+        for (e, _) in &blobs {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
+    let (mesh, material) = look
+        .get_or_insert_with(|| {
+            let mesh = meshes.add(Plane3d::default().mesh().size(BLOB_SIZE, BLOB_SIZE));
+            let material = materials.add(StandardMaterial {
+                base_color_texture: Some(images.add(blob_picture())),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            });
+            (mesh, material)
+        })
+        .clone();
+    for (mate, _) in &mates {
+        if blobs.iter().any(|(_, p)| p.parent() == mate) {
+            continue;
+        }
+        commands.entity(mate).with_children(|c| {
+            c.spawn((
+                Blob,
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                // Just above the floor, so it isn't hidden in it.
+                Transform::from_xyz(0.0, 0.02, 0.0),
+                bevy::light::NotShadowCaster,
+            ));
+        });
     }
 }
 

@@ -26,7 +26,7 @@ impl Plugin for PaniniViewPlugin {
 fn bend_view(
     mut commands: Commands,
     settings: Res<Settings>,
-    window: Query<&Window>,
+    area: Option<Res<crate::display::PlayArea>>,
     mut view: Query<(Entity, &mut Projection, Option<&PaniniView>), With<PlayerCamera>>,
     log: Res<GameLog>,
     mut logged: Local<Option<(f32, f32)>>,
@@ -38,11 +38,7 @@ fn bend_view(
     let Projection::Perspective(p) = &mut *proj else {
         return;
     };
-    let aspect = window
-        .iter()
-        .next()
-        .map(|w| w.width() / w.height().max(1.0))
-        .unwrap_or(16.0 / 9.0);
+    let aspect = area.map_or(16.0 / 9.0, |a| a.aspect());
     if strength <= 0.0 {
         if has.is_some() {
             commands.entity(e).remove::<PaniniView>();

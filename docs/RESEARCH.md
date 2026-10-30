@@ -188,6 +188,36 @@ the new `marker_survey` example over all 50 campaign maps, read only.
   `TossGrenadeEvent` and a thermal detonator, so the grenadier throws one
   in) are compiled code.
 
+### Auto pull maneuvers (read 2026-10-30)
+
+The GAME options row AUTO PULL MANEUVERS sets `PlayerController`'s
+`globalconfig bool bAutoPullManeuvers` (Engine.u; `User.ini` ships
+`bAutoPullManeuvers=True`). No script reads it, so its use is in the
+compiled `Engine.dll`. Its exported function names and a look at the
+machine code of two of them (read only, nothing copied) show:
+
+- `ASquadMarker::GetMarkerUsability` (what decides "PRESS @ TO ENGAGE
+  ... MANEUVER" or a refusal) passes the player's `bAutoPullManeuvers`
+  bit (bit 2 of the word holding `bGlobalRumbleActive`, `bRumbleActive`,
+  `bAutoPullManeuvers`, in that order) to `FillParticipants`.
+- `FillParticipants` counts squad mates as free, busy or down. A busy one
+  whose current marker has both `bCancelIfMembersNeeded` and
+  `bCanCancelAfterUnderway` is kept aside as "can be pulled" when the bit
+  is on. If too few are free for the marker's `MembersRequired`, the
+  pullable ones fill the gap, sorted so the marker that has been running
+  longest goes first.
+- Too few even so: the marker is "occupied", and the helmet shows
+  `SquadOccupiedText`, "RECALL SQUAD BEFORE ENGAGING MANEUVER".
+- Class defaults (`rc_probe --classes`): `bCancelIfMembersNeeded` is set
+  only on `MarkerWeapon` (so `MarkerSnipe`, `MarkerGrenade`,
+  `MarkerAntiArmor`) and `MarkerTurretNative`. Demolition, breach, slice,
+  traps, mines, bacta and revive have only `bCanCancelAfterUnderway`, so
+  they are never pulled.
+
+So: on, ordering a new maneuver with the whole squad on posts takes the
+longest-posted squad mate off their post; off, you must recall the squad
+(F4) first. The port does the same (`Squad::pull_for`, `pullable` jobs).
+
 ## Battle droids
 
 Found on 2026-10-29 by reading the installed game's script packages

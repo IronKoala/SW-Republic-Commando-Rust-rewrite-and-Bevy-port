@@ -263,7 +263,7 @@ fn fit_and_show(
     settings: Res<Settings>,
     state: Option<Res<State<GameState>>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut cameras: Query<&mut Visibility, With<HelmetCamera>>,
+    mut cameras: Query<(&mut Visibility, &Camera), With<HelmetCamera>>,
     pieces: Query<(&HelmetPiece, &Mesh3d)>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     mut readout: ResMut<HelmetReadout>,
@@ -276,8 +276,12 @@ fn fit_and_show(
     let in_game = state.is_some_and(|s| *s.get() == GameState::InGame);
     let show = in_game && helmet.plan.enabled && settings.game.helmet;
     let mut any = false;
-    for mut v in &mut cameras {
+    // The box the helmet is drawn in: the camera's own (smaller than the
+    // window when full screen adds black bars), else the window.
+    let mut drawn: Option<Vec2> = None;
+    for (mut v, cam) in &mut cameras {
         any = true;
+        drawn = drawn.or(cam.logical_viewport_size());
         let want = if show {
             Visibility::Inherited
         } else {
@@ -297,10 +301,15 @@ fn fit_and_show(
         }
         readout.shown = shown;
     }
-    let Ok(window) = windows.single() else {
+    let Some(size) = drawn.or_else(|| {
+        windows
+            .single()
+            .ok()
+            .map(|w| Vec2::new(w.resolution.width(), w.resolution.height()))
+    }) else {
         return;
     };
-    let (w, h) = (window.resolution.width(), window.resolution.height());
+    let (w, h) = (size.x, size.y);
     if w < 1.0 || h < 1.0 {
         return;
     }

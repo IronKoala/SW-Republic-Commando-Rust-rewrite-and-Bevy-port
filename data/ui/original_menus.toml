@@ -45,6 +45,14 @@
 # the original's function names. `rc_probe --pages` lists every menu's
 # buttons and says which pages would use their original menu.
 
+
+# Screens wider than 4:3: menus keep the size they have on a 4:3 screen of
+# the same height and spread out, moving things apart rather than shrinking
+# them (rc_menus/src/fit.rs). On screens wider than this shape (width over
+# height) they stay in a centred area this shape. 0 = spread to any width.
+[fit]
+widest_shape = 2.4
+
 [pages.paused]
 class = "XInterfaceCTMenus.CTPausePCMenu"
 over_game = true
@@ -100,7 +108,7 @@ OnRight = "option_right"
 "Options[3]" = "helmet"             # the helmet frame round the view
 "Options[4]" = "prompt_text"        # the level scripts' hints
 "Options[5]" = "difficulty"
-"Options[6]" = "unavailable"        # AUTO PULL MANEUVERS
+"Options[6]" = "auto_pull_maneuvers" # squad orders take mates off posts
 "Options[7]" = "unavailable"        # TACTICAL VISOR MODE
 "Options[8]" = "unavailable"        # TACTICAL MODE INTENSITY
 
@@ -253,7 +261,7 @@ OnRight = "option_right"
 [pages.more_settings.choosers]
 "Options[0]" = "field_of_view"
 "Options[1]" = "panini"
-"Options[2]" = "fullscreen"
+"Options[2]" = "display_mode"
 "Options[3]" = "master_volume"
 "Options[4]" = "stick_look_speed"
 "Options[5]" = "look_stick_dead_zone"
@@ -264,7 +272,7 @@ OnRight = "option_right"
 GameLabel = "PORT +"
 "OptionLabels[0]" = "FIELD OF VIEW"
 "OptionLabels[1]" = "WIDE SCREEN FIX"
-"OptionLabels[2]" = "FULL SCREEN"
+"OptionLabels[2]" = "DISPLAY MODE"
 "OptionLabels[3]" = "MASTER VOLUME"
 "OptionLabels[4]" = "STICK LOOK SPEED"
 "OptionLabels[5]" = "STICK DEAD ZONE"

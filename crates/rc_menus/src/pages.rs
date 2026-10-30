@@ -216,6 +216,39 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
             ));
         }
     }
+    // A row the original fills or switches on while it runs (FSAA and VSYNC,
+    // from what the graphics card can do) can be stored switched off or
+    // with no values. A row given a setting here is switched on, and gets a
+    // stand-in value for the game to replace with the setting's own list.
+    for (name, setting) in &plan.choosers {
+        if is_unavailable(setting) {
+            continue;
+        }
+        let Some(at) = layout
+            .widgets
+            .iter()
+            .position(|w| w.name.eq_ignore_ascii_case(name))
+        else {
+            continue;
+        };
+        if !matches!(&layout.widgets[at].kind, Kind::Button(_)) {
+            continue;
+        }
+        let row = layout.widgets[at].name.clone();
+        for i in crate::screens::row_widgets(layout, &row)
+            .into_iter()
+            .chain([at])
+        {
+            if let Kind::Button(b) = &mut layout.widgets[i].kind {
+                b.disabled = false;
+            }
+        }
+        if let Kind::Button(b) = &mut layout.widgets[at].kind {
+            if b.items.is_empty() {
+                b.items.push(String::new());
+            }
+        }
+    }
     let mut commands = Vec::new();
     let mut choosers = Vec::new();
     let mut keys = Vec::new();
@@ -288,6 +321,33 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
 #[serde(default, deny_unknown_fields)]
 struct PagesFile {
     pages: BTreeMap<String, PageDef>,
+    fit: FitDef,
+}
+
+/// `[fit]`: how menus use screens wider than 4:3 (`fit.rs`).
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FitDef {
+    widest_shape: f32,
+}
+
+impl Default for FitDef {
+    fn default() -> Self {
+        FitDef {
+            widest_shape: DEFAULT_WIDEST_SHAPE,
+        }
+    }
+}
+
+/// The widest screen shape (width over height) menus spread out to; on a
+/// wider screen they stay in a centred area this shape. 21.5:9 covers the
+/// usual ultrawide monitors.
+pub const DEFAULT_WIDEST_SHAPE: f32 = 2.4;
+
+/// `[fit] widest_shape` from `data/ui/original_menus.toml` (0 is no limit).
+pub fn parse_widest_shape(text: &str) -> Result<f32, String> {
+    let f: PagesFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    Ok(f.fit.widest_shape.max(0.0))
 }
 
 #[derive(Deserialize)]
@@ -418,6 +478,24 @@ mod tests {
             Some(PageCmd::Play("geo_01a".into()))
         );
         assert_eq!(PageCmd::parse("fly"), None);
+    }
+
+    #[test]
+    fn a_row_switched_off_or_empty_in_the_original_works_when_given_a_setting() {
+        // As the original's FSAA row: stored switched off with no values.
+        let mut fsaa = button("Options[11]", "");
+        if let Kind::Button(b) = &mut fsaa.kind {
+            b.disabled = true;
+        }
+        let mut l = layout(vec![button("Options[0]", "resumeselected"), fsaa]);
+        let mut p = plan();
+        p.choosers = vec![("Options[11]".into(), "fsaa".into())];
+        let got = check(&mut l, &p).unwrap();
+        assert_eq!(got.chooser(1), Some("fsaa"));
+        let Kind::Button(b) = &l.widgets[1].kind else {
+            panic!()
+        };
+        assert!(!b.disabled && b.is_chooser());
     }
 
     #[test]

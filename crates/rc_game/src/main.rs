@@ -14,6 +14,7 @@
 //! numbers to the log, to check a controller.
 //! Everything is logged to `logs/rc_game.log`.
 
+mod display;
 mod graphics;
 mod helmet;
 mod hud;
@@ -35,7 +36,7 @@ mod subtitles;
 mod theme;
 
 use bevy::prelude::*;
-use bevy::window::{PresentMode, WindowMode};
+use bevy::window::PresentMode;
 use rc_game_core::{CorePlugin, CurrentLevel, GameLog, GamePaths, GameSet, GameState};
 use settings::{Settings, SettingsPath};
 use std::path::PathBuf;
@@ -379,11 +380,7 @@ fn main() -> AppExit {
         primary_window: Some(Window {
             title: "Star Wars Republic Commando (Rust and Bevy)".into(),
             resolution: (settings.video.width, settings.video.height).into(),
-            mode: if settings.video.fullscreen {
-                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-            } else {
-                WindowMode::Windowed
-            },
+            mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
             present_mode: if settings.video.vsync {
                 PresentMode::AutoVsync
             } else {
@@ -409,6 +406,9 @@ fn main() -> AppExit {
     .insert_resource(player::FieldOfView::from_settings(&settings))
     .insert_resource(input::LookSettings::from_settings(&settings))
     .insert_resource(settings.gyro.clone())
+    .insert_resource(rc_squad_plugin::SquadOptions {
+        auto_pull_maneuvers: settings.game.auto_pull_maneuvers,
+    })
     .insert_resource(button_names)
     .insert_resource(bindings)
     .insert_resource(input::BaseBindings(base_bindings))
@@ -424,6 +424,7 @@ fn main() -> AppExit {
     .add_plugins(rc_pads::PadsPlugin)
     .add_plugins((
         menu::MenuPlugin,
+        display::DisplayPlugin,
         original_menu::OriginalMenuPlugin,
         hud::HudPlugin,
         original_hud::OriginalHudPlugin,
@@ -455,7 +456,6 @@ fn main() -> AppExit {
         (
             log_states,
             menu::apply_settings,
-            menu::apply_video,
             count_frames,
             menu_camera_clear,
         )

@@ -12,7 +12,7 @@
 //! sensitivity is the chosen number times 0.5, with 3.0 (number 6) as the
 //! default, and its volumes are the chosen number divided by 10.
 
-use crate::settings::{Difficulty, Settings};
+use crate::settings::{Difficulty, DisplayMode, Settings};
 
 /// Every setting a chooser can show.
 pub const ALL: &[&str] = &[
@@ -22,6 +22,7 @@ pub const ALL: &[&str] = &[
     "subtitles",
     "prompt_text",
     "helmet",
+    "auto_pull_maneuvers",
     "effects_volume",
     "music_volume",
     "voices_volume",
@@ -41,7 +42,7 @@ pub const ALL: &[&str] = &[
     // The port's own settings, on its PORT + page.
     "field_of_view",
     "panini",
-    "fullscreen",
+    "display_mode",
     "master_volume",
     "stick_look_speed",
     "look_stick_dead_zone",
@@ -113,8 +114,8 @@ pub fn known(name: &str) -> bool {
 const SENSITIVITY_DEFAULT_STEP: f32 = 6.0;
 
 /// Screen sizes offered: the original's list (all 4:3 and 5:4) plus wide
-/// and ultrawide ones, which this port supports properly. The size the game
-/// runs at is added if it isn't here.
+/// and ultrawide ones, which this port supports properly. The monitor's own
+/// size and the size the game runs at are added if they aren't here.
 const RESOLUTIONS: &[(u32, u32)] = &[
     (640, 480),
     (800, 600),
@@ -136,14 +137,24 @@ const RESOLUTIONS: &[(u32, u32)] = &[
     (5120, 1440),
 ];
 
-/// The values to show instead of the original's, if this setting needs
-/// its own list.
-/// The screen size list's first entry: full screen at the desktop's size
-/// (borderless), as other PC games list it.
-pub const FULL_SCREEN: &str = "FULL SCREEN";
+const DISPLAY_MODES: [(DisplayMode, &str); 3] = [
+    (DisplayMode::Windowed, "WINDOWED"),
+    (DisplayMode::Borderless, "BORDERLESS"),
+    (DisplayMode::Fullscreen, "FULL SCREEN"),
+];
 
-/// `desktop` is the main screen's size: window sizes bigger than it can't
-/// be shown, so they aren't offered.
+/// Two screen shapes (width over height) count as the same within this.
+const SAME_SHAPE: f32 = 0.01;
+
+/// True if `size` has the same shape as `desktop` (the monitor).
+pub fn same_shape(size: (u32, u32), desktop: (u32, u32)) -> bool {
+    let shape = |(w, h): (u32, u32)| w as f32 / h.max(1) as f32;
+    (shape(size) / shape(desktop) - 1.0).abs() < SAME_SHAPE
+}
+
+/// The values to show instead of the original's, if this setting needs
+/// its own list. `desktop` is the monitor's own size: sizes bigger than it
+/// can't be shown, so they aren't offered.
 pub fn items(name: &str, s: &Settings, desktop: Option<(u32, u32)>) -> Option<Vec<String>> {
     if let Some(n @ (_, _, _, decimals, suffix, unit)) = numeric(name) {
         return Some(
@@ -154,24 +165,25 @@ pub fn items(name: &str, s: &Settings, desktop: Option<(u32, u32)>) -> Option<Ve
         );
     }
     match name {
-        "fullscreen" => Some(vec!["ON".into(), "OFF".into()]),
+        "display_mode" => Some(DISPLAY_MODES.iter().map(|(_, t)| t.to_string()).collect()),
         "gyro_mode" => Some(vec!["OFF".into(), "ALWAYS".into(), "WHEN AIMING".into()]),
+        // The original fills these from the graphics card while it runs;
+        // ours are what this game can do.
+        "fsaa" | "vsync" => fallback_items(name),
         "video_resolution" => {
             let fits = |&(w, h): &(u32, u32)| desktop.is_none_or(|(dw, dh)| w <= dw && h <= dh);
             let mut sizes: Vec<(u32, u32)> = RESOLUTIONS.iter().copied().filter(fits).collect();
-            let now = (s.video.width, s.video.height);
-            if !s.video.fullscreen && !sizes.contains(&now) {
-                sizes.push(now);
-                sizes.sort_by_key(|(w, h)| (*w, *h));
+            for size in desktop.into_iter().chain([(s.video.width, s.video.height)]) {
+                if !sizes.contains(&size) {
+                    sizes.push(size);
+                }
             }
-            let mut out = vec![FULL_SCREEN.to_string()];
-            out.extend(sizes.iter().map(|(w, h)| format!("{w}x{h}")));
-            Some(out)
+            sizes.sort_by_key(|(w, h)| (*w, *h));
+            Some(sizes.iter().map(|(w, h)| format!("{w}x{h}")).collect())
         }
         _ => None,
     }
 }
-
 
 /// Whether a value's text means on (ON, YES, ENABLED) or off (OFF, NO,
 /// DISABLED, NONE), if it says.
@@ -256,7 +268,9 @@ fn is_custom(text: &str) -> bool {
 
 /// The GRAPHICS QUALITY values that are presets (not CUSTOM), in order.
 fn presets(items: &[String]) -> Vec<usize> {
-    (0..items.len()).filter(|&i| !is_custom(&items[i])).collect()
+    (0..items.len())
+        .filter(|&i| !is_custom(&items[i]))
+        .collect()
 }
 
 /// The number in a value's text ("32 CHANNELS" is 32), if it has one.
@@ -271,6 +285,32 @@ fn number_in(text: &str) -> Option<u32> {
 
 fn says_low(text: &str) -> bool {
     text.to_ascii_uppercase().contains("LOW")
+}
+
+/// Values to use when the original's list for a row has fewer than two
+/// (the original fills some lists, such as FSAA, from the graphics card
+/// while the game runs, so the stored list can be empty).
+pub fn fallback_items(name: &str) -> Option<Vec<String>> {
+    let l = |v: &[&str]| Some(v.iter().map(|s| s.to_string()).collect());
+    match name {
+        "fsaa" => l(&["OFF", "2X", "4X"]),
+        "vsync"
+        | "subtitles"
+        | "prompt_text"
+        | "helmet"
+        | "auto_pull_maneuvers"
+        | "blur"
+        | "bloom"
+        | "squad_shadows"
+        | "sound_3d" => l(&["ON", "OFF"]),
+        "graphics_quality" => l(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST"]),
+        "texture_detail" | "character_detail" | "sound_quality" => l(&["LOW", "MEDIUM", "HIGH"]),
+        "audio_channels" => l(&["16", "32", "64"]),
+        "brightness" | "voices_volume" | "effects_volume" | "music_volume" => {
+            l(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"])
+        }
+        _ => None,
+    }
 }
 
 /// Which of `items` the setting is now.
@@ -289,7 +329,11 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         return Some(nearest.min(n - 1));
     }
     Some(match name {
-        "fullscreen" => yes_no(s.video.fullscreen),
+        "display_mode" => DISPLAY_MODES
+            .iter()
+            .position(|(m, _)| *m == s.video.display_mode)
+            .unwrap_or(0)
+            .min(n - 1),
         "gyro_mode" => GYRO_MODES
             .iter()
             .position(|m| *m == s.gyro.mode)
@@ -335,17 +379,14 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
                 .unwrap_or(0)
         }
         "video_resolution" => {
-            let now = if s.video.fullscreen {
-                FULL_SCREEN.to_string()
-            } else {
-                format!("{}x{}", s.video.width, s.video.height)
-            };
+            let now = format!("{}x{}", s.video.width, s.video.height);
             items.iter().position(|i| i.eq_ignore_ascii_case(&now))?
         }
         "vsync" => yes_no(s.video.vsync),
         "subtitles" => on_off_index(items, s.game.subtitles),
         "prompt_text" => on_off_index(items, s.game.prompt_text),
         "helmet" => on_off_index(items, s.game.helmet),
+        "auto_pull_maneuvers" => on_off_index(items, s.game.auto_pull_maneuvers),
         "blur" => on_off_index(items, s.video.blur),
         "bloom" => on_off_index(items, s.video.bloom),
         "squad_shadows" => on_off_index(items, s.video.squad_shadows),
@@ -361,12 +402,20 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         "graphics_quality" => {
             let p = presets(items);
             let now = quality_now(s);
-            let matching = p
+            // The value last chosen, if the rows still match it. Several
+            // values can set the same rows (LOW and MEDIUM on a five-value
+            // list), so the choice itself is kept, not worked out from the
+            // rows, or the arrows would get stuck on the first of them.
+            let chosen = level_index(s.video.quality, p.len());
+            if quality_preset(level_value(chosen, p.len())) == now {
+                return p.get(chosen).copied();
+            }
+            match p
                 .iter()
                 .enumerate()
                 .find(|(k, _)| quality_preset(level_value(*k, p.len())) == now)
-                .map(|(_, &i)| i);
-            match matching {
+                .map(|(_, &i)| i)
+            {
                 Some(i) => i,
                 // Changed by hand: CUSTOM if the list has it, else the
                 // preset with the nearest texture detail.
@@ -382,8 +431,16 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
 }
 
 /// Set the setting to value `i` of `items`. Returns false for a setting it
-/// doesn't know or a value it can't use.
-pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
+/// doesn't know or a value it can't use. `desktop` is the monitor's own
+/// size: in borderless full screen, a screen size of another shape than the
+/// monitor's switches to a window of that size.
+pub fn write(
+    name: &str,
+    s: &mut Settings,
+    i: usize,
+    items: &[String],
+    desktop: Option<(u32, u32)>,
+) -> bool {
     let Some(text) = items.get(i) else {
         return false;
     };
@@ -396,7 +453,7 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
         return true;
     }
     match name {
-        "fullscreen" => s.video.fullscreen = first,
+        "display_mode" => s.video.display_mode = DISPLAY_MODES[i.min(2)].0,
         "gyro_mode" => s.gyro.mode = GYRO_MODES[i.min(2)],
         "mouse_sensitivity" => {
             let base = Settings::default().controls.mouse_sensitivity;
@@ -412,7 +469,6 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
         }
         "effects_volume" => s.audio.effects_volume = (i as f32 / 10.0).clamp(0.0, 1.0),
         "music_volume" => s.audio.music_volume = (i as f32 / 10.0).clamp(0.0, 1.0),
-        "video_resolution" if text == FULL_SCREEN => s.video.fullscreen = true,
         "voices_volume" => s.audio.voices_volume = (i as f32 / 10.0).clamp(0.0, 1.0),
         "sound_quality" => s.audio.low_quality = says_low(text),
         "sound_3d" => {
@@ -440,12 +496,17 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
             };
             s.video.width = w;
             s.video.height = h;
-            s.video.fullscreen = false;
+            if s.video.display_mode == DisplayMode::Borderless
+                && desktop.is_some_and(|d| !same_shape((w, h), d))
+            {
+                s.video.display_mode = DisplayMode::Windowed;
+            }
         }
         "vsync" => s.video.vsync = first,
         "subtitles" => s.game.subtitles = on_off_value(items, i),
         "prompt_text" => s.game.prompt_text = on_off_value(items, i),
         "helmet" => s.game.helmet = on_off_value(items, i),
+        "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = on_off_value(items, i),
         "blur" => s.video.blur = on_off_value(items, i),
         "bloom" => s.video.bloom = on_off_value(items, i),
         "squad_shadows" => s.video.squad_shadows = on_off_value(items, i),
@@ -459,8 +520,10 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
             let Some(k) = p.iter().position(|&j| j == i) else {
                 return true;
             };
-            let (tex, chars, blur, bloom, shadows, fsaa) = quality_preset(level_value(k, p.len()));
+            let place = level_value(k, p.len());
+            let (tex, chars, blur, bloom, shadows, fsaa) = quality_preset(place);
             let v = &mut s.video;
+            v.quality = place;
             v.texture_detail = tex;
             v.character_detail = chars;
             v.blur = blur;
@@ -484,6 +547,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "subtitles" => s.game.subtitles = d.game.subtitles,
         "prompt_text" => s.game.prompt_text = d.game.prompt_text,
         "helmet" => s.game.helmet = d.game.helmet,
+        "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = d.game.auto_pull_maneuvers,
         "effects_volume" => s.audio.effects_volume = d.audio.effects_volume,
         "music_volume" => s.audio.music_volume = d.audio.music_volume,
         "voices_volume" => s.audio.voices_volume = d.audio.voices_volume,
@@ -493,7 +557,6 @@ pub fn restore(name: &str, s: &mut Settings) {
         "video_resolution" => {
             s.video.width = d.video.width;
             s.video.height = d.video.height;
-            s.video.fullscreen = d.video.fullscreen;
         }
         "vsync" => s.video.vsync = d.video.vsync,
         "brightness" => s.video.brightness = d.video.brightness,
@@ -504,6 +567,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "squad_shadows" => s.video.squad_shadows = d.video.squad_shadows,
         "fsaa" => s.video.fsaa = d.video.fsaa,
         "graphics_quality" => {
+            s.video.quality = d.video.quality;
             for name in [
                 "texture_detail",
                 "character_detail",
@@ -515,7 +579,7 @@ pub fn restore(name: &str, s: &mut Settings) {
                 restore(name, s);
             }
         }
-        "fullscreen" => s.video.fullscreen = d.video.fullscreen,
+        "display_mode" => s.video.display_mode = d.video.display_mode,
         "gyro_mode" => s.gyro.mode = d.gyro.mode,
         _ if numeric(name).is_some() => set_numeric(name, s, numeric_value(name, &d)),
         _ => {}
@@ -535,9 +599,24 @@ mod tests {
         let ten = list(&["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
         let mut s = Settings::default();
         assert_eq!(read("mouse_sensitivity", &s, &ten), Some(5));
-        assert!(write("mouse_sensitivity", &mut s, 9, &ten));
+        assert!(write("mouse_sensitivity", &mut s, 9, &ten, None));
         assert_eq!(read("mouse_sensitivity", &s, &ten), Some(9));
         assert!(s.controls.mouse_sensitivity > Settings::default().controls.mouse_sensitivity);
+    }
+
+    #[test]
+    fn short_lists_get_a_working_one() {
+        // FSAA and VSYNC came up with one value (or none) on the user's
+        // install, so they couldn't be changed.
+        assert_eq!(fallback_items("fsaa").unwrap(), list(&["OFF", "2X", "4X"]));
+        assert_eq!(fallback_items("vsync").unwrap(), list(&["ON", "OFF"]));
+        assert!(fallback_items("unavailable").is_none());
+        let s = Settings::default();
+        let fsaa = fallback_items("fsaa").unwrap();
+        let mut t = s.clone();
+        write("fsaa", &mut t, 2, &fsaa, None);
+        assert_eq!(t.video.fsaa, 4);
+        assert_eq!(read("fsaa", &t, &fsaa), Some(2));
     }
 
     #[test]
@@ -547,15 +626,21 @@ mod tests {
             let items = items(name, &s0, None).unwrap_or_else(|| match *name {
                 "fsaa" => list(&["OFF", "2X", "4X"]),
                 "graphics_quality" => list(&["LOW", "MEDIUM", "HIGH", "CUSTOM"]),
-                "blur" | "bloom" | "squad_shadows" | "sound_3d" | "subtitles" | "prompt_text"
-                | "helmet" => list(&["ON", "OFF"]),
+                "blur"
+                | "bloom"
+                | "squad_shadows"
+                | "sound_3d"
+                | "subtitles"
+                | "prompt_text"
+                | "helmet"
+                | "auto_pull_maneuvers" => list(&["ON", "OFF"]),
                 "sound_quality" => list(&["LOW", "HIGH"]),
                 "audio_channels" => list(&["16", "32", "64"]),
                 _ => list(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]),
             });
             let mut s = s0.clone();
             for i in (0..3).filter(|&i| i < items.len()) {
-                assert!(write(name, &mut s, i, &items), "{name} {i}");
+                assert!(write(name, &mut s, i, &items, None), "{name} {i}");
                 let back = read(name, &s, &items);
                 // Two-value settings (on/off) read back as 0 or 1.
                 assert!(
@@ -582,29 +667,64 @@ mod tests {
     }
 
     #[test]
-    fn full_screen_and_sizes_that_fit_the_screen() {
-        let mut s = Settings::default();
-        let items = items("video_resolution", &s, Some((1920, 1080))).unwrap();
-        assert_eq!(items[0], FULL_SCREEN);
+    fn sizes_that_fit_the_monitor_and_no_full_screen_entry() {
+        let s = Settings::default();
+        let items = items("video_resolution", &s, Some((3440, 1440))).unwrap();
+        assert!(!items.iter().any(|i| i.contains("FULL")));
+        assert!(items.contains(&"3440x1440".to_string()));
         assert!(items.contains(&"1920x1080".to_string()));
-        assert!(!items.contains(&"2560x1440".to_string()));
-        assert!(write("video_resolution", &mut s, 0, &items));
-        assert!(s.video.fullscreen);
-        assert_eq!(read("video_resolution", &s, &items), Some(0));
-        let at = items.iter().position(|i| i == "1600x900").unwrap();
-        assert!(write("video_resolution", &mut s, at, &items));
-        assert!(!s.video.fullscreen);
-        assert_eq!((s.video.width, s.video.height), (1600, 900));
+        assert!(!items.contains(&"3840x2160".to_string()));
+        // The monitor's own size is offered even when it isn't a usual one.
+        let odd = super::items("video_resolution", &s, Some((2256, 1504))).unwrap();
+        assert!(odd.contains(&"2256x1504".to_string()));
+    }
+
+    #[test]
+    fn display_modes_and_screen_sizes() {
+        let desktop = Some((1920, 1080));
+        let sizes = items("video_resolution", &Settings::default(), desktop).unwrap();
+        let modes = items("display_mode", &Settings::default(), desktop).unwrap();
+        assert_eq!(modes, ["WINDOWED", "BORDERLESS", "FULL SCREEN"]);
+        let pick = |s: &mut Settings, size: &str| {
+            let at = sizes.iter().position(|i| i == size).unwrap();
+            assert!(write("video_resolution", s, at, &sizes, desktop));
+        };
+        // Windowed: the size is the window's.
+        let mut s = Settings::default();
+        pick(&mut s, "1600x900");
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1600, 900, DisplayMode::Windowed)
+        );
+        // Borderless: a size of the monitor's shape stays borderless...
+        assert!(write("display_mode", &mut s, 1, &modes, desktop));
+        assert_eq!(s.video.display_mode, DisplayMode::Borderless);
+        pick(&mut s, "1280x720");
+        assert_eq!(s.video.display_mode, DisplayMode::Borderless);
+        // ...another shape goes to a window of that size.
+        pick(&mut s, "1280x1024");
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1280, 1024, DisplayMode::Windowed)
+        );
+        // True full screen keeps any size (other shapes get black bars).
+        assert!(write("display_mode", &mut s, 2, &modes, desktop));
+        pick(&mut s, "1024x768");
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1024, 768, DisplayMode::Fullscreen)
+        );
+        assert_eq!(read("display_mode", &s, &modes), Some(2));
     }
 
     #[test]
     fn on_off_follows_the_words_not_the_order() {
         let off_first = list(&["OFF", "ON"]);
         let mut s = Settings::default();
-        assert!(write("bloom", &mut s, 1, &off_first));
+        assert!(write("bloom", &mut s, 1, &off_first, None));
         assert!(s.video.bloom);
         assert_eq!(read("bloom", &s, &off_first), Some(1));
-        assert!(write("bloom", &mut s, 0, &off_first));
+        assert!(write("bloom", &mut s, 0, &off_first, None));
         assert!(!s.video.bloom);
     }
 
@@ -612,10 +732,10 @@ mod tests {
     fn graphics_quality_sets_the_detail_rows_and_shows_custom_after_a_change() {
         let q = list(&["LOW", "MEDIUM", "HIGH", "CUSTOM"]);
         let mut s = Settings::default();
-        assert!(write("graphics_quality", &mut s, 0, &q));
+        assert!(write("graphics_quality", &mut s, 0, &q, None));
         assert_eq!(s.video.texture_detail, 0.0);
         assert_eq!(read("graphics_quality", &s, &q), Some(0));
-        assert!(write("graphics_quality", &mut s, 2, &q));
+        assert!(write("graphics_quality", &mut s, 2, &q, None));
         assert!(s.video.bloom && s.video.squad_shadows);
         assert_eq!(s.video.fsaa, 4);
         assert_eq!(read("graphics_quality", &s, &q), Some(2));
@@ -625,7 +745,7 @@ mod tests {
         assert_eq!(read("graphics_quality", &s, &q), Some(3));
         // Choosing CUSTOM changes nothing.
         let before = s.clone();
-        assert!(write("graphics_quality", &mut s, 3, &q));
+        assert!(write("graphics_quality", &mut s, 3, &q, None));
         assert_eq!(s, before);
     }
 
@@ -634,7 +754,7 @@ mod tests {
         let f = list(&["NONE", "2X", "4X"]);
         let mut s = Settings::default();
         assert_eq!(read("fsaa", &s, &f), Some(0));
-        assert!(write("fsaa", &mut s, 2, &f));
+        assert!(write("fsaa", &mut s, 2, &f, None));
         assert_eq!(s.video.fsaa, 4);
         assert_eq!(read("fsaa", &s, &f), Some(2));
     }
@@ -651,20 +771,38 @@ mod tests {
         let mut s = Settings::default();
         let ch = list(&["8 CHANNELS", "16 CHANNELS", "32 CHANNELS"]);
         assert_eq!(read("audio_channels", &s, &ch), Some(2));
-        assert!(write("audio_channels", &mut s, 0, &ch));
+        assert!(write("audio_channels", &mut s, 0, &ch, None));
         assert_eq!(s.audio.channels, 8);
         let q = list(&["LOW", "MEDIUM", "HIGH"]);
         assert_eq!(read("sound_quality", &s, &q), Some(2));
-        assert!(write("sound_quality", &mut s, 0, &q));
+        assert!(write("sound_quality", &mut s, 0, &q, None));
         assert!(s.audio.low_quality);
         assert_eq!(read("sound_quality", &s, &q), Some(0));
         // 3D sound named by kind: anything but OFF is on.
         let kinds = list(&["SOFTWARE", "HARDWARE", "OFF"]);
-        assert!(write("sound_3d", &mut s, 2, &kinds));
+        assert!(write("sound_3d", &mut s, 2, &kinds, None));
         assert!(!s.audio.sound_3d);
         assert_eq!(read("sound_3d", &s, &kinds), Some(2));
-        assert!(write("sound_3d", &mut s, 1, &kinds));
+        assert!(write("sound_3d", &mut s, 1, &kinds, None));
         assert!(s.audio.sound_3d);
         assert_eq!(read("sound_3d", &s, &kinds), Some(0));
+    }
+
+    #[test]
+    fn graphics_quality_steps_through_values_that_share_a_preset() {
+        // Found by the user: on a five-value list LOW and MEDIUM set the same
+        // rows, and the arrows got stuck on LOW.
+        let q = list(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST"]);
+        let mut s = Settings::default();
+        assert_eq!(read("graphics_quality", &s, &q), Some(3));
+        for i in [4, 0, 1, 2, 3, 4, 3, 2, 1, 0] {
+            assert!(write("graphics_quality", &mut s, i, &q, None));
+            assert_eq!(
+                read("graphics_quality", &s, &q),
+                Some(i),
+                "step to {}",
+                q[i]
+            );
+        }
     }
 }

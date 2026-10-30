@@ -65,6 +65,16 @@ impl DamageKind {
     }
 }
 
+/// Takes no damage at all (a level script's `ACTION_MakeInvulnerable`:
+/// characters in a cut scene, the player during an intro).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Invulnerable;
+
+/// Hurt as usual, but never below 1 health (a level script's
+/// `ACTION_SetCannotDie`).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CannotDie;
+
 /// Health points. The player has 200, a commando squad mate and a battle
 /// droid 100 (see docs/RESEARCH.md, "Weapons and damage").
 #[derive(Component, Debug, Clone, Copy, PartialEq)]

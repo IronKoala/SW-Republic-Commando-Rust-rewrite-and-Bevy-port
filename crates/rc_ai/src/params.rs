@@ -89,6 +89,9 @@ pub struct Combat {
     /// Rushes in to hit when its enemy is this close, uu. An enemy with
     /// no gun (`weapon = ""`) always rushes in.
     pub lunge_distance: f32,
+    /// Leaps (flies) straight to a point a level script sends it to when
+    /// it can't walk there, at this speed, uu a second. 0: it can't.
+    pub leap_speed: f32,
 }
 
 /// Grenades it throws (`[grenades]`). An empty `grenade` means none (the
@@ -160,6 +163,13 @@ pub struct Look {
     /// of the level's lights (the original lights characters with each
     /// zone's ambient light, which we don't read yet).
     pub ambient: f32,
+    /// Seconds to blend from one animation into the next. Our choice: the
+    /// original blends inside its compiled code.
+    pub blend_time: f32,
+    /// Blend time into the firing animation, which is very short.
+    pub blend_time_fire: f32,
+    /// Blend time into the death animation.
+    pub blend_time_death: f32,
 }
 
 /// What the character says or sounds like: sound names in `package`
@@ -301,6 +311,7 @@ impl AiParams {
                 melee_damage_type: "CTDamageMelee".into(),
                 melee_delay: 1.5,
                 lunge_distance: 0.0,
+                leap_speed: 0.0,
             },
             grenades: GrenadeUse {
                 grenade: String::new(),
@@ -336,6 +347,9 @@ impl AiParams {
                 throw: String::new(),
                 melee: String::new(),
                 ambient: 0.5,
+                blend_time: 0.2,
+                blend_time_fire: 0.05,
+                blend_time_death: 0.1,
             },
         }
     }
@@ -450,6 +464,7 @@ impl AiParams {
             ("combat", "melee_damage_type") => c.melee_damage_type = text(),
             ("combat", "melee_delay") => c.melee_delay = num()?,
             ("combat", "lunge_distance") => c.lunge_distance = num()?,
+            ("combat", "leap_speed") => c.leap_speed = num()?,
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
             ("senses", "auto_detect_radius") => s.auto_detect_radius = num()?,
@@ -493,6 +508,9 @@ impl AiParams {
             ("look", "throw") => l.throw = text(),
             ("look", "melee") => l.melee = text(),
             ("look", "ambient") => l.ambient = num()?,
+            ("look", "blend_time") => l.blend_time = num()?.max(0.0),
+            ("look", "blend_time_fire") => l.blend_time_fire = num()?.max(0.0),
+            ("look", "blend_time_death") => l.blend_time_death = num()?.max(0.0),
             _ => return Err(format!("unknown setting `{key}` in [{section}]")),
         }
         Ok(())

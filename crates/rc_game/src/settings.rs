@@ -41,6 +41,11 @@ pub struct GameSection {
     /// HELMET: the helmet frame round the edge of the view (the original's
     /// `bVisor`).
     pub helmet: bool,
+    /// The original's AUTO PULL MANEUVERS: a new squad order that needs
+    /// more squad mates than are free takes them off sniper, grenade and
+    /// anti-armour posts. Off, the order is refused until you recall the
+    /// squad. On by default, as in the original's `User.ini`.
+    pub auto_pull_maneuvers: bool,
 }
 
 /// The original's three difficulties.
@@ -78,7 +83,13 @@ pub struct ModsSection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct VideoSection {
-    pub fullscreen: bool,
+    /// In a window, full screen in a borderless window the size of the
+    /// monitor, or true full screen (the monitor switches to the chosen
+    /// size).
+    pub display_mode: DisplayMode,
+    /// The screen size: the window's size when windowed. In true full
+    /// screen, a size of another shape than the monitor's is shown at that
+    /// shape with black bars filling the rest.
     pub width: u32,
     pub height: u32,
     pub vsync: bool,
@@ -102,6 +113,10 @@ pub struct VideoSection {
     /// 3D view so things near the sides aren't stretched; the middle keeps
     /// its size.
     pub panini: f32,
+    /// GRAPHICS QUALITY last chosen, as its place in the list: 0 lowest, 1
+    /// highest. It sets the detail options below; changing one of those by
+    /// hand makes it CUSTOM.
+    pub quality: f32,
     /// BRIGHTNESS: 0 (one stop darker) to 1 (one stop brighter); 0.5
     /// changes nothing.
     pub brightness: f32,
@@ -120,6 +135,19 @@ pub struct VideoSection {
     /// FSAA: smooths jagged edges by drawing this many samples per pixel
     /// (1 is off, 2 or 4; more counts as 4).
     pub fsaa: u32,
+}
+
+/// How the game window covers the screen (`video.display_mode`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplayMode {
+    #[default]
+    Windowed,
+    /// A window without edges that covers the whole monitor at its own
+    /// size; quick to switch away from.
+    Borderless,
+    /// The game takes over the monitor and switches it to the chosen size.
+    Fullscreen,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -192,13 +220,14 @@ impl Default for Settings {
                 subtitles: true,
                 prompt_text: true,
                 helmet: true,
+                auto_pull_maneuvers: true,
             },
             mods: ModsSection {
                 folder: "mods".into(),
                 enabled: vec![],
             },
             video: VideoSection {
-                fullscreen: false,
+                display_mode: DisplayMode::Windowed,
                 width: 1280,
                 height: 720,
                 vsync: true,
@@ -206,6 +235,7 @@ impl Default for Settings {
                 widest_shape: 2.0,
                 hud_max_aspect: 16.0 / 9.0,
                 panini: 0.0,
+                quality: 0.75,
                 brightness: 0.5,
                 texture_detail: 1.0,
                 character_detail: 1.0,
@@ -286,6 +316,11 @@ difficulty = 'medium'
 subtitles = true     # the words of what is said, at the bottom of the screen
 prompt_text = true   # the level's hints, such as "Press USE to open"
 helmet = true        # the helmet frame round the edge of the view
+# When a squad order needs more squad mates than are free, take them off
+# sniper, grenade and anti-armour posts (the longest-held first). false:
+# the order is refused until you recall the squad. The original's AUTO
+# PULL MANEUVERS (GAME options page), on by default.
+auto_pull_maneuvers = true
 
 [mods]
 # One sub-folder per mod. A mod holds files with the same names as in
@@ -295,7 +330,11 @@ folder = 'mods'
 enabled = []
 
 [video]
-fullscreen = false
+# windowed, borderless (full screen in a window the size of the monitor) or
+# fullscreen (true full screen: the monitor switches to width x height).
+display_mode = 'windowed'
+# The window's size. In true full screen, a size of another shape than the
+# monitor's is shown at that shape with black bars around it.
 width = 1280
 height = 720
 vsync = true
@@ -315,6 +354,7 @@ hud_max_aspect = 1.7777778
 # 21:9 and 32:9; the middle stays the same size, a little softer.
 panini = 0.0
 # The GRAPHICS options page sets these.
+quality = 0.75           # GRAPHICS QUALITY chosen: 0 lowest, 1 highest (sets the rows below)
 brightness = 0.5         # 0 darkest, 0.5 unchanged, 1 brightest
 texture_detail = 1.0     # walls and props: 0 quarter-size pictures, 1 full size (next level load)
 character_detail = 1.0   # squad, enemies, arms and weapons: the same
@@ -371,9 +411,24 @@ auto_calibrate = true              # learn the gyro's drift while it lies still
 folder = ''
 "#;
 
+/// The option `display_mode` replaced; still read.
+const OLD_FULLSCREEN: &str = "fullscreen";
+
 impl Settings {
     pub fn parse(text: &str) -> Result<Settings, String> {
-        toml::from_str(text).map_err(|e| e.to_string())
+        let mut s: Settings = toml::from_str(text).map_err(|e| e.to_string())?;
+        // Older versions had `fullscreen = true` (a borderless window) in
+        // place of `display_mode`.
+        if let Ok(t) = text.parse::<toml::Table>() {
+            let video = t.get("video").and_then(|v| v.as_table());
+            let old = video
+                .and_then(|v| v.get(OLD_FULLSCREEN))
+                .and_then(|v| v.as_bool());
+            if old == Some(true) && video.is_some_and(|v| !v.contains_key("display_mode")) {
+                s.video.display_mode = DisplayMode::Borderless;
+            }
+        }
+        Ok(s)
     }
 
     /// Options in `text` the game doesn't know: typos, or ones from another
@@ -397,6 +452,7 @@ impl Settings {
                 out.extend(
                     v.keys()
                         .filter(|key| !k.contains_key(*key))
+                        .filter(|key| !(section == "video" && *key == OLD_FULLSCREEN))
                         .map(|key| format!("{section}.{key}")),
                 );
             }
@@ -544,6 +600,21 @@ mod tests {
         assert_eq!(s.video.fov, 120.0);
         assert_eq!(s.video.widest_shape, 2.0);
         assert_eq!(Settings::unknown_options(text), ["video.widest_fov"]);
+    }
+
+    #[test]
+    fn old_full_screen_option_becomes_borderless() {
+        let old = "[video]\nfullscreen = true\n";
+        let s = Settings::parse(old).unwrap();
+        assert_eq!(s.video.display_mode, DisplayMode::Borderless);
+        assert!(Settings::unknown_options(old).is_empty());
+        let s = Settings::parse("[video]\nfullscreen = false\n").unwrap();
+        assert_eq!(s.video.display_mode, DisplayMode::Windowed);
+        let both = "[video]\nfullscreen = true\ndisplay_mode = 'fullscreen'\n";
+        assert_eq!(
+            Settings::parse(both).unwrap().video.display_mode,
+            DisplayMode::Fullscreen
+        );
     }
 
     #[test]

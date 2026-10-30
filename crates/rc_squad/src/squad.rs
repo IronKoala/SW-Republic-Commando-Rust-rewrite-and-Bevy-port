@@ -105,6 +105,9 @@ pub struct Member {
     pub hold_point: Vec3,
     /// The marked job they're on, if any.
     pub marker: Option<usize>,
+    /// `Squad::time` when they were given that job (auto pull takes the
+    /// longest-held post first).
+    pub marker_since: f32,
     /// Threat they're moving to fight (search and destroy), if any.
     pub engaging: Option<usize>,
     /// Out of the fight (health at 0). Squad mates can't die in the
@@ -169,6 +172,12 @@ pub enum SquadEvent {
     MarkerCancelled {
         member: String,
         marker: String,
+    },
+    /// Auto pull maneuvers: taken off a post for a new order.
+    MarkerPulled {
+        member: String,
+        marker: String,
+        for_marker: String,
     },
     Stuck {
         member: String,
@@ -328,6 +337,9 @@ impl fmt::Display for SquadEvent {
             SquadEvent::MarkerStarted { member, marker } => write!(f, "{member} working at {marker}"),
             SquadEvent::MarkerDone { member, marker } => write!(f, "{member} finished {marker}"),
             SquadEvent::MarkerCancelled { member, marker } => write!(f, "{member} left {marker} (cancelled)"),
+            SquadEvent::MarkerPulled { member, marker, for_marker } => {
+                write!(f, "{member} left {marker} (pulled for {for_marker})")
+            }
             SquadEvent::Stuck { member, at, goal, next, path_points } => write!(
                 f,
                 "{member} STUCK at {} trying to reach {} (next path point {}, {path_points} points left)",
@@ -443,6 +455,10 @@ pub struct Squad {
     pub time: f32,
     /// Charges and grenades waiting to go off.
     pub pending: Vec<Pending>,
+    /// "Auto pull maneuvers" (the original's GAME option, on by default):
+    /// an order that needs more squad mates than are free takes them off
+    /// pullable posts. Off, the order is refused while they're busy.
+    pub auto_pull: bool,
 }
 
 /// A lit fuse.
@@ -532,6 +548,7 @@ impl Squad {
                     goal: feet,
                     hold_point: feet,
                     marker: None,
+                    marker_since: 0.0,
                     engaging: None,
                     down: false,
                     revive: None,
@@ -560,6 +577,7 @@ impl Squad {
             rng: Rng::new(0x0D17_DE17),
             time: 0.0,
             pending: Vec::new(),
+            auto_pull: true,
         };
         (squad, events)
     }
@@ -686,10 +704,17 @@ impl Squad {
                     });
                     return events;
                 }
+                let order_name = format!("{} ({})", spot.name, spot.job);
+                self.pull_for(k, &mut events);
                 if !self.members.iter().any(|m| m.marker.is_none() && !m.down) {
                     events.push(SquadEvent::OrderIgnored {
-                        order: format!("{} ({})", spot.name, spot.job),
-                        why: "everyone is busy".into(),
+                        order: order_name,
+                        why: if self.auto_pull {
+                            "everyone is busy".into()
+                        } else {
+                            "everyone is busy (auto pull maneuvers is off: recall the squad first)"
+                                .into()
+                        },
                     });
                     return events;
                 }
@@ -739,6 +764,7 @@ impl Squad {
                     self.markers[g].1 = MarkerState::Assigned(i);
                     let m = &mut self.members[i];
                     m.marker = Some(g);
+                    m.marker_since = self.time;
                     m.revive = None;
                     m.state = MemberState::Idle;
                     m.think_in = 0.0;
@@ -767,6 +793,63 @@ impl Squad {
             }
         }
         events
+    }
+
+    /// Auto pull maneuvers: when marker `k`'s order needs more squad mates
+    /// than are free (one per open spot of its group), take the missing
+    /// ones off pullable posts, the longest-held first, as the original
+    /// does (its `FillParticipants`, read from `Engine.dll`: members on a
+    /// marker with `bCancelIfMembersNeeded` and `bCanCancelAfterUnderway`
+    /// may be taken, sorted by how long their marker has been running).
+    /// Nobody is taken off a job that's under way (a lit charge, slicing),
+    /// a group job, or the post being ordered.
+    fn pull_for(&mut self, k: usize, events: &mut Vec<SquadEvent>) {
+        if !self.auto_pull {
+            return;
+        }
+        let needed = self
+            .group_of(k)
+            .into_iter()
+            .filter(|&g| self.markers[g].1 == MarkerState::Open)
+            .count();
+        let free = self
+            .members
+            .iter()
+            .filter(|m| m.marker.is_none() && !m.down)
+            .count();
+        if free >= needed {
+            return;
+        }
+        let mut pullable: Vec<usize> = (0..self.members.len())
+            .filter(|&i| {
+                let m = &self.members[i];
+                !m.down
+                    && m.marker.is_some_and(|j| {
+                        j != k
+                            && self.job_of(j).is_some_and(|job| {
+                                job.pullable && job.kind == JobKind::Post && !job.group
+                            })
+                    })
+            })
+            .collect();
+        pullable.sort_by(|&a, &b| {
+            self.members[a]
+                .marker_since
+                .total_cmp(&self.members[b].marker_since)
+        });
+        let for_marker = self.markers[k].0.name.clone();
+        for i in pullable.into_iter().take(needed - free) {
+            let Some(j) = self.members[i].marker.take() else {
+                continue;
+            };
+            self.markers[j].1 = MarkerState::Open;
+            self.members[i].state = MemberState::Idle;
+            events.push(SquadEvent::MarkerPulled {
+                member: self.members[i].settings.name.clone(),
+                marker: self.markers[j].0.name.clone(),
+                for_marker: for_marker.clone(),
+            });
+        }
     }
 
     /// A direct order: head for the new spot now, unless already there.

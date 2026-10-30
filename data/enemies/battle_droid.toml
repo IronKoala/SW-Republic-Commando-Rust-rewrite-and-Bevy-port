@@ -74,6 +74,7 @@ melee_damage = 0          # damage per hit, before the target's damage table
 melee_damage_type = "CTDamageMelee" # the hit's damage type (data/combat/damage_types.toml)
 melee_delay = 1.5         # guess: seconds between hits
 lunge_distance = 0        # rushes in to hit when its enemy is this close; with weapon = "" it always does
+leap_speed = 0            # leaps straight to a point a level script sends it to but it can't walk to, uu/s (0: it can't)
 
 [grenades]
 # Grenades it throws. The original's battle droids carry none, so grenade
@@ -148,3 +149,9 @@ death = "Death"
 throw = ""                # throwing a grenade; empty: battle droids don't
 melee = ""                # a close-up hit; empty: battle droids don't
 ambient = 0.5             # guess: light the droid always gets (0 to 1); the original uses each zone's ambient light, which we don't read yet
+# Seconds to blend smoothly from one animation into the next, so the droid
+# doesn't snap between poses (0 snaps). Our choice: the original blends
+# inside its compiled engine code, which we can't read.
+blend_time = 0.2          # guess
+blend_time_fire = 0.05    # guess: the firing animation lasts only 0.1 s
+blend_time_death = 0.1    # guess

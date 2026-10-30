@@ -22,7 +22,7 @@ pub use battle::{
     Battle, BattleEvent, BattleSnapshot, Birth, FighterSnapshot, Spawner, SpawnerSnapshot,
     SwitchedOn,
 };
-pub use brain::{AiEvent, Fighter, Maneuver, Mode, Target, View};
+pub use brain::{AiEvent, Fighter, Maneuver, Mode, ScriptGoal, Target, View};
 pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
 pub use spawns::{read_factories, Factory, Offspring, SpawnSpot, StartState};
 

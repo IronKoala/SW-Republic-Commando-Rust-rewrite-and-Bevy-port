@@ -41,24 +41,27 @@ fn take(
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let path = dir.join(format!("rc_game_{stamp}_{:03}.png", *count));
-    commands
-        .spawn(Screenshot::primary_window())
-        .observe(move |shot: On<ScreenshotCaptured>, log: Res<GameLog>| {
-            save(&shot, &path, &log);
-        });
+    commands.spawn(Screenshot::primary_window()).observe(
+        move |shot: On<ScreenshotCaptured>, log: Res<GameLog>| {
+            let img = &shot.image;
+            let (w, h) = (img.width() as usize, img.height() as usize);
+            let Some(data) = img.data.clone() else {
+                log.line("screenshot: the picture had no pixels");
+                return;
+            };
+            let bgra = matches!(
+                img.texture_descriptor.format,
+                TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb
+            );
+            // Packing and writing the file takes a moment; doing it beside
+            // the game keeps the game from pausing.
+            let (path, log) = (path.clone(), log.clone());
+            std::thread::spawn(move || save(data, w, h, bgra, &path, &log));
+        },
+    );
 }
 
-fn save(shot: &ScreenshotCaptured, path: &std::path::Path, log: &GameLog) {
-    let img = &shot.image;
-    let (w, h) = (img.width() as usize, img.height() as usize);
-    let Some(data) = img.data.as_ref() else {
-        log.line("screenshot: the picture had no pixels");
-        return;
-    };
-    let bgra = matches!(
-        img.texture_descriptor.format,
-        TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb
-    );
+fn save(data: Vec<u8>, w: usize, h: usize, bgra: bool, path: &std::path::Path, log: &GameLog) {
     let mut pixels = Vec::with_capacity(w * h * 4);
     for p in data.as_chunks::<4>().0.iter().take(w * h) {
         if bgra {

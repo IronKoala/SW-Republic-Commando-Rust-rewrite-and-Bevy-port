@@ -6,9 +6,12 @@
 //! work here (`rc_menus::pages::check`); otherwise the placeholder page
 //! stays and the log says why.
 //!
-//! The original lays menus out for a 4:3 screen. We draw them in a centred
-//! 4:3 area, as large as the window allows, with black on either side
-//! (or above and below on a tall phone screen), so nothing is stretched.
+//! The original lays menus out for a 4:3 screen. On a wider screen each
+//! picture and letter keeps the size it has on a 4:3 screen of the same
+//! height, and the menu spreads out to use the width: things move apart,
+//! they are never shrunk (`rc_menus::fit`), up to `[fit] widest_shape` in
+//! `data/ui/original_menus.toml`. On a 4:3 or taller screen the menu is a
+//! centred 4:3 area with black above and below.
 //!
 //! Every picture and letter is a Bevy UI image node placed in percent of
 //! that area, so the menu follows the window when it is resized. Menu
@@ -28,11 +31,11 @@ use bevy::audio::{AudioSource, PlaybackSettings};
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::window::PrimaryWindow;
 use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, InputDevice,
     InputPrompts, LoadingGate, Play,
 };
+use rc_menus::fit;
 use rc_menus::gpu::{self, Variant};
 use rc_menus::layout::{Kind, MenuLayout};
 use rc_menus::pages::{self, PageButtons, PageCmd, PagePlan};
@@ -254,7 +257,14 @@ pub struct OriginalMenus {
     select_sound: Option<String>,
     /// True when the drawing needs redoing.
     dirty: bool,
-    /// The quads last drawn, for the script's colour check.
+    /// The widest screen shape menus spread to (`[fit] widest_shape`).
+    widest: f32,
+    /// How many 4:3 menus wide the menu was last drawn (`rc_menus::fit`).
+    pub across: f32,
+    /// Pages whose spreading was logged, with the width.
+    fit_logged: Vec<(String, u32)>,
+    /// The quads last drawn, for the script's colour check, in fractions
+    /// of the menu area (`area_for`).
     pub drawn: Vec<Quad>,
     /// This frame's button press was used here (for example to open the
     /// campaign page), so the placeholder pages must not act on it too.
@@ -299,7 +309,8 @@ impl OriginalMenus {
 
 /// Read the page list: the first copy found in the data folders (so a mod
 /// wins), else the one built into the game.
-fn page_plans(paths: &GamePaths, log: &GameLog) -> Vec<PagePlan> {
+/// The page plans and `[fit] widest_shape`.
+fn page_plans(paths: &GamePaths, log: &GameLog) -> (Vec<PagePlan>, f32) {
     const REL: &str = "ui/original_menus.toml";
     let text = match paths.data_file(REL) {
         Some(p) => match std::fs::read_to_string(&p) {
@@ -311,10 +322,12 @@ fn page_plans(paths: &GamePaths, log: &GameLog) -> Vec<PagePlan> {
         },
         None => include_str!("../../../data/ui/original_menus.toml").to_string(),
     };
-    pages::parse_plans(&text).unwrap_or_else(|e| {
+    let widest = pages::parse_widest_shape(&text).unwrap_or(pages::DEFAULT_WIDEST_SHAPE);
+    let plans = pages::parse_plans(&text).unwrap_or_else(|e| {
         log.line(format!("original menus: {REL}: {e}; no original pages"));
         Vec::new()
-    })
+    });
+    (plans, widest)
 }
 
 pub struct OriginalMenuPlugin;
@@ -362,7 +375,9 @@ fn load(
         }
     };
     let mut paths_needed = Vec::new();
-    for plan in page_plans(&paths, &log) {
+    let (plans, widest) = page_plans(&paths, &log);
+    menus.widest = widest;
+    for plan in plans {
         let class = match assets.library.class(&plan.class) {
             Ok(c) => c,
             Err(e) => {
@@ -387,14 +402,6 @@ fn load(
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {
                 check_names(&mut layout, &mut buttons, &plan.page, &log);
-                let shrunk = screens::fit_row_labels(&mut layout, &mut assets);
-                if !shrunk.is_empty() {
-                    log.line(format!(
-                        "original menus: page {}: labels shrunk to fit before their arrows: {}",
-                        plan.page,
-                        shrunk.join(", ")
-                    ));
-                }
                 log.line(format!(
                     "original menus: page {} uses {} ({} buttons)",
                     plan.page,
@@ -516,6 +523,23 @@ fn check_names(layout: &mut MenuLayout, buttons: &mut PageButtons, page: &str, l
         }
         ok
     });
+    // The original fills some lists (FSAA, VSYNC) while it runs, so the
+    // stored list can be too short to choose from.
+    for (i, name) in &buttons.choosers {
+        let w = &mut layout.widgets[*i];
+        let Kind::Button(b) = &mut w.kind else {
+            continue;
+        };
+        if b.items.len() < 2 {
+            if let Some(items) = option_settings::fallback_items(name) {
+                log.line(format!(
+                    "original menus: page {page}: {} ({name}) has {:?} in the original; using {:?}",
+                    w.name, b.items, items
+                ));
+                b.items = items;
+            }
+        }
+    }
     for (i, why) in bad {
         let name = layout.widgets[i].name.clone();
         log.line(format!(
@@ -591,11 +615,11 @@ fn focus_new_page(
     mut last: Local<Option<Shown>>,
     settings: Res<Settings>,
     prompts: Res<InputPrompts>,
-    monitors: Query<&bevy::window::Monitor, With<bevy::window::PrimaryMonitor>>,
+    monitor: Res<crate::display::Desktop>,
     log: Res<GameLog>,
 ) {
-    if let Ok(m) = monitors.single() {
-        menus.desktop = Some((m.physical_width, m.physical_height));
+    if menus.desktop != monitor.size {
+        menus.desktop = monitor.size;
     }
     let desktop = menus.desktop;
     let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
@@ -1200,7 +1224,7 @@ fn apply_options(
                     continue;
                 }
                 let (at, text, items) = (b.current, b.items[b.current].clone(), b.items.clone());
-                if option_settings::write(&name, &mut settings, at, &items) {
+                if option_settings::write(&name, &mut settings, at, &items, desktop) {
                     log.line(format!("original menus: page {k}: {name} is now {text}"));
                     settings_changed = true;
                 }
@@ -1218,7 +1242,7 @@ fn apply_options(
                 }
                 b.choose(at);
                 let (text, items) = (b.items[at].clone(), b.items.clone());
-                if option_settings::write(&name, &mut settings, at, &items) {
+                if option_settings::write(&name, &mut settings, at, &items, desktop) {
                     log.line(format!(
                         "original menus: page {k}: {name} is now {text} (from its list)"
                     ));
@@ -1392,7 +1416,15 @@ fn draw(
     mut menus: ResMut<OriginalMenus>,
     roots: Query<Entity, With<OriginalRoot>>,
     mut image_assets: ResMut<Assets<Image>>,
+    area: Option<Res<crate::display::PlayArea>>,
+    log: Res<GameLog>,
 ) {
+    let aspect = area.map_or(4.0 / 3.0, |a| a.aspect());
+    let across = fit::across_for(aspect, menus.widest);
+    if (across - menus.across).abs() > 1e-4 {
+        menus.across = across;
+        menus.dirty = true;
+    }
     let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
     let Some(shown) = shown else {
         for r in &roots {
@@ -1434,30 +1466,110 @@ fn draw(
         screens.push((true, &l.screen));
     }
     let overlay = screens.len() > 1;
+    // Spread each screen over a wide screen (`rc_menus::fit`). The
+    // drop-down list follows the value it opened from; other boxes over
+    // the page spread on their own.
+    let page_name = match (&menus.question, &shown) {
+        (Some(_), _) => "question".to_string(),
+        (None, Shown::Main) => "main".to_string(),
+        (None, Shown::Page(k)) => k.clone(),
+    };
+    let list_chooser = menus.list.as_ref().map(|l| l.chooser);
+    let mut fitted: Vec<(bool, MenuLayout, Option<usize>)> = Vec::new();
+    let mut page_moves: Vec<f32> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+    for (n, (on_top, screen)) in screens.into_iter().enumerate() {
+        let mut layout = screen.layout.clone();
+        let is_list = menus
+            .list
+            .as_ref()
+            .is_some_and(|l| std::ptr::eq(&l.screen, screen));
+        if is_list {
+            let dx = list_chooser
+                .and_then(|c| page_moves.get(c))
+                .copied()
+                .unwrap_or(0.0);
+            fit::shift_all(&mut layout, dx);
+        } else {
+            let spread = fit::spread(&mut layout, assets, across);
+            if n == 0 {
+                page_moves = spread.moved.clone();
+                if across > 1.0 + 1e-4 {
+                    notes.push(format!(
+                        "{} groups spread over {across:.2} 4:3 widths{}",
+                        spread.groups,
+                        if spread.widened.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                ", widened {} ({})",
+                                spread.widened.join(", "),
+                                spread.why.join("; ")
+                            )
+                        }
+                    ));
+                }
+                // Only when moving apart wasn't enough (a 4:3 screen):
+                // shrink labels that run into their row's arrows.
+                let shrunk = screens::fit_row_labels(&mut layout, assets);
+                if !shrunk.is_empty() {
+                    notes.push(format!(
+                        "labels shrunk to fit before their arrows: {}",
+                        shrunk.join(", ")
+                    ));
+                }
+            }
+        }
+        fitted.push((
+            on_top,
+            layout,
+            if overlay && !on_top {
+                None
+            } else {
+                screen.focus
+            },
+        ));
+    }
     // (on top?, pictures, mouse areas by widget index)
     type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>);
     let mut list: Vec<Drawn> = Vec::new();
-    for (on_top, screen) in screens {
+    let left = fit::left_edge(across);
+    let to_area = |b: [f32; 4]| [(b[0] - left) / across, b[1], (b[2] - left) / across, b[3]];
+    for (on_top, layout, focus) in &fitted {
         // The page under a box shows no focus and takes no clicks.
         let under = overlay && !on_top;
-        let focus = if under { None } else { screen.focus };
-        let q = quads::menu_quads(&screen.layout, focus, assets);
+        let mut q = quads::menu_quads(layout, *focus, assets);
+        for quad in &mut q {
+            quad.dst = to_area(quad.dst);
+        }
         let boxes = if under {
             Vec::new()
         } else {
-            screen
-                .layout
+            layout
                 .buttons_on_pc()
                 .into_iter()
-                .filter_map(|i| match &screen.layout.widgets[i].kind {
+                .filter_map(|i| match &layout.widgets[i].kind {
                     Kind::Button(b) => quads::sprite_box(&b.background_blurred, assets)
                         .or_else(|| quads::text_box(&b.blurred, assets))
-                        .map(|bx| (i, bx)),
+                        .map(|bx| (i, to_area(bx))),
                     _ => None,
                 })
                 .collect()
         };
-        list.push((on_top, q, boxes));
+        list.push((*on_top, q, boxes));
+    }
+    let key = (page_name.clone(), (across * 100.0).round() as u32);
+    if !menus.fit_logged.contains(&key) {
+        menus.fit_logged.push(key);
+        let overlaps = fit::text_overlaps(&fitted[0].1, assets);
+        if !overlaps.is_empty() {
+            notes.push(format!("STILL OVERLAPPING: {}", overlaps.join(", ")));
+        }
+        for note in notes {
+            log.line(format!(
+                "original menus: {page_name} at {aspect:.2} wide: {note}"
+            ));
+        }
     }
     menus.drawn = list.iter().flat_map(|l| l.1.clone()).collect();
     for q in &menus.drawn {
@@ -1558,25 +1670,29 @@ fn draw(
         });
 }
 
-/// The menu area: the largest 4:3 box that fits the window, centred.
-pub fn area_for(window: Vec2) -> Rect {
-    let (w, h) = if window.x / window.y.max(1.0) > MENU_ASPECT {
-        (window.y * MENU_ASPECT, window.y)
+/// The menu area: the largest box `across` 4:3 menus wide that fits the
+/// window, centred (`across` is 1 on a 4:3 or taller screen).
+pub fn area_for(window: Vec2, across: f32) -> Rect {
+    let shape = MENU_ASPECT * across.max(1.0);
+    let (w, h) = if window.x / window.y.max(1.0) > shape {
+        (window.y * shape, window.y)
     } else {
-        (window.x, window.x / MENU_ASPECT)
+        (window.x, window.x / shape)
     };
     let min = (window - Vec2::new(w, h)) / 2.0;
     Rect::from_corners(min, min + Vec2::new(w, h))
 }
 
 fn fit_area(
-    windows: Query<&Window, With<PrimaryWindow>>,
+    menus: Res<OriginalMenus>,
+    play: Option<Res<crate::display::PlayArea>>,
     mut areas: Query<&mut Node, With<MenuArea>>,
 ) {
-    let Ok(window) = windows.single() else {
+    // The menus are drawn inside the play area (inside any black bars).
+    let Some(play) = play else {
         return;
     };
-    let r = area_for(Vec2::new(window.width(), window.height()));
+    let r = area_for(play.logical_size(), menus.across);
     for mut n in &mut areas {
         let want = (
             Val::Px(r.min.x),
