@@ -45,6 +45,7 @@ the small set of types in `crates/rc_game_core`.
 | Find our own data file (moddable) | `GamePaths::data_file("weapons/dc15s.toml")`: a mod's copy wins over `data/` |
 | Player input | read `ActionState` (`pressed(Action::Fire)`, `movement`, `look`). Never read keys, mouse or gamepad. To show a button prompt, read `InputPrompts`: `label(Action::Use)` is the button's name on the device used last ("F", "X", "Square"). |
 | Collide or trace | `LevelCollision` (Unreal units). The level part inserts it while loading, and may replace it at any time (moving doors) |
+| Doors and lifts | `rc_movers_plugin::LevelMovers` while in the game: `send("Tag")` opens every mover with that `Tag` (the original's `TriggerEvent`); `read()` for where they are. `MoverHappened` messages say what they did. Its `world()` is already in `LevelCollision` |
 | Where the player starts | the level part inserts `PlayerStart` (feet in Unreal units, yaw) while loading |
 | What the map has | `rc_level_plugin::LevelInfo` (counts, sky position), present while in the game |
 | A new camera the player looks through (VR) | give it `PlayerCamera`; the level part adds `SkyViewer` so the sky turns with it |

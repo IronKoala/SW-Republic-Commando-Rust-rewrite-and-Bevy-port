@@ -28,6 +28,7 @@ toml = "0.8"
 # PLUGINS FROM OTHER PARTS: add the crates of the level, weapons, enemies
 # and squad parts here (see docs/PLUGINS.md).
 rc_level_plugin = { path = "../rc_level_plugin" }
+rc_movers_plugin = { path = "../rc_movers_plugin" }
 rc_combat = { path = "../rc_combat" }
 rc_enemies = { path = "../rc_enemies" }
 rc_squad_plugin = { path = "../rc_squad_plugin" }
