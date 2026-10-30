@@ -79,13 +79,10 @@ pub struct ScriptEvent {
     pub by: String,
 }
 
-/// A checkpoint was reached: save the game. `name` is the map's
-/// `Checkpoint` actor (unique in the map). Held while the player is down.
-/// (The save part's own message will replace this once it is merged.)
-#[derive(Message, Debug, Clone)]
-pub struct CheckpointReached {
-    pub name: String,
-}
+/// A checkpoint was reached: the save part saves the game. `name` is the
+/// map's `Checkpoint` actor (unique in the map). Held while the player is
+/// down.
+pub use rc_game_core::save::CheckpointReached;
 
 /// The mission objectives the scripts have updated, in order: (seconds,
 /// `ObjectiveNum`, `ChangeToObjNum`). What the numbers mean on screen
