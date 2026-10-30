@@ -79,8 +79,19 @@ copy of the game.
   windowless test run `rc_squad_sim` passes 33 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
   and stays put until revived. They are in the game program (`rc_game`):
-  start a level and they stand with you. Drawn as coloured capsules for
-  now.
+  start a level and they stand with you.
+
+- **Sev, Fixer and Scorch look like themselves (tested in the cloud
+  sandbox and on Windows).** Each squad mate is drawn with the
+  original commando model, their own armour (Sev's red, Fixer's green,
+  Scorch's yellow) and the original's animations: standing, walking,
+  running, backing up, side-stepping, firing, falling when knocked out, and
+  kneeling to revive. Everything is read from the install when the level
+  starts; which model and animations are used is in
+  `data/squad/looks.toml`. A squad mate whose model can't be read is drawn
+  as a coloured capsule (a placeholder) and the log says why. They don't
+  hold a weapon yet, and the helmet extras the original adds
+  (`AvailableAccessories`) aren't drawn.
 
 - **The squad fights and revives (tested in the cloud sandbox by numbers,
   not yet on Windows or with eyes).** Sev, Fixer and Scorch shoot enemies
@@ -174,9 +185,23 @@ copy of the game.
   and triggers stored in each map, and their collision moves with them, so
   you can ride a lift in `rc_walk`. `rc_mover_check` runs every one in every
   map and logs the numbers: all 863 that could be timed opened and closed
-  on time, and all 33 rideable lifts carried the player. Doors that the
+  on time, and all 33 rideable lifts carried the player. They also run
+  in the game itself (`rc_game`, tested in the cloud sandbox on geo_01a):
+  doors are solid where they stand and move when set off. Doors that the
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
+
+- **Levels run their own scripts (tested in the cloud sandbox, not on
+  Windows).** The game reads each map's own scripting (79 of 79 maps, 2,842
+  scripts, 19,041 actions, nothing unreadable) and runs it: scripts wait
+  for events and timers, touch triggers, counters and conditions send
+  events on, doors open by event, checkpoints ask for a save, and
+  barricades come down. On geo_01a the landing zone now plays like the
+  original: after the intro you are hit by a shell, the advisor tells you
+  to heal, the bacta dispenser switches on, and holding Use at it heals you
+  and blows the barricade so you can reach the fight. `rc_game --script`
+  checks that whole chain (37 of 37 checks). `rc_script_check` runs every
+  map's scripts without a window.
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
@@ -230,6 +255,22 @@ copy of the game.
   Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
   mouse and a gamepad work at the same time.
 
+- **Controllers and gyro aiming (tested with pretend controllers only, no
+  real hardware yet).** SDL3 reads Xbox, PlayStation, Switch Pro, Joy-Con,
+  GameCube and Steam Deck controllers and says which kind each is. Button
+  names for prompts follow the device you used last (`InputPrompts`,
+  names in `data/input/button_names.toml`). Separate dead zones and curves
+  for each stick, a trigger threshold, and gyro aiming with sensitivity,
+  drift calibration, a ratchet button and on/off (`[gyro]` in
+  `settings.toml`). Changing a control in the game is saved to
+  `my_bindings.toml` (the screen to do it from comes with the original
+  options menus). `rc_padtest` checks a real controller. See
+  `docs/DISPLAY_AND_INPUT.md`.
+- **Panini view for ultrawide screens (tested in a check program, not yet
+  in a level).** `video.panini` in `settings.toml` bends the view so the
+  sides of a 21:9 or 32:9 screen aren't stretched, keeping the middle's
+  size.
+
 - **Battle droids that fight back (tested in the cloud sandbox on
   geo_01a, not yet on Windows).** Droids appear from the map's own
   spawners when you walk into their triggers, walk the level's own path
@@ -243,11 +284,45 @@ copy of the game.
   2 droids destroyed by a stand-in player, no droid shooting another, and
   the droids on screen had the skin's colours (all 12 checks passed).
 
+- **Grenades, the DC-17m's attachments, melee, picked-up weapons and
+  more enemy types, with the original's numbers (tested in the cloud
+  sandbox with automatic tests and the game's script files, not yet played
+  in the real game).** You can throw thermal, sonic, EMP and flash
+  grenades: the thermal bounces and goes off a second after it lands (and
+  sets people close to it alight), the sonic sticks and waits for someone to
+  come near, the EMP electrocutes droids, and the flash stuns anyone looking
+  at it. Switch to the DC-17m's sniper (two zoom steps; zoomed shots hit
+  1.72 times harder) and anti-armour attachments, hit with melee, and pick
+  up a fallen enemy's weapon. Every character takes more or less damage by
+  type, from the game's own damage tables (battle droids shrug off sniper
+  rounds but fall to melee). Super battle droids, Geonosian warriors and
+  Trandoshan mercenaries each have their own settings file in
+  `data/enemies` with the game's health, speed, size and aim.
+
+- **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
+  Quicksave with F5 and quickload with F9. The start of each level and each
+  checkpoint the level reports are saved automatically to the checkpoint
+  save. A save holds where you are and where you look, your health, shield,
+  weapons and ammo, and the droids: which spawners have started, which
+  droids are still alive, where they are and their health, and the squad:
+  where each mate is, what they're doing, who is down. Saves are
+  readable text files in `%APPDATA%\rc_game\saves` on Windows or
+  `~/.local/share/rc_game/saves` on Linux (change it with `[save] folder` in
+  `settings.toml`), never in the game's folder. The scripted run saves,
+  walks 422 units away and quickloads, and the player comes back 0.00
+  units from the saved spot with the ammo as it was.
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Scripts are not decoded yet.
+- Level scripts run, but only part of what they ask is carried out:
+  doors, barricades, damage to the player, bacta dispensers, prompts,
+  objectives (kept, not shown) and checkpoints. Lines of dialogue, music
+  cues, characters walking or animating, droid factories, the squad
+  joining and leaving, camera moves and level changes are logged as "not
+  done yet". Sound lengths aren't read, so a script waiting for a line
+  waits 3 s. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
@@ -267,12 +342,18 @@ copy of the game.
   On geo_01a the start area is closed in by such a barricade, so in
   `rc_game` you won't reach the droids yet; `rc_droidview` shows them.
   Some droid numbers are guesses (marked in the data file), including how
-  far a shot can miss. No droid sounds, hit reactions or death effects
-  beyond the animation. Droids don't use jump links or doors.
+  far a shot can miss. No hit reactions or death effects beyond the
+  animation. Droids don't use jump links or doors.
 
-- Weapons: no first-person arms, muzzle flash, grenades, melee or sniper
-  attachment yet, and switching weapons is instant. How the view kick
-  settles back is our own guess.
+- Weapons: no first-person arms or muzzle flash, and switching weapons is
+  instant. How the view kick settles back is our own guess. The
+  attachments' and the Trandoshan repeater's reload times are stand-ins,
+  grenades have no explosion sounds or models yet (a small glowing ball),
+  and nobody but the player throws grenades yet.
+- Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
+  stand-in blaster instead of using their force pike, and walk instead of
+  flying and climbing. The Trandoshan uses a stand-in model. Droid voice
+  lines are empty until the sound packages are read.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
@@ -287,9 +368,16 @@ copy of the game.
   question are the original's so far. Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
-  being built to plug into it). No saving or loading, no checkpoints, no
-  briefings or cut scenes. Options are a short list. Not tested on Windows,
-  with a gamepad, or with a touch screen.
+  being built to plug into it). No briefings or cut scenes. Saving: doors
+  and lifts aren't saved yet, there's no Load Game screen yet (the
+  menu's LOAD GAME stays greyed out), and the original's own checkpoints
+  (144 found in the campaign maps) wait on the level scripts part to fire
+  them, so for now each level has only its level-start checkpoint. Options are a short list. Not tested on Windows,
+  with a real controller, or with a touch screen.
+- Controllers: no button pictures yet (words only), no rebinding screen
+  yet, no rumble or aim assist. Gyro on phones isn't started. Building with
+  SDL needs CMake installed (`cargo build --no-default-features` builds
+  without SDL and without gyro).
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the
   real game side by side. Real-time lights use placeholder strengths and
@@ -301,7 +389,10 @@ copy of the game.
 
 ## How to run it
 
-You need Rust (install from <https://rustup.rs>). From this folder:
+You need Rust (install from <https://rustup.rs>) and CMake, which builds
+SDL, the controller and gyro reader (Windows: `winget install
+Kitware.CMake`, then open a new PowerShell; Linux: your system's `cmake`
+package). From this folder:
 
 ```
 cargo run --release -p rc_game
@@ -312,6 +403,14 @@ you run it from; if your game isn't in a usual Steam folder, open that file
 and set `folder` under `[game]`. `--map geo_01a` skips the menus.
 `--script` plays itself through the menus and a level and checks each step
 (the log is `logs/rc_game.log`).
+
+To check a controller without the game (lists every controller, which kind
+it is taken for and whether it has a gyro, then logs its buttons, sticks
+and gyro to `logs\rc_padtest.log` for 20 seconds):
+
+```
+cargo run --release -p rc_pads --bin rc_padtest
+```
 
 To look at one of the original menus without starting the game:
 
@@ -578,8 +677,27 @@ cargo test --release -p rc_squad_plugin --test jobs_room
 ```
 
 It should say `test result: ok. 1 passed`. In `logs\jobs_room.log` look
-for `Fixer healed to 400`, `set the charge ... 5.0 s`, then five seconds
-later `BLAST (Demolition, Sev)` and `blast hurt 1 bodies`.
+for `Fixer healed to 400`, `Scorch set the charge ... 10.0 s`, then ten
+seconds later `BLAST (Demolition, Scorch)` and `blast hurt 1 bodies`.
+
+To check that Sev, Fixer and Scorch are drawn with their original models
+and armour (opens a window for a few seconds):
+
+```
+cargo run -p rc_squad_plugin --example rc_squad_look_check
+```
+
+It stands the three side by side, checks every animation, checks each
+armour is the one the original gives that commando, and compares the
+outline and colours on screen with what the model and its pictures say. It
+should end with `LOOK CHECK DONE: 48 checks passed, 0 failed`. The log is
+`logs\rc_squad_look_check.log`, and `logs\rc_squad_look_check.ppm` is the
+captured picture. To list what a model package holds (for editing
+`looks.toml`):
+
+```
+cargo run -p rc_model --example rc_model_list -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Animations\clone.ukx" --sequences
+```
 
 ## Credits
 

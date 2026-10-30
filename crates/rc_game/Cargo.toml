@@ -4,8 +4,19 @@ version = "0.1.0"
 edition.workspace = true
 description = "The game: one program with the menus, settings, input, on-screen display and music, that every other part plugs into."
 
+[features]
+# Read controllers and gyros with SDL3 (see crates/rc_pads). Building it
+# needs CMake; `--no-default-features` builds without it, using gilrs and
+# no gyro.
+default = ["sdl"]
+sdl = ["rc_pads/sdl"]
+
 [dependencies]
 rc_game_core = { path = "../rc_game_core" }
+# Without its default features, so `--no-default-features` here really
+# builds without SDL.
+rc_pads = { path = "../rc_pads", default-features = false }
+rc_panini = { path = "../rc_panini" }
 rc_image = { path = "../rc_image" }
 rc_menus = { path = "../rc_menus" }
 rc_movement = { path = "../rc_movement" }
@@ -17,9 +28,13 @@ toml = "0.8"
 # PLUGINS FROM OTHER PARTS: add the crates of the level, weapons, enemies
 # and squad parts here (see docs/PLUGINS.md).
 rc_level_plugin = { path = "../rc_level_plugin" }
+rc_movers_plugin = { path = "../rc_movers_plugin" }
+rc_scripts_plugin = { path = "../rc_scripts_plugin" }
+rc_level_viewer = { path = "../rc_level_viewer" }
 rc_combat = { path = "../rc_combat" }
 rc_enemies = { path = "../rc_enemies" }
 rc_squad_plugin = { path = "../rc_squad_plugin" }
+rc_save = { path = "../rc_save" }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. The 3D renderer, a window on
 # X11 or Wayland, menus and text (bevy_ui with Bevy's built-in font), audio

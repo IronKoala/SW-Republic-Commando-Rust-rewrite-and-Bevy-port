@@ -33,10 +33,14 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
+pub mod look;
+pub mod save;
+
 use bevy::prelude::*;
+use rc_game_core::save::SaveAppExt;
 use rc_combat::{
-    CombatSet, Damage, DamageKind, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded,
-    Team, WeaponLibrary,
+    CombatSet, Damage, DamageKind, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield,
+    ShotLanded, Team, WeaponLibrary,
 };
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -49,8 +53,10 @@ use rc_squad::{
     aimed_spot, JobResult, Leader, MapSquadInfo, MemberState, Navigator, Order, Patient, Squad,
     SquadEvent, SquadSettings, StraightLine, Threat,
 };
+use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The settings file, under `data/` (or a mod's folder).
 pub const SETTINGS_FILE: &str = "squad/squad.toml";
@@ -203,6 +209,66 @@ pub struct SquadJobDone {
 #[derive(Resource, Default, Debug)]
 pub struct SquadJobQueue(pub Vec<SquadEvent>);
 
+/// The squad mates' models, read from the game the first time a squad
+/// is spawned and kept between maps. `None`: couldn't be read (the mate
+/// gets the stand-in body).
+#[derive(Resource, Default)]
+pub struct SquadLooks {
+    tried: bool,
+    pub ambient: f32,
+    pub models: HashMap<String, Option<Arc<rc_model::Model>>>,
+}
+
+impl SquadLooks {
+    fn load(&mut self, paths: Option<&GamePaths>, keys: &[String], log: &Option<Res<GameLog>>) {
+        if self.tried {
+            return;
+        }
+        self.tried = true;
+        let (looks, file) = match look::LooksFile::read(paths) {
+            Ok(x) => x,
+            Err(e) => {
+                log_line(log, format!("{e}; squad mates get stand-in bodies"));
+                return;
+            }
+        };
+        log_line(log, format!("looks from {}", file.display()));
+        self.ambient = looks.ambient;
+        let Some(paths) = paths else {
+            log_line(log, "no game folder; squad mates get stand-in bodies");
+            return;
+        };
+        for key in keys {
+            let t = std::time::Instant::now();
+            let model = match look::load_model(paths, &looks, key) {
+                Ok((m, notes)) => {
+                    for n in notes {
+                        log_line(log, format!("{key}: {n}"));
+                    }
+                    log_line(
+                        log,
+                        format!(
+                            "{key}: model read in {:.0} ms",
+                            t.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    );
+                    Some(Arc::new(m))
+                }
+                Err(e) => {
+                    log_line(
+                        log,
+                        format!(
+                            "{key}: model not loaded, using the stand-in body (placeholder): {e}"
+                        ),
+                    );
+                    None
+                }
+            };
+            self.models.insert(key.clone(), model);
+        }
+    }
+}
+
 /// One squad mate's body in the world. Its `Transform` is at the feet,
 /// turned to face the way they face (like the player's).
 #[derive(Component, Debug)]
@@ -228,7 +294,18 @@ impl Plugin for SquadPlugin {
             .init_resource::<SquadState>()
             .init_resource::<SquadThreats>()
             .init_resource::<SquadFightStats>()
+            .init_resource::<SquadLooks>()
+            .add_save_part::<save::SquadSave>()
             .add_systems(OnEnter(GameState::Loading), load_map_data)
+            .add_systems(
+                Update,
+                save::apply_pending
+                    .in_set(GameSet::Simulate)
+                    .in_set(SquadSet)
+                    .after(spawn_squad)
+                    .before(check_down)
+                    .run_if(resource_exists::<save::PendingSquadSave>),
+            )
             .add_systems(OnExit(GameState::InGame), clear_squad)
             .add_systems(
                 Update,
@@ -256,7 +333,7 @@ impl Plugin for SquadPlugin {
             )
             .add_systems(
                 Update,
-                place_bodies
+                (place_bodies, look::animate)
                     .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
             );
@@ -359,6 +436,8 @@ fn spawn_squad(
     log: Option<Res<GameLog>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
+    images: Option<ResMut<Assets<Image>>>,
+    mut looks: ResMut<SquadLooks>,
 ) {
     if state.squad.is_some() {
         return;
@@ -429,33 +508,21 @@ fn spawn_squad(
             }
         ),
     );
-    // Stand-in bodies: a capsule the commando's size in their colour, with
-    // a dark visor showing which way they face. Skipped without a renderer.
-    let look = match (meshes, materials) {
-        (Some(mut meshes), Some(mut materials)) => {
-            let radius = 40.0 / rc_game_core::units::UU_PER_UNIT;
-            let height = 168.0 / rc_game_core::units::UU_PER_UNIT;
-            let body = meshes.add(Capsule3d::new(radius, height - 2.0 * radius));
-            let visor = meshes.add(Cuboid::new(0.55, 0.22, 0.3));
-            let visor_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.05, 0.05, 0.06),
-                perceptual_roughness: 0.3,
-                ..default()
-            });
-            let mats: Vec<_> = squad
-                .members
-                .iter()
-                .map(|m| {
-                    let [r, g, b] = m.settings.colour;
-                    materials.add(StandardMaterial {
-                        base_color: Color::srgb(r, g, b),
-                        perceptual_roughness: 0.7,
-                        ..default()
-                    })
-                })
-                .collect();
-            Some((body, visor, visor_mat, mats, height))
-        }
+    // The original models where they could be read; otherwise a stand-in
+    // body (placeholder): a capsule the commando's size in their colour,
+    // with a dark visor showing which way they face. Nothing is drawn
+    // without a renderer.
+    let drawing = meshes.is_some() && materials.is_some() && images.is_some();
+    if drawing {
+        let keys: Vec<String> = squad
+            .members
+            .iter()
+            .map(|m| m.settings.key.clone())
+            .collect();
+        looks.load(paths.as_deref(), &keys, &log);
+    }
+    let mut assets = match (meshes, materials, images) {
+        (Some(meshes), Some(materials), Some(images)) => Some((meshes, materials, images)),
         _ => None,
     };
     for (i, m) in squad.members.iter().enumerate() {
@@ -476,23 +543,64 @@ fn spawn_squad(
             ),
             Team::Republic,
             Hittable::COMMANDO,
+            // The original's squad damage table: droid bolts x0.15,
+            // explosions x0.4, stuns x0.
+            DamageTable("DV_OrganicCTSquadDamage".into()),
         ));
-        if let Some((body, visor, visor_mat, mats, height)) = &look {
-            e.with_children(|c| {
-                c.spawn((
-                    Mesh3d(body.clone()),
-                    MeshMaterial3d(mats[i].clone()),
-                    Transform::from_xyz(0.0, height / 2.0, 0.0),
-                ));
-                c.spawn((
-                    Mesh3d(visor.clone()),
-                    MeshMaterial3d(visor_mat.clone()),
-                    Transform::from_xyz(0.0, height - 0.45, -0.72),
-                ));
-            });
+        let Some((meshes, materials, images)) = assets.as_mut() else {
+            continue;
+        };
+        if let Some(Some(model)) = looks.models.get(&m.settings.key) {
+            let mm = look::spawn_pieces(
+                model.clone(),
+                looks.ambient,
+                &mut e,
+                meshes,
+                materials,
+                images,
+            );
+            e.insert(mm);
+        } else {
+            stand_in_body(&mut e, m.settings.colour, meshes, materials);
         }
     }
     state.squad = Some(squad);
+}
+
+/// The placeholder body for a squad mate whose model couldn't be read.
+fn stand_in_body(
+    e: &mut EntityCommands,
+    colour: [f32; 3],
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let radius = 40.0 / rc_game_core::units::UU_PER_UNIT;
+    let height = 168.0 / rc_game_core::units::UU_PER_UNIT;
+    let body = meshes.add(Capsule3d::new(radius, height - 2.0 * radius));
+    let visor = meshes.add(Cuboid::new(0.55, 0.22, 0.3));
+    let visor_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.05, 0.05, 0.06),
+        perceptual_roughness: 0.3,
+        ..default()
+    });
+    let [r, g, b] = colour;
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(r, g, b),
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+    e.with_children(|c| {
+        c.spawn((
+            Mesh3d(body),
+            MeshMaterial3d(mat),
+            Transform::from_xyz(0.0, height / 2.0, 0.0),
+        ));
+        c.spawn((
+            Mesh3d(visor),
+            MeshMaterial3d(visor_mat),
+            Transform::from_xyz(0.0, height - 0.45, -0.72),
+        ));
+    });
 }
 
 /// The player's eye and aim, in Unreal units.

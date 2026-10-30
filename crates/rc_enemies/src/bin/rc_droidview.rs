@@ -484,9 +484,9 @@ fn picture_check(
             }
             let mean = sum.map(|s| s / solid.max(1) as f64);
             let skin = looks
-                .look
-                .as_ref()
-                .and_then(|l| l.skin.as_ref())
+                .by_type
+                .get("battle_droid")
+                .and_then(|l| l.look.skin.as_ref())
                 .map(|(_, img)| img.mean());
             log.line(format!(
                 "picture: {n} pixels changed when the droids were hidden ({:.2}% of the window), {solid} of them strongly; their average colour R {:.0} G {:.0} B {:.0}; {magenta} magenta; skin texture average {:?}",

@@ -1,0 +1,414 @@
+# Damage types and damage tables, read from the original game.
+#
+# [parents]: each damage type (a class in the game's script packages,
+# engine.u, ctgame.u, ctinventory.u and Properties/properties.u) and the
+# type it is a kind of.
+#
+# Every other section is a damage table (a DamageVariance class in
+# Properties/properties.u): a multiplier for each listed damage type. A
+# hit uses the entry for its own type, else its parent's, and so on up; no
+# entry means x1. The game's "exclude" entries are written as 0.
+# Characters name their table with `damage_table` (player.toml and the
+# enemy files). Mods can change any number or add tables.
+
+[parents]
+CTDamageAcid = "CTDamageType"
+CTDamageBallistic = "CTDamageType"
+CTDamageBallisticDC17MP = "CTDamageBallisticSMG"
+CTDamageBallisticDC17Sniper = "CTDamageBallistic"
+CTDamageBallisticDC17SniperCommando = "CTDamageBallisticDC17Sniper"
+CTDamageBallisticHAM = "CTDamageBallistic"
+CTDamageBallisticSMG = "CTDamageBallistic"
+CTDamageBallisticShotgun = "CTDamageBallistic"
+CTDamageEMPPulse = "CTDamageExplosion"
+CTDamageElectricity = "CTDamageType"
+CTDamageElectricityEMPGrenade = "CTDamageElectricity"
+CTDamageElectricityGrievousGuard = "CTDamageElectricity"
+CTDamageEnergy = "CTDamageType"
+CTDamageEnergyATTE = "CTDamageEnergy"
+CTDamageEnergyAutoTurret = "CTDamageEnergy"
+CTDamageEnergyBeam = "CTDamageEnergy"
+CTDamageEnergyBeamEnemy = "CTDamageEnergyBeam"
+CTDamageEnergyBow = "CTDamageEnergy"
+CTDamageEnergyBowSkewer = "CTDamageEnergy"
+CTDamageEnergyConc = "CTDamageEnergy"
+CTDamageEnergyDC15s = "CTDamageEnergy"
+CTDamageEnergyDC17 = "CTDamageEnergy"
+CTDamageEnergyDC17Commando = "CTDamageEnergyDC17"
+CTDamageEnergyDroids = "CTDamageEnergy"
+CTDamageEnergyEWeb = "CTDamageEnergy"
+CTDamageEnergyGunshipTurret = "CTDamageEnergy"
+CTDamageEnergySMGMultiPlay = "CTDamageEnergy"
+CTDamageEnergySonicCannon = "CTDamageEnergy"
+CTDamageEnergyWookieeTurret = "CTDamageEnergy"
+CTDamageExplosion = "CTDamageType"
+CTDamageExplosionDC17AA = "CTDamageExplosion"
+CTDamageExplosionDC17AACommando = "CTDamageExplosionDC17AA"
+CTDamageExplosionEMPPulse = "CTDamageExplosion"
+CTDamageExplosionFlashDet = "CTDamageExplosion"
+CTDamageExplosionGeoBarrel = "CTDamageExplosion"
+CTDamageExplosionMissileTurret = "CTDamageExplosion"
+CTDamageExplosionRocket = "CTDamageExplosion"
+CTDamageExplosionSonic = "CTDamageExplosion"
+CTDamageExplosionThermalDet = "CTDamageExplosion"
+CTDamageExplosionTranHeat = "CTDamageExplosion"
+CTDamageExplosionTrap = "CTDamageExplosion"
+CTDamageFire = "CTDamageType"
+CTDamageMelee = "CTDamageType"
+CTDamageMeleeBerserker = "CTDamageMelee"
+CTDamageMeleeHAM = "CTDamageMelee"
+CTDamageMeleeWarrior = "CTDamageMelee"
+CTDamageMeleeWookieePaws = "CTDamageMelee"
+CTDamageRASAutoTurret = "CTDamageEnergy"
+CTDamageShotgun = "CTDamageBallistic"
+CTDamageSniper = "CTDamageBallistic"
+CTDamageSonic = "CTDamageType"
+CTDamageSpiderBump = "CTDamageType"
+CTDamageStun = "CTDamageType"
+
+[DV_Droids]
+CTDamageExplosionFlashDet = 0             # excluded
+
+[DV_Organic]
+CTDamageBallistic = 0.75
+CTDamageEnergy = 0.5
+CTDamageExplosion = 1
+
+[DV_DroidDispenser]
+CTDamageEnergyDC17 = 0
+CTDamageBallisticDC17SniperCommando = 0
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageFire = 0
+CTDamageEnergyDroids = 0
+CTDamageElectricityEMPGrenade = 0.1
+CTDamageEnergyATTE = 2
+CTDamageBallistic = 0.15
+CTDamageEnergy = 0.15
+CTDamageExplosion = 0.5
+
+[DV_OrganicCTSquadDamage]
+CTDamageBallisticDC17SniperCommando = 0
+CTDamageEnergyDC17Commando = 0.3
+CTDamageEnergyDC17 = 0.3
+CTDamageEnergySonicCannon = 0.25
+CTDamageElectricityEMPGrenade = 0.25
+CTDamageEnergyAutoTurret = 2.5
+CTDamageElectricity = 0.1
+CTDamageEnergyBeam = 0.1
+CTDamageMelee = 0.5
+CTDamageEnergyDroids = 0.15
+CTDamageMeleeHAM = 5
+CTDamageBallistic = 0.7
+CTDamageEnergy = 0.45
+CTDamageExplosion = 0.4
+CTDamageStun = 0             # excluded
+
+[DV_OrganicCTPlayerDamage]
+CTDamageEnergyAutoTurret = 2.5
+CTDamageEnergyBow = 0
+CTDamageExplosionGeoBarrel = 0.15
+CTDamageEnergySonicCannon = 0.25
+CTDamageBallisticHAM = 2
+CTDamageEnergyBeamEnemy = 0.15
+CTDamageEnergyGunshipTurret = 1
+CTDamageElectricity = 1.1
+CTDamageBallistic = 1.2
+CTDamageEnergy = 0.5
+CTDamageExplosion = 0.7
+CTDamageBallisticDC17SniperCommando = 0.25
+
+[DV_Geonoshans]
+CTDamageBallistic = 1
+CTDamageEnergy = 0.5
+CTDamageExplosion = 0.75
+
+[DV_GeonoshansDroneDamage]
+CTDamageMeleeWarrior = 0
+CTDamageBallistic = 1
+CTDamageEnergy = 1
+CTDamageExplosion = 0.75
+
+[DV_DroidsGrievousGuardDamage]
+CTDamageStun = 0
+CTDamageBallisticDC17SniperCommando = 0.25
+CTDamageEnergyDC17Commando = 0.25
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageExplosionRocket = 0.7
+CTDamageMelee = 0.2
+CTDamageFire = 0
+CTDamageEnergyBowSkewer = 0.25
+CTDamageEnergyConc = 0.75
+CTDamageElectricityEMPGrenade = 2
+CTDamageElectricity = 0
+CTDamageBallistic = 0.2
+CTDamageEnergy = 0.5
+CTDamageExplosion = 0.7
+
+[DV_Turrets]
+CTDamageFire = 0             # excluded
+
+[DV_TurretsTrandoshan]
+CTDamageFire = 0
+CTDamageEnergyConc = 3
+
+[DV_OrganicCTMultiPlayerDamage]
+CTDamageMelee = 0.65
+CTDamageEnergyBeam = 0.075
+CTDamageEnergyConc = 0.75
+CTDamageExplosionDC17AA = 0.55
+CTDamageExplosionRocket = 0.75
+CTDamageBallisticDC17Sniper = 0.65
+CTDamageBallisticHAM = 1.15
+CTDamageBallisticShotgun = 1.2
+CTDamageEnergyBowSkewer = 0.2
+CTDamageEnergyBow = 0.6
+CTDamageExplosionSonic = 0.45
+CTDamageBallisticDC17MP = 0.8
+CTDamageBallisticSMG = 0.8
+CTDamageEnergyDC15s = 0.65
+CTDamageElectricityEMPGrenade = 0.6
+CTDamageExplosion = 0.75
+
+[DV_OrganicWookieDamage]
+
+[DV_OrganicTrandoHeavyDamage]
+CTDamageBallisticDC17SniperCommando = 0.75
+CTDamageEnergyDC17Commando = 0.2
+CTDamageExplosionDC17AACommando = 0.75
+CTDamageMelee = 0.1
+CTDamageElectricityEMPGrenade = 0.5
+CTDamageFire = 0
+CTDamageExplosionRocket = 1.2
+CTDamageExplosionMissileTurret = 1.2
+CTDamageBallistic = 0.75
+CTDamageEnergy = 0.35
+CTDamageExplosion = 0.75
+
+[DV_OrganicTrandoSlaverBerserker]
+CTDamageEnergyDC17Commando = 0.5
+CTDamageBallisticDC17SniperCommando = 1
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageEnergyEWeb = 1.2
+CTDamageElectricityEMPGrenade = 0.5
+CTDamageEnergyConc = 1
+CTDamageBallistic = 0.75
+CTDamageEnergy = 0.5
+CTDamageExplosion = 1
+
+[DV_DroidsAmbient]
+CTDamageFire = 0
+
+[DV_OrganicTrandoMercDamage]
+CTDamageEnergyDC17Commando = 0.5
+CTDamageExplosionMissileTurret = 3
+CTDamageElectricityEMPGrenade = 0.5
+CTDamageBallistic = 1
+CTDamageEnergy = 0.85
+CTDamageExplosion = 1
+
+[DV_TrandoDropShip]
+CTDamageEnergyEWeb = 0.5
+CTDamageExplosionMissileTurret = 1.5
+
+[DV_DroidsGrievousGuardShieldDamage]
+CTDamageStun = 0
+CTDamageEnergyDC17Commando = 0.5
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageFire = 0
+CTDamageExplosion = 0.25
+CTDamageBallistic = 0.5
+CTDamageEnergy = 0.4
+
+[DV_KarmaProps]
+CTDamageFire = 1
+CTDamageElectricity = 0.75
+CTDamageBallistic = 0.5
+CTDamageEnergy = 0.75
+CTDamageExplosion = 1
+
+[DV_KarmaProps_FallingTree]
+CTDamageFire = 1
+CTDamageElectricity = 0.75
+CTDamageEnergyConc = 2
+CTDamageBallistic = 0
+CTDamageEnergy = 0
+CTDamageExplosion = 1
+
+[DV_TurretsGunshipBallAuto]
+CTDamageFire = 0
+
+[DV_DroidsSuperBattleDroidDamage]
+CTDamageStun = 0
+CTDamageEnergyDC17Commando = 0.15
+CTDamageBallisticDC17SniperCommando = 0.25
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageEnergySonicCannon = 1
+CTDamageMelee = 0.2
+CTDamageFire = 0
+CTDamageBallistic = 0.4
+CTDamageEnergyEWeb = 1.5
+CTDamageEnergyGunshipTurret = 1
+CTDamageEnergyATTE = 2
+CTDamageEnergy = 0.15
+CTDamageExplosionDC17AA = 1.25
+CTDamageElectricityEMPGrenade = 1.25
+CTDamageExplosion = 0.5
+
+[DV_DroidsSuperBattleDroidHalfDamage]
+CTDamageEnergyDC17 = 0.65
+CTDamageEnergyDC17Commando = 0.5
+CTDamageBallisticDC17SniperCommando = 0.25
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageFire = 0
+CTDamageBallistic = 0.38
+CTDamageEnergy = 0.15
+CTDamageExplosion = 1.25
+
+[DV_TurretsATTEBase]
+CTDamageFire = 0
+
+[DV_TurretsATTECannon]
+CTDamageFire = 0
+
+[DV_OrganicTrandoSlaverDamage]
+CTDamageEnergyDC17Commando = 0.5
+CTDamageBallisticDC17SniperCommando = 1
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageExplosionMissileTurret = 2.5
+CTDamageElectricityEMPGrenade = 0.5
+CTDamageBallistic = 0.85
+CTDamageEnergy = 0.8
+CTDamageExplosion = 1
+
+[DV_DroidsDroidekaShieldDamage]
+CTDamageStun = 0
+CTDamageEnergyDC17Commando = 0.5
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageElectricityEMPGrenade = 5
+CTDamageFire = 0
+CTDamageBallistic = 2
+CTDamageEnergyEWeb = 1.5
+CTDamageEnergyATTE = 3
+CTDamageExplosionDC17AA = 2.25
+CTDamageExplosion = 0.5
+CTDamageEnergy = 0.5
+
+[DV_DroidsDroidekaDamage]
+CTDamageStun = 0
+CTDamageEnergyDC17Commando = 0.75
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageMelee = 0.2
+CTDamageFire = 0
+CTDamageBallisticDC17Sniper = 0.1
+CTDamageBallistic = 0.3
+CTDamageElectricityEMPGrenade = 2
+CTDamageEnergyATTE = 2
+CTDamageEnergy = 1
+CTDamageExplosionDC17AA = 0.65
+CTDamageExplosion = 0.5
+
+[DV_TurretsGeoSonic]
+CTDamageFire = 0
+
+[DV_GeonoshansEliteDamage]
+CTDamageEnergyDC17Commando = 0.15
+CTDamageBallisticDC17SniperCommando = 0.75
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageExplosionRocket = 2
+CTDamageEnergyBeam = 0.4
+CTDamageEnergySonicCannon = 3
+CTDamageExplosionGeoBarrel = 0.15
+CTDamageElectricityEMPGrenade = 0.5
+CTDamageBallistic = 0.75
+CTDamageEnergy = 0.4
+CTDamageExplosion = 1
+
+[DV_RAS_AutoTurret]
+CTDamageFire = 0
+CTDamageBallisticDC17Sniper = 1
+CTDamageEnergyDroids = 0.1
+CTDamageBallistic = 0.1
+CTDamageEnergy = 0.75
+CTDamageExplosion = 1
+
+[DV_DSD]
+CTDamageStun = 0
+CTDamageMelee = 0
+CTDamageEnergyBowSkewer = 0
+CTDamageElectricityEMPGrenade = 1.5
+CTDamageEnergyWookieeTurret = 0.25
+CTDamageExplosionRocket = 1.25
+CTDamageBallistic = 0.2
+CTDamageEnergy = 0.2
+CTDamageExplosion = 0.4
+CTDamageExplosionFlashDet = 0             # excluded
+
+[DV_TurretsCoreshipAuto]
+CTDamageFire = 0
+CTDamageBallisticDC17Sniper = 1
+CTDamageEnergyDroids = 0.1
+CTDamageBallistic = 0.1
+CTDamageEnergy = 0.75
+CTDamageExplosion = 1
+
+[DV_GeonoshansWarriorDamage]
+CTDamageEnergyDC17Commando = 0.5
+CTDamageExplosionDC17AACommando = 0.5
+CTDamageMeleeWarrior = 0.75
+CTDamageMelee = 1.5
+CTDamageExplosionGeoBarrel = 0.5
+CTDamageEnergySonicCannon = 3
+CTDamageElectricityEMPGrenade = 0.5
+CTDamageEnergyDC15s = 1
+CTDamageBallistic = 1
+CTDamageEnergy = 2
+CTDamageExplosion = 1.5
+
+[DV_TurretsGunshipBall]
+CTDamageFire = 0
+
+[DV_TurretsEweb]
+CTDamageFire = 0
+
+[DV_TurretsWookieeRail]
+CTDamageEnergyConc = 2
+CTDamageFire = 0
+
+[DV_DroidsBattleDroidDamage]
+CTDamageStun = 0
+CTDamageFire = 0
+CTDamageEnergyDroids = 0
+CTDamageMelee = 3
+CTDamageBallistic = 0.4
+CTDamageEnergy = 1
+CTDamageExplosion = 0.75
+
+[DV_DroidsTrandoScavengerDamage]
+CTDamageStun = 0
+CTDamageFire = 0
+CTDamageBallistic = 0.75
+CTDamageEnergy = 1
+CTDamageExplosion = 1
+
+[DV_DSD_Scanner]
+CTDamageMelee = 0
+CTDamageEnergyBowSkewer = 0
+CTDamageElectricityEMPGrenade = 0
+CTDamageExplosionDC17AACommando = 0
+CTDamageEnergyDC17Commando = 1.25
+CTDamageBallisticDC17SniperCommando = 0
+CTDamageBallisticDC17Sniper = 1
+CTDamageExplosion = 0
+CTDamageBallistic = 0.2
+CTDamageEnergy = 0.4
+
+[DV_DSD_Shield]
+CTDamageFire = 0
+CTDamageMelee = 0
+CTDamageEnergyBowSkewer = 0
+CTDamageBallistic = 0.2
+CTDamageEnergy = 0.2
+CTDamageExplosion = 0.2
+
+[DV_KarmaPropTranHeat]
+CTDamageExplosionTranHeat = 1000

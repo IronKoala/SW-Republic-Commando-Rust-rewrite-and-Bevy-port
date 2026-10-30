@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
 use rc_combat::{
-    Arsenal, CombatPlugin, Damage, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded,
-    Team, WeaponLibrary,
+    Arsenal, Blast, Body, CombatPlugin, Damage, DamageTable, Dead, Died, FireShot, Grenades,
+    Health, Hittable, Shield, ShotLanded, Stunned, Team, ThrowGrenade, WeaponLibrary,
 };
 use rc_game_core::{
     Action, ActionState, CorePlugin, GamePaths, GameState, LevelCollision, Player, PlayerCamera,
@@ -19,6 +19,9 @@ use std::time::Duration;
 
 const STEP: f32 = 1.0 / 60.0;
 
+/// The battle droid's damage table (`DamageVariance`), from the game.
+const DROID_TABLE: &str = "DV_DroidsBattleDroidDamage";
+
 /// Unreal position to Bevy (same rule as rc_game_core::units).
 fn b(x: f32, y: f32, z: f32) -> Vec3 {
     Vec3::new(x, z, y) / 50.0
@@ -29,6 +32,7 @@ struct Seen {
     landed: Vec<ShotLanded>,
     died: Vec<Died>,
     damage: Vec<Damage>,
+    blasts: Vec<Blast>,
 }
 
 fn record(
@@ -36,7 +40,9 @@ fn record(
     mut l: MessageReader<ShotLanded>,
     mut d: MessageReader<Died>,
     mut h: MessageReader<Damage>,
+    mut x: MessageReader<Blast>,
 ) {
+    seen.blasts.extend(x.read().cloned());
     seen.landed.extend(l.read().cloned());
     seen.died.extend(d.read().cloned());
     seen.damage.extend(h.read().cloned());
@@ -78,6 +84,8 @@ impl Range {
                 Name::new("droid"),
                 Health::new(100.0),
                 Team::Separatist,
+                Body::Droid,
+                DamageTable(DROID_TABLE.into()),
                 Hittable {
                     radius: 40.0,
                     half_height: 84.0,
@@ -118,6 +126,15 @@ impl Range {
             .clone()
     }
 
+    /// The droid's damage table multiplier for damage type `ty`.
+    fn droid_takes(&self, ty: &str) -> f32 {
+        self.app
+            .world()
+            .resource::<WeaponLibrary>()
+            .damage_types
+            .multiplier(Some(DROID_TABLE), ty)
+    }
+
     fn seen(&mut self) -> Seen {
         std::mem::take(&mut *self.app.world_mut().resource_mut::<Seen>())
     }
@@ -133,9 +150,14 @@ fn every_weapon_file_reads() {
         ids,
         [
             "dc15s_pistol",
+            "dc17m_antiarmor",
             "dc17m_blaster",
+            "dc17m_sniper",
             "e5_blaster",
-            "e5_blaster_tm"
+            "e5_blaster_pickup",
+            "e5_blaster_tm",
+            "sbd_blaster",
+            "trandoshan_smg"
         ]
     );
 }
@@ -269,12 +291,13 @@ fn magazine_empties_and_reloads() {
 #[test]
 fn pistol_is_one_shot_per_press_and_recharges() {
     let mut r = Range::new();
-    r.run(1, &[Action::NextWeapon]);
+    // The pistol is last in the cycle: one step back from the rifle.
+    r.run(1, &[Action::PrevWeapon]);
     r.run(1, &[]);
-    assert_eq!(r.arsenal().current, 1);
+    assert_eq!(r.arsenal().current, 3);
     r.seconds(1.0, &[Action::Fire]);
     assert_eq!(
-        r.arsenal().weapons[1].1.shots_fired,
+        r.arsenal().weapons[3].1.shots_fired,
         1,
         "holding fires once"
     );
@@ -282,10 +305,10 @@ fn pistol_is_one_shot_per_press_and_recharges() {
         r.run(1, &[Action::Fire]);
         r.seconds(0.25, &[]);
     }
-    let charge = r.arsenal().weapons[1].1.clip;
+    let charge = r.arsenal().weapons[3].1.clip;
     assert!(charge < 5.0);
     r.seconds(4.0, &[]);
-    assert_eq!(r.arsenal().weapons[1].1.clip, 5.0);
+    assert_eq!(r.arsenal().weapons[3].1.clip, 5.0);
     // Two 55-damage bolts take the 100-health droid down.
     let seen = r.seen();
     assert_eq!(seen.died.len(), 1);
@@ -299,10 +322,10 @@ fn pistol_is_one_shot_per_press_and_recharges() {
 fn droid_fire_hits_shield_then_health() {
     let mut r = Range::new();
     r.seen();
-    // The droid fires its E-5 at the player's chest five times.
+    // The droid fires its E-5 at the player's chest ten times.
     let from = b(500.0, 0.0, 120.0);
     let to = b(-500.0, 0.0, 100.0);
-    for _ in 0..5 {
+    for _ in 0..10 {
         r.app.world_mut().write_message(FireShot {
             shooter: r.droid,
             origin: from,
@@ -317,9 +340,12 @@ fn droid_fire_hits_shield_then_health() {
         .iter()
         .filter(|d| d.target == r.player)
         .collect();
-    assert_eq!(on_player.len(), 5);
+    assert_eq!(on_player.len(), 10);
+    // The player's damage table: droid bolts (CTDamageEnergyDroids, a kind
+    // of CTDamageEnergy) do x0.5.
+    assert!(on_player.iter().all(|d| d.amount == 12.0), "{on_player:?}");
     let w = r.app.world();
-    // 5 x 24 = 120: the shield takes 100, health the other 20.
+    // 10 x 24 x 0.5 = 120: the shield takes 100, health the other 20.
     assert_eq!(w.get::<Shield>(r.player).unwrap().current, 0.0);
     assert_eq!(w.get::<Health>(r.player).unwrap().current, 180.0);
     // Nothing for 3 s, then 20 a second.
@@ -397,4 +423,375 @@ fn real_game_sounds_and_model() {
     }
     eprintln!("DC-17m model: {parts} parts, {tris} triangles");
     assert!(tris > 100);
+}
+
+#[test]
+fn every_grenade_file_reads_and_the_player_carries_them() {
+    let r = Range::new();
+    let lib = r.app.world().resource::<WeaponLibrary>();
+    assert!(lib.errors.is_empty(), "{:?}", lib.errors);
+    let ids: Vec<_> = lib.grenades.keys().cloned().collect();
+    assert_eq!(
+        ids,
+        [
+            "dc17m_antiarmor_round",
+            "emp_grenade",
+            "flash_grenade",
+            "sonic_detonator",
+            "thermal_detonator"
+        ]
+    );
+    let g = r.app.world().get::<Grenades>(r.player).unwrap();
+    assert_eq!(g.carried[0].0, "thermal_detonator");
+    assert_eq!(
+        g.carried[0].1,
+        lib.grenades["thermal_detonator"].start_count
+    );
+    let ro = r.app.world().resource::<WeaponReadout>();
+    assert_eq!(
+        ro.grenade,
+        Some(("Thermal Detonator".to_string(), g.carried[0].1))
+    );
+}
+
+/// Drop a grenade at rest at `at` (Unreal units) and wait for its blast.
+fn drop_grenade(r: &mut Range, id: &str, at: (f32, f32, f32)) -> Seen {
+    r.seen();
+    let origin = b(at.0, at.1, at.2);
+    r.app.world_mut().write_message(ThrowGrenade {
+        thrower: r.player,
+        origin,
+        velocity: Vec3::ZERO,
+        grenade: id.into(),
+    });
+    let mut frames = 0;
+    while r.app.world().resource::<Seen>().blasts.is_empty() {
+        r.run(1, &[]);
+        frames += 1;
+        assert!(frames < 60 * 10, "no blast after 10 s");
+    }
+    r.run(2, &[]);
+    r.seen()
+}
+
+#[test]
+fn thermal_blast_falls_off_with_distance() {
+    let mut r = Range::new();
+    let p = r.app.world().resource::<WeaponLibrary>().grenades["thermal_detonator"].clone();
+    // On the floor 200 uu in front of the droid (centre at x 500, z 84),
+    // so the floor holds it still until the fuse runs out.
+    let seen = drop_grenade(&mut r, "thermal_detonator", (300.0, 0.0, 10.0));
+    let blast = &seen.blasts[0];
+    let bx = blast.point.x * 50.0;
+    assert!((bx - 300.0).abs() < 1.0, "lay still: went off at x {bx}");
+    let on_droid: Vec<_> = seen.damage.iter().filter(|d| d.target == r.droid).collect();
+    assert_eq!(on_droid.len(), 1);
+    // Blast at about (300, 0, 0.5); droid centre (500, 0, 84).
+    let c = Vec3::new(500.0, 0.0, 84.0);
+    let pt = Vec3::new(blast.point.x, blast.point.z, blast.point.y) * 50.0;
+    let dist = (c - pt).length();
+    // Falloff, times the droid's table for the thermal's damage type
+    // (CTDamageExplosionThermalDet, a kind of CTDamageExplosion: x0.75).
+    let m = r.droid_takes(&p.damage_type);
+    assert_eq!(m, 0.75);
+    let want = p.damage * (1.0 - (dist - 40.0) / p.radius) * m;
+    assert!(
+        (on_droid[0].amount - want).abs() < 0.5,
+        "damage {} at {dist:.0} uu, expected {want:.1}",
+        on_droid[0].amount
+    );
+    // The player is 800 uu away: out of reach for a radius under 760.
+    if p.radius + 40.0 < 800.0 {
+        assert!(seen.damage.iter().all(|d| d.target != r.player));
+    }
+    // Battle droids don't burn (CTDamageFire x0 in their table).
+    assert!(r.app.world().get::<Stunned>(r.droid).is_none());
+}
+
+#[test]
+fn thermal_sets_an_organic_alight_close_up() {
+    let mut r = Range::new();
+    // An organic with no damage table, 100 uu from the blast.
+    r.app
+        .world_mut()
+        .entity_mut(r.droid)
+        .remove::<DamageTable>()
+        .insert((Body::Organic, Health::new(1000.0)));
+    let p = r.app.world().resource::<WeaponLibrary>().grenades["thermal_detonator"].clone();
+    let st = p.status.clone().expect("the thermal burns");
+    drop_grenade(&mut r, "thermal_detonator", (420.0, 0.0, 10.0));
+    let s = r
+        .app
+        .world()
+        .get::<Stunned>(r.droid)
+        .expect("burning")
+        .clone();
+    assert!(!s.stops, "burning doesn't stop it");
+    assert_eq!(s.damage_per_sec, st.damage_per_sec);
+    assert!(s.left > 0.0 && s.left < st.max_time, "{}", s.left);
+    // It hurts 15 a second until it wears off.
+    r.seconds(2.0, &[]);
+    let seen = r.seen();
+    let burn: f32 = seen
+        .damage
+        .iter()
+        .filter(|d| d.target == r.droid && d.kind == rc_combat::DamageKind::Fire)
+        .map(|d| d.amount)
+        .sum();
+    assert!((burn - 30.0).abs() < 4.0, "about 2 s of burning: {burn}");
+}
+
+#[test]
+fn flash_stuns_organics_but_not_droids() {
+    let mut r = Range::new();
+    let p = r.app.world().resource::<WeaponLibrary>().grenades["flash_grenade"].clone();
+    let seen = drop_grenade(&mut r, "flash_grenade", (300.0, 0.0, 10.0));
+    assert!(seen
+        .damage
+        .iter()
+        .all(|d| d.amount == 0.0 || d.target != r.droid));
+    assert!(
+        r.app.world().get::<Stunned>(r.droid).is_none(),
+        "droids ignore CTDamageStun"
+    );
+    // An organic without a table is stunned, for up to 18 s.
+    r.app
+        .world_mut()
+        .entity_mut(r.droid)
+        .remove::<DamageTable>()
+        .insert(Body::Organic);
+    drop_grenade(&mut r, "flash_grenade", (300.0, 0.0, 10.0));
+    let s = r.app.world().get::<Stunned>(r.droid).expect("stunned");
+    let max = p.status.as_ref().unwrap().max_time;
+    assert!(s.stops && s.left > 0.0 && s.left <= max, "{}", s.left);
+}
+
+#[test]
+fn emp_electrocutes_droids() {
+    let mut r = Range::new();
+    let p = r.app.world().resource::<WeaponLibrary>().grenades["emp_grenade"].clone();
+    let st = p.status.clone().expect("the EMP electrocutes");
+    drop_grenade(&mut r, "emp_grenade", (300.0, 0.0, 10.0));
+    // No blast damage; the droid is electrocuted (stopped) for up to 9 s,
+    // at 50 damage a second.
+    let s = r
+        .app
+        .world()
+        .get::<Stunned>(r.droid)
+        .expect("electrocuted")
+        .clone();
+    assert!(s.stops);
+    assert!(s.left > 0.0 && s.left <= st.max_time, "{}", s.left);
+    let m = r.droid_takes(&st.damage_type);
+    assert_eq!(s.damage_per_sec, st.damage_per_sec * m);
+    // 100 health at 50 a second: down in about 2 s.
+    r.seconds(2.5, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.died.len(), 1, "electrocuted to death");
+}
+
+#[test]
+fn player_throws_the_selected_grenade() {
+    let mut r = Range::new();
+    let before = r.app.world().get::<Grenades>(r.player).unwrap().carried[0].1;
+    assert!(before > 0);
+    r.seen();
+    r.run(1, &[Action::ThrowGrenade]);
+    r.run(1, &[]);
+    let g = r.app.world().get::<Grenades>(r.player).unwrap();
+    assert_eq!(g.carried[0].1, before - 1);
+    // In the air, moving forward and up.
+    let mut q = r.app.world_mut().query::<&rc_combat::GrenadeFlight>();
+    let f = q.single(r.app.world()).expect("one grenade in flight");
+    assert!(f.flight.velocity.x > 0.0);
+    r.seconds(6.0, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.blasts.len(), 1, "it went off");
+    let ro = r.app.world().resource::<WeaponReadout>();
+    assert_eq!(ro.grenade.as_ref().map(|g| g.1), Some(before - 1));
+}
+
+#[test]
+fn sniper_zooms_and_hits_hard() {
+    let mut r = Range::new();
+    let lib = r.app.world().resource::<WeaponLibrary>();
+    let p = lib.weapons["dc17m_sniper"].clone();
+    r.run(1, &[Action::NextWeapon]);
+    r.run(1, &[]);
+    assert_eq!(r.arsenal().weapons[r.arsenal().current].0, "dc17m_sniper");
+    r.run(1, &[Action::Zoom]);
+    r.run(1, &[]);
+    assert_eq!(
+        r.app.world().resource::<WeaponReadout>().zoom_fov,
+        p.zoom_fovs.first().copied()
+    );
+    r.seen();
+    r.run(1, &[Action::Fire]);
+    r.seconds(1.0, &[]);
+    let seen = r.seen();
+    let d: Vec<_> = seen.damage.iter().filter(|d| d.target == r.droid).collect();
+    assert_eq!(d.len(), 1);
+    // Zoomed: x1.72, then the droid's table for CTDamageBallisticDC17Sniper
+    // (a kind of CTDamageBallistic: x0.4). 175 x 1.72 x 0.4 = 120.4.
+    let m = r.droid_takes(&p.damage_type);
+    assert_eq!(m, 0.4);
+    let want = p.damage * p.zoom_damage * m;
+    assert!(
+        (d[0].amount - want).abs() < 1e-3,
+        "{} vs {want}",
+        d[0].amount
+    );
+    assert!((want - 120.4).abs() < 1e-3);
+    // Switching weapon leaves zoom.
+    r.run(1, &[Action::NextWeapon]);
+    r.run(2, &[]);
+    assert_eq!(r.app.world().resource::<WeaponReadout>().zoom_fov, None);
+}
+
+#[test]
+fn anti_armour_round_flies_and_blows_up_on_the_droid() {
+    let mut r = Range::new();
+    let round = r.app.world().resource::<WeaponLibrary>().grenades["dc17m_antiarmor_round"].clone();
+    for _ in 0..2 {
+        r.run(1, &[Action::NextWeapon]);
+        r.run(1, &[]);
+    }
+    assert_eq!(
+        r.arsenal().weapons[r.arsenal().current].0,
+        "dc17m_antiarmor"
+    );
+    r.seen();
+    r.run(1, &[Action::Fire]);
+    r.seconds(2.0, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.blasts.len(), 1, "one blast");
+    let b = &seen.blasts[0];
+    let bx = b.point.x * 50.0;
+    // It goes off on the droid's near side (x 460), not at the far wall.
+    assert!((bx - 460.0).abs() < 60.0, "went off at x {bx}");
+    let d = seen
+        .damage
+        .iter()
+        .find(|d| d.target == r.droid)
+        .expect("droid hurt");
+    // A direct hit: the full 400, times the droid's x0.75 for explosions.
+    let want = round.damage * r.droid_takes(&round.damage_type);
+    assert!((d.amount - want).abs() < 1e-3, "{} vs {want}", d.amount);
+}
+
+#[test]
+fn melee_hits_only_within_reach() {
+    let mut r = Range::new();
+    let reach = r
+        .app
+        .world()
+        .resource::<WeaponLibrary>()
+        .player
+        .melee
+        .clone();
+    r.seen();
+    r.run(1, &[Action::Melee]);
+    r.run(1, &[]);
+    assert!(r.seen().damage.is_empty(), "the droid is 1000 uu away");
+    // Bring the droid within reach: 80 uu in front of the eye.
+    r.app
+        .world_mut()
+        .entity_mut(r.droid)
+        .insert(Transform::from_translation(b(
+            -500.0 + 80.0 + 40.0,
+            0.0,
+            0.0,
+        )));
+    r.seconds(reach.delay + 0.1, &[]);
+    r.run(1, &[Action::Melee]);
+    r.run(1, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.damage.len(), 1);
+    assert_eq!(seen.damage[0].target, r.droid);
+    // The DC-17m's own melee (220), times the droid's x3 for CTDamageMelee.
+    let lib = r.app.world().resource::<WeaponLibrary>();
+    let (_, dmg) = lib.weapons["dc17m_blaster"].melee.expect("rifle melee");
+    assert_eq!(seen.damage[0].amount, dmg * r.droid_takes("CTDamageMelee"));
+    assert_eq!(seen.damage[0].amount, 660.0);
+    assert_eq!(seen.damage[0].kind, rc_combat::DamageKind::Melee);
+}
+
+#[test]
+fn walking_over_a_dropped_weapon_picks_it_up() {
+    let mut r = Range::new();
+    let p = r.app.world().resource::<WeaponLibrary>().weapons["e5_blaster_pickup"].clone();
+    let mut commands = r.app.world_mut().commands();
+    rc_combat::spawn_pickup(&mut commands, "e5_blaster_pickup", b(-200.0, 0.0, 0.0));
+    r.run(2, &[]);
+    assert_eq!(r.arsenal().weapons.len(), 4, "not picked up from 300 uu");
+    r.app
+        .world_mut()
+        .entity_mut(r.player)
+        .insert(Transform::from_translation(b(-220.0, 0.0, 0.0)));
+    r.run(2, &[]);
+    let a = r.arsenal();
+    let (id, w) = a.weapons.last().unwrap();
+    assert_eq!(id, "e5_blaster_pickup");
+    assert_eq!(w.shots_in_clip() + w.reserve, p.start_ammo);
+    let mut q = r.app.world_mut().query::<&rc_combat::WeaponPickup>();
+    assert_eq!(
+        q.iter(r.app.world()).count(),
+        0,
+        "it's gone from the ground"
+    );
+}
+
+#[test]
+fn sonic_sticks_and_goes_off_when_a_droid_comes_close() {
+    let mut r = Range::new();
+    // Move the droid far away, drop the sonic on the floor: it sticks and
+    // waits (its fuse is 10 s).
+    r.app
+        .world_mut()
+        .entity_mut(r.droid)
+        .insert(Transform::from_translation(b(2500.0, 0.0, 0.0)));
+    r.seen();
+    r.app.world_mut().write_message(ThrowGrenade {
+        thrower: r.player,
+        origin: b(300.0, 0.0, 10.0),
+        velocity: Vec3::ZERO,
+        grenade: "sonic_detonator".into(),
+    });
+    r.seconds(2.0, &[]);
+    assert!(r.seen().blasts.is_empty(), "nobody within 400 uu yet");
+    let mut q = r.app.world_mut().query::<&rc_combat::GrenadeFlight>();
+    let f = q.single(r.app.world()).expect("waiting on the floor");
+    assert!(f.flight.stuck, "stuck to the floor");
+    // The droid steps within 400 uu: it goes off at the next check (0.5 s).
+    r.app
+        .world_mut()
+        .entity_mut(r.droid)
+        .insert(Transform::from_translation(b(600.0, 0.0, 0.0)));
+    r.seconds(0.6, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.blasts.len(), 1, "proximity blast");
+    assert!(seen.damage.iter().any(|d| d.target == r.droid));
+}
+
+#[test]
+fn a_flash_on_the_player_sends_no_damage_and_the_shield_recharges() {
+    let mut r = Range::new();
+    r.app
+        .world_mut()
+        .get_mut::<Shield>(r.player)
+        .unwrap()
+        .current = 50.0;
+    // In front of the player (who looks along +X), so they see the flash.
+    drop_grenade(&mut r, "flash_grenade", (-300.0, 0.0, 10.0));
+    assert!(r.app.world().get::<Stunned>(r.player).is_some(), "flashed");
+    r.seconds(5.0, &[]);
+    let seen = r.seen();
+    assert!(
+        seen.damage.iter().all(|d| d.target != r.player),
+        "a stun does no damage: {:?}",
+        seen.damage.iter().filter(|d| d.target == r.player).count()
+    );
+    // 3 s delay after the last hit, then 20 a second: well above 50 by now.
+    let s = r.app.world().get::<Shield>(r.player).unwrap().current;
+    assert!(s > 70.0, "shield {s}");
 }

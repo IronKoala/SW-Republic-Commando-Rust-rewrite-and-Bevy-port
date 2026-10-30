@@ -10,7 +10,13 @@
 //!   (`rc_level_viewer::scene` and `draw`), and its sky
 //!   (`rc_level_viewer::sky`): a second camera inside the sky box that turns
 //!   with the player's camera;
-//! - `LevelInfo`: counts for the log and the self-tests.
+//! - `LevelInfo`: counts for the log and the self-tests;
+//! - `LevelParts`: props and blocking volumes with a tag of their own
+//!   (barricades, bunker walls), solid until a level script switches them
+//!   off. They are part of `LevelCollision`;
+//! - `LevelMoverData`: the map's doors, lifts and their triggers, as read
+//!   from the map, for the movers part (`rc_movers_plugin`) to run. Their
+//!   triangles are not in `LevelCollision`; that part adds them.
 //!
 //! Everything it spawns is removed when the game leaves `InGame`.
 //!
@@ -29,7 +35,9 @@ use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
 use rc_level_viewer::sky::{self, SkyViewer};
 use rc_level_viewer::{materials, scene};
-use rc_movement::{MoveParams, TriangleWorld, Vec3};
+use rc_movement::{Hit, MoveParams, TriangleWorld, Vec3, World as MoveWorld};
+use std::collections::HashMap;
+use std::sync::RwLock;
 use rc_package::Package;
 use std::path::Path;
 use std::rc::Rc;
@@ -83,6 +91,126 @@ pub struct LevelInfo {
     pub draw_ms: f64,
 }
 
+/// The map's doors, lifts and triggers as the map places them, and each
+/// mover's collision triangles by its export index. Present from the end of
+/// loading until the game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelMoverData {
+    pub movers: rc_level::movers::MapMovers,
+    pub triangles: std::collections::HashMap<usize, Vec<[[f32; 3]; 3]>>,
+}
+
+/// One part of the level a script can switch off (see `LevelParts`).
+pub struct Part {
+    pub export: usize,
+    pub class: String,
+    pub tag: String,
+    pub solid: bool,
+    world: Option<TriangleWorld>,
+}
+
+struct PartsShared {
+    fixed: Arc<dyn MoveWorld + Send + Sync>,
+    parts: RwLock<Vec<Part>>,
+}
+
+/// Props and blocking volumes with a `Tag` of their own (barricades, bunker
+/// walls). They start solid; level scripts switch them off by tag
+/// (`ACTION_SetCollision`, a prop blown up). `LevelCollision` is the level
+/// plus the solid parts. Present while in the game. Cheap to clone.
+#[derive(Resource, Clone)]
+pub struct LevelParts(Arc<PartsShared>);
+
+impl LevelParts {
+    pub fn new(
+        fixed: Arc<dyn MoveWorld + Send + Sync>,
+        tagged: &HashMap<usize, (String, String)>,
+        triangles: HashMap<usize, Vec<[[f32; 3]; 3]>>,
+    ) -> Self {
+        let v = |p: [f32; 3]| Vec3::new(p[0], p[1], p[2]);
+        let mut parts: Vec<Part> = tagged
+            .iter()
+            .map(|(&export, (class, tag))| Part {
+                export,
+                class: class.clone(),
+                tag: tag.clone(),
+                solid: true,
+                world: triangles.get(&export).map(|ts| {
+                    TriangleWorld::new(ts.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect())
+                }),
+            })
+            .collect();
+        parts.sort_by_key(|p| p.export);
+        LevelParts(Arc::new(PartsShared {
+            fixed,
+            parts: RwLock::new(parts),
+        }))
+    }
+
+    /// Make every part with this tag solid or not. Returns how many parts
+    /// have the tag.
+    pub fn set_solid(&self, tag: &str, solid: bool) -> usize {
+        let mut parts = self.0.parts.write().unwrap_or_else(|e| e.into_inner());
+        let mut n = 0;
+        for p in parts.iter_mut().filter(|p| p.tag.eq_ignore_ascii_case(tag)) {
+            p.solid = solid;
+            n += 1;
+        }
+        n
+    }
+
+    /// Make one part (by export index) solid or not.
+    pub fn set_solid_export(&self, export: usize, solid: bool) {
+        let mut parts = self.0.parts.write().unwrap_or_else(|e| e.into_inner());
+        for p in parts.iter_mut().filter(|p| p.export == export) {
+            p.solid = solid;
+        }
+    }
+
+    /// (export, class, tag, solid, has collision) for every part.
+    pub fn list(&self) -> Vec<(usize, String, String, bool, bool)> {
+        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
+        parts
+            .iter()
+            .map(|p| (p.export, p.class.clone(), p.tag.clone(), p.solid, p.world.is_some()))
+            .collect()
+    }
+
+    /// The box around each part with this tag that has collision
+    /// (lowest corner, highest corner), Unreal units.
+    pub fn bounds(&self, tag: &str) -> Vec<(Vec3, Vec3)> {
+        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
+        parts
+            .iter()
+            .filter(|p| p.tag.eq_ignore_ascii_case(tag))
+            .filter_map(|p| p.world.as_ref().map(|w| w.bounds()))
+            .collect()
+    }
+
+    /// The level plus the parts that are solid now.
+    pub fn world(&self) -> Arc<dyn MoveWorld + Send + Sync> {
+        Arc::new(WithParts(self.0.clone()))
+    }
+}
+
+struct WithParts(Arc<PartsShared>);
+
+impl MoveWorld for WithParts {
+    fn sweep(&self, extent: Vec3, start: Vec3, end: Vec3) -> Option<Hit> {
+        let mut best = self.0.fixed.sweep(extent, start, end);
+        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
+        for p in parts.iter().filter(|p| p.solid) {
+            let Some(w) = &p.world else { continue };
+            if let Some(h) = w.sweep(extent, start, end) {
+                if best.is_none_or(|b| h.time < b.time || (h.start_solid && !b.start_solid)) {
+                    best = Some(h);
+                }
+            }
+        }
+        best
+    }
+}
+
 /// Frames to wait in the loading screen before the slow load, so the
 /// loading screen is drawn first.
 #[derive(Resource)]
@@ -95,6 +223,8 @@ fn begin(mut commands: Commands, mut gate: ResMut<LoadingGate>) {
 
 fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelInfo>();
+    commands.remove_resource::<LevelMoverData>();
+    commands.remove_resource::<LevelParts>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -172,7 +302,18 @@ fn load(world: &mut World) {
         yaw.to_degrees()
     ));
     world.insert_resource(PlayerStart { feet, yaw });
-    world.insert_resource(LevelCollision(Arc::new(tw)));
+    world.insert_resource(LevelMoverData {
+        movers: lvl.movers,
+        triangles: lvl.mover_triangles,
+    });
+    let parts = LevelParts::new(Arc::new(tw), &lvl.parts, lvl.part_triangles);
+    log.line(format!(
+        "{PART}: {} parts a script may switch off ({} solid ones)",
+        lvl.parts.len(),
+        parts.list().iter().filter(|p| p.4).count()
+    ));
+    world.insert_resource(LevelCollision(parts.world()));
+    world.insert_resource(parts);
 
     // The look. If it can't be built the level is still solid, just
     // invisible, so the game goes on and says so in the log.

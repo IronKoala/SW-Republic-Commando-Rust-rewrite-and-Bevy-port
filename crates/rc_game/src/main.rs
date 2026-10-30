@@ -3,13 +3,15 @@
 //! into (see docs/PLUGINS.md).
 //!
 //! Usage:
-//!   rc_game [--settings FILE] [--map NAME] [--script] [--frames N]
+//!   rc_game [--settings FILE] [--map NAME] [--script] [--frames N] [--log-input]
 //!
 //! `--settings` picks the settings file (default `settings.toml` in the
 //! folder you run from; written with defaults if missing). `--map` skips the
 //! menus and loads that map. `--script` plays a fixed route through the menus
 //! and a level instead of reading the keyboard, checks every step, and exits
 //! with code 0 if all passed. `--frames N` closes after N frames.
+//! `--log-input` writes every button press and the move, look and gyro
+//! numbers to the log, to check a controller.
 //! Everything is logged to `logs/rc_game.log`.
 
 mod hud;
@@ -18,7 +20,9 @@ mod levels;
 mod menu;
 mod music;
 mod original_menu;
+mod panini;
 mod player;
+mod rebind;
 mod script;
 mod settings;
 mod theme;
@@ -108,6 +112,7 @@ fn main() -> AppExit {
     let mut map = None;
     let mut use_script = false;
     let mut frames = None;
+    let mut log_input = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -115,9 +120,12 @@ fn main() -> AppExit {
             "--map" => map = args.next(),
             "--script" => use_script = true,
             "--frames" => frames = args.next().and_then(|n| n.parse().ok()),
+            "--log-input" => log_input = true,
             other => {
                 eprintln!("unknown option {other}");
-                eprintln!("usage: rc_game [--settings FILE] [--map NAME] [--script] [--frames N]");
+                eprintln!(
+                    "usage: rc_game [--settings FILE] [--map NAME] [--script] [--frames N] [--log-input]"
+                );
                 return AppExit::from_code(2);
             }
         }
@@ -170,6 +178,17 @@ fn main() -> AppExit {
         }
     };
     let paths = GamePaths::new(game_dir, settings.data_dirs());
+    // A scripted run saves into its own folder, emptied first, so it never
+    // touches your saves and always starts the same way.
+    let save_folder = if use_script {
+        let d = PathBuf::from("logs/script_saves");
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    } else if settings.save.folder.trim().is_empty() {
+        rc_save::file::default_folder(rc_save::file::System::this(), |k| std::env::var(k).ok())
+    } else {
+        PathBuf::from(settings.save.folder.trim())
+    };
     for d in &paths.data_dirs {
         log.line(format!(
             "data folder: {}{}",
@@ -191,12 +210,33 @@ fn main() -> AppExit {
             log.line(format!("controls from {}", p.display()));
             input::Bindings::parse(&t).map_err(|e| format!("{}: {e}", p.display()))
         });
-    let bindings = match bindings {
+    let base_bindings = match bindings {
         Ok(b) => b,
         Err(e) => {
             log.line(format!("ERROR in the controls file: {e}"));
             return AppExit::from_code(1);
         }
+    };
+    // The player's own changes, saved by the game next to the settings file.
+    let user_bindings = settings_path
+        .parent()
+        .unwrap_or(std::path::Path::new(""))
+        .join(&settings.controls.user_bindings);
+    let bindings = match std::fs::read_to_string(&user_bindings) {
+        Ok(t) => match base_bindings.with_changes(&t) {
+            Ok(b) => {
+                log.line(format!("controls: your changes from {}", user_bindings.display()));
+                b
+            }
+            Err(e) => {
+                log.line(format!(
+                    "ERROR in {}: {e}; using the default controls",
+                    user_bindings.display()
+                ));
+                base_bindings.clone()
+            }
+        },
+        Err(_) => base_bindings.clone(),
     };
     log.line(format!(
         "controls: {} keyboard, {} mouse, {} gamepad bindings; touch {}",
@@ -205,6 +245,43 @@ fn main() -> AppExit {
         bindings.pad.len(),
         if bindings.touch { "on" } else { "off" }
     ));
+    let button_names = match paths.data_file("input/button_names.toml") {
+        Some(p) => match std::fs::read_to_string(&p)
+            .map_err(|e| e.to_string())
+            .and_then(|t| rc_pads::ButtonNames::parse(&t))
+        {
+            Ok(n) => n,
+            Err(e) => {
+                log.line(format!("ERROR in {}: {e}; prompts use plain names", p.display()));
+                rc_pads::ButtonNames::default()
+            }
+        },
+        None => {
+            log.line("controls: no input/button_names.toml; prompts use plain names");
+            rc_pads::ButtonNames::default()
+        }
+    };
+
+    // Controllers: SDL if it starts (it reads gyros and knows every kind of
+    // controller), otherwise Bevy's own gilrs.
+    #[cfg(all(feature = "sdl", not(target_os = "android")))]
+    let sdl = match rc_pads::sdl::SdlPads::open() {
+        Ok(p) => {
+            for n in &p.notes {
+                log.line(n);
+            }
+            Some(p)
+        }
+        Err(e) => {
+            log.line(format!("pads: {e}; using gilrs (no gyro)"));
+            None
+        }
+    };
+    #[cfg(not(all(feature = "sdl", not(target_os = "android"))))]
+    let sdl: Option<()> = {
+        log.line("pads: built without SDL; using gilrs (no gyro)");
+        None
+    };
 
     let theme = match paths.data_file("ui/theme.toml") {
         Some(p) => match std::fs::read_to_string(&p)
@@ -244,7 +321,7 @@ fn main() -> AppExit {
     }
 
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+    let plugins = DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Star Wars Republic Commando (Rust and Bevy)".into(),
             resolution: (settings.video.width, settings.video.height).into(),
@@ -261,21 +338,28 @@ fn main() -> AppExit {
             ..default()
         }),
         ..default()
-    }))
+    });
+    // SDL reads the controllers instead of gilrs; never both, or every
+    // button would count twice.
+    app.add_plugins(if sdl.is_some() {
+        plugins.disable::<bevy::gilrs::GilrsPlugin>()
+    } else {
+        plugins
+    })
     .add_plugins(CorePlugin)
     .insert_resource(ClearColor(Color::BLACK))
     .insert_resource(log)
     .insert_resource(paths)
+    .insert_resource(rc_save::SaveFolder(save_folder))
     .insert_resource(menu::GamePathsFound(found.is_some()))
     .insert_resource(player::FieldOfView(settings.video.fov))
-    .insert_resource(input::LookSettings {
-        mouse_sensitivity: settings.controls.mouse_sensitivity,
-        stick_look_speed: settings.controls.stick_look_speed,
-        invert_y: settings.controls.invert_y,
-        dead_zone: settings.controls.stick_dead_zone,
-        look_curve: settings.controls.stick_look_curve,
-    })
+    .insert_resource(input::LookSettings::from_settings(&settings))
+    .insert_resource(settings.gyro.clone())
+    .insert_resource(button_names)
     .insert_resource(bindings)
+    .insert_resource(input::BaseBindings(base_bindings))
+    .insert_resource(rebind::UserBindingsPath(user_bindings))
+    .insert_resource(input::LogInput(log_input))
     .insert_resource(theme)
     .insert_resource(music_plan)
     .insert_resource(level_list)
@@ -283,12 +367,14 @@ fn main() -> AppExit {
     .insert_resource(SettingsPath(settings_path))
     .insert_resource(StartMap(map))
     .insert_resource(ExitAfter(frames))
+    .add_plugins(rc_pads::PadsPlugin)
     .add_plugins((
         menu::MenuPlugin,
         original_menu::OriginalMenuPlugin,
         hud::HudPlugin,
         music::MusicPlugin,
         player::PlayerPlugin,
+        panini::PaniniViewPlugin,
     ))
     .add_systems(Startup, |mut commands: Commands| {
         // The camera for menus and the display; the 3D view has its own.
@@ -316,13 +402,30 @@ fn main() -> AppExit {
 
     // PLUGINS FROM OTHER PARTS (see docs/PLUGINS.md).
     app.add_plugins(rc_level_plugin::LevelPlugin);
+    app.add_plugins(rc_movers_plugin::MoversPlugin);
+    app.add_plugins(rc_scripts_plugin::ScriptsPlugin);
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
+    app.add_plugins(rc_save::SavePlugin);
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),
     );
+    app.configure_sets(
+        Update,
+        rc_scripts_plugin::ScriptSystems.after(player::PlayerMoveSet),
+    );
+
+    #[cfg(all(feature = "sdl", not(target_os = "android")))]
+    match sdl {
+        Some(p) => rc_pads::sdl::add_to(&mut app, p),
+        None => {
+            app.insert_resource(rc_pads::PadReader::Gilrs);
+        }
+    }
+    #[cfg(not(all(feature = "sdl", not(target_os = "android"))))]
+    app.insert_resource(rc_pads::PadReader::Gilrs);
 
     if use_script {
         app.add_plugins(script::ScriptPlugin);

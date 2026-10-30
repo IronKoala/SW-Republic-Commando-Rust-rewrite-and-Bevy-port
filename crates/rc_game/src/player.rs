@@ -8,12 +8,14 @@
 use bevy::camera::Exposure;
 use bevy::prelude::*;
 use bevy::render::view::Tonemapping;
+use rc_game_core::save::{SaveAppExt, SavePart};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
     playing, Action, ActionState, GameLog, GamePaths, GameSet, GameState, LevelCollision, Player,
     PlayerCamera, PlayerStart, ViewKick,
 };
-use rc_movement::{MoveInput, MoveParams, Pawn, Vec3 as UVec3, World};
+use rc_movement::{Mode, MoveInput, MoveParams, Pawn, Vec3 as UVec3, World};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Field of view across the screen, degrees (from the settings file).
@@ -49,7 +51,8 @@ pub struct PlayerMoveSet;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::InGame), spawn_player)
+        app.add_save_part::<PlayerSave>()
+            .add_systems(OnEnter(GameState::InGame), spawn_player)
             .add_systems(
                 Update,
                 move_body
@@ -63,6 +66,76 @@ impl Plugin for PlayerPlugin {
                     .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
             );
+    }
+}
+
+/// The player's `[player]` section in a save file: where the body is and
+/// where it looks, in Unreal units and radians. Health and weapons are the
+/// weapons part's own section.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlayerSave {
+    /// Centre of the collision box.
+    pub location: [f32; 3],
+    pub velocity: [f32; 3],
+    /// On the ground (`true`) or in the air.
+    pub walking: bool,
+    pub crouched: bool,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+fn arr(v: UVec3) -> [f32; 3] {
+    [v.x, v.y, v.z]
+}
+
+impl SavePart for PlayerSave {
+    const KEY: &'static str = "player";
+
+    fn save(world: &mut bevy::ecs::world::World) -> Option<Self> {
+        let mut q = world.query_filtered::<&Body, With<Player>>();
+        let b = q.iter(world).next()?;
+        Some(PlayerSave {
+            location: arr(b.pawn.location),
+            velocity: arr(b.pawn.velocity),
+            walking: b.pawn.mode == Mode::Walking,
+            crouched: b.pawn.crouched,
+            yaw: b.yaw,
+            pitch: b.pitch,
+        })
+    }
+
+    fn load(world: &mut bevy::ecs::world::World, d: Self) -> Result<(), String> {
+        let mut q = world.query_filtered::<(&mut Body, &mut Transform), With<Player>>();
+        let (mut b, mut t) = q.iter_mut(world).next().ok_or("no player in the level")?;
+        let [x, y, z] = d.location;
+        b.pawn.location = UVec3::new(x, y, z);
+        let [x, y, z] = d.velocity;
+        b.pawn.velocity = UVec3::new(x, y, z);
+        b.pawn.mode = if d.walking {
+            Mode::Walking
+        } else {
+            Mode::Falling
+        };
+        b.pawn.crouched = d.crouched;
+        b.pawn.eye_height = if d.crouched {
+            b.pawn.params.crouched_eye_height()
+        } else {
+            b.pawn.params.base_eye_height
+        };
+        b.yaw = d.yaw;
+        b.pitch = d.pitch;
+        t.translation = to_bevy(b.pawn.feet());
+        t.rotation = Quat::from_rotation_y(-(b.yaw + std::f32::consts::FRAC_PI_2));
+        let feet = b.pawn.feet();
+        let yaw = b.yaw;
+        world.resource::<GameLog>().line(format!(
+            "player: put back at feet ({:.1}, {:.1}, {:.1}) facing {:.0} deg",
+            feet.x,
+            feet.y,
+            feet.z,
+            yaw.to_degrees()
+        ));
+        Ok(())
     }
 }
 
@@ -147,6 +220,7 @@ fn move_body(
     time: Res<Time>,
     actions: Res<ActionState>,
     collision: Res<LevelCollision>,
+    movers: Option<Res<rc_movers_plugin::LevelMovers>>,
     mut kicks: MessageReader<ViewKick>,
     mut body: Query<(&mut Body, &mut Transform, Has<rc_combat::Dead>), With<Player>>,
     log: Res<GameLog>,
@@ -179,6 +253,11 @@ fn move_body(
             walk: actions.pressed(Action::Walk),
         }
     };
+    // Doors and lifts move first, carrying or pushing the player; the
+    // player then moves among them (they are in `LevelCollision`).
+    if let Some(m) = &movers {
+        m.step(dt, &mut body.pawn);
+    }
     let events = body.pawn.step(dt, &input, collision.0.as_ref());
     body.time += dt;
     for e in &events {
@@ -188,8 +267,9 @@ fn move_body(
     t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
 }
 
-fn place_camera(
+pub(crate) fn place_camera(
     fov: Res<FieldOfView>,
+    weapon: Option<Res<rc_game_core::WeaponReadout>>,
     body: Query<&Body, With<Player>>,
     window: Query<&Window>,
     log: Res<GameLog>,
@@ -205,7 +285,9 @@ fn place_camera(
     // the window's shape: that is "Hor+" as long as the up-and-down view
     // doesn't change with the shape.
     if let Projection::Perspective(p) = &mut *proj {
-        p.fov = vertical_fov(fov.0);
+        // A zoomed weapon (the sniper attachment) narrows the view.
+        let across = weapon.and_then(|w| w.zoom_fov).unwrap_or(fov.0);
+        p.fov = vertical_fov(across);
         // Log the angles whenever the window's shape or the setting changes.
         if let Some(w) = window.iter().next() {
             let aspect = w.width() / w.height().max(1.0);

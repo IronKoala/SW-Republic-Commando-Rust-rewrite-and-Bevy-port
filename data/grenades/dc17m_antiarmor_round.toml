@@ -1,0 +1,43 @@
+# The DC-17m anti-armour attachment's round: fired by dc17m_antiarmor.toml,
+# it flies like a grenade and goes off on touching anything.
+#
+# Mods: change any value and restart. A misspelt name stops loading this
+# file with an error naming the line (see logs/rc_game.log).
+#
+# Numbers marked "game:" are the original's class defaults, read from its
+# script packages (ctinventory.u, with the "...Defaults" class in
+# Properties/properties.u on top). "our choice" marks the few that are ours.
+# Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
+
+name = "Anti-Armour Round"
+
+[ammo]
+max_count = 1             # not carried by hand; the weapon's ammo counts
+
+[throw]
+speed = 3000              # game: AntiArmorProjDefaults Speed (the weapon's shot.speed sets it)
+
+[fuse]
+time = 5                  # game: AntiArmorProj FuseTime
+after_impact = 1          # game: CTProjExplosive PostImpactFuseTime
+on_actor = true           # game: AntiArmorProj bActorDetonate
+on_world = true           # game: AntiArmorProj bWorldDetonate
+
+[flight]
+bounce = 0.5              # game: AntiArmorProj BounceDampening
+actor_bounce = 0.05       # game: CTProjExplosive ActorBounceDampening
+rest_speed = 20           # game: CTProjExplosive RestSpeed
+gravity = 1100            # game: level gravity (Physics 2, falling)
+
+[blast]
+damage = 400              # game: AntiArmorProjDefaults Damage
+radius = 800              # game: DamageRadius
+damage_type = "CTDamageExplosionDC17AA" # game: MyDamageType
+damage_kind = "explosion"
+
+[sound]
+package = "gen_sound"
+
+[model]
+mesh = "DC17mAntiArmorAmmoLow" # game: StaticMesh (not drawn yet)
+blast_colour = [1.0, 0.5, 0.2]   # our choice

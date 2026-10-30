@@ -1,0 +1,51 @@
+[package]
+name = "rc_pads"
+version = "0.1.0"
+edition.workspace = true
+description = "Controllers: which kind each one is, button names for prompts, and gyro aiming (through SDL3)."
+
+[features]
+# Read controllers and gyros with SDL3 instead of gilrs. SDL is built from
+# its source code with the game (needs CMake and a C compiler). On by
+# default, so `cargo run -p rc_pads --bin rc_padtest` works as is.
+default = ["sdl"]
+sdl = ["dep:sdl3-sys"]
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+# Reading the button names file. serde (MIT OR Apache-2.0),
+# https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Only the app, ECS and gamepad
+# types: no window or renderer, so the tests run without a screen.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "gamepad"]
+
+# SDL3 (zlib licence), https://libsdl.org, through sdl3-sys (zlib),
+# https://codeberg.org/maia/sdl3-sys-rs. Built from source and linked into
+# the game, with only the parts we use: controllers, HID devices (for
+# PlayStation, Switch and Steam Deck gyros), sensors and rumble. No window,
+# sound or graphics, so it never touches Bevy's window. Not on Android,
+# where SDL needs its own Java start-up code; phones will use Android's
+# sensor service instead (docs/DISPLAY_AND_INPUT.md).
+[target.'cfg(not(target_os = "android"))'.dependencies.sdl3-sys]
+version = "0.7.2"
+optional = true
+default-features = false
+features = [
+    "build-from-source-static",
+    "no-default-subsystems",
+    "sdl-joystick",
+    "sdl-hidapi",
+    "sdl-sensor",
+    "sdl-haptic",
+    "sdl-unix-console-build",
+]
+
+[[bin]]
+name = "rc_padtest"
+required-features = ["sdl"]

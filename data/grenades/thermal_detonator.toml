@@ -1,0 +1,56 @@
+# Thermal detonator: the standard explosive grenade. Bounces, then goes off
+# a second after it first touches anything (or 12 s after the throw), and
+# sets characters close to the blast alight.
+#
+# Mods: change any value and restart. A misspelt name stops loading this
+# file with an error naming the line (see logs/rc_game.log).
+#
+# Numbers marked "game:" are the original's class defaults, read from its
+# script packages (ctinventory.u, with the "...Defaults" class in
+# Properties/properties.u on top). "our choice" marks the few that are ours.
+# Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
+
+name = "Thermal Detonator"   # game: ThermalDetonator ItemName
+
+[ammo]
+max_count = 5             # game: ThermalDetonatorAmmoDefaults MaxAmmo
+start_count = 2           # game: ThermalDetonatorDefaults InitAmmoAmount
+
+[throw]
+speed = 2200              # game: GrenadeProj Speed (along the view)
+toss_up = 200             # game: GrenadeProj TossZ (extra upward speed)
+offset = [57.4, -30, -10.56] # game: Weapon FPGrenadeOffset (forward, right, up from the eye)
+delay = 1.0               # our choice: seconds between throws (the throw animation isn't read yet)
+
+[fuse]
+time = 12                 # game: ThermalDetonatorProjDefaults FuseTime
+after_impact = 1          # game: CTProjExplosive PostImpactFuseTime (goes off this soon after a touch)
+
+[flight]
+bounce = 0.3              # game: GrenadeProj BounceDampening (speed kept off the level)
+actor_bounce = 0.1        # game: GrenadeProj ActorBounceDampening (off a character)
+rest_speed = 20           # game: CTProjExplosive RestSpeed (stops bouncing below this)
+gravity = 1100            # game: LevelInfo/PhysicsVolume gravity
+
+[blast]
+damage = 400              # game: CTProjExplosive Damage
+radius = 600              # game: ThermalDetonatorProjDefaults DamageRadius
+damage_type = "CTDamageExplosionThermalDet" # game: MyDamageType
+damage_kind = "explosion"
+
+[status]
+# game: ExplosionStatusEffect StatusEffect_Immolate (burning)
+max_time = 12             # game: StatusEffectMaxDuration
+damage_per_sec = 15       # game: StatusEffectDamagePerSec
+radius_change = -400      # game: StatusEffectRadiusModifier (burns within 200 uu)
+damage_type = "CTDamageFire" # game: StatusEffect_Immolate DamageType
+damage_kind = "fire"
+stops = false             # our reading: burning hurts but doesn't stop anyone
+
+[sound]
+package = "gen_sound"
+bounce = "imp_GEN_grenadeBounce_01" # game: ImpactSound
+
+[model]
+mesh = "ThermalDetonator" # game: StaticMesh (not drawn yet)
+blast_colour = [1.0, 0.6, 0.2]   # our choice: colour of the stand-in flash

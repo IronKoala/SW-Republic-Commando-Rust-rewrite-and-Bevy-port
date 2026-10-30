@@ -23,19 +23,30 @@
 #![allow(clippy::type_complexity)]
 
 mod damage;
+pub mod damage_types;
 pub mod data;
 mod fire;
+pub mod grenade;
 pub mod health;
 mod library;
+mod melee;
+pub mod pickup;
+pub mod save;
 pub mod shot;
+mod throw;
 mod view;
 pub mod weapon;
 
+pub use damage_types::{DamageTable, DamageTypes};
+pub use grenade::{GrenadeParams, Grenades};
 pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
-pub use library::{PlayerSetup, WeaponLibrary};
+pub use library::{read_sounds, MeleeParams, PlayerSetup, WeaponLibrary};
+pub use pickup::{spawn_pickup, WeaponPickup};
+pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{WeaponParams, WeaponState};
 
 use bevy::prelude::*;
+use rc_game_core::save::SaveAppExt;
 use rc_game_core::{playing, GamePaths, GameSet};
 
 /// Something shots can hit: an upright cylinder, as Unreal Engine 2 uses
@@ -160,6 +171,8 @@ impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FireShot>()
             .add_message::<ShotLanded>()
+            .add_message::<ThrowGrenade>()
+            .add_message::<Blast>()
             .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
                 Update,
@@ -167,7 +180,8 @@ impl Plugin for WeaponsPlugin {
                     library::load
                         .run_if(not(resource_exists::<WeaponLibrary>))
                         .run_if(resource_exists::<GamePaths>),
-                    library::equip_player.run_if(resource_exists::<WeaponLibrary>),
+                    (library::equip_player, library::equip_grenades)
+                        .run_if(resource_exists::<WeaponLibrary>),
                 )
                     .chain()
                     .before(CombatSet::Fire)
@@ -175,7 +189,14 @@ impl Plugin for WeaponsPlugin {
             )
             .add_systems(
                 Update,
-                (fire::player_trigger, fire::launch_shots)
+                (
+                    fire::player_trigger,
+                    fire::launch_shots,
+                    melee::player_zoom,
+                    melee::player_melee,
+                    throw::player_grenades,
+                    throw::launch_grenades,
+                )
                     .chain()
                     .in_set(CombatSet::Fire)
                     .run_if(playing)
@@ -183,18 +204,35 @@ impl Plugin for WeaponsPlugin {
             )
             .add_systems(
                 Update,
-                fire::fly_bolts.in_set(CombatSet::Flight).run_if(playing),
+                (
+                    fire::fly_bolts,
+                    throw::fly_grenades,
+                    throw::wear_off_stuns,
+                    pickup::collect_pickups,
+                )
+                    .in_set(CombatSet::Flight)
+                    .run_if(playing)
+                    .run_if(resource_exists::<WeaponLibrary>),
             )
             .add_systems(
                 Update,
-                fire::weapon_readout
+                (
+                    fire::weapon_readout,
+                    throw::grenade_readout,
+                    melee::zoom_readout,
+                )
+                    .chain()
                     .in_set(CombatSet::Readouts)
                     .run_if(playing)
                     .run_if(resource_exists::<WeaponLibrary>),
             )
             .add_systems(
                 Update,
-                (view::show_weapon_model, view::make_bolt_looks)
+                (
+                    view::show_weapon_model,
+                    view::make_bolt_looks,
+                    view::make_grenade_looks,
+                )
                     .in_set(GameSet::View)
                     .run_if(resource_exists::<WeaponLibrary>),
             );
@@ -206,6 +244,7 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HealthPlugin, WeaponsPlugin));
+        app.add_plugins((HealthPlugin, WeaponsPlugin))
+            .add_save_part::<save::CombatSave>();
     }
 }
