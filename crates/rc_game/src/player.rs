@@ -23,20 +23,20 @@ use std::sync::Arc;
 pub struct FieldOfView {
     /// Across a 4:3 screen (`video.fov`).
     pub across_4_3: f32,
-    /// The widest the view may get across any screen (`video.widest_fov`);
-    /// 0 for no limit. Off while the Panini view is on, which takes the
-    /// stretching out its own way.
-    pub widest: f32,
+    /// The longest screen shape (long side over short side) the view keeps
+    /// widening for (`video.widest_shape`); 0 for no limit. Off while the
+    /// Panini view is on, which takes the stretching out its own way.
+    pub widest_shape: f32,
 }
 
 impl FieldOfView {
     pub fn from_settings(s: &crate::settings::Settings) -> Self {
         Self {
             across_4_3: s.video.fov,
-            widest: if s.video.panini > 0.0 {
+            widest_shape: if s.video.panini > 0.0 {
                 0.0
             } else {
-                s.video.widest_fov
+                s.video.widest_shape
             },
         }
     }
@@ -325,22 +325,22 @@ pub(crate) fn place_camera(
     *t = eye_view(body);
     // Bevy's field of view is up and down, and it widens the sides to fit
     // the window's shape: that is "Hor+" as long as the up-and-down view
-    // doesn't change with the shape. Past `widest` degrees across, a flat
-    // view stretches things at the sides into a fish-eye look, so there
-    // the angle across stays put and a wider window shows a little less up
-    // and down instead.
+    // doesn't change with the shape. On screens longer than `widest_shape`,
+    // a flat view would stretch things at the sides into a fish-eye look,
+    // so there the angle across stays what it is at that shape and the
+    // view shows a little less up and down instead.
     if let Projection::Perspective(p) = &mut *proj {
         let w = window.iter().next();
         let aspect = w.map_or(p.aspect_ratio, |w| w.width() / w.height().max(1.0));
         // A zoomed weapon (the sniper attachment) narrows the view.
         let across = weapon.and_then(|w| w.zoom_fov).unwrap_or(fov.across_4_3);
-        p.fov = view_angle(across, fov.widest, aspect);
+        p.fov = view_angle(across, fov.widest_shape, aspect);
         // Log the angles whenever the window's shape or a setting changes.
         let Some(w) = w else {
             return;
         };
-        if (aspect, fov.across_4_3, fov.widest) != *logged {
-            *logged = (aspect, fov.across_4_3, fov.widest);
+        if (aspect, fov.across_4_3, fov.widest_shape) != *logged {
+            *logged = (aspect, fov.across_4_3, fov.widest_shape);
             let capped = p.fov < vertical_fov(across) - 1e-4;
             log.line(format!(
                 "player: view {:.0}x{:.0} (aspect {aspect:.3}): {:.1} degrees across, {:.1} up and down (setting {:.0} across 4:3, widest {}{})",
@@ -349,8 +349,8 @@ pub(crate) fn place_camera(
                 horizontal_fov(p.fov, aspect),
                 p.fov.to_degrees(),
                 fov.across_4_3,
-                if fov.widest > 0.0 { format!("{:.0}", fov.widest) } else { "no limit".into() },
-                if capped { ", held at the widest" } else { "" },
+                if fov.widest_shape > 0.0 { format!("shape {:.2}", fov.widest_shape) } else { "no limit".into() },
+                if capped { ", wider screen than that: held" } else { "" },
             ));
         }
     }
@@ -363,24 +363,29 @@ pub(crate) fn place_camera(
 /// (69.0 degrees for 85), and the longer side widens to fit: "Hor+" on a
 /// TV, monitor or ultrawide, and the same turned on its side for a phone
 /// held upright or a tall flip phone, so those see as much across as a
-/// landscape screen sees up and down instead of a narrow slit. The longer
-/// side stops at `widest` degrees (0 for no limit), past which a flat view
-/// stretches the edges into a fish-eye look.
-pub fn view_angle(across_4_3: f32, widest: f32, aspect: f32) -> f32 {
-    let short_side = vertical_fov(across_4_3);
-    let half = |deg_or_rad: f32| (deg_or_rad / 2.0).tan();
-    let limit = if widest > 0.0 {
-        half(widest.to_radians())
-    } else {
-        f32::INFINITY
+/// landscape screen sees up and down instead of a narrow slit.
+///
+/// The longer side stops widening once the screen is `widest_shape` times
+/// longer than it is short (0 for no limit): past that a flat view
+/// stretches the edges into a fish-eye look, so a longer screen shows the
+/// same angle along its long side and a little less along its short one.
+/// The limit is a shape, not an angle, so the setting always changes the
+/// view on every screen.
+pub fn view_angle(across_4_3: f32, widest_shape: f32, aspect: f32) -> f32 {
+    let short_side = (vertical_fov(across_4_3) / 2.0).tan();
+    let limit = |long: f32| {
+        if widest_shape > 0.0 {
+            long.min(widest_shape)
+        } else {
+            long
+        }
     };
     if aspect >= 1.0 {
         // Landscape: up and down is the short side.
-        let across = (half(short_side) * aspect).min(limit);
-        2.0 * (across / aspect).atan()
+        2.0 * (short_side * limit(aspect) / aspect).atan()
     } else {
         // Upright: across is the short side; up and down is the long one.
-        2.0 * (half(short_side) / aspect).min(limit).atan()
+        2.0 * (short_side * limit(1.0 / aspect)).atan()
     }
 }
 
@@ -414,41 +419,49 @@ mod tests {
     }
 
     #[test]
-    fn widest_view_stops_the_fish_eye() {
-        // 16:9 at the original's 85 is under 110 across: plain Hor+.
-        assert_eq!(view_angle(85.0, 110.0, 16.0 / 9.0), vertical_fov(85.0));
-        // Ultrawide and 32:9 stop at 110 across; the view up and down gets
-        // a little shorter.
-        for aspect in [21.0 / 9.0, 3440.0 / 1377.0, 32.0 / 9.0] {
-            let v = view_angle(85.0, 110.0, aspect);
-            assert!((horizontal_fov(v, aspect) - 110.0).abs() < 0.01);
-            assert!(v < vertical_fov(85.0));
+    fn long_screens_stop_widening() {
+        // 16:9 is under the 2.0 limit: plain Hor+.
+        assert_eq!(view_angle(85.0, 2.0, 16.0 / 9.0), vertical_fov(85.0));
+        // The user's maximized ultrawide (3440x1369) sees what a 2:1
+        // screen sees across, 107.9, and a little less up and down.
+        let aspect = 3440.0 / 1369.0;
+        let v = view_angle(85.0, 2.0, aspect);
+        assert!((horizontal_fov(v, aspect) - 107.9).abs() < 0.1);
+        assert!(v < vertical_fov(85.0));
+        // The setting still changes the view there (it didn't with the
+        // first try, a fixed 110 degrees, which held 95 to 120 all at 110).
+        let mut last = 0.0;
+        for fov in [60.0, 85.0, 95.0, 100.0, 110.0, 120.0] {
+            let across = horizontal_fov(view_angle(fov, 2.0, aspect), aspect);
+            assert!(across > last + 1.0, "{fov}: {across}");
+            last = across;
         }
-        // 95 at 16:9 would be 111 across: held at 110.
-        let v = view_angle(95.0, 110.0, 16.0 / 9.0);
-        assert!((horizontal_fov(v, 16.0 / 9.0) - 110.0).abs() < 0.01);
         // 0 is no limit: 32:9 goes to 135.5 again.
         let v = view_angle(85.0, 0.0, 32.0 / 9.0);
         assert!((horizontal_fov(v, 32.0 / 9.0) - 135.5).abs() < 0.1);
-        // A zoomed weapon is far narrower than the limit: untouched.
-        assert_eq!(view_angle(30.0, 110.0, 32.0 / 9.0), vertical_fov(30.0));
     }
 
     /// Every common screen shape: (name, width, height, degrees across,
-    /// degrees up and down) at the default 85 and widest 110. The same
-    /// table is in docs/DISPLAY_AND_INPUT.md.
+    /// degrees up and down) at the default 85 and widest shape 2.0. The
+    /// same table is in docs/DISPLAY_AND_INPUT.md.
     const SHAPES: [(&str, f32, f32, f32, f32); 14] = [
         ("4:3 old monitor or iPad", 1024.0, 768.0, 85.0, 69.0),
         ("16:10 monitor or Steam Deck", 1280.0, 800.0, 95.4, 69.0),
         ("16:9 TV or monitor", 1920.0, 1080.0, 101.4, 69.0),
         ("16:9 maximized window", 1920.0, 1009.0, 105.2, 69.0),
-        ("21:9 ultrawide", 2560.0, 1080.0, 110.0, 62.1),
-        ("3440x1440 ultrawide", 3440.0, 1440.0, 110.0, 61.7),
-        ("32:9 super ultrawide", 5120.0, 1440.0, 110.0, 43.8),
-        ("phone landscape 19.5:9", 2340.0, 1080.0, 110.0, 66.8),
-        ("phone upright 9:19.5", 1080.0, 2340.0, 66.8, 110.0),
+        ("21:9 ultrawide", 2560.0, 1080.0, 107.9, 60.2),
+        (
+            "3440x1369 ultrawide, maximized",
+            3440.0,
+            1369.0,
+            107.9,
+            57.4,
+        ),
+        ("32:9 super ultrawide", 5120.0, 1440.0, 107.9, 42.3),
+        ("phone sideways 19.5:9", 2340.0, 1080.0, 107.9, 64.8),
+        ("phone upright 9:19.5", 1080.0, 2340.0, 64.8, 107.9),
         ("phone upright 9:16", 1080.0, 1920.0, 69.0, 101.4),
-        ("flip phone open upright 9:22", 1080.0, 2640.0, 60.6, 110.0),
+        ("flip phone open upright 9:22", 1080.0, 2640.0, 58.7, 107.9),
         ("flip phone cover screen", 1056.0, 1066.0, 69.0, 69.5),
         ("foldable opened", 2176.0, 1812.0, 79.1, 69.0),
         ("square", 1000.0, 1000.0, 69.0, 69.0),
@@ -458,21 +471,13 @@ mod tests {
     fn every_screen_shape() {
         for (name, w, h, across, up) in SHAPES {
             let aspect = w / h;
-            let v = view_angle(85.0, 110.0, aspect);
+            let v = view_angle(85.0, 2.0, aspect);
             let got_across = horizontal_fov(v, aspect);
             let got_up = v.to_degrees();
             println!("{name} {w}x{h}: {got_across:.1} across, {got_up:.1} up and down");
             assert!(
                 (got_across - across).abs() < 0.1 && (got_up - up).abs() < 0.1,
                 "{name}: {got_across:.1} across, {got_up:.1} up and down"
-            );
-            // The short side never sees more than the original's 69, and
-            // the long side never more than the limit. (Very long shapes,
-            // 32:9 or a tall flip phone, give up some of the short side to
-            // stay under the limit; the Panini view is the way to keep it.)
-            assert!(
-                got_across.min(got_up) < 69.01 && got_across.max(got_up) < 110.01,
-                "{name}"
             );
         }
     }

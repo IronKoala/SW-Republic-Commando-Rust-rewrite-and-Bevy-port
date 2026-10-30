@@ -48,7 +48,7 @@ pub enum GyroMode {
 
 /// The `[gyro]` part of the settings file.
 #[derive(Resource, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct GyroSettings {
     pub mode: GyroMode,
     pub space: GyroSpace,

@@ -26,16 +26,20 @@ longer side widens to fit: a wider screen shows more at the sides, and a
 phone held upright (or a tall flip phone) shows more above and below, the
 same rule turned on its side.
 
-The longer side stops at `video.widest_fov` degrees (110 by default; 0 is
-no limit). A flat 3D view stretches things near its edges, and past about
-110 degrees that looks like a fish-eye lens: a maximized window with
-`fov = 95` was 111 degrees across at 16:9, and an ultrawide was 125 or
-more. On shapes long enough to reach the limit, the long side holds at 110
-and the short side shows a little less instead. While the Panini view
-(below) is on, the limit is off, because the Panini view takes the
-stretching out its own way.
+The longer side stops widening once the screen is `video.widest_shape`
+times longer than it is short (2.0, which is 18:9, by default; 0 is no
+limit). A flat 3D view stretches things near its edges, and on long
+screens that looks like a fish-eye lens: the user's maximized ultrawide
+(3440x1369) with `fov = 95` was 128 degrees across. A longer screen sees
+what a 2:1 screen sees along its long side and a little less along its
+short side. The limit is a shape and not an angle, so `video.fov` always
+changes the view. (A first try used a fixed 110 degrees; on the
+ultrawide every setting from 95 to 120 came out as the same 110, so the
+setting seemed to do nothing.) While the Panini view (below) is on, the
+limit is off, because the Panini view takes the stretching out its own
+way.
 
-At the default 85 and 110 (the test `player::tests::every_screen_shape`
+At the default 85 and 2.0 (the test `player::tests::every_screen_shape`
 checks this exact table):
 
 | Screen | Size | Across | Up and down |
@@ -44,26 +48,34 @@ checks this exact table):
 | 16:10 monitor or Steam Deck | 1280x800 | 95.4 | 69.0 |
 | 16:9 TV or monitor | 1920x1080 | 101.4 | 69.0 |
 | 16:9 maximized window | 1920x1009 | 105.2 | 69.0 |
-| 21:9 ultrawide | 2560x1080 | 110.0 | 62.1 |
-| Ultrawide | 3440x1440 | 110.0 | 61.7 |
-| 32:9 super ultrawide | 5120x1440 | 110.0 | 43.8 |
-| Phone sideways (19.5:9) | 2340x1080 | 110.0 | 66.8 |
-| Phone upright (9:19.5) | 1080x2340 | 66.8 | 110.0 |
+| 21:9 ultrawide | 2560x1080 | 107.9 | 60.2 |
+| Ultrawide, maximized window | 3440x1369 | 107.9 | 57.4 |
+| 32:9 super ultrawide | 5120x1440 | 107.9 | 42.3 |
+| Phone sideways (19.5:9) | 2340x1080 | 107.9 | 64.8 |
+| Phone upright (9:19.5) | 1080x2340 | 64.8 | 107.9 |
 | Phone upright (9:16) | 1080x1920 | 69.0 | 101.4 |
-| Flip phone opened, upright (9:22) | 1080x2640 | 60.6 | 110.0 |
+| Flip phone opened, upright (9:22) | 1080x2640 | 58.7 | 107.9 |
 | Flip phone cover screen | 1056x1066 | 69.0 | 69.5 |
 | Foldable opened | 2176x1812 | 79.1 | 69.0 |
 | Square | 1000x1000 | 69.0 | 69.0 |
 
-Before this, an upright phone saw only 42 degrees across (a narrow slit),
-and the very wide shapes went past 130 degrees. A 32:9 screen at 43.8 up
-and down is a real trade: to keep the full 69 there, set `widest_fov = 0`
-and turn on the Panini view.
+A higher `fov` widens every one of these. Before this, an upright phone
+saw only 42 degrees across (a narrow slit), and the very long shapes went
+past 130 degrees. A 32:9 screen at 42.3 up and down is a real trade: to
+keep the full 69 there, set `widest_shape = 0` and turn on the Panini
+view.
 
 The game logs the numbers whenever the window changes shape (for example
-when it is maximized): `player: view 1920x1009 (aspect 1.903): 105.2
-degrees across, 69.0 up and down (setting 85 across 4:3, widest 110)`,
-with `, held at the widest` when the limit is in use.
+when it is maximized) or the setting changes: `player: view 3440x1369
+(aspect 2.513): 107.9 degrees across, 57.4 up and down (setting 85 across
+4:3, widest shape 2.00, wider screen than that: held)`.
+
+**Unknown options in `settings.toml` are skipped, not fatal.** A typo, or
+an option from another version of the game, is named in a `WARNING:` on
+the log's `settings from ...` line and otherwise ignored, so one settings
+file works with every version being tested. A wrong value for a known
+option (for example `difficulty = 'brutal'`) still stops the game with a
+message, since there is no sensible guess.
 
 **The HUD and menus fit any shape.** Everything is placed from the screen's
 edges and sized by the screen's height, or its width when that is smaller

@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Field of view setting works again on wide screens; unknown settings are warnings (rc_game)
+
+- **Changed:** `crates/rc_game/src/player.rs`: the limit from the entry below is now a screen shape, `video.widest_shape` (2.0 by default), instead of a fixed `widest_fov` of 110 degrees. Screens longer than 2:1 see what a 2:1 screen sees along the long side. `settings.rs`: options the game doesn't know are skipped and named in a `WARNING:` in the log (`Settings::unknown_options`) instead of stopping the game; `deny_unknown_fields` removed here and from `rc_pads` `GyroSettings`. A wrong value still stops it. Tests `long_screens_stop_widening`, `every_screen_shape` (new numbers), `missing_options_use_defaults_and_typos_are_warnings`, `file_from_the_first_fish_eye_fix_still_loads`.
+- **Why:** The user: "the fish eye effect is gone but i cant adjust my FOV anymore". Their log on a maximized 3440x1369 ultrawide showed every setting from 95 to 120 as `110.0 degrees across, 59.2 up and down (..., held at the widest)`. Also, the options menu had saved `widest_fov` into their `settings.toml`, so every other branch refused to start with "unknown field widest_fov" (reported by the collisions/performance thread).
+- **Tested how:** `cargo test -p rc_game --bins` and `cargo test -p rc_pads --lib` in the cloud sandbox; parsed a copy of the user's own `settings.toml`.
+- **Result:** 28 + 13 pass. On the ultrawide: fov 60, 85, 95, 100, 110, 120 now give six different views (85 is 107.9 x 57.4; 95 is 117.2 x 66.2; 120 is 137.9 x 91.9). The user's file loads with `fov 120` and one warning for `video.widest_fov`.
+- **Still broken / not tested:** Not tested in the game on the PC yet. Other branches still stop on `widest_fov` until this is merged into main and they take main; until then, deleting the `widest_fov` line from `settings.toml` fixes them. High settings (above about 100) on an ultrawide still look fish-eyed, because that is what the setting asks for.
+- **Next:** The user tries the FOV setting maximized on the ultrawide.
+
 ## 2026-10-30: No more fish-eye on wide windows; tall phones see more (rc_game)
 
 - **Changed:** `crates/rc_game/src/player.rs`: new `view_angle`. The screen's shorter side keeps the original's 69 degrees (for `fov = 85`), the longer side widens to fit, and it stops at the new setting `video.widest_fov` (110 by default, 0 for no limit, off while `panini` is on). Upright phones now get Hor+ turned on its side (more above and below) instead of 42 degrees across. `FieldOfView` now holds both settings. The `player: view ...` log line also gives the setting, the limit and `held at the widest`. `settings.rs`: the new option and its note in the default file. Tests `widest_view_stops_the_fish_eye` and `every_screen_shape` (14 shapes). Docs: `docs/DISPLAY_AND_INPUT.md` table, `docs/DESIGN.md`, `README.md`.
