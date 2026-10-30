@@ -134,6 +134,7 @@ hurt_interval = 2.0                    # our choice: seconds between hurt lines 
 # `rc_character --package <file> --set BattleDroidSet --list`).
 package = "GameData/Animations/droid.ukx"
 mesh = "BattleDroid"
+skin = ""                 # the skin to wear instead of the mesh's own, as Package.Group.Object (the original's Skins[0]); empty: the mesh's own
 idle = "ActionBreathe"
 walk = "WalkForward"
 run = "RunForward"
