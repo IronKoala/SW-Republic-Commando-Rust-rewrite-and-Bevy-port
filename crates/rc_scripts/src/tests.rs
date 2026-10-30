@@ -81,6 +81,7 @@ fn events_and_timers_chain() {
             ),
         ],
         failures: vec![],
+        sounds: Default::default(),
     };
     let mut d = Director::new(&map, &[], Settings::default());
     assert_eq!(d.start_events(), ["levelstart"]);
@@ -125,6 +126,7 @@ fn if_condition_skips_its_section() {
     let map = MapScripts {
         actors: vec![cond.clone(), reminder("A")],
         failures: vec![],
+        sounds: Default::default(),
     };
     // Condition off: the reminder plays.
     let mut d = Director::new(&map, &[], Settings::default());
@@ -171,6 +173,7 @@ fn counter_and_checkpoint() {
             ),
         ],
         failures: vec![],
+        sounds: Default::default(),
     };
     let mut d = Director::new(&map, &[], Settings::default());
     let mut fx = Vec::new();
@@ -260,6 +263,7 @@ fn touch_triggers() {
             vec![],
         )],
         failures: vec![],
+        sounds: Default::default(),
     };
     let mut d = Director::new(&map, &triggers[1..], Settings::default());
     d.step(0.05, Some(near));
@@ -311,6 +315,7 @@ fn hurt_actor_destroys_props() {
             ),
         ],
         failures: vec![],
+        sounds: Default::default(),
     };
     let mut d = Director::new(&map, &[], Settings::default());
     assert_eq!(d.props_standing("PathToGunshipBarricade"), 1);
@@ -366,6 +371,7 @@ fn loops_are_bounded_and_sequences_start_with_their_factory() {
             ),
         ],
         failures: vec![],
+        sounds: Default::default(),
     };
     let mut d = Director::new(&map, &[], Settings::default());
     run(&mut d, 0.2);
@@ -429,6 +435,7 @@ fn snapshot_restores_scripts_mid_wait() {
             ),
         ],
         failures: vec![],
+        sounds: Default::default(),
     };
     let mut a = Director::new(&map, &[], Settings::default());
     a.start();
@@ -468,6 +475,7 @@ fn restore_skips_unknown_names() {
     let map = MapScripts {
         actors: vec![script("First", vec![act("WaitForEvent", &[("ExternalEvent", t("Go"))])])],
         failures: vec![],
+        sounds: Default::default(),
     };
     let mut d = Director::new(&map, &[], Settings::default());
     let mut snap = d.snapshot();
@@ -479,4 +487,52 @@ fn restore_skips_unknown_names() {
     let r = d.restore(&snap);
     assert_eq!(r.unknown, ["Counter9"]);
     assert_eq!(r.past_end, ["First"]);
+}
+
+/// A script that waits for a line waits for the line's own length when the
+/// game has told the director, and the settings' guess otherwise. A line
+/// switched off (`bDisabled`) is not waited for.
+#[test]
+fn waits_for_the_sounds_length() {
+    let line = |name: &str| {
+        act(
+            "PlaySound",
+            &[("Sound", t(name)), ("bWaitForFinish", Val::Bool(true))],
+        )
+    };
+    let map = MapScripts {
+        actors: vec![script(
+            "Talk",
+            vec![
+                line("CA1G1701"),
+                act("TriggerEvent", &[("Event", t("AfterKnown"))]),
+                line("Unknown01"),
+                act("TriggerEvent", &[("Event", t("AfterUnknown"))]),
+                act(
+                    "PlaySound",
+                    &[
+                        ("Sound", t("Off01")),
+                        ("bWaitForFinish", Val::Bool(true)),
+                        ("bDisabled", Val::Bool(true)),
+                    ],
+                ),
+                act("TriggerEvent", &[("Event", t("AfterOff"))]),
+            ],
+        )],
+        failures: vec![],
+        sounds: Default::default(),
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    d.set_sound_length("ca1g1701", 1.0);
+    assert_eq!(d.sound_length("CA1G1701"), 1.0);
+    assert_eq!(d.sound_length("Unknown01"), d.settings.sound_seconds);
+    run(&mut d, 0.9);
+    assert!(sent(&d).is_empty());
+    run(&mut d, 0.2);
+    assert_eq!(sent(&d), ["AfterKnown"]);
+    // The unknown line takes the settings' 3 s.
+    run(&mut d, 2.8);
+    assert_eq!(sent(&d), ["AfterKnown"]);
+    run(&mut d, 0.3);
+    assert_eq!(sent(&d), ["AfterKnown", "AfterUnknown", "AfterOff"]);
 }

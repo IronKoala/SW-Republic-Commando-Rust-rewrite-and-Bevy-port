@@ -1137,8 +1137,10 @@ The director runs every script one action at a time until it has to wait:
   `EndSection`; sections nest).
 - **Everything else** comes out as an `Effect::Action` for the game. Some
   also take time: a line of dialogue with `bWaitForFinish`, an animation
-  that waits for its end, a character told to walk. Their lengths are our
-  settings (sound lengths aren't read yet).
+  that waits for its end, a character told to walk. A line waits for the
+  sound's real length, which the game measures while loading and hands
+  over with `Director::set_sound_length`; animations, walks and sounds whose
+  length can't be read use our settings.
 - `HurtActor` and `DestroyActor` on a **prop** are the director's: it keeps
   each prop's `Health` and reports `PropDestroyed` (and sends the prop's
   `DestroyedState.Event`).
@@ -1189,7 +1191,32 @@ and carries out the effects:
 | checkpoint | `CheckpointReached { name }`, held while the player is down |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
+| `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
+
+**Script sounds** (`rc_scripts_plugin/src/sounds.rs`). A script names a
+sound only by its name (`Sound=CA1G1701`). The map's import table also
+says which package holds it (`GEO_Voice.CA1G1701`);
+`rc_level::scripts::sound_refs` keeps that as `MapScripts::sounds`. While
+the level loads, every sound its scripts can play is read from
+`GameData/Sounds/<package>.uax` with `rc_combat::read_sounds` (groups too,
+also members kept in another package, such as geo_sound's
+`arena_cloneDeaths` whose takes are in character_voice), measured with
+`rc_audio` and kept in the `ScriptSounds` resource. `SoundStreamed` ones
+(a few music stingers) play their `.ogg` from `GameData/Music`. Across the
+57 campaign maps the scripts name 1,629 sounds; `rc_script_check` finds
+every one in its package. When a script plays one, the sound starts at
+`[sound] volume` (`data/scripts/scripts.toml`) times the action's own
+`Volume`, and is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
+ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
+reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
+script) says one line of speech (a `*_voice` package) at a time, so a new
+line stops its last one unless `bDontOverrideOtherSounds`; effects never
+stop each other; nothing is placed in the world yet (every sound plays at
+full loudness); a group waits for its longest take. Lines pause with the
+game and stop when the level ends. Not done: subtitles (the game's
+`System/subtitles_*.int` files hold them, by sound name), sounds stored
+inside a map, and placing sounds at the speaker.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).

@@ -95,6 +95,10 @@ fn main() {
         names = all;
     }
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
+    // Sound packages read so far: the lower-case names of their sounds.
+    let mut packages: BTreeMap<String, Option<std::collections::HashSet<String>>> = BTreeMap::new();
+    let (mut sounds_total, mut sounds_found) = (0, 0);
+    let mut classes: BTreeMap<String, usize> = BTreeMap::new();
     let (mut maps, mut failed, mut scripts, mut actions, mut unreadable) = (0, 0, 0, 0, 0);
     for name in &names {
         maps += 1;
@@ -146,6 +150,51 @@ fn main() {
         for f in &map.failures {
             log.line(format!("   unreadable: {f}"));
         }
+        // The sounds the scripts play: where each one lives, and whether
+        // that package really has it.
+        let mut sound_names: Vec<String> = Vec::new();
+        for a in map.scripts() {
+            for act in &a.actions {
+                if rc_scripts::sound_action(act) {
+                    if let Some(n) = act.text("Sound") {
+                        if !sound_names.iter().any(|m| m.eq_ignore_ascii_case(n)) {
+                            sound_names.push(n.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let (mut found, mut lost) = (0, Vec::new());
+        for n in &sound_names {
+            match map.sounds.get(&n.to_ascii_lowercase()) {
+                Some(r) => {
+                    let pkg_name = r.package.clone().unwrap_or_else(|| name.clone());
+                    let ok = packages
+                        .entry(pkg_name.to_ascii_lowercase())
+                        .or_insert_with(|| sound_names_in(&data, &pkg_name))
+                        .as_ref()
+                        .map(|set| set.contains(&n.to_ascii_lowercase()));
+                    *classes.entry(r.class.clone()).or_default() += 1;
+                    match ok {
+                        Some(true) => found += 1,
+                        Some(false) => lost.push(format!("{n} (not in {pkg_name})")),
+                        None => lost.push(format!("{n} ({pkg_name} not readable)")),
+                    }
+                }
+                None => lost.push(format!("{n} (the map doesn't say where)")),
+            }
+        }
+        sounds_total += sound_names.len();
+        sounds_found += found;
+        log.line(format!(
+            "   sounds: {} played by scripts, {found} found in their package{}",
+            sound_names.len(),
+            if lost.is_empty() {
+                String::new()
+            } else {
+                format!("; missing: {}", lost.join(", "))
+            }
+        ));
         for a in map.scripts() {
             log.line(format!(
                 "   {} {} (tag {})",
@@ -239,9 +288,40 @@ fn main() {
         ));
     }
     let line = format!(
-        "{maps} maps, {failed} unreadable; {scripts} scripts with {actions} actions; {} action kinds; {unreadable} actors or actions unreadable",
+        "{maps} maps, {failed} unreadable; {scripts} scripts with {actions} actions; {} action kinds; {unreadable} actors or actions unreadable; {sounds_found} of {sounds_total} script sounds found",
         kinds.len()
     );
     log.line(&line);
+    log.line(format!("== script sounds by kind (per map): {classes:?}"));
     println!("{line}");
+}
+
+/// The lower-case names of every sound in a sound package
+/// (`GameData/Sounds/<name>.uax`), or in a map when `name` is one.
+fn sound_names_in(data: &std::path::Path, name: &str) -> Option<std::collections::HashSet<String>> {
+    // File names differ in case from what the maps say (`GEO_Voice`).
+    let find = |dir: &str, file: String| {
+        fs::read_dir(data.join(dir)).ok()?.flatten().find_map(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&file)
+                .then(|| e.path())
+        })
+    };
+    let path =
+        find("Sounds", format!("{name}.uax")).or_else(|| find("Maps", format!("{name}.ctm")))?;
+    let bytes = fs::read(path).ok()?;
+    let pkg = Package::parse(&bytes).ok()?;
+    Some(
+        pkg.exports
+            .iter()
+            .filter(|e| {
+                matches!(
+                    pkg.export_class_name(e),
+                    "Sound" | "SoundMultiple" | "SoundStreamed"
+                )
+            })
+            .map(|e| pkg.name(e.object_name).to_ascii_lowercase())
+            .collect(),
+    )
 }
