@@ -1,0 +1,53 @@
+# Flash detonator: no damage, but stuns every organic character that can
+# see it within 4096 uu for up to 18 s. Droids are immune (their damage
+# tables), and the player is only stunned when looking towards it.
+#
+# Mods: change any value and restart. A misspelt name stops loading this
+# file with an error naming the line (see logs/rc_game.log).
+#
+# Numbers marked "game:" are the original's class defaults, read from its
+# script packages (ctinventory.u, with the "...Defaults" class in
+# Properties/properties.u on top). "our choice" marks the few that are ours.
+# Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
+
+name = "Flash Detonator"  # game: FlashBangDefaults ItemName
+
+[ammo]
+max_count = 5             # game: FlashBangAmmoDefaults MaxAmmo
+start_count = 2           # game: FlashBangDefaults InitAmmoAmount
+
+[throw]
+speed = 2200              # game: GrenadeProj Speed
+toss_up = 200             # game: GrenadeProj TossZ
+offset = [57.4, -30, -10.56] # game: Weapon FPGrenadeOffset
+delay = 1.0               # our choice
+
+[fuse]
+time = 12                 # game: FlashBangProjDefaults FuseTime
+after_impact = 1          # game: CTProjExplosive PostImpactFuseTime
+
+[flight]
+bounce = 0.3              # game: GrenadeProj BounceDampening
+actor_bounce = 0.1        # game: GrenadeProj ActorBounceDampening
+rest_speed = 20           # game: CTProjExplosive RestSpeed
+gravity = 1100            # game: level gravity
+
+[blast]
+damage = 0                # game: FlashBangProj Damage
+radius = 4096             # game: FlashBangProjDefaults DamageRadius
+damage_type = "CTDamageExplosionFlashDet" # game: MyDamageType
+damage_kind = "other"
+
+[status]
+# game: ExplosionStatusEffect StatusEffect_Stun
+max_time = 18             # game: StatusEffectMaxDuration
+damage_type = "CTDamageStun" # game: StatusEffect_Stun DamageType
+player_must_face = true   # game: the player is only stunned facing the flash
+
+[sound]
+package = "gen_sound"
+bounce = "imp_GEN_grenadeBounce_01" # game: ImpactSound
+
+[model]
+mesh = "FlashGrenade"     # game: StaticMesh (not drawn yet)
+blast_colour = [1.0, 1.0, 0.9]   # our choice

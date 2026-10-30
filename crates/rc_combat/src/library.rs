@@ -2,7 +2,9 @@
 //! `data/combat/player.toml`, and the weapons' sounds from the game's sound
 //! packages.
 
+use crate::damage_types::{DamageTable, DamageTypes};
 use crate::data::Table;
+use crate::grenade::{GrenadeParams, Grenades};
 use crate::health::{Health, Shield, Team};
 use crate::weapon::{WeaponParams, WeaponState};
 use crate::{Arsenal, Hittable};
@@ -20,6 +22,11 @@ use std::time::Instant;
 #[derive(Resource, Debug, Default)]
 pub struct WeaponLibrary {
     pub weapons: BTreeMap<String, WeaponParams>,
+    /// Every grenade the data files describe (`data/grenades/*.toml`).
+    pub grenades: BTreeMap<String, GrenadeParams>,
+    /// Damage types and every character's damage table
+    /// (`data/combat/damage_types.toml`).
+    pub damage_types: DamageTypes,
     /// Files that didn't read, with the reason. They are left out.
     pub errors: Vec<String>,
     /// Sound name to Bevy sound. Empty when there is no audio (tests).
@@ -37,6 +44,37 @@ pub struct PlayerSetup {
     pub shield_recharge_delay: f32,
     /// Weapon ids, the first one in hand at the start.
     pub weapons: Vec<String>,
+    /// Grenade ids, in the order "next grenade" cycles; the first is
+    /// selected at the start. Each starts with its file's `start_count`.
+    pub grenades: Vec<String>,
+    pub melee: MeleeParams,
+    /// The player's damage table (in `damage_types.toml`).
+    pub damage_table: Option<String>,
+}
+
+/// The player's close-range hit when the weapon in hand has none of its
+/// own, and the time between hits, from `data/combat/player.toml`
+/// `[melee]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeleeParams {
+    pub damage: f32,
+    /// How far in front of the eye it reaches, uu.
+    pub range: f32,
+    /// Seconds between hits.
+    pub delay: f32,
+    pub sound: Option<String>,
+}
+
+impl Default for MeleeParams {
+    /// The DC-17m's melee (`DC17mBlasterDefaults`), and our own delay.
+    fn default() -> Self {
+        MeleeParams {
+            damage: 220.0,
+            range: 150.0,
+            delay: 0.8,
+            sound: None,
+        }
+    }
 }
 
 impl Default for PlayerSetup {
@@ -47,6 +85,9 @@ impl Default for PlayerSetup {
             shield_recharge_rate: 20.0,
             shield_recharge_delay: 3.0,
             weapons: vec!["dc17m_blaster".into(), "dc15s_pistol".into()],
+            grenades: vec![],
+            melee: MeleeParams::default(),
+            damage_table: Some("DV_OrganicCTPlayerDamage".into()),
         }
     }
 }
@@ -65,6 +106,14 @@ impl PlayerSetup {
                 .number("player.shield_recharge_delay")?
                 .unwrap_or(d.shield_recharge_delay),
             weapons: t.texts("player.weapons")?.unwrap_or(d.weapons),
+            grenades: t.texts("player.grenades")?.unwrap_or(d.grenades),
+            melee: MeleeParams {
+                damage: t.number("melee.damage")?.unwrap_or(d.melee.damage),
+                range: t.number("melee.range")?.unwrap_or(d.melee.range),
+                delay: t.number("melee.delay")?.unwrap_or(d.melee.delay),
+                sound: t.text("melee.sound")?.or(d.melee.sound),
+            },
+            damage_table: t.text("player.damage_table")?.or(d.damage_table),
         };
         t.finish()?;
         Ok(p)
@@ -78,13 +127,14 @@ fn say(log: &Option<Res<GameLog>>, s: String) {
     }
 }
 
-/// Every `weapons/*.toml` across the data folders. A mod's file replaces
-/// the base file with the same name (the data folders list mods first).
-fn weapon_files(paths: &GamePaths) -> BTreeMap<String, PathBuf> {
+/// Every `<folder>/*.toml` across the data folders (`weapons`,
+/// `grenades`). A mod's file replaces the base file with the same name (the
+/// data folders list mods first).
+fn data_files(paths: &GamePaths, folder: &str) -> BTreeMap<String, PathBuf> {
     let mut out = BTreeMap::new();
     for dir in paths.data_dirs.iter().rev() {
-        // Finds `weapons` in any letter case (for Linux and Android).
-        let folder = GamePaths::new(dir.clone(), vec![]).game_file("weapons");
+        // Finds the folder in any letter case (for Linux and Android).
+        let folder = GamePaths::new(dir.clone(), vec![]).game_file(folder);
         let Ok(entries) = std::fs::read_dir(folder) else {
             continue;
         };
@@ -114,7 +164,7 @@ pub(crate) fn load(
 ) {
     let t = Instant::now();
     let mut lib = WeaponLibrary::default();
-    for (id, path) in weapon_files(&paths) {
+    for (id, path) in data_files(&paths, "weapons") {
         let read = std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|text| WeaponParams::from_text(&id, &text));
@@ -136,6 +186,58 @@ pub(crate) fn load(
                 lib.errors.push(e);
             }
         }
+    }
+    for (id, path) in data_files(&paths, "grenades") {
+        let read = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| GrenadeParams::from_text(&id, &text));
+        match read {
+            Ok(p) => {
+                say(
+                    &log,
+                    format!(
+                        "grenades: {id} ({}): carry {} (start {}), thrown at {} uu/s +{} up, fuse {} s (then {} s after a touch), explodes on actor {} / world {}, sticks world {} / actors {}, proximity {} uu every {} s, bounce {} / {}, damage {} ({}) within {} uu, status {:?}",
+                        p.name, p.max_count, p.start_count, p.speed, p.toss_up, p.fuse_time,
+                        p.after_impact, p.explode_on_actor, p.explode_on_world,
+                        p.stick_to_world, p.stick_to_actors, p.proximity, p.proximity_interval,
+                        p.bounce, p.actor_bounce, p.damage, p.damage_type, p.radius, p.status
+                    ),
+                );
+                lib.grenades.insert(id, p);
+            }
+            Err(e) => {
+                let e = format!("{}: {e}", path.display());
+                say(&log, format!("grenades: FAILED to read {e}"));
+                lib.errors.push(e);
+            }
+        }
+    }
+    match paths.data_file("combat/damage_types.toml") {
+        None => say(
+            &log,
+            "weapons: no combat/damage_types.toml: every hit at full strength".into(),
+        ),
+        Some(p) => match std::fs::read_to_string(&p)
+            .map_err(|e| e.to_string())
+            .and_then(|t| DamageTypes::from_text(&t))
+        {
+            Ok(d) => {
+                say(
+                    &log,
+                    format!(
+                        "weapons: {} damage types and {} damage tables read",
+                        d.parents.len(),
+                        d.tables.len()
+                    ),
+                );
+                lib.damage_types = d;
+            }
+            Err(e) => {
+                let e = format!("{}: {e}", p.display());
+                say(&log, format!("weapons: FAILED to read {e}"));
+                lib.errors.push(e);
+            }
+        },
     }
     match paths.data_file("combat/player.toml") {
         None => say(
@@ -161,14 +263,22 @@ pub(crate) fn load(
             lib.errors.push(e);
         }
     }
+    for id in &lib.player.grenades {
+        if !lib.grenades.contains_key(id) {
+            let e = format!("player grenade `{id}` has no file grenades/{id}.toml");
+            say(&log, format!("grenades: {e}"));
+            lib.errors.push(e);
+        }
+    }
     if let Some(mut audio) = audio {
         load_sounds(&mut lib, &paths, &mut audio, &log);
     }
     say(
         &log,
         format!(
-            "weapons: {} weapon files read, {} failed, {} sounds, {:.0} ms",
+            "weapons: {} weapon files and {} grenade files read, {} failed, {} sounds, {:.0} ms",
             lib.weapons.len(),
+            lib.grenades.len(),
             lib.errors.len(),
             lib.sounds.len(),
             t.elapsed().as_secs_f64() * 1000.0
@@ -200,47 +310,88 @@ fn load_sounds(
             }
         }
     }
-    for (package, names) in wanted {
-        let path = paths.game_file(&format!("GameData/Sounds/{package}.uax"));
-        let read = std::fs::read(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|data| {
-                Package::parse(&data)
-                    .map(|p| (p, data))
-                    .map_err(|e| e.to_string())
-            });
-        let (pkg, data) = match read {
-            Ok(v) => v,
-            Err(e) => {
-                say(
-                    log,
-                    format!("weapons: no sounds from {}: {e}", path.display()),
-                );
-                continue;
-            }
-        };
-        let (pkg, data) = (&pkg, &data);
-        for name in names {
-            let export = pkg.exports.iter().find(|e| {
-                pkg.export_class_name(e) == "Sound"
-                    && pkg.name(e.object_name).eq_ignore_ascii_case(&name)
-            });
-            let Some(export) = export else {
-                say(log, format!("weapons: sound {name} not in {package}"));
-                continue;
-            };
-            match read_sound(pkg, data, export) {
-                Ok(s) => {
-                    let bytes: Vec<u8> = s.bytes(data).to_vec();
-                    let h = audio.add(AudioSource {
-                        bytes: bytes.into(),
-                    });
-                    lib.sounds.insert(name, h);
-                }
-                Err(e) => say(log, format!("weapons: sound {name} didn't read: {e}")),
+    if let Some(n) = &lib.player.melee.sound {
+        wanted
+            .entry("gen_sound".into())
+            .or_default()
+            .push(n.clone());
+    }
+    for p in lib.grenades.values() {
+        let list = wanted
+            .entry(p.sound_package.to_ascii_lowercase())
+            .or_default();
+        for n in p
+            .throw_sound
+            .iter()
+            .chain(&p.bounce_sound)
+            .chain(&p.blast_sound)
+        {
+            if !list.contains(n) {
+                list.push(n.clone());
             }
         }
     }
+    for (package, names) in wanted {
+        let (found, notes) = read_sounds(paths, &package, &names, audio);
+        for n in notes {
+            say(log, format!("weapons: {n}"));
+        }
+        lib.sounds.extend(found);
+    }
+}
+
+/// Read sounds by name from one of the game's sound packages
+/// (`GameData/Sounds/<package>.uax`) into Bevy sounds. Returns what was
+/// found and a note for each problem. Any part can use it (enemies do).
+pub fn read_sounds(
+    paths: &GamePaths,
+    package: &str,
+    names: &[String],
+    audio: &mut Assets<AudioSource>,
+) -> (HashMap<String, Handle<AudioSource>>, Vec<String>) {
+    let mut found = HashMap::new();
+    let mut notes = Vec::new();
+    if names.is_empty() {
+        return (found, notes);
+    }
+    let path = paths.game_file(&format!("GameData/Sounds/{package}.uax"));
+    let read = std::fs::read(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|data| {
+            Package::parse(&data)
+                .map(|p| (p, data))
+                .map_err(|e| e.to_string())
+        });
+    let (pkg, data) = match read {
+        Ok(v) => v,
+        Err(e) => {
+            notes.push(format!("no sounds from {}: {e}", path.display()));
+            return (found, notes);
+        }
+    };
+    for name in names {
+        let export = pkg.exports.iter().find(|e| {
+            pkg.export_class_name(e) == "Sound"
+                && pkg.name(e.object_name).eq_ignore_ascii_case(name)
+        });
+        let Some(export) = export else {
+            notes.push(format!("sound {name} not in {package}"));
+            continue;
+        };
+        match read_sound(&pkg, &data, export) {
+            Ok(snd) => {
+                let bytes: Vec<u8> = snd.bytes(&data).to_vec();
+                found.insert(
+                    name.clone(),
+                    audio.add(AudioSource {
+                        bytes: bytes.into(),
+                    }),
+                );
+            }
+            Err(e) => notes.push(format!("sound {name} didn't read: {e}")),
+        }
+    }
+    (found, notes)
 }
 
 /// Give the player (any new `Player` entity) the game's health, shield,
@@ -283,5 +434,35 @@ pub(crate) fn equip_player(
                 current: 0,
             },
         ));
+        if let Some(t) = &s.damage_table {
+            commands.entity(e).insert(DamageTable(t.clone()));
+        }
+    }
+}
+
+/// Give the player (any `Player` without them) the starting grenades. On
+/// its own, so a loaded game that restores the arsenal still gets them
+/// (or restores its own `Grenades` first).
+pub(crate) fn equip_grenades(
+    mut commands: Commands,
+    lib: Res<WeaponLibrary>,
+    players: Query<Entity, (With<Player>, Without<Grenades>)>,
+    log: Option<Res<GameLog>>,
+) {
+    for e in &players {
+        let s = &lib.player;
+        let grenades = Grenades {
+            carried: s
+                .grenades
+                .iter()
+                .filter_map(|id| lib.grenades.get(id).map(|p| (id.clone(), p.start_count)))
+                .collect(),
+            ..Default::default()
+        };
+        say(
+            &log,
+            format!("grenades: player equipped {:?}", grenades.carried),
+        );
+        commands.entity(e).insert(grenades);
     }
 }

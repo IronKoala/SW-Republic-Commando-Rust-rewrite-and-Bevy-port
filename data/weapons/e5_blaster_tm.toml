@@ -20,7 +20,8 @@ accel = 60000
 max_speed = 5000          # MaxSpeed (BattleDroidBlasterProj)
 life_span = 10
 damage = 2                # Damage (BattleDroidBlasterProjTM)
-damage_kind = "blaster"   # CTDamageEnergyDroids
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyDroids" # MyDamageType (battle droids take x0 from it: no friendly fire)
 
 [sound]
 package = "gen_sound"

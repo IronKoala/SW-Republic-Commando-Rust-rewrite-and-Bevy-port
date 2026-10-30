@@ -1,0 +1,178 @@
+# Names shown in button prompts ("Press X to use"), for each kind of
+# controller, keyboard and mouse. Mods and players can change any line.
+#
+# Gamepad buttons are named by where they sit, as in bindings.toml: South is
+# the bottom face button, East the right one, and so on. So "South" is A on
+# Xbox, Cross on PlayStation and B on Switch. The back paddles (Steam Deck
+# L4/R4/L5/R5, Xbox Elite, DualSense Edge), Touchpad and Misc1 (Share,
+# Capture, Mute) are only read when SDL reads the controllers.
+#
+# A controller looks in its own section first (ps5, joycon_pair, ...), then
+# its family's (xbox, playstation, nintendo, steam_deck), then [generic].
+# Kinds: xbox, ps4, ps5, switch_pro, joycon_left, joycon_right,
+# joycon_pair, gamecube, steam_deck, steam, generic.
+#
+# PLACEHOLDER: these are words. The original PC game has no controller
+# button pictures, so pictures need new art (a mod can add them later).
+
+[xbox]
+South = "A"
+East = "B"
+West = "X"
+North = "Y"
+LeftTrigger = "LB"
+LeftTrigger2 = "LT"
+RightTrigger = "RB"
+RightTrigger2 = "RT"
+Select = "View"
+Start = "Menu"
+Mode = "Xbox"
+LeftThumb = "LS"
+RightThumb = "RS"
+DPadUp = "D-pad Up"
+DPadDown = "D-pad Down"
+DPadLeft = "D-pad Left"
+DPadRight = "D-pad Right"
+RightPaddle1 = "P1"
+RightPaddle2 = "P2"
+LeftPaddle1 = "P3"
+LeftPaddle2 = "P4"
+Misc1 = "Share"
+
+[playstation]
+South = "Cross"
+East = "Circle"
+West = "Square"
+North = "Triangle"
+LeftTrigger = "L1"
+LeftTrigger2 = "L2"
+RightTrigger = "R1"
+RightTrigger2 = "R2"
+Select = "Share"
+Start = "Options"
+Mode = "PS"
+LeftThumb = "L3"
+RightThumb = "R3"
+DPadUp = "Up"
+DPadDown = "Down"
+DPadLeft = "Left"
+DPadRight = "Right"
+Touchpad = "Touchpad"
+RightPaddle1 = "Right Back"
+LeftPaddle1 = "Left Back"
+Misc1 = "Mute"
+
+[ps5]
+Select = "Create"
+
+[nintendo]
+South = "B"
+East = "A"
+West = "Y"
+North = "X"
+LeftTrigger = "L"
+LeftTrigger2 = "ZL"
+RightTrigger = "R"
+RightTrigger2 = "ZR"
+Select = "-"
+Start = "+"
+Mode = "Home"
+LeftThumb = "L Stick"
+RightThumb = "R Stick"
+DPadUp = "Up"
+DPadDown = "Down"
+DPadLeft = "Left"
+DPadRight = "Right"
+Misc1 = "Capture"
+
+[steam_deck]
+South = "A"
+East = "B"
+West = "X"
+North = "Y"
+LeftTrigger = "L1"
+LeftTrigger2 = "L2"
+RightTrigger = "R1"
+RightTrigger2 = "R2"
+Select = "View"
+Start = "Menu"
+Mode = "Steam"
+LeftThumb = "L3"
+RightThumb = "R3"
+DPadUp = "D-pad Up"
+DPadDown = "D-pad Down"
+DPadLeft = "D-pad Left"
+DPadRight = "D-pad Right"
+RightPaddle1 = "R4"
+LeftPaddle1 = "L4"
+RightPaddle2 = "R5"
+LeftPaddle2 = "L5"
+Misc1 = "Quick Access"
+
+[generic]
+South = "A"
+East = "B"
+West = "X"
+North = "Y"
+LeftTrigger = "LB"
+LeftTrigger2 = "LT"
+RightTrigger = "RB"
+RightTrigger2 = "RT"
+Select = "Back"
+Start = "Start"
+Mode = "Guide"
+LeftThumb = "Left Stick"
+RightThumb = "Right Stick"
+DPadUp = "D-pad Up"
+DPadDown = "D-pad Down"
+DPadLeft = "D-pad Left"
+DPadRight = "D-pad Right"
+RightPaddle1 = "Right Paddle 1"
+LeftPaddle1 = "Left Paddle 1"
+RightPaddle2 = "Right Paddle 2"
+LeftPaddle2 = "Left Paddle 2"
+Touchpad = "Touchpad"
+Misc1 = "Misc"
+
+# Keys not listed are shown by their bindings.toml name with the "Key" or
+# "Digit" taken off (KeyW is "W", Digit1 is "1").
+[keyboard]
+Space = "Space"
+Enter = "Enter"
+Escape = "Esc"
+Tab = "Tab"
+Backspace = "Backspace"
+ShiftLeft = "Shift"
+ShiftRight = "Right Shift"
+ControlLeft = "Ctrl"
+ControlRight = "Right Ctrl"
+AltLeft = "Alt"
+AltRight = "Right Alt"
+ArrowUp = "Up"
+ArrowDown = "Down"
+ArrowLeft = "Left"
+ArrowRight = "Right"
+Slash = "/"
+Backslash = "\\"
+BracketLeft = "["
+BracketRight = "]"
+Minus = "-"
+Equal = "="
+Comma = ","
+Period = "."
+Semicolon = ";"
+Quote = "'"
+Backquote = "`"
+CapsLock = "Caps Lock"
+PageUp = "Page Up"
+PageDown = "Page Down"
+NumpadEnter = "Num Enter"
+
+[mouse]
+Left = "Left Mouse"
+Right = "Right Mouse"
+Middle = "Middle Mouse"
+Back = "Mouse 4"
+Forward = "Mouse 5"
+WheelUp = "Wheel Up"
+WheelDown = "Wheel Down"

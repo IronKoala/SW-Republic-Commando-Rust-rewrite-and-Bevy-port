@@ -10,6 +10,7 @@
 //! our own choice.
 
 use crate::fight::{FightState, Patient, Rng, Threat};
+use crate::jobs::{JobKind, JobResult, JobSettings};
 use crate::map::MarkerSpot;
 use crate::nav::Navigator;
 use crate::settings::{MemberSettings, SquadSettings, StanceSettings, Tether};
@@ -77,6 +78,12 @@ pub enum MemberState {
     Working { left: f32 },
     /// Kneeling by a downed commando; seconds left.
     Reviving { left: f32 },
+    /// At their spot of a group job (door breach), waiting for the others
+    /// to get to theirs.
+    Ready,
+    /// Holding a post (sniper, grenade, anti-armour position) until
+    /// recalled.
+    Posted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +114,8 @@ pub struct Member {
     /// The downed commando they're going to revive, if any.
     pub revive: Option<Patient>,
     pub fight: FightState,
+    /// Seconds to the next grenade from a grenade post.
+    pub throw_in: f32,
     path: Vec<Vec3>,
     pub(crate) planned_for: Option<Vec3>,
     pub(crate) think_in: f32,
@@ -201,6 +210,8 @@ pub enum SquadEvent {
     Fire {
         member: String,
         index: usize,
+        /// The gun (a file in data/weapons): `[fight]`'s, or a post's own.
+        weapon: String,
         origin: Vec3,
         direction: Vec3,
         target: u64,
@@ -241,6 +252,54 @@ pub enum SquadEvent {
         patient: String,
         after: f32,
         why: String,
+    },
+    /// At a group job's spot, waiting for the others.
+    MarkerReady {
+        member: String,
+        marker: String,
+        waiting_for: usize,
+    },
+    /// Took up a post, and stays until recalled.
+    Posted {
+        member: String,
+        marker: String,
+        job: String,
+    },
+    /// A charge is set: the result comes in `seconds`.
+    FuseLit {
+        member: String,
+        marker: String,
+        seconds: f32,
+    },
+    /// A finished job's result, for the game to carry out: `Heal` gives
+    /// member `index` their health back; `Trigger` sets off the anchor.
+    JobResult {
+        member: String,
+        index: usize,
+        marker: String,
+        job: String,
+        result: JobResult,
+        anchor: String,
+        anchor_class: String,
+        at: Vec3,
+    },
+    /// An explosion: `damage` at `at`, falling to nothing at `radius`.
+    Blast {
+        member: String,
+        index: Option<usize>,
+        at: Vec3,
+        damage: f32,
+        radius: f32,
+        what: String,
+    },
+    /// A grenade thrown from a grenade post; it goes off in `fuse` seconds.
+    Throw {
+        member: String,
+        index: usize,
+        from: Vec3,
+        to: Vec3,
+        target: u64,
+        fuse: f32,
     },
 }
 
@@ -320,6 +379,30 @@ impl fmt::Display for SquadEvent {
             SquadEvent::PlayerReviveStopped { patient, after, why } => {
                 write!(f, "the player stops reviving {patient} after {after:.1} s: {why}")
             }
+            SquadEvent::MarkerReady { member, marker, waiting_for } => {
+                write!(f, "{member} ready at {marker}, waiting for {waiting_for} more")
+            }
+            SquadEvent::Posted { member, marker, job } => {
+                write!(f, "{member} holds {marker} ({job}) until recalled")
+            }
+            SquadEvent::FuseLit { member, marker, seconds } => {
+                write!(f, "{member} set the charge at {marker}: {seconds:.1} s")
+            }
+            SquadEvent::JobResult { member, marker, job, result, anchor, anchor_class, at, .. } => write!(
+                f,
+                "JOB {job} at {marker} by {member}: {result:?} {anchor_class} {anchor} at {}",
+                p(at)
+            ),
+            SquadEvent::Blast { member, at, damage, radius, what, .. } => write!(
+                f,
+                "BLAST ({what}, {member}) at {}: {damage:.0} damage within {radius:.0} uu",
+                p(at)
+            ),
+            SquadEvent::Throw { member, to, target, fuse, .. } => write!(
+                f,
+                "{member} throws a grenade at enemy {target}, landing {} in {fuse:.1} s",
+                p(to)
+            ),
         }
     }
 }
@@ -358,6 +441,26 @@ pub struct Squad {
     pub player_revive: Option<(usize, f32)>,
     pub(crate) rng: Rng,
     pub time: f32,
+    /// Charges and grenades waiting to go off.
+    pub pending: Vec<Pending>,
+}
+
+/// A lit fuse.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pending {
+    /// Seconds left.
+    pub left: f32,
+    pub member: String,
+    pub index: usize,
+    pub what: PendingWhat,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PendingWhat {
+    /// A finished job's charge: the blast (if any) and the job's result.
+    Job { marker: usize },
+    /// A thrown grenade.
+    Grenade { at: Vec3, damage: f32, radius: f32 },
 }
 
 fn dist_2d(a: Vec3, b: Vec3) -> f32 {
@@ -433,6 +536,7 @@ impl Squad {
                     down: false,
                     revive: None,
                     fight: FightState::default(),
+                    throw_in: 0.0,
                     path: Vec::new(),
                     planned_for: None,
                     think_in: 0.0,
@@ -455,6 +559,7 @@ impl Squad {
             player_revive: None,
             rng: Rng::new(0x0D17_DE17),
             time: 0.0,
+            pending: Vec::new(),
         };
         (squad, events)
     }
@@ -466,6 +571,71 @@ impl Squad {
             Stance::SearchAndDestroy => &self.settings.search_and_destroy,
             Stance::Hold => &self.settings.hold,
         }
+    }
+
+    /// The job a marker is for: the first `[job.*]` whose words are in
+    /// its order marker's class (`MarkerDoorBreach`), else its anchor's
+    /// (`BactaDispenserGEO`), else the marker's name.
+    pub fn job_of(&self, k: usize) -> Option<&JobSettings> {
+        let (spot, _) = self.markers.get(k)?;
+        let key = [&spot.marker_class, &spot.anchor_class, &spot.name]
+            .into_iter()
+            .find(|s| !s.is_empty())?;
+        self.settings.jobs.iter().find(|j| j.fits(key))
+    }
+
+    /// Put in the map's markers, each named after its job.
+    pub fn set_markers(&mut self, spots: Vec<MarkerSpot>) {
+        self.markers = spots.into_iter().map(|s| (s, MarkerState::Open)).collect();
+        for k in 0..self.markers.len() {
+            if let Some(name) = self.job_of(k).map(|j| j.name.clone()) {
+                self.markers[k].0.job = name;
+            }
+        }
+    }
+
+    /// The other markers of the same group job as marker `k` (the spots
+    /// sharing its anchor), `k` first. Just `k` for any other job.
+    pub fn group_of(&self, k: usize) -> Vec<usize> {
+        let group = self.job_of(k).is_some_and(|j| j.group);
+        let anchor = &self.markers[k].0.anchor;
+        let mut out = vec![k];
+        if group && !anchor.is_empty() {
+            out.extend(
+                (0..self.markers.len()).filter(|&o| o != k && &self.markers[o].0.anchor == anchor),
+            );
+        }
+        out
+    }
+
+    /// The shooting numbers for member `i`: `[fight]`, with a post's own
+    /// numbers while holding one.
+    pub fn fight_for(&self, i: usize) -> crate::settings::FightSettings {
+        let mut f = self.settings.fight.clone();
+        let m = &self.members[i];
+        let job = match (m.state, m.marker) {
+            (MemberState::Posted, Some(k)) => self.job_of(k),
+            _ => None,
+        };
+        if let Some(j) = job {
+            if !j.weapon.is_empty() {
+                f.weapon = j.weapon.clone();
+            }
+            let set = |v: f32, slot: &mut f32| {
+                if v > 0.0 {
+                    *slot = v
+                }
+            };
+            set(j.sight_radius, &mut f.sight_radius);
+            set(j.accuracy, &mut f.accuracy);
+            set(j.shot_interval, &mut f.shot_interval);
+            set(j.burst_pause_min, &mut f.burst_pause_min);
+            set(j.burst_pause_max, &mut f.burst_pause_max);
+            if j.burst_count > 0 {
+                f.burst_count = j.burst_count;
+            }
+        }
+        f
     }
 
     /// Give an order. Members not on a marked job set off at once.
@@ -516,34 +686,64 @@ impl Squad {
                     });
                     return events;
                 }
-                let stand = spot.stand;
-                let best = self
-                    .members
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, m)| m.marker.is_none() && !m.down)
-                    .min_by(|a, b| {
-                        dist(a.1.pawn.feet(), stand).total_cmp(&dist(b.1.pawn.feet(), stand))
-                    });
-                let Some((i, m)) = best else {
+                if !self.members.iter().any(|m| m.marker.is_none() && !m.down) {
                     events.push(SquadEvent::OrderIgnored {
                         order: format!("{} ({})", spot.name, spot.job),
                         why: "everyone is busy".into(),
                     });
                     return events;
-                };
-                events.push(SquadEvent::MarkerAssigned {
-                    member: m.settings.name.clone(),
-                    marker: spot.name.clone(),
-                    job: spot.job.clone(),
-                    distance: dist(m.pawn.feet(), stand),
-                });
-                self.markers[k].1 = MarkerState::Assigned(i);
-                let m = &mut self.members[i];
-                m.marker = Some(k);
-                m.state = MemberState::Idle;
-                m.think_in = 0.0;
-                self.set_off_now(i, leader, world, &mut events);
+                }
+                // One member per spot (a group job fills every spot of
+                // its anchor, the ordered one first), nearest first.
+                // The job's preferred squad mate takes the ordered spot
+                // when free (Scorch for demolition, Fixer for slicing, Sev
+                // for sniping, as in the original).
+                let preferred = self
+                    .job_of(k)
+                    .map(|j| j.preferred.clone())
+                    .unwrap_or_default();
+                for g in self.group_of(k) {
+                    if self.markers[g].1 != MarkerState::Open {
+                        continue;
+                    }
+                    let stand = self.markers[g].0.stand;
+                    let free = |m: &Member| m.marker.is_none() && !m.down;
+                    let wanted = (g == k && !preferred.is_empty())
+                        .then(|| {
+                            self.members.iter().position(|m| {
+                                free(m)
+                                    && (m.settings.class.eq_ignore_ascii_case(&preferred)
+                                        || m.settings.key.eq_ignore_ascii_case(&preferred))
+                            })
+                        })
+                        .flatten();
+                    let best = wanted.or_else(|| {
+                        self.members
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, m)| free(m))
+                            .min_by(|a, b| {
+                                dist(a.1.pawn.feet(), stand)
+                                    .total_cmp(&dist(b.1.pawn.feet(), stand))
+                            })
+                            .map(|(i, _)| i)
+                    });
+                    let Some(i) = best else { break };
+                    let m = &self.members[i];
+                    events.push(SquadEvent::MarkerAssigned {
+                        member: m.settings.name.clone(),
+                        marker: self.markers[g].0.name.clone(),
+                        job: self.markers[g].0.job.clone(),
+                        distance: dist(m.pawn.feet(), stand),
+                    });
+                    self.markers[g].1 = MarkerState::Assigned(i);
+                    let m = &mut self.members[i];
+                    m.marker = Some(g);
+                    m.revive = None;
+                    m.state = MemberState::Idle;
+                    m.think_in = 0.0;
+                    self.set_off_now(i, leader, world, &mut events);
+                }
                 events.insert(
                     0,
                     SquadEvent::OrderGiven {
@@ -689,6 +889,13 @@ impl Squad {
             };
         }
         if let Some(k) = m.marker {
+            let on_guard = matches!(m.state, MemberState::Posted | MemberState::Ready);
+            if let (true, Some(t)) = (on_guard, self.target_of(i)) {
+                let d = t.centre - m.pawn.feet();
+                if d.length_2d() > 1.0 {
+                    return d.y.atan2(d.x);
+                }
+            }
             return self.markers[k].0.yaw;
         }
         // Standing and fighting: face the enemy.
@@ -726,6 +933,10 @@ impl Squad {
                 None
             };
         let reached_patient = self.reached_patient(i, leader);
+        let job = self.members[i]
+            .marker
+            .and_then(|k| self.job_of(k))
+            .map(|j| (j.kind, j.group, j.work_time, j.name.clone()));
         let m = &mut self.members[i];
         m.goal = goal;
         m.engaging = engaging;
@@ -759,8 +970,12 @@ impl Squad {
         let td = dist(feet, tether);
         let to_goal = dist_2d(feet, goal);
         let close_height = (feet.z - goal.z).abs() < 150.0;
+        let mut became_ready = None;
         match m.state {
-            MemberState::Working { .. } | MemberState::Reviving { .. } => {}
+            MemberState::Working { .. }
+            | MemberState::Reviving { .. }
+            | MemberState::Ready
+            | MemberState::Posted => {}
             MemberState::Idle => {
                 if m.marker.is_some() && !(to_goal <= arrive && close_height) {
                     m.state = MemberState::Moving {
@@ -797,15 +1012,35 @@ impl Squad {
                         leader_distance: dist(feet, leader.feet),
                         tether_distance: td,
                     });
-                    if let Some(k) = m.marker {
-                        if at_goal {
-                            m.state = MemberState::Working {
-                                left: self.settings.marker_work_time,
-                            };
-                            events.push(SquadEvent::MarkerStarted {
-                                member: m.settings.name.clone(),
-                                marker: self.markers[k].0.name.clone(),
-                            });
+                    if let (Some(k), true) = (m.marker, at_goal) {
+                        let marker = self.markers[k].0.name.clone();
+                        match &job {
+                            Some((JobKind::Post, _, _, name)) => {
+                                m.state = MemberState::Posted;
+                                m.throw_in = 0.0;
+                                events.push(SquadEvent::Posted {
+                                    member: m.settings.name.clone(),
+                                    marker,
+                                    job: name.clone(),
+                                });
+                            }
+                            // Starts when everyone is at their spot
+                            // (`start_groups`).
+                            Some((_, true, _, _)) => {
+                                m.state = MemberState::Ready;
+                                became_ready = Some(k);
+                            }
+                            _ => {
+                                m.state = MemberState::Working {
+                                    left: job
+                                        .as_ref()
+                                        .map_or(self.settings.marker_work_time, |j| j.2),
+                                };
+                                events.push(SquadEvent::MarkerStarted {
+                                    member: m.settings.name.clone(),
+                                    marker,
+                                });
+                            }
                         }
                     }
                 } else {
@@ -818,6 +1053,21 @@ impl Squad {
                     m.state = MemberState::Moving { urgent, by_order };
                 }
             }
+        }
+        if let Some(k) = became_ready {
+            let waiting_for = self
+                .group_of(k)
+                .into_iter()
+                .filter(|&g| match self.markers[g].1 {
+                    MarkerState::Assigned(j) => self.members[j].state != MemberState::Ready,
+                    _ => false,
+                })
+                .count();
+            events.push(SquadEvent::MarkerReady {
+                member: self.members[i].settings.name.clone(),
+                marker: self.markers[k].0.name.clone(),
+                waiting_for,
+            });
         }
     }
 
@@ -832,26 +1082,21 @@ impl Squad {
         let mut events = Vec::new();
         self.time += dt;
         self.assign_revivers(leader, &mut events);
+        self.start_groups(&mut events);
+        self.burn_fuses(dt, &mut events);
         for i in 0..self.members.len() {
             self.tick_revive(i, dt, &mut events);
             // Marked jobs count down.
             if let MemberState::Working { left } = self.members[i].state {
                 let left = left - dt;
                 if left <= 0.0 {
-                    let k = self.members[i]
-                        .marker
-                        .take()
-                        .expect("working members have a marker");
-                    self.markers[k].1 = MarkerState::Done;
-                    events.push(SquadEvent::MarkerDone {
-                        member: self.members[i].settings.name.clone(),
-                        marker: self.markers[k].0.name.clone(),
-                    });
-                    self.members[i].state = MemberState::Idle;
-                    self.members[i].think_in = 0.0;
+                    self.finish_job(i, &mut events);
                 } else {
                     self.members[i].state = MemberState::Working { left };
                 }
+            }
+            if self.members[i].state == MemberState::Posted {
+                self.throw_from_post(i, dt, &mut events);
             }
             if self.members[i].down {
                 // Lies where they fell; gravity still applies.
@@ -1006,6 +1251,202 @@ impl Squad {
             crouch: false,
             walk,
         };
+    }
+
+    /// Member `i` finished the work at its marker (and, for a group job,
+    /// so did everyone with it): the markers are done, the members free,
+    /// and the job's result happens now or when its fuse runs out.
+    fn finish_job(&mut self, i: usize, events: &mut Vec<SquadEvent>) {
+        let k = self.members[i]
+            .marker
+            .expect("working members have a marker");
+        for g in self.group_of(k) {
+            let MarkerState::Assigned(j) = self.markers[g].1 else {
+                continue;
+            };
+            if self.members[j].marker != Some(g) {
+                continue;
+            }
+            self.markers[g].1 = MarkerState::Done;
+            let m = &mut self.members[j];
+            m.marker = None;
+            m.state = MemberState::Idle;
+            m.think_in = 0.0;
+            events.push(SquadEvent::MarkerDone {
+                member: m.settings.name.clone(),
+                marker: self.markers[g].0.name.clone(),
+            });
+        }
+        let Some(job) = self.job_of(k).cloned() else {
+            return;
+        };
+        let member = self.members[i].settings.name.clone();
+        if job.fuse > 0.0 {
+            events.push(SquadEvent::FuseLit {
+                member: member.clone(),
+                marker: self.markers[k].0.name.clone(),
+                seconds: job.fuse,
+            });
+            self.pending.push(Pending {
+                left: job.fuse,
+                member,
+                index: i,
+                what: PendingWhat::Job { marker: k },
+            });
+        } else {
+            self.job_result(k, i, member, events);
+        }
+    }
+
+    /// A job's blast (if it has one) and its result.
+    fn job_result(&self, k: usize, i: usize, member: String, events: &mut Vec<SquadEvent>) {
+        let Some(job) = self.job_of(k) else { return };
+        let spot = &self.markers[k].0;
+        if job.blast_damage > 0.0 {
+            events.push(SquadEvent::Blast {
+                member: member.clone(),
+                index: Some(i),
+                at: spot.aim,
+                damage: job.blast_damage,
+                radius: job.blast_radius,
+                what: job.name.clone(),
+            });
+        }
+        if job.result != JobResult::Nothing {
+            events.push(SquadEvent::JobResult {
+                member,
+                index: i,
+                marker: spot.name.clone(),
+                job: job.name.clone(),
+                result: job.result,
+                anchor: spot.anchor.clone(),
+                anchor_class: spot.anchor_class.clone(),
+                at: spot.aim,
+            });
+        }
+    }
+
+    /// Group jobs whose members are all at their spots start: the member
+    /// at the first spot does the work, the others stand guard.
+    fn start_groups(&mut self, events: &mut Vec<SquadEvent>) {
+        for i in 0..self.members.len() {
+            let (MemberState::Ready, Some(k)) = (self.members[i].state, self.members[i].marker)
+            else {
+                continue;
+            };
+            let group = self.group_of(k);
+            let mut assigned = group.iter().filter_map(|&g| match self.markers[g].1 {
+                MarkerState::Assigned(j) if self.members[j].marker == Some(g) => Some(j),
+                _ => None,
+            });
+            let lead = assigned.clone().next();
+            let waiting = assigned
+                .by_ref()
+                .filter(|&j| self.members[j].state != MemberState::Ready)
+                .count();
+            if waiting > 0 || lead != Some(i) {
+                continue;
+            }
+            let work = self
+                .job_of(k)
+                .map_or(self.settings.marker_work_time, |j| j.work_time);
+            self.members[i].state = MemberState::Working { left: work };
+            events.push(SquadEvent::MarkerStarted {
+                member: self.members[i].settings.name.clone(),
+                marker: self.markers[k].0.name.clone(),
+            });
+        }
+    }
+
+    /// Count down charges and grenades; set off those whose time is up.
+    fn burn_fuses(&mut self, dt: f32, events: &mut Vec<SquadEvent>) {
+        for p in &mut self.pending {
+            p.left -= dt;
+        }
+        let (done, left): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .partition(|p| p.left <= 0.0);
+        self.pending = left;
+        for p in done {
+            match p.what {
+                PendingWhat::Job { marker } => self.job_result(marker, p.index, p.member, events),
+                PendingWhat::Grenade { at, damage, radius } => events.push(SquadEvent::Blast {
+                    member: p.member,
+                    index: Some(p.index),
+                    at,
+                    damage,
+                    radius,
+                    what: "grenade".into(),
+                }),
+            }
+        }
+    }
+
+    /// A member on a grenade post throws at its target when it's in range
+    /// and the last throw was `throw_interval` ago.
+    fn throw_from_post(&mut self, i: usize, dt: f32, events: &mut Vec<SquadEvent>) {
+        let Some(job) = self.members[i].marker.and_then(|k| self.job_of(k)) else {
+            return;
+        };
+        if job.throw_interval <= 0.0 {
+            return;
+        }
+        let (interval, range, fuse, damage, radius, area_radius) = (
+            job.throw_interval,
+            job.throw_range,
+            job.throw_fuse,
+            job.throw_damage,
+            job.throw_radius,
+            job.target_radius,
+        );
+        let area = self.members[i]
+            .marker
+            .and_then(|k| self.markers[k].0.target);
+        let m = &mut self.members[i];
+        m.throw_in -= dt;
+        if m.throw_in > 0.0 {
+            return;
+        }
+        let from = self.members[i].pawn.eye();
+        // A marker with a target area: the enemy nearest that area, within
+        // `target_radius` of it (seen or not: grenades arc over cover).
+        // Otherwise their own target, within `throw_range`.
+        let t = match area {
+            Some(a) => self
+                .threats
+                .iter()
+                .filter(|t| dist(t.feet, a) <= area_radius)
+                .min_by(|x, y| dist(x.feet, a).total_cmp(&dist(y.feet, a)))
+                .copied(),
+            None => self
+                .target_of(i)
+                .copied()
+                .filter(|t| dist(from, t.feet) <= range),
+        };
+        let Some(t) = t else {
+            return;
+        };
+        let m = &self.members[i];
+        let name = m.settings.name.clone();
+        self.members[i].throw_in = interval;
+        events.push(SquadEvent::Throw {
+            member: name.clone(),
+            index: i,
+            from,
+            to: t.feet,
+            target: t.id,
+            fuse,
+        });
+        self.pending.push(Pending {
+            left: fuse,
+            member: name,
+            index: i,
+            what: PendingWhat::Grenade {
+                at: t.feet,
+                damage,
+                radius,
+            },
+        });
     }
 
     /// Mark member `i` down (health ran out) or back up. A downed member

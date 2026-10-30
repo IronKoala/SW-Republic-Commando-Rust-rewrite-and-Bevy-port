@@ -1,8 +1,9 @@
-//! rc_enemies: battle droids in the game.
+//! rc_enemies: battle droids and the other enemies in the game.
 //!
 //! [`EnemiesPlugin`] follows `docs/PLUGINS.md`. When a map loads it reads the
-//! map's spawners and path network (`rc_ai`, `rc_nav`) and the droid's
-//! settings (`data/enemies/battle_droid.toml`, which mods can replace).
+//! map's spawners and path network (`rc_ai`, `rc_nav`) and every enemy
+//! type's settings (`data/enemies/*.toml`, which mods can replace or add
+//! to; each file names the game classes it is for).
 //! During play it runs the fight (`rc_ai::Battle`): spawners switch on,
 //! droids appear, see the player, take cover, keep their distance and
 //! shoot. Their shots go through the weapons part (`rc_combat::FireShot`),
@@ -24,7 +25,10 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, Target};
-use rc_combat::{CombatSet, Damage, Dead, Died, FireShot, Health, Hittable, ShotLanded, Team};
+use rc_combat::{
+    Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, Health, Hittable,
+    ShotLanded, Stunned, Team,
+};
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -47,6 +51,7 @@ pub struct EnemiesPlugin;
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Looks>()
+            .init_resource::<EnemySounds>()
             .add_save_part::<save::EnemiesSave>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
@@ -124,10 +129,12 @@ impl Fight {
     }
 }
 
-/// One battle droid on screen.
+/// One enemy on screen (a battle droid or any other type).
 #[derive(Component, Debug)]
 pub struct Droid {
     pub id: u32,
+    /// Its enemy type: the settings file's id, like `battle_droid`.
+    pub kind: String,
     pub pose: Pose,
     /// Frame of the current animation.
     pub frame: f32,
@@ -136,41 +143,114 @@ pub struct Droid {
     mesh: Option<Handle<Mesh>>,
 }
 
-/// The droid's mesh, read once from the game and kept between maps.
+/// Each enemy type's mesh, read once from the game and kept between maps.
 #[derive(Resource, Default)]
 pub struct Looks {
-    tried: bool,
-    pub look: Option<Arc<DroidLook>>,
+    tried: std::collections::HashSet<String>,
+    pub by_type: HashMap<String, TypeLook>,
+}
+
+/// Each enemy type's sounds (`[sound]` in its file), by sound name.
+#[derive(Resource, Default)]
+pub struct EnemySounds {
+    tried: std::collections::HashSet<String>,
+    by_type: HashMap<String, HashMap<String, Handle<AudioSource>>>,
+    picks: u32,
+}
+
+impl EnemySounds {
+    /// Play one of `names` (picked in turn) for an enemy of type `kind` at
+    /// `at` (Unreal units), quieter with distance from `listener`. **Our
+    /// choice**, not the game's 3D sound.
+    fn play(
+        &mut self,
+        commands: &mut Commands,
+        kind: &str,
+        names: &[String],
+        at: rc_movement::Vec3,
+        listener: Option<rc_movement::Vec3>,
+    ) -> Option<String> {
+        if names.is_empty() {
+            return None;
+        }
+        self.picks = self.picks.wrapping_add(1);
+        let name = &names[self.picks as usize % names.len()];
+        let h = self.by_type.get(kind)?.get(name)?;
+        let volume = listener.map_or(0.5, |l| 1.0 / (1.0 + (l - at).length() / 1000.0));
+        commands.spawn((
+            AudioPlayer(h.clone()),
+            bevy::audio::PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume)),
+        ));
+        Some(name.clone())
+    }
+}
+
+pub struct TypeLook {
+    pub look: Arc<DroidLook>,
     material: Option<Handle<StandardMaterial>>,
 }
 
-fn settings(paths: &GamePaths, log: &GameLog) -> AiParams {
-    let base = AiParams::battle_droid();
-    let Some(path) = paths.data_file("enemies/battle_droid.toml") else {
-        log.line(format!(
-            "{PART}: no enemies/battle_droid.toml, using built-in values"
-        ));
-        return base;
-    };
-    match std::fs::read_to_string(&path)
-        .map_err(|e| e.to_string())
-        .and_then(|t| base.clone().with_overrides(&t))
-    {
-        Ok(p) => {
-            log.line(format!(
-                "{PART}: battle droid settings from {}",
-                path.display()
-            ));
-            p
-        }
-        Err(e) => {
-            log.line(format!(
-                "{PART}: ERROR in {}: {e}; using built-in values",
-                path.display()
-            ));
-            base
+/// Every enemy type: each `enemies/*.toml` across the data folders (a
+/// mod's file replaces the base file with the same name), each read on top
+/// of the battle droid's built-in values. The battle droid comes first.
+fn enemy_types(paths: &GamePaths, log: &GameLog) -> Vec<Arc<AiParams>> {
+    let mut files = std::collections::BTreeMap::new();
+    for dir in paths.data_dirs.iter().rev() {
+        let folder = GamePaths::new(dir.clone(), vec![]).game_file("enemies");
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("toml"))
+            {
+                let id = p
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_ascii_lowercase();
+                files.insert(id, p);
+            }
         }
     }
+    let mut out = Vec::new();
+    for (id, path) in files {
+        let read = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|t| AiParams::battle_droid().with_overrides(&t));
+        match read {
+            Ok(mut p) => {
+                p.kind.id = id;
+                log.line(format!(
+                    "{PART}: enemy type {} ({}, {}) for classes {:?} from {}: health {}, speed {}, weapon {}, accuracy {}, cover {}",
+                    p.kind.id,
+                    p.kind.name,
+                    p.kind.body,
+                    p.kind.classes,
+                    path.display(),
+                    p.combat.health,
+                    p.movement.ground_speed,
+                    p.combat.weapon,
+                    p.combat.accuracy,
+                    p.combat.uses_cover
+                ));
+                out.push(Arc::new(p));
+            }
+            Err(e) => log.line(format!(
+                "{PART}: ERROR in {}: {e}; that enemy type is left out",
+                path.display()
+            )),
+        }
+    }
+    if !out.iter().any(|p| p.kind.id == "battle_droid") {
+        log.line(format!(
+            "{PART}: no enemies/battle_droid.toml, using built-in battle droid values"
+        ));
+        out.push(Arc::new(AiParams::battle_droid()));
+    }
+    out.sort_by_key(|p| p.kind.id != "battle_droid");
+    out
 }
 
 /// Read the map's spawners and paths. A map that can't be read gives no
@@ -182,13 +262,16 @@ fn load_fight(
     paths: Res<GamePaths>,
     log: Res<GameLog>,
     mut looks: ResMut<Looks>,
+    mut sounds: ResMut<EnemySounds>,
+    audio: Option<ResMut<Assets<AudioSource>>>,
     images: Option<ResMut<Assets<Image>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
 ) {
     commands.remove_resource::<Fight>();
     let Some(map) = level.map.clone() else { return };
     let t = std::time::Instant::now();
-    let params = Arc::new(settings(&paths, &log));
+    let types = enemy_types(&paths, &log);
+    let params = types[0].clone();
     let path = paths.map_path(&map);
     let read = std::fs::read(&path)
         .map_err(|e| format!("can't read {}: {e}", path.display()))
@@ -206,13 +289,27 @@ fn load_fight(
         }
     };
     let all = factories.len();
-    let droids: Vec<rc_ai::Factory> = factories
-        .into_iter()
-        .filter(|f| f.prototype.starts_with("BattleDroid"))
-        .collect();
-    let triggered = droids.iter().filter(|f| !f.triggers.is_empty()).count();
+    // Each spawner makes the enemy type whose file claims its class.
+    // Spawners of classes no file claims (squad mates, turrets, ...) are
+    // left to other parts; each such class is logged once.
+    let mut unclaimed: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut per_type: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut droids: Vec<(rc_ai::Factory, Arc<AiParams>)> = Vec::new();
+    for f in factories {
+        match types.iter().find(|t| t.kind.matches(&f.prototype)) {
+            Some(t) => {
+                *per_type.entry(t.kind.id.clone()).or_default() += 1;
+                droids.push((f, t.clone()));
+            }
+            None => *unclaimed.entry(f.prototype.clone()).or_default() += 1,
+        }
+    }
+    let triggered = droids.iter().filter(|f| !f.0.triggers.is_empty()).count();
     log.line(format!(
-        "{PART}: {map}: {} path points, {} links ({} blocked until scripts open them), {all} spawners, {} make battle droids ({triggered} with walk-in triggers, the rest start when the player comes within {:.0} uu), {:.0} ms",
+        "{PART}: {map}: spawners by enemy type {per_type:?}; spawners no enemy file claims {unclaimed:?}"
+    ));
+    log.line(format!(
+        "{PART}: {map}: {} path points, {} links ({} blocked until scripts open them), {all} spawners, {} make enemies ({triggered} with walk-in triggers, the rest start when the player comes within {:.0} uu), {:.0} ms",
         nav.nodes.len(),
         nav.link_count(),
         nav.blocked.len(),
@@ -221,19 +318,55 @@ fn load_fight(
         t.elapsed().as_secs_f64() * 1000.0
     ));
 
-    if !looks.tried {
-        looks.tried = true;
-        let t = std::time::Instant::now();
-        match DroidLook::load(&paths, &params.look) {
+    let mut images = images;
+    let mut materials = materials;
+    // Each used type's sounds, once per run.
+    if let Some(mut audio) = audio {
+        for t in &types {
+            if !per_type.contains_key(&t.kind.id) || !sounds.tried.insert(t.kind.id.clone()) {
+                continue;
+            }
+            let snd = &t.sounds;
+            let names: Vec<String> = snd
+                .spotted
+                .iter()
+                .chain(&snd.hurt)
+                .chain(&snd.death)
+                .cloned()
+                .collect();
+            let (found, notes) = rc_combat::read_sounds(&paths, &snd.package, &names, &mut audio);
+            for n in notes {
+                log.line(format!("{PART}: {}: {n}", t.kind.id));
+            }
+            log.line(format!(
+                "{PART}: {} sounds: {} of {} found in {}",
+                t.kind.id,
+                found.len(),
+                names.len(),
+                snd.package
+            ));
+            sounds.by_type.insert(t.kind.id.clone(), found);
+        }
+    }
+    // Only the types this map uses, each once per run.
+    for t in &types {
+        if !per_type.contains_key(&t.kind.id) || looks.tried.contains(&t.kind.id) {
+            continue;
+        }
+        looks.tried.insert(t.kind.id.clone());
+        let started = std::time::Instant::now();
+        match DroidLook::load(&paths, &t.look) {
             Ok((look, notes)) => {
                 for n in notes {
-                    log.line(format!("{PART}: {n}"));
+                    log.line(format!("{PART}: {}: {n}", t.kind.id));
                 }
                 log.line(format!(
-                    "{PART}: droid mesh read in {:.0} ms",
-                    t.elapsed().as_secs_f64() * 1000.0
+                    "{PART}: {} mesh read in {:.0} ms",
+                    t.kind.id,
+                    started.elapsed().as_secs_f64() * 1000.0
                 ));
-                if let (Some(mut images), Some(mut materials)) = (images, materials) {
+                let mut material = None;
+                if let (Some(images), Some(materials)) = (images.as_mut(), materials.as_mut()) {
                     let texture = look.skin.as_ref().map(|(_, img)| {
                         images.add(Image::new(
                             Extent3d {
@@ -252,8 +385,8 @@ fn load_fight(
                     // would be black away from live lights. Give it a
                     // steady share of its own colour ("ambient" in the
                     // look settings), as light it gives off itself.
-                    let a = params.look.ambient.max(0.0);
-                    looks.material = Some(materials.add(StandardMaterial {
+                    let a = t.look.ambient.max(0.0);
+                    material = Some(materials.add(StandardMaterial {
                         base_color: if texture.is_some() {
                             Color::WHITE
                         } else {
@@ -267,14 +400,21 @@ fn load_fight(
                         ..default()
                     }));
                 }
-                looks.look = Some(Arc::new(look));
+                looks.by_type.insert(
+                    t.kind.id.clone(),
+                    TypeLook {
+                        look: Arc::new(look),
+                        material,
+                    },
+                );
             }
             Err(e) => log.line(format!(
-                "{PART}: droid mesh not loaded, droids will be invisible: {e}"
+                "{PART}: {} mesh not loaded, they will be invisible: {e}",
+                t.kind.id
             )),
         }
     }
-    commands.insert_resource(Fight::new(Battle::new(params, nav, droids)));
+    commands.insert_resource(Fight::new(Battle::with_types(params, nav, droids)));
 }
 
 fn end_fight(
@@ -339,19 +479,35 @@ fn think(
     collision: Option<Res<LevelCollision>>,
     player: Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
     camera: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
+    allies: Query<(&Transform, &Hittable, &Team), (Without<Player>, Without<Dead>, Without<Droid>)>,
     mut droids: Query<&mut Droid>,
     mut fire: MessageWriter<FireShot>,
     mut mood: ResMut<MusicMood>,
     looks: Res<Looks>,
+    mut sounds: ResMut<EnemySounds>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     log: Res<GameLog>,
 ) {
     let Some(collision) = collision else { return };
+    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
     let dt = time.delta_secs().min(0.1);
     let target = player_target(&player, &camera);
+    // The player's side besides the player (squad mates): droids fight
+    // them too.
+    let others: Vec<Target> = allies
+        .iter()
+        .filter(|(_, _, team)| **team == Team::Republic)
+        .map(|(t, hit, _)| {
+            let centre = to_unreal(t.translation) + rc_movement::Vec3::new(0.0, 0.0, hit.center_up);
+            Target {
+                centre,
+                eye: centre + rc_movement::Vec3::new(0.0, 0.0, hit.half_height * 0.7),
+            }
+        })
+        .collect();
     let fight = &mut *fight;
     let mut events = std::mem::take(&mut fight.restored);
-    events.extend(fight.battle.step(dt, &*collision.0, target));
+    events.extend(fight.battle.step_with(dt, &*collision.0, target, &others));
     let now = fight.battle.time;
     let mut meshes = meshes;
     for e in events {
@@ -378,8 +534,9 @@ fn think(
                 feet,
                 yaw,
             } => {
-                let p = &fight.battle.params;
-                let mesh = match (&looks.look, meshes.as_mut()) {
+                let p = fight.battle.spawners[spawner].params.clone();
+                let tl = looks.by_type.get(&p.kind.id);
+                let mesh = match (tl.map(|t| &t.look), meshes.as_mut()) {
                     (Some(look), Some(meshes)) => {
                         let points = look.posed(Pose::Idle, 0.0);
                         let (pos, normals) = look.wedge_attributes(&points);
@@ -396,9 +553,10 @@ fn think(
                     _ => None,
                 };
                 let mut e = commands.spawn((
-                    Name::new(format!("battle droid {id}")),
+                    Name::new(format!("{} {id}", p.kind.name)),
                     Droid {
                         id,
+                        kind: p.kind.id.clone(),
                         pose: Pose::Idle,
                         frame: 0.0,
                         last_fire: f32::NEG_INFINITY,
@@ -412,6 +570,11 @@ fn think(
                         None => Health::new(p.combat.health),
                     },
                     Team::Separatist,
+                    if p.kind.body == "organic" {
+                        Body::Organic
+                    } else {
+                        Body::Droid
+                    },
                     Hittable {
                         radius: p.movement.collision_radius,
                         half_height: p.movement.collision_height,
@@ -422,7 +585,10 @@ fn think(
                     Visibility::default(),
                     DespawnOnExit(GameState::InGame),
                 ));
-                if let (Some(mesh), Some(material)) = (mesh, &looks.material) {
+                if !p.combat.damage_table.is_empty() {
+                    e.insert(DamageTable(p.combat.damage_table.clone()));
+                }
+                if let (Some(mesh), Some(material)) = (mesh, tl.and_then(|t| t.material.as_ref())) {
                     // The points move every frame, so Bevy's stored outline
                     // would be wrong: don't let it skip drawing by it.
                     e.insert((
@@ -434,7 +600,9 @@ fn think(
                 fight.entities.insert(id, e.id());
                 fight.stats.spawned += 1;
                 log.line(format!(
-                    "{PART}: t={now:.1}s droid {id} spawned by {} at ({:.0}, {:.0}, {:.0}) facing {:.0} deg",
+                    "{PART}: t={now:.1}s droid {id} ({}, health {}) spawned by {} at ({:.0}, {:.0}, {:.0}) facing {:.0} deg",
+                    p.kind.id,
+                    p.combat.health,
                     fight.battle.spawners[spawner].factory.name,
                     feet.x,
                     feet.y,
@@ -458,11 +626,30 @@ fn think(
                             shooter: entity,
                             origin: to_bevy(origin),
                             direction: to_bevy(direction),
-                            weapon: fight.battle.params.combat.weapon.clone(),
+                            weapon: fight
+                                .battle
+                                .fighters
+                                .iter()
+                                .find(|f| f.id == id)
+                                .map_or_else(
+                                    || fight.battle.params.combat.weapon.clone(),
+                                    |f| f.params.combat.weapon.clone(),
+                                ),
                         });
                     }
                     AiEvent::Spotted { distance } => {
                         fight.stats.first_spotted.get_or_insert(now);
+                        if let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) {
+                            if let Some(n) = sounds.play(
+                                &mut commands,
+                                &f.params.kind.id,
+                                &f.params.sounds.spotted,
+                                f.pawn.location,
+                                listener,
+                            ) {
+                                log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
+                            }
+                        }
                         log.line(format!("{PART}: t={now:.1}s droid {id} spotted the player {distance:.0} uu away"));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
@@ -523,18 +710,42 @@ fn place_droids(fight: Res<Fight>, mut droids: Query<(&Droid, &mut Transform, &m
 /// Damage and deaths from the weapons part, and the player's shots heard.
 #[allow(clippy::too_many_arguments)]
 fn react_to_combat(
+    mut commands: Commands,
     mut fight: ResMut<Fight>,
     mut damage: MessageReader<Damage>,
     mut died: MessageReader<Died>,
     mut shots: MessageReader<FireShot>,
     mut landed: MessageReader<ShotLanded>,
+    mut blasts: MessageReader<Blast>,
+    stunned: Query<(&Droid, &Stunned), Added<Stunned>>,
     droids: Query<&Droid>,
     players: Query<(), With<Player>>,
     transforms: Query<&Transform>,
+    camera: Query<&Transform, With<PlayerCamera>>,
+    mut sounds: ResMut<EnemySounds>,
     log: Res<GameLog>,
 ) {
     let fight = &mut *fight;
     let now = fight.battle.time;
+    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
+    let mut say = |commands: &mut Commands, fight: &Fight, id: u32, what: &str| {
+        let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) else {
+            return;
+        };
+        let names = match what {
+            "hurt" => &f.params.sounds.hurt,
+            _ => &f.params.sounds.death,
+        };
+        if let Some(n) = sounds.play(
+            commands,
+            &f.params.kind.id,
+            names,
+            f.pawn.location,
+            listener,
+        ) {
+            log.line(format!("{PART}: t={now:.1}s droid {id} {what} sound {n}"));
+        }
+    };
     for d in damage.read() {
         if players.contains(d.target) {
             if d.instigator.is_some_and(|i| droids.contains(i)) {
@@ -547,6 +758,7 @@ fn react_to_combat(
             continue;
         };
         fight.stats.droids_hurt += 1;
+        say(&mut commands, fight, droid.id, "hurt");
         let from = d
             .instigator
             .and_then(|i| transforms.get(i).ok())
@@ -566,7 +778,18 @@ fn react_to_combat(
         };
         fight.battle.killed(droid.id);
         fight.stats.droids_destroyed += 1;
+        say(&mut commands, fight, droid.id, "death");
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);
+        // It leaves its weapon on the ground for the player.
+        if let (Some(f), Ok(t)) = (f, transforms.get(d.entity)) {
+            if !f.params.combat.drops.is_empty() {
+                rc_combat::spawn_pickup(&mut commands, &f.params.combat.drops, t.translation);
+                log.line(format!(
+                    "{PART}: t={now:.1}s droid {} dropped {}",
+                    droid.id, f.params.combat.drops
+                ));
+            }
+        }
         log.line(format!(
             "{PART}: t={now:.1}s droid {} destroyed (fired {} shots, walked {:.0} uu)",
             droid.id,
@@ -578,6 +801,25 @@ fn react_to_combat(
         if players.contains(s.shooter) {
             fight.battle.hear(to_unreal(s.origin));
         }
+    }
+    // Grenade blasts are heard by every droid in earshot.
+    for b in blasts.read() {
+        fight.battle.hear(to_unreal(b.point));
+    }
+    for (droid, s) in &stunned {
+        if !s.stops {
+            // Burning hurts but doesn't stop it.
+            log.line(format!(
+                "{PART}: t={now:.1}s droid {} burning for {:.1} s",
+                droid.id, s.left
+            ));
+            continue;
+        }
+        fight.battle.stun(droid.id, s.left);
+        log.line(format!(
+            "{PART}: t={now:.1}s droid {} stunned for {:.1} s",
+            droid.id, s.left
+        ));
     }
     for l in landed.read() {
         if !droids.contains(l.shooter) {
@@ -666,7 +908,7 @@ fn animate(
             d.pose = pose;
             d.frame = 0.0;
         }
-        let Some(look) = &looks.look else {
+        let Some(look) = looks.by_type.get(&d.kind).map(|t| &t.look) else {
             continue;
         };
         let clip = look.clip(d.pose);

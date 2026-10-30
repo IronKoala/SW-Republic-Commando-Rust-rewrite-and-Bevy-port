@@ -1,0 +1,41 @@
+# The super battle droid's wrist blaster (SBDBlaster).
+#
+# The values are the original game's: class SBDBlaster (ctinventory.u) with
+# SBDBlasterDefaults (Properties/properties.u) on top, and its bolt SBDProj
+# (+Defaults). Droids fire it by sending FireShot; how well they aim is the
+# droid's own business (its Accuracy), so the weapon adds no aim error.
+
+name = "SBD Wrist Blaster"
+
+[fire]
+mode = "automatic"        # FireMode 2
+shot_delay = 0.2          # ShotDelay
+aim_error = 0
+offset = [57.4, 20, -6.56] # FPFireOffset (CTWeaponRecharging)
+
+[ammo]
+max_ammo = 100            # CTAmmoRecharging MaxAmmo
+recharge_rate = 100       # never runs dry (bCanReload false, recharging)
+
+[shot]
+kind = "bolt"
+accel = 60000             # AccelFactor (Projectile's default)
+max_speed = 5000          # SBDProj MaxSpeed
+life_span = 10            # SBDProj LifeSpan
+damage = 75               # SBDProjDefaults Damage
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyDroids" # MyDamageType
+
+[melee]
+range = 200               # MeleeRange
+damage = 100              # MeleeDamage
+
+[sound]
+package = "gen_sound"     # not checked: the sound packages weren't read in the cloud
+fire = ["wep_GEN_sbdRocket_01"]   # FireSound (Defaults)
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # our stand-in: the wrist blaster is part of the droid's model
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.3, 0.1]  # our choice, from the bolt light's hue 14 (red-orange)
