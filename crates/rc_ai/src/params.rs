@@ -109,6 +109,13 @@ pub struct Look {
     /// of the level's lights (the original lights characters with each
     /// zone's ambient light, which we don't read yet).
     pub ambient: f32,
+    /// Seconds to blend from one animation into the next. Our choice: the
+    /// original blends inside its compiled code.
+    pub blend_time: f32,
+    /// Blend time into the firing animation, which is very short.
+    pub blend_time_fire: f32,
+    /// Blend time into the death animation.
+    pub blend_time_death: f32,
 }
 
 /// What the character says or sounds like: sound names in `package`
@@ -212,6 +219,9 @@ impl AiParams {
                 crouch_fire: "CrouchFire".into(),
                 death: "Death".into(),
                 ambient: 0.5,
+                blend_time: 0.2,
+                blend_time_fire: 0.05,
+                blend_time_death: 0.1,
             },
         }
     }
@@ -336,6 +346,9 @@ impl AiParams {
             ("look", "crouch_fire") => l.crouch_fire = text(),
             ("look", "death") => l.death = text(),
             ("look", "ambient") => l.ambient = num()?,
+            ("look", "blend_time") => l.blend_time = num()?.max(0.0),
+            ("look", "blend_time_fire") => l.blend_time_fire = num()?.max(0.0),
+            ("look", "blend_time_death") => l.blend_time_death = num()?.max(0.0),
             _ => return Err(format!("unknown setting `{key}` in [{section}]")),
         }
         Ok(())

@@ -101,3 +101,9 @@ crouch = "CrouchBreathe"
 crouch_fire = "CrouchFire"
 death = "Death"
 ambient = 0.5             # guess: light the droid always gets (0 to 1); the original uses each zone's ambient light, which we don't read yet
+# Seconds to blend smoothly from one animation into the next, so the droid
+# doesn't snap between poses (0 snaps). Our choice: the original blends
+# inside its compiled engine code, which we can't read.
+blend_time = 0.2          # guess
+blend_time_fire = 0.05    # guess: the firing animation lasts only 0.1 s
+blend_time_death = 0.1    # guess

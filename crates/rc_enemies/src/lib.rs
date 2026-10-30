@@ -138,6 +138,8 @@ pub struct Droid {
     pub pose: Pose,
     /// Frame of the current animation.
     pub frame: f32,
+    /// Smooths the change from one animation to the next.
+    pub blend: rc_anim::Crossfade,
     /// Battle time of its last shot.
     last_fire: f32,
     mesh: Option<Handle<Mesh>>,
@@ -559,6 +561,7 @@ fn think(
                         kind: p.kind.id.clone(),
                         pose: Pose::Idle,
                         frame: 0.0,
+                        blend: rc_anim::Crossfade::default(),
                         last_fire: f32::NEG_INFINITY,
                         mesh: mesh.clone(),
                     },
@@ -907,6 +910,9 @@ fn animate(
         if pose != d.pose {
             d.pose = pose;
             d.frame = 0.0;
+            d.blend.start(pose.blend_time(&f.params.look));
+        } else {
+            d.blend.advance(dt);
         }
         let Some(look) = looks.by_type.get(&d.kind).map(|t| &t.look) else {
             continue;
@@ -920,15 +926,16 @@ fn animate(
             (d.frame + dt * clip.rate).rem_euclid(clip.num_frames.max(1.0))
         };
         // A body that finished falling doesn't need posing again.
-        if d.pose.once() && before == last && d.frame == last {
+        if d.pose.once() && before == last && d.frame == last && !d.blend.blending() {
             continue;
         }
-        let (Some(handle), Some(meshes)) = (&d.mesh, meshes.as_mut()) else {
+        let (Some(handle), Some(meshes)) = (d.mesh.clone(), meshes.as_mut()) else {
             continue;
         };
-        let points = look.posed(d.pose, d.frame);
+        let target = look.local_pose(d.pose, d.frame);
+        let points = look.posed_local(d.blend.apply(target));
         let (pos, normals) = look.wedge_attributes(&points);
-        if let Some(mut m) = meshes.get_mut(handle) {
+        if let Some(mut m) = meshes.get_mut(&handle) {
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
             m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         }
