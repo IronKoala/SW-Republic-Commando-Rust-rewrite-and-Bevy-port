@@ -1559,9 +1559,13 @@ the target's middle, off by up to `(1 - accuracy) x max_aim_error`; the
 weapons part then adds the gun's own spread, as it does for the player and
 the droids. A standing member turns to face its target and fires only
 within `max_aim_yaw` of its facing; a moving one fires on the move. A
-member holds fire while the player or another squad mate (standing or
-lying) is within `friendly_clearance` of the line of fire, nearer than the
-target. Shots go out as `rc_combat::FireShot` with the squad mate as the
+member holds fire while the line of fire, nearer than the target, passes
+within `friendly_clearance` of the player's or another squad mate's whole
+body (the 40-wide, 168-tall commando cylinder, or a low wide shape for one
+lying down), widened by how far the shot can stray (our aim error plus
+about 2 uu per 100 for the gun's spread). Until 2026-10-30 it measured from
+the body's middle point only, so lines passing at shoulder or head height
+went through friends (`fight::shot_passes_friend`). Shots go out as `rc_combat::FireShot` with the squad mate as the
 shooter, so the weapons part flies the bolts, applies the damage, and its
 `ShotLanded` and `Died` messages count hits and kills per member
 (`SquadFightStats`).
