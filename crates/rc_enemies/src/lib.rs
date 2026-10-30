@@ -27,7 +27,7 @@ use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
-    Hittable, ShotLanded, Stunned, Team, ThrowGrenade,
+    Hittable, MeleeAttack, ShotLanded, Stunned, Team, ThrowGrenade,
 };
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
@@ -45,6 +45,9 @@ const PART: &str = "enemies";
 const SUMMARY_EVERY: f32 = 5.0;
 /// A droid counts as "just fired" (for its animation) this long, seconds.
 const FIRE_POSE_TIME: f32 = 0.35;
+/// A close-up hit plays its animation this long at most, seconds (the
+/// Geonosian warrior's `MeleeAttack` is 48 frames at 30 a second).
+const MELEE_POSE_TIME: f32 = 1.6;
 
 pub struct EnemiesPlugin;
 
@@ -116,6 +119,8 @@ pub struct FightStats {
     pub bolts_nowhere: u32,
     /// Grenades enemies threw.
     pub grenades_thrown: u32,
+    /// Close-up hits enemies swung (force pikes), hit or miss.
+    pub melee_swings: u32,
 }
 
 impl Fight {
@@ -469,7 +474,7 @@ fn end_fight(
 fn summary(f: &Fight, log: &GameLog) {
     let s = &f.stats;
     log.line(format!(
-        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hits on the player for {:.0} damage ({} bolts hit other droids, {} the level, {} nothing); {} grenades thrown; droids hurt {} times; first spotted at {}",
+        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hits on the player for {:.0} damage ({} bolts hit other droids, {} the level, {} nothing); {} grenades thrown, {} melee swings; droids hurt {} times; first spotted at {}",
         f.battle.time,
         f.battle.alive().count(),
         s.spawned,
@@ -481,6 +486,7 @@ fn summary(f: &Fight, log: &GameLog) {
         s.bolts_on_level,
         s.bolts_nowhere,
         s.grenades_thrown,
+        s.melee_swings,
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
@@ -518,6 +524,7 @@ fn think(
     mut droids: Query<&mut Droid>,
     mut fire: MessageWriter<FireShot>,
     mut throws: MessageWriter<ThrowGrenade>,
+    mut melee: MessageWriter<MeleeAttack>,
     mut mood: ResMut<MusicMood>,
     looks: Res<Looks>,
     mut sounds: ResMut<EnemySounds>,
@@ -700,6 +707,29 @@ fn think(
                             origin: to_bevy(origin),
                             velocity: to_bevy(velocity),
                             grenade,
+                        });
+                    }
+                    AiEvent::Melee {
+                        origin,
+                        direction,
+                        range,
+                    } => {
+                        fight.stats.melee_swings += 1;
+                        let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) else {
+                            continue;
+                        };
+                        let c = &f.params.combat;
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} swings at the enemy ({range:.0} uu reach, {} {})",
+                            c.melee_damage, c.melee_damage_type
+                        ));
+                        melee.write(MeleeAttack {
+                            attacker: entity,
+                            origin: to_bevy(origin),
+                            direction: to_bevy(direction).normalize_or_zero(),
+                            range,
+                            damage: c.melee_damage,
+                            damage_type: c.melee_damage_type.clone(),
                         });
                     }
                     AiEvent::Spotted { distance } => {
@@ -919,6 +949,9 @@ fn choose_pose(f: &rc_ai::Fighter, just_fired: bool, now: f32) -> Pose {
     }
     if now - f.last_throw < f.params.grenades.throw_time {
         return Pose::Throw;
+    }
+    if now - f.last_melee < f.params.combat.melee_delay.min(MELEE_POSE_TIME) {
+        return Pose::Melee;
     }
     let v = f.pawn.velocity;
     let speed = (v.x * v.x + v.y * v.y).sqrt();

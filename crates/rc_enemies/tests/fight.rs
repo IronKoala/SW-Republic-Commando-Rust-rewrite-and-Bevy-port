@@ -60,7 +60,8 @@ impl Room {
             PlayerCamera,
             Transform::from_translation(b(-500.0, 0.0, 144.0)).looking_to(Vec3::X, Vec3::Y),
         ));
-        let spot = UVec3::new(1000.0, 0.0, 80.0);
+        // Spawn points are the body's centre: its feet land on the floor.
+        let spot = UVec3::new(1000.0, 0.0, params.movement.collision_height);
         let factory = Factory {
             name: "TestFactory".into(),
             tag: "TestDroids".into(),
@@ -325,4 +326,50 @@ fn battle_droids_throw_no_grenades() {
     let mut r = Room::new();
     r.seconds(8.0, &[]);
     assert_eq!(r.app.world().resource::<Fight>().stats.grenades_thrown, 0);
+}
+
+#[derive(Resource, Default)]
+struct MeleeOnPlayer(Vec<f32>);
+
+fn record_melee(
+    mut out: ResMut<MeleeOnPlayer>,
+    mut d: bevy::ecs::message::MessageReader<Damage>,
+    players: Query<(), With<Player>>,
+) {
+    out.0.extend(
+        d.read()
+            .filter(|d| d.kind == rc_combat::DamageKind::Melee && players.contains(d.target))
+            .map(|d| d.amount),
+    );
+}
+
+#[test]
+fn a_geonosian_rushes_in_with_its_force_pike() {
+    let p = enemy_file("geonosian");
+    assert_eq!(p.combat.weapon, "");
+    assert_eq!(
+        (p.combat.melee_range, p.combat.melee_damage),
+        (350.0, 125.0)
+    );
+    let mut r = Room::with(p);
+    r.app
+        .init_resource::<MeleeOnPlayer>()
+        .add_systems(Last, record_melee);
+    r.seconds(8.0, &[]);
+    let w = r.app.world();
+    let fight = w.resource::<Fight>();
+    println!("{:?}", fight.stats);
+    assert_eq!(fight.stats.shots, 0, "no gun");
+    assert!(fight.stats.melee_swings >= 2, "{:?}", fight.stats);
+    let hits = &w.resource::<MeleeOnPlayer>().0;
+    // The player's table has no entry for the warrior's melee: x1.
+    assert!(!hits.is_empty(), "the pike never hit the player");
+    assert!(hits.iter().all(|&a| (a - 125.0).abs() < 1e-3), "{hits:?}");
+    let d = r.droids()[0];
+    let w = r.app.world();
+    let gap = (w.get::<Transform>(d).unwrap().translation - b(-500.0, 0.0, 0.0)).length() * 50.0;
+    assert!(
+        gap < 400.0,
+        "the warrior stands {gap:.0} uu from the player"
+    );
 }

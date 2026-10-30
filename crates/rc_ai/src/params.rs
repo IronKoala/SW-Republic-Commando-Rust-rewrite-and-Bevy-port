@@ -80,6 +80,15 @@ pub struct Combat {
     /// The original's damage table for this enemy (`DamageVariance`), by
     /// name in `data/combat/damage_types.toml`. Empty for none.
     pub damage_table: String,
+    /// Close-up hits (a Geonosian's force pike): reach, uu (0 for none),
+    /// damage, its damage type, and seconds between hits.
+    pub melee_range: f32,
+    pub melee_damage: f32,
+    pub melee_damage_type: String,
+    pub melee_delay: f32,
+    /// Rushes in to hit when its enemy is this close, uu. An enemy with
+    /// no gun (`weapon = ""`) always rushes in.
+    pub lunge_distance: f32,
 }
 
 /// Grenades it throws (`[grenades]`). An empty `grenade` means none (the
@@ -141,6 +150,8 @@ pub struct Look {
     pub death: String,
     /// Throwing a grenade. Empty for none (it plays the idle animation).
     pub throw: String,
+    /// A close-up hit. Empty for none.
+    pub melee: String,
     /// Light the character always gets, 0 to 1 of its full colour, on top
     /// of the level's lights (the original lights characters with each
     /// zone's ambient light, which we don't read yet).
@@ -230,6 +241,11 @@ impl AiParams {
                 uses_cover: true,
                 drops: "e5_blaster_pickup".into(),
                 damage_table: "DV_DroidsBattleDroidDamage".into(),
+                melee_range: 0.0,
+                melee_damage: 0.0,
+                melee_damage_type: "CTDamageMelee".into(),
+                melee_delay: 1.5,
+                lunge_distance: 0.0,
             },
             grenades: GrenadeUse {
                 grenade: String::new(),
@@ -262,6 +278,7 @@ impl AiParams {
                 crouch_fire: "CrouchFire".into(),
                 death: "Death".into(),
                 throw: String::new(),
+                melee: String::new(),
                 ambient: 0.5,
             },
         }
@@ -359,6 +376,11 @@ impl AiParams {
             ("combat", "uses_cover") => c.uses_cover = boolean()?,
             ("combat", "drops") => c.drops = text(),
             ("combat", "damage_table") => c.damage_table = text(),
+            ("combat", "melee_range") => c.melee_range = num()?,
+            ("combat", "melee_damage") => c.melee_damage = num()?,
+            ("combat", "melee_damage_type") => c.melee_damage_type = text(),
+            ("combat", "melee_delay") => c.melee_delay = num()?,
+            ("combat", "lunge_distance") => c.lunge_distance = num()?,
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
             ("senses", "auto_detect_radius") => s.auto_detect_radius = num()?,
@@ -399,6 +421,7 @@ impl AiParams {
             ("look", "crouch_fire") => l.crouch_fire = text(),
             ("look", "death") => l.death = text(),
             ("look", "throw") => l.throw = text(),
+            ("look", "melee") => l.melee = text(),
             ("look", "ambient") => l.ambient = num()?,
             _ => return Err(format!("unknown setting `{key}` in [{section}]")),
         }

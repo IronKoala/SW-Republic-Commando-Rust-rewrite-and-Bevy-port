@@ -395,6 +395,18 @@ goes off on touch), not a thrown grenade; `GeonosianDroneBot` 0.7 with
 frames at 30 a second, with an `AnimNotify_ReleaseGrenade` partway.
 How the brain uses these numbers is compiled code.
 
+**Force pike** (read 2026-10-30). `GeonosianWarrior` `RequiredEquipment`
+is only `CTInventory.ForcePike`, so it has no gun. `ForcePikeDefaults`:
+`MeleeRange` 350, `MeleeDamage` 125, `MeleeDamageType`
+`CTDamageMeleeWarrior` (a kind of `CTDamageMelee`; the player's table has
+no entry, so x1; squad mates x0.5 through `CTDamageMelee`; other warriors
+x0.75). Its ammo (`ForcePikeAmmo`) is instant-hit with `Range` 0, so
+nothing is fired. `StateGeonosianWarriorAttack`: `LungeDist` 800,
+`JumpDist` 3000, `OffensiveJumpProbability` 0.5,
+`DefensiveJumpProbability` 0.8 (the jumping and flying aren't built).
+Animations in `GeonosianWarriorSet`: `MeleeAttack` (48 frames at 30 a
+second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
+
 **Still not read or not known:**
 - The attachments' and repeater's reload times (in their animations).
 - Grenade explosion sounds (they're in the explosion effect classes) and

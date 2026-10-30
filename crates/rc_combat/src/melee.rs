@@ -1,10 +1,11 @@
-//! The player's melee hit and the sniper attachment's zoom.
+//! Melee hits (the player's, and anyone's `MeleeAttack`) and the sniper
+//! attachment's zoom.
 
 use crate::damage_types::DamageTable;
 use crate::fire::{to_bevy, to_unreal};
 use crate::health::{Damage, DamageKind, Dead};
 use crate::library::WeaponLibrary;
-use crate::{shot, Arsenal, Hittable};
+use crate::{shot, Arsenal, Hittable, Team};
 use bevy::audio::{PlaybackSettings, Volume};
 use bevy::prelude::*;
 use rc_game_core::{Action, ActionState, GameLog, Player, PlayerCamera, WeaponReadout};
@@ -173,5 +174,98 @@ pub(crate) fn player_melee(
             });
         }
         None => say(&log, "weapons: melee hit nothing".into()),
+    }
+}
+
+/// "Hit up close from here, this way." For computer-controlled characters
+/// with a melee weapon (a Geonosian's force pike); the player's melee
+/// button has its own system. Bevy space for `origin` and `direction`;
+/// `range` in Unreal units. `damage` is before the target's damage table,
+/// which looks up `damage_type`.
+#[derive(Message, Debug, Clone)]
+pub struct MeleeAttack {
+    pub attacker: Entity,
+    pub origin: Vec3,
+    pub direction: Vec3,
+    pub range: f32,
+    pub damage: f32,
+    pub damage_type: String,
+}
+
+/// Each `MeleeAttack`: the same rule as the player's melee (a straight line
+/// that long against the characters' cylinders, walls block it), hitting
+/// the nearest character not on the attacker's own team.
+pub(crate) fn melee_attacks(
+    mut attacks: MessageReader<MeleeAttack>,
+    lib: Res<WeaponLibrary>,
+    targets: Query<
+        (
+            Entity,
+            &GlobalTransform,
+            &Hittable,
+            Option<&DamageTable>,
+            Option<&Team>,
+        ),
+        Without<Dead>,
+    >,
+    teams: Query<&Team>,
+    level: Option<Res<rc_game_core::LevelCollision>>,
+    mut damage: MessageWriter<Damage>,
+    log: Option<Res<GameLog>>,
+) {
+    for a in attacks.read() {
+        let own = teams.get(a.attacker).ok();
+        let start = to_unreal(a.origin);
+        let d = a.direction.normalize_or_zero();
+        let dir = Vec3::new(d.x, d.z, d.y);
+        let end = start + dir * a.range;
+        let wall = level.as_deref().and_then(|l| {
+            let v = |p: Vec3| rc_movement::Vec3::new(p.x, p.y, p.z);
+            l.0.sweep(rc_movement::Vec3::ZERO, v(start), v(end))
+                .map(|h| h.time)
+        });
+        let mut best: Option<(f32, Entity, Option<String>)> = None;
+        for (e, gt, hit, table, team) in &targets {
+            if e == a.attacker || (own.is_some() && team == own) {
+                continue;
+            }
+            let c = to_unreal(gt.translation()) + Vec3::Z * hit.center_up;
+            if let Some(t) = shot::line_hits_cylinder(start, end, c, hit.radius, hit.half_height) {
+                if wall.is_none_or(|w| t < w) && best.as_ref().is_none_or(|(bt, ..)| t < *bt) {
+                    best = Some((t, e, table.map(|d| d.0.clone())));
+                }
+            }
+        }
+        let Some((t, e, table)) = best else {
+            say(
+                &log,
+                format!("weapons: melee by {:?} hit nothing", a.attacker),
+            );
+            continue;
+        };
+        let mult = lib
+            .damage_types
+            .multiplier(table.as_deref(), &a.damage_type);
+        let amount = a.damage * mult;
+        say(
+            &log,
+            format!(
+                "weapons: melee by {:?} hit {e:?} at {:.0} uu for {amount} ({} x{mult} by its table, {})",
+                a.attacker,
+                t * a.range,
+                a.damage,
+                a.damage_type
+            ),
+        );
+        if amount > 0.0 {
+            damage.write(Damage {
+                target: e,
+                amount,
+                kind: DamageKind::Melee,
+                instigator: Some(a.attacker),
+                point: to_bevy(start + (end - start) * t),
+                direction: d,
+            });
+        }
     }
 }

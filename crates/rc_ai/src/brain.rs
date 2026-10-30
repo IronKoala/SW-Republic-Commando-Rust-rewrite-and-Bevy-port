@@ -89,6 +89,8 @@ pub enum Maneuver {
     ToCover(usize),
     /// At cover point `node`: crouch, stand up to fire.
     InCover(usize),
+    /// Rushing at the enemy to hit it up close.
+    Charge,
 }
 
 impl Maneuver {
@@ -100,6 +102,7 @@ impl Maneuver {
             Maneuver::Reposition => "reposition",
             Maneuver::ToCover(_) => "to cover",
             Maneuver::InCover(_) => "in cover",
+            Maneuver::Charge => "charge",
         }
     }
 }
@@ -158,6 +161,13 @@ pub enum AiEvent {
     },
     /// Couldn't make progress along a route for 2 s; gave up on it.
     Stuck,
+    /// A close-up hit (a force pike): along `direction` (length 1) from
+    /// `origin`, reaching `range` uu.
+    Melee {
+        origin: Vec3,
+        direction: Vec3,
+        range: f32,
+    },
     /// Threw a grenade (`grenade` is its file id): it leaves the hand at
     /// `origin` with `velocity` (uu/s), aimed to land near `aim_at`.
     /// `left` is how many it still carries.
@@ -216,10 +226,17 @@ pub struct Fighter {
     next_throw: f32,
     /// Battle time of its last throw (for the animation).
     pub last_throw: f32,
+    /// No close-up hit before this battle time.
+    next_melee: f32,
+    /// Battle time of its last close-up hit (for the animation).
+    pub last_melee: f32,
     rng: Rng,
 }
 
 const STUCK_SECONDS: f32 = 2.0;
+/// How far off the floor a charge's straight-line check starts, uu (about
+/// a stair step).
+const STEP_LIFT: f32 = 24.0;
 /// A new spot closer than this isn't worth walking to, uu.
 const MIN_MOVE: f32 = 150.0;
 /// After failing to find a route or spot, wait this long before trying
@@ -271,6 +288,8 @@ impl Fighter {
             grenades_left,
             next_throw: 0.0,
             last_throw: f32::NEG_INFINITY,
+            next_melee: 0.0,
+            last_melee: f32::NEG_INFINITY,
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -492,6 +511,18 @@ impl Fighter {
             _ => {}
         }
 
+        // Charging and now within reach: stop and hit.
+        if self.maneuver == Maneuver::Charge {
+            if let Some(t) = saw {
+                if (t.centre - self.pawn.location).length_2d()
+                    <= self.params.combat.melee_range * 0.7
+                {
+                    self.follower = None;
+                    self.set_maneuver(Maneuver::Hold, now, &mut events);
+                }
+            }
+        }
+
         // 3. Turn and move.
         let mut input = MoveInput::default();
         let enemy_dir = self
@@ -531,10 +562,14 @@ impl Fighter {
         input.crouch = self.crouch;
         self.pawn.step(dt, &input, view.world);
 
-        // 4. Shoot.
+        // 4. Shoot, or hit up close.
         if self.mode == Mode::Attack {
             if let (Some(t), true) = (saw, self.enemy_seen_now) {
-                self.shoot(view.world, view.allies, now, &t, &mut events);
+                if !self.melee(view.world, now, &t, &mut events)
+                    && !self.params.combat.weapon.is_empty()
+                {
+                    self.shoot(view.world, view.allies, now, &t, &mut events);
+                }
             }
         }
         events
@@ -611,6 +646,25 @@ impl Fighter {
         // A grenade, now and then, at an enemy it knows the place of.
         if self.try_grenade(view, enemy, events) {
             return;
+        }
+        // A melee fighter rushes in when the enemy is close enough (always,
+        // if it has no gun), following it as it moves.
+        if c.melee_range > 0.0
+            && now - self.last_seen_time < 1.0
+            && (c.weapon.is_empty() || dist <= c.lunge_distance)
+        {
+            if dist <= c.melee_range * 0.7 {
+                self.follower = None;
+                self.set_maneuver(Maneuver::Hold, now, events);
+            } else if self.charge(view, enemy, events) {
+                self.set_maneuver(Maneuver::Charge, now, events);
+            }
+            return;
+        }
+        if self.maneuver == Maneuver::Charge {
+            // Lost it: stop rushing.
+            self.follower = None;
+            self.set_maneuver(Maneuver::Hold, now, events);
         }
         // Walking somewhere for a clear shot, and now it has one: stop and
         // shoot.
@@ -756,6 +810,64 @@ impl Fighter {
             velocity,
             aim_at,
             left: self.grenades_left,
+        });
+        true
+    }
+
+    /// Head straight at the enemy if nothing is in the way, else along
+    /// the paths. Re-planned at every decision, since the enemy moves.
+    fn charge(&mut self, view: &View, enemy: Vec3, events: &mut Vec<AiEvent>) -> bool {
+        let here = self.pawn.location;
+        let goal = Vec3::new(enemy.x, enemy.y, here.z);
+        // The body, lifted off the floor by a step's height (so standing on
+        // the floor, or a small step, doesn't count as in the way).
+        let lift = Vec3::new(0.0, 0.0, STEP_LIFT);
+        let e = self.pawn.extent();
+        let body = Vec3::new(e.x, e.y, (e.z - STEP_LIFT / 2.0).max(1.0));
+        let up = lift * 0.5;
+        if view.world.sweep(body, here + up, goal + up).is_none() {
+            self.follower = Some(PathFollower::new(vec![goal]));
+            return true;
+        }
+        self.walk_to(view, enemy, events)
+    }
+
+    /// A close-up hit, if it has a melee weapon, the target is within
+    /// reach and in front of it, nothing is in the way, and the last hit
+    /// was `melee_delay` ago. **Our rule** (the original's is compiled):
+    /// the reach is measured between the two bodies' centres.
+    fn melee(
+        &mut self,
+        world: &dyn World,
+        now: f32,
+        t: &Target,
+        events: &mut Vec<AiEvent>,
+    ) -> bool {
+        let c = &self.params.combat;
+        if c.melee_range <= 0.0 {
+            return false;
+        }
+        let to = t.centre - self.pawn.location;
+        if to.length_2d() > c.melee_range {
+            return false;
+        }
+        let off = angle_diff(to.y.atan2(to.x), self.facing).abs().to_degrees();
+        if off > 30.0 {
+            return true; // turning to face it: no shooting meanwhile
+        }
+        if now < self.next_melee {
+            return true;
+        }
+        let origin = self.pawn.location + Vec3::new(0.0, 0.0, 20.0);
+        if !clear_line(world, origin, t.centre) {
+            return false;
+        }
+        self.next_melee = now + c.melee_delay;
+        self.last_melee = now;
+        events.push(AiEvent::Melee {
+            origin,
+            direction: (t.centre - origin).normalize_or_zero(),
+            range: c.melee_range,
         });
         true
     }

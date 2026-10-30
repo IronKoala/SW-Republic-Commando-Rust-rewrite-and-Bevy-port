@@ -41,6 +41,7 @@ pub use damage_types::{DamageTable, DamageTypes};
 pub use grenade::{GrenadeParams, Grenades};
 pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
 pub use library::{read_sounds, MeleeParams, PlayerSetup, WeaponLibrary};
+pub use melee::MeleeAttack;
 pub use pickup::{spawn_pickup, WeaponPickup};
 pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{WeaponParams, WeaponState};
@@ -172,6 +173,7 @@ impl Plugin for WeaponsPlugin {
         app.add_message::<FireShot>()
             .add_message::<ShotLanded>()
             .add_message::<ThrowGrenade>()
+            .add_message::<MeleeAttack>()
             .add_message::<Blast>()
             .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
@@ -194,6 +196,7 @@ impl Plugin for WeaponsPlugin {
                     fire::launch_shots,
                     melee::player_zoom,
                     melee::player_melee,
+                    melee::melee_attacks,
                     throw::player_grenades,
                     throw::launch_grenades,
                 )
