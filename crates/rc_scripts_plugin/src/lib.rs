@@ -29,13 +29,18 @@
 //!   [`FactoryOrder`]s for them, and what they send back (a droid's death
 //!   event, a spawner running out) arrives as a `RaiseEvent`.
 //!
-//! Everything else a script does (lines of dialogue, animations,
-//! characters walking) is logged as "not done yet" with the script's own
+//! - lines of dialogue and sounds (`ACTION_PlaySound`,
+//!   `ACTION_PlayLocalSound`) play from the game's own sound packages, read
+//!   while the level loads; a script waiting for a line waits for its real
+//!   length (see `sounds.rs`).
+//!
+//! Everything else a script does (animations, characters walking) is logged as "not done yet" with the script's own
 //! comment. Every event and effect is logged with a `scripts:` prefix, and
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
 pub mod save;
+pub mod sounds;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind, Health};
@@ -79,13 +84,14 @@ impl Plugin for ScriptsPlugin {
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
                 Update,
-                (bacta, run, hide_parts)
+                (bacta, run, sounds::play, hide_parts)
                     .chain()
                     .in_set(ScriptSystems)
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
             )
-            .add_systems(OnExit(GameState::InGame), forget);
+            .add_systems(Update, (sounds::started, sounds::pause))
+            .add_systems(OnExit(GameState::InGame), (forget, sounds::forget));
     }
 }
 
@@ -93,6 +99,8 @@ impl Plugin for ScriptsPlugin {
 /// `SpawnBarricadeDroids`, `BactaUsed`, ...). Read it with a
 /// `MessageReader` to hook a part of the game to the map's events.
 pub use rc_game_core::ScriptEvent;
+
+pub use sounds::{ScriptSound, ScriptSounds};
 
 /// A script's order to the enemy spawners (see [`rc_game_core::events`]).
 pub use rc_game_core::FactoryOrder;
@@ -145,6 +153,8 @@ pub struct LevelScript {
     hidden: HashSet<usize>,
     /// Checkpoints waiting for the player to be up.
     held: Vec<String>,
+    /// Sounds the scripts asked for this frame.
+    sounds: Vec<sounds::SoundRequest>,
     started: bool,
     /// Counts for the self-tests.
     pub stats: PlayStats,
@@ -165,6 +175,12 @@ pub struct PlayStats {
     pub left_for: Option<String>,
     /// Events sent into the scripts by other parts (droids, spawners).
     pub raised: Vec<String>,
+    /// Sounds and lines played, by name, in order.
+    pub sounds_played: Vec<String>,
+    /// How many of them started on the sound card.
+    pub sounds_started: usize,
+    /// Sounds asked for that weren't loaded.
+    pub sounds_missing: Vec<String>,
     pub not_done: usize,
 }
 
@@ -269,13 +285,27 @@ fn build(
     loaded: Option<Res<Loaded>>,
     movers: Option<Res<LevelMoverData>>,
     mut gate: ResMut<LoadingGate>,
+    paths: Res<GamePaths>,
+    audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
     log: Res<GameLog>,
 ) {
     let (Some(loaded), Some(movers)) = (loaded, movers) else {
         return;
     };
     let Loaded(map, settings) = &*loaded;
-    let director = Director::new(map, &movers.movers.triggers, settings.clone());
+    let mut director = Director::new(map, &movers.movers.triggers, settings.clone());
+    // The lines and sounds the scripts play, and how long each lasts.
+    // Without audio (tests) there's nothing to read them into.
+    match audio {
+        Some(mut audio) => {
+            let s = sounds::load(map, &paths, &mut audio, &log);
+            for (name, secs) in &s.lengths {
+                director.set_sound_length(name, *secs);
+            }
+            commands.insert_resource(s);
+        }
+        None => log.line(format!("{PART}: no audio; script sounds not read")),
+    }
     let s = &director.stats;
     log.line(format!(
         "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} counters, {} conditions, {} checkpoints, {} props, {} level exits; level start sends {:?}",
@@ -339,6 +369,7 @@ fn build(
         dispensers,
         hidden: HashSet::new(),
         held: Vec::new(),
+        sounds: Vec::new(),
         started: false,
         stats: PlayStats::default(),
     });
@@ -765,6 +796,14 @@ fn carry_out(
             log.line(format!("{at}: spawners {tag} refilled"));
             script.stats.factory_orders.push(format!("reset {tag}"));
             factories.write(FactoryOrder::Reset { tag });
+        }
+        "playsound" | "playlocalsound" => {
+            if a.flag("bDisabled", false) {
+                log.line(format!("{at}: switched off in the map; not played"));
+            } else {
+                let volume = script.director.settings.sound_volume;
+                script.sounds.push(sounds::request(who, index, a, volume));
+            }
         }
         "changelevel" => {
             log.line(format!(
