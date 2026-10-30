@@ -32,7 +32,9 @@ pub mod save;
 
 use bevy::prelude::*;
 use rc_game_core::save::SaveAppExt;
-use rc_combat::{CombatSet, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded, Team};
+use rc_combat::{
+    CombatSet, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded, Team,
+};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
@@ -503,6 +505,9 @@ fn spawn_squad(
             ),
             Team::Republic,
             Hittable::COMMANDO,
+            // The original's squad damage table: droid bolts x0.15,
+            // explosions x0.4, stuns x0.
+            DamageTable("DV_OrganicCTSquadDamage".into()),
         ));
         let Some((meshes, materials, images)) = assets.as_mut() else {
             continue;

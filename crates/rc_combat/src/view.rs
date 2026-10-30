@@ -43,6 +43,49 @@ fn glow(materials: &mut Assets<StandardMaterial>, c: [f32; 3]) -> Handle<Standar
     })
 }
 
+/// A thrown grenade's look per grenade id. **Our choice:** a small
+/// glowing ball in the grenade's colour, until the thrown models
+/// (`ThermalDetonator` and friends in weapons.usx) are drawn.
+#[derive(Resource)]
+pub(crate) struct GrenadeLooks {
+    mesh: Handle<Mesh>,
+    materials: HashMap<String, Handle<StandardMaterial>>,
+}
+
+impl GrenadeLooks {
+    pub(crate) fn attach(&self, e: &mut EntityCommands, grenade: &str) {
+        if let Some(m) = self.materials.get(grenade) {
+            e.insert((Mesh3d(self.mesh.clone()), MeshMaterial3d(m.clone())));
+        }
+    }
+}
+
+pub(crate) fn make_grenade_looks(
+    mut commands: Commands,
+    lib: Res<WeaponLibrary>,
+    looks: Option<Res<GrenadeLooks>>,
+    meshes: Option<ResMut<Assets<Mesh>>>,
+    materials: Option<ResMut<Assets<StandardMaterial>>>,
+) {
+    if looks.is_some() {
+        return;
+    }
+    let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else {
+        return;
+    };
+    // 8 uu across.
+    let mesh = meshes.add(Sphere::new(0.08));
+    let map = lib
+        .grenades
+        .iter()
+        .map(|(id, p)| (id.clone(), glow(&mut materials, p.blast_colour)))
+        .collect();
+    commands.insert_resource(GrenadeLooks {
+        mesh,
+        materials: map,
+    });
+}
+
 /// Make the bolt looks once (only if the game can draw meshes).
 pub(crate) fn make_bolt_looks(
     mut commands: Commands,

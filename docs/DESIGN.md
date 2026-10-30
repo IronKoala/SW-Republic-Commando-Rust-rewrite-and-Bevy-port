@@ -1727,6 +1727,28 @@ squad:
      player is found by its `Player` and `PlayerCamera` markers, so a VR
      camera works the same. No platform-specific code.
 
+### Enemy types
+
+Each enemy type is one file in `data/enemies/`, read on top of the battle
+droid's built-in values, so a file only lists what differs. Its `[type]`
+section names the game classes it stands for (`classes`, a trailing `*`
+matches any ending) and its `body` (droid or organic). When a map loads,
+each spawner's `Prototype` class is matched to a type, and that spawner's
+enemies get the type's health, size, speed, weapon, accuracy, look and
+sounds. A spawner whose class no file claims (squad mates, turrets) is
+left to other parts and logged. `combat.uses_cover = false` makes an enemy
+walk at you instead of taking cover (super battle droids);
+`combat.drops` is the weapon it leaves when it falls. `[sound]` lists
+sound names played when it spots you, is hurt and is destroyed.
+
+**Several enemies to fight.** Droids fight the player and the squad mates
+(every living `Team::Republic` character). Each keeps fighting the one it
+fought last while it can still see it, otherwise picks the nearest one it
+can see, otherwise hunts the player. **Our choice:** the original's target
+choice is in its compiled engine. A stunned droid (flash or EMP grenade)
+stands still and does nothing until the stun wears off, and grenade blasts
+are heard like shots.
+
 **Checking without looking.** `rc_droidsim` (no window) and
 `rc_droidview --check` (a window) run a stand-in player into a spawner's
 trigger on a real map and log every spawn, sighting, state change, route,
@@ -1779,6 +1801,85 @@ weapon), the player from `Player` and `PlayerCamera`, the level from
 - To be hit: add `Hittable` (the cylinder) and `Team`.
 - Recoil: each player shot sends `ViewKick { pitch, yaw }` (radians). The
   player's view applies it; a VR mod can ignore it.
+- To throw a grenade (squad mates, enemies): send `ThrowGrenade { thrower,
+  origin, velocity, grenade }` (Bevy space, units per second). When it goes
+  off, `Blast { grenade, point, radius, instigator, hit }` is sent.
+- `DamageTable(name)` names a character's damage table (the original's
+  `DamageVariance`, in `data/combat/damage_types.toml`). Every hit by a
+  shot, melee or blast is multiplied by the table's entry for the hit's
+  damage type (a weapon's `shot.damage_type`, a grenade's
+  `blast.damage_type`). The player gets one from `player.toml`, enemies
+  from `combat.damage_table`; squad mates should use
+  `DV_OrganicCTSquadDamage`. No table means x1.
+- `Body` (droid or organic) is for logs and AI. `Stunned { left,
+  damage_per_sec, kind, stops, .. }` is a grenade's lasting effect: when
+  `stops` is set the character can't act (AI should check it); it hurts
+  `damage_per_sec` while it lasts.
+- `read_sounds(paths, package, names, audio)` reads sounds by name from a
+  game sound package, for any part.
+
+### Grenades (`grenade.rs`, `throw.rs`)
+
+A grenade kind is a file in `data/grenades`. `grenade.rs` holds the plain
+rules: a thrown grenade starts at the hand (`throw.offset` from the eye)
+with the view's direction times `throw.speed`, plus `throw.toss_up`
+upwards. Gravity pulls it down every frame. When it touches a wall, floor
+or character it bounces off the surface, keeping `flight.bounce` of its
+speed (`flight.actor_bounce` off a character); on a floor, once slower
+than `flight.rest_speed`, it lies still. The fuse is the original's
+(`CTProjExplosive`): it goes off `fuse.time` seconds after the throw, or
+`fuse.after_impact` seconds after it first touches anything if that is
+sooner; `fuse.on_actor` / `fuse.on_world` make it go off on touch.
+`flight.stick_to_world` / `stick_to_actors` make it stick where it lands
+(the sonic detonator), and `fuse.proximity` makes a stuck one go off when a
+character it can see comes that close (checked every
+`fuse.proximity_interval` seconds). The thrower never sets it off.
+
+The blast is the engine's `HurtRadius` rule: a character it went off on
+takes the full damage; every other character within `blast.radius` (plus
+its own radius) whose centre the blast can see takes `damage x (1 -
+(distance - its radius) / radius)`, so full damage up close and nothing at
+the edge. Each hit is then multiplied by the target's damage table for
+`blast.damage_type`. A `[status]` section adds a lasting effect
+(`Stunned`) to every character that can see the blast within the radius
+(plus `status.radius_change`): it lasts `status.max_time` at the centre,
+falling to nothing at the edge, and hurts `status.damage_per_sec`. A
+character whose table gives `status.damage_type` x0 is immune (droids
+aren't stunned or set alight). `half_on_commandos` halves it on clone
+commandos (the EMP), `player_must_face` spares a player looking away (the
+flash), and `stops = false` lets characters keep acting (the thermal's
+burn).
+
+`throw.rs` is the Bevy side: the throw and next-grenade buttons, the
+`ThrowGrenade` message (anyone can throw), grenades in flight, the `Blast`
+message when one goes off, stuns wearing off, and the grenade line on the
+display. The player's kinds and their order are `grenades` in
+`data/combat/player.toml`; each starts with its file's `start_count`.
+
+### Attachments, zoom, melee and pickups
+
+- The DC-17m's sniper and anti-armour attachments are their own weapon
+  files and their own entries in the weapon cycle (rifle, sniper,
+  anti-armour, pistol), each with its own ammo. **Our choice:** the
+  original swaps the attachment onto the rifle with an animation.
+- `fire.zoom_fovs` gives a weapon zoom steps: each press of the zoom
+  button narrows the view to the next one (degrees across a 4:3 screen),
+  and after the last it zooms back out. Combat writes it to
+  `WeaponReadout.zoom_fov` and the game's camera uses it; a VR mod can
+  ignore it. Switching weapon or reloading leaves the zoom. While zoomed,
+  the player's shots do `fire.zoom_damage` times the damage (1.72 for the
+  sniper).
+- `shot.kind = "lobbed"` fires a grenade file (`shot.grenade`) along the
+  aim at `shot.speed`: the anti-armour round is an impact grenade.
+- Melee (`melee.rs`): a line `[melee] range` long from the eye along the
+  view; the first character on it takes `[melee] damage` of type
+  `CTDamageMelee` (times its table: battle droids take x3). The weapon in
+  hand's `[melee]` section wins; `player.toml`'s is the fallback. Walls
+  block it.
+- Pickups (`pickup.rs`): a `WeaponPickup` on the ground is collected by
+  walking within 80 uu of it (our choice). A new weapon joins the cycle;
+  one already carried gets the ammo. Enemies drop the weapon file named by
+  `combat.drops` in their settings file.
 
 ### Modding
 

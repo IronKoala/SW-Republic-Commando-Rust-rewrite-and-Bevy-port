@@ -30,7 +30,12 @@ accel = 60000             # AccelFactor (Projectile's default): bolts start at r
 max_speed = 10000         # MaxSpeed
 life_span = 10            # LifeSpan: seconds before an unhit bolt vanishes
 damage = 20               # Damage
-damage_kind = "blaster"   # CTDamageEnergyDC17
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyDC17" # MyDamageType, looked up in the target's damage table
+
+[melee]
+range = 150               # MeleeRange (the rifle butt)
+damage = 220              # MeleeDamage (CTDamageMelee)
 
 [recoil]
 kick = [200, -100, 0]     # WeaponKick: up, sideways (random either way), 65536 = full turn

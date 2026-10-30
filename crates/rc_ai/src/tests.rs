@@ -402,6 +402,184 @@ fn droids_on_the_same_spot_are_pushed_apart() {
     assert!(gap >= 69.0, "still overlapping: {gap:.1} uu apart");
 }
 
+/// A battle with one stationary droid at the origin, facing +X.
+fn one_droid_battle() -> Battle {
+    let params = Arc::new(AiParams::battle_droid());
+    let mut b = Battle::new(params.clone(), NavGraph::default(), vec![]);
+    b.fighters.push(Fighter::new(
+        1,
+        params,
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    ));
+    b.made_by.push(0);
+    b
+}
+
+fn fire_directions(events: &[BattleEvent]) -> Vec<Vec3> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            BattleEvent::Ai {
+                event: AiEvent::Fire { direction, .. },
+                ..
+            } => Some(*direction),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn shoots_a_squad_mate_when_the_player_is_hidden() {
+    // The player stands behind a wall; a squad mate is in the open.
+    let wall = Brush::cuboid(
+        Vec3::new(900.0, 1400.0, 0.0),
+        Vec3::new(1100.0, 2600.0, 400.0),
+    );
+    let world = flat_floor(vec![wall]);
+    let mut b = one_droid_battle();
+    let player = target_at(2000.0, 2000.0);
+    let mate = target_at(1500.0, -300.0);
+    let mut dirs = Vec::new();
+    for _ in 0..90 {
+        dirs.extend(fire_directions(&b.step_with(
+            1.0 / 30.0,
+            &world,
+            Some(player),
+            &[mate],
+        )));
+    }
+    assert!(!dirs.is_empty(), "never fired");
+    let to_mate = (mate.centre - Vec3::new(0.0, 0.0, 60.0)).normalize_or_zero();
+    for d in &dirs {
+        assert!(d.dot(to_mate) > 0.95, "fired at {d:?}, not the mate");
+    }
+    assert_eq!(b.fighters[0].target_index, Some(1));
+}
+
+#[test]
+fn prefers_the_nearest_visible_enemy_and_keeps_it() {
+    let world = flat_floor(vec![]);
+    let mut b = one_droid_battle();
+    let player = target_at(3000.0, 0.0);
+    let mate = target_at(1000.0, 200.0);
+    for _ in 0..30 {
+        b.step_with(1.0 / 30.0, &world, Some(player), &[mate]);
+    }
+    assert_eq!(b.fighters[0].target_index, Some(1), "nearest is the mate");
+    // The player walks closer, but the droid keeps its target while it
+    // can still see it.
+    let near_player = target_at(800.0, 0.0);
+    b.step_with(1.0 / 30.0, &world, Some(near_player), &[mate]);
+    assert_eq!(b.fighters[0].target_index, Some(1));
+}
+
+#[test]
+fn a_stunned_droid_does_nothing() {
+    let world = flat_floor(vec![]);
+    let mut b = one_droid_battle();
+    b.stun(1, 2.0);
+    let mut shots = 0;
+    for _ in 0..55 {
+        shots += fire_directions(&b.step(1.0 / 30.0, &world, Some(target_at(1500.0, 0.0)))).len();
+    }
+    assert_eq!(shots, 0, "fired while stunned");
+    for _ in 0..60 {
+        shots += fire_directions(&b.step(1.0 / 30.0, &world, Some(target_at(1500.0, 0.0)))).len();
+    }
+    assert!(shots > 0, "never fired after the stun wore off");
+}
+
+#[test]
+fn every_enemy_file_reads_and_claims_its_classes() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/enemies");
+    let mut types = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "toml") {
+            let text = std::fs::read_to_string(&p).unwrap();
+            let params = AiParams::battle_droid()
+                .with_overrides(&text)
+                .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+            assert_eq!(
+                params.kind.id,
+                p.file_stem().unwrap().to_string_lossy(),
+                "[type] id should be the file's name"
+            );
+            types.push(params.kind);
+        }
+    }
+    assert!(types.len() >= 4);
+    let who = |class: &str| {
+        let m: Vec<_> = types
+            .iter()
+            .filter(|t| t.matches(class))
+            .map(|t| t.id.as_str())
+            .collect();
+        assert!(m.len() <= 1, "{class} claimed by {m:?}");
+        m.first().map(|s| s.to_string())
+    };
+    assert_eq!(who("BattleDroidTM").as_deref(), Some("battle_droid"));
+    assert_eq!(who("battledroid").as_deref(), Some("battle_droid"));
+    assert_eq!(
+        who("SuperBattleDroid").as_deref(),
+        Some("super_battle_droid")
+    );
+    assert_eq!(who("CloneCommando"), None);
+}
+
+#[test]
+fn spawners_make_their_own_enemy_type() {
+    let world = flat_floor(vec![]);
+    let base = Arc::new(AiParams::battle_droid());
+    let mut big = AiParams::battle_droid();
+    big.kind.id = "big".into();
+    big.movement.collision_height = 120.0;
+    let big = Arc::new(big);
+    let factory = |name: &str, x: f32| Factory {
+        name: name.into(),
+        tag: name.into(),
+        prototype: name.into(),
+        location: Vec3::new(x, 0.0, 200.0),
+        yaw: 0.0,
+        spots: vec![],
+        capacity: 1,
+        max_alive: 1,
+        generate_forever: false,
+        spawn_mode: 0,
+        spawn_interval: 0.1,
+        start_state: StartState::StationaryAttack,
+        team: None,
+        triggers: vec![],
+    };
+    let mut b = Battle::with_types(
+        base.clone(),
+        NavGraph::default(),
+        vec![(factory("a", 500.0), base), (factory("b", -500.0), big)],
+    );
+    for _ in 0..20 {
+        b.step(1.0 / 30.0, &world, Some(target_at(0.0, 2000.0)));
+    }
+    assert_eq!(b.fighters.len(), 2);
+    let ids: Vec<_> = b
+        .fighters
+        .iter()
+        .map(|f| f.params.kind.id.as_str())
+        .collect();
+    assert!(
+        ids.contains(&"battle_droid") && ids.contains(&"big"),
+        "{ids:?}"
+    );
+    // Placed with its own height: feet at 200 - 120 for the big one.
+    let bigf = b
+        .fighters
+        .iter()
+        .find(|f| f.params.kind.id == "big")
+        .unwrap();
+    assert!(bigf.pawn.feet().z < 81.0, "{:?}", bigf.pawn.feet());
+}
+
 fn factory(x: f32) -> Factory {
     Factory {
         name: format!("factory at {x}"),

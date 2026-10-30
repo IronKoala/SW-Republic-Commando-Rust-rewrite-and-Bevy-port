@@ -268,6 +268,21 @@ copy of the game.
   2 droids destroyed by a stand-in player, no droid shooting another, and
   the droids on screen had the skin's colours (all 12 checks passed).
 
+- **Grenades, the DC-17m's attachments, melee, picked-up weapons and
+  more enemy types, with the original's numbers (tested in the cloud
+  sandbox with automatic tests and the game's script files, not yet played
+  in the real game).** You can throw thermal, sonic, EMP and flash
+  grenades: the thermal bounces and goes off a second after it lands (and
+  sets people close to it alight), the sonic sticks and waits for someone to
+  come near, the EMP electrocutes droids, and the flash stuns anyone looking
+  at it. Switch to the DC-17m's sniper (two zoom steps; zoomed shots hit
+  1.72 times harder) and anti-armour attachments, hit with melee, and pick
+  up a fallen enemy's weapon. Every character takes more or less damage by
+  type, from the game's own damage tables (battle droids shrug off sniper
+  rounds but fall to melee). Super battle droids, Geonosian warriors and
+  Trandoshan mercenaries each have their own settings file in
+  `data/enemies` with the game's health, speed, size and aim.
+
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
   checkpoint the level reports are saved automatically to the checkpoint
@@ -311,12 +326,18 @@ copy of the game.
   On geo_01a the start area is closed in by such a barricade, so in
   `rc_game` you won't reach the droids yet; `rc_droidview` shows them.
   Some droid numbers are guesses (marked in the data file), including how
-  far a shot can miss. No droid sounds, hit reactions or death effects
-  beyond the animation. Droids don't use jump links or doors.
+  far a shot can miss. No hit reactions or death effects beyond the
+  animation. Droids don't use jump links or doors.
 
-- Weapons: no first-person arms, muzzle flash, grenades, melee or sniper
-  attachment yet, and switching weapons is instant. How the view kick
-  settles back is our own guess.
+- Weapons: no first-person arms or muzzle flash, and switching weapons is
+  instant. How the view kick settles back is our own guess. The
+  attachments' and the Trandoshan repeater's reload times are stand-ins,
+  grenades have no explosion sounds or models yet (a small glowing ball),
+  and nobody but the player throws grenades yet.
+- Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
+  stand-in blaster instead of using their force pike, and walk instead of
+  flying and climbing. The Trandoshan uses a stand-in model. Droid voice
+  lines are empty until the sound packages are read.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our

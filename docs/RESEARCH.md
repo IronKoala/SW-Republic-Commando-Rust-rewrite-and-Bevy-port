@@ -266,5 +266,87 @@ Easy, 1 on Medium and 1.75 on Hard.
 
 **What we don't know yet:** how the view kick (`WeaponKick`,
 `RecoilConstant`, `RecoilDampening`) settles back (it is in the compiled
-engine), the burst mode's details, hit-location and damage-type multipliers,
-grenades and melee.
+engine), the burst mode's details and hit-location multipliers. Damage-type
+multipliers, grenades and melee are in the next section.
+
+## Grenades, attachments, melee, damage tables and more enemies
+
+Read on 2026-10-29 with `rc_probe --class NAME` from the user's install
+(read only; each class with its "...Defaults" class in
+`Properties/properties.u` on top, as in "Weapons and damage"). The values
+are in the data files, each marked `game:` with the property it came from.
+
+**Grenades** (`data/grenades/*.toml`). All four hand grenades share
+`GrenadeProj`: `Speed` 2200, `TossZ` 200, `BounceDampening` 0.3 (0.1 off a
+character), `RestSpeed` 20, thrown from `FPGrenadeOffset` (57.4, -30,
+-10.56); each carries `MaxAmmo` 5 and starts with `InitAmmoAmount` 2.
+Gravity is 1100 (`LevelInfo`/`PhysicsVolume`). The explosive rules
+(`CTProjExplosive`), in our words: the fuse runs `FuseTime` from the
+throw; touching anything shortens what's left to `PostImpactFuseTime`;
+`bActorDetonate`/`bWorldDetonate` make it go off on touch;
+`bStickToWorld`/`bStickToActors` make it stick; a stuck proximity mine
+checks every `ElapseTime` for a character within `ExplosionProximity`.
+A character it goes off on takes the full `Damage`; everyone else in
+`DamageRadius` takes the engine's `HurtRadius` falloff,
+`1 - max(0, distance - their radius) / DamageRadius`.
+
+| | Fuse | After a touch | Damage | Radius | Damage type | Status effect |
+|---|---|---|---|---|---|---|
+| Thermal | 12 s | 1 s | 400 | 600 | CTDamageExplosionThermalDet | burn (`StatusEffect_Immolate`, CTDamageFire): up to 12 s at 15/s, within 200 uu (radius -400) |
+| Sonic | 10 s | 10 s | 400 | 800 | CTDamageExplosionSonic | none; sticks, proximity 400 uu every 0.5 s |
+| EC (EMP) | 12 s | 1 s | 0 | 1024 | CTDamageElectricityEMPGrenade | electrocution: up to 9 s at 50/s, half as long on clone commandos |
+| Flash | 12 s | 1 s | 0 | 4096 | CTDamageExplosionFlashDet | stun (`StatusEffect_Stun`, CTDamageStun): up to 18 s; the player only when facing it |
+
+A status effect lasts `StatusEffectMaxDuration x (1 - distance / (radius -
+their radius))`, only on characters that can see the blast. **Our
+reading:** burning doesn't stop a character acting; stun and electrocution
+do (for computer-controlled characters).
+
+**Damage tables** (`data/combat/damage_types.toml`). Every character has a
+`MyDamageVariance` class: a list of damage types with a multiplier
+(`IncludeTypes`), and types it ignores (`ExcludeTypes`, written as 0). A
+hit uses the most specific entry up the damage type's parent chain
+(`CTDamageEnergyDC17` is a kind of `CTDamageEnergy`), else x1. The file
+holds all 53 damage types' parents and all 41 tables. Examples: battle
+droids take x3 from melee, x0.75 from explosions, x0.4 from ballistic
+(the sniper), and nothing from stun, fire or droid blasters; the player
+(`DV_OrganicCTPlayerDamage`) takes x0.5 from energy bolts and x0.7 from
+explosions; super battle droids x0.15 from energy, x1.25 from the
+anti-armour round and the EMP.
+
+**DC-17m attachments.** Sniper (`DC17mSniper`): instant hit, range 10000,
+`Damage` 175 (`CTDamageBallisticDC17Sniper`), 5 a magazine, 20 carried,
+`ShotDelay` 1.5, `ZoomFOVs` 30 and 10, `ZoomDamageMultiplier` 1.72,
+`WeaponKick` 2500, `RecoilConstant` 15, `RecoilDampening` 0.2, fire sound
+`wep_GEN_sniperFire_01`. Anti-armour (`DC17mAntiArmor`): 1 a magazine, 4
+carried, `ShotDelay` 0.6, kick 4000, sound `wep_GEN_antiArmorGun_03`; its
+round (`AntiArmorProj`) flies at 3000, falls, goes off on touching
+anything, `Damage` 400 within 800 (`CTDamageExplosionDC17AA`).
+
+**Melee.** Each weapon has `MeleeRange` and `MeleeDamage`
+(`CTDamageMelee`): DC-17m 150 uu / 220, DC-15s 175 / 100, E-5 100 / 15,
+SBD blaster 200 / 100, Trandoshan repeater 150 / 220.
+
+**Enemies.** Super battle droid (`SuperBattleDroid`): `MaxHealth` 500,
+`GroundSpeed` 100, collision 65 x 115, eye 60, `Accuracy` 0.9,
+`MaxAimYaw` 90, wrist blaster `SBDBlaster` (automatic, 0.2 s, bursts of
+3, bolt `SBDProj` 75 damage at 5000 uu/s). Geonosian warrior
+(`GeonosianWarrior`): health 100, speed 450, collision 50 x 115,
+`Accuracy` 0.5, `MaxAimYaw` 80, fights with a `ForcePike` up close.
+Trandoshan mercenary (`TrandoshanMercenary`): health 220, speed 450,
+collision 40 x 84, `Accuracy` 0.65, `MaxAimYaw` 70, `SMG` repeater
+(instant hit, 10 damage `CTDamageBallisticSMG`, 0.1 s, bursts of 9, 40 a
+magazine, `AimError` 25, range 5000), plus thermal detonators.
+
+**Still not read or not known:**
+- The attachments' and repeater's reload times (in their animations).
+- Grenade explosion sounds (they're in the explosion effect classes) and
+  the droids' voice lines (in the large sound packages).
+- How the original lets the player hurt droids with a picked-up E-5: its
+  `CTDamageEnergyDroids` is ignored by battle droids' table. Our
+  `e5_blaster_pickup.toml` uses plain `CTDamageEnergy` instead.
+- The Trandoshan's mesh `TrandoshanMerc` isn't in `trandoshan.ukx`; we
+  use the `Trandoshan` mesh there for now.
+- Which class names the maps' spawners actually use for these enemies
+  (log line `spawners no enemy file claims`).
+- The other Geonosians (`GeonosianDrone`, `GeonosianElite` with its beam).
