@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Grenade log says why each one went off (rc_combat)
+
+- **Changed:** `crates/rc_combat/src/throw.rs`: the `grenades: X went off ...` log line now says why: "on touching a character", "on touching the level", "when a character came near" or "when its fuse ran out".
+- **Why:** In the user's replay of geo_01a with the squad fix, the player went down twice from their own anti-armour round. Both times it went off 0.03 s after firing, about 80 uu in front of the player, and the log didn't say what it ran into.
+- **Tested how:** `cargo test --release -p rc_combat` (19 + 21 range tests).
+- **Result:** All pass.
+- **Still broken / not tested:** Not seen in a real game log yet.
+- **Next:** The next play log shows what the anti-armour round hit.
+
 ## 2026-10-30: Squad mates no longer shoot through the player or each other (rc_squad, rc_combat log)
 
 - **Changed:** `crates/rc_squad/src/fight.rs`: the "friend in the way" check before a squad mate fires now tests the line of fire against each friend's whole body (the 40-wide, 168-tall commando cylinder; a low wide shape for someone lying down), widened by `friendly_clearance` and by how far the shot can stray (aim error plus the gun's spread). New `shot_passes_friend` and test `a_shot_over_a_friends_shoulder_counts_as_through_them`. `friendly_clearance` is now the gap round the body: 20 uu (was 60 uu round the middle point). `crates/rc_combat/src/damage.rs`: every `combat: ... took N damage` log line now says who did it (`from Scorch`, `from battle droid 2`, or `from no one (script, fall or level)`). `crates/rc_squad_plugin/src/lib.rs`: logs `X hit the player by mistake` and names the squad mate hit; those no longer count as hits on enemies.
@@ -10,7 +19,7 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Tested how:** `cargo test --release -p rc_squad -p rc_combat -p rc_squad_plugin` in the cloud sandbox.
 - **Result:** All pass: rc_squad 30 (1 new), rc_combat 19 + 21 (range), rc_squad_plugin fight_room and jobs_room. The new test uses the exact positions and direction from the log (Fixer at (-1409, -720, -2251) firing along (0.98, -0.17, 0.06) past Sev at (-1090, -758)), which the old check let through.
 - **Still broken / not tested:** Not re-run in `rc_game` on the PC yet. The scripted 175 damage is the original level's own event and is kept. Whether the original lets squad bolts hurt the player at all is not known (the damage table says x0.5, so we keep it). Squad mates hold fire more often now; they don't yet step aside to get a clear line.
-- **Next:** The user replays geo_01a; the log should show no `hit the player by mistake` lines and the damage lines should name every attacker.
+- **Next:** The user replays geo_01a; the log should show no `hit the player by mistake` lines and the damage lines should name every attacker. Done 2026-10-30 04:48Z on the PC: 0 squad hits on the player in a 3-minute fight (321 droid shots, 10 droids destroyed).
 
 ## 2026-10-30: Droids no longer spot the player right after a load (rc_game player and self-test)
 

@@ -276,6 +276,7 @@ pub(crate) fn fly_grenades(
         }
         let thrower = g.thrower;
         let mut touched: Option<Entity> = None;
+        let mut touched_level = false;
         let r = g.flight.step(p, dt, |a, b| {
             let mut best = level.as_deref().and_then(|l| {
                 l.0.sweep(rc_movement::Vec3::ZERO, v(a), v(b))
@@ -309,6 +310,7 @@ pub(crate) fn fly_grenades(
             if best.is_some_and(|b| b.actor) {
                 touched = who;
             }
+            touched_level = best.is_some_and(|b| !b.actor);
             best
         });
         if r.stuck && r.hit_actor {
@@ -343,6 +345,15 @@ pub(crate) fn fly_grenades(
         } else {
             None
         };
+        // Why it went off, for the log: a grenade that goes off right in
+        // front of the thrower should say what it ran into.
+        let mut why = if direct.is_some() {
+            "on touching a character"
+        } else if r.explode && touched_level {
+            "on touching the level"
+        } else {
+            "when its fuse ran out"
+        };
         // Stuck proximity grenades: a character it can see comes close.
         if !explode && g.flight.proximity_due(p, dt) {
             let at = g.flight.position;
@@ -352,6 +363,7 @@ pub(crate) fn fly_grenades(
             {
                 explode = true;
                 direct = Some(vic.entity);
+                why = "when a character came near";
             }
         }
         if !explode {
@@ -369,6 +381,7 @@ pub(crate) fn fly_grenades(
             &sees,
             &mut damage,
             &log,
+            why,
         );
         let point = g.flight.position;
         let vol = listener.map_or(1.0, |l| 1.0 / (1.0 + (l - point).length() / 2000.0));
@@ -407,6 +420,7 @@ fn blast(
     sees: &dyn Fn(Vec3, Vec3) -> bool,
     damage: &mut MessageWriter<Damage>,
     log: &Option<Res<GameLog>>,
+    why: &str,
 ) -> u32 {
     let point = g.flight.position;
     let types = &lib.damage_types;
@@ -493,7 +507,7 @@ fn blast(
     say(
         log,
         format!(
-            "grenades: {} went off after {:.2} s and {} bounces at ({:.0}, {:.0}, {:.0}), radius {}, {hit_count} characters reached",
+            "grenades: {} went off {why} after {:.2} s and {} bounces at ({:.0}, {:.0}, {:.0}), radius {}, {hit_count} characters reached",
             g.grenade, g.flight.age, g.flight.bounces, point.x, point.y, point.z, p.radius
         ),
     );
