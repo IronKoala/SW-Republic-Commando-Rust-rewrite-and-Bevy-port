@@ -16,7 +16,10 @@
 //!   `ACTION_GotoState` switches them off and on;
 //! - prompts (`ACTION_ShowPrompt`) become `HudMessage`s;
 //! - objectives (`ACTION_ObjectiveUpdate`) are kept in [`Objectives`];
-//! - checkpoints send [`CheckpointReached`], held while the player is down.
+//! - checkpoints send [`CheckpointReached`], held while the player is down;
+//! - where every script is goes into save files (`[scripts]`, see
+//!   `save.rs`). After a load the scripts carry on from there, and the
+//!   level-start events aren't sent again.
 //!
 //! Everything else a script does (lines of dialogue, animations,
 //! characters walking) is logged as "not done yet" with the script's own
@@ -24,8 +27,11 @@
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
+pub mod save;
+
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind, Health};
+use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
     playing, units::to_unreal, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet,
     GameState, HudMessage, LoadingGate, Player, PlayerVitals,
@@ -55,6 +61,7 @@ impl Plugin for ScriptsPlugin {
         app.insert_resource(rc_movers_plugin::TriggersRunElsewhere)
             .add_message::<ScriptEvent>()
             .add_message::<CheckpointReached>()
+            .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
@@ -416,9 +423,15 @@ fn run(
     mut checkpoints: MessageWriter<CheckpointReached>,
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
+    restoring: Option<Res<RestoringSave>>,
     log: Res<GameLog>,
 ) {
     let Some(mut script) = script else { return };
+    // A save is being put back: its [scripts] section says where the
+    // scripts are, so nothing starts or runs until it has.
+    if restoring.is_some() {
+        return;
+    }
     let script = &mut *script;
     if !script.started {
         script.started = true;

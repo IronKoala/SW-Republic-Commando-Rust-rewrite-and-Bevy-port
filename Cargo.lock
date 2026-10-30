@@ -4571,6 +4571,8 @@ dependencies = [
  "rc_level_viewer",
  "rc_movement",
  "rc_movers",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -4650,6 +4652,8 @@ dependencies = [
  "rc_movers_plugin",
  "rc_package",
  "rc_scripts",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]

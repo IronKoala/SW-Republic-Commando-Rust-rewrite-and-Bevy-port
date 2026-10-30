@@ -1054,6 +1054,9 @@ A `MoverSystems` set (in `GameSet::View`) then logs what happened
 Other parts open a door the way the original's scripts do: by event name.
 `LevelMovers::send("D_Exit")` sets off every mover whose `Tag` is `D_Exit`.
 
+Where every mover is goes into save files as `[movers]` (see "Saving,
+loading and checkpoints").
+
 
 
 - **Unit tests** (`cargo test -p rc_movers`): a triggered door opens in its
@@ -1219,6 +1222,14 @@ way through is the gap where `Blockade01` stood.
   with its values, counts action kinds, sends the level start and runs 30 s
   (or `--secs`) with no player, logging every event and effect. `--fire
   BactaUsed@60` stands in for the game.
+- **Saving** (`cargo test -p rc_scripts -p rc_scripts_plugin`): a save
+  made while a script waits on a timer with a counter half counted loads
+  into a fresh director that carries on the same way, without the level
+  start; a small geo_01a (barricade blown, volume off, checkpoint held)
+  goes through the file and back, and after the load the parts stay off,
+  the level counts as started and the script finishes on `BactaUsed`.
+  After the game's quickload, `rc_game --script` checks the level start
+  wasn't sent again and the barricade is still gone.
 - **In the game** (`rc_game --script`): on geo_01a it checks the scripts
   run and `levelstart` was sent, that a box swept through the barricade at
   `Blockade01` is stopped, waits for the scripts to switch the dispenser
@@ -2151,7 +2162,28 @@ each spawner's state and each living droid; `rc_enemies/src/save.rs`, using
 `rc_ai::Battle::snapshot` and `restore`), `[squad]` (stance, orders, each
 mate's place, job, revive, health and shield; `rc_squad_plugin/src/save.rs`,
 applied right after the squad appears on its first frame), `[checkpoints]`
-(checkpoints reached on this map; `rc_save`).
+(checkpoints reached on this map; `rc_save`), `[movers]` (every door and
+lift; `rc_movers_plugin/src/save.rs`, using `rc_movers::MoverSet::snapshot`
+and `restore`) and `[scripts]` (the level scripts;
+`rc_scripts_plugin/src/save.rs`, using `rc_scripts::Director::snapshot`
+and `restore`).
+
+**Doors, lifts and scripts carry on.** `[movers]` lists each mover by its
+map name (`Mover37`) with the key it is at, what it is doing (`rest`,
+`delay`, `moving` from one key to the next and how far, or `wait` with the
+seconds left before it closes), and whether it has been used, plus each
+touch trigger's state. Its position isn't written: it follows from the key
+and the move. `[scripts]` holds the director's clock and random-number
+state, each script's next action and what it waits for (an event, or a time
+on the scripts' clock), each trigger, counter, condition and prop, and
+events not handed out yet; and what the scripts changed in the game: level
+parts no longer solid or hidden (by map export number), bacta dispensers,
+objectives, and checkpoints waiting for the player to get up. Everything is
+matched by the map's own actor names, so a name the map hasn't got is
+logged and skipped. Loading `[scripts]` marks the level as started, so the
+map's level-start events (`levelstart`) are not sent again, and while
+`RestoringSave` exists the scripts don't run at all. An older save without
+these sections loads as before: doors shut and scripts from the start.
 
 **Loading reloads the map.** Loading a save sets `CurrentLevel` to the
 save's map and goes through `Loading` exactly like the menu does, so the
