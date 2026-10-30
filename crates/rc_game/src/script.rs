@@ -423,6 +423,30 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
+        // The helmet frame, on the same picture (drawn a few seconds after
+        // the level starts, once its shaders are ready), then the GAME
+        // page's HELMET row switched off and on again.
+        Check("the original helmet frame is drawn round the view", |w| {
+            helmet_drawn(w, "look_up")
+        }),
+        Note(|w| w.resource_mut::<Settings>().game.helmet = false),
+        Wait(0.5),
+        Shot("no_helmet"),
+        Check("HELMET OFF takes the frame away", |w| {
+            let shown = w.resource::<crate::helmet::HelmetReadout>().shown;
+            match helmet_match(w, "no_helmet")? {
+                None => Ok("no model in the install, nothing to take away".into()),
+                Some((share, _)) if !shown && share < 0.3 => Ok(format!(
+                    "hidden; {:.0}% of its pixels still match",
+                    share * 100.0
+                )),
+                Some((share, _)) => Err(format!(
+                    "shown {shown}; {:.0}% of its pixels still match",
+                    share * 100.0
+                )),
+            }
+        }),
+        Note(|w| w.resource_mut::<Settings>().game.helmet = true),
         Note(|w| set_pitch(w, 0.0)),
         Wait(0.2),
         // Turn round to where the squad stands (behind the player) and
@@ -1220,6 +1244,69 @@ fn shrink(img: &rc_image::Rgba, area: Rect, w: usize, h: usize) -> rc_image::Rgb
         width: w,
         height: h,
         pixels: out,
+    }
+}
+
+/// How much of the helmet frame's software painting matches screenshot
+/// `name`: the share of its pixels within a small colour difference, and
+/// how many pixels it covers. `None` if the install has no model.
+fn helmet_match(w: &mut World, name: &str) -> Result<Option<(f32, usize)>, String> {
+    let helmet = w.resource::<crate::helmet::Helmet>();
+    let model = match &helmet.model {
+        Some(Ok(m)) => m.clone(),
+        _ => return Ok(None),
+    };
+    let plan = helmet.plan.clone();
+    let shots = w.resource::<Shots>();
+    let pic = shots.pictures.get(name).ok_or("no screenshot")?;
+    let (pw, ph) = (pic.width, pic.height);
+    let points = rc_menus::helmet::fit(&model, &plan, pw as f32 / ph as f32);
+    let want = rc_menus::helmet::paint(&model, &points, plan.brightness, pw, ph);
+    let (mut close, mut total) = (0usize, 0usize);
+    for i in 0..pw * ph {
+        if want.pixels[i * 4 + 3] == 0 {
+            continue;
+        }
+        total += 1;
+        let d: i32 = (0..3)
+            .map(|k| (want.pixels[i * 4 + k] as i32 - pic.pixels[i * 4 + k] as i32).abs())
+            .sum();
+        if d <= 90 {
+            close += 1;
+        }
+    }
+    Ok(Some((close as f32 / total.max(1) as f32, total)))
+}
+
+/// The helmet frame is on screen in its own colours: most of the pixels
+/// that the software painting of it covers match screenshot `name` (the
+/// display drawn over it covers a few). Without the model in the install
+/// it is enough that the log says why.
+fn helmet_drawn(w: &mut World, name: &str) -> Result<String, String> {
+    let readout = w
+        .get_resource::<crate::helmet::HelmetReadout>()
+        .cloned()
+        .ok_or("no helmet readout")?;
+    match &w.resource::<crate::helmet::Helmet>().model {
+        Some(Err(e)) => return Ok(format!("not drawn, as the log says: {e}")),
+        None => return Err("the model was never read".into()),
+        Some(Ok(_)) => {}
+    }
+    if !readout.shown || readout.triangles == 0 {
+        return Err(format!("{readout:?}"));
+    }
+    let (share, total) = helmet_match(w, name)?.unwrap_or_default();
+    let got = format!(
+        "{} triangles fitted to shape {:.3}; {:.0}% of its {} pixels match the painting",
+        readout.triangles,
+        readout.fitted_to,
+        share * 100.0,
+        total
+    );
+    if total > 0 && share > 0.7 {
+        Ok(got)
+    } else {
+        Err(got)
     }
 }
 
