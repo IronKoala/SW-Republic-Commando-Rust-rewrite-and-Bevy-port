@@ -14,6 +14,7 @@
 //! numbers to the log, to check a controller.
 //! Everything is logged to `logs/rc_game.log`.
 
+mod display;
 mod hud;
 mod input;
 mod levels;
@@ -30,7 +31,7 @@ mod settings;
 mod theme;
 
 use bevy::prelude::*;
-use bevy::window::{PresentMode, WindowMode};
+use bevy::window::PresentMode;
 use rc_game_core::{CorePlugin, CurrentLevel, GameLog, GamePaths, GameSet, GameState};
 use settings::{Settings, SettingsPath};
 use std::path::PathBuf;
@@ -374,11 +375,7 @@ fn main() -> AppExit {
         primary_window: Some(Window {
             title: "Star Wars Republic Commando (Rust and Bevy)".into(),
             resolution: (settings.video.width, settings.video.height).into(),
-            mode: if settings.video.fullscreen {
-                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-            } else {
-                WindowMode::Windowed
-            },
+            mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
             present_mode: if settings.video.vsync {
                 PresentMode::AutoVsync
             } else {
@@ -419,6 +416,7 @@ fn main() -> AppExit {
     .add_plugins(rc_pads::PadsPlugin)
     .add_plugins((
         menu::MenuPlugin,
+        display::DisplayPlugin,
         original_menu::OriginalMenuPlugin,
         hud::HudPlugin,
         original_hud::OriginalHudPlugin,
@@ -444,7 +442,6 @@ fn main() -> AppExit {
         (
             log_states,
             menu::apply_settings,
-            menu::apply_video,
             count_frames,
             menu_camera_clear,
         )

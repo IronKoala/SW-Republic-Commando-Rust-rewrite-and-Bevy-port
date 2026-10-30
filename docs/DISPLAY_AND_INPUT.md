@@ -115,6 +115,34 @@ pictures are `logs/panini_plain.png` and `logs/panini_bent.png`. **Not
 tested** inside a level yet (the cloud sandbox had no game files this
 time), only in that check program.
 
+## Display modes (done; tested only in the cloud's virtual screen)
+
+`video.display_mode` in `settings.toml` (PORT + > DISPLAY MODE in the game)
+is one of three, handled by `crates/rc_game/src/display.rs`:
+
+- `windowed`: a window of the chosen screen size (`width` x `height`).
+- `borderless`: a window without edges covering the monitor at its own
+  size. Picking a screen size of another shape than the monitor's
+  switches to `windowed` at that size (`option_settings::write`). A size
+  of the monitor's shape stays borderless; the picture is still drawn at
+  the monitor's own size (drawing at a lower size, for speed, is not done).
+- `fullscreen` (true full screen): the monitor switches to the chosen size
+  when it can show that size and it has the monitor's shape (the highest
+  refresh rate of that size). For another shape the monitor stays at its
+  own size and the game draws in the largest centred box of the chosen
+  shape: every camera gets that box as its viewport, a camera behind them
+  all (`BarsCamera`) clears the window to black, and the menus, the
+  display and the field of view use the box's shape (`PlayArea`).
+
+The old `fullscreen = true` option still loads, as `borderless`.
+
+Checked in the cloud with a window manager under Xvfb: a 3440x1440 screen
+in full screen at 1920x1080 logs "display: drawing 2560x1440 at (440, 0)
+in a 3440x1440 window, black bars around it" and the screenshot shows the
+menu in the middle with black sides. Xvfb can't switch the monitor's size,
+so the true full screen video mode change itself is **not tested**; nor is
+anything on Windows, Linux desktops or Android.
+
 ## Dual input (done)
 
 Every device is read every frame and added together: keys, mouse, every

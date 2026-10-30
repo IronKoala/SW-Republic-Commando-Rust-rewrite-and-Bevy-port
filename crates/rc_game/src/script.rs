@@ -1162,7 +1162,8 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
         .get(name)
         .cloned()
         .ok_or("no screenshot")?;
-    let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
+    let across = w.resource::<OriginalMenus>().across;
+    let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32), across);
     let ours = shrink(&shot, area, W, H);
     let mut menus = w.resource_mut::<OriginalMenus>();
     let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
