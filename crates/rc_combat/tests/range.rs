@@ -360,7 +360,8 @@ fn droid_fire_hits_shield_then_health() {
 
 /// With the real game (RC_GAME_DIR set to the install, or a copy of its
 /// System, Sounds, StaticMeshes and Textures folders): every sound the
-/// weapon files name is found, and the DC-17m's model is built.
+/// weapon and grenade files name is found, groups (SoundMultiple) included,
+/// and the DC-17m's model is built.
 #[test]
 fn real_game_sounds_and_model() {
     let Some(game) = std::env::var_os("RC_GAME_DIR") else {
@@ -399,6 +400,15 @@ fn real_game_sounds_and_model() {
         wanted.extend(p.reload_sound.iter().cloned());
         wanted.extend(p.empty_sound.iter().cloned());
     }
+    for p in lib.grenades.values() {
+        wanted.extend(p.throw_sound.iter().cloned());
+        wanted.extend(p.bounce_sound.iter().cloned());
+        wanted.extend(p.blast_sound.iter().cloned());
+    }
+    // Every grenade that blows up has a blast sound.
+    for (id, p) in &lib.grenades {
+        assert!(p.blast_sound.is_some(), "{id} has no blast sound");
+    }
     wanted.sort();
     wanted.dedup();
     let missing: Vec<_> = wanted
@@ -406,6 +416,9 @@ fn real_game_sounds_and_model() {
         .filter(|n| !lib.sounds.contains_key(*n))
         .collect();
     assert!(missing.is_empty(), "sounds not found: {missing:?}");
+    // Groups: the repeater's Uzi_Fire holds one sound, the EMP blast two.
+    assert_eq!(lib.sounds["Uzi_Fire"].variants.len(), 1);
+    assert_eq!(lib.sounds["exp_empGren"].variants.len(), 2);
     eprintln!("sounds loaded: {}", lib.sounds.len());
     // The DC-17m in hand: a child of the camera with one mesh per section.
     let children = app

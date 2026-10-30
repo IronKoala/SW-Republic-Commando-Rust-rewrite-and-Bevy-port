@@ -154,11 +154,50 @@ pub struct Looks {
 #[derive(Resource, Default)]
 pub struct EnemySounds {
     tried: std::collections::HashSet<String>,
-    by_type: HashMap<String, HashMap<String, Handle<AudioSource>>>,
+    by_type: HashMap<String, HashMap<String, rc_combat::GameSound>>,
     picks: u32,
+    /// When each droid last said a hurt line (battle time), for
+    /// `hurt_interval`.
+    last_hurt: HashMap<u32, f32>,
 }
 
 impl EnemySounds {
+    /// Read one enemy type's lines (its `[sound]` names) from the game's
+    /// sound package, and log how many were found.
+    pub fn load_type(
+        &mut self,
+        paths: &GamePaths,
+        t: &AiParams,
+        audio: &mut Assets<AudioSource>,
+        log: &GameLog,
+    ) {
+        let snd = &t.sounds;
+        let mut names: Vec<String> = Vec::new();
+        for n in snd
+            .spotted
+            .iter()
+            .chain(&snd.hurt)
+            .chain(&snd.death)
+            .chain(snd.by_kind.values().flatten())
+        {
+            if !names.contains(n) {
+                names.push(n.clone());
+            }
+        }
+        let (found, notes) = rc_combat::read_sounds(paths, &snd.package, &names, audio);
+        for n in notes {
+            log.line(format!("{PART}: {}: {n}", t.kind.id));
+        }
+        log.line(format!(
+            "{PART}: {} sounds: {} of {} found in {}",
+            t.kind.id,
+            found.len(),
+            names.len(),
+            snd.package
+        ));
+        self.by_type.insert(t.kind.id.clone(), found);
+    }
+
     /// Play one of `names` (picked in turn) for an enemy of type `kind` at
     /// `at` (Unreal units), quieter with distance from `listener`. **Our
     /// choice**, not the game's 3D sound.
@@ -175,10 +214,10 @@ impl EnemySounds {
         }
         self.picks = self.picks.wrapping_add(1);
         let name = &names[self.picks as usize % names.len()];
-        let h = self.by_type.get(kind)?.get(name)?;
+        let h = self.by_type.get(kind)?.get(name)?.pick()?;
         let volume = listener.map_or(0.5, |l| 1.0 / (1.0 + (l - at).length() / 1000.0));
         commands.spawn((
-            AudioPlayer(h.clone()),
+            AudioPlayer(h),
             bevy::audio::PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume)),
         ));
         Some(name.clone())
@@ -326,26 +365,7 @@ fn load_fight(
             if !per_type.contains_key(&t.kind.id) || !sounds.tried.insert(t.kind.id.clone()) {
                 continue;
             }
-            let snd = &t.sounds;
-            let names: Vec<String> = snd
-                .spotted
-                .iter()
-                .chain(&snd.hurt)
-                .chain(&snd.death)
-                .cloned()
-                .collect();
-            let (found, notes) = rc_combat::read_sounds(&paths, &snd.package, &names, &mut audio);
-            for n in notes {
-                log.line(format!("{PART}: {}: {n}", t.kind.id));
-            }
-            log.line(format!(
-                "{PART}: {} sounds: {} of {} found in {}",
-                t.kind.id,
-                found.len(),
-                names.len(),
-                snd.package
-            ));
-            sounds.by_type.insert(t.kind.id.clone(), found);
+            sounds.load_type(&paths, t, &mut audio, &log);
         }
     }
     // Only the types this map uses, each once per run.
@@ -728,14 +748,22 @@ fn react_to_combat(
     let fight = &mut *fight;
     let now = fight.battle.time;
     let listener = camera.single().ok().map(|c| to_unreal(c.translation));
-    let mut say = |commands: &mut Commands, fight: &Fight, id: u32, what: &str| {
+    let died_now: Vec<Entity> = died.read().map(|d| d.entity).collect();
+    // The kind of the last damage each droid took this frame, so its death
+    // line can match what killed it.
+    let mut last_kind: HashMap<Entity, &'static str> = HashMap::new();
+    let mut say = |commands: &mut Commands, fight: &Fight, id: u32, what: &str, kind: &str| {
         let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) else {
             return;
         };
-        let names = match what {
-            "hurt" => &f.params.sounds.hurt,
-            _ => &f.params.sounds.death,
-        };
+        if what == "hurt" {
+            let last = sounds.last_hurt.get(&id).copied();
+            if last.is_some_and(|t| now - t < f.params.sounds.hurt_interval) {
+                return;
+            }
+            sounds.last_hurt.insert(id, now);
+        }
+        let names = f.params.sounds.for_damage(what, kind);
         if let Some(n) = sounds.play(
             commands,
             &f.params.kind.id,
@@ -743,7 +771,9 @@ fn react_to_combat(
             f.pawn.location,
             listener,
         ) {
-            log.line(format!("{PART}: t={now:.1}s droid {id} {what} sound {n}"));
+            log.line(format!(
+                "{PART}: t={now:.1}s droid {id} {what} ({kind}) sound {n}"
+            ));
         }
     };
     for d in damage.read() {
@@ -758,7 +788,10 @@ fn react_to_combat(
             continue;
         };
         fight.stats.droids_hurt += 1;
-        say(&mut commands, fight, droid.id, "hurt");
+        last_kind.insert(d.target, d.kind.name());
+        if !died_now.contains(&d.target) {
+            say(&mut commands, fight, droid.id, "hurt", d.kind.name());
+        }
         let from = d
             .instigator
             .and_then(|i| transforms.get(i).ok())
@@ -772,16 +805,17 @@ fn react_to_combat(
             }
         }
     }
-    for d in died.read() {
-        let Ok(droid) = droids.get(d.entity) else {
+    for d in &died_now {
+        let Ok(droid) = droids.get(*d) else {
             continue;
         };
         fight.battle.killed(droid.id);
         fight.stats.droids_destroyed += 1;
-        say(&mut commands, fight, droid.id, "death");
+        let kind = last_kind.get(d).copied().unwrap_or("other");
+        say(&mut commands, fight, droid.id, "death", kind);
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);
         // It leaves its weapon on the ground for the player.
-        if let (Some(f), Ok(t)) = (f, transforms.get(d.entity)) {
+        if let (Some(f), Ok(t)) = (f, transforms.get(*d)) {
             if !f.params.combat.drops.is_empty() {
                 rc_combat::spawn_pickup(&mut commands, &f.params.combat.drops, t.translation);
                 log.line(format!(
