@@ -17,9 +17,10 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 /// Sky-blue-grey background, as 0-255 sRGB values.
 pub const BACKGROUND: [u8; 3] = [64, 72, 89];
 
-/// Marks the drawn triangles of a mover (door, lift), by the mover's
-/// export index in the map. Their vertices are where the map placed the
-/// mover; moving the entity's `Transform` moves the mover.
+/// Marks the drawn triangles of a mover (door, lift), or of a prop with a
+/// tag of its own that a level script may remove, by its export index in
+/// the map. Their vertices are where the map placed it; moving the
+/// entity's `Transform` moves it, and hiding the entity hides it.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct MoverPart(pub usize);
 

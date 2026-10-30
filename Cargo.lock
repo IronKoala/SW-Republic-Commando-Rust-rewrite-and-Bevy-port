@@ -4472,12 +4472,14 @@ dependencies = [
  "rc_game_core",
  "rc_image",
  "rc_level_plugin",
+ "rc_level_viewer",
  "rc_menus",
  "rc_movement",
  "rc_movers_plugin",
  "rc_pads",
  "rc_panini",
  "rc_save",
+ "rc_scripts_plugin",
  "rc_squad_plugin",
  "serde",
  "toml 0.8.23",
@@ -4620,6 +4622,32 @@ dependencies = [
  "rc_game_core",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_scripts"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_package",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_scripts_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_combat",
+ "rc_game_core",
+ "rc_level",
+ "rc_level_plugin",
+ "rc_level_viewer",
+ "rc_movement",
+ "rc_movers_plugin",
+ "rc_package",
+ "rc_scripts",
 ]
 
 [[package]]

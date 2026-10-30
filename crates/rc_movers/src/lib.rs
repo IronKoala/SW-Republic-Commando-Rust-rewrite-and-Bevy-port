@@ -845,6 +845,12 @@ impl MoverSet {
         }
     }
 
+    /// The event is over (the player left the trigger that sent it):
+    /// movers that open only while set off (`TriggerControl`) close again.
+    pub fn release(&mut self, event: &str, events: &mut Vec<MoverEvent>) {
+        self.unsend(event, events);
+    }
+
     fn unsend(&mut self, event: &str, events: &mut Vec<MoverEvent>) {
         let now = self.time;
         for (i, m) in self.movers.iter_mut().enumerate() {

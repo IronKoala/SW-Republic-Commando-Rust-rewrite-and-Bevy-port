@@ -26,6 +26,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
 | `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
+| `rc_scripts` | Level scripts: runs a map's own scripting (scripted triggers and sequences, touch triggers, counters, true/false conditions, checkpoints, destructible props) as events and tags. No Bevy. `rc_script_check` reads every map's scripts and runs them without a window. |
+| `rc_scripts_plugin` | `ScriptsPlugin`, level scripts in `rc_game`: carries out what the scripts ask (doors, barricades, the player's health, bacta dispensers, prompts, objectives, checkpoints) and sends every event as a `ScriptEvent`. |
 | `rc_save` | Saving, loading and checkpoints: `SavePlugin` writes and reads the save files, quicksave and quickload, and saves at checkpoints. Bevy, but no window. |
 | `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
@@ -1085,6 +1087,146 @@ and closed in their `MoveTimes` (72 take over 60 s and weren't run). 33 of
 movers have nothing in the map sending their tag: most likely the game's
 scripts. In the walker, geo_05a's `Mover37` carried the player 12,176
 units up in 18 s with a gap of 0.0 units.
+
+## Level scripts (`rc_scripts`, `rc_scripts_plugin`)
+
+A Republic Commando level is a mission because of its scripting, and the
+scripting is data in the map, not code. It works with **events** and
+**tags**: every actor has a `Tag` (a name), and many have an `Event`
+(another name). "Triggering" an event wakes every actor whose `Tag` is that
+name. The map's own scripts are `ScriptedTrigger` and `ScriptedSequence`
+actors, each holding an `Actions` list of small objects with values:
+
+```
+ScriptedTrigger15:
+  0 WaitForEvent   ExternalEvent=BactaUsed
+  1 SetCollision   CollideActorTag=BactaBarricadeBlockingVolume bCollideActors=false
+  ...
+ 11 HurtActor      TargetTag=PathToGunshipBarricade amount=50000
+```
+
+### Reading (`rc_level::scripts`)
+
+`read` takes every actor in the level (except plain meshes, path nodes and
+lights) with all its values by name: numbers, true/false, names, strings,
+lists of objects, and structs. Republic Commando writes most structs as
+named values too (a dispenser's `BactaRecharging = {Event=BactaUsed, ...}`,
+a random wait's `PauseTime = {Min=2, Max=4}`), so those are read the same
+way. A script's `Actions` list is resolved to the action objects, in
+order; empty slots are skipped, as the original does. New action kinds need
+no code in the reader. All 79 maps read with nothing unreadable: 2,842
+scripts with 19,041 actions of 87 kinds.
+
+`tagged_actors` lists the props and blocking volumes with a `Tag` of their
+own. Those are what scripts switch off or blow up (barricades, bunker
+walls), so the collision loader keeps their triangles apart
+(`MapCollision::part_triangles`) and the level drawing gives them batches
+of their own (`MoverPart`), like movers.
+
+### Running (`rc_scripts::Director`)
+
+The director runs every script one action at a time until it has to wait:
+
+- **Own actions** (run inside the director): `WaitForEvent`,
+  `TriggerEvent`, `WaitForTimer`, `WaitForRandomTimer`, `Label`,
+  `GotoLabel`, `GotoAction`, `IfCondition`/`IfRandomPct` ... `EndSection`
+  (an `If` runs its section only when true, otherwise skips to the matching
+  `EndSection`; sections nest).
+- **Everything else** comes out as an `Effect::Action` for the game. Some
+  also take time: a line of dialogue with `bWaitForFinish`, an animation
+  that waits for its end, a character told to walk. Their lengths are our
+  settings (sound lengths aren't read yet).
+- `HurtActor` and `DestroyActor` on a **prop** are the director's: it keeps
+  each prop's `Health` and reports `PropDestroyed` (and sends the prop's
+  `DestroyedState.Event`).
+
+An event, when sent, goes to: scripts waiting for it; `ScriptedSequence`s
+handed out by a `PawnFactory` with that tag (`AIScriptFromFactory`; a
+sequence also runs from the start if a placed character names it in
+`AIScriptTag`); touch triggers it switches on or off (`OtherTriggerTurnsOn`,
+`...TurnsOff`, `...Toggles`); `Counter`s (count down `NumToCount`, then
+send their own event); `TriggeredCondition`s (a `bToggled` one flips, others
+take the opposite of how they started, `bTriggerControlled` ones go back
+when untriggered); `Checkpoint`s (`Effect::Checkpoint`). Every event also
+comes out as `Effect::Event`, so the game can pass it to doors, factories
+and anything else. All of this is our reading of Unreal Engine 2's public
+descriptions of these classes and of what the maps store; no game code was
+copied.
+
+Scripts run before events are handed out each frame, so a script that has
+just reached a `WaitForEvent` hears an event sent in the same frame. A
+chain settles within the frame (up to 8 rounds); a script that loops
+without waiting stops after 64 actions in a frame and carries on the next
+(`max_actions_per_frame`), so no map can freeze the game.
+
+The level starts by sending the first `PlayerStart`'s `Event` (`levelstart`
+in most campaign maps; `Startup`, `SetupLevel` and others in some).
+
+### In the game (`rc_scripts_plugin`)
+
+While loading, the plugin reads the map's scripts and builds the director
+once the level part has read the triggers (loading gate part `scripts`).
+It inserts `TriggersRunElsewhere`, so the movers part leaves touch triggers
+to the director and one place sends every trigger's event. Each frame of
+play (after the player moves) it steps the director with the player's body
+and carries out the effects:
+
+| Effect | What happens |
+|---|---|
+| any event | `LevelMovers::send`: doors and lifts with that tag; then a `ScriptEvent` message for other parts |
+| a door's own event (`OpenedEvent`, ...) | back into the director, so scripts can wait for doors |
+| player leaves a trigger | `LevelMovers::release` (doors that open only while set off close) |
+| `SetCollision` | `LevelParts::set_solid(tag, bCollideActors)` |
+| prop destroyed, `DestroyActor` | part no longer solid; its drawn `MoverPart`s hidden |
+| `SetHidden` | drawn parts hidden |
+| `HurtActor` on the player (`PlayerCommando`) | `rc_combat` `Damage` to the player |
+| `GotoState` on a bacta dispenser | switched off (`Disabled`) or on |
+| `ShowPrompt` | `HudMessage` (`@`, the button, shows as USE for now) |
+| `ObjectiveUpdate` | kept in `Objectives` (what the numbers mean isn't worked out) |
+| checkpoint | `CheckpointReached { name }`, held while the player is down |
+| anything else | logged with the action's values and the script's own comment, "not done yet" |
+
+**Bacta dispensers.** Hold Use within 256 units of one that's switched on
+(the game's `PlayerRange`) to heal at 50 health per second (our choice).
+Starting sends the dispenser's `BactaActive.Event`; full health sends its
+`BactaRecharging.Event` and it rests 10 s (our choice). In geo_01a those
+are `BactaDispenserActive` (a condition the reminder lines check) and
+`BactaUsed`, which is what opens the landing zone.
+
+### geo_01a, worked through
+
+From the map: `levelstart` starts the gunship intro (`ScriptedTrigger52`),
+which sends `Rappel`; `ScriptedTrigger7` plays the advisor's lines, sends
+`CheckpointLevelStart` (checkpoint0) and `StartBactaTraining`;
+`ScriptedTrigger3` hurts the player 175 (an "anti-infantry round"), plays
+the "heal yourself" lines and sends `StartBactaReminderTimer`;
+`ScriptedTrigger86` switches the dispenser `BactaDispenserLZ` on. Using it
+sends `BactaUsed`, and `ScriptedTrigger15` switches off
+`BactaBarricadeBlockingVolume`, sends `RetreatToGammaSector`, and blows up
+the prop `PathToGunshipBarricade` (`Blockade01`, health 49,000, hurt
+50,000). The barricade's other piece (`Blockade02`, a plain mesh) stays: the
+way through is the gap where `Blockade01` stood.
+
+### How we check it without looking
+
+- **Unit tests** (`cargo test -p rc_scripts`, 7): an event and timer chain
+  in order and on time; `IfCondition` skipping a section only when its
+  condition is on; a counter sending on its last count and a checkpoint
+  asking for a save; touch triggers firing once, and one switched on by
+  another; a prop destroyed when its health runs out; a loop with no wait
+  bounded, and a sequence starting with its factory; the settings file.
+- **Every map** (`rc_script_check`): reads all scripts, lists every action
+  with its values, counts action kinds, sends the level start and runs 30 s
+  (or `--secs`) with no player, logging every event and effect. `--fire
+  BactaUsed@60` stands in for the game.
+- **In the game** (`rc_game --script`): on geo_01a it checks the scripts
+  run and `levelstart` was sent, that a box swept through the barricade at
+  `Blockade01` is stopped, waits for the scripts to switch the dispenser
+  on, stands the player at the dispenser's marker, holds Use, waits for the
+  barricade to go, then checks the same sweep now passes, the volume isn't
+  solid, both drawn parts of the prop are hidden, and that the chain of
+  events happened in order with the player hurt, healed and checkpoint0
+  saved.
 
 ## Sounds
 

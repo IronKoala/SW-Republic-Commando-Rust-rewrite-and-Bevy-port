@@ -64,6 +64,13 @@ impl Plugin for MoversPlugin {
     }
 }
 
+/// Insert this (in the app, before the game starts) when another part runs
+/// the map's triggers and sends their events with [`LevelMovers::send`] and
+/// [`LevelMovers::release`]. The level scripts part does. Without it, the
+/// movers run the triggers that only open doors themselves.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct TriggersRunElsewhere;
+
 /// Something a door, lift or trigger did, with the movers' clock (seconds
 /// since the level started). Read it with a `MessageReader`.
 #[derive(Message, Debug, Clone)]
@@ -127,6 +134,17 @@ impl LevelMovers {
         let t = set.time;
         self.queue(t, events);
         n
+    }
+
+    /// The event is over (the player left the trigger that sent it), as
+    /// the original's `UntriggerEvent`: movers that open only while set off
+    /// close again.
+    pub fn release(&self, event: &str) {
+        let mut set = self.shared.set.write().unwrap_or_else(|e| e.into_inner());
+        let mut events = Vec::new();
+        set.release(event, &mut events);
+        let t = set.time;
+        self.queue(t, events);
     }
 
     fn queue(&self, t: f32, events: Vec<MoverEvent>) {
@@ -203,6 +221,7 @@ fn build(
     data: Option<Res<LevelMoverData>>,
     collision: Option<Res<LevelCollision>>,
     paths: Res<GamePaths>,
+    elsewhere: Option<Res<TriggersRunElsewhere>>,
     mut gate: ResMut<LoadingGate>,
     log: Res<GameLog>,
 ) {
@@ -214,7 +233,15 @@ fn build(
     }
     let settings = load_settings(&paths, &log);
     let v = |p: [f32; 3]| UVec3::new(p[0], p[1], p[2]);
-    let set = MoverSet::new(data.movers.clone(), settings, |e| {
+    let mut map = data.movers.clone();
+    if elsewhere.is_some() {
+        log.line(format!(
+            "{PART}: the level scripts run the map's {} triggers",
+            map.triggers.len()
+        ));
+        map.triggers.clear();
+    }
+    let set = MoverSet::new(map, settings, |e| {
         data.triangles
             .get(&e)
             .map(|ts| ts.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect())
