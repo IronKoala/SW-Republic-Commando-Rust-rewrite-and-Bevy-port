@@ -1816,6 +1816,14 @@ squad:
      the scene has no ambient light, so droids get a steady share of their
      own colour (`ambient`, a guess standing in for each zone's ambient
      light, which we don't read yet).
+     Each animation comes from the first of the mesh's linked animation
+     sets that has it, in the mesh's order, so a character whose own set
+     holds only cutscenes still finds its everyday moves (the Trandoshan
+     mercenary borrows the commandos' `CloneCommandoSet`). `[look] skin`
+     names a material to wear instead of the mesh's own, as the original
+     does with a class's `Skins[0]` (the mercenary's mesh carries only a
+     grey stand-in). `rc_enemy_look_check` (an example program in
+     rc_enemies) loads every enemy file's look and checks it.
    - VR and other platforms: nothing here reads input or the screen; the
      player is found by its `Player` and `PlayerCamera` markers, so a VR
      camera works the same. No platform-specific code.
