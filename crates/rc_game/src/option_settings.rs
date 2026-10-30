@@ -23,7 +23,71 @@ pub const ALL: &[&str] = &[
     "music_volume",
     "video_resolution",
     "vsync",
+    // The port's own settings, on its PORT + page.
+    "field_of_view",
+    "panini",
+    "fullscreen",
+    "master_volume",
+    "stick_look_speed",
+    "look_stick_dead_zone",
+    "gyro_mode",
+    "gyro_sensitivity",
 ];
+
+/// A setting shown as evenly spaced numbers: (lowest, highest, step,
+/// decimals shown, text after the number, number shown per unit).
+type Numeric = (f32, f32, f32, usize, &'static str, f32);
+
+fn numeric(name: &str) -> Option<Numeric> {
+    Some(match name {
+        "field_of_view" => (60.0, 120.0, 5.0, 0, "", 1.0),
+        "panini" => (0.0, 1.0, 0.1, 0, "%", 100.0),
+        "master_volume" => (0.0, 1.0, 0.1, 0, "", 10.0),
+        "stick_look_speed" => (0.5, 8.0, 0.5, 1, "", 1.0),
+        "look_stick_dead_zone" => (0.0, 0.5, 0.02, 2, "", 1.0),
+        "gyro_sensitivity" => (0.25, 5.0, 0.25, 2, "", 1.0),
+        _ => return None,
+    })
+}
+
+fn numeric_values((lo, hi, step, ..): Numeric) -> Vec<f32> {
+    let n = ((hi - lo) / step).round() as usize;
+    (0..=n).map(|i| lo + step * i as f32).collect()
+}
+
+fn numeric_value(name: &str, s: &Settings) -> f32 {
+    match name {
+        "field_of_view" => s.video.fov,
+        "panini" => s.video.panini,
+        "master_volume" => s.audio.master_volume,
+        "stick_look_speed" => s.controls.stick_look_speed,
+        "look_stick_dead_zone" => s.controls.look_stick_dead_zone,
+        "gyro_sensitivity" => s.gyro.sensitivity,
+        _ => 0.0,
+    }
+}
+
+fn set_numeric(name: &str, s: &mut Settings, v: f32) {
+    match name {
+        "field_of_view" => s.video.fov = v,
+        "panini" => s.video.panini = v,
+        "master_volume" => s.audio.master_volume = v,
+        "stick_look_speed" => s.controls.stick_look_speed = v,
+        "look_stick_dead_zone" => s.controls.look_stick_dead_zone = v,
+        "gyro_sensitivity" => s.gyro.sensitivity = v,
+        _ => {}
+    }
+}
+
+const GYRO_MODES: [rc_pads::GyroMode; 3] = [
+    rc_pads::GyroMode::Off,
+    rc_pads::GyroMode::Always,
+    rc_pads::GyroMode::Aiming,
+];
+
+/// The setting whose value opens a drop-down list when chosen (the
+/// others change only with their arrows).
+pub const LIST_SETTING: &str = "video_resolution";
 
 pub fn known(name: &str) -> bool {
     ALL.contains(&name)
@@ -60,7 +124,17 @@ const RESOLUTIONS: &[(u32, u32)] = &[
 /// The values to show instead of the original's, if this setting needs
 /// its own list.
 pub fn items(name: &str, s: &Settings) -> Option<Vec<String>> {
+    if let Some(n @ (_, _, _, decimals, suffix, unit)) = numeric(name) {
+        return Some(
+            numeric_values(n)
+                .into_iter()
+                .map(|v| format!("{:.*}{suffix}", decimals, v * unit))
+                .collect(),
+        );
+    }
     match name {
+        "fullscreen" => Some(vec!["ON".into(), "OFF".into()]),
+        "gyro_mode" => Some(vec!["OFF".into(), "ALWAYS".into(), "WHEN AIMING".into()]),
         "video_resolution" => {
             let mut sizes = RESOLUTIONS.to_vec();
             let now = (s.video.width, s.video.height);
@@ -82,7 +156,20 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
     }
     let tenth = |v: f32| ((v * 10.0).round() as usize).min(n - 1);
     let yes_no = |on: bool| if on { 0 } else { 1.min(n - 1) };
+    if let Some(num) = numeric(name) {
+        let v = numeric_value(name, s);
+        let values = numeric_values(num);
+        let nearest = (0..values.len())
+            .min_by(|&a, &b| (values[a] - v).abs().total_cmp(&(values[b] - v).abs()))?;
+        return Some(nearest.min(n - 1));
+    }
     Some(match name {
+        "fullscreen" => yes_no(s.video.fullscreen),
+        "gyro_mode" => GYRO_MODES
+            .iter()
+            .position(|m| *m == s.gyro.mode)
+            .unwrap_or(0)
+            .min(n - 1),
         "mouse_sensitivity" => {
             let base = Settings::default().controls.mouse_sensitivity;
             let step = (s.controls.mouse_sensitivity / base * SENSITIVITY_DEFAULT_STEP).round();
@@ -114,7 +201,16 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
         return false;
     };
     let first = i == 0;
+    if let Some(num) = numeric(name) {
+        let Some(v) = numeric_values(num).get(i).copied() else {
+            return false;
+        };
+        set_numeric(name, s, v);
+        return true;
+    }
     match name {
+        "fullscreen" => s.video.fullscreen = first,
+        "gyro_mode" => s.gyro.mode = GYRO_MODES[i.min(2)],
         "mouse_sensitivity" => {
             let base = Settings::default().controls.mouse_sensitivity;
             s.controls.mouse_sensitivity = base * (i + 1) as f32 / SENSITIVITY_DEFAULT_STEP;
@@ -163,6 +259,9 @@ pub fn restore(name: &str, s: &mut Settings) {
             s.video.height = d.video.height;
         }
         "vsync" => s.video.vsync = d.video.vsync,
+        "fullscreen" => s.video.fullscreen = d.video.fullscreen,
+        "gyro_mode" => s.gyro.mode = d.gyro.mode,
+        _ if numeric(name).is_some() => set_numeric(name, s, numeric_value(name, &d)),
         _ => {}
     }
 }
@@ -192,7 +291,7 @@ mod tests {
             let items = items(name, &s0)
                 .unwrap_or_else(|| list(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]));
             let mut s = s0.clone();
-            for i in [0, 1, 2] {
+            for i in (0..3).filter(|&i| i < items.len()) {
                 assert!(write(name, &mut s, i, &items), "{name} {i}");
                 let back = read(name, &s, &items);
                 // Two-value settings (on/off) read back as 0 or 1.

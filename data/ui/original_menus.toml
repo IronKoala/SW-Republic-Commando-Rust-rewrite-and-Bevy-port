@@ -36,6 +36,11 @@
 # have, copied from one of the page's own buttons and moved down. Its text
 # must say it's this port's addition.
 #
+# For the port's own pages, which borrow an original page's look:
+# [pages.<page>.texts] gives widgets new text, [pages.<page>.moves] moves
+# widgets down (negative: up) by a fraction of the screen, and
+# hidden_rows = [...] hides whole rows (by the row's button).
+#
 # Checked 2026-10-29 with `rc_probe --pages` against the install: these are
 # the original's function names. `rc_probe --pages` lists every menu's
 # buttons and says which pages would use their original menu.
@@ -99,13 +104,13 @@ OnRight = "option_right"
 "Options[7]" = "unavailable"        # TACTICAL VISOR MODE
 "Options[8]" = "unavailable"        # TACTICAL MODE INTENSITY
 
-# Not in the original: our own button ("PORT +", short enough to fit the
-# tab) to the placeholder page with the port's extra settings.
+# Not in the original: our own tab ("PORT +", short enough to fit) for the
+# port's extra settings, on [pages.more_settings] below.
 [pages.options.extra_buttons.PortSettings]
 copy_of = "Controls"
 text = "PORT +"
 move_down = 0.05
-command = "open:more_settings"
+command = "switch:more_settings"
 
 [pages.options_sound]
 class = "XInterfaceCTMenus.CTSoundOptionsPCMenu"
@@ -133,7 +138,7 @@ OnRight = "option_right"
 copy_of = "Controls"
 text = "PORT +"
 move_down = 0.05
-command = "open:more_settings"
+command = "switch:more_settings"
 
 [pages.options_graphics]
 class = "XInterfaceCTMenus.CTGraphicsOptionsPCMenu"
@@ -166,7 +171,7 @@ OnRight = "option_right"
 copy_of = "Controls"
 text = "PORT +"
 move_down = 0.05
-command = "open:more_settings"
+command = "switch:more_settings"
 
 # The controls page shows the keys of the keyboard and mouse, or of the
 # controller when that was used last. Choosing a row opens the original
@@ -225,4 +230,54 @@ ActionSelected = "rebind"
 copy_of = "Graphics"
 text = "PORT +"
 move_down = 0.1
-command = "open:more_settings"
+command = "switch:more_settings"
+
+# The port's own settings (the original has none of these), on a page that
+# borrows the original GAME page's look: its rows, arrows, tabs and boxes.
+# The GAME tab's "you are here" bar moves down to the PORT + tab, and a GAME
+# tab (a copy of SOUND) takes its place.
+[pages.more_settings]
+class = "XInterfaceCTMenus.CTGameOptionsPCMenu"
+back = "back"
+hidden_rows = ["Options[8]"]
+
+[pages.more_settings.buttons]
+SoundSelected = "switch:options_sound"
+GraphicsSelected = "switch:options_graphics"
+ControlsSelected = "switch:options_controls"
+RestoreToDefaultSelected = "restore_defaults"
+DoneSelected = "back"
+OnLeft = "option_left"
+OnRight = "option_right"
+
+[pages.more_settings.choosers]
+"Options[0]" = "field_of_view"
+"Options[1]" = "panini"
+"Options[2]" = "fullscreen"
+"Options[3]" = "master_volume"
+"Options[4]" = "stick_look_speed"
+"Options[5]" = "look_stick_dead_zone"
+"Options[6]" = "gyro_mode"
+"Options[7]" = "gyro_sensitivity"
+
+[pages.more_settings.texts]
+GameLabel = "PORT +"
+"OptionLabels[0]" = "FIELD OF VIEW"
+"OptionLabels[1]" = "WIDE SCREEN FIX"
+"OptionLabels[2]" = "FULL SCREEN"
+"OptionLabels[3]" = "MASTER VOLUME"
+"OptionLabels[4]" = "STICK LOOK SPEED"
+"OptionLabels[5]" = "STICK DEAD ZONE"
+"OptionLabels[6]" = "GYRO AIMING"
+"OptionLabels[7]" = "GYRO SENSITIVITY"
+
+[pages.more_settings.moves]
+GameLabel = 0.2
+GameLabelBackground = 0.2
+GameLabelConnector = 0.2
+
+[pages.more_settings.extra_buttons.GameTab]
+copy_of = "Sound"
+text = "GAME"
+move_down = -0.05
+command = "switch:options"

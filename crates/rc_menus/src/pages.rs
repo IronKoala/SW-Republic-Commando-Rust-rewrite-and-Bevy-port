@@ -106,6 +106,14 @@ pub struct PagePlan {
     pub keys: Vec<(String, String)>,
     /// Buttons this port adds to the original page, clearly marked.
     pub extra_buttons: Vec<ExtraButton>,
+    /// New text for widgets (a label or a button), by widget name: lets
+    /// the port's own page reuse an original page's look.
+    pub texts: Vec<(String, String)>,
+    /// Widgets moved down (up when negative) by a fraction of the screen.
+    pub moves: Vec<(String, f32)>,
+    /// Rows hidden whole (the row's button, label and arrows), by the
+    /// row button's name.
+    pub hidden_rows: Vec<String>,
 }
 
 /// A button the port adds to an original page, made as a copy of one of
@@ -184,6 +192,21 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
     let mut why = Vec::new();
     for s in &layout.skipped {
         why.push(format!("widget {s} is a kind we can't draw yet"));
+    }
+    for (name, text) in &plan.texts {
+        if !crate::screens::set_widget_text(layout, name, text) {
+            why.push(format!("text for {name}, which isn't on this page"));
+        }
+    }
+    for (name, by) in &plan.moves {
+        if !crate::screens::move_widget(layout, name, *by) {
+            why.push(format!("move for {name}, which isn't on this page"));
+        }
+    }
+    for name in &plan.hidden_rows {
+        for i in crate::screens::row_widgets(layout, name) {
+            layout.widgets[i].hidden = true;
+        }
     }
     for e in &plan.extra_buttons {
         if !crate::screens::add_button_copy(layout, e) {
@@ -282,6 +305,12 @@ struct PageDef {
     keys: BTreeMap<String, String>,
     #[serde(default)]
     extra_buttons: BTreeMap<String, ExtraDef>,
+    #[serde(default)]
+    texts: BTreeMap<String, String>,
+    #[serde(default)]
+    moves: BTreeMap<String, f32>,
+    #[serde(default)]
+    hidden_rows: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -324,6 +353,9 @@ pub fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
             choosers: d.choosers.into_iter().collect(),
             keys: d.keys.into_iter().collect(),
             extra_buttons,
+            texts: d.texts.into_iter().collect(),
+            moves: d.moves.into_iter().collect(),
+            hidden_rows: d.hidden_rows,
         });
     }
     Ok(out)

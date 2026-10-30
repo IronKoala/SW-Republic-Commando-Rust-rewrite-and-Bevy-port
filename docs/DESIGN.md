@@ -2278,9 +2278,12 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   setting behind each row (`rc_game/src/option_settings.rs` turns a
   setting into "which value" and back), `keys` names the action behind
   each key row of CONTROLS, and `extra_buttons` adds a copy of an original
-  button (here "PORT +", which opens our clearly marked placeholder page
-  for settings the original never had: FOV, Panini, full screen, master
-  volume, controller look and gyro). A row naming `unavailable` is greyed
+  button (here the "PORT +" tab). The port's own settings page
+  (`more_settings`: FOV, Panini, full screen, master volume, controller
+  look and gyro) borrows the original GAME page with `texts`, `moves` and
+  `hidden_rows`. The screen size opens a drop-down list made from the
+  page's own pieces (`screens::drop_down`); other values change only with
+  their arrows. A row naming `unavailable` is greyed
   out and skipped, as the original greys options it can't offer. Key rows
   open the original's REASSIGN BUTTON box (`CTMapKeyMenu`), which uses
   `rebind.rs` for the actual capture. The effects volume now scales every

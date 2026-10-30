@@ -153,8 +153,9 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::OptionsGraphics => Some("options_graphics"),
         Page::OptionsControls => Some("options_controls"),
         Page::Paused => Some("paused"),
-        // MORE SETTINGS is this port's own page: always the placeholder.
-        Page::Main | Page::Levels(_) | Page::NoGame | Page::MoreSettings => None,
+        // The port's own settings, drawn in the original GAME page's look.
+        Page::MoreSettings => Some("more_settings"),
+        Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
 
@@ -182,6 +183,29 @@ pub struct RebindBox {
     pub chosen: bool,
 }
 
+/// A drop-down list open under a chooser (the screen size).
+pub struct ListBox {
+    pub screen: Screen,
+    /// The chooser it belongs to (widget index on the page).
+    pub chooser: usize,
+    pub items: Vec<String>,
+    /// The first value shown (the list scrolls).
+    pub first: usize,
+}
+
+impl ListBox {
+    /// The value with focus, as an index into `items`.
+    pub fn focused_item(&self) -> Option<usize> {
+        let name = self.screen.focused_name()?;
+        let n: usize = name
+            .strip_prefix("ListItems[")?
+            .strip_suffix(']')?
+            .parse()
+            .ok()?;
+        Some(self.first + n)
+    }
+}
+
 /// What the options pages asked for this frame, done by `apply_options`
 /// (which has the settings and bindings).
 #[derive(Debug, Clone, PartialEq)]
@@ -191,6 +215,8 @@ enum OptionWork {
     RestoreDefaults,
     /// Open the "reassign button" box for a key button (widget index).
     Rebind(usize),
+    /// Set a chooser (widget index) to one of its values, from its list.
+    Pick(usize, usize),
     RebindAccept,
     RebindCancel,
     /// CLEAR: forget the key pressed and wait for another.
@@ -212,6 +238,8 @@ pub struct OriginalMenus {
     /// The "reassign button" box while it shows, and its layout.
     pub rebind: Option<RebindBox>,
     map_key_layout: Option<MenuLayout>,
+    /// The drop-down list while it shows.
+    pub list: Option<ListBox>,
     /// Options work for `apply_options`.
     work: Vec<OptionWork>,
     quit_text: String,
@@ -566,6 +594,7 @@ fn focus_new_page(
     *last = shown.clone();
     menus.question = None;
     menus.rebind = None;
+    menus.list = None;
     menus.dirty = true;
     if let Some(Shown::Page(k)) = &shown {
         let p = menus.pages.get_mut(k).unwrap();
@@ -620,6 +649,145 @@ fn play_sound(
     }
 }
 
+/// What the drop-down list did with this frame's input.
+enum ListInput {
+    Nothing,
+    Moved,
+    Close,
+    /// A value was chosen (index into the list's items).
+    Pick(usize),
+}
+
+/// Open the drop-down list under chooser `i` of page `k`, focused on the
+/// value chosen now.
+fn open_list(menus: &mut OriginalMenus, k: &str, i: usize, log: &GameLog) {
+    let page = &menus.pages[k];
+    let Kind::Button(b) = &page.screen.layout.widgets[i].kind else {
+        return;
+    };
+    let (items, current) = (b.items.clone(), b.current);
+    let mut l = ListBox {
+        screen: Screen {
+            layout: page.screen.layout.clone(),
+            focus: None,
+        },
+        chooser: i,
+        items,
+        first: 0,
+    };
+    if !show_list(&page.screen.layout, &mut l, current) {
+        log.line(format!(
+            "original menus: page {k}: no drop-down list for {}",
+            page.screen.layout.widgets[i].name
+        ));
+        return;
+    }
+    log.line(format!(
+        "original menus: page {k}: drop-down list of {} values opened on {}",
+        l.items.len(),
+        l.items[current.min(l.items.len() - 1)]
+    ));
+    menus.list = Some(l);
+    menus.dirty = true;
+}
+
+/// Lay the list out with value `focus` shown and focused, scrolling only
+/// as far as needed. False if the page can't make a list.
+fn show_list(page: &MenuLayout, l: &mut ListBox, focus: usize) -> bool {
+    let focus = focus.min(l.items.len().saturating_sub(1));
+    let rows = screens::LIST_ROWS;
+    if focus < l.first {
+        l.first = focus;
+    } else if focus >= l.first + rows {
+        l.first = focus + 1 - rows;
+    }
+    l.first = l.first.min(l.items.len().saturating_sub(rows));
+    let name = &page.widgets[l.chooser].name;
+    let Some(layout) = screens::drop_down(page, name, &l.items, l.first) else {
+        return false;
+    };
+    let row = format!("ListItems[{}]", focus - l.first);
+    l.screen.focus = layout.widgets.iter().position(|w| w.name == row);
+    l.screen.layout = layout;
+    true
+}
+
+/// Keys, controller, mouse and wheel in the drop-down list.
+fn list_input(
+    menus: &mut OriginalMenus,
+    k: &str,
+    actions: &ActionState,
+    hits: &Query<(&Interaction, &HitBox), Changed<Interaction>>,
+    mouse_moved: bool,
+    wheel_y: f32,
+) -> ListInput {
+    let page = &menus.pages[k].screen.layout;
+    let l = menus.list.as_mut().unwrap();
+    let Some(now) = l.focused_item() else {
+        return ListInput::Close;
+    };
+    if actions.just_pressed(Action::MenuBack) {
+        return ListInput::Close;
+    }
+    if actions.just_pressed(Action::MenuAccept) {
+        return ListInput::Pick(now);
+    }
+    let last = l.items.len().saturating_sub(1);
+    let mut to = None;
+    if actions.just_pressed(Action::MenuDown) {
+        to = Some((now + 1).min(last));
+    }
+    if actions.just_pressed(Action::MenuUp) {
+        to = Some(now.saturating_sub(1));
+    }
+    if wheel_y != 0.0 {
+        // The wheel scrolls the list and the focus with it.
+        let by = if wheel_y > 0.0 { -1 } else { 1 };
+        let first = (l.first as i32 + by)
+            .clamp(0, l.items.len().saturating_sub(screens::LIST_ROWS) as i32)
+            as usize;
+        let at = now as i32 - l.first as i32;
+        l.first = first;
+        to = Some((first as i32 + at).clamp(0, last as i32) as usize);
+    }
+    // Every mouse area under the pointer gets the press (the clear one over
+    // the whole screen too), so a row wins over "outside".
+    let mut outside = false;
+    for (i, hit) in hits {
+        if !hit.0 {
+            continue;
+        }
+        let name = l
+            .screen
+            .layout
+            .widgets
+            .get(hit.1)
+            .map(|w| w.name.clone())
+            .unwrap_or_default();
+        let item = name
+            .strip_prefix("ListItems[")
+            .and_then(|n| n.strip_suffix(']'))
+            .and_then(|n| n.parse::<usize>().ok())
+            .map(|n| l.first + n);
+        match (i, item) {
+            (Interaction::Pressed, Some(item)) => return ListInput::Pick(item),
+            (Interaction::Pressed, None) if name == "ListOutside" => outside = true,
+            (Interaction::Hovered, Some(item)) if mouse_moved && item != now => to = Some(item),
+            _ => {}
+        }
+    }
+    if outside {
+        return ListInput::Close;
+    }
+    match to {
+        Some(to) if to != now || wheel_y != 0.0 => {
+            show_list(page, l, to);
+            ListInput::Moved
+        }
+        _ => ListInput::Nothing,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn navigate(
     mut commands: Commands,
@@ -634,26 +802,13 @@ fn navigate(
     mut next_play: Option<ResMut<NextState<Play>>>,
     mut exit: MessageWriter<AppExit>,
     mut sources: ResMut<Assets<AudioSource>>,
-    (mut cursor, mut wheel, mouse): (
-        MessageReader<CursorMoved>,
-        MessageReader<MouseWheel>,
-        Res<ButtonInput<MouseButton>>,
-    ),
+    (mut cursor, mut wheel): (MessageReader<CursorMoved>, MessageReader<MouseWheel>),
     log: Res<GameLog>,
 ) {
     // Pointing at a button moves focus only when the mouse itself moves,
     // not when the menu is redrawn under a still pointer.
     let mouse_moved = cursor.read().count() > 0;
-    // The wheel and the right button also step the row under the pointer
-    // (a left click steps it forwards, as its right arrow does).
-    let wheel_step: f32 = wheel.read().map(|w| w.y).sum();
-    let mouse_step = if wheel_step > 0.0 {
-        1
-    } else if wheel_step < 0.0 || mouse.just_pressed(MouseButton::Right) {
-        -1
-    } else {
-        0
-    };
+    let wheel_y: f32 = wheel.read().map(|w| w.y).sum();
     menus.used_input = false;
     let Some(shown) = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu) else {
         return;
@@ -663,6 +818,35 @@ fn navigate(
     // rebinding, not to the menu.
     if menus.rebind.as_ref().is_some_and(|r| !r.chosen) {
         menus.used_input = true;
+        return;
+    }
+    // The drop-down list takes all input while it's open.
+    if menus.list.is_some() {
+        let Shown::Page(k) = &shown else {
+            menus.list = None;
+            return;
+        };
+        menus.used_input = true;
+        let pick = list_input(menus, k, &actions, &hits, mouse_moved, wheel_y);
+        match pick {
+            ListInput::Nothing => {}
+            ListInput::Moved => {
+                menus.dirty = true;
+                let s = menus.focus_sound.clone();
+                play_sound(&mut commands, menus, &mut sources, s, &log);
+            }
+            ListInput::Close => {
+                menus.list = None;
+                menus.dirty = true;
+            }
+            ListInput::Pick(item) => {
+                let l = menus.list.take().unwrap();
+                menus.work.push(OptionWork::Pick(l.chooser, item));
+                menus.dirty = true;
+                let s = menus.select_sound.clone();
+                play_sound(&mut commands, menus, &mut sources, s, &log);
+            }
+        }
         return;
     }
     let in_question = menus.question.is_some();
@@ -700,9 +884,6 @@ fn navigate(
             } else {
                 moved |= screen.step(-1);
             }
-        }
-        if chooser && mouse_step != 0 && !in_overlay {
-            stepped = screen.focus.map(|f| (f, mouse_step));
         }
         for (i, hit) in &hits {
             if hit.0 != in_overlay {
@@ -813,10 +994,15 @@ fn navigate(
         }
         Shown::Page(k) => {
             let p = &menus.pages[k];
-            // Choosing a chooser steps it on, like its right arrow.
+            // Only the arrows (or left and right) change a chooser;
+            // choosing the screen size's value opens its drop-down list.
             if let Some(i) = chosen.filter(|i| p.buttons.chooser(*i).is_some()) {
                 menus.used_input = true;
-                menus.work.push(OptionWork::Step(i, 1));
+                if p.buttons.chooser(i) == Some(option_settings::LIST_SETTING) {
+                    let s = menus.select_sound.clone();
+                    play_sound(&mut commands, menus, &mut sources, s, &log);
+                    open_list(menus, k, i, &log);
+                }
                 return;
             }
             if let Some(i) = chosen.filter(|i| p.buttons.key(*i).is_some()) {
@@ -994,6 +1180,26 @@ fn apply_options(
                 let (at, text, items) = (b.current, b.items[b.current].clone(), b.items.clone());
                 if option_settings::write(&name, &mut settings, at, &items) {
                     log.line(format!("original menus: page {k}: {name} is now {text}"));
+                    settings_changed = true;
+                }
+                menus.dirty = true;
+            }
+            OptionWork::Pick(i, at) => {
+                let Some(name) = page.buttons.chooser(i).map(str::to_string) else {
+                    continue;
+                };
+                let Kind::Button(b) = &mut page.screen.layout.widgets[i].kind else {
+                    continue;
+                };
+                if at >= b.items.len() {
+                    continue;
+                }
+                b.choose(at);
+                let (text, items) = (b.items[at].clone(), b.items.clone());
+                if option_settings::write(&name, &mut settings, at, &items) {
+                    log.line(format!(
+                        "original menus: page {k}: {name} is now {text} (from its list)"
+                    ));
                     settings_changed = true;
                 }
                 menus.dirty = true;
@@ -1202,6 +1408,9 @@ fn draw(
     if let (None, Some(r)) = (&menus.question, &menus.rebind) {
         screens.push((true, &r.screen));
     }
+    if let (None, Some(l)) = (&menus.question, &menus.list) {
+        screens.push((true, &l.screen));
+    }
     let overlay = screens.len() > 1;
     // (on top?, pictures, mouse areas by widget index)
     type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>);
@@ -1214,42 +1423,17 @@ fn draw(
         let boxes = if under {
             Vec::new()
         } else {
-            let layout = &screen.layout;
-            let mut boxes: Vec<(usize, [f32; 4])> = layout
+            screen
+                .layout
                 .buttons_on_pc()
                 .into_iter()
-                .filter_map(|i| match &layout.widgets[i].kind {
+                .filter_map(|i| match &screen.layout.widgets[i].kind {
                     Kind::Button(b) => quads::sprite_box(&b.background_blurred, assets)
                         .or_else(|| quads::text_box(&b.blurred, assets))
-                        .map(|mut bx| {
-                            // An options row (chooser or key) also takes
-                            // clicks on its label, so the whole row works,
-                            // not only the value on the right.
-                            if b.is_chooser() || !b.mouse_only {
-                                for j in screens::row_widgets(layout, &layout.widgets[i].name) {
-                                    if let Kind::Text(t) = &layout.widgets[j].kind {
-                                        if let Some(l) = quads::text_box(t, assets) {
-                                            bx = [
-                                                bx[0].min(l[0]),
-                                                bx[1].min(l[1]),
-                                                bx[2].max(l[2]),
-                                                bx[3].max(l[3]),
-                                            ];
-                                        }
-                                    }
-                                }
-                            }
-                            (i, bx)
-                        }),
+                        .map(|bx| (i, bx)),
                     _ => None,
                 })
-                .collect();
-            // Mouse-only buttons (the arrows beside a row) last, so they sit
-            // on top and keep their own clicks.
-            boxes.sort_by_key(
-                |(i, _)| matches!(&layout.widgets[*i].kind, Kind::Button(b) if b.mouse_only),
-            );
-            boxes
+                .collect()
         };
         list.push((on_top, q, boxes));
     }

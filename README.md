@@ -290,9 +290,10 @@ copy of the game.
   sensitivity, invert mouse, difficulty, effects and music volume, screen
   size and vsync work; key rows open the original's REASSIGN BUTTON box.
   Rows the port can't do yet (subtitles, brightness, detail levels and so
-  on) are greyed out. Our own extra settings (field of view, full screen,
-  controller and gyro) are behind a "PORT +" button on each page, on a
-  page marked as a placeholder. The campaign page keeps the placeholder until its planet
+  on) are greyed out. Values change with the arrows; the screen size
+  also has a drop-down list. Our own extra settings (field of view, full
+  screen, controller and gyro) are on a fifth tab, "PORT +", in the same
+  original look. The campaign page keeps the placeholder until its planet
   buttons and level list can be drawn; `logs/rc_game.log` says why
   ("original menus: page campaigns kept the placeholder: ..."). Which
   original menu draws which page is in `data/ui/original_menus.toml`. The

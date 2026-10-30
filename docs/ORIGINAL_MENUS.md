@@ -128,10 +128,14 @@ mouse sensitivity, invert mouse, difficulty, effects volume, music volume,
 screen size (the original's list plus wide and ultrawide sizes) and vsync,
 plus RESTORE DEFAULTS / SET RECOMMENDED. Key rows open `CTMapKeyMenu`
 ("REASSIGN BUTTON"): press a key, then ACCEPT, CANCEL or press again.
-With the mouse, a click anywhere on a row (its name or its value) steps it
-on, a right click steps it back, the wheel steps either way, and the small
-arrows work as in the original. (At first only the value and the arrows took
-clicks, so clicking a setting's name did nothing; the user found this.)
+Values change only with the arrows (the small ones beside each row, or
+left and right on keys and controllers), as the user asked. The one
+exception is the screen size: choosing its value (a click on the numbers,
+or Enter / A) opens a drop-down list, which the original doesn't have. It is
+built only from pieces of the page (`rc_menus::screens::drop_down`): the
+page's own display box over a black square, and copies of the chooser for
+its rows. It shows 10 sizes and scrolls with the keys or the mouse wheel; a
+click outside or Back closes it.
 
 Greyed out for now: subtitles, helmet and prompt options, auto pull, visor
 and its intensity, sound quality, 3D sound, EAX, channels, graphics quality
@@ -140,11 +144,14 @@ projectors, squad shadows, FSAA, and the CONTROLS rows whose action the
 port doesn't have. Not done: the original's "keep these settings?" timer
 after a screen change (ours applies at once).
 
-Our own settings the original doesn't have (FOV, Panini, full screen, master
-volume, controller look speed and dead zone, gyro) are on a page titled
-"MORE SETTINGS (PLACEHOLDER)", reached by a "PORT +" button added under
-the tabs on every options page (`extra_buttons`, a copy of an original
-button so it looks like the others).
+Our own settings the original doesn't have (field of view, Panini "wide
+screen fix", full screen, master volume, controller look speed and dead
+zone, gyro mode and sensitivity) are on a fifth tab, "PORT +"
+(`[pages.more_settings]`). It borrows the original GAME page's look: its
+rows get our labels (`texts`), its ninth row is hidden (`hidden_rows`), the
+GAME tab's "you are here" bar moves down to PORT + (`moves`), and a GAME tab
+copied from SOUND takes its place. The amber placeholder page is only used
+if the install's menus can't be read.
 
 `rc_game --script` checks GAME, SOUND and CONTROLS, changes the music volume
 with an arrow, checks greyed rows can't be reached, rebinds JUMP to K and

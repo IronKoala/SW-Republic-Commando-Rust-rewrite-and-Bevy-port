@@ -3,7 +3,7 @@
 //! adjusts a few widgets when it opens (`Init`), and names a function for
 //! each button; here those become plain data the game acts on.
 
-use crate::layout::{Kind, MenuLayout};
+use crate::layout::{pivot_fraction, Kind, MenuLayout, Sprite, MSCM_FIT, MSCM_FIT_STRETCH};
 
 /// What choosing a main menu button asks the game to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +197,46 @@ pub fn add_button_copy(layout: &mut MenuLayout, e: &crate::pages::ExtraButton) -
     true
 }
 
+/// Give a widget new text (a label, or a button's text when blurred and
+/// focused). False if the page has no such widget.
+pub fn set_widget_text(layout: &mut MenuLayout, name: &str, text: &str) -> bool {
+    let Some(w) = layout.widget_mut(name) else {
+        return false;
+    };
+    match &mut w.kind {
+        Kind::Text(t) => t.text = text.to_string(),
+        Kind::Button(b) => {
+            b.blurred.text = text.to_string();
+            b.focused.text = text.to_string();
+        }
+        Kind::Sprite(_) => return false,
+    }
+    true
+}
+
+/// Move a widget down (up when `by` is negative). False if the page has no
+/// such widget.
+pub fn move_widget(layout: &mut MenuLayout, name: &str, by: f32) -> bool {
+    let Some(w) = layout.widget_mut(name) else {
+        return false;
+    };
+    match &mut w.kind {
+        Kind::Text(t) => t.pos[1] += by,
+        Kind::Sprite(s) => s.pos[1] += by,
+        Kind::Button(b) => {
+            for p in [
+                &mut b.blurred.pos,
+                &mut b.focused.pos,
+                &mut b.background_blurred.pos,
+                &mut b.background_focused.pos,
+            ] {
+                p[1] += by;
+            }
+        }
+    }
+    true
+}
+
 /// Every menu with a title strip (`MenuTemplateTitled` and its children)
 /// hides its Xbox Live name and controller number on a PC.
 pub fn setup_titled(layout: &mut MenuLayout) {
@@ -205,6 +245,145 @@ pub fn setup_titled(layout: &mut MenuLayout) {
             w.hidden = true;
         }
     }
+}
+
+/// How many values a drop-down list shows at once (more scroll).
+pub const LIST_ROWS: usize = 10;
+/// Choosing a row of a drop-down list.
+pub const LIST_PICK: &str = "ListPick";
+/// Clicking outside a drop-down list closes it.
+pub const LIST_CLOSE: &str = "ListClose";
+
+/// The box a sprite covers when its size is given directly (the "fit"
+/// scale modes), as fractions of the menu area.
+fn fitted_box(s: &Sprite) -> Option<[f32; 4]> {
+    if s.scale_mode != MSCM_FIT && s.scale_mode != MSCM_FIT_STRETCH {
+        return None;
+    }
+    let (px, py) = pivot_fraction(s.pivot);
+    let x0 = s.pos[0] - s.scale[0] * px;
+    let y0 = s.pos[1] - s.scale[1] * py;
+    Some([x0, y0, x0 + s.scale[0], y0 + s.scale[1]])
+}
+
+fn place(s: &mut Sprite, b: [f32; 4]) {
+    s.pivot = 0;
+    s.scale_mode = MSCM_FIT_STRETCH;
+    s.pos = [b[0], b[1]];
+    s.scale = [b[2] - b[0], b[3] - b[1]];
+}
+
+/// A drop-down list of a chooser's values (the original has none; PC games
+/// show one for screen sizes), opening under the chooser and drawn only
+/// with pieces of the page itself: the page's display box for the frame
+/// over a black backing, and copies of the chooser for the rows, so it
+/// looks like the rest of the options page. Shows `items[first..]`, up to
+/// [`LIST_ROWS`]; rows are buttons named `ListItems[n]` (n counted from
+/// `first`) that call [`LIST_PICK`]. A clear button over the whole screen,
+/// drawn first, calls [`LIST_CLOSE`] so a click outside the list closes it.
+pub fn drop_down(
+    page: &MenuLayout,
+    chooser: &str,
+    items: &[String],
+    first: usize,
+) -> Option<MenuLayout> {
+    let row = page.widget(chooser)?.clone();
+    let Kind::Button(b) = &row.kind else {
+        return None;
+    };
+    let frame = page
+        .widgets
+        .iter()
+        .find(|w| matches!(&w.kind, Kind::Sprite(s) if s.texture.as_deref().is_some_and(|t| t.ends_with("CT_DisplayBox"))))?
+        .clone();
+    // The row's own bar gives the list its width and row height.
+    let bar = fitted_box(&b.background_blurred).unwrap_or([
+        b.blurred.pos[0] - 0.13,
+        b.blurred.pos[1] - 0.013,
+        b.blurred.pos[0] + 0.13,
+        b.blurred.pos[1] + 0.013,
+    ]);
+    let step = 0.04;
+    let shown = items.len().saturating_sub(first).min(LIST_ROWS);
+    let pad = 0.012;
+    // Wide enough to cover the arrows of the rows underneath.
+    let side = 0.04;
+    let outer = [
+        bar[0] - side,
+        bar[3] + 0.006,
+        bar[2] + side,
+        bar[3] + 0.006 + shown as f32 * step + 2.0 * pad,
+    ];
+    let mut widgets = Vec::new();
+    // Over the whole screen: catches clicks outside the list.
+    let mut outside = row.clone();
+    outside.name = "ListOutside".into();
+    if let Kind::Button(o) = &mut outside.kind {
+        o.items.clear();
+        o.blurred.text.clear();
+        o.focused.text.clear();
+        o.on_select = LIST_CLOSE.into();
+        o.mouse_only = true;
+        o.disabled = false;
+        for s in [&mut o.background_blurred, &mut o.background_focused] {
+            place(s, [-1.0, -1.0, 2.0, 2.0]);
+            s.color[3] = 0;
+        }
+    }
+    widgets.push(outside);
+    // A solid black square behind the frame hides the rows underneath
+    // (the page's own `blacksquare` picture, which it draws over a level).
+    if let Some(black) = page.widgets.iter().find(|w| {
+        matches!(&w.kind, Kind::Sprite(s) if s.texture.as_deref().is_some_and(|t| t.ends_with("blacksquare")))
+    }) {
+        let mut backing = black.clone();
+        backing.name = "ListBacking".into();
+        backing.hidden = false;
+        if let Kind::Sprite(s) = &mut backing.kind {
+            place(s, [outer[0] + 0.004, outer[1] + 0.004, outer[2] - 0.004, outer[3] - 0.004]);
+            s.color = [0, 0, 0, 255];
+        }
+        widgets.push(backing);
+    }
+    let mut border = frame;
+    border.name = "ListBorder".into();
+    if let Kind::Sprite(s) = &mut border.kind {
+        place(s, outer);
+    }
+    border.hidden = false;
+    widgets.push(border);
+    for n in 0..shown {
+        let mut w = row.clone();
+        w.name = format!("ListItems[{n}]");
+        w.hidden = false;
+        let dy = bar[3] + 0.006 + pad - bar[1] + n as f32 * step;
+        if let Kind::Button(r) = &mut w.kind {
+            r.items.clear();
+            r.current = 0;
+            r.blurred.text = items[first + n].clone();
+            r.focused.text = items[first + n].clone();
+            r.on_select = LIST_PICK.into();
+            r.disabled = false;
+            r.mouse_only = false;
+            for p in [
+                &mut r.blurred.pos,
+                &mut r.focused.pos,
+                &mut r.background_blurred.pos,
+                &mut r.background_focused.pos,
+            ] {
+                p[1] += dy;
+            }
+        }
+        widgets.push(w);
+    }
+    Some(MenuLayout {
+        class: format!("{} (drop-down list)", page.class),
+        widgets,
+        skipped: Vec::new(),
+        sounds: page.sounds.clone(),
+        background_movie: String::new(),
+        music: None,
+    })
 }
 
 /// The class of the original "reassign button" box, shown over the

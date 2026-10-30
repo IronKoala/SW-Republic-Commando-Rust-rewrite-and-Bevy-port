@@ -858,6 +858,84 @@ fn steps() -> Vec<Step> {
                 Ok(format!("{} buttons reachable", focusable.len()))
             }
         }),
+        // Only the arrows (and left and right) change a value.
+        Note(|w| {
+            let v = w.resource::<Settings>().audio.music_volume;
+            w.resource_mut::<Noted>().music_volume = v;
+        }),
+        FocusOn("Options[2]"),
+        Press(Action::MenuAccept),
+        Wait(0.2),
+        Check(
+            "choosing a value doesn't change it (only the arrows do)",
+            |w| {
+                let before = w.resource::<Noted>().music_volume;
+                let now = w.resource::<Settings>().audio.music_volume;
+                if now == before {
+                    Ok(format!("music volume stays {now:.1}"))
+                } else {
+                    Err(format!("{before:.1} -> {now:.1}"))
+                }
+            },
+        ),
+        // The screen size's value opens a drop-down list.
+        FocusOn("Graphics"),
+        Press(Action::MenuAccept), // GRAPHICS
+        Wait(0.3),
+        FocusOn("Options[2]"), // VIDEO RESOLUTION
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check("choosing the screen size opens its drop-down list", |w| {
+            let v = w.resource::<Settings>().video.clone();
+            let m = w.resource::<OriginalMenus>();
+            let l = m.list.as_ref().ok_or("no list")?;
+            let at = l.focused_item().map(|i| l.items[i].clone());
+            let now = format!("{}x{}", v.width, v.height);
+            if at.as_deref() == Some(now.as_str()) {
+                Ok(format!("{} sizes, on {now}", l.items.len()))
+            } else {
+                Err(format!("{} sizes, focus {at:?}, size {now}", l.items.len()))
+            }
+        }),
+        Shot("options_list"),
+        Press(Action::MenuDown),
+        Wait(0.2),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("Back closes the list without changing the size", |w| {
+            let v = w.resource::<Settings>().video.clone();
+            let open = w.resource::<OriginalMenus>().list.is_some();
+            let shown = button_text(w, "Options[2]").unwrap_or_default();
+            let now = format!("{}x{}", v.width, v.height);
+            if !open && shown.eq_ignore_ascii_case(&now) {
+                Ok(format!("closed, still {now}"))
+            } else {
+                Err(format!("open {open}, shows {shown}, size {now}"))
+            }
+        }),
+        // The port's own settings, in the original GAME page's look.
+        FocusOn("PortSettings"),
+        Press(Action::MenuAccept), // PORT +
+        Wait(0.3),
+        Check(
+            "PORT + opens the port's settings in the original's look",
+            |w| {
+                let fov = w.resource::<Settings>().video.fov;
+                match (
+                    page(w),
+                    original_page_shown(w),
+                    button_text(w, "Options[0]"),
+                ) {
+                    (Page::MoreSettings, Some(k), Some(t))
+                        if k == "more_settings" && t == format!("{fov:.0}") =>
+                    {
+                        Ok(format!("original look, FIELD OF VIEW shows {t}"))
+                    }
+                    other => Err(format!("{other:?}")),
+                }
+            },
+        ),
+        Shot("options_port"),
         FocusOn("Controls"),
         Press(Action::MenuAccept), // CONTROLS
         Wait(0.3),
@@ -1009,6 +1087,9 @@ fn focus(w: &mut World) -> Option<String> {
     }
     if let Some(r) = &m.rebind {
         return r.screen.focused_name().map(str::to_string);
+    }
+    if let Some(l) = &m.list {
+        return l.screen.focused_name().map(str::to_string);
     }
     match m.shown(&state, play.as_ref(), menu) {
         Some(original_menu::Shown::Page(k)) => {
