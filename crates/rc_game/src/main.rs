@@ -170,6 +170,17 @@ fn main() -> AppExit {
         }
     };
     let paths = GamePaths::new(game_dir, settings.data_dirs());
+    // A scripted run saves into its own folder, emptied first, so it never
+    // touches your saves and always starts the same way.
+    let save_folder = if use_script {
+        let d = PathBuf::from("logs/script_saves");
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    } else if settings.save.folder.trim().is_empty() {
+        rc_save::file::default_folder(rc_save::file::System::this(), |k| std::env::var(k).ok())
+    } else {
+        PathBuf::from(settings.save.folder.trim())
+    };
     for d in &paths.data_dirs {
         log.line(format!(
             "data folder: {}{}",
@@ -266,6 +277,7 @@ fn main() -> AppExit {
     .insert_resource(ClearColor(Color::BLACK))
     .insert_resource(log)
     .insert_resource(paths)
+    .insert_resource(rc_save::SaveFolder(save_folder))
     .insert_resource(menu::GamePathsFound(found.is_some()))
     .insert_resource(player::FieldOfView(settings.video.fov))
     .insert_resource(input::LookSettings {
@@ -320,6 +332,7 @@ fn main() -> AppExit {
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
+    app.add_plugins(rc_save::SavePlugin);
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),

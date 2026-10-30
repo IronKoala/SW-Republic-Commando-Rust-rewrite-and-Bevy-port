@@ -401,3 +401,67 @@ fn droids_on_the_same_spot_are_pushed_apart() {
     let gap = (b.fighters[0].pawn.location - b.fighters[1].pawn.location).length();
     assert!(gap >= 69.0, "still overlapping: {gap:.1} uu apart");
 }
+
+fn factory(x: f32) -> Factory {
+    Factory {
+        name: format!("factory at {x}"),
+        tag: String::new(),
+        prototype: "BattleDroidTM".into(),
+        location: Vec3::new(x, 0.0, 60.0),
+        yaw: 0.0,
+        spots: vec![],
+        capacity: 2,
+        max_alive: 2,
+        generate_forever: false,
+        spawn_mode: 0,
+        spawn_interval: 1.0,
+        start_state: StartState::StationaryAttack,
+        team: None,
+        triggers: vec![],
+    }
+}
+
+#[test]
+fn a_battle_carries_on_from_a_snapshot() {
+    let world = flat_floor(vec![]);
+    let params = Arc::new(AiParams::battle_droid());
+    let make = || Battle::new(params.clone(), NavGraph::default(), vec![factory(0.0), factory(50_000.0)]);
+    let mut b = make();
+    // The player stands by the first spawner (it switches on) until it has
+    // made its droids, then one droid is destroyed.
+    let player = Some(target_at(200.0, 0.0));
+    for _ in 0..120 {
+        b.step(1.0 / 30.0, &world, player);
+    }
+    assert_eq!(b.spawners[0].made, 2);
+    let first = b.fighters[0].id;
+    b.killed(first);
+    let snap = b.snapshot();
+    assert_eq!(snap.fighters.len(), 1, "the dead droid isn't saved");
+    assert!(snap.spawners[0].0 && !snap.spawners[1].0);
+
+    let mut fresh = make();
+    let events = fresh.restore(&snap).unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0], BattleEvent::Spawned { .. }));
+    let again = fresh.snapshot();
+    assert_eq!(again.spawners, snap.spawners);
+    assert_eq!(again.time, snap.time);
+    assert_eq!(again.fighters.len(), 1);
+    let (a, z) = (&snap.fighters[0], &again.fighters[0]);
+    assert_eq!((a.id, a.spawner), (z.id, z.spawner));
+    assert!((a.feet - z.feet).length() < 0.5, "{:?} vs {:?}", a.feet, z.feet);
+    // A droid that was fighting is fighting again.
+    if a.mode != Mode::Idle {
+        assert_eq!(z.mode, Mode::Alerted);
+    }
+    // The spawner doesn't make the destroyed droid again.
+    for _ in 0..120 {
+        fresh.step(1.0 / 30.0, &world, player);
+    }
+    assert_eq!(fresh.spawners[0].made, 2);
+    assert_eq!(fresh.alive().count(), 1);
+    // A snapshot from another map is refused.
+    let mut other = Battle::new(params.clone(), NavGraph::default(), vec![factory(0.0)]);
+    assert!(other.restore(&snap).is_err());
+}
