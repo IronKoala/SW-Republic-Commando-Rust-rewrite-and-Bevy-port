@@ -51,6 +51,11 @@ pub struct JobSettings {
     pub result: JobResult,
     /// Send a member to every spot of the same anchor (door breach).
     pub group: bool,
+    /// Post: with "auto pull maneuvers" on, a new order that needs more
+    /// squad mates than are free may take a member off this post (the
+    /// original's `bCancelIfMembersNeeded`, set on its sniper, grenade,
+    /// anti-armour and turret markers).
+    pub pullable: bool,
     /// Seconds from the end of the work to the blast and the result.
     pub fuse: f32,
     /// A blast at the anchor when the fuse runs out: damage at the middle,
@@ -92,6 +97,7 @@ impl JobSettings {
             work_time: 3.0,
             result: JobResult::Nothing,
             group: false,
+            pullable: false,
             fuse: 0.0,
             blast_damage: 0.0,
             blast_radius: 0.0,
@@ -160,6 +166,9 @@ impl JobSettings {
                 if self.sight_radius > 0.0 {
                     s += &format!(", sees {} uu", self.sight_radius);
                 }
+                if self.pullable {
+                    s += ", pullable";
+                }
                 if self.throw_interval > 0.0 {
                     s += &format!(
                         ", throws every {} s within {} uu ({} damage within {} uu after {} s)",
@@ -205,6 +214,7 @@ pub fn default_jobs() -> Vec<JobSettings> {
     sniper.weapon = "dc17m_sniper".into();
     sniper.sight_radius = 8000.0;
     sniper.preferred = "Commando07Delta".into();
+    sniper.pullable = true;
     sniper.accuracy = 1.0;
     sniper.burst_count = 1;
     sniper.shot_interval = 0.1;
@@ -212,6 +222,7 @@ pub fn default_jobs() -> Vec<JobSettings> {
     sniper.burst_pause_max = 2.5;
 
     let mut grenade = JobSettings::new("grenade", "Grenade position", &["grenade"], JobKind::Post);
+    grenade.pullable = true;
     grenade.throw_interval = 6.0;
     grenade.throw_range = 1500.0;
     grenade.throw_fuse = 2.0;
@@ -226,6 +237,7 @@ pub fn default_jobs() -> Vec<JobSettings> {
         JobKind::Post,
     );
     anti_armour.preferred = "Commando62Delta".into();
+    anti_armour.pullable = true;
     anti_armour.weapon = "dc17m_antiarmor".into();
     anti_armour.burst_count = 1;
     anti_armour.shot_interval = 0.1;

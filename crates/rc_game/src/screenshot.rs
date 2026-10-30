@@ -41,9 +41,8 @@ fn take(
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let path = dir.join(format!("rc_game_{stamp}_{:03}.png", *count));
-    commands
-        .spawn(Screenshot::primary_window())
-        .observe(move |shot: On<ScreenshotCaptured>, log: Res<GameLog>| {
+    commands.spawn(Screenshot::primary_window()).observe(
+        move |shot: On<ScreenshotCaptured>, log: Res<GameLog>| {
             let img = &shot.image;
             let (w, h) = (img.width() as usize, img.height() as usize);
             let Some(data) = img.data.clone() else {
@@ -58,7 +57,8 @@ fn take(
             // the game keeps the game from pausing.
             let (path, log) = (path.clone(), log.clone());
             std::thread::spawn(move || save(data, w, h, bgra, &path, &log));
-        });
+        },
+    );
 }
 
 fn save(data: Vec<u8>, w: usize, h: usize, bgra: bool, path: &std::path::Path, log: &GameLog) {

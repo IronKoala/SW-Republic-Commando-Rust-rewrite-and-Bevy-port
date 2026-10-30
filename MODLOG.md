@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: FSAA and VSYNC change, squad shadows show, F12 doesn't pause, AUTO PULL MANEUVERS row (rc_game, rc_menus)
+
+- **Changed:** FSAA and VSYNC use our own value lists (OFF, 2X, 4X; ON, OFF) instead of the original's, which the original fills from the graphics card while it runs. `rc_menus::pages::check` switches on any row that `original_menus.toml` gives a setting, even if the original stores it switched off or with no values; `original_menu.rs` logs the original's list when it is replaced. SQUAD SHADOWS now also puts a soft round shadow under each squad mate (`graphics.rs` `squad_blobs`), since few of the levels' lights move. F12 packs and writes the picture on a separate thread. AUTO PULL MANEUVERS (GAME page) is an on/off row for `game.auto_pull_maneuvers`, now that PR #50 is in main (merged in).
+- **Why:** User: "squad shadows settings does nothing, fsaa cant be changed, Vsync cant be changed", and F12 "caused the game to freeze for a sec".
+- **Tested how:** `cargo test -p rc_game -p rc_menus` (new tests: a switched-off empty row given a setting becomes a working chooser; the stand-in FSAA list writes and reads 4X); `graphics_check` example under Xvfb.
+- **Result:** rc_game 50 and rc_menus 16 pass; `GRAPHICS CHECK: 34 passed, 0 failed`.
+- **Still broken / not tested:** Not tested with the game files or on Windows: why FSAA and VSYNC couldn't be changed on the PC is a guess (empty or switched-off rows in the original); the log line `... has [...] in the original; using [...]` will show. The squad blob shadows aren't tested in a level (no game files in this session); they sit flat at the squad mate's feet, so on stairs or slopes they can float or cut in. F12's pause not measured. BUMPMAPPING and PROJECTORS stay greyed on purpose: the port doesn't draw bump maps or projected pictures yet.
+- **Next:** User re-checks on the PC.
+
 ## 2026-10-30: GRAPHICS QUALITY no longer gets stuck on LOW (rc_game)
 
 - **Changed:** `settings.toml` `[video] quality` keeps the GRAPHICS QUALITY value last chosen; `option_settings` shows that value while the rows still match it, instead of the first value whose preset matches.
@@ -55,6 +64,16 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** Tests 28 + 11 + 18 pass. `rc_probe --pages`: options, options_sound, options_graphics, options_controls all "USES THE ORIGINAL". Script `SCRIPT DONE: 61 checks passed, 0 failed`; GAME page matches the `rc_probe` painting (mean difference 3.3 of 255), CONTROLS 4.2; music volume 1.0 -> 0.9 with the left arrow; JUMP rebound to K then cancelled back to SPACE. Main, pause and quit pictures byte-identical to before.
 - **Still broken / not tested:** Not tested on Windows, with a mouse on the arrows, or with a controller. Not compared with the real game by eye (a few long labels, such as TACTICAL MODE INTENSITY, touch the left arrow; unknown whether the original does too). Greyed out until built: subtitles, helmet, prompts, auto pull, visor, sound quality/3D/EAX/channels, graphics presets, brightness, detail levels, blur, bloom, projectors, shadows, FSAA, and key rows for actions the port lacks. No "keep these settings?" timer after a screen change. Campaign, load and save pages are still placeholders.
 - **Next:** Campaign page (needs `MenuStringList`, scroll bars), then load/save pages.
+
+## 2026-10-30: Auto pull maneuvers (rc_squad, rc_squad_plugin, rc_game)
+
+- **Changed:** `rc_squad`: jobs gain `pullable` (sniper, grenade and anti-armour posts in `data/squad/squad.toml`); `Squad::auto_pull` (on by default) and `Member::marker_since`; a marker order that needs more squad mates than are free takes the missing ones off pullable posts, longest-held first (`Squad::pull_for`, new `SquadEvent::MarkerPulled`). Off, the order is refused with "recall the squad first". `rc_squad_plugin::SquadOptions` carries the setting; `rc_game` reads `auto_pull_maneuvers` from `[game]` in `settings.toml` and passes it on at start and whenever settings change. Docs: RESEARCH ("Auto pull maneuvers"), DESIGN (Context orders), README. 4 new tests.
+- **Why:** The GAME options page has AUTO PULL MANEUVERS greyed out because nobody knew what it did. Thread "Make auto pull maneuvers work".
+- **Tested how:** Read the game's files from the PC, read only: `User.ini` (`bAutoPullManeuvers=True`), Engine.u and XInterfaceCTMenus.u script text, class defaults with `rc_probe --classes`, and the exported function names and machine code of `ASquadMarker::GetMarkerUsability` and `FillParticipants` in Engine.dll (nothing copied). Then `cargo test -p rc_squad -p rc_squad_plugin -p rc_game` in the cloud.
+- **Result:** The setting lets a new maneuver take squad mates off sniper, grenade, anti-armour (and turret) markers, the longest-running first; off, the helmet says "RECALL SQUAD BEFORE ENGAGING MANEUVER". Tests: rc_squad 34 passed (new: pulls the longest-held post, off refuses until recalled, once jobs are never pulled, shipped posts are pullable).
+- **Still broken / not tested:** Not tested on Windows or by playing; not tested in a real level. The GAME options row is still greyed: the options rows live in draft PR #47, which hooks it up once both are in. The helmet's refusal text isn't shown on screen yet (only the log says it). Turret markers aren't a port job yet, so they can't be pulled.
+- **Next:** Turn on the AUTO PULL MANEUVERS row in the options code (#47's `option_settings.rs`, reading and writing `game.auto_pull_maneuvers`).
+
 ## 2026-10-30: Smooth blending between animations (rc_anim, squad and enemies)
 
 - **Changed:** `crates/rc_anim/src/lib.rs`: new `blend_poses` and `Crossfade` (remembers the pose on screen when the animation changes and mixes it into the new one with an S curve). `rc_model::Model` and `rc_enemies::look::DroidLook` gained `local_pose` and `posed_local`, so a mixed pose can be skinned. Squad mates (`rc_squad_plugin/src/look.rs`) and enemies (`rc_enemies/src/lib.rs`) now blend whenever their animation changes. Blend times are data: `[blend]` in `data/squad/looks.toml` and `blend_time`, `blend_time_fire`, `blend_time_death` in `[look]` of `data/enemies/battle_droid.toml` (other enemies inherit them). New check `crates/rc_model/examples/rc_blend_check.rs`.

@@ -21,6 +21,7 @@ pub const ALL: &[&str] = &[
     "difficulty",
     "subtitles",
     "prompt_text",
+    "auto_pull_maneuvers",
     "effects_volume",
     "music_volume",
     "voices_volume",
@@ -165,6 +166,9 @@ pub fn items(name: &str, s: &Settings, desktop: Option<(u32, u32)>) -> Option<Ve
     match name {
         "display_mode" => Some(DISPLAY_MODES.iter().map(|(_, t)| t.to_string()).collect()),
         "gyro_mode" => Some(vec!["OFF".into(), "ALWAYS".into(), "WHEN AIMING".into()]),
+        // The original fills these from the graphics card while it runs;
+        // ours are what this game can do.
+        "fsaa" | "vsync" => fallback_items(name),
         "video_resolution" => {
             let fits = |&(w, h): &(u32, u32)| desktop.is_none_or(|(dw, dh)| w <= dw && h <= dh);
             let mut sizes: Vec<(u32, u32)> = RESOLUTIONS.iter().copied().filter(fits).collect();
@@ -179,7 +183,6 @@ pub fn items(name: &str, s: &Settings, desktop: Option<(u32, u32)>) -> Option<Ve
         _ => None,
     }
 }
-
 
 /// Whether a value's text means on (ON, YES, ENABLED) or off (OFF, NO,
 /// DISABLED, NONE), if it says.
@@ -264,7 +267,9 @@ fn is_custom(text: &str) -> bool {
 
 /// The GRAPHICS QUALITY values that are presets (not CUSTOM), in order.
 fn presets(items: &[String]) -> Vec<usize> {
-    (0..items.len()).filter(|&i| !is_custom(&items[i])).collect()
+    (0..items.len())
+        .filter(|&i| !is_custom(&items[i]))
+        .collect()
 }
 
 /// The number in a value's text ("32 CHANNELS" is 32), if it has one.
@@ -288,15 +293,20 @@ pub fn fallback_items(name: &str) -> Option<Vec<String>> {
     let l = |v: &[&str]| Some(v.iter().map(|s| s.to_string()).collect());
     match name {
         "fsaa" => l(&["OFF", "2X", "4X"]),
-        "vsync" | "subtitles" | "prompt_text" | "blur" | "bloom" | "squad_shadows" | "sound_3d" => {
-            l(&["ON", "OFF"])
-        }
+        "vsync"
+        | "subtitles"
+        | "prompt_text"
+        | "auto_pull_maneuvers"
+        | "blur"
+        | "bloom"
+        | "squad_shadows"
+        | "sound_3d" => l(&["ON", "OFF"]),
         "graphics_quality" => l(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST"]),
         "texture_detail" | "character_detail" | "sound_quality" => l(&["LOW", "MEDIUM", "HIGH"]),
         "audio_channels" => l(&["16", "32", "64"]),
-        "brightness" | "voices_volume" | "effects_volume" | "music_volume" => l(&[
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-        ]),
+        "brightness" | "voices_volume" | "effects_volume" | "music_volume" => {
+            l(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"])
+        }
         _ => None,
     }
 }
@@ -373,6 +383,7 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         "vsync" => yes_no(s.video.vsync),
         "subtitles" => on_off_index(items, s.game.subtitles),
         "prompt_text" => on_off_index(items, s.game.prompt_text),
+        "auto_pull_maneuvers" => on_off_index(items, s.game.auto_pull_maneuvers),
         "blur" => on_off_index(items, s.video.blur),
         "bloom" => on_off_index(items, s.video.bloom),
         "squad_shadows" => on_off_index(items, s.video.squad_shadows),
@@ -491,6 +502,7 @@ pub fn write(
         "vsync" => s.video.vsync = first,
         "subtitles" => s.game.subtitles = on_off_value(items, i),
         "prompt_text" => s.game.prompt_text = on_off_value(items, i),
+        "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = on_off_value(items, i),
         "blur" => s.video.blur = on_off_value(items, i),
         "bloom" => s.video.bloom = on_off_value(items, i),
         "squad_shadows" => s.video.squad_shadows = on_off_value(items, i),
@@ -530,6 +542,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "difficulty" => s.game.difficulty = d.game.difficulty,
         "subtitles" => s.game.subtitles = d.game.subtitles,
         "prompt_text" => s.game.prompt_text = d.game.prompt_text,
+        "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = d.game.auto_pull_maneuvers,
         "effects_volume" => s.audio.effects_volume = d.audio.effects_volume,
         "music_volume" => s.audio.music_volume = d.audio.music_volume,
         "voices_volume" => s.audio.voices_volume = d.audio.voices_volume,
@@ -587,13 +600,34 @@ mod tests {
     }
 
     #[test]
+    fn short_lists_get_a_working_one() {
+        // FSAA and VSYNC came up with one value (or none) on the user's
+        // install, so they couldn't be changed.
+        assert_eq!(fallback_items("fsaa").unwrap(), list(&["OFF", "2X", "4X"]));
+        assert_eq!(fallback_items("vsync").unwrap(), list(&["ON", "OFF"]));
+        assert!(fallback_items("unavailable").is_none());
+        let s = Settings::default();
+        let fsaa = fallback_items("fsaa").unwrap();
+        let mut t = s.clone();
+        write("fsaa", &mut t, 2, &fsaa, None);
+        assert_eq!(t.video.fsaa, 4);
+        assert_eq!(read("fsaa", &t, &fsaa), Some(2));
+    }
+
+    #[test]
     fn every_setting_reads_back_what_was_written() {
         let s0 = Settings::default();
         for name in ALL {
             let items = items(name, &s0, None).unwrap_or_else(|| match *name {
                 "fsaa" => list(&["OFF", "2X", "4X"]),
                 "graphics_quality" => list(&["LOW", "MEDIUM", "HIGH", "CUSTOM"]),
-                "blur" | "bloom" | "squad_shadows" | "sound_3d" | "subtitles" | "prompt_text" => list(&["ON", "OFF"]),
+                "blur"
+                | "bloom"
+                | "squad_shadows"
+                | "sound_3d"
+                | "subtitles"
+                | "prompt_text"
+                | "auto_pull_maneuvers" => list(&["ON", "OFF"]),
                 "sound_quality" => list(&["LOW", "HIGH"]),
                 "audio_channels" => list(&["16", "32", "64"]),
                 _ => list(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]),
@@ -652,7 +686,10 @@ mod tests {
         // Windowed: the size is the window's.
         let mut s = Settings::default();
         pick(&mut s, "1600x900");
-        assert_eq!((s.video.width, s.video.height, s.video.display_mode), (1600, 900, DisplayMode::Windowed));
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1600, 900, DisplayMode::Windowed)
+        );
         // Borderless: a size of the monitor's shape stays borderless...
         assert!(write("display_mode", &mut s, 1, &modes, desktop));
         assert_eq!(s.video.display_mode, DisplayMode::Borderless);
@@ -660,11 +697,17 @@ mod tests {
         assert_eq!(s.video.display_mode, DisplayMode::Borderless);
         // ...another shape goes to a window of that size.
         pick(&mut s, "1280x1024");
-        assert_eq!((s.video.width, s.video.height, s.video.display_mode), (1280, 1024, DisplayMode::Windowed));
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1280, 1024, DisplayMode::Windowed)
+        );
         // True full screen keeps any size (other shapes get black bars).
         assert!(write("display_mode", &mut s, 2, &modes, desktop));
         pick(&mut s, "1024x768");
-        assert_eq!((s.video.width, s.video.height, s.video.display_mode), (1024, 768, DisplayMode::Fullscreen));
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1024, 768, DisplayMode::Fullscreen)
+        );
         assert_eq!(read("display_mode", &s, &modes), Some(2));
     }
 
@@ -748,7 +791,12 @@ mod tests {
         assert_eq!(read("graphics_quality", &s, &q), Some(3));
         for i in [4, 0, 1, 2, 3, 4, 3, 2, 1, 0] {
             assert!(write("graphics_quality", &mut s, i, &q, None));
-            assert_eq!(read("graphics_quality", &s, &q), Some(i), "step to {}", q[i]);
+            assert_eq!(
+                read("graphics_quality", &s, &q),
+                Some(i),
+                "step to {}",
+                q[i]
+            );
         }
     }
 }

@@ -1,6 +1,6 @@
 //! The GRAPHICS options that change how the 3D view is drawn: brightness,
 //! texture and character detail, blur, bloom, squad shadows and FSAA (the
-//! screen size and vsync are in `menu::apply_video`).
+//! screen size and vsync are in `display.rs`).
 //!
 //! Every camera gets the same edge smoothing and colour range, because the
 //! cameras draw on top of one another (sky, level, arms, then menus and the

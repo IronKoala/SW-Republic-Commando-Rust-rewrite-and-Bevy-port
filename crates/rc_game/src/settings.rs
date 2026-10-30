@@ -38,6 +38,11 @@ pub struct GameSection {
     pub subtitles: bool,
     /// PROMPT TEXT: the level's hints, such as "Press USE to open".
     pub prompt_text: bool,
+    /// The original's AUTO PULL MANEUVERS: a new squad order that needs
+    /// more squad mates than are free takes them off sniper, grenade and
+    /// anti-armour posts. Off, the order is refused until you recall the
+    /// squad. On by default, as in the original's `User.ini`.
+    pub auto_pull_maneuvers: bool,
 }
 
 /// The original's three difficulties.
@@ -211,6 +216,7 @@ impl Default for Settings {
                 difficulty: Difficulty::Medium,
                 subtitles: true,
                 prompt_text: true,
+                auto_pull_maneuvers: true,
             },
             mods: ModsSection {
                 folder: "mods".into(),
@@ -305,6 +311,11 @@ data_folder = 'data'
 difficulty = 'medium'
 subtitles = true     # the words of what is said, at the bottom of the screen
 prompt_text = true   # the level's hints, such as "Press USE to open"
+# When a squad order needs more squad mates than are free, take them off
+# sniper, grenade and anti-armour posts (the longest-held first). false:
+# the order is refused until you recall the squad. The original's AUTO
+# PULL MANEUVERS (GAME options page), on by default.
+auto_pull_maneuvers = true
 
 [mods]
 # One sub-folder per mod. A mod holds files with the same names as in
@@ -405,7 +416,9 @@ impl Settings {
         // place of `display_mode`.
         if let Ok(t) = text.parse::<toml::Table>() {
             let video = t.get("video").and_then(|v| v.as_table());
-            let old = video.and_then(|v| v.get(OLD_FULLSCREEN)).and_then(|v| v.as_bool());
+            let old = video
+                .and_then(|v| v.get(OLD_FULLSCREEN))
+                .and_then(|v| v.as_bool());
             if old == Some(true) && video.is_some_and(|v| !v.contains_key("display_mode")) {
                 s.video.display_mode = DisplayMode::Borderless;
             }
@@ -593,7 +606,10 @@ mod tests {
         let s = Settings::parse("[video]\nfullscreen = false\n").unwrap();
         assert_eq!(s.video.display_mode, DisplayMode::Windowed);
         let both = "[video]\nfullscreen = true\ndisplay_mode = 'fullscreen'\n";
-        assert_eq!(Settings::parse(both).unwrap().video.display_mode, DisplayMode::Fullscreen);
+        assert_eq!(
+            Settings::parse(both).unwrap().video.display_mode,
+            DisplayMode::Fullscreen
+        );
     }
 
     #[test]

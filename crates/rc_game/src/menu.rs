@@ -535,6 +535,7 @@ pub fn apply_settings(
     mut fov: ResMut<FieldOfView>,
     mut look: ResMut<LookSettings>,
     mut gyro: ResMut<rc_pads::GyroSettings>,
+    squad: Option<ResMut<rc_squad_plugin::SquadOptions>>,
 ) {
     if !settings.is_changed() {
         return;
@@ -542,6 +543,9 @@ pub fn apply_settings(
     *fov = FieldOfView::from_settings(&settings);
     *look = LookSettings::from_settings(&settings);
     *gyro = settings.gyro.clone();
+    if let Some(mut squad) = squad {
+        squad.auto_pull_maneuvers = settings.game.auto_pull_maneuvers;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

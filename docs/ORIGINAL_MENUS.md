@@ -207,8 +207,8 @@ their lists weren't checked against the install when this was written:
 | TEXTURE QUALITY / CHARACTER DETAIL | Walls and props / squad, enemies, arms and weapons use the half- or quarter-size picture each texture stores (never below 32 pixels). From the next level load. |
 | BLUR EFFECTS | Bevy's motion blur on the level view. |
 | BLOOM EFFECTS | Bevy's bloom (a glow around the brightest parts). Switches every camera to a wide colour range; brightness is then applied once, by the last 3D camera. |
-| SQUAD SHADOWS | The level's moving lights cast shadows (the squad, droids and props in their light). |
-| FSAA | Edge smoothing, 1, 2 or 4 samples (8 counts as 4: not every card can do 8). |
+| SQUAD SHADOWS | A soft round shadow under each squad mate, and the level's moving lights cast shadows (the squad, droids and props in their light). |
+| FSAA | Edge smoothing: OFF, 2X or 4X (our own list; the original fills its list from the graphics card while it runs). VSYNC is ON or OFF the same way. |
 | VOICES VOLUME | Speech: the level scripts' lines and enemies whose sounds come from a `*_voice` package (`rc_game_core::Voice`). |
 | SOUND QUALITY | LOW keeps sounds at 22050 samples a second at most (most already are). From the next level load. |
 | 3D SOUND | Enemy sounds are heard from their side (`rc_game_core::SoundAt`, Bevy's spatial sound from the player's eyes). Their distance fall-off was already there. |
@@ -220,10 +220,13 @@ level scripts' lines (`rc_game/src/subtitles.rs`, from the install's
 `SubtitleText[n]` holds the words). PROMPT TEXT hides or shows the level's
 hints (`ACTION_ShowPrompt`). CONTROLS: TURN LEFT / TURN RIGHT (no key by
 default), SCREEN SHOT (F12, a PNG in `screenshots`), and one key per weapon
-(1 to 4: DC-15s pistol, DC-17m blaster, sniper, anti-armour).
+(1 to 4: DC-15s pistol, DC-17m blaster, sniper, anti-armour). AUTO PULL
+MANEUVERS sets `game.auto_pull_maneuvers` (see `rc_squad`).
 
-Still greyed out: HELMET (the helmet frame isn't drawn), AUTO PULL
-MANEUVERS (what it does in the original isn't known yet), TACTICAL VISOR
+A row `original_menus.toml` gives a setting is switched on even if the
+original stores it switched off or with no values (`rc_menus::pages::check`).
+
+Still greyed out: HELMET (the helmet frame isn't drawn), TACTICAL VISOR
 MODE and its INTENSITY (the visor's outline view isn't built), BUMPMAPPING QUALITY (bump maps aren't drawn yet),
 PROJECTORS (nothing projected yet), EAX (Creative's Windows-only sound
 card effects, nothing to switch), and the CONTROLS rows whose action the

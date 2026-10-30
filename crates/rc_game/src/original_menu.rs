@@ -523,6 +523,23 @@ fn check_names(layout: &mut MenuLayout, buttons: &mut PageButtons, page: &str, l
         }
         ok
     });
+    // The original fills some lists (FSAA, VSYNC) while it runs, so the
+    // stored list can be too short to choose from.
+    for (i, name) in &buttons.choosers {
+        let w = &mut layout.widgets[*i];
+        let Kind::Button(b) = &mut w.kind else {
+            continue;
+        };
+        if b.items.len() < 2 {
+            if let Some(items) = option_settings::fallback_items(name) {
+                log.line(format!(
+                    "original menus: page {page}: {} ({name}) has {:?} in the original; using {:?}",
+                    w.name, b.items, items
+                ));
+                b.items = items;
+            }
+        }
+    }
     for (i, why) in bad {
         let name = layout.widgets[i].name.clone();
         log.line(format!(
@@ -546,10 +563,6 @@ fn refresh_page(
         };
         if let Some(items) = option_settings::items(name, settings, desktop) {
             b.items = items;
-        } else if b.items.len() < 2 {
-            if let Some(items) = option_settings::fallback_items(name) {
-                b.items = items;
-            }
         }
         if let Some(at) = option_settings::read(name, settings, &b.items) {
             b.choose(at);
@@ -1467,9 +1480,15 @@ fn draw(
     let mut notes: Vec<String> = Vec::new();
     for (n, (on_top, screen)) in screens.into_iter().enumerate() {
         let mut layout = screen.layout.clone();
-        let is_list = menus.list.as_ref().is_some_and(|l| std::ptr::eq(&l.screen, screen));
+        let is_list = menus
+            .list
+            .as_ref()
+            .is_some_and(|l| std::ptr::eq(&l.screen, screen));
         if is_list {
-            let dx = list_chooser.and_then(|c| page_moves.get(c)).copied().unwrap_or(0.0);
+            let dx = list_chooser
+                .and_then(|c| page_moves.get(c))
+                .copied()
+                .unwrap_or(0.0);
             fit::shift_all(&mut layout, dx);
         } else {
             let spread = fit::spread(&mut layout, assets, across);
@@ -1482,7 +1501,11 @@ fn draw(
                         if spread.widened.is_empty() {
                             String::new()
                         } else {
-                            format!(", widened {} ({})", spread.widened.join(", "), spread.why.join("; "))
+                            format!(
+                                ", widened {} ({})",
+                                spread.widened.join(", "),
+                                spread.why.join("; ")
+                            )
                         }
                     ));
                 }
@@ -1490,11 +1513,22 @@ fn draw(
                 // shrink labels that run into their row's arrows.
                 let shrunk = screens::fit_row_labels(&mut layout, assets);
                 if !shrunk.is_empty() {
-                    notes.push(format!("labels shrunk to fit before their arrows: {}", shrunk.join(", ")));
+                    notes.push(format!(
+                        "labels shrunk to fit before their arrows: {}",
+                        shrunk.join(", ")
+                    ));
                 }
             }
         }
-        fitted.push((on_top, layout, if overlay && !on_top { None } else { screen.focus }));
+        fitted.push((
+            on_top,
+            layout,
+            if overlay && !on_top {
+                None
+            } else {
+                screen.focus
+            },
+        ));
     }
     // (on top?, pictures, mouse areas by widget index)
     type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>);
@@ -1532,7 +1566,9 @@ fn draw(
             notes.push(format!("STILL OVERLAPPING: {}", overlaps.join(", ")));
         }
         for note in notes {
-            log.line(format!("original menus: {page_name} at {aspect:.2} wide: {note}"));
+            log.line(format!(
+                "original menus: {page_name} at {aspect:.2} wide: {note}"
+            ));
         }
     }
     menus.drawn = list.iter().flat_map(|l| l.1.clone()).collect();

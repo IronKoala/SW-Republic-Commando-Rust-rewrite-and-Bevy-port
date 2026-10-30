@@ -405,6 +405,9 @@ fn main() -> AppExit {
     .insert_resource(player::FieldOfView::from_settings(&settings))
     .insert_resource(input::LookSettings::from_settings(&settings))
     .insert_resource(settings.gyro.clone())
+    .insert_resource(rc_squad_plugin::SquadOptions {
+        auto_pull_maneuvers: settings.game.auto_pull_maneuvers,
+    })
     .insert_resource(button_names)
     .insert_resource(bindings)
     .insert_resource(input::BaseBindings(base_bindings))
