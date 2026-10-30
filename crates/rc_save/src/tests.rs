@@ -341,3 +341,53 @@ fn differences_between_sections() {
     assert_eq!(super::file::largest_difference(&a, &b), Some(0.5));
     assert_eq!(super::file::largest_difference(&a, &c), None);
 }
+
+#[test]
+fn level_exit_carries_sections_to_the_next_map() {
+    let dir = temp_dir("travel");
+    let mut app = game(&dir);
+    app.insert_resource(TravelSettings {
+        carry: vec!["score".into(), "nothing_saves_this".into()],
+    });
+    app.world_mut().resource_mut::<Score>().0 = 7;
+    app.world_mut().write_message(ChangeLevel {
+        map: "geo_01b".into(),
+        portal: Some("FromA".into()),
+        by: "Teleporter0".into(),
+    });
+    for _ in 0..4 {
+        app.update();
+    }
+    assert_eq!(
+        app.world().resource::<CurrentLevel>().map.as_deref(),
+        Some("geo_01b")
+    );
+    assert_eq!(
+        *app.world().resource::<State<GameState>>().get(),
+        GameState::InGame
+    );
+    // The fresh map started the score at 0; the carried section put 7 back.
+    assert_eq!(*app.world().resource::<Score>(), Score(7));
+    // The level part reads (and removes) this; the fake level doesn't.
+    assert_eq!(
+        app.world().get_resource::<ArrivalPortal>(),
+        Some(&ArrivalPortal("FromA".into()))
+    );
+    // The new map's start is the checkpoint, with what was carried.
+    let cp = read(&slot_path(&dir, &SaveSlot::Checkpoint)).unwrap();
+    assert_eq!(cp.header.map, "geo_01b");
+    assert_eq!(cp.header.checkpoint.as_deref(), Some(LEVEL_START));
+    assert_eq!(cp.part("score").unwrap()["score"].as_integer(), Some(7));
+    assert_eq!(
+        app.world().resource::<Checkpoints>().reached,
+        vec![LEVEL_START.to_string()]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn travel_file_reads_and_rejects_typos() {
+    let t = TravelSettings::from_text("carry = [\"combat\", \"squad\"]").unwrap();
+    assert_eq!(t.carry, ["combat", "squad"]);
+    assert!(TravelSettings::from_text("cary = []").is_err());
+}
