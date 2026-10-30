@@ -392,7 +392,26 @@ left at `CTDamageExplosion` (the player's version is
 `SBDCrouchWeapon`, a straight-flying 800-damage rocket (`Speed` 5000,
 goes off on touch), not a thrown grenade; `GeonosianDroneBot` 0.7 with
 `DroneSpit`. The throw animation `ThrowGrenade` in the Trandoshan sets is 26
-frames at 30 a second, with an `AnimNotify_ReleaseGrenade` partway.
+frames at 30 a second, with an `AnimNotify_ReleaseGrenade` partway. The
+mercenary plays `CloneCommandoSet`'s instead (65 frames, 2.17 s; see below).
+
+**The Trandoshan mercenary's model (read 2026-10-30).** `TrandoshanMercenary`
+(ctcharacters.u) has `Mesh = TrandoshanMerc`, an import of
+`Clone.TrandoshanMerc`: the mesh is in `GameData/Animations/clone.ukx`, not
+`trandoshan.ukx` (which holds `TrandoshanSlaver`, `TrandoshanHeavy` and
+`TrandoshanScav`). It has the commandos' 65-bone skeleton (1500 points, 2956
+triangles, about 186 uu tall) and links nine animation sets in this order:
+`cYYY04MercSet`, `cRAS03MercSet`, `cYYY01MercenarySet`, `MPSet`,
+`TrandoshanMercSet`, `CloneCommandoSet`, `mHackUnlockDoorSet`,
+`mDoorBreachSet`, `CloneCommandoSPSet`. Its own sets hold only cutscenes,
+entrances and finishing moves (`TrandoshanMercSet`: climbs, rappel,
+`DeathRocket`, `EmoteSeeEnemy`...); idle, walking, firing, crouching, death and
+`ThrowGrenade` come from `CloneCommandoSet`. The mesh's material is
+`CloneTextures.TrandoshanMercTextures.TrandoshanMercProxy`, a stand-in;
+`TrandoshanMercenaryDefaults` (properties.u) sets `Skins[0]` to
+`CloneTextures.TrandoshanMercTextures.TrandoshanMerc_Shader` and
+`BurntMaterial` to `TrandoshanMerc_Burn`.
+
 How the brain uses these numbers is compiled code.
 
 **Force pike** (read 2026-10-30). `GeonosianWarrior` `RequiredEquipment`
@@ -412,8 +431,6 @@ second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
 - How the original lets the player hurt droids with a picked-up E-5: its
   `CTDamageEnergyDroids` is ignored by battle droids' table. Our
   `e5_blaster_pickup.toml` uses plain `CTDamageEnergy` instead.
-- The Trandoshan's mesh `TrandoshanMerc` isn't in `trandoshan.ukx`; we
-  use the `Trandoshan` mesh there for now.
 - Which class names the maps' spawners actually use for these enemies
   (log line `spawners no enemy file claims`).
 - The other Geonosians (`GeonosianDrone`, `GeonosianElite` with its beam).
