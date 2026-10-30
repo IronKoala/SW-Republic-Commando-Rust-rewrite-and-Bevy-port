@@ -14,6 +14,7 @@
 //! numbers to the log, to check a controller.
 //! Everything is logged to `logs/rc_game.log`.
 
+mod graphics;
 mod hud;
 mod input;
 mod levels;
@@ -27,6 +28,7 @@ mod player;
 mod rebind;
 mod script;
 mod settings;
+mod sound_options;
 mod theme;
 
 use bevy::prelude::*;
@@ -425,6 +427,8 @@ fn main() -> AppExit {
         music::MusicPlugin,
         player::PlayerPlugin,
         panini::PaniniViewPlugin,
+        graphics::GraphicsOptionsPlugin,
+        sound_options::SoundOptionsPlugin,
     ))
     .add_systems(Startup, |mut commands: Commands| {
         // The camera for menus and the display; the 3D view has its own.

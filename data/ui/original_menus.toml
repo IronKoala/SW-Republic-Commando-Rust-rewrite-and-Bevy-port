@@ -126,13 +126,13 @@ OnLeft = "option_left"
 OnRight = "option_right"
 
 [pages.options_sound.choosers]
-"Options[0]" = "unavailable"        # VOICES VOLUME: no voices yet
+"Options[0]" = "voices_volume"      # speech: squad, enemies, level lines
 "Options[1]" = "effects_volume"
 "Options[2]" = "music_volume"
-"Options[3]" = "unavailable"        # SOUND QUALITY
-"Options[4]" = "unavailable"        # 3D SOUND
-"Options[5]" = "unavailable"        # EAX (a Windows-only sound system)
-"Options[6]" = "unavailable"        # AUDIO CHANNELS
+"Options[3]" = "sound_quality"      # LOW: 22050 per second at most (next level load)
+"Options[4]" = "sound_3d"           # enemies heard from their side
+"Options[5]" = "unavailable"        # EAX: Creative's Windows-only sound card effects; no equivalent here
+"Options[6]" = "audio_channels"     # most sounds at once
 
 [pages.options_sound.extra_buttons.PortSettings]
 copy_of = "Controls"
@@ -154,18 +154,18 @@ OnLeft = "option_left"
 OnRight = "option_right"
 
 [pages.options_graphics.choosers]
-"Options[0]" = "unavailable"        # GRAPHICS QUALITY
-"Options[1]" = "unavailable"        # BRIGHTNESS
+"Options[0]" = "graphics_quality"   # sets the rows below (CUSTOM after a change)
+"Options[1]" = "brightness"
 "Options[2]" = "video_resolution"
-"Options[3]" = "unavailable"        # TEXTURE QUALITY
-"Options[4]" = "unavailable"        # CHARACTER DETAIL
-"Options[5]" = "unavailable"        # BUMPMAPPING QUALITY
-"Options[6]" = "unavailable"        # BLUR EFFECTS
-"Options[7]" = "unavailable"        # BLOOM EFFECTS
-"Options[8]" = "unavailable"        # PROJECTORS
-"Options[9]" = "unavailable"        # SQUAD SHADOWS
+"Options[3]" = "texture_detail"     # from the next level load
+"Options[4]" = "character_detail"   # from the next level load
+"Options[5]" = "unavailable"        # BUMPMAPPING QUALITY: bump maps aren't drawn yet
+"Options[6]" = "blur"               # motion blur
+"Options[7]" = "bloom"
+"Options[8]" = "unavailable"        # PROJECTORS: no projected decals or blob shadows yet
+"Options[9]" = "squad_shadows"      # moving lights cast shadows
 "Options[10]" = "vsync"
-"Options[11]" = "unavailable"       # FSAA
+"Options[11]" = "fsaa"              # edge smoothing (MSAA)
 
 [pages.options_graphics.extra_buttons.PortSettings]
 copy_of = "Controls"

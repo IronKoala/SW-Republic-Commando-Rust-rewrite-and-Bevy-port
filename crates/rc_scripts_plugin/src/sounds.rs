@@ -303,13 +303,16 @@ pub(crate) fn play(
             source: r.source,
             speech,
         };
-        let e = commands
-            .spawn((
-                tag.clone(),
-                AudioPlayer(h),
-                PlaybackSettings::DESPAWN.with_volume(Volume::Linear(r.volume)),
-            ))
-            .id();
+        let mut spawned = commands.spawn((
+            tag.clone(),
+            AudioPlayer(h),
+            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(r.volume)),
+        ));
+        // Speech follows the VOICES volume (rc_game_core::Voice).
+        if speech {
+            spawned.insert(rc_game_core::Voice);
+        }
+        let e = spawned.id();
         on.push((e, tag));
     }
 }

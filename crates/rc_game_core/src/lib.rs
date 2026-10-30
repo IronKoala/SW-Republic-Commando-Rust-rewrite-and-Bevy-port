@@ -23,6 +23,8 @@
 //!   the player's eyes.
 //! - [`MusicMood`]: calm or battle music; whoever knows a fight started
 //!   sets it.
+//! - [`Voice`] and [`SoundAt`]: tags for a sound a part plays (speech;
+//!   where it comes from), for the VOICES volume and 3D SOUND options.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
 //! - [`events`]: the level's named events ([`ScriptEvent`] out of the level
 //!   scripts, [`RaiseEvent`] into them), and [`ChangeLevel`] when a level
@@ -39,6 +41,7 @@ mod hud;
 mod log;
 pub mod paths;
 pub mod save;
+pub mod sound;
 mod state;
 pub mod units;
 
@@ -50,6 +53,7 @@ pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
 pub use log::GameLog;
+pub use sound::{SoundAt, Voice};
 pub use paths::GamePaths;
 pub use state::{
     playing, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate, MusicMood, Play,

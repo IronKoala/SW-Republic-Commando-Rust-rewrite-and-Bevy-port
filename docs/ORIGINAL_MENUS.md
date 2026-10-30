@@ -137,10 +137,30 @@ page's own display box over a black square, and copies of the chooser for
 its rows. It shows 10 sizes and scrolls with the keys or the mouse wheel; a
 click outside or Back closes it.
 
-Greyed out for now: subtitles, helmet and prompt options, auto pull, visor
-and its intensity, sound quality, 3D sound, EAX, channels, graphics quality
-presets, brightness, texture, character and bump detail, blur, bloom,
-projectors, squad shadows, FSAA, and the CONTROLS rows whose action the
+**GRAPHICS and SOUND rows (2026-10-30).** What each does here
+(`rc_game/src/graphics.rs`, `sound_options.rs`, the names in
+`option_settings.rs`). The code reads the words of the original's values
+(ON/OFF/YES/NO, LOW, 2X, numbers such as 32), not only their order, because
+their lists weren't checked against the install when this was written:
+
+| Row | What it does in the port |
+| --- | --- |
+| GRAPHICS QUALITY | Sets the rows below: lowest = quarter-size pictures; middle = half size; next = full size; top = full size with bloom, shadows and 4x FSAA. Shows CUSTOM after a row is changed by hand. Our choice of presets. |
+| BRIGHTNESS | Exposure on the 3D views: the middle value changes nothing, each end is one stop (twice or half as bright). Menus and the display aren't changed. |
+| TEXTURE QUALITY / CHARACTER DETAIL | Walls and props / squad, enemies, arms and weapons use the half- or quarter-size picture each texture stores (never below 32 pixels). From the next level load. |
+| BLUR EFFECTS | Bevy's motion blur on the level view. |
+| BLOOM EFFECTS | Bevy's bloom (a glow around the brightest parts). Switches every camera to a wide colour range; brightness is then applied once, by the last 3D camera. |
+| SQUAD SHADOWS | The level's moving lights cast shadows (the squad, droids and props in their light). |
+| FSAA | Edge smoothing, 1, 2 or 4 samples (8 counts as 4: not every card can do 8). |
+| VOICES VOLUME | Speech: the level scripts' lines and enemies whose sounds come from a `*_voice` package (`rc_game_core::Voice`). |
+| SOUND QUALITY | LOW keeps sounds at 22050 samples a second at most (most already are). From the next level load. |
+| 3D SOUND | Enemy sounds are heard from their side (`rc_game_core::SoundAt`, Bevy's spatial sound from the player's eyes). Their distance fall-off was already there. |
+| AUDIO CHANNELS | The most sounds at once; the oldest effect stops for a new one. Speech and music are never stopped. |
+
+Still greyed out: subtitles, helmet and prompt options, auto pull, visor
+and its intensity, BUMPMAPPING QUALITY (bump maps aren't drawn yet),
+PROJECTORS (nothing projected yet), EAX (Creative's Windows-only sound
+card effects, nothing to switch), and the CONTROLS rows whose action the
 port doesn't have. Not done: the original's "keep these settings?" timer
 after a screen change (ours applies at once).
 

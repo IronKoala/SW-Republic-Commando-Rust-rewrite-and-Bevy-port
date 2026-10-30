@@ -289,8 +289,12 @@ copy of the game.
   GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
   sensitivity, invert mouse, difficulty, effects and music volume, screen
   size and vsync work; key rows open the original's REASSIGN BUTTON box.
-  Rows the port can't do yet (subtitles, brightness, detail levels and so
-  on) are greyed out. Values change with the arrows; the screen size
+  The GRAPHICS rows (quality presets, brightness, texture and character
+  detail, blur, bloom, squad shadows, FSAA) and SOUND rows (voices volume,
+  sound quality, 3D sound, audio channels) work too (checked in a stand-in
+  scene and by tests; not tested in a real level yet). Rows the port can't
+  do yet (subtitles, helmet, bump mapping, projectors, EAX and so on) are
+  greyed out. Values change with the arrows; the screen size
   also has a drop-down list. Our own extra settings (field of view, full
   screen, controller and gyro) are on a fifth tab, "PORT +", in the same
   original look. The campaign page keeps the placeholder until its planet
