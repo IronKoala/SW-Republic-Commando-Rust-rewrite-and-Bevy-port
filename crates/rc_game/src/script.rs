@@ -50,6 +50,10 @@ enum Step {
     Note(fn(&mut World)),
     /// Press menu-down until the item the function names is selected.
     SelectItem(&'static str, fn(&mut World) -> Option<usize>),
+    /// On the pause menu, press menu-down until the button is focused: on
+    /// the original's page the one calling this function, on the
+    /// placeholder the item at this index.
+    FocusPauseItem(&'static str, usize),
     /// Press an action, then check which original menu button has focus.
     FocusAfter(Action, &'static str),
     /// Capture the window, save it to `logs/<name>.png` and measure its
@@ -83,6 +87,9 @@ struct ShotStats {
     /// Amber pixels within 3% of the screen height of the centre (the
     /// crosshair).
     centre_amber: u32,
+    /// Near-white pixels within 7% of the screen height of the centre
+    /// (the original's reticle picture, which is white and grey).
+    centre_white: u32,
 }
 
 #[derive(Resource, Default)]
@@ -284,16 +291,29 @@ fn steps() -> Vec<Step> {
             }
         }),
         Shot("in_game"),
-        Check("level drawn with the crosshair in amber", |w| {
+        Check("level drawn with the crosshair at the centre", |w| {
             let s = shot(w, "in_game")?;
-            if s.lit > 0.3 && s.centre_amber > 4 {
+            // The original's white reticle picture when the install has
+            // it, else the placeholder's amber bars.
+            let original = crate::original_hud::reticle_showing(w);
+            let ok = s.lit > 0.3
+                && if original {
+                    s.centre_white > 100
+                } else {
+                    s.centre_amber > 4
+                };
+            if ok {
                 Ok(format!(
-                    "{:.0}% lit, {} amber pixels at the centre",
+                    "{:.0}% lit, {}",
                     s.lit * 100.0,
-                    s.centre_amber
+                    if original {
+                        format!("original reticle: {} white pixels at the centre", s.centre_white)
+                    } else {
+                        format!("{} amber pixels at the centre", s.centre_amber)
+                    }
                 ))
             } else {
-                Err(format!("{s:?}"))
+                Err(format!("original reticle {original}: {s:?}"))
             }
         }),
         Check("the level part loaded walls, props, doors and invisible walls", |w| {
@@ -636,8 +656,16 @@ fn steps() -> Vec<Step> {
         }),
         Press(Action::Pause),
         Wait(0.2),
-        Press(Action::MenuDown),
-        Press(Action::MenuDown),
+        Check("the pause menu is the original's when the install has it", |w| {
+            let m = w.resource::<OriginalMenus>();
+            match (m.active(), m.pages.contains_key("paused")) {
+                (true, true) => Ok("original CTPausePCMenu".into()),
+                (false, _) => Ok("no original menus: placeholder".into()),
+                (true, false) => Err("placeholder, see the log for why".into()),
+            }
+        }),
+        Shot("paused"),
+        FocusPauseItem("EndMissionSelected", 2),
         Press(Action::MenuAccept), // Quit to main menu
         Until("main menu again", |w| in_state(w, GameState::MainMenu), 5.0),
         Wait(0.3),
@@ -733,6 +761,20 @@ fn steps() -> Vec<Step> {
             Err("still running 5 s later".into())
         }),
     ]
+}
+
+fn pause_item_focused(w: &mut World, func: &str, index: usize) -> bool {
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    let m = w.resource::<OriginalMenus>();
+    match m.shown(&state, play.as_ref(), menu) {
+        Some(original_menu::Shown::Page(k)) => {
+            let screen = &m.pages[&k].screen;
+            screen.focus.is_some_and(|i| screen.on_select(i) == func)
+        }
+        _ => menu.selected == index,
+    }
 }
 
 fn focus(w: &mut World) -> Option<String> {
@@ -865,8 +907,9 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
             rgba.extend([p[0], p[1], p[2], 255]);
         }
     }
-    let (mut amber, mut lit, mut centre) = (0u32, 0u32, 0u32);
+    let (mut amber, mut lit, mut centre, mut white) = (0u32, 0u32, 0u32, 0u32);
     let r = (h as f32 * 0.03) as i64;
+    let r_white = (h as f32 * 0.07) as i64;
     for (i, p) in rgba.chunks_exact(4).enumerate() {
         let (x, y) = ((i % w) as i64, (i / w) as i64);
         let (pr, pg, pb) = (p[0] as i32, p[1] as i32, p[2] as i32);
@@ -881,6 +924,14 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         if pr.max(pg).max(pb) > 30 {
             lit += 1;
         }
+        let min = pr.min(pg).min(pb);
+        if min > 170
+            && pr.max(pg).max(pb) - min < 40
+            && (x - w as i64 / 2).abs() <= r_white
+            && (y - h as i64 / 2).abs() <= r_white
+        {
+            white += 1;
+        }
     }
     if lit == 0 {
         log.line(format!(
@@ -893,6 +944,7 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
         amber: amber as f32 / n,
         lit: lit as f32 / n,
         centre_amber: centre,
+        centre_white: white,
     };
     let path = format!("logs/{name}.png");
     let picture = rc_image::Rgba {
@@ -1023,6 +1075,19 @@ fn run(world: &mut World) {
                     }
                 }
             },
+            Step::FocusPauseItem(func, index) => {
+                if !pause_item_focused(world, func, index) {
+                    // Down on even frames, released on odd ones.
+                    if frames % 2 == 0 {
+                        held.insert(Action::MenuDown);
+                    }
+                    done = frames > 200;
+                    if done {
+                        log.line(format!("CHECK focus {func} on the pause menu: not reached -> FAIL"));
+                        world.resource_mut::<Script>().failed += 1;
+                    }
+                }
+            }
             Step::FocusAfter(a, want) => {
                 if frames == 0 {
                     held.insert(a);

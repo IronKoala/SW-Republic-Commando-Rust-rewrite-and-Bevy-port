@@ -7,3 +7,7 @@ description = "Reads the original game's menu layouts, pictures, fonts and sound
 [dependencies]
 rc_image = { path = "../rc_image" }
 rc_package = { path = "../rc_package" }
+# Reading data/ui/original_menus.toml. serde (MIT OR Apache-2.0),
+# https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

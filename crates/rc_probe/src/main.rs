@@ -37,6 +37,9 @@
 //!   rc_probe --menu [Package.Class]  build one of the original menus (default
 //!                            the main menu), log its widgets to `logs/rc_menu.log`
 //!                            and paint it to `extracted/menus/`
+//!   rc_probe --pages [file]  the same for every page in
+//!                            `data/ui/original_menus.toml`, then say which
+//!                            pages would use their original menu, and why not
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
@@ -109,6 +112,7 @@ fn main() {
     let classes_mode = args.first().is_some_and(|a| a == "--classes");
     let font_mode = args.first().is_some_and(|a| a == "--fonts");
     let menu_mode = args.first().is_some_and(|a| a == "--menu");
+    let pages_mode = args.first().is_some_and(|a| a == "--pages");
     if texture_mode
         || sound_mode
         || mesh_mode
@@ -117,6 +121,7 @@ fn main() {
         || classes_mode
         || font_mode
         || menu_mode
+        || pages_mode
     {
         args.remove(0);
     }
@@ -165,7 +170,7 @@ fn main() {
         CLASSES_LOG_PATH
     } else if font_mode {
         FONT_LOG_PATH
-    } else if menu_mode {
+    } else if menu_mode || pages_mode {
         MENU_LOG_PATH
     } else {
         LOG_PATH
@@ -214,6 +219,12 @@ fn main() {
             .unwrap_or(rc_menus::screens::MAIN_MENU)
             .to_string();
         menus::probe(&mut log, &game.join("GameData"), &class, Path::new(MENU_EXTRACT_DIR))
+    } else if pages_mode {
+        let file = args
+            .first()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("data/ui/original_menus.toml"));
+        menus::pages(&mut log, &game.join("GameData"), &file, Path::new(MENU_EXTRACT_DIR))
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {
