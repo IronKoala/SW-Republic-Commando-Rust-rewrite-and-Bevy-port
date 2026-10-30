@@ -130,7 +130,19 @@ copy of the game.
   rifle hits or 2 pistol hits. One droid fires back, and its hits take your
   shield before your health. The firing and reload sounds are the game's.
   Every weapon is a text file in `data/weapons`, which mods can edit.
-  `rc_shoot --script` drives itself through 12 checks and passed all of them.
+  `rc_shoot --script` drives itself through 17 checks and passed all of them.
+
+- **First-person arms and weapon animations (tested in the cloud sandbox,
+  not yet on Windows or by playing).** The player holds the original
+  first-person arms and gun for the DC-17m, its sniper and anti-armour
+  attachments, the DC-15s pistol and the picked-up Trandoshan repeater,
+  read from the game's `hudarms.ukx` at run time. They breathe when you
+  stand still, sway when you walk or run, kick on each shot, play the full
+  reload, holster the old weapon and bring up the new one when you switch
+  (with the attachment swap between DC-17m attachments), and play the
+  grenade throw and melee hit. They're drawn by their own camera, so the gun
+  never pokes into walls. The sniper's arms hide while zoomed, as in the
+  game.
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
@@ -401,10 +413,11 @@ copy of the game.
   far a shot can miss. No hit reactions or death effects beyond the
   animation. Droids don't use jump links or doors.
 
-- Weapons: no first-person arms or muzzle flash, and switching weapons is
-  instant. How the view kick settles back is our own guess. The
-  attachments' and the Trandoshan repeater's reload times are stand-ins,
-  grenades have no models yet (a small glowing ball), and squad mates only
+- Weapons: no muzzle flash, and switching weapons is instant for firing
+  (the arms do play the holster and draw animations). The first-person
+  arms have no blending between animations, aren't lit by the level (a
+  fixed brightness), and the DC-17m's ammo counter always shows 999. How
+  the view kick settles back is our own guess. Grenades have no models yet (a small glowing ball), and squad mates only
   throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors walk
@@ -588,7 +601,9 @@ cargo run --release -p rc_combat --bin rc_shoot -- --script
 ```
 
 The log goes to `logs\rc_shoot.log`. The last line should be
-`script done: 12 of 12 checks passed`.
+`script done: 17 of 17 checks passed`. With the game folder found, you hold
+the original first-person arms and gun: the log shows lines like
+`arms: dc17m_blaster plays Reload` as the animations change.
 
 To load a level and fly around it:
 

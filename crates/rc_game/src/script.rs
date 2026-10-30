@@ -321,6 +321,25 @@ fn steps() -> Vec<Step> {
                 Err(format!("original reticle {original}: {s:?}"))
             }
         }),
+        Check("the first-person arms hold the weapon in hand", |w| {
+            let arms = w
+                .get_resource::<rc_combat::ArmsReadout>()
+                .cloned()
+                .ok_or("no arms readout")?;
+            let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+            let held = q.iter(w).next().and_then(|a| a.current()).map(|c| c.0.clone());
+            let got = format!(
+                "holding {held:?}; the arms show {:?} playing {}{}",
+                arms.weapon,
+                arms.animation,
+                if arms.hidden { " (hidden)" } else { "" }
+            );
+            if held.is_some() && arms.weapon == held && !arms.hidden {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check("the level part loaded walls, props, doors and invisible walls", |w| {
             let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
                 return Err("no LevelInfo".into());
