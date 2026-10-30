@@ -25,7 +25,8 @@ accel = 60000             # AccelFactor (Projectile's default)
 max_speed = 5000          # MaxSpeed
 life_span = 10
 damage = 24               # Damage (BattleDroidBlasterProjDefaults)
-damage_kind = "blaster"   # CTDamageEnergyDroids
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyDroids" # MyDamageType (battle droids take x0 from it: no friendly fire)
 
 [sound]
 package = "gen_sound"

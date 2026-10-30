@@ -196,6 +196,10 @@ pub struct Fighter {
     pub distance_walked: f32,
     /// Since when a friend has been standing in its line of fire.
     ally_in_way_since: Option<f32>,
+    /// Can't act before this battle time (stunned by a grenade).
+    pub stunned_until: f32,
+    /// Which of the battle's targets it fought last (0 is the player).
+    pub target_index: Option<usize>,
     rng: Rng,
 }
 
@@ -241,6 +245,8 @@ impl Fighter {
             shots_fired: 0,
             distance_walked: 0.0,
             ally_in_way_since: None,
+            stunned_until: f32::NEG_INFINITY,
+            target_index: None,
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -342,6 +348,48 @@ impl Fighter {
             self.maneuver = to;
             self.maneuver_started = time;
         }
+    }
+
+    /// Of several enemies, the one to fight: the one it fought last while
+    /// it can still see it (so it doesn't flick between targets every
+    /// frame), else the nearest it can see. `None` if it sees none.
+    /// **Our choice:** the original's target picking is in its compiled
+    /// engine.
+    pub fn choose_target(&mut self, world: &dyn World, targets: &[Target]) -> Option<Target> {
+        let s = &self.params.senses;
+        let eye = self.eye();
+        let fighting = matches!(self.mode, Mode::Alerted | Mode::Attack);
+        let (fwd, _) = rc_movement::axes(self.facing);
+        let visible = |t: &Target| {
+            let to = t.eye - eye;
+            let dist = to.length();
+            if dist > s.sight_radius {
+                return false;
+            }
+            if dist > s.auto_detect_radius
+                && !fighting
+                && to.flat().normalize_or_zero().dot(fwd) < s.peripheral_vision
+            {
+                return false;
+            }
+            clear_line(world, eye, t.eye)
+        };
+        if let Some(i) = self.target_index {
+            if let Some(t) = targets.get(i).filter(|t| visible(t)) {
+                return Some(*t);
+            }
+        }
+        let best = targets
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| visible(t))
+            .min_by(|a, b| {
+                let da = (a.1.centre - self.pawn.location).length();
+                let db = (b.1.centre - self.pawn.location).length();
+                da.total_cmp(&db)
+            });
+        self.target_index = best.map(|(i, _)| i);
+        best.map(|(_, t)| *t)
     }
 
     /// Can it see the target right now?
@@ -629,6 +677,9 @@ impl Fighter {
     /// lets us shoot at it when standing.
     fn pick_cover(&self, view: &View, enemy: Vec3) -> Option<usize> {
         let c = &self.params.combat;
+        if !c.uses_cover {
+            return None;
+        }
         let mut best: Option<(usize, f32)> = None;
         for n in view
             .nav

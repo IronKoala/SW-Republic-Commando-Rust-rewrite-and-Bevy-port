@@ -440,16 +440,14 @@ pub fn apply_settings(
     settings: Res<Settings>,
     mut fov: ResMut<FieldOfView>,
     mut look: ResMut<LookSettings>,
+    mut gyro: ResMut<rc_pads::GyroSettings>,
 ) {
     if !settings.is_changed() {
         return;
     }
     fov.0 = settings.video.fov;
-    look.mouse_sensitivity = settings.controls.mouse_sensitivity;
-    look.invert_y = settings.controls.invert_y;
-    look.stick_look_speed = settings.controls.stick_look_speed;
-    look.dead_zone = settings.controls.stick_dead_zone;
-    look.look_curve = settings.controls.stick_look_curve;
+    *look = LookSettings::from_settings(&settings);
+    *gyro = settings.gyro.clone();
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,13 +1,42 @@
 //! A character's AI settings, read from a data file such as
 //! `data/enemies/battle_droid.toml`.
 //!
-//! The file has sections. `[movement]` goes to `rc_movement::MoveParams`
-//! (same names as the player's file). `[senses]`, `[combat]`,
-//! `[spawning]` and `[look]` are read here. Every value has a built-in default (the
+//! The file has sections. `[type]` says which of the game's classes the
+//! file is for. `[movement]` goes to `rc_movement::MoveParams` (same names
+//! as the player's file). `[senses]`, `[combat]`, `[spawning]` and
+//! `[look]` are read here. Every value has a built-in default (the
 //! battle droid's), so a mod's file only needs the lines it changes. A
 //! misspelt name is an error naming the line.
 
 use rc_movement::MoveParams;
+
+/// Which enemy this is, and which of the game's classes it stands for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnemyType {
+    /// The settings file's name without `.toml`, like `battle_droid`.
+    pub id: String,
+    /// For the log, like "battle droid".
+    pub name: String,
+    /// The game's class names a map's spawner may make (its `Prototype`),
+    /// compared ignoring letter case. A name ending in `*` matches every
+    /// class starting with the rest (`BattleDroid*`).
+    pub classes: Vec<String>,
+    /// "droid" or "organic": for damage tables and stuns (EMP, flash).
+    pub body: String,
+}
+
+impl EnemyType {
+    pub fn matches(&self, class: &str) -> bool {
+        let class = class.to_ascii_lowercase();
+        self.classes.iter().any(|c| {
+            let c = c.to_ascii_lowercase();
+            match c.strip_suffix('*') {
+                Some(prefix) => class.starts_with(prefix),
+                None => class == c,
+            }
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Senses {
@@ -43,6 +72,14 @@ pub struct Combat {
     pub cover_boredom_time: f32,
     pub cover_search_radius: f32,
     pub lost_sight_reposition: f32,
+    /// Looks for cover when shot in the open. Super battle droids don't.
+    pub uses_cover: bool,
+    /// The weapon file left on the ground when it falls, for the player to
+    /// pick up. Empty for none.
+    pub drops: String,
+    /// The original's damage table for this enemy (`DamageVariance`), by
+    /// name in `data/combat/damage_types.toml`. Empty for none.
+    pub damage_table: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,8 +111,22 @@ pub struct Look {
     pub ambient: f32,
 }
 
+/// What the character says or sounds like: sound names in `package`
+/// (`GameData/Sounds/<package>.uax`). One is picked at random each time.
+/// Empty lists play nothing.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Sounds {
+    pub package: String,
+    /// On first seeing the enemy.
+    pub spotted: Vec<String>,
+    pub hurt: Vec<String>,
+    pub death: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiParams {
+    pub kind: EnemyType,
+    pub sounds: Sounds,
     pub movement: MoveParams,
     pub senses: Senses,
     pub combat: Combat,
@@ -100,6 +151,16 @@ impl AiParams {
         m.side_speed_ratio = 0.8;
         m.jump_z = 0.0;
         AiParams {
+            kind: EnemyType {
+                id: "battle_droid".into(),
+                name: "battle droid".into(),
+                classes: vec!["BattleDroid*".into()],
+                body: "droid".into(),
+            },
+            sounds: Sounds {
+                package: "droid_sound".into(),
+                ..Default::default()
+            },
             movement: m,
             senses: Senses {
                 sight_radius: 5000.0,
@@ -129,6 +190,9 @@ impl AiParams {
                 cover_boredom_time: 15.0,
                 cover_search_radius: 1500.0,
                 lost_sight_reposition: 2.0,
+                uses_cover: true,
+                drops: "e5_blaster_pickup".into(),
+                damage_table: "DV_DroidsBattleDroidDamage".into(),
             },
             spawning: Spawning {
                 activate_unscripted_within: 3000.0,
@@ -197,7 +261,41 @@ impl AiParams {
         let p = &mut self.spawning;
         let l = &mut self.look;
         let text = || value.trim_matches('"').to_string();
+        let boolean = || match value {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(format!("`{value}` should be true or false")),
+        };
+        let list = || -> Result<Vec<String>, String> {
+            let inner = value
+                .strip_prefix('[')
+                .and_then(|v| v.strip_suffix(']'))
+                .ok_or_else(|| format!("`{value}` should be a list like [\"A\", \"B\"]"))?;
+            Ok(inner
+                .split(',')
+                .map(|x| x.trim().trim_matches('"').to_string())
+                .filter(|x| !x.is_empty())
+                .collect())
+        };
+        let k = &mut self.kind;
+        let snd = &mut self.sounds;
         match (section, key) {
+            ("sound", "package") => snd.package = text(),
+            ("sound", "spotted") => snd.spotted = list()?,
+            ("sound", "hurt") => snd.hurt = list()?,
+            ("sound", "death") => snd.death = list()?,
+            ("type", "id") => k.id = text(),
+            ("type", "name") => k.name = text(),
+            ("type", "classes") => k.classes = list()?,
+            ("type", "body") => {
+                k.body = text();
+                if !matches!(k.body.as_str(), "droid" | "organic") {
+                    return Err("body should be \"droid\" or \"organic\"".into());
+                }
+            }
+            ("combat", "uses_cover") => c.uses_cover = boolean()?,
+            ("combat", "drops") => c.drops = text(),
+            ("combat", "damage_table") => c.damage_table = text(),
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
             ("senses", "auto_detect_radius") => s.auto_detect_radius = num()?,
@@ -251,6 +349,7 @@ impl AiParams {
             .into_iter()
             .map(|(k, v)| format!("movement.{k} = {v}"))
             .collect();
+        out.push(format!("{:?}", self.kind));
         out.push(format!("{:?}", self.senses));
         out.push(format!("{:?}", self.combat));
         out.push(format!("{:?}", self.spawning));

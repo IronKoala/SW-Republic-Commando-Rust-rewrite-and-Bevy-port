@@ -23,7 +23,12 @@ accel = 40000             # AccelFactor
 max_speed = 8000          # MaxSpeed
 life_span = 10
 damage = 55               # Damage
-damage_kind = "blaster"   # CTDamageEnergyDC15s
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyDC15s" # MyDamageType
+
+[melee]
+range = 175               # MeleeRange
+damage = 100              # MeleeDamage (CTDamageMelee)
 
 [recoil]
 kick = [300, 300, 0]      # WeaponKick

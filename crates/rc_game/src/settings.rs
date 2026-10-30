@@ -7,6 +7,7 @@
 //! stops the game with a message naming it.
 
 use bevy::prelude::Resource;
+use rc_pads::GyroSettings;
 use rc_game_core::paths::resolve;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ pub struct Settings {
     pub video: VideoSection,
     pub audio: AudioSection,
     pub controls: ControlsSection,
+    pub gyro: GyroSettings,
     pub save: SaveSection,
 }
 
@@ -81,6 +83,10 @@ pub struct VideoSection {
     /// health and ammo aren't in the far corners of an ultrawide.
     /// 0 lets it fill the screen.
     pub hud_max_aspect: f32,
+    /// The Panini view for very wide screens: 0 is off, up to 1. Bends the
+    /// 3D view so things near the sides aren't stretched; the middle keeps
+    /// its size.
+    pub panini: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -107,16 +113,29 @@ pub struct SaveSection {
 pub struct ControlsSection {
     /// Our data file with the key and button bindings.
     pub bindings: String,
+    /// Controls changed in the game are saved to this file, next to the
+    /// settings file, and used instead of `bindings`. Delete it to go back
+    /// to the defaults.
+    pub user_bindings: String,
     /// Mouse turn per count of mouse movement, radians.
     pub mouse_sensitivity: f32,
     /// Gamepad and touch turning speed at full stick, radians per second.
     pub stick_look_speed: f32,
     pub invert_y: bool,
-    /// Stick movement smaller than this is ignored (0 to 1).
+    /// Move-stick movement smaller than this is ignored (0 to 1).
     pub stick_dead_zone: f32,
+    /// The same for the look stick.
+    pub look_stick_dead_zone: f32,
+    /// Move-stick response: 1 is straight, higher makes small pushes walk
+    /// slower.
+    pub stick_move_curve: f32,
     /// Look-stick response: 1 is straight, 2 or more makes small pushes
     /// gentler for fine aiming while full tilt still turns at full speed.
     pub stick_look_curve: f32,
+    /// Look-stick up and down speed compared with left and right.
+    pub stick_look_vertical: f32,
+    /// How far a trigger must be pulled to count as pressed (0 to 1).
+    pub trigger_threshold: f32,
 }
 
 impl Default for Settings {
@@ -138,6 +157,7 @@ impl Default for Settings {
                 vsync: true,
                 fov: 85.0,
                 hud_max_aspect: 16.0 / 9.0,
+                panini: 0.0,
             },
             audio: AudioSection {
                 master_volume: 1.0,
@@ -146,12 +166,18 @@ impl Default for Settings {
             },
             controls: ControlsSection {
                 bindings: "input/bindings.toml".into(),
+                user_bindings: "my_bindings.toml".into(),
                 mouse_sensitivity: 0.0025,
                 stick_look_speed: 2.5,
                 invert_y: false,
                 stick_dead_zone: 0.15,
+                look_stick_dead_zone: 0.12,
+                stick_move_curve: 1.0,
                 stick_look_curve: 1.5,
+                stick_look_vertical: 1.0,
+                trigger_threshold: 0.3,
             },
+            gyro: GyroSettings::default(),
             save: SaveSection::default(),
         }
     }
@@ -217,6 +243,10 @@ fov = 85
 # Widest shape (width / height) the display spreads to; on an ultrawide it
 # stays in a centred area this shape. 1.7777778 is 16:9. 0 fills the screen.
 hud_max_aspect = 1.7777778
+# Panini view for ultrawide screens: 0 is off (the original's straight
+# view), up to 1. Around 0.3 to 0.5 takes the stretching out of the sides on
+# 21:9 and 32:9; the middle stays the same size, a little softer.
+panini = 0.0
 
 [audio]
 master_volume = 1.0   # 0 is silent, 1 is full
@@ -225,11 +255,35 @@ effects_volume = 1.0
 
 [controls]
 bindings = 'input/bindings.toml'   # inside data_folder (or a mod)
+# Controls you change in the game are saved here (next to this file) and
+# used instead. Delete that file to go back to the defaults.
+user_bindings = 'my_bindings.toml'
 mouse_sensitivity = 0.0025         # radians per mouse count
 stick_look_speed = 2.5             # radians per second at full stick
 invert_y = false
-stick_dead_zone = 0.15
+stick_dead_zone = 0.15             # move stick: smaller pushes are ignored
+look_stick_dead_zone = 0.12        # look stick
+stick_move_curve = 1.0             # 1 is straight; higher walks slower on small pushes
 stick_look_curve = 1.5             # 1 is straight; higher is finer near the middle
+stick_look_vertical = 1.0          # look stick: up and down speed compared with across
+trigger_threshold = 0.3            # how far to pull a trigger to fire (0 to 1)
+
+[gyro]
+# Aim by turning the controller (PlayStation, Switch Pro, Joy-Con, Steam
+# Deck and others with a gyro) or a handheld PC with a built-in gyro.
+# always: whenever the ratchet button isn't held. aiming: only while
+# zooming. off: never. The gyro_toggle button switches it on and off.
+mode = 'always'
+# player: turn around the real up direction, however the controller is
+# held (best for most people). local: only the controller's own up axis.
+space = 'player'
+sensitivity = 2.0                  # view turn per real turn (1 is one to one)
+vertical_scale = 1.0               # up and down compared with across
+invert_x = false
+invert_y = false
+smoothing_threshold = 2.0          # degrees per second; slower moves are smoothed
+tightening = 0.0                   # degrees per second; slower moves are damped (0 is off)
+auto_calibrate = true              # learn the gyro's drift while it lies still
 
 [save]
 # Where save files go (quicksave, checkpoint and named saves, as readable

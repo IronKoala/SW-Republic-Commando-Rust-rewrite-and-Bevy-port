@@ -105,6 +105,22 @@ copy of the game.
   still have to be read from the game. Droids still only shoot at you, not
   at the squad.
 
+- **Squad context orders (tested in the cloud sandbox by numbers, not yet
+  on Windows, in a real level, or with eyes).** Each kind of squad marker
+  does its own job: bacta heals the squad mate who uses it; demolition and
+  door breach set a charge that blows after a few seconds and hurts
+  anything near it (a breach first sends a squad mate to every spot at the
+  door); slicing takes longer and makes no bang; sniper, grenade and
+  anti-armour positions are held until you press F4, the sniper firing
+  single long-range shots, the grenadier throwing a grenade every few
+  seconds. Every job is a `[job.*]` part of `data/squad/squad.toml`, so
+  mods can change them or add new ones. Doors don't open yet: the squad
+  reports the job done, and the level scripts part will act on it. The
+  markers are read the way the original's maps lay them out (checked on
+  all 50 campaign maps), and blast sizes, fuses and who does which job
+  are the game's; how long the work takes is our guess. Traps, mines and
+  turrets aren't done yet.
+
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
   room holding the game's own DC-17m model, and shoot battle droids. The
@@ -239,6 +255,22 @@ copy of the game.
   Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
   mouse and a gamepad work at the same time.
 
+- **Controllers and gyro aiming (tested with pretend controllers only, no
+  real hardware yet).** SDL3 reads Xbox, PlayStation, Switch Pro, Joy-Con,
+  GameCube and Steam Deck controllers and says which kind each is. Button
+  names for prompts follow the device you used last (`InputPrompts`,
+  names in `data/input/button_names.toml`). Separate dead zones and curves
+  for each stick, a trigger threshold, and gyro aiming with sensitivity,
+  drift calibration, a ratchet button and on/off (`[gyro]` in
+  `settings.toml`). Changing a control in the game is saved to
+  `my_bindings.toml` (the screen to do it from comes with the original
+  options menus). `rc_padtest` checks a real controller. See
+  `docs/DISPLAY_AND_INPUT.md`.
+- **Panini view for ultrawide screens (tested in a check program, not yet
+  in a level).** `video.panini` in `settings.toml` bends the view so the
+  sides of a 21:9 or 32:9 screen aren't stretched, keeping the middle's
+  size.
+
 - **Battle droids that fight back (tested in the cloud sandbox on
   geo_01a, not yet on Windows).** Droids appear from the map's own
   spawners when you walk into their triggers, walk the level's own path
@@ -251,6 +283,21 @@ copy of the game.
   `rc_droidview --check` watched a fight on geo_01a: 5 droids, 180 shots,
   2 droids destroyed by a stand-in player, no droid shooting another, and
   the droids on screen had the skin's colours (all 12 checks passed).
+
+- **Grenades, the DC-17m's attachments, melee, picked-up weapons and
+  more enemy types, with the original's numbers (tested in the cloud
+  sandbox with automatic tests and the game's script files, not yet played
+  in the real game).** You can throw thermal, sonic, EMP and flash
+  grenades: the thermal bounces and goes off a second after it lands (and
+  sets people close to it alight), the sonic sticks and waits for someone to
+  come near, the EMP electrocutes droids, and the flash stuns anyone looking
+  at it. Switch to the DC-17m's sniper (two zoom steps; zoomed shots hit
+  1.72 times harder) and anti-armour attachments, hit with melee, and pick
+  up a fallen enemy's weapon. Every character takes more or less damage by
+  type, from the game's own damage tables (battle droids shrug off sniper
+  rounds but fall to melee). Super battle droids, Geonosian warriors and
+  Trandoshan mercenaries each have their own settings file in
+  `data/enemies` with the game's health, speed, size and aim.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -298,12 +345,18 @@ copy of the game.
   On geo_01a the start area is closed in by such a barricade, so in
   `rc_game` you won't reach the droids yet; `rc_droidview` shows them.
   Some droid numbers are guesses (marked in the data file), including how
-  far a shot can miss. No droid sounds, hit reactions or death effects
-  beyond the animation. Droids don't use jump links or doors.
+  far a shot can miss. No hit reactions or death effects beyond the
+  animation. Droids don't use jump links or doors.
 
-- Weapons: no first-person arms, muzzle flash, grenades, melee or sniper
-  attachment yet, and switching weapons is instant. How the view kick
-  settles back is our own guess.
+- Weapons: no first-person arms or muzzle flash, and switching weapons is
+  instant. How the view kick settles back is our own guess. The
+  attachments' and the Trandoshan repeater's reload times are stand-ins,
+  grenades have no explosion sounds or models yet (a small glowing ball),
+  and nobody but the player throws grenades yet.
+- Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
+  stand-in blaster instead of using their force pike, and walk instead of
+  flying and climbing. The Trandoshan uses a stand-in model. Droid voice
+  lines are empty until the sound packages are read.
 - Movement guesses: how the game blends the backwards and sideways speed
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
@@ -320,7 +373,11 @@ copy of the game.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
   being built to plug into it). No briefings or cut scenes. Saving: there's no Load Game screen yet (the
   menu's LOAD GAME stays greyed out). Options are a short list. Not tested on Windows,
-  with a gamepad, or with a touch screen.
+  with a real controller, or with a touch screen.
+- Controllers: no button pictures yet (words only), no rebinding screen
+  yet, no rumble or aim assist. Gyro on phones isn't started. Building with
+  SDL needs CMake installed (`cargo build --no-default-features` builds
+  without SDL and without gyro).
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the
   real game side by side. Real-time lights use placeholder strengths and
@@ -332,7 +389,10 @@ copy of the game.
 
 ## How to run it
 
-You need Rust (install from <https://rustup.rs>). From this folder:
+You need Rust (install from <https://rustup.rs>) and CMake, which builds
+SDL, the controller and gyro reader (Windows: `winget install
+Kitware.CMake`, then open a new PowerShell; Linux: your system's `cmake`
+package). From this folder:
 
 ```
 cargo run --release -p rc_game
@@ -343,6 +403,14 @@ you run it from; if your game isn't in a usual Steam folder, open that file
 and set `folder` under `[game]`. `--map geo_01a` skips the menus.
 `--script` plays itself through the menus and a level and checks each step
 (the log is `logs/rc_game.log`).
+
+To check a controller without the game (lists every controller, which kind
+it is taken for and whether it has a gyro, then logs its buttons, sticks
+and gyro to `logs\rc_padtest.log` for 20 seconds):
+
+```
+cargo run --release -p rc_pads --bin rc_padtest
+```
 
 To look at one of the original menus without starting the game:
 
@@ -600,6 +668,17 @@ cargo test --release -p rc_squad_plugin --test fight_room
 ```
 
 It should say `test result: ok. 1 passed`. The log is `logs\fight_room.log`.
+
+The squad's context orders in the test room (bacta heals, a demolition
+charge blows up a stand-in droid), no game files needed:
+
+```
+cargo test --release -p rc_squad_plugin --test jobs_room
+```
+
+It should say `test result: ok. 1 passed`. In `logs\jobs_room.log` look
+for `Fixer healed to 400`, `Scorch set the charge ... 10.0 s`, then ten
+seconds later `BLAST (Demolition, Scorch)` and `blast hurt 1 bodies`.
 
 To check that Sev, Fixer and Scorch are drawn with their original models
 and armour (opens a window for a few seconds):

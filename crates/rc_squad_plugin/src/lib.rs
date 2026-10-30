@@ -19,6 +19,12 @@
 //!   player (when the player has `Dead`), and the player revives a mate by
 //!   holding `Use` next to them. A revive gives health back and removes
 //!   `Dead`;
+//! - marked jobs ("context orders", `[job.*]` in `squad.toml`) have
+//!   results: bacta gives the squad mate their health and shield back,
+//!   charges and grenades send `rc_combat::Damage` to everyone in the
+//!   blast, and a finished breach, slice or demolition sends
+//!   `SquadJobDone` for whatever owns the anchor (the level's scripts
+//!   and doors) to act on;
 //! - it writes `SquadReadout`, logs to `GameLog`, and runs only while
 //!   playing.
 //!
@@ -32,7 +38,10 @@ pub mod save;
 
 use bevy::prelude::*;
 use rc_game_core::save::SaveAppExt;
-use rc_combat::{CombatSet, Dead, Died, FireShot, Health, Hittable, Shield, ShotLanded, Team};
+use rc_combat::{
+    CombatSet, Damage, DamageKind, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield,
+    ShotLanded, Team, WeaponLibrary,
+};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
@@ -41,8 +50,8 @@ use rc_game_core::{
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
 use rc_squad::{
-    aimed_spot, Leader, MapSquadInfo, MemberState, Navigator, Order, Patient, Squad, SquadEvent,
-    SquadSettings, StraightLine, Threat,
+    aimed_spot, JobResult, Leader, MapSquadInfo, MemberState, Navigator, Order, Patient, Squad,
+    SquadEvent, SquadSettings, StraightLine, Threat,
 };
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
@@ -71,6 +80,8 @@ pub struct SquadOrder(pub Order);
 pub struct SquadState {
     pub squad: Option<Squad>,
     since_log: f32,
+    /// Post weapons not found, logged once each.
+    missing_weapons: std::collections::BTreeSet<String>,
 }
 
 /// Enemies the squad knows about this frame, in Unreal units. Rebuilt
@@ -179,6 +190,25 @@ impl SquadMapData {
     }
 }
 
+/// A squad mate finished a job that sets something off: a door breached
+/// or sliced open, a demolition charge blown. `anchor` is the map actor
+/// the job was for (like `DemolitionCharge2`); the level's scripts and
+/// doors listen for it. Positions are in Bevy space.
+#[derive(Message, Debug, Clone)]
+pub struct SquadJobDone {
+    pub job: String,
+    pub marker: String,
+    pub anchor: String,
+    pub anchor_class: String,
+    pub at: Vec3,
+    /// Who did it.
+    pub member: String,
+}
+
+/// Job results waiting for `carry_out_jobs` (filled by `run_squad`).
+#[derive(Resource, Default, Debug)]
+pub struct SquadJobQueue(pub Vec<SquadEvent>);
+
 /// The squad mates' models, read from the game the first time a squad
 /// is spawned and kept between maps. `None`: couldn't be read (the mate
 /// gets the stand-in body).
@@ -259,6 +289,8 @@ pub struct SquadPlugin;
 impl Plugin for SquadPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SquadOrder>()
+            .add_message::<SquadJobDone>()
+            .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadThreats>()
             .init_resource::<SquadFightStats>()
@@ -283,6 +315,7 @@ impl Plugin for SquadPlugin {
                     take_orders,
                     gather_threats,
                     run_squad,
+                    carry_out_jobs,
                     write_readout,
                 )
                     .chain()
@@ -440,13 +473,20 @@ fn spawn_squad(
         &*collision.0,
     );
     if let Some(m) = &map {
-        squad.markers = m
-            .info
-            .markers
-            .iter()
-            .cloned()
-            .map(|s| (s, rc_squad::MarkerState::Open))
-            .collect();
+        squad.set_markers(m.info.markers.clone());
+        for k in 0..squad.markers.len() {
+            let spot = &squad.markers[k].0;
+            log_line(
+                &log,
+                format!(
+                    "marker {} -> {}",
+                    spot.name,
+                    squad
+                        .job_of(k)
+                        .map_or("no job matches (generic job)".into(), |j| j.summary())
+                ),
+            );
+        }
     }
     for e in &events {
         log_line(&log, e.to_string());
@@ -503,6 +543,9 @@ fn spawn_squad(
             ),
             Team::Republic,
             Hittable::COMMANDO,
+            // The original's squad damage table: droid bolts x0.15,
+            // explosions x0.4, stuns x0.
+            DamageTable("DV_OrganicCTSquadDamage".into()),
         ));
         let Some((meshes, materials, images)) = assets.as_mut() else {
             continue;
@@ -669,6 +712,8 @@ fn run_squad(
     threats: Res<SquadThreats>,
     mut stats: ResMut<SquadFightStats>,
     mut fire: MessageWriter<FireShot>,
+    mut jobs: ResMut<SquadJobQueue>,
+    library: Option<Res<WeaponLibrary>>,
     mut commands: Commands,
     log: Option<Res<GameLog>>,
 ) {
@@ -707,7 +752,7 @@ fn run_squad(
     let holding_use = actions.as_ref().is_some_and(|a| a.pressed(Action::Use));
     let mut events = squad.player_use(dt, leader, holding_use);
     events.extend(squad.update(dt, leader, world, nav));
-    let weapon = squad.settings.fight.weapon.clone();
+    let usual_weapon = squad.settings.fight.weapon.clone();
     let revive_health = squad.settings.revive.health.clamp(0.01, 1.0);
     for e in &events {
         match e {
@@ -716,8 +761,22 @@ fn run_squad(
                 origin,
                 direction,
                 burst_start,
+                weapon,
                 ..
             } => {
+                // A post's own gun, if the weapons part has it.
+                let weapon = match &library {
+                    Some(lib) if !lib.weapons.contains_key(weapon) => {
+                        if state.missing_weapons.insert(weapon.clone()) {
+                            log_line(
+                                &log,
+                                format!("no weapon file `{weapon}`; using {usual_weapon} instead"),
+                            );
+                        }
+                        &usual_weapon
+                    }
+                    _ => weapon,
+                };
                 if let Some((entity, _, _)) = mates.iter().find(|(_, m, _)| m.index == *index) {
                     fire.write(FireShot {
                         shooter: entity,
@@ -734,6 +793,10 @@ fn run_squad(
                 }
             }
             SquadEvent::HeldFire { .. } => log_line(&log, format!("t={:.2} {e}", squad.time)),
+            SquadEvent::JobResult { .. } | SquadEvent::Blast { .. } => {
+                log_line(&log, format!("t={:.2} {e}", squad.time));
+                jobs.0.push(e.clone());
+            }
             SquadEvent::ReviveDone {
                 member, patient, ..
             } => {
@@ -792,6 +855,98 @@ fn run_squad(
     if stats.since_log >= FIGHT_LOG_EVERY {
         stats.since_log = 0.0;
         log_line(&log, fight_line(squad, &stats));
+    }
+}
+
+/// Carry out finished jobs: bacta heals the squad mate, blasts hurt
+/// everyone near them (friend or foe, as in the original), and jobs that
+/// set off their anchor send `SquadJobDone`.
+#[allow(clippy::type_complexity)]
+fn carry_out_jobs(
+    mut jobs: ResMut<SquadJobQueue>,
+    mut mates: Query<(Entity, &SquadMate, &mut Health, Option<&mut Shield>)>,
+    bodies: Query<(Entity, &Transform, &Hittable), Without<Dead>>,
+    mut damage: MessageWriter<Damage>,
+    mut done: MessageWriter<SquadJobDone>,
+    log: Option<Res<GameLog>>,
+) {
+    for e in jobs.0.drain(..) {
+        match e {
+            SquadEvent::JobResult {
+                member,
+                index,
+                marker,
+                job,
+                result,
+                anchor,
+                anchor_class,
+                at,
+            } => match result {
+                JobResult::Heal => {
+                    for (_, mate, mut h, shield) in &mut mates {
+                        if mate.index == index {
+                            h.current = h.max;
+                            if let Some(mut s) = shield {
+                                s.current = s.max;
+                            }
+                            log_line(&log, format!("{member} healed to {:.0} at {marker}", h.max));
+                        }
+                    }
+                }
+                JobResult::Trigger => {
+                    log_line(
+                        &log,
+                        format!("{job} done: sets off {anchor_class} {anchor} (SquadJobDone)"),
+                    );
+                    done.write(SquadJobDone {
+                        job,
+                        marker,
+                        anchor,
+                        anchor_class,
+                        at: to_bevy(at),
+                        member,
+                    });
+                }
+                JobResult::Nothing => {}
+            },
+            SquadEvent::Blast {
+                index,
+                at,
+                damage: amount,
+                radius,
+                what,
+                ..
+            } => {
+                let by = index.and_then(|i| {
+                    mates
+                        .iter()
+                        .find(|(_, m, _, _)| m.index == i)
+                        .map(|(e, ..)| e)
+                });
+                let mut hit = 0;
+                for (target, t, body) in &bodies {
+                    let centre = to_unreal(t.translation) + UVec3::new(0.0, 0.0, body.center_up);
+                    // Distance to the body's edge, not its middle.
+                    let d = ((centre - at).length() - body.radius).max(0.0);
+                    if radius <= 0.0 || d >= radius {
+                        continue;
+                    }
+                    let falloff = 1.0 - d / radius;
+                    let dir = (centre - at).normalize_or_zero();
+                    damage.write(Damage {
+                        target,
+                        amount: amount * falloff,
+                        kind: DamageKind::Explosion,
+                        instigator: by,
+                        point: to_bevy(centre),
+                        direction: Vec3::new(dir.x, dir.z, dir.y),
+                    });
+                    hit += 1;
+                }
+                log_line(&log, format!("{what} blast hurt {hit} bodies"));
+            }
+            _ => {}
+        }
     }
 }
 
@@ -897,6 +1052,8 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
             MemberState::Moving { .. } => "moving".to_string(),
             MemberState::Working { left } => format!("working {left:.1}s"),
             MemberState::Reviving { left } => format!("reviving {left:.1}s"),
+            MemberState::Ready => "ready at marker".to_string(),
+            MemberState::Posted => "holding post".to_string(),
         };
         let state = if m.down { "DOWN".to_string() } else { state };
         s.push_str(&format!(

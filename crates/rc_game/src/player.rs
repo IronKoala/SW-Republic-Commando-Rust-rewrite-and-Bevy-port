@@ -267,8 +267,9 @@ fn move_body(
     t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
 }
 
-fn place_camera(
+pub(crate) fn place_camera(
     fov: Res<FieldOfView>,
+    weapon: Option<Res<rc_game_core::WeaponReadout>>,
     body: Query<&Body, With<Player>>,
     window: Query<&Window>,
     log: Res<GameLog>,
@@ -284,7 +285,9 @@ fn place_camera(
     // the window's shape: that is "Hor+" as long as the up-and-down view
     // doesn't change with the shape.
     if let Projection::Perspective(p) = &mut *proj {
-        p.fov = vertical_fov(fov.0);
+        // A zoomed weapon (the sniper attachment) narrows the view.
+        let across = weapon.and_then(|w| w.zoom_fov).unwrap_or(fov.0);
+        p.fov = vertical_fov(across);
         // Log the angles whenever the window's shape or the setting changes.
         if let Some(w) = window.iter().next() {
             let aspect = w.width() / w.height().max(1.0);

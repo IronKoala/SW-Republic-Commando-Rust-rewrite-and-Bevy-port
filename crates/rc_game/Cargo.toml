@@ -4,8 +4,19 @@ version = "0.1.0"
 edition.workspace = true
 description = "The game: one program with the menus, settings, input, on-screen display and music, that every other part plugs into."
 
+[features]
+# Read controllers and gyros with SDL3 (see crates/rc_pads). Building it
+# needs CMake; `--no-default-features` builds without it, using gilrs and
+# no gyro.
+default = ["sdl"]
+sdl = ["rc_pads/sdl"]
+
 [dependencies]
 rc_game_core = { path = "../rc_game_core" }
+# Without its default features, so `--no-default-features` here really
+# builds without SDL.
+rc_pads = { path = "../rc_pads", default-features = false }
+rc_panini = { path = "../rc_panini" }
 rc_image = { path = "../rc_image" }
 rc_menus = { path = "../rc_menus" }
 rc_movement = { path = "../rc_movement" }

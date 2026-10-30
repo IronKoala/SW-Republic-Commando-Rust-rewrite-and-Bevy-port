@@ -43,7 +43,7 @@ the small set of types in `crates/rc_game_core`.
 | Clean up when the map ends | spawn with `DespawnOnExit(GameState::InGame)` |
 | Find a game file | `GamePaths::game_file("GameData/Sounds/x.uax")`, `map_path("geo_01a")`. Never `RC_GAME_DIR` or a Steam path. |
 | Find our own data file (moddable) | `GamePaths::data_file("weapons/dc15s.toml")`: a mod's copy wins over `data/` |
-| Player input | read `ActionState` (`pressed(Action::Fire)`, `movement`, `look`). Never read keys, mouse or gamepad. To show a button prompt, check `last_device` (keyboard and mouse, gamepad or touch) and show that device's button. |
+| Player input | read `ActionState` (`pressed(Action::Fire)`, `movement`, `look`). Never read keys, mouse or gamepad. To show a button prompt, read `InputPrompts`: `label(Action::Use)` is the button's name on the device used last ("F", "X", "Square"). |
 | Collide or trace | `LevelCollision` (Unreal units). The level part inserts it while loading, and may replace it at any time (moving doors) |
 | Doors and lifts | `rc_movers_plugin::LevelMovers` while in the game: `send("Tag")` opens every mover with that `Tag` (the original's `TriggerEvent`); `read()` for where they are. `MoverHappened` messages say what they did. Its `world()` is already in `LevelCollision` |
 | Hook into the level's own events | read `rc_scripts_plugin::ScriptEvent` messages (`name` is the map's event, e.g. `SpawnBarricadeDroids`); send one into the scripts with `LevelScript::director.fire(name, by)` (a droid died, a charge went off) |

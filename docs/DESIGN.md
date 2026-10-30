@@ -33,6 +33,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 | `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
 | `rc_ai` | What enemies decide: settings from `data/enemies/*.toml`, the map's spawners, one fighter's brain, and a whole fight on a map (`Battle`). No Bevy. Tool: `rc_droidsim` (droids against a stand-in player, no window). |
+| `rc_pads` | Controllers: which kind each one is, button names for prompts, gyro clean-up, and an SDL3 reader (built from source) for controllers and gyros. Bevy, no window. Tool: `rc_padtest`. |
+| `rc_panini` | The optional Panini view for very wide screens: a full-screen pass that bends the 3D view. Check: `panini_check` example. |
 | `rc_enemies` | Bevy plugin `EnemiesPlugin`: battle droids in the game, shooting and taking damage through `rc_combat`, animated with the game's mesh. Program: `rc_droidview` (watch a fight in a real level, with a picture check). |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
@@ -1376,10 +1378,59 @@ instead.
 
 A marked job is two actors in the map: the thing (the "anchor", like
 `BactaDispenserGEO4`) and a `SquadMarkerSpot` next to it whose `MyAnchor`
-names it. The member walks to the spot, works for 3 s (our own; the
-original plays an animation), and the marker is done. Stuck for 10 s on
-the way, it gives the job up. geo_01a has 6: five bacta dispensers and a
-demolition charge.
+names it. Stuck for 10 s on the way, a member gives the job up. geo_01a
+has 6: five bacta dispensers and a demolition charge.
+
+### Context orders (`rc_squad/src/jobs.rs`, `[job.*]` in `squad.toml`)
+
+What a marked job *does* depends on its kind. Each `[job.<name>]` section
+of `squad.toml` describes one; a marker gets the first job whose `match`
+words appear in its order marker's class (`MarkerDoorBreach` matches
+"breach"), or, with none, its anchor's class (`BactaDispenserGEO` matches
+"bacta"). How a map's anchors, order markers and spots fit together is
+in docs/RESEARCH.md, "Squad markers"; `rc_squad::map::read` turns them
+into one `MarkerSpot` per place a squad mate stands (a firing position
+with no spot puts them at the anchor). A marker no job matches is a plain
+"walk there, work `marker_work_time` seconds, done". Blast sizes, fuses,
+grenades and who prefers which job are the game's numbers; how long the
+work takes and the posts' firing rhythm are compiled code in the
+original, so those are our own, marked in the file. A job's `preferred`
+squad mate takes it when free (Scorch demolition and anti-armour, Fixer
+slicing, Sev sniping, as in the original). Mods can change a job or add a new one (say a
+`[job.turret]` matching "turret").
+
+- **Once** jobs (bacta, demolition, breach, slice): walk to the spot,
+  work `work_time` seconds, done. The member is free again at once. Then,
+  after `fuse` seconds (the charge burning), there is a blast if
+  `blast_damage` is set, and the `result`:
+  - `heal` (bacta): the squad mate's health and shield are filled.
+  - `trigger` (breach, slice, demolition): the plugin sends a
+    `SquadJobDone` message naming the anchor. Whoever owns that actor (the
+    level's scripts and doors, still being built in their own part)
+    opens the door or destroys the target. Until then it is logged:
+    `Demolition done: sets off DemolitionCharge DemolitionCharge2`.
+- **Group** jobs (`group = "yes"`, the door breach): ordering one spot
+  sends a free member to every spot sharing the same anchor (the ordered
+  spot first, nearest member each). Members wait at their spots (`Ready`)
+  until all are in place; then the one at the ordered spot does the work
+  and the others stand guard and shoot. When it's done, every spot is
+  done. If someone gives up (stuck or down), the rest go ahead without.
+- **Posts** (sniper, grenade, anti-armour): walk to the spot and stay
+  (`Posted`) until F4 recalls the squad, even if the player walks away.
+  While posted, the job's own shooting numbers replace `[fight]`'s:
+  the sniper sees 8000 uu and fires single aimed shots with
+  `dc17m_sniper`. A grenade post throws a grenade every `throw_interval`
+  seconds; it goes off `throw_fuse` seconds later where the target stood.
+  A grenade marker names a target area (`WeaponTarget`): the grenadier
+  throws at the enemy nearest it within `target_radius`, seen or not.
+  Without one, at its own target within `throw_range`.
+- **Blasts** (charges and grenades) hurt everyone near: `rc_combat::Damage`
+  of kind `Explosion`, `blast_damage` at the middle falling to nothing at
+  the radius, measured to the edge of each body. Friend or foe, as in the
+  original, so stand clear of a demolition charge.
+- **Guns from other parts.** `dc17m_sniper` and `dc17m_antiarmor` come with
+  the weapons part's attachments. If a post's weapon file isn't there, the
+  squad mate uses the usual DC-17m and the log says so once.
 
 ### Where the squad comes from
 
@@ -1736,6 +1787,28 @@ squad:
      player is found by its `Player` and `PlayerCamera` markers, so a VR
      camera works the same. No platform-specific code.
 
+### Enemy types
+
+Each enemy type is one file in `data/enemies/`, read on top of the battle
+droid's built-in values, so a file only lists what differs. Its `[type]`
+section names the game classes it stands for (`classes`, a trailing `*`
+matches any ending) and its `body` (droid or organic). When a map loads,
+each spawner's `Prototype` class is matched to a type, and that spawner's
+enemies get the type's health, size, speed, weapon, accuracy, look and
+sounds. A spawner whose class no file claims (squad mates, turrets) is
+left to other parts and logged. `combat.uses_cover = false` makes an enemy
+walk at you instead of taking cover (super battle droids);
+`combat.drops` is the weapon it leaves when it falls. `[sound]` lists
+sound names played when it spots you, is hurt and is destroyed.
+
+**Several enemies to fight.** Droids fight the player and the squad mates
+(every living `Team::Republic` character). Each keeps fighting the one it
+fought last while it can still see it, otherwise picks the nearest one it
+can see, otherwise hunts the player. **Our choice:** the original's target
+choice is in its compiled engine. A stunned droid (flash or EMP grenade)
+stands still and does nothing until the stun wears off, and grenade blasts
+are heard like shots.
+
 **Checking without looking.** `rc_droidsim` (no window) and
 `rc_droidview --check` (a window) run a stand-in player into a spawner's
 trigger on a real map and log every spawn, sighting, state change, route,
@@ -1788,6 +1861,85 @@ weapon), the player from `Player` and `PlayerCamera`, the level from
 - To be hit: add `Hittable` (the cylinder) and `Team`.
 - Recoil: each player shot sends `ViewKick { pitch, yaw }` (radians). The
   player's view applies it; a VR mod can ignore it.
+- To throw a grenade (squad mates, enemies): send `ThrowGrenade { thrower,
+  origin, velocity, grenade }` (Bevy space, units per second). When it goes
+  off, `Blast { grenade, point, radius, instigator, hit }` is sent.
+- `DamageTable(name)` names a character's damage table (the original's
+  `DamageVariance`, in `data/combat/damage_types.toml`). Every hit by a
+  shot, melee or blast is multiplied by the table's entry for the hit's
+  damage type (a weapon's `shot.damage_type`, a grenade's
+  `blast.damage_type`). The player gets one from `player.toml`, enemies
+  from `combat.damage_table`; squad mates should use
+  `DV_OrganicCTSquadDamage`. No table means x1.
+- `Body` (droid or organic) is for logs and AI. `Stunned { left,
+  damage_per_sec, kind, stops, .. }` is a grenade's lasting effect: when
+  `stops` is set the character can't act (AI should check it); it hurts
+  `damage_per_sec` while it lasts.
+- `read_sounds(paths, package, names, audio)` reads sounds by name from a
+  game sound package, for any part.
+
+### Grenades (`grenade.rs`, `throw.rs`)
+
+A grenade kind is a file in `data/grenades`. `grenade.rs` holds the plain
+rules: a thrown grenade starts at the hand (`throw.offset` from the eye)
+with the view's direction times `throw.speed`, plus `throw.toss_up`
+upwards. Gravity pulls it down every frame. When it touches a wall, floor
+or character it bounces off the surface, keeping `flight.bounce` of its
+speed (`flight.actor_bounce` off a character); on a floor, once slower
+than `flight.rest_speed`, it lies still. The fuse is the original's
+(`CTProjExplosive`): it goes off `fuse.time` seconds after the throw, or
+`fuse.after_impact` seconds after it first touches anything if that is
+sooner; `fuse.on_actor` / `fuse.on_world` make it go off on touch.
+`flight.stick_to_world` / `stick_to_actors` make it stick where it lands
+(the sonic detonator), and `fuse.proximity` makes a stuck one go off when a
+character it can see comes that close (checked every
+`fuse.proximity_interval` seconds). The thrower never sets it off.
+
+The blast is the engine's `HurtRadius` rule: a character it went off on
+takes the full damage; every other character within `blast.radius` (plus
+its own radius) whose centre the blast can see takes `damage x (1 -
+(distance - its radius) / radius)`, so full damage up close and nothing at
+the edge. Each hit is then multiplied by the target's damage table for
+`blast.damage_type`. A `[status]` section adds a lasting effect
+(`Stunned`) to every character that can see the blast within the radius
+(plus `status.radius_change`): it lasts `status.max_time` at the centre,
+falling to nothing at the edge, and hurts `status.damage_per_sec`. A
+character whose table gives `status.damage_type` x0 is immune (droids
+aren't stunned or set alight). `half_on_commandos` halves it on clone
+commandos (the EMP), `player_must_face` spares a player looking away (the
+flash), and `stops = false` lets characters keep acting (the thermal's
+burn).
+
+`throw.rs` is the Bevy side: the throw and next-grenade buttons, the
+`ThrowGrenade` message (anyone can throw), grenades in flight, the `Blast`
+message when one goes off, stuns wearing off, and the grenade line on the
+display. The player's kinds and their order are `grenades` in
+`data/combat/player.toml`; each starts with its file's `start_count`.
+
+### Attachments, zoom, melee and pickups
+
+- The DC-17m's sniper and anti-armour attachments are their own weapon
+  files and their own entries in the weapon cycle (rifle, sniper,
+  anti-armour, pistol), each with its own ammo. **Our choice:** the
+  original swaps the attachment onto the rifle with an animation.
+- `fire.zoom_fovs` gives a weapon zoom steps: each press of the zoom
+  button narrows the view to the next one (degrees across a 4:3 screen),
+  and after the last it zooms back out. Combat writes it to
+  `WeaponReadout.zoom_fov` and the game's camera uses it; a VR mod can
+  ignore it. Switching weapon or reloading leaves the zoom. While zoomed,
+  the player's shots do `fire.zoom_damage` times the damage (1.72 for the
+  sniper).
+- `shot.kind = "lobbed"` fires a grenade file (`shot.grenade`) along the
+  aim at `shot.speed`: the anti-armour round is an impact grenade.
+- Melee (`melee.rs`): a line `[melee] range` long from the eye along the
+  view; the first character on it takes `[melee] damage` of type
+  `CTDamageMelee` (times its table: battle droids take x3). The weapon in
+  hand's `[melee]` section wins; `player.toml`'s is the fallback. Walls
+  block it.
+- Pickups (`pickup.rs`): a `WeaponPickup` on the ground is collected by
+  walking within 80 uu of it (our choice). A new weapon joins the cycle;
+  one already carried gets the ammo. Enemies drop the weapon file named by
+  `combat.drops` in their settings file.
 
 ### Modding
 
@@ -1951,6 +2103,34 @@ a screenshot of the game shrunk to 320x240: the mean difference must stay
 under 12 of 255 and fewer than 5% of pixels may differ by more than 40.
 centre.
 
+## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
+
+The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:
+
+- **One reader for controllers.** `rc_pads::sdl` starts SDL3 with no
+  window and turns its controller events into the same Bevy gamepad
+  messages gilrs sends, so Bevy keeps each controller's `Gamepad`
+  component up to date and the game's input code doesn't care which reader
+  ran. `rc_game` disables Bevy's `GilrsPlugin` only when SDL started.
+  SDL lives in a non-send resource, so it stays on the main thread.
+- **Gyro readings are messages.** `GyroSample { source, rate, accel, dt }`
+  comes from the SDL reader, and later from Android's sensor service.
+  `PadsPlugin` runs each source through its own `GyroFilter` and puts this
+  frame's turn for the controller used last (or the built-in gyro) in
+  `GyroLook`. `rc_game`'s input code decides whether to use it (mode,
+  ratchet, toggle) and adds it to `ActionState::look`. So a VR mod or
+  another sensor only needs to send `GyroSample`s or write
+  `ActionState`.
+- **Prompts are data.** `InputPrompts` (in `rc_game_core`, so every part
+  can read it) is rebuilt when the last-used device, the controller's kind
+  or the bindings change, from `bindings.toml` and `button_names.toml`.
+- **Rebinding saves differences.** `Bindings::changes_from(base)` writes
+  only the actions that differ from the shipped (and modded) bindings, and
+  `with_changes` lays them back on top at start-up.
+- **Panini** is a `FullscreenMaterial` on the player's camera. After
+  `place_camera` sets the normal field of view, `rc_game/src/panini.rs`
+  widens it with `Fit::new` and updates the camera's `PaniniView`. The
+  shader and `Fit::source` do the same maths, which the tests check.
 ## Saving, loading and checkpoints (`rc_game_core::save`, `rc_save`)
 
 **One interface, one section per part.** A save file is a plain TOML text
