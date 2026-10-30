@@ -359,12 +359,20 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         "graphics_quality" => {
             let p = presets(items);
             let now = quality_now(s);
-            let matching = p
+            // The value last chosen, if the rows still match it. Several
+            // values can set the same rows (LOW and MEDIUM on a five-value
+            // list), so the choice itself is kept, not worked out from the
+            // rows, or the arrows would get stuck on the first of them.
+            let chosen = level_index(s.video.quality, p.len());
+            if quality_preset(level_value(chosen, p.len())) == now {
+                return p.get(chosen).copied();
+            }
+            match p
                 .iter()
                 .enumerate()
                 .find(|(k, _)| quality_preset(level_value(*k, p.len())) == now)
-                .map(|(_, &i)| i);
-            match matching {
+                .map(|(_, &i)| i)
+            {
                 Some(i) => i,
                 // Changed by hand: CUSTOM if the list has it, else the
                 // preset with the nearest texture detail.
@@ -456,8 +464,10 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
             let Some(k) = p.iter().position(|&j| j == i) else {
                 return true;
             };
-            let (tex, chars, blur, bloom, shadows, fsaa) = quality_preset(level_value(k, p.len()));
+            let place = level_value(k, p.len());
+            let (tex, chars, blur, bloom, shadows, fsaa) = quality_preset(place);
             let v = &mut s.video;
+            v.quality = place;
             v.texture_detail = tex;
             v.character_detail = chars;
             v.blur = blur;
@@ -500,6 +510,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "squad_shadows" => s.video.squad_shadows = d.video.squad_shadows,
         "fsaa" => s.video.fsaa = d.video.fsaa,
         "graphics_quality" => {
+            s.video.quality = d.video.quality;
             for name in [
                 "texture_detail",
                 "character_detail",
@@ -661,5 +672,18 @@ mod tests {
         assert!(write("sound_3d", &mut s, 1, &kinds));
         assert!(s.audio.sound_3d);
         assert_eq!(read("sound_3d", &s, &kinds), Some(0));
+    }
+
+    #[test]
+    fn graphics_quality_steps_through_values_that_share_a_preset() {
+        // Found by the user: on a five-value list LOW and MEDIUM set the same
+        // rows, and the arrows got stuck on LOW.
+        let q = list(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST"]);
+        let mut s = Settings::default();
+        assert_eq!(read("graphics_quality", &s, &q), Some(3));
+        for i in [4, 0, 1, 2, 3, 4, 3, 2, 1, 0] {
+            assert!(write("graphics_quality", &mut s, i, &q));
+            assert_eq!(read("graphics_quality", &s, &q), Some(i), "step to {}", q[i]);
+        }
     }
 }

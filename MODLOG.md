@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: GRAPHICS QUALITY no longer gets stuck on LOW (rc_game)
+
+- **Changed:** `settings.toml` `[video] quality` keeps the GRAPHICS QUALITY value last chosen; `option_settings` shows that value while the rows still match it, instead of the first value whose preset matches.
+- **Why:** User: after going to the lowest value, the arrows wouldn't go above LOW. On their five-value list LOW and MEDIUM both set the middle preset, so stepping to MEDIUM read back as LOW.
+- **Tested how:** New test `graphics_quality_steps_through_values_that_share_a_preset` (LOWEST..HIGHEST, up and down); `cargo test -p rc_game`.
+- **Result:** 45 tests pass.
+- **Still broken / not tested:** Not tested on the PC yet. The short freeze when choosing the highest value is Bevy preparing the bloom, shadow and edge-smoothing drawing for the first time (expected once per run; not measured).
+- **Next:** User re-checks on the PC.
+
 ## 2026-10-30: GAME and CONTROLS option rows: subtitles, prompt text, turn keys, weapon keys, screenshot (rc_game, rc_game_core, rc_combat)
 
 - **Changed:** SUBTITLES: new `rc_game/src/subtitles.rs` reads every `GameData/System/subtitles*.int` (pairs `SubtitleSound[n]` with `SubtitleText[n]`) and shows a line's words at the bottom middle of the display area, above the readouts, while the level script's speech plays (at least 1.5 s, at most 3 lines; placeholder font as the rest of the stand-in display). PROMPT TEXT: the level scripts' hints (`ACTION_ShowPrompt`) are left off the display when it is off (`hud.rs`). New actions in `rc_game_core::Action`: `turn_left`, `turn_right` (keys turn at the controller's look speed; no key by default), `weapon_pistol`, `weapon_blaster`, `weapon_sniper`, `weapon_anti_armor` (1 to 4, straight to that weapon, `rc_combat/src/fire.rs`) and `screenshot` (F12, saves a PNG in `screenshots` next to the settings file, `rc_game/src/screenshot.rs`). `data/ui/original_menus.toml` names them; `data/input/bindings.toml` gives the keys (our choice, DefaultCtrl.ini not checked for these).

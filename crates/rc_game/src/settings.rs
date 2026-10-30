@@ -99,6 +99,10 @@ pub struct VideoSection {
     /// 3D view so things near the sides aren't stretched; the middle keeps
     /// its size.
     pub panini: f32,
+    /// GRAPHICS QUALITY last chosen, as its place in the list: 0 lowest, 1
+    /// highest. It sets the detail options below; changing one of those by
+    /// hand makes it CUSTOM.
+    pub quality: f32,
     /// BRIGHTNESS: 0 (one stop darker) to 1 (one stop brighter); 0.5
     /// changes nothing.
     pub brightness: f32,
@@ -202,6 +206,7 @@ impl Default for Settings {
                 widest_shape: 2.0,
                 hud_max_aspect: 16.0 / 9.0,
                 panini: 0.0,
+                quality: 0.75,
                 brightness: 0.5,
                 texture_detail: 1.0,
                 character_detail: 1.0,
@@ -310,6 +315,7 @@ hud_max_aspect = 1.7777778
 # 21:9 and 32:9; the middle stays the same size, a little softer.
 panini = 0.0
 # The GRAPHICS options page sets these.
+quality = 0.75           # GRAPHICS QUALITY chosen: 0 lowest, 1 highest (sets the rows below)
 brightness = 0.5         # 0 darkest, 0.5 unchanged, 1 brightest
 texture_detail = 1.0     # walls and props: 0 quarter-size pictures, 1 full size (next level load)
 character_detail = 1.0   # squad, enemies, arms and weapons: the same
