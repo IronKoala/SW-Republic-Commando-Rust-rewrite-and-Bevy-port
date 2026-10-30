@@ -72,7 +72,8 @@ pub struct FightSettings {
     pub burst_pause_max: f32,
     /// How far off their facing a standing member can shoot, radians.
     pub max_aim_yaw: f32,
-    /// Hold fire when a friend is this close to the line of fire, uu.
+    /// Hold fire when the line of fire passes this close to a friend's
+    /// body, uu (on top of the body itself and the shot's possible stray).
     pub friendly_clearance: f32,
 }
 
@@ -89,7 +90,7 @@ impl Default for FightSettings {
             burst_pause_min: 0.6,
             burst_pause_max: 1.2,
             max_aim_yaw: 60f32.to_radians(),
-            friendly_clearance: 60.0,
+            friendly_clearance: 20.0,
         }
     }
 }
