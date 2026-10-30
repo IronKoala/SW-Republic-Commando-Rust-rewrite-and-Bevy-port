@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: The DC-17m's ammo counter shows the real ammo (rc_combat)
+
+- **Changed:** New `crates/rc_combat/src/counter.rs` (plain rules, 5 tests): what the little screen on the gun shows and how far each piece's picture slides. `arms_view.rs` finds the counter pieces by material name, slides their pictures (`uv_transform`) when the ammo changes, and reads them back into `ArmsReadout::counter`. New `counter_digits` and `counter_bar` in `[arms]` of `data/weapons/dc17m_blaster.toml` and `dc17m_sniper.toml`. `rc_shoot --script` has 2 new checks. Docs: DESIGN (arms section), README.
+- **Why:** The gun's screen always read 999: its `TexPanner2D` pieces were drawn unslid.
+- **Tested how:** Read (never wrote) the game's `hudarms.ukx`, `HUDArmsTextures.utx`, `ctinventory.u` and `Engine.dll` from the PC: the ammo class names the pieces, the picture has a strip of 11 cells (blank, 0-9), and the engine slides each digit by `digit/11 + 2/11` and the bar by `-0.5 * (1 - magazine fill)`; the digits show all ammo carried. `cargo test -p rc_combat`, `cargo check --release --workspace --all-targets`, and `xvfb-run -a -s "-screen 0 1280x1024x24" target/release/rc_shoot --script` in the cloud with the game files copied read only.
+- **Result:** `script done: 19 of 19 checks passed`, including `the gun's ammo counter shows 110, bar 83% full` after 10 shots and `shows 110, bar 100% full` after the reload. Log: `arms: dc17m_blaster: ammo counter on the gun (4 pieces) shows 120, bar 100% full`. I looked at the saved picture: the screen reads "110" and the magazine window shows its blue ticks.
+- **Still broken / not tested:** Not tested on Windows or by playing. The sniper's counter uses the same rule but no check covers it (not tested). Not done: the anti-armour's grenade digit (`PannerClip`) and the DC-15s pistol's charge bar. The game shows leading zeros ("060"); we do the same.
+- **Next:** The user fires the DC-17m in `rc_shoot` or `rc_game` and checks the screen counts down.
+
 ## 2026-10-30: Smooth blending between animations (rc_anim, squad and enemies)
 
 - **Changed:** `crates/rc_anim/src/lib.rs`: new `blend_poses` and `Crossfade` (remembers the pose on screen when the animation changes and mixes it into the new one with an S curve). `rc_model::Model` and `rc_enemies::look::DroidLook` gained `local_pose` and `posed_local`, so a mixed pose can be skinned. Squad mates (`rc_squad_plugin/src/look.rs`) and enemies (`rc_enemies/src/lib.rs`) now blend whenever their animation changes. Blend times are data: `[blend]` in `data/squad/looks.toml` and `blend_time`, `blend_time_fire`, `blend_time_death` in `[look]` of `data/enemies/battle_droid.toml` (other enemies inherit them). New check `crates/rc_model/examples/rc_blend_check.rs`.
