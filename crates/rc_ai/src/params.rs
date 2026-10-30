@@ -157,6 +157,42 @@ pub struct Sounds {
     pub spotted: Vec<String>,
     pub hurt: Vec<String>,
     pub death: Vec<String>,
+    /// Lines for one kind of damage (`hurt_explosion`, `death_electrical`,
+    /// ...: "hurt_" or "death_" and a damage kind), used instead of `hurt`
+    /// or `death` when that kind did it. A file with a `[sound]` section
+    /// keeps only the ones it lists.
+    pub by_kind: std::collections::BTreeMap<String, Vec<String>>,
+    /// Seconds before the same character can say a hurt line again, so a
+    /// burst of shots gives one line, not ten. **Our choice.**
+    pub hurt_interval: f32,
+}
+
+/// The damage kinds a `[sound]` key can name (as in rc_combat's
+/// `DamageKind::from_name`).
+pub const SOUND_DAMAGE_KINDS: [&str; 8] = [
+    "blaster",
+    "explosion",
+    "sonic",
+    "electrical",
+    "fire",
+    "melee",
+    "fall",
+    "other",
+];
+
+impl Sounds {
+    /// The lines for `what` ("hurt" or "death") from damage of `kind`: the
+    /// kind's own list if the file has one, else the general one.
+    pub fn for_damage(&self, what: &str, kind: &str) -> &[String] {
+        if let Some(l) = self.by_kind.get(&format!("{what}_{kind}")) {
+            return l;
+        }
+        if what == "hurt" {
+            &self.hurt
+        } else {
+            &self.death
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -195,8 +231,23 @@ impl AiParams {
                 body: "droid".into(),
             },
             sounds: Sounds {
-                package: "droid_sound".into(),
-                ..Default::default()
+                package: "character_voice".into(),
+                spotted: vec!["BD1_SpottedEnemy".into()],
+                hurt: vec!["BD1_HurtSmallArms".into()],
+                death: vec!["BD1_DieSmallArms".into()],
+                by_kind: [
+                    ("hurt_explosion", "BD1_HurtExplosion"),
+                    ("death_explosion", "BD1_DieExplosion"),
+                    ("hurt_electrical", "BD1_HurtElectricity"),
+                    ("death_electrical", "BD1_DieElectricity"),
+                    ("hurt_melee", "BD1_HurtMelee"),
+                    ("hurt_fall", "BD1_HurtFall"),
+                    ("death_fall", "BD1_DieFall"),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), vec![v.to_string()]))
+                .collect(),
+                hurt_interval: 2.0,
             },
             movement: m,
             senses: Senses {
@@ -280,6 +331,11 @@ impl AiParams {
             }
             if let Some(s) = line.strip_prefix('[') {
                 section = s.trim_end_matches(']').trim().to_string();
+                // A file's own [sound] section starts its by-kind lines
+                // afresh, so a Geonosian never keeps a droid's lines.
+                if section == "sound" {
+                    self.sounds.by_kind.clear();
+                }
                 movement_lines.push('\n');
                 continue;
             }
@@ -347,6 +403,14 @@ impl AiParams {
             ("sound", "spotted") => snd.spotted = list()?,
             ("sound", "hurt") => snd.hurt = list()?,
             ("sound", "death") => snd.death = list()?,
+            ("sound", "hurt_interval") => snd.hurt_interval = num()?,
+            ("sound", k)
+                if k.split_once('_').is_some_and(|(w, kind)| {
+                    matches!(w, "hurt" | "death") && SOUND_DAMAGE_KINDS.contains(&kind)
+                }) =>
+            {
+                snd.by_kind.insert(k.to_string(), list()?);
+            }
             ("type", "id") => k.id = text(),
             ("type", "name") => k.name = text(),
             ("type", "classes") => k.classes = list()?,

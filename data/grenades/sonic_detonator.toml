@@ -43,7 +43,11 @@ damage_type = "CTDamageExplosionSonic" # game: MyDamageType
 damage_kind = "sonic"
 
 [sound]
+# The blast sound is the SpawnSound of the grenade's ExplosionEffect
+# (an Emitter class in Properties/cteffects.u). Not read: the game may use
+# another effect for some surfaces (HitEffectsByMaterial).
 package = "gen_sound"
+blast = "exp_GEN_tanker_01" # game: SonicDetonatorProjDefaults ExplosionEffect Grenade_Sonic_Explo, its SpawnSound
 
 [model]
 mesh = "GeoGrenade"       # game: StaticMesh (not drawn yet)

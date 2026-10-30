@@ -397,8 +397,6 @@ How the brain uses these numbers is compiled code.
 
 **Still not read or not known:**
 - The attachments' and repeater's reload times (in their animations).
-- Grenade explosion sounds (they're in the explosion effect classes) and
-  the droids' voice lines (in the large sound packages).
 - How the original lets the player hurt droids with a picked-up E-5: its
   `CTDamageEnergyDroids` is ignored by battle droids' table. Our
   `e5_blaster_pickup.toml` uses plain `CTDamageEnergy` instead.
@@ -407,3 +405,46 @@ How the brain uses these numbers is compiled code.
 - Which class names the maps' spawners actually use for these enemies
   (log line `spawners no enemy file claims`).
 - The other Geonosians (`GeonosianDrone`, `GeonosianElite` with its beam).
+
+## Grenade explosion sounds and enemy voices (read 2026-10-30)
+
+Read only from the user's install with `rc_probe --class` and the package
+reader (gen_sound.uax, character_voice.uax, System/ctaudio.u,
+Properties/properties.u and cteffects.u).
+
+**Grenade blasts.** A grenade's sound isn't on the grenade: its
+`ExplosionEffect` is an `Emitter` class in `cteffects.u`, and the emitter's
+`SpawnSound` plays when it appears. All in `gen_sound`:
+
+| Grenade | `ExplosionEffect` (from) | `SpawnSound` |
+|---|---|---|
+| Thermal detonator | `Grenade_ThermDet_Explo_Metal` (ThermalDetonatorProjDefaults) | `exp_GEN_MedWhistle_01` |
+| EC (EMP) detonator | `Grenade_ECDet_explo` (EMPGrenadeProjDefaults) | `exp_empGren` (a group of `exp_GEN_empGren_01`, `_02`) |
+| Flash detonator | `Grenade_Flashbang_Explo` (FlashBangProjDefaults) | `exp_GEN_tanker_01` |
+| Sonic detonator | `Grenade_Sonic_Explo` (SonicDetonatorProjDefaults) | `exp_GEN_tanker_01` |
+| DC-17m anti-armour round | `DC_17_AA_hit` (AntiArmorProj) | `exp_GEN_ship_01` |
+
+Not read: `HitEffectsByMaterial` (for example `ThermalDetEffects`) may pick
+a different effect, and so sound, for some surfaces. `CTProjExplosive` also
+has a ticking loop, `TickSound = wep_GEN_grenTimer_lp_01`, not played yet.
+
+**The Trandoshan repeater.** `SMGDefaults FireSound = Uzi_Fire` is in
+`gen_sound` after all, but as a `SoundMultiple` group (holding
+`wep_GEN_UziFireNew_04`), and the sound reader only took plain `Sound`
+objects. It now reads groups too.
+
+**Enemy voices.** Each character class names an `AudioTable` class in
+`System/ctaudio.u` (`BattleDroid` -> `BattleDroidAudio`, `SuperBattleDroid`
+-> `SBDAudio`, `TrandoshanMercenary` -> `TranMercAudio`,
+`GeonosianWarrior` -> `WarriorAudio`). Its one property, `Table`, is an
+array of 34 object references: entry *i* is the line group for event
+*i*+1 of the enum `EPawnAudioEvent` in engine.u (`PAE_DieQuiet`,
+`PAE_DieFall`, `PAE_DieExplosion`, `PAE_DieLargeArms`, `PAE_DieSmallArms`,
+`PAE_DieElectricity`, `PAE_DieFire`, `PAE_HurtFall`, `PAE_HurtExplosion`,
+`PAE_HurtLargeArms`, `PAE_HurtMelee`, `PAE_HurtSmallArms`,
+`PAE_HurtElectricity`, `PAE_HurtFire`, `PAE_SpottedEnemy`, ...; checked by
+the group names matching, e.g. entry 0 is `BD1_DieQuiet`). Empty entries
+mean the character has no line for that event. The groups are
+`SoundMultiple`s in `character_voice.uax` (prefixes `BD1_`, `SBD_`, `TMC_`,
+`GWR_`), each holding 2 to 10 takes. Which take plays, and how often a
+character may speak, is in compiled code we don't read.

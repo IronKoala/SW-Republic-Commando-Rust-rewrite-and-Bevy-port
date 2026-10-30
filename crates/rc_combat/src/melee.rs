@@ -143,9 +143,9 @@ pub(crate) fn player_melee(
             }
         }
     }
-    if let Some(s) = m.sound.as_ref().and_then(|n| lib.sounds.get(n)) {
+    if let Some(s) = m.sound.as_ref().and_then(|n| lib.sounds.get(n)?.pick()) {
         commands.spawn((
-            AudioPlayer(s.clone()),
+            AudioPlayer(s),
             PlaybackSettings::DESPAWN.with_volume(Volume::Linear(1.0)),
         ));
     }

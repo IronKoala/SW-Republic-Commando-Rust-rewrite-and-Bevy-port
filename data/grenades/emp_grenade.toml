@@ -47,7 +47,11 @@ damage_kind = "electrical"
 half_on_commandos = true  # game: electrocution lasts half as long on clone commandos
 
 [sound]
+# The blast sound is the SpawnSound of the grenade's ExplosionEffect
+# (an Emitter class in Properties/cteffects.u). Not read: the game may use
+# another effect for some surfaces (HitEffectsByMaterial).
 package = "gen_sound"
+blast = "exp_empGren" # game: EMPGrenadeProjDefaults ExplosionEffect Grenade_ECDet_explo, its SpawnSound (a group of 2)
 bounce = "imp_GEN_grenadeBounce_01" # game: ImpactSound
 
 [model]

@@ -392,3 +392,91 @@ fn settings_file() {
         Settings::default()
     );
 }
+
+/// A save made while a script waits on a timer, with a counter half
+/// counted, loads into a fresh director that carries on the same way
+/// without sending the level-start event again.
+#[test]
+fn snapshot_restores_scripts_mid_wait() {
+    let map = MapScripts {
+        actors: vec![
+            actor(
+                obj(2, "PlayerStart", "PlayerStart0", &[("Event", t("levelstart"))]),
+                vec![],
+            ),
+            actor(
+                obj(
+                    4,
+                    "Counter",
+                    "Counter1",
+                    &[
+                        ("Tag", t("DeadDroid")),
+                        ("NumToCount", Val::Byte(3)),
+                        ("Event", t("AllDead")),
+                    ],
+                ),
+                vec![],
+            ),
+            script(
+                "First",
+                vec![
+                    act("WaitForEvent", &[("ExternalEvent", t("levelstart"))]),
+                    act("WaitForTimer", &[("PauseTime", Val::Float(1.5))]),
+                    act("TriggerEvent", &[("Event", t("Rappel"))]),
+                    act("WaitForEvent", &[("ExternalEvent", t("AllDead"))]),
+                    act("TriggerEvent", &[("Event", t("Done"))]),
+                ],
+            ),
+        ],
+        failures: vec![],
+    };
+    let mut a = Director::new(&map, &[], Settings::default());
+    a.start();
+    run(&mut a, 1.0);
+    a.fire("DeadDroid", "droid");
+    run(&mut a, 0.1);
+    let snap = a.snapshot();
+    let first = &snap.script[0];
+    assert!(first.waits_until.is_some() && first.next == 1, "{first:?}");
+    assert_eq!(snap.counter[0].left, 2);
+
+    // Through the file and back.
+    let text = toml::to_string(&snap).unwrap();
+    let back: crate::save::DirectorSave = toml::from_str(&text).unwrap();
+    assert_eq!(back, snap, "{text}");
+
+    let mut b = Director::new(&map, &[], Settings::default());
+    let report = b.restore(&back);
+    assert!(report.unknown.is_empty() && report.past_end.is_empty(), "{report:?}");
+    assert_eq!(b.snapshot(), snap);
+    // No level start this time, and it carries on as the first did.
+    run(&mut a, 1.0);
+    run(&mut b, 1.0);
+    assert_eq!(sent(&b), ["Rappel"]);
+    for d in [&mut a, &mut b] {
+        d.fire("DeadDroid", "droid");
+        d.fire("DeadDroid", "droid");
+        run(d, 0.1);
+    }
+    assert_eq!(sent(&b), ["Rappel", "DeadDroid", "DeadDroid", "AllDead", "Done"]);
+    assert_eq!(a.snapshot(), b.snapshot());
+}
+
+/// Names the map doesn't have are skipped and reported.
+#[test]
+fn restore_skips_unknown_names() {
+    let map = MapScripts {
+        actors: vec![script("First", vec![act("WaitForEvent", &[("ExternalEvent", t("Go"))])])],
+        failures: vec![],
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    let mut snap = d.snapshot();
+    snap.script[0].next = 7;
+    snap.counter.push(crate::save::CounterSave {
+        name: "Counter9".into(),
+        left: 1,
+    });
+    let r = d.restore(&snap);
+    assert_eq!(r.unknown, ["Counter9"]);
+    assert_eq!(r.past_end, ["First"]);
+}

@@ -61,6 +61,45 @@ How to look at a menu without the game: `rc_probe --menu` (main menu) or
 `extracted/menus/<Class>.png` and logs every widget to `logs/rc_menu.log`.
 `rc_probe --classes <package.u> [Class]` logs a package's class defaults.
 
+## Pages behind the main menu (2026-10-29)
+
+The pause, campaign and options pages can each use their original menu.
+`data/ui/original_menus.toml` lists, for each page, its class and what each
+button's function does. When the game starts, each page's class is read
+and checked (`rc_menus::pages::check`): a page uses the original only if
+every widget on it is a kind we can draw (picture, text, text button) and
+every button a PC player can reach has a command. Otherwise the amber
+placeholder stays, and the log lists every reason, plus every button the
+class has and the function it calls. So one run with the install shows
+exactly what to add.
+
+Built the night of 2026-10-29 without the game files, then checked
+against the install the same evening with `rc_probe --pages`:
+
+- **Pause (`CTPausePCMenu`): uses the original.** 11 buttons: LOAD LAST
+  SAVE, QUICK SAVE, QUICK LOAD, RESUME GAME, RESTART LEVEL, SAVE GAME,
+  LOAD GAME, OPTIONS, ENABLE HINTS, END MISSION, QUIT PROGRAM. Saving,
+  loading and hints are greyed out until built. END MISSION goes to the
+  main menu; QUIT PROGRAM asks the quit question. Its `Background` is a
+  black square at alpha 120 over the game. Two of the night's guesses
+  were wrong (QUIT was thought to mean "to the main menu").
+- **Campaign (`CTCampaignMenu`): keeps the placeholder.** It needs widget
+  kinds the reader doesn't draw yet: `MenuButtonSprite` (the planets and
+  arrows), `MenuStringList` (the level list), `MenuScrollBar`,
+  `MenuScrollArea`, `MenuActiveWidget`. Its buttons are BACK
+  (`OnBButton`) and SELECT (`SelectCurrentLevel`).
+- The options classes use sliders and key lists too, so they aren't
+  listed yet.
+- `rc_game --script` picks pause items by the original's function name
+  (`FocusPauseItem`), so it works with either pause page.
+
+To check on the PC without playing: `rc_probe --pages` probes every page
+in `data/ui/original_menus.toml` as `--menu` does (widgets and each
+button's function in `logs/rc_menu.log`, a painting in `extracted/menus/`),
+then ends with a summary saying which pages would use the original and
+why the others wouldn't. In the game, the same reasons are in
+`logs\rc_game.log` on lines starting `original menus: page`.
+
 ## What the original's menus are made of (checked 2026-10-29)
 
 Checked by reading the install's packages with our own `rc_package` reader
@@ -127,6 +166,20 @@ layout to read. Its pictures are all there to reuse:
   compass), `VisorDamage` (cracks), `VisorBlood`, `Helmet` (sniper and night
   vision glass, flashlight).
 - `Textures/HUDArmsTextures.utx`: the helmet and arms.
+
+**Started (2026-10-29):** the crosshair.
+`rc_game/src/original_hud.rs` draws the reticle picture named in
+`data/ui/hud.toml` (one per weapon, by the weapon file's `name`, else the
+default), centred and sized by screen height (one picture pixel per line
+of a 480-line screen, a guess), red over an enemy. If the picture can't be
+read, the placeholder's bars stay and the log says why. The package has
+each reticle twice (`HUD_WeaponDefault` and a smaller `HUD_WeaponDefaultPC`,
+and so on, all in the `Reticles` group); we use the PC ones. Checked in
+`rc_game --script` with the install: the 64x64 picture loads and the
+screenshot has 461 near-white pixels at the centre. Its size and the red
+tint were not compared with the real game. Not done:
+spread (the bars move apart; the picture doesn't grow yet), shield,
+health, ammo and squad pictures.
 
 The plan for the HUD is to place these original pictures where the original
 shows them, matched by eye and by measuring against screenshots of the
