@@ -274,6 +274,8 @@ mod tests {
             dispensers: vec![],
             hidden: HashSet::new(),
             held: vec![],
+            calls: vec![],
+            places: Default::default(),
             started: false,
             stats: PlayStats::default(),
         });

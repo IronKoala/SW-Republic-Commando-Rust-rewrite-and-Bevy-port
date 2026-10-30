@@ -96,6 +96,7 @@ fn main() {
     }
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
     let (mut maps, mut failed, mut scripts, mut actions, mut unreadable) = (0, 0, 0, 0, 0);
+    let (mut dest_found, mut dest_missing) = (0, 0);
     for name in &names {
         maps += 1;
         let path = data.join("Maps").join(format!("{name}.ctm"));
@@ -120,6 +121,31 @@ fn main() {
             }
         };
         let map = rc_level::scripts::read(&pkg, &bytes, &level);
+        // Where scripts send characters: every DestinationTag / ObjectiveTag
+        // should name an actor (by tag, else by name).
+        let places = rc_level::scripts::places(&pkg, &bytes, &level);
+        let mut missing = Vec::new();
+        for s in map.scripts() {
+            for a in &s.actions {
+                for key in ["DestinationTag", "ObjectiveTag"] {
+                    let Some(t) = a.text(key).filter(|t| !t.eq_ignore_ascii_case("None")) else {
+                        continue;
+                    };
+                    if places
+                        .iter()
+                        .any(|p| p.tag.eq_ignore_ascii_case(t) || p.name.eq_ignore_ascii_case(t))
+                    {
+                        dest_found += 1;
+                    } else {
+                        dest_missing += 1;
+                        missing.push(format!("{}.{key}={t}", s.obj.name));
+                    }
+                }
+            }
+        }
+        if !missing.is_empty() {
+            log.line(format!("   destinations not in the map: {missing:?}"));
+        }
         // Triggers with their class defaults, as the movers part reads them.
         let triggers = rc_level::map_collision::load(&path, &data, 84.0)
             .map(|l| l.movers.triggers)
@@ -191,6 +217,7 @@ fn main() {
                         script,
                         index,
                         action,
+                        ..
                     } => {
                         let kind = action
                             .class
@@ -239,7 +266,7 @@ fn main() {
         ));
     }
     let line = format!(
-        "{maps} maps, {failed} unreadable; {scripts} scripts with {actions} actions; {} action kinds; {unreadable} actors or actions unreadable",
+        "{maps} maps, {failed} unreadable; {scripts} scripts with {actions} actions; {} action kinds; {unreadable} actors or actions unreadable; {dest_found} places characters are sent to found, {dest_missing} not found",
         kinds.len()
     );
     log.line(&line);

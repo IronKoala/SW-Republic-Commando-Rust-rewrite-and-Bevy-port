@@ -178,6 +178,40 @@ pub enum AiEvent {
         aim_at: Vec3,
         left: u32,
     },
+    /// Finished what a level script told it to do ([`ScriptGoal`]):
+    /// arrived, turned, or the animation's time is up.
+    ScriptDone,
+    /// Leapt to a point a level script sent it to but it couldn't walk to
+    /// (`leap_speed` in its file).
+    Leapt,
+}
+
+/// What a level script has a fighter do (`ACTION_MoveToPoint`,
+/// `ACTION_TurnTowardPlayer`, ...). While it has one, the fighter does
+/// that instead of its own plans (it still looks, and shoots only once
+/// done); it sends [`AiEvent::ScriptDone`] when finished.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScriptGoal {
+    /// Walk (or run) to `to` along the path network, within `tolerance`
+    /// uu, then turn to `face` (radians) if given.
+    MoveTo {
+        to: Vec3,
+        walk: bool,
+        tolerance: f32,
+        face: Option<f32>,
+    },
+    /// Go to the target (the player) until within `tolerance` uu.
+    MoveToTarget { tolerance: f32 },
+    /// Turn to face the target.
+    TurnToTarget,
+    /// Turn to `yaw`, radians.
+    Face(f32),
+    /// Stand still until battle time `until`: a scripted animation (the
+    /// game plays it), or a pause.
+    Hold { until: f32 },
+    /// Stand until the target is within `distance` uu
+    /// (`ACTION_WaitForPlayer`).
+    WaitForTarget { distance: f32 },
 }
 
 /// One fighter.
@@ -230,10 +264,27 @@ pub struct Fighter {
     next_melee: f32,
     /// Battle time of its last close-up hit (for the animation).
     pub last_melee: f32,
+    /// What a level script has it doing, if anything.
+    pub script: Option<ScriptGoal>,
+    /// A level script made it unable to be hurt (`ACTION_MakeInvulnerable`).
+    pub invulnerable: bool,
+    /// The scripted walk has been planned (a route asked for).
+    script_planned: bool,
+    /// Leaping to a scripted point it can't walk to: (from, to, battle
+    /// time it left, seconds the leap takes).
+    leap: Option<(Vec3, Vec3, f32, f32)>,
     rng: Rng,
 }
 
 const STUCK_SECONDS: f32 = 2.0;
+/// A scripted point this much higher than a character that can leap is
+/// leapt to rather than walked to, uu. Our own (a guess).
+const LEAP_CLIMB: f32 = 200.0;
+/// How high a leap arcs above its straight line, uu. Our own.
+const LEAP_ARC: f32 = 120.0;
+/// A scripted walk ends this near its point at the latest, uu (maps often
+/// give no tolerance). Our own.
+const SCRIPT_NEAR: f32 = 48.0;
 /// How far off the floor a charge's straight-line check starts, uu (about
 /// a stair step).
 const STEP_LIFT: f32 = 24.0;
@@ -290,6 +341,10 @@ impl Fighter {
             last_throw: f32::NEG_INFINITY,
             next_melee: 0.0,
             last_melee: f32::NEG_INFINITY,
+            script: None,
+            invulnerable: false,
+            script_planned: false,
+            leap: None,
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -322,6 +377,14 @@ impl Fighter {
     pub fn on_damaged(&mut self, from: Option<Vec3>, time: f32, events: &mut Vec<AiEvent>) {
         if self.mode == Mode::Dead {
             return;
+        }
+        // Standing about for a script (an animation, waiting for the
+        // player) ends when it's hurt: it fights. A scripted walk goes on.
+        if matches!(
+            self.script,
+            Some(ScriptGoal::Hold { .. } | ScriptGoal::WaitForTarget { .. })
+        ) {
+            self.script_done(events);
         }
         if let Some(p) = from {
             if self.last_seen_at.is_none() || time - self.last_seen_time > 1.0 {
@@ -487,6 +550,12 @@ impl Fighter {
             events.push(AiEvent::LostSight);
         }
 
+        // A level script's order comes first.
+        if let Some(goal) = self.script.clone() {
+            self.script_tick(dt, view, goal, &mut events);
+            return events;
+        }
+
         // 2. Decide.
         match self.mode {
             Mode::Alerted if now - self.alerted_at >= senses.reaction_time => {
@@ -573,6 +642,197 @@ impl Fighter {
             }
         }
         events
+    }
+
+    /// A level script gives it something to do (replacing any earlier
+    /// order). It drops its own plans.
+    pub fn follow_script(&mut self, goal: ScriptGoal) {
+        self.script = Some(goal);
+        self.script_planned = false;
+        self.leap = None;
+        self.follower = None;
+        self.crouch = false;
+    }
+
+    /// Be at `centre` (the middle of its body) at once, facing `yaw`
+    /// (`ACTION_TeleportToPoint`). It falls to the floor from there.
+    pub fn teleport(&mut self, centre: Vec3, yaw: f32) {
+        self.pawn.location = centre;
+        self.pawn.velocity = Vec3::ZERO;
+        self.pawn.mode = rc_movement::Mode::Falling;
+        self.facing = yaw;
+        self.follower = None;
+        self.script_planned = false;
+        self.leap = None;
+    }
+
+    /// Drop the script's order (the script moved on, or was stopped).
+    pub fn stop_script(&mut self) {
+        if self.script.take().is_some() {
+            self.follower = None;
+            self.leap = None;
+        }
+    }
+
+    fn script_done(&mut self, events: &mut Vec<AiEvent>) {
+        self.script = None;
+        self.follower = None;
+        events.push(AiEvent::ScriptDone);
+    }
+
+    fn start_leap(&mut self, from: Vec3, to: Vec3, now: f32) {
+        let secs = ((to - from).length() / self.params.combat.leap_speed).max(0.3);
+        self.leap = Some((from, to, now, secs));
+        self.follower = None;
+    }
+
+    /// One frame of following a level script's order.
+    fn script_tick(&mut self, dt: f32, view: &View, goal: ScriptGoal, events: &mut Vec<AiEvent>) {
+        let now = view.time;
+        let mut input = MoveInput::default();
+        let mut want_yaw = self.facing;
+        let here = self.pawn.location;
+        // Where to walk, how near is near enough, and what to face after.
+        let walk = match &goal {
+            ScriptGoal::MoveTo {
+                to,
+                walk,
+                tolerance,
+                face,
+            } => Some((*to, *walk, *tolerance, *face)),
+            ScriptGoal::MoveToTarget { tolerance } => {
+                view.target.map(|t| (t.centre, false, *tolerance, None))
+            }
+            _ => None,
+        };
+        match &goal {
+            ScriptGoal::MoveTo { .. } | ScriptGoal::MoveToTarget { .. } => {
+                let Some((to, walking, tolerance, face)) = walk else {
+                    // No target to go to: nothing to do.
+                    self.script_done(events);
+                    return;
+                };
+                if let Some((from, end, left, secs)) = self.leap {
+                    // Flying there: a straight line with a little arc,
+                    // through anything in the way. Stands in for the
+                    // original's flying, which isn't done.
+                    let k = ((now - left) / secs).clamp(0.0, 1.0);
+                    let lift = (k * std::f32::consts::PI).sin() * LEAP_ARC;
+                    self.pawn.location = from + (end - from) * k + Vec3::new(0.0, 0.0, lift);
+                    self.pawn.velocity = Vec3::ZERO;
+                    self.facing = rc_nav::steer::yaw_towards(from, end);
+                    if k >= 1.0 {
+                        self.leap = None;
+                        self.pawn.mode = rc_movement::Mode::Falling;
+                        self.follower = None;
+                        self.distance_walked += (end - from).length();
+                        events.push(AiEvent::Leapt);
+                        match face {
+                            Some(y) => self.script = Some(ScriptGoal::Face(y)),
+                            None => self.script_done(events),
+                        }
+                    }
+                    return;
+                }
+                if (to - here).length_2d() <= tolerance.max(SCRIPT_NEAR) {
+                    self.distance_walked += self.follower.as_ref().map_or(0.0, |f| f.travelled);
+                    match face {
+                        Some(y) => {
+                            self.follower = None;
+                            self.script = Some(ScriptGoal::Face(y));
+                        }
+                        None => self.script_done(events),
+                    }
+                    return;
+                }
+                // Going after the player: plan again when they've moved.
+                let stale = matches!(goal, ScriptGoal::MoveToTarget { .. })
+                    && self
+                        .destination()
+                        .is_some_and(|d| (d - to).length_2d() > tolerance.max(128.0));
+                let leaps = self.params.combat.leap_speed > 0.0;
+                // A point well above it: the original flies up there.
+                if leaps && !self.script_planned && to.z - here.z > LEAP_CLIMB {
+                    self.start_leap(here, to, now);
+                    return;
+                }
+                if !self.script_planned || stale {
+                    self.script_planned = true;
+                    if !self.walk_to(view, to, events) {
+                        // No route on the path network: straight there.
+                        self.follower = Some(PathFollower::new(vec![to]));
+                    }
+                    if let Some(f) = self.follower.as_mut() {
+                        f.walk = walking;
+                    }
+                }
+                match self
+                    .follower
+                    .as_mut()
+                    .map(|f| (f.update(&self.pawn, dt), f.stuck_time))
+                {
+                    Some((Some(mut i), stuck)) => {
+                        want_yaw = i.yaw;
+                        let off = angle_diff(want_yaw, self.facing).abs();
+                        i.forward = (1.0 - off / std::f32::consts::FRAC_PI_2).clamp(0.0, 1.0);
+                        i.walk = walking;
+                        i.yaw = self.facing;
+                        input = i;
+                        if stuck > STUCK_SECONDS {
+                            events.push(AiEvent::Stuck);
+                            if leaps {
+                                self.start_leap(here, to, now);
+                            } else {
+                                self.script_done(events);
+                            }
+                        }
+                    }
+                    Some((None, _)) | None => {
+                        // End of the route, but not near enough: the
+                        // route ends at the nearest node. Go straight on.
+                        self.follower = Some(PathFollower::new(vec![to]));
+                        if let Some(f) = self.follower.as_mut() {
+                            f.walk = walking;
+                        }
+                    }
+                }
+            }
+            ScriptGoal::TurnToTarget | ScriptGoal::Face(_) => {
+                let y = match goal {
+                    ScriptGoal::Face(y) => Some(y),
+                    _ => view
+                        .target
+                        .map(|t| rc_nav::steer::yaw_towards(here, t.centre)),
+                };
+                match y {
+                    Some(y) if angle_diff(y, self.facing).abs() > 0.05 => want_yaw = y,
+                    _ => {
+                        self.script_done(events);
+                        return;
+                    }
+                }
+            }
+            ScriptGoal::Hold { until } => {
+                if now >= *until {
+                    self.script_done(events);
+                    return;
+                }
+            }
+            ScriptGoal::WaitForTarget { distance } => {
+                if view
+                    .target
+                    .is_some_and(|t| (t.centre - here).length() <= *distance)
+                {
+                    self.script_done(events);
+                    return;
+                }
+            }
+        }
+        let max_turn = self.params.senses.turn_rate.to_radians() * dt;
+        self.facing =
+            wrap(self.facing + angle_diff(want_yaw, self.facing).clamp(-max_turn, max_turn));
+        input.yaw = self.facing;
+        self.pawn.step(dt, &input, view.world);
     }
 
     /// Reached the end of a route.

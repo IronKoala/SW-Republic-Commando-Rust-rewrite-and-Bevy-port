@@ -313,3 +313,57 @@ pub fn tagged_actors(
     }
     out
 }
+
+/// Somewhere a script can send a character (`DestinationTag`): any actor,
+/// path nodes included.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Place {
+    pub name: String,
+    pub class: String,
+    /// Its `Tag` (the class name when the map gives none, as in UE2).
+    pub tag: String,
+    /// Unreal units.
+    pub location: [f32; 3],
+    /// Facing, radians (Unreal's convention).
+    pub yaw: f32,
+}
+
+/// Every actor's name, tag, location and facing, for scripts that send
+/// characters places (`ACTION_MoveToPoint`, `ACTION_TeleportToPoint`).
+/// Level meshes and lights are left out: scripts don't send characters to
+/// those.
+pub fn places(pkg: &Package, data: &[u8], level: &LevelInfo) -> Vec<Place> {
+    let mut out = Vec::new();
+    for &a in level.actors.iter().flatten() {
+        let class = pkg.export_class_name(&pkg.exports[a]);
+        if class.eq_ignore_ascii_case("StaticMeshActor") || class.eq_ignore_ascii_case("Light") {
+            continue;
+        }
+        let Ok(props) = actors::read_actor_properties(pkg, data, a) else {
+            continue;
+        };
+        let find = |n: &str| rc_package::properties::find(pkg, &props, n).map(|p| &p.value);
+        let raw3 = |n: &str| match find(n) {
+            Some(Value::Raw(b)) if b.len() == 12 => {
+                Some([0, 4, 8].map(|i| <[u8; 4]>::try_from(&b[i..i + 4]).unwrap()))
+            }
+            _ => None,
+        };
+        let location = raw3("Location").map_or([0.0; 3], |v| v.map(f32::from_le_bytes));
+        let yaw = raw3("Rotation").map_or(0.0, |v| {
+            i32::from_le_bytes(v[1]) as f32 / 65536.0 * std::f32::consts::TAU
+        });
+        let tag = match find("Tag") {
+            Some(Value::Name(n)) => pkg.name(*n).to_string(),
+            _ => class.to_string(),
+        };
+        out.push(Place {
+            name: pkg.name(pkg.exports[a].object_name).to_string(),
+            class: class.to_string(),
+            tag,
+            location,
+            yaw,
+        });
+    }
+    out
+}

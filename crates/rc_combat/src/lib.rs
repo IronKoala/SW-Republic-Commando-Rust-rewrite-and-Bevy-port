@@ -39,7 +39,9 @@ pub mod weapon;
 
 pub use damage_types::{DamageTable, DamageTypes};
 pub use grenade::{GrenadeParams, Grenades};
-pub use health::{Damage, DamageKind, Dead, Died, Difficulty, Health, Shield, Team};
+pub use health::{
+    CannotDie, Damage, DamageKind, Dead, Died, Difficulty, Health, Invulnerable, Shield, Team,
+};
 pub use library::{read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary};
 pub use melee::MeleeAttack;
 pub use pickup::{spawn_pickup, WeaponPickup};

@@ -401,7 +401,12 @@ fn snapshot_restores_scripts_mid_wait() {
     let map = MapScripts {
         actors: vec![
             actor(
-                obj(2, "PlayerStart", "PlayerStart0", &[("Event", t("levelstart"))]),
+                obj(
+                    2,
+                    "PlayerStart",
+                    "PlayerStart0",
+                    &[("Event", t("levelstart"))],
+                ),
                 vec![],
             ),
             actor(
@@ -447,7 +452,10 @@ fn snapshot_restores_scripts_mid_wait() {
 
     let mut b = Director::new(&map, &[], Settings::default());
     let report = b.restore(&back);
-    assert!(report.unknown.is_empty() && report.past_end.is_empty(), "{report:?}");
+    assert!(
+        report.unknown.is_empty() && report.past_end.is_empty(),
+        "{report:?}"
+    );
     assert_eq!(b.snapshot(), snap);
     // No level start this time, and it carries on as the first did.
     run(&mut a, 1.0);
@@ -458,7 +466,10 @@ fn snapshot_restores_scripts_mid_wait() {
         d.fire("DeadDroid", "droid");
         run(d, 0.1);
     }
-    assert_eq!(sent(&b), ["Rappel", "DeadDroid", "DeadDroid", "AllDead", "Done"]);
+    assert_eq!(
+        sent(&b),
+        ["Rappel", "DeadDroid", "DeadDroid", "AllDead", "Done"]
+    );
     assert_eq!(a.snapshot(), b.snapshot());
 }
 
@@ -466,7 +477,10 @@ fn snapshot_restores_scripts_mid_wait() {
 #[test]
 fn restore_skips_unknown_names() {
     let map = MapScripts {
-        actors: vec![script("First", vec![act("WaitForEvent", &[("ExternalEvent", t("Go"))])])],
+        actors: vec![script(
+            "First",
+            vec![act("WaitForEvent", &[("ExternalEvent", t("Go"))])],
+        )],
         failures: vec![],
     };
     let mut d = Director::new(&map, &[], Settings::default());
@@ -479,4 +493,151 @@ fn restore_skips_unknown_names() {
     let r = d.restore(&snap);
     assert_eq!(r.unknown, ["Counter9"]);
     assert_eq!(r.past_end, ["First"]);
+}
+
+/// A placed character's sequence: its actions name it as the owner, a
+/// walk waits for the game to say it arrived (or the time-out), and an
+/// action the map switched off is skipped.
+#[test]
+fn character_actions_wait_for_the_game() {
+    let seq = |n: usize| {
+        actor(
+            obj(
+                30 + n,
+                "ScriptedSequence",
+                &format!("Seq{n}"),
+                &[("Tag", t(&format!("WalkerAI{n}")))],
+            ),
+            vec![
+                act("MakeInvulnerable", &[("bDisabled", Val::Bool(true))]),
+                act("MoveToPoint", &[("DestinationTag", t("Here"))]),
+                act("TriggerEvent", &[("Event", t(&format!("Arrived{n}")))]),
+            ],
+        )
+    };
+    let placed = |n: usize| {
+        actor(
+            obj(
+                40 + n,
+                "CloneTrooper",
+                &format!("CloneTrooper{n}"),
+                &[("AIScriptTag", t(&format!("WalkerAI{n}")))],
+            ),
+            vec![],
+        )
+    };
+    let map = MapScripts {
+        actors: vec![seq(1), placed(1), seq(2), placed(2)],
+        failures: vec![],
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    d.game_runs_characters = true;
+    let out = run(&mut d, 0.1);
+    let actions: Vec<_> = out
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Action {
+                script,
+                index,
+                action,
+                owner,
+                waits,
+            } => Some((
+                script.clone(),
+                *index,
+                action.name.clone(),
+                owner.clone(),
+                *waits,
+            )),
+            _ => None,
+        })
+        .collect();
+    // The switched-off action never reaches the game.
+    assert_eq!(
+        actions,
+        [
+            (
+                "Seq1".into(),
+                1,
+                "MoveToPoint".into(),
+                Some("WalkerAI1".into()),
+                true
+            ),
+            (
+                "Seq2".into(),
+                1,
+                "MoveToPoint".into(),
+                Some("WalkerAI2".into()),
+                true
+            ),
+        ]
+    );
+    assert!(out
+        .iter()
+        .any(|e| matches!(e, Effect::Note(n) if n.contains("switched off"))));
+    // Long past the old fixed 2 s, they still wait for the game.
+    run(&mut d, 5.0);
+    assert!(sent(&d).is_empty());
+    // The first arrives; a wrong index is ignored.
+    assert!(!d.action_done("Seq1", 0));
+    assert!(d.action_done("Seq1", 1));
+    run(&mut d, 0.1);
+    assert_eq!(sent(&d), ["Arrived1"]);
+    // The second never does: it carries on at the time-out.
+    let w = d.settings.move_timeout_seconds;
+    run(&mut d, w);
+    assert_eq!(sent(&d), ["Arrived1", "Arrived2"]);
+
+    // With no game (the headless tools) the walk takes the fixed time.
+    let mut d = Director::new(&map, &[], Settings::default());
+    let w = d.settings.move_seconds + 0.2;
+    run(&mut d, w);
+    assert_eq!(sent(&d), ["Arrived1", "Arrived2"]);
+}
+
+/// A save made while a character walks: after the load the walk is
+/// handed to the game again, and finishing it carries the script on.
+#[test]
+fn saved_walk_is_started_again() {
+    let map = MapScripts {
+        actors: vec![
+            actor(
+                obj(30, "ScriptedSequence", "Seq", &[("Tag", t("WalkerAI"))]),
+                vec![
+                    act("MoveToPoint", &[("DestinationTag", t("Here"))]),
+                    act("TriggerEvent", &[("Event", t("Arrived"))]),
+                ],
+            ),
+            actor(
+                obj(
+                    40,
+                    "CloneTrooper",
+                    "CloneTrooper0",
+                    &[("AIScriptTag", t("WalkerAI"))],
+                ),
+                vec![],
+            ),
+        ],
+        failures: vec![],
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    d.game_runs_characters = true;
+    run(&mut d, 1.0);
+    let save = d.snapshot();
+    assert_eq!(save.script[0].waits_for_action, Some(0));
+    let mut e = Director::new(&map, &[], Settings::default());
+    e.game_runs_characters = true;
+    e.restore(&save);
+    let out = run(&mut e, 0.1);
+    assert!(out.iter().any(|x| matches!(
+        x,
+        Effect::Action {
+            index: 0,
+            waits: true,
+            ..
+        }
+    )));
+    assert!(e.action_done("Seq", 0));
+    run(&mut e, 0.1);
+    assert_eq!(sent(&e), ["Arrived"]);
 }

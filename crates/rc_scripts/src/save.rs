@@ -45,6 +45,11 @@ pub struct ScriptSave {
     /// The scripts' clock time it waits until, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waits_until: Option<f32>,
+    /// The action it waits for the game to finish (a character walking
+    /// somewhere), if any; `waits_until` is then its time-out. After a
+    /// load the game starts that action again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for_action: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,7 +141,11 @@ impl Director {
                         _ => None,
                     },
                     waits_until: match s.wait {
-                        Wait::Until(t) => Some(t),
+                        Wait::Until(t) | Wait::Game { until: t, .. } => Some(t),
+                        _ => None,
+                    },
+                    waits_for_action: match s.wait {
+                        Wait::Game { index, .. } => Some(index),
                         _ => None,
                     },
                 })
@@ -193,10 +202,17 @@ impl Director {
                 r.past_end.push(s.name.clone());
                 sc.finished = true;
             }
-            sc.wait = match (&s.waits_for, s.waits_until) {
-                (Some(e), _) => Wait::Event(e.to_ascii_lowercase()),
-                (None, Some(t)) => Wait::Until(t),
-                (None, None) => Wait::Nothing,
+            sc.wait = match (&s.waits_for, s.waits_until, s.waits_for_action) {
+                (Some(e), _, _) => Wait::Event(e.to_ascii_lowercase()),
+                // Run the unfinished character action again, so the game
+                // hears it (its characters were put back from the save,
+                // not mid-walk).
+                (None, _, Some(i)) if i < sc.actions.len() => {
+                    sc.pc = i;
+                    Wait::Nothing
+                }
+                (None, Some(t), _) => Wait::Until(t),
+                _ => Wait::Nothing,
             };
             r.restored += 1;
         }

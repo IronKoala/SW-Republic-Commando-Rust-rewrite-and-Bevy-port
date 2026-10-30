@@ -47,6 +47,17 @@ pub enum Effect {
         script: String,
         index: usize,
         action: ScriptObject,
+        /// Whose character script it is: the `ScriptedSequence`'s tag (the
+        /// name placed characters give in `AIScriptTag` and factories in
+        /// `AIScriptFromFactory`). Character actions with no target of
+        /// their own (`MoveToPoint`, `PlayAnim`, `TurnTowardPlayer`, ...)
+        /// act on the characters running it. `None` for a
+        /// `ScriptedTrigger`.
+        owner: Option<String>,
+        /// The script waits for the game to call
+        /// [`Director::action_done`] with this script and index (a walk
+        /// arriving, an animation ending), or for its time-out.
+        waits: bool,
     },
     /// A prop was destroyed (blown up by a script or hurt past its
     /// health): its collision and drawing go away, or `mesh` takes its
@@ -72,6 +83,12 @@ enum Wait {
     Event(String),
     /// A time, in the director's seconds.
     Until(f32),
+    /// The game to finish action `index` (a character walking somewhere),
+    /// or the time-out, in the director's seconds.
+    Game {
+        index: usize,
+        until: f32,
+    },
 }
 
 struct Script {
@@ -171,6 +188,10 @@ pub struct Director {
     /// Every event sent so far, in order, with the time. For the log and
     /// the self-tests.
     pub history: Vec<(f32, String)>,
+    /// Whether the game carries out character actions and says when each
+    /// is done ([`Self::action_done`]). Off (tools with no game), scripts
+    /// wait the fixed `anim_seconds` / `move_seconds` instead.
+    pub game_runs_characters: bool,
 }
 
 fn low(s: &str) -> String {
@@ -203,6 +224,7 @@ impl Director {
             time: 0.0,
             stats: Stats::default(),
             history: Vec::new(),
+            game_runs_characters: false,
         };
         // Placed characters run the sequence named by their AIScriptTag.
         let placed_scripts: Vec<String> = map
@@ -370,6 +392,9 @@ impl Director {
                         Wait::Nothing => "running".to_string(),
                         Wait::Event(e) => format!("waits for {e}"),
                         Wait::Until(t) => format!("waits until {t:.1} s"),
+                        Wait::Game { index, .. } => {
+                            format!("waits for the game to finish action {index}")
+                        }
                     }
                 };
                 let next = s.actions.get(s.pc).map_or("end".to_string(), |a| {
@@ -628,9 +653,19 @@ impl Director {
                 match &s.wait {
                     Wait::Event(_) => break,
                     Wait::Until(t) if self.time < *t => break,
+                    Wait::Game { until, .. } if self.time < *until => break,
                     Wait::Until(_) => {
                         s.wait = Wait::Nothing;
                         s.pc += 1;
+                        continue;
+                    }
+                    Wait::Game { index, .. } => {
+                        let (name, index) = (s.name.clone(), *index);
+                        s.wait = Wait::Nothing;
+                        s.pc += 1;
+                        self.out.push(Effect::Note(format!(
+                            "{name}: action {index} not finished by the game in time; carries on"
+                        )));
                         continue;
                     }
                     Wait::Nothing => {}
@@ -674,6 +709,16 @@ impl Director {
         let name = self.scripts[i].name.clone();
         let kind = action_kind(&a).to_ascii_lowercase();
         let mut next = pc + 1;
+        // The map's own off switch on an action (level designers leave
+        // some in, switched off).
+        if a.flag("bDisabled", false) {
+            self.out.push(Effect::Note(format!(
+                "{name} #{pc} {} switched off in the map; skipped",
+                action_kind(&a)
+            )));
+            self.scripts[i].pc = next;
+            return;
+        }
         match kind.as_str() {
             "waitforevent" => {
                 let e = a.text("ExternalEvent").unwrap_or("").to_string();
@@ -736,12 +781,25 @@ impl Director {
                 // take time.
                 let wait = match kind.as_str() {
                     "playsound" if a.flag("bWaitForFinish", false) => self.settings.sound_seconds,
-                    "playanim" | "playpropanim" if a.flag("bWaitUntilAnimEnd", true) => {
+                    "playpropanim" if a.flag("bWaitUntilAnimEnd", true) => {
                         self.settings.anim_seconds
                     }
-                    "movetopoint" | "movetoplayer" => self.settings.move_seconds,
                     _ => 0.0,
                 };
+                // Character actions the game finishes: the script waits
+                // for it to say so (or the fixed time with no game).
+                let owner = (self.scripts[i]
+                    .class
+                    .eq_ignore_ascii_case("ScriptedSequence"))
+                .then(|| self.scripts[i].tag.clone());
+                let game_wait = character_wait(&kind, &a, &self.settings);
+                let game_wait = game_wait.map(|(fixed, timeout)| {
+                    if self.game_runs_characters {
+                        timeout
+                    } else {
+                        fixed
+                    }
+                });
                 // Props are ours to hurt and remove; the rest goes to the
                 // game too (characters, the player).
                 match kind.as_str() {
@@ -760,7 +818,22 @@ impl Director {
                     script: name,
                     index: pc,
                     action: a,
+                    owner,
+                    waits: game_wait.is_some() && self.game_runs_characters,
                 });
+                if let Some(w) = game_wait {
+                    if self.game_runs_characters {
+                        self.scripts[i].wait = Wait::Game {
+                            index: pc,
+                            until: self.time + w,
+                        };
+                        return;
+                    }
+                    if w > 0.0 {
+                        self.scripts[i].wait = Wait::Until(self.time + w);
+                        return;
+                    }
+                }
                 if wait > 0.0 {
                     self.scripts[i].wait = Wait::Until(self.time + wait);
                     return;
@@ -768,6 +841,24 @@ impl Director {
             }
         }
         self.scripts[i].pc = next;
+    }
+
+    /// The game finished action `index` of the script named `script` (a
+    /// character arrived, an animation ended): the script carries on, on
+    /// the next step. Returns whether a script was waiting for it.
+    pub fn action_done(&mut self, script: &str, index: usize) -> bool {
+        for s in &mut self.scripts {
+            if s.name.eq_ignore_ascii_case(script) {
+                if let Wait::Game { index: w, .. } = s.wait {
+                    if w == index {
+                        s.wait = Wait::Nothing;
+                        s.pc = index + 1;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// The action after the `ACTION_EndSection` that closes the section an
@@ -799,6 +890,23 @@ impl Director {
                 s.actions.len(),
             )
         })
+    }
+}
+
+/// Character actions that take time: (seconds with no game, time-out when
+/// the game carries them out). `None`: no wait.
+fn character_wait(kind: &str, a: &ScriptObject, s: &Settings) -> Option<(f32, f32)> {
+    match kind {
+        "movetopoint" | "movetoplayer" => Some((s.move_seconds, s.move_timeout_seconds)),
+        "playanim" if a.flag("bWaitUntilAnimEnd", true) && !a.flag("bLoopAnim", false) => {
+            Some((s.anim_seconds, s.anim_timeout_seconds))
+        }
+        "waitforanimend" => Some((s.anim_seconds, s.anim_timeout_seconds)),
+        "turntowardplayer" => Some((0.0, s.turn_timeout_seconds)),
+        // Waits until the player comes near the character: no time-out in
+        // the game (the original waits as long as it takes).
+        "waitforplayer" => Some((0.0, f32::MAX)),
+        _ => None,
     }
 }
 

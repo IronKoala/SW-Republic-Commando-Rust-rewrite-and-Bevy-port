@@ -89,6 +89,9 @@ pub struct Combat {
     /// Rushes in to hit when its enemy is this close, uu. An enemy with
     /// no gun (`weapon = ""`) always rushes in.
     pub lunge_distance: f32,
+    /// Leaps (flies) straight to a point a level script sends it to when
+    /// it can't walk there, at this speed, uu a second. 0: it can't.
+    pub leap_speed: f32,
 }
 
 /// Grenades it throws (`[grenades]`). An empty `grenade` means none (the
@@ -297,6 +300,7 @@ impl AiParams {
                 melee_damage_type: "CTDamageMelee".into(),
                 melee_delay: 1.5,
                 lunge_distance: 0.0,
+                leap_speed: 0.0,
             },
             grenades: GrenadeUse {
                 grenade: String::new(),
@@ -445,6 +449,7 @@ impl AiParams {
             ("combat", "melee_damage_type") => c.melee_damage_type = text(),
             ("combat", "melee_delay") => c.melee_delay = num()?,
             ("combat", "lunge_distance") => c.lunge_distance = num()?,
+            ("combat", "leap_speed") => c.leap_speed = num()?,
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
             ("senses", "auto_detect_radius") => s.auto_detect_radius = num()?,

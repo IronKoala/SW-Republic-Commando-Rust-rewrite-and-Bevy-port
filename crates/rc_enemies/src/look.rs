@@ -12,7 +12,7 @@ use rc_ai::params::Look;
 use rc_anim::{globals, skin, weights_per_point, Clip, Convention, Skeleton};
 use rc_game_core::GamePaths;
 use rc_image::{PixelFormat, Rgba};
-use rc_package::animation::read_mesh_animation;
+use rc_package::animation::{read_mesh_animation, MeshAnimation};
 use rc_package::properties::Value;
 use rc_package::skeletal::{read_skeletal_mesh, SkeletalMesh};
 use rc_package::{texture, ObjectRef, Package};
@@ -81,6 +81,9 @@ pub struct DroidLook {
     pub skeleton: Skeleton,
     pub weights: Vec<Vec<(usize, f32)>>,
     pub clips: HashMap<Pose, Clip>,
+    /// The whole animation set, for animations a level script names
+    /// (`ACTION_PlayAnim`).
+    pub anim: MeshAnimation,
     pub skin: Option<(String, Rgba)>,
     /// Triangle corners as wedge numbers, already in Bevy's winding.
     pub indices: Vec<u32>,
@@ -197,6 +200,7 @@ impl DroidLook {
             skeleton,
             weights,
             clips,
+            anim,
             skin,
             indices,
             lift: 0.0,
@@ -231,11 +235,24 @@ impl DroidLook {
         self.clips.get(&pose).unwrap_or(&self.clips[&Pose::Idle])
     }
 
-    /// Points posed at `frame` of `pose`, Unreal units relative to the
+    /// An animation from the set by name (any case), for a level script.
+    pub fn named_clip(&self, name: &str) -> Option<Clip> {
+        self.anim
+            .sequences
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name))
+            .map(|seq| Clip::new(&self.anim, seq, &self.skeleton))
+    }
+
+    fn pose_unreal(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
+        self.clip_unreal(self.clip(pose), frame)
+    }
+
+    /// Points posed at `frame` of `clip`, Unreal units relative to the
     /// mesh origin (feet not yet lifted). The root bone's sideways travel
     /// is removed: the droid's body moves the droid, not the animation.
-    fn pose_unreal(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
-        let mut local = self.clip(pose).sample(&self.skeleton, frame);
+    fn clip_unreal(&self, clip: &Clip, frame: f32) -> Vec<[f32; 3]> {
+        let mut local = clip.sample(&self.skeleton, frame);
         if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
             l.pos[0] = rest.pos[0];
             l.pos[1] = rest.pos[1];
@@ -251,6 +268,15 @@ impl DroidLook {
     /// droid's feet, before its facing is applied.
     pub fn posed(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
         self.pose_unreal(pose, frame)
+            .into_iter()
+            .map(|p| to_bevy([p[0], p[1], p[2] + self.lift]))
+            .collect()
+    }
+
+    /// Like [`Self::posed`], for a named animation (see
+    /// [`Self::named_clip`]).
+    pub fn posed_clip(&self, clip: &Clip, frame: f32) -> Vec<[f32; 3]> {
+        self.clip_unreal(clip, frame)
             .into_iter()
             .map(|p| to_bevy([p[0], p[1], p[2] + self.lift]))
             .collect()
