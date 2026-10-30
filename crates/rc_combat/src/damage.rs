@@ -32,9 +32,21 @@ pub(crate) fn apply_damage(
         let who = names
             .get(d.target)
             .map_or_else(|_| format!("{:?}", d.target), |n| n.to_string());
+        // Who did it, so a health drop can be traced from the log alone.
+        // No instigator means a level script, a fall or the like.
+        let from = match d.instigator {
+            Some(e) if e == d.target => " from itself".to_string(),
+            Some(e) => format!(
+                " from {}",
+                names
+                    .get(e)
+                    .map_or_else(|_| format!("{e:?}"), |n| n.to_string())
+            ),
+            None => " from no one (script, fall or level)".to_string(),
+        };
         let line =
             format!(
-            "combat: {who} took {amount} {:?} damage (shield {}, health {}), health now {}/{}{}",
+            "combat: {who} took {amount} {:?} damage{from} (shield {}, health {}), health now {}/{}{}",
             d.kind,
             taken.to_shield,
             taken.to_health,

@@ -371,6 +371,8 @@ fn squad_mates_shoot_a_droid_they_can_see() {
     }
     let fired = shots(&events);
     // Every member who isn't blocked by a friend shoots, and only at it.
+    // (Sev, front left, holds: his line to the droid passes 17 uu from the
+    // player's middle, inside the player's body.)
     let shooters: std::collections::HashSet<usize> = fired.iter().map(|s| s.0).collect();
     assert!(shooters.len() >= 2, "shooters {shooters:?}");
     assert!(fired.iter().all(|s| s.3 == 7));
@@ -959,4 +961,51 @@ fn grenade_post_with_a_target_area_throws_only_into_it() {
         has(&ev, |e| matches!(e, SquadEvent::Throw { target: 2, .. })),
         "{ev:?}"
     );
+}
+
+#[test]
+fn a_shot_over_a_friends_shoulder_counts_as_through_them() {
+    use crate::fight::shot_passes_friend;
+    // From the user's rc_game.log (2026-10-30): Fixer, standing still,
+    // fired at a droid 4212 uu away and hit Sev 30 times, then the player.
+    // The line passed Sev about 110 uu above his middle: inside his body,
+    // but outside the old 60 uu check round the middle point.
+    let origin = Vec3::new(-1409.0, -720.0, -2251.0);
+    let dir = Vec3::new(0.98, -0.17, 0.06).normalize_or_zero();
+    let end = origin + dir * 4212.0;
+    let sev = Vec3::new(-1090.0, -758.0, -2384.0);
+    assert!(shot_passes_friend(origin, end, sev, false, 20.0, 0.0375));
+    // Standing well to the side is fine.
+    let aside = sev + Vec3::new(0.0, 300.0, 0.0);
+    assert!(!shot_passes_friend(origin, end, aside, false, 20.0, 0.0375));
+    // So is being behind the shooter or well past the target.
+    assert!(!shot_passes_friend(
+        origin,
+        end,
+        origin - dir * 200.0 - Vec3::new(0.0, 0.0, 130.0),
+        false,
+        20.0,
+        0.0375
+    ));
+    assert!(!shot_passes_friend(
+        origin,
+        end,
+        end + dir * 400.0 - Vec3::new(0.0, 0.0, 84.0),
+        false,
+        20.0,
+        0.0375
+    ));
+    // A downed friend on the floor right under the line is not in the way,
+    // but one the line runs into is.
+    assert!(!shot_passes_friend(origin, end, sev, true, 20.0, 0.0375));
+    let low_origin = Vec3::new(0.0, 0.0, 40.0);
+    let low_end = Vec3::new(2000.0, 0.0, 40.0);
+    assert!(shot_passes_friend(
+        low_origin,
+        low_end,
+        Vec3::new(500.0, 50.0, 0.0),
+        true,
+        20.0,
+        0.0375
+    ));
 }

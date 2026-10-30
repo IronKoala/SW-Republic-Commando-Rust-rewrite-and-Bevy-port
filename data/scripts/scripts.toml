@@ -39,3 +39,12 @@ range = 256
 heal_per_second = 50
 # Seconds before a used dispenser works again. Our choice.
 recharge_seconds = 10
+
+[exits]
+# Most maps end where the player walks into a "Teleporter" with a URL (the
+# arrows: "Walking through the arrows will load the next level"). Its size
+# comes from the map; these are for one the map gives no size. 80 and 100
+# are the game's own defaults (engine.u, Teleporter's parent class
+# NavigationPoint), read with `rc_probe --class Teleporter`.
+teleporter_radius = 80
+teleporter_height = 100

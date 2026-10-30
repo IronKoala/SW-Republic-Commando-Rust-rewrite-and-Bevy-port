@@ -14,8 +14,10 @@
 //!   at the enemy's middle, off by up to `(1 - accuracy) x max_aim_error`.
 //!   Standing members turn to face their target and only fire within
 //!   `max_aim_yaw` of where they face; moving members fire on the move.
-//!   Nobody fires when the player or another squad mate is within
-//!   `friendly_clearance` of the line of fire, nearer than the target.
+//!   Nobody fires when the line of fire passes within `friendly_clearance`
+//!   of the player's or another squad mate's body (the whole 168-tall
+//!   commando, not just its middle), allowing for how far the shot can
+//!   stray, nearer than the target.
 //! - **Reviving.** A downed squad mate (or the player, with
 //!   `revive_player`) gets the nearest member who is up, not on a marked
 //!   job and not already reviving someone, if one is within `range`. That
@@ -111,23 +113,88 @@ fn dist_2d(a: Vec3, b: Vec3) -> f32 {
     Vec3::new(a.x - b.x, a.y - b.y, 0.0).length()
 }
 
-/// How far `p` is from the segment `a`..`b`, and how far along it (0..1).
-fn point_segment(p: Vec3, a: Vec3, b: Vec3) -> (f32, f32) {
-    let ab = b - a;
-    let len2 = ab.dot(ab);
-    let t = if len2 > 0.0 {
-        ((p - a).dot(ab) / len2).clamp(0.0, 1.0)
+/// Height of a downed commando's middle above the floor, uu.
+const LYING_MIDDLE: f32 = 30.0;
+
+/// How far a squad weapon's own aim error can take a shot off its line,
+/// per uu travelled. The DC-17m's `aim_error` is 15 uu per 1000; we allow
+/// a little more.
+const WEAPON_SPREAD: f32 = 0.02;
+
+/// A commando's body as shots see it: the game's 40-wide, 168-tall
+/// cylinder (`rc_combat::Hittable::COMMANDO`), feet at the bottom. A
+/// downed one lies flat, so we take a low, wide shape: 60 tall, 90 out
+/// from the middle each way (our own guess at a body on the floor).
+const BODY_RADIUS: f32 = 40.0;
+const BODY_HEIGHT: f32 = 168.0;
+const LYING_RADIUS: f32 = 90.0;
+const LYING_HEIGHT: f32 = 2.0 * LYING_MIDDLE;
+
+/// Would a shot from `origin` to `end` pass near a friend standing (or
+/// lying, `down`) with their feet at `feet`? Near means within the body
+/// plus `clearance`, plus `spread` uu for every uu along the shot, since
+/// the shot can go off its line by about that much (aim error).
+///
+/// The body is the whole upright cylinder, so a shot at head height
+/// counts, not just one through the belly: checking
+/// only the middle point let squad mates shoot over each other's
+/// shoulders and into the player (rc_game.log, 2026-10-30).
+pub(crate) fn shot_passes_friend(
+    origin: Vec3,
+    end: Vec3,
+    feet: Vec3,
+    down: bool,
+    clearance: f32,
+    spread: f32,
+) -> bool {
+    let (radius, height) = if down {
+        (LYING_RADIUS, LYING_HEIGHT)
+    } else {
+        (BODY_RADIUS, BODY_HEIGHT)
+    };
+    let d = end - origin;
+    let len = d.length();
+    // Across: where the shot passes nearest the body's upright middle line
+    // (seen from above), and how wide the body counts as there.
+    let rel = Vec3::new(feet.x - origin.x, feet.y - origin.y, 0.0);
+    let flat = d.x * d.x + d.y * d.y;
+    let t_near = if flat > 1e-6 {
+        (rel.x * d.x + rel.y * d.y) / flat
     } else {
         0.0
     };
-    (dist(p, a + ab * t), t)
+    let wide = radius + clearance + spread * len * t_near.clamp(0.0, 1.0);
+    // The stretch of the shot (0..1) within `wide` of the middle line...
+    let (mut t0, mut t1) = if flat > 1e-6 {
+        let off = (rel.x * d.y - rel.y * d.x).abs() / flat.sqrt();
+        if off >= wide {
+            return false;
+        }
+        let half = (wide * wide - off * off).sqrt() / flat.sqrt();
+        (t_near - half, t_near + half)
+    } else {
+        // Straight up or down: in or out for the whole shot.
+        if rel.length() >= wide {
+            return false;
+        }
+        (0.0, 1.0)
+    };
+    // ...and also between the feet and the top of the head, give or take
+    // `clearance`.
+    let bottom = feet.z - clearance;
+    let top = feet.z + height + clearance;
+    if d.z.abs() > 1e-6 {
+        let (za, zb) = ((bottom - origin.z) / d.z, (top - origin.z) / d.z);
+        t0 = t0.max(za.min(zb));
+        t1 = t1.min(za.max(zb));
+    } else if origin.z < bottom || origin.z > top {
+        return false;
+    }
+    // Only in front of the shooter and short of the target.
+    t0 = t0.max(0.0);
+    t1 = t1.min(1.0);
+    t0 < t1 && t0 < 1.0 - 1.0 / len.max(1.0) && t1 > 0.0
 }
-
-/// Height of a standing commando's middle above its feet, and of a downed
-/// one lying on the floor, uu.
-const STANDING_MIDDLE: f32 = 84.0;
-const LYING_MIDDLE: f32 = 30.0;
-
 impl Squad {
     /// The name the log uses for a patient.
     pub fn patient_name(&self, p: Patient) -> String {
@@ -425,39 +492,30 @@ impl Squad {
         if !moving && off_facing > f.max_aim_yaw {
             return;
         }
-        // Friends in the way: the leader and the other squad mates.
         let range = to.length();
-        let mut friends: Vec<(String, Vec3)> = vec![(
-            "the player".into(),
-            leader.feet
-                + Vec3::new(
-                    0.0,
-                    0.0,
-                    if self.leader_down {
-                        LYING_MIDDLE
-                    } else {
-                        STANDING_MIDDLE
-                    },
-                ),
-        )];
+        // Friends in the way: the leader and the other squad mates, as
+        // whole bodies. The shot can stray by our aim error plus the
+        // weapon's own (up to about 15 uu per 1000 for the DC-17m).
+        let err = (1.0 - f.accuracy).clamp(0.0, 1.0) * f.max_aim_error;
+        let spread = err.tan() + WEAPON_SPREAD;
+        let mut friends: Vec<(String, Vec3, bool)> =
+            vec![("the player".into(), leader.feet, self.leader_down)];
         for (j, o) in self.members.iter().enumerate() {
             if j != i {
-                let up = if o.down {
-                    LYING_MIDDLE
-                } else {
-                    STANDING_MIDDLE
-                };
-                friends.push((
-                    o.settings.name.clone(),
-                    o.pawn.feet() + Vec3::new(0.0, 0.0, up),
-                ));
+                friends.push((o.settings.name.clone(), o.pawn.feet(), o.down));
             }
         }
-        let blocker = friends.into_iter().find(|(_, p)| {
-            let (d, t) = point_segment(*p, origin, target.centre);
-            d < f.friendly_clearance && t * range < range - 1.0 && t > 0.0
+        let blocker = friends.into_iter().find(|(_, feet, down)| {
+            shot_passes_friend(
+                origin,
+                target.centre,
+                *feet,
+                *down,
+                f.friendly_clearance,
+                spread,
+            )
         });
-        if let Some((friend, _)) = blocker {
+        if let Some((friend, _, _)) = blocker {
             let m = &mut self.members[i];
             m.fight.held_fire += 1;
             m.fight.next_shot = now + f.shot_interval;
@@ -470,7 +528,6 @@ impl Squad {
             return;
         }
         // Aim error, then fire.
-        let err = (1.0 - f.accuracy).clamp(0.0, 1.0) * f.max_aim_error;
         let yaw = to.y.atan2(to.x) + self.rng.range(-err, err);
         let pitch = to.z.atan2(to.length_2d()) + self.rng.range(-err, err) * 0.5;
         let direction = Vec3::new(
