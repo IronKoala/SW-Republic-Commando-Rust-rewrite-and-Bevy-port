@@ -220,6 +220,7 @@ fn move_body(
     time: Res<Time>,
     actions: Res<ActionState>,
     collision: Res<LevelCollision>,
+    movers: Option<Res<rc_movers_plugin::LevelMovers>>,
     mut kicks: MessageReader<ViewKick>,
     mut body: Query<(&mut Body, &mut Transform, Has<rc_combat::Dead>), With<Player>>,
     log: Res<GameLog>,
@@ -252,6 +253,11 @@ fn move_body(
             walk: actions.pressed(Action::Walk),
         }
     };
+    // Doors and lifts move first, carrying or pushing the player; the
+    // player then moves among them (they are in `LevelCollision`).
+    if let Some(m) = &movers {
+        m.step(dt, &mut body.pawn);
+    }
     let events = body.pawn.step(dt, &input, collision.0.as_ref());
     body.time += dt;
     for e in &events {

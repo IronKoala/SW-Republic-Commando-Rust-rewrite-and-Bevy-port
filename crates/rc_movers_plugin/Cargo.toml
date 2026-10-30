@@ -1,0 +1,20 @@
+[package]
+name = "rc_movers_plugin"
+version = "0.1.0"
+edition.workspace = true
+description = "Doors and lifts in the game: runs the map's movers (rc_movers) in rc_game, makes them solid, moves their drawn parts and carries the player."
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+rc_level = { path = "../rc_level" }
+rc_level_plugin = { path = "../rc_level_plugin" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_movers = { path = "../rc_movers" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. No window or drawing of its
+# own; it only moves what the level part drew.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state", "3d_bevy_render"]

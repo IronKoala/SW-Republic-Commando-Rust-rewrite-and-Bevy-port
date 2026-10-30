@@ -79,8 +79,19 @@ copy of the game.
   windowless test run `rc_squad_sim` passes 33 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
   and stays put until revived. They are in the game program (`rc_game`):
-  start a level and they stand with you. Drawn as coloured capsules for
-  now.
+  start a level and they stand with you.
+
+- **Sev, Fixer and Scorch look like themselves (tested in the cloud
+  sandbox and on Windows).** Each squad mate is drawn with the
+  original commando model, their own armour (Sev's red, Fixer's green,
+  Scorch's yellow) and the original's animations: standing, walking,
+  running, backing up, side-stepping, firing, falling when knocked out, and
+  kneeling to revive. Everything is read from the install when the level
+  starts; which model and animations are used is in
+  `data/squad/looks.toml`. A squad mate whose model can't be read is drawn
+  as a coloured capsule (a placeholder) and the log says why. They don't
+  hold a weapon yet, and the helmet extras the original adds
+  (`AvailableAccessories`) aren't drawn.
 
 - **The squad fights and revives (tested in the cloud sandbox by numbers,
   not yet on Windows or with eyes).** Sev, Fixer and Scorch shoot enemies
@@ -158,9 +169,23 @@ copy of the game.
   and triggers stored in each map, and their collision moves with them, so
   you can ride a lift in `rc_walk`. `rc_mover_check` runs every one in every
   map and logs the numbers: all 863 that could be timed opened and closed
-  on time, and all 33 rideable lifts carried the player. Doors that the
+  on time, and all 33 rideable lifts carried the player. They also run
+  in the game itself (`rc_game`, tested in the cloud sandbox on geo_01a):
+  doors are solid where they stand and move when set off. Doors that the
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
+
+- **Levels run their own scripts (tested in the cloud sandbox, not on
+  Windows).** The game reads each map's own scripting (79 of 79 maps, 2,842
+  scripts, 19,041 actions, nothing unreadable) and runs it: scripts wait
+  for events and timers, touch triggers, counters and conditions send
+  events on, doors open by event, checkpoints ask for a save, and
+  barricades come down. On geo_01a the landing zone now plays like the
+  original: after the intro you are hit by a shell, the advisor tells you
+  to heal, the bacta dispenser switches on, and holding Use at it heals you
+  and blows the barricade so you can reach the fight. `rc_game --script`
+  checks that whole chain (37 of 37 checks). `rc_script_check` runs every
+  map's scripts without a window.
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
@@ -259,7 +284,13 @@ copy of the game.
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
-- Scripts are not decoded yet.
+- Level scripts run, but only part of what they ask is carried out:
+  doors, barricades, damage to the player, bacta dispensers, prompts,
+  objectives (kept, not shown) and checkpoints. Lines of dialogue, music
+  cues, characters walking or animating, droid factories, the squad
+  joining and leaving, camera moves and level changes are logged as "not
+  done yet". Sound lengths aren't read, so a script waiting for a line
+  waits 3 s. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups are read but not used yet.
@@ -590,6 +621,25 @@ cargo test --release -p rc_squad_plugin --test fight_room
 ```
 
 It should say `test result: ok. 1 passed`. The log is `logs\fight_room.log`.
+
+To check that Sev, Fixer and Scorch are drawn with their original models
+and armour (opens a window for a few seconds):
+
+```
+cargo run -p rc_squad_plugin --example rc_squad_look_check
+```
+
+It stands the three side by side, checks every animation, checks each
+armour is the one the original gives that commando, and compares the
+outline and colours on screen with what the model and its pictures say. It
+should end with `LOOK CHECK DONE: 48 checks passed, 0 failed`. The log is
+`logs\rc_squad_look_check.log`, and `logs\rc_squad_look_check.ppm` is the
+captured picture. To list what a model package holds (for editing
+`looks.toml`):
+
+```
+cargo run -p rc_model --example rc_model_list -- "C:\Games\Steam\steamapps\common\Star Wars Republic Commando\GameData\Animations\clone.ukx" --sequences
+```
 
 ## Credits
 

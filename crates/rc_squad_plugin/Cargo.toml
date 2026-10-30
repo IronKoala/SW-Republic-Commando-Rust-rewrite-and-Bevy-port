@@ -12,12 +12,15 @@ rc_movement = { path = "../rc_movement" }
 rc_nav = { path = "../rc_nav" }
 rc_package = { path = "../rc_package" }
 rc_squad = { path = "../rc_squad" }
-# The [squad] section of save files. serde (MIT OR Apache-2.0),
-# https://serde.rs.
+# The original Sev, Fixer and Scorch models, read from the game.
+rc_model = { path = "../rc_model" }
+# Reading data/squad/looks.toml, and the [squad] section of save files. serde (MIT OR Apache-2.0),
+# https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
 serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. Game states, and the 3D
-# material types for the squad's stand-in bodies. No window: the game
+# meshes, pictures and materials for the squad's bodies. No window: the game
 # (rc_game or rc_walk) brings that.
 [dependencies.bevy]
 version = "0.20.1"
@@ -25,5 +28,8 @@ default-features = false
 features = ["std", "bevy_state", "bevy_pbr"]
 
 [dev-dependencies]
+# Only for the rc_squad_look_check example, which opens a window: the same
+# Bevy with window and renderer features switched on (as rc_character).
+bevy = { version = "0.20.1", default-features = false, features = ["default_app", "std", "bevy_winit", "multi_threaded", "x11", "2d_bevy_render", "bevy_pbr"] }
 # Only for the rc_squad_sim example: loads a map's collision.
 rc_level = { path = "../rc_level" }

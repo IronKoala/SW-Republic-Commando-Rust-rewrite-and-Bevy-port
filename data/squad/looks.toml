@@ -1,0 +1,53 @@
+# What Delta Squad looks like: the original models, armour pictures and
+# animations, read from the game's files at run time (nothing here is
+# copied from the game, only names). Read by rc_squad_plugin.
+#
+# To see what a package holds (meshes, material slots, animation sets and
+# their sequences):
+#   cargo run -p rc_model --example rc_model_list -- "<game>\GameData\Animations\clone.ukx" --sequences
+#
+# A squad mate whose model can't be read is drawn as a coloured capsule (a
+# placeholder) and the log (logs/rc_game.log, lines starting "squad:") says why.
+
+# Light every squad mate always gets, 0 to 1 of its own colour. Guess, the
+# same as the droids': the original lights characters with each zone's
+# ambient light, which we don't read yet.
+ambient = 0.5
+
+# Which sequence plays for what the commando is doing. Searched in the
+# mesh's own animation sets, first set first (CloneCommando: everyday moves
+# in CloneCommandoSet, wounded and healing ones in CloneCommandoSPSet).
+[animations]
+idle = "ActionBreathe"
+walk = "WalkForward"
+run = "RunForward"
+walk_back = "WalkBackward"
+step_left = "StepLeft"
+step_right = "StepRight"
+fire = "Fire"
+# Knocked out, waiting for a revive: played once, then held. Our pick; the
+# original's choice is in compiled code.
+down = "WoundedFallDown"
+# Kneeling by a downed commando with the bacta healer. Our pick, as above.
+revive = "HealImmobileLoop"
+
+# One block per squad mate, named like [member.<key>] in squad.toml.
+# All three use the CloneCommando mesh (Mesh in the CloneCommando class
+# defaults, CTCharacters.u). Each one's armour is the class's Skins[0]
+# (Properties package, CommandoNNDeltaDefaults), which replaces the
+# mesh's stand-in material in slot 0. `skins` lists replacements by slot;
+# "" keeps the mesh's own.
+[member.sev]
+package = "GameData/Animations/clone.ukx"
+mesh = "CloneCommando"
+skins = ["CloneTextures.CloneTextures.CloneCommando07_Shader"]
+
+[member.fixer]
+package = "GameData/Animations/clone.ukx"
+mesh = "CloneCommando"
+skins = ["CloneTextures.CloneTextures.CloneCommando40_Shader"]
+
+[member.scorch]
+package = "GameData/Animations/clone.ukx"
+mesh = "CloneCommando"
+skins = ["CloneTextures.CloneTextures.CloneCommando62_Shader"]
