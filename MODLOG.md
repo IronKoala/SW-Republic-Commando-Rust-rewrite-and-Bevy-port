@@ -3,6 +3,24 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Grenade log says why each one went off (rc_combat)
+
+- **Changed:** `crates/rc_combat/src/throw.rs`: the `grenades: X went off ...` log line now says why: "on touching a character", "on touching the level", "when a character came near" or "when its fuse ran out".
+- **Why:** In the user's replay of geo_01a with the squad fix, the player went down twice from their own anti-armour round. Both times it went off 0.03 s after firing, about 80 uu in front of the player, and the log didn't say what it ran into.
+- **Tested how:** `cargo test --release -p rc_combat` (19 + 21 range tests).
+- **Result:** All pass.
+- **Still broken / not tested:** Not seen in a real game log yet.
+- **Next:** The next play log shows what the anti-armour round hit.
+
+## 2026-10-30: Squad mates no longer shoot through the player or each other (rc_squad, rc_combat log)
+
+- **Changed:** `crates/rc_squad/src/fight.rs`: the "friend in the way" check before a squad mate fires now tests the line of fire against each friend's whole body (the 40-wide, 168-tall commando cylinder; a low wide shape for someone lying down), widened by `friendly_clearance` and by how far the shot can stray (aim error plus the gun's spread). New `shot_passes_friend` and test `a_shot_over_a_friends_shoulder_counts_as_through_them`. `friendly_clearance` is now the gap round the body: 20 uu (was 60 uu round the middle point). `crates/rc_combat/src/damage.rs`: every `combat: ... took N damage` log line now says who did it (`from Scorch`, `from battle droid 2`, or `from no one (script, fall or level)`). `crates/rc_squad_plugin/src/lib.rs`: logs `X hit the player by mistake` and names the squad mate hit; those no longer count as hits on enemies.
+- **Why:** The user's geo_01a run (`logs/rc_game.log`, 2026-10-30 ~03:25Z) lost its health with almost no droid hits. Reading the log: the droids' 47 shots all missed (`0 hit the player`). The player lost 100 shield and then health to 10-damage Blaster hits that matched squad mates' shots (squad bolts x0.5 on the player's damage table), then 175 from the level script (`ScriptedTrigger3 #6 HurtActor: the player takes 175 damage`, the original's intro "anti-infantry round"), then a last squad bolt put the player down (`Scorch KILLED 740v1`). Scorch revived the player to 50% = 100/200. Fixer also hit Sev about 40 times from where he stood. Cause: the old check measured only from the friend's middle point (84 uu up), but the squad's shots leave at eye height, so a line passing at shoulder or head height (about 110 uu above the middle) went "clear" and straight through the body.
+- **Tested how:** `cargo test --release -p rc_squad -p rc_combat -p rc_squad_plugin` in the cloud sandbox.
+- **Result:** All pass: rc_squad 30 (1 new), rc_combat 19 + 21 (range), rc_squad_plugin fight_room and jobs_room. The new test uses the exact positions and direction from the log (Fixer at (-1409, -720, -2251) firing along (0.98, -0.17, 0.06) past Sev at (-1090, -758)), which the old check let through.
+- **Still broken / not tested:** Not re-run in `rc_game` on the PC yet. The scripted 175 damage is the original level's own event and is kept. Whether the original lets squad bolts hurt the player at all is not known (the damage table says x0.5, so we keep it). Squad mates hold fire more often now; they don't yet step aside to get a clear line.
+- **Next:** The user replays geo_01a; the log should show no `hit the player by mistake` lines and the damage lines should name every attacker. Done 2026-10-30 04:48Z on the PC: 0 squad hits on the player in a 3-minute fight (321 droid shots, 10 droids destroyed).
+
 ## 2026-10-30: Geonosian warriors fight with their force pike (rc_ai, rc_combat, rc_enemies)
 
 - **Changed:** `rc_ai`: `[combat]` gains `melee_range`, `melee_damage`, `melee_damage_type`, `melee_delay` and `lunge_distance`; new `Maneuver::Charge` (rush at the enemy, straight if the way is clear, else along the paths) and `AiEvent::Melee`; an enemy with `weapon = ""` never shoots. `[look] melee` names the swing animation. `rc_combat`: new public message `MeleeAttack` and system `melee_attacks` (the player's melee rule, skipping the attacker's own team, scaled by the target's damage table). `rc_enemies` sends it, plays the swing, counts `melee_swings`. `data/enemies/geonosian.toml`: no gun, force pike 350 / 125 `CTDamageMeleeWarrior`, `LungeDist` 800. The enemies test room now puts each spawn point at its enemy's own height (it used to start the taller Geonosian 35 uu inside the floor). Tests: 3 in `rc_ai`, 1 in `rc_enemies/tests/fight.rs`.
