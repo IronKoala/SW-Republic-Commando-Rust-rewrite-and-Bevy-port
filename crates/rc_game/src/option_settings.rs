@@ -137,7 +137,13 @@ const RESOLUTIONS: &[(u32, u32)] = &[
 
 /// The values to show instead of the original's, if this setting needs
 /// its own list.
-pub fn items(name: &str, s: &Settings) -> Option<Vec<String>> {
+/// The screen size list's first entry: full screen at the desktop's size
+/// (borderless), as other PC games list it.
+pub const FULL_SCREEN: &str = "FULL SCREEN";
+
+/// `desktop` is the main screen's size: window sizes bigger than it can't
+/// be shown, so they aren't offered.
+pub fn items(name: &str, s: &Settings, desktop: Option<(u32, u32)>) -> Option<Vec<String>> {
     if let Some(n @ (_, _, _, decimals, suffix, unit)) = numeric(name) {
         return Some(
             numeric_values(n)
@@ -150,13 +156,16 @@ pub fn items(name: &str, s: &Settings) -> Option<Vec<String>> {
         "fullscreen" => Some(vec!["ON".into(), "OFF".into()]),
         "gyro_mode" => Some(vec!["OFF".into(), "ALWAYS".into(), "WHEN AIMING".into()]),
         "video_resolution" => {
-            let mut sizes = RESOLUTIONS.to_vec();
+            let fits = |&(w, h): &(u32, u32)| desktop.is_none_or(|(dw, dh)| w <= dw && h <= dh);
+            let mut sizes: Vec<(u32, u32)> = RESOLUTIONS.iter().copied().filter(fits).collect();
             let now = (s.video.width, s.video.height);
-            if !sizes.contains(&now) {
+            if !s.video.fullscreen && !sizes.contains(&now) {
                 sizes.push(now);
                 sizes.sort_by_key(|(w, h)| (*w, *h));
             }
-            Some(sizes.iter().map(|(w, h)| format!("{w}x{h}")).collect())
+            let mut out = vec![FULL_SCREEN.to_string()];
+            out.extend(sizes.iter().map(|(w, h)| format!("{w}x{h}")));
+            Some(out)
         }
         _ => None,
     }
@@ -325,7 +334,11 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
                 .unwrap_or(0)
         }
         "video_resolution" => {
-            let now = format!("{}x{}", s.video.width, s.video.height);
+            let now = if s.video.fullscreen {
+                FULL_SCREEN.to_string()
+            } else {
+                format!("{}x{}", s.video.width, s.video.height)
+            };
             items.iter().position(|i| i.eq_ignore_ascii_case(&now))?
         }
         "vsync" => yes_no(s.video.vsync),
@@ -397,6 +410,7 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
         }
         "effects_volume" => s.audio.effects_volume = (i as f32 / 10.0).clamp(0.0, 1.0),
         "music_volume" => s.audio.music_volume = (i as f32 / 10.0).clamp(0.0, 1.0),
+        "video_resolution" if text == FULL_SCREEN => s.video.fullscreen = true,
         "voices_volume" => s.audio.voices_volume = (i as f32 / 10.0).clamp(0.0, 1.0),
         "sound_quality" => s.audio.low_quality = says_low(text),
         "sound_3d" => {
@@ -424,6 +438,7 @@ pub fn write(name: &str, s: &mut Settings, i: usize, items: &[String]) -> bool {
             };
             s.video.width = w;
             s.video.height = h;
+            s.video.fullscreen = false;
         }
         "vsync" => s.video.vsync = first,
         "subtitles" => s.game.subtitles = on_off_value(items, i),
@@ -474,6 +489,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "video_resolution" => {
             s.video.width = d.video.width;
             s.video.height = d.video.height;
+            s.video.fullscreen = d.video.fullscreen;
         }
         "vsync" => s.video.vsync = d.video.vsync,
         "brightness" => s.video.brightness = d.video.brightness,
@@ -524,7 +540,7 @@ mod tests {
     fn every_setting_reads_back_what_was_written() {
         let s0 = Settings::default();
         for name in ALL {
-            let items = items(name, &s0).unwrap_or_else(|| match *name {
+            let items = items(name, &s0, None).unwrap_or_else(|| match *name {
                 "fsaa" => list(&["OFF", "2X", "4X"]),
                 "graphics_quality" => list(&["LOW", "MEDIUM", "HIGH", "CUSTOM"]),
                 "blur" | "bloom" | "squad_shadows" | "sound_3d" | "subtitles" | "prompt_text" => list(&["ON", "OFF"]),
@@ -552,12 +568,28 @@ mod tests {
         let mut s = Settings::default();
         s.video.width = 1234;
         s.video.height = 567;
-        let items = items("video_resolution", &s).unwrap();
+        let items = items("video_resolution", &s, None).unwrap();
         assert!(items.contains(&"1234x567".to_string()));
         assert_eq!(
             read("video_resolution", &s, &items).map(|i| items[i].as_str()),
             Some("1234x567")
         );
+    }
+
+    #[test]
+    fn full_screen_and_sizes_that_fit_the_screen() {
+        let mut s = Settings::default();
+        let items = items("video_resolution", &s, Some((1920, 1080))).unwrap();
+        assert_eq!(items[0], FULL_SCREEN);
+        assert!(items.contains(&"1920x1080".to_string()));
+        assert!(!items.contains(&"2560x1440".to_string()));
+        assert!(write("video_resolution", &mut s, 0, &items));
+        assert!(s.video.fullscreen);
+        assert_eq!(read("video_resolution", &s, &items), Some(0));
+        let at = items.iter().position(|i| i == "1600x900").unwrap();
+        assert!(write("video_resolution", &mut s, at, &items));
+        assert!(!s.video.fullscreen);
+        assert_eq!((s.video.width, s.video.height), (1600, 900));
     }
 
     #[test]

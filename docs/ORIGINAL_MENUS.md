@@ -135,7 +135,17 @@ or Enter / A) opens a drop-down list, which the original doesn't have. It is
 built only from pieces of the page (`rc_menus::screens::drop_down`): the
 page's own display box over a black square, and copies of the chooser for
 its rows. It shows 10 sizes and scrolls with the keys or the mouse wheel; a
-click outside or Back closes it.
+click outside or Back closes it. The list starts with FULL SCREEN and then
+only offers window sizes that fit the monitor (a window can't be bigger than
+the screen it is on), plus the current size.
+
+Long setting names (AUTO PULL MANEUVERS, TACTICAL VISOR MODE, BUMPMAPPING
+QUALITY and others) can run into the arrows, because our font is wider than
+the original's. `rc_menus::screens::fit_row_labels` shrinks any label that
+would reach the first button of its row, keeping its left edge and middle
+line. It works on the 4:3 menu area, so it holds at any window shape. The
+log names the labels it shrank ("labels shrunk to fit before their
+arrows").
 
 **GRAPHICS and SOUND rows (2026-10-30).** What each does here
 (`rc_game/src/graphics.rs`, `sound_options.rs`, the names in

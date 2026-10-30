@@ -296,8 +296,10 @@ copy of the game.
   PROMPT TEXT, the turn keys, the screenshot key (F12) and the weapon keys
   (1 to 4) (tests only; subtitles not yet checked with the game's files).
   Rows the port can't do yet (helmet, auto pull, tactical visor, bump
-  mapping, projectors, EAX) are greyed out. Values change with the arrows; the screen size
-  also has a drop-down list. Our own extra settings (field of view, full
+  mapping, projectors, EAX) are greyed out. Values change with the arrows;
+  the screen size also has a drop-down list, starting with FULL SCREEN and
+  then the window sizes that fit your monitor. Long setting names shrink
+  to fit before their arrows. Our own extra settings (field of view, full
   screen, controller and gyro) are on a fifth tab, "PORT +", in the same
   original look. The campaign page keeps the placeholder until its planet
   buttons and level list can be drawn; `logs/rc_game.log` says why
