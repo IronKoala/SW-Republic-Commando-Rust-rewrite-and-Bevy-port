@@ -23,7 +23,7 @@ pub use battle::{
     SwitchedOn,
 };
 pub use brain::{AiEvent, Fighter, Maneuver, Mode, Target, View};
-pub use params::{AiParams, EnemyType, Sounds};
+pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
 pub use spawns::{read_factories, Factory, Offspring, SpawnSpot, StartState};
 
 #[cfg(test)]

@@ -451,7 +451,8 @@ fn every_grenade_file_reads_and_the_player_carries_them() {
             "emp_grenade",
             "flash_grenade",
             "sonic_detonator",
-            "thermal_detonator"
+            "thermal_detonator",
+            "thermal_detonator_enemy"
         ]
     );
     let g = r.app.world().get::<Grenades>(r.player).unwrap();

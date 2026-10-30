@@ -375,6 +375,38 @@ collision 40 x 84, `Accuracy` 0.65, `MaxAimYaw` 70, `SMG` repeater
 (instant hit, 10 damage `CTDamageBallisticSMG`, 0.1 s, bursts of 9, 40 a
 magazine, `AimError` 25, range 5000), plus thermal detonators.
 
+**Enemy grenades** (read 2026-10-30). Who carries one
+(`RequiredEquipment`): `TrandoshanMercenary` and `TrandoshanSlaver`
+(`ThermalDetonatorEnemy`); battle droids, Geonosian warriors and the
+squad's enemies otherwise carry none. `ThermalDetonatorEnemyDefaults`
+`InitAmmoAmount` 2. Its projectile (`ThermalDetonatorEnemyProjDefaults`):
+`FuseTime` 12, `Damage` 200, `DamageRadius` 600, the burn status
+(`StatusEffect_Immolate`, 12 s at 15/s, radius -400), and `MyDamageType`
+left at `CTDamageExplosion` (the player's version is
+`CTDamageExplosionThermalDet` with 400 damage). The grenade weapon's
+`ValidRange` is 600 to 2500 uu. The brain's settings: `CTBot`
+`GrenadeProbability` 0.3, `MinGrenadeTime` 10;
+`TrandoshanMercenaryBotDefaults` 0.05 and 20; `TrandoshanSlaverBotDefaults`
+0.1 and 20; the "Grenadier" bots 1.0 / 0.85 and 5;
+`SuperBattleDroidBot` 0.5 and 20, but its grenade slot is
+`SBDCrouchWeapon`, a straight-flying 800-damage rocket (`Speed` 5000,
+goes off on touch), not a thrown grenade; `GeonosianDroneBot` 0.7 with
+`DroneSpit`. The throw animation `ThrowGrenade` in the Trandoshan sets is 26
+frames at 30 a second, with an `AnimNotify_ReleaseGrenade` partway.
+How the brain uses these numbers is compiled code.
+
+**Force pike** (read 2026-10-30). `GeonosianWarrior` `RequiredEquipment`
+is only `CTInventory.ForcePike`, so it has no gun. `ForcePikeDefaults`:
+`MeleeRange` 350, `MeleeDamage` 125, `MeleeDamageType`
+`CTDamageMeleeWarrior` (a kind of `CTDamageMelee`; the player's table has
+no entry, so x1; squad mates x0.5 through `CTDamageMelee`; other warriors
+x0.75). Its ammo (`ForcePikeAmmo`) is instant-hit with `Range` 0, so
+nothing is fired. `StateGeonosianWarriorAttack`: `LungeDist` 800,
+`JumpDist` 3000, `OffensiveJumpProbability` 0.5,
+`DefensiveJumpProbability` 0.8 (the jumping and flying aren't built).
+Animations in `GeonosianWarriorSet`: `MeleeAttack` (48 frames at 30 a
+second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
+
 **Still not read or not known:**
 - The attachments' and repeater's reload times (in their animations).
 - How the original lets the player hurt droids with a picked-up E-5: its

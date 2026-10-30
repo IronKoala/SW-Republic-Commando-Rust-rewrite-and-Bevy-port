@@ -1587,9 +1587,13 @@ the target's middle, off by up to `(1 - accuracy) x max_aim_error`; the
 weapons part then adds the gun's own spread, as it does for the player and
 the droids. A standing member turns to face its target and fires only
 within `max_aim_yaw` of its facing; a moving one fires on the move. A
-member holds fire while the player or another squad mate (standing or
-lying) is within `friendly_clearance` of the line of fire, nearer than the
-target. Shots go out as `rc_combat::FireShot` with the squad mate as the
+member holds fire while the line of fire, nearer than the target, passes
+within `friendly_clearance` of the player's or another squad mate's whole
+body (the 40-wide, 168-tall commando cylinder, or a low wide shape for one
+lying down), widened by how far the shot can stray (our aim error plus
+about 2 uu per 100 for the gun's spread). Until 2026-10-30 it measured from
+the body's middle point only, so lines passing at shoulder or head height
+went through friends (`fight::shot_passes_friend`). Shots go out as `rc_combat::FireShot` with the squad mate as the
 shooter, so the weapons part flies the bolts, applies the damage, and its
 `ShotLanded` and `Died` messages count hits and kills per member
 (`SquadFightStats`).
@@ -1856,6 +1860,44 @@ left to other parts and logged. `combat.uses_cover = false` makes an enemy
 walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
+
+**Grenades.** `[grenades]` gives an enemy grenades: which file in
+`data/grenades/` and how many (the Trandoshan mercenary: two of
+`thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
+rules for when are ours, since the original decides in its compiled
+engine; the numbers are its settings. At each decision while fighting, an
+enemy that still has one, threw its last at least `min_time` ago
+(`MinGrenadeTime`), saw its enemy within `seen_within` seconds, and is
+`min_range` to `max_range` away from it (the grenade's `ValidRange`)
+throws with chance `probability` (`GrenadeProbability`), unless a friend
+stands within the blast radius of the landing spot. It aims at the floor
+by the enemy, off by the same aim error as its shots, and works out the
+arc itself (`rc_ai::brain::throw_arc`): first the gentlest lob that
+reaches (the slowest throw, which comes down steeply and rolls on little),
+then the flattest arc at full speed for under a low ceiling; if the level
+blocks both, it tries again 3 s later. It doesn't shoot for `throw_time`
+(the throw animation, `[look] throw`). The AI sends `AiEvent::Throw`;
+`rc_enemies` turns it into the same `rc_combat::ThrowGrenade` the player's
+button sends, so the grenade flies, bounces and goes off with the
+grenade's own rules. To aim, `rc_enemies` reads the grenade file's speed,
+gravity and radius. Saves keep how many each enemy has left.
+
+**Melee (the Geonosian's force pike).** `combat.melee_range` above 0
+gives an enemy a close-up hit: `melee_damage` of `melee_damage_type`
+every `melee_delay` seconds. An enemy with no gun (`weapon = ""`) always
+rushes in; one with a gun only when its enemy is within
+`lunge_distance` (`LungeDist`). Rushing in (`Maneuver::Charge`) heads
+straight at the enemy when the level leaves a clear path (checked with
+its body lifted a step off the floor), else along the paths, and is
+re-planned at every decision as the enemy moves. Once within 70% of its
+reach it stops; it swings when its enemy's centre is within reach, within
+30 degrees of straight ahead, with a clear line. **Our rules**: the
+original's are compiled. The AI sends `AiEvent::Melee`; `rc_enemies`
+turns it into `rc_combat::MeleeAttack`, which `rc_combat` resolves with
+the same rule as the player's melee (a line that long against the
+characters' cylinders, walls block it, the attacker's own team is
+skipped) and the target's damage table. `[look] melee` names the
+animation.
 
 **Several enemies to fight.** Droids fight the player and the squad mates
 (every living `Team::Republic` character). Each keeps fighting the one it

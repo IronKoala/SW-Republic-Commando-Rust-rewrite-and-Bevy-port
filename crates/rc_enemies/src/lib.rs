@@ -28,8 +28,8 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
-    Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, Health, Hittable,
-    ShotLanded, Stunned, Team,
+    Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
+    Hittable, MeleeAttack, ShotLanded, Stunned, Team, ThrowGrenade,
 };
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
@@ -47,6 +47,9 @@ const PART: &str = "enemies";
 const SUMMARY_EVERY: f32 = 5.0;
 /// A droid counts as "just fired" (for its animation) this long, seconds.
 const FIRE_POSE_TIME: f32 = 0.35;
+/// A close-up hit plays its animation this long at most, seconds (the
+/// Geonosian warrior's `MeleeAttack` is 48 frames at 30 a second).
+const MELEE_POSE_TIME: f32 = 1.6;
 
 pub struct EnemiesPlugin;
 
@@ -122,6 +125,10 @@ pub struct FightStats {
     pub bolts_on_droids: u32,
     pub bolts_on_level: u32,
     pub bolts_nowhere: u32,
+    /// Grenades enemies threw.
+    pub grenades_thrown: u32,
+    /// Close-up hits enemies swung (force pikes), hit or miss.
+    pub melee_swings: u32,
 }
 
 impl Fight {
@@ -270,6 +277,9 @@ fn enemy_types(paths: &GamePaths, log: &GameLog) -> Vec<Arc<AiParams>> {
         match read {
             Ok(mut p) => {
                 p.kind.id = id;
+                if !p.grenades.grenade.is_empty() {
+                    aim_with_grenade_file(&mut p, paths, log);
+                }
                 log.line(format!(
                     "{PART}: enemy type {} ({}, {}) for classes {:?} from {}: health {}, speed {}, weapon {}, accuracy {}, cover {}",
                     p.kind.id,
@@ -299,6 +309,35 @@ fn enemy_types(paths: &GamePaths, log: &GameLog) -> Vec<Arc<AiParams>> {
     }
     out.sort_by_key(|p| p.kind.id != "battle_droid");
     out
+}
+
+/// An enemy aims its throws with its grenade's own flight numbers (speed,
+/// gravity, blast radius), read from `grenades/<id>.toml` in the data
+/// folders (a mod's file first). If the file can't be read, it keeps the
+/// values in its own `[grenades]` section and the log says so.
+fn aim_with_grenade_file(p: &mut AiParams, paths: &GamePaths, log: &GameLog) {
+    let id = p.grenades.grenade.clone();
+    let file = paths.data_dirs.iter().find_map(|dir| {
+        let f = GamePaths::new(dir.clone(), vec![])
+            .game_file("grenades")
+            .join(format!("{id}.toml"));
+        std::fs::read_to_string(&f).ok()
+    });
+    match file.map(|t| GrenadeParams::from_text(&id, &t)) {
+        Some(Ok(g)) => {
+            p.grenades.speed = g.speed;
+            p.grenades.gravity = g.gravity;
+            p.grenades.radius = g.radius;
+        }
+        Some(Err(e)) => log.line(format!(
+            "{PART}: {}: grenades/{id}.toml: {e}; aiming with the [grenades] values",
+            p.kind.id
+        )),
+        None => log.line(format!(
+            "{PART}: {}: no grenades/{id}.toml; aiming with the [grenades] values",
+            p.kind.id
+        )),
+    }
 }
 
 /// Read the map's spawners and paths. A map that can't be read gives no
@@ -545,7 +584,7 @@ fn end_fight(
 fn summary(f: &Fight, log: &GameLog) {
     let s = &f.stats;
     log.line(format!(
-        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hit the player for {:.0} damage ({} hit other droids, {} the level, {} nothing); droids hurt {} times; first spotted at {}",
+        "{PART}: t={:.1}s {} droids alive of {} spawned, {} destroyed; {} droid shots, {} hits on the player for {:.0} damage ({} bolts hit other droids, {} the level, {} nothing); {} grenades thrown, {} melee swings; droids hurt {} times; first spotted at {}",
         f.battle.time,
         f.battle.alive().count(),
         s.spawned,
@@ -556,6 +595,8 @@ fn summary(f: &Fight, log: &GameLog) {
         s.bolts_on_droids,
         s.bolts_on_level,
         s.bolts_nowhere,
+        s.grenades_thrown,
+        s.melee_swings,
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
@@ -591,7 +632,12 @@ fn think(
     camera: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
     allies: Query<(&Transform, &Hittable, &Team), (Without<Player>, Without<Dead>, Without<Droid>)>,
     mut droids: Query<&mut Droid>,
-    mut fire: MessageWriter<FireShot>,
+    // One tuple: Bevy takes at most 16 inputs per system.
+    (mut fire, mut throws, mut melee): (
+        MessageWriter<FireShot>,
+        MessageWriter<ThrowGrenade>,
+        MessageWriter<MeleeAttack>,
+    ),
     mut mood: ResMut<MusicMood>,
     looks: Res<Looks>,
     mut sounds: ResMut<EnemySounds>,
@@ -771,6 +817,58 @@ fn think(
                                     || fight.battle.params.combat.weapon.clone(),
                                     |f| f.params.combat.weapon.clone(),
                                 ),
+                        });
+                    }
+                    AiEvent::Throw {
+                        grenade,
+                        origin,
+                        velocity,
+                        aim_at,
+                        left,
+                    } => {
+                        fight.stats.grenades_thrown += 1;
+                        let from = fight
+                            .battle
+                            .fighters
+                            .iter()
+                            .find(|f| f.id == id)
+                            .map_or(origin, |f| f.pawn.location);
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} threw {grenade} at {:.0} uu/s toward ({:.0}, {:.0}, {:.0}), {:.0} uu away ({left} left)",
+                            velocity.length(),
+                            aim_at.x,
+                            aim_at.y,
+                            aim_at.z,
+                            (aim_at - from).length_2d()
+                        ));
+                        throws.write(ThrowGrenade {
+                            thrower: entity,
+                            origin: to_bevy(origin),
+                            velocity: to_bevy(velocity),
+                            grenade,
+                        });
+                    }
+                    AiEvent::Melee {
+                        origin,
+                        direction,
+                        range,
+                    } => {
+                        fight.stats.melee_swings += 1;
+                        let Some(f) = fight.battle.fighters.iter().find(|f| f.id == id) else {
+                            continue;
+                        };
+                        let c = &f.params.combat;
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} swings at the enemy ({range:.0} uu reach, {} {})",
+                            c.melee_damage, c.melee_damage_type
+                        ));
+                        melee.write(MeleeAttack {
+                            attacker: entity,
+                            origin: to_bevy(origin),
+                            direction: to_bevy(direction).normalize_or_zero(),
+                            range,
+                            damage: c.melee_damage,
+                            damage_type: c.melee_damage_type.clone(),
                         });
                     }
                     AiEvent::Spotted { distance } => {
@@ -1009,9 +1107,15 @@ fn react_to_combat(
 }
 
 /// Which animation a droid should be playing.
-fn choose_pose(f: &rc_ai::Fighter, just_fired: bool) -> Pose {
+fn choose_pose(f: &rc_ai::Fighter, just_fired: bool, now: f32) -> Pose {
     if f.mode == Mode::Dead {
         return Pose::Death;
+    }
+    if now - f.last_throw < f.params.grenades.throw_time {
+        return Pose::Throw;
+    }
+    if now - f.last_melee < f.params.combat.melee_delay.min(MELEE_POSE_TIME) {
+        return Pose::Melee;
     }
     let v = f.pawn.velocity;
     let speed = (v.x * v.x + v.y * v.y).sqrt();
@@ -1064,7 +1168,7 @@ fn animate(
         let Ok(mut d) = droids.get_mut(e) else {
             continue;
         };
-        let pose = choose_pose(f, now - d.last_fire < FIRE_POSE_TIME);
+        let pose = choose_pose(f, now - d.last_fire < FIRE_POSE_TIME, now);
         if pose != d.pose {
             d.pose = pose;
             d.frame = 0.0;

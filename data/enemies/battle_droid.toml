@@ -67,6 +67,32 @@ lost_sight_reposition = 2 # guess: seconds without a clear shot before a station
 uses_cover = true         # guess: looks for cover when shot in the open
 drops = "e5_blaster_pickup" # placeholder: the weapon file it leaves when it falls ("" for none)
 damage_table = "DV_DroidsBattleDroidDamage" # game: BattleDroid DamageVariance (data/combat/damage_types.toml)
+# Close-up hits with a melee weapon (the Geonosian's force pike). The
+# battle droid has none: melee_range 0.
+melee_range = 0           # reach, uu (0: no melee)
+melee_damage = 0          # damage per hit, before the target's damage table
+melee_damage_type = "CTDamageMelee" # the hit's damage type (data/combat/damage_types.toml)
+melee_delay = 1.5         # guess: seconds between hits
+lunge_distance = 0        # rushes in to hit when its enemy is this close; with weapon = "" it always does
+
+[grenades]
+# Grenades it throws. The original's battle droids carry none, so grenade
+# is empty. A file that sets grenade (a file in data/grenades/) and count
+# makes that enemy throw. The rules for when are ours (the original's are
+# in its compiled engine); the numbers are the original's settings.
+grenade = ""              # game: battle droids carry no grenade (RequiredEquipment)
+count = 0                 # how many it carries
+probability = 0.3         # game: CTBot GrenadeProbability (chance at each decision while it may throw)
+min_time = 10             # game: CTBot MinGrenadeTime (seconds between one enemy's throws)
+min_range = 600           # game: ThermalDetonator ValidRange min (won't throw at anyone closer)
+max_range = 2500          # game: ThermalDetonator ValidRange max
+seen_within = 3           # guess: only throws at an enemy it saw this recently
+throw_time = 1.0          # guess: seconds the throw takes (no shooting meanwhile)
+# The arc is aimed with the grenade file's speed, gravity and radius;
+# these three are used only if that file can't be read.
+speed = 2200              # game: GrenadeProj Speed
+gravity = 1100            # game: LevelInfo gravity
+radius = 600              # game: ThermalDetonatorProjDefaults DamageRadius (no throw if a friend is this near the landing spot)
 
 [spawning]
 # In the game the level's scripts switch spawners on, as in the original.
@@ -118,4 +144,6 @@ fire = "Fire"
 crouch = "CrouchBreathe"
 crouch_fire = "CrouchFire"
 death = "Death"
+throw = ""                # throwing a grenade; empty: battle droids don't
+melee = ""                # a close-up hit; empty: battle droids don't
 ambient = 0.5             # guess: light the droid always gets (0 to 1); the original uses each zone's ambient light, which we don't read yet

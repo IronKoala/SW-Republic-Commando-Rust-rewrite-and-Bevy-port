@@ -31,10 +31,14 @@ pub enum Pose {
     Crouch,
     CrouchFire,
     Death,
+    /// Throwing a grenade.
+    Throw,
+    /// A close-up hit (a force pike).
+    Melee,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 10] = [
+    pub const ALL: [Pose; 12] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Run,
@@ -45,6 +49,8 @@ impl Pose {
         Pose::Crouch,
         Pose::CrouchFire,
         Pose::Death,
+        Pose::Throw,
+        Pose::Melee,
     ];
 
     fn sequence(self, l: &Look) -> &str {
@@ -59,6 +65,8 @@ impl Pose {
             Pose::Crouch => &l.crouch,
             Pose::CrouchFire => &l.crouch_fire,
             Pose::Death => &l.death,
+            Pose::Throw => &l.throw,
+            Pose::Melee => &l.melee,
         }
     }
 
@@ -132,6 +140,9 @@ impl DroidLook {
         let mut clips = HashMap::new();
         for pose in Pose::ALL {
             let name = pose.sequence(look);
+            if name.is_empty() {
+                continue; // this character has none: it plays the idle one
+            }
             match anim
                 .sequences
                 .iter()
