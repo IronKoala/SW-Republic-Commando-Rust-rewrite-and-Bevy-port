@@ -394,7 +394,7 @@ fn main() -> AppExit {
     .insert_resource(paths)
     .insert_resource(rc_save::SaveFolder(save_folder))
     .insert_resource(menu::GamePathsFound(found.is_some()))
-    .insert_resource(player::FieldOfView(settings.video.fov))
+    .insert_resource(player::FieldOfView::from_settings(&settings))
     .insert_resource(input::LookSettings::from_settings(&settings))
     .insert_resource(settings.gyro.clone())
     .insert_resource(button_names)
@@ -424,7 +424,7 @@ fn main() -> AppExit {
         commands.spawn((
             Camera2d,
             Camera {
-                order: 1,
+                order: 2,
                 clear_color: ClearColorConfig::None,
                 ..default()
             },

@@ -7,8 +7,8 @@
 
 [timing]
 # A script that plays a line of dialogue and waits for it to finish
-# (bWaitForFinish) waits this many seconds. We don't read the sounds'
-# lengths yet.
+# (bWaitForFinish) waits for the line's own length, read from the game's
+# sound file. Only if that can't be read does it wait this many seconds.
 sound_seconds = 3.0
 # A script that plays an animation and waits for its end waits this long.
 anim_seconds = 1.5
@@ -29,6 +29,12 @@ prop_health = 100.0
 # loops with no wait from freezing the game).
 max_actions_per_frame = 64
 
+[sound]
+# Loudness of the lines and sounds the level's scripts play (squad radio
+# chatter, briefings, explosions on cue), 0 is silent and 1 is full. An
+# action's own Volume (a few maps set one) is multiplied in.
+volume = 1.0
+
 [bacta]
 # How near the player must stand to use a bacta dispenser, in Unreal units
 # (about 2 cm each). 256 is the game's own value (BactaDispenser's
@@ -39,3 +45,12 @@ range = 256
 heal_per_second = 50
 # Seconds before a used dispenser works again. Our choice.
 recharge_seconds = 10
+
+[exits]
+# Most maps end where the player walks into a "Teleporter" with a URL (the
+# arrows: "Walking through the arrows will load the next level"). Its size
+# comes from the map; these are for one the map gives no size. 80 and 100
+# are the game's own defaults (engine.u, Teleporter's parent class
+# NavigationPoint), read with `rc_probe --class Teleporter`.
+teleporter_radius = 80
+teleporter_height = 100

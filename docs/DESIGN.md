@@ -1165,8 +1165,10 @@ The director runs every script one action at a time until it has to wait:
   `EndSection`; sections nest).
 - **Everything else** comes out as an `Effect::Action` for the game. Some
   also take time: a line of dialogue with `bWaitForFinish`, an animation
-  that waits for its end, a character told to walk. Their lengths are our
-  settings (sound lengths aren't read yet).
+  that waits for its end, a character told to walk. A line waits for the
+  sound's real length, which the game measures while loading and hands
+  over with `Director::set_sound_length`; animations, walks and sounds whose
+  length can't be read use our settings.
 - `HurtActor` and `DestroyActor` on a **prop** are the director's: it keeps
   each prop's `Health` and reports `PropDestroyed` (and sends the prop's
   `DestroyedState.Event`).
@@ -1215,9 +1217,35 @@ and carries out the effects:
 | `ShowPrompt` | `HudMessage` (`@`, the button, shows as USE for now) |
 | `ObjectiveUpdate` | kept in `Objectives` (what the numbers mean isn't worked out) |
 | checkpoint | `CheckpointReached { name }`, held while the player is down |
+| walking into an open level exit, `ChangeLevel`, a debriefing's `NewLevel` | `ChangeLevel { map, portal }` (see "Going on to the next map") |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
+| `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
+
+**Script sounds** (`rc_scripts_plugin/src/sounds.rs`). A script names a
+sound only by its name (`Sound=CA1G1701`). The map's import table also
+says which package holds it (`GEO_Voice.CA1G1701`);
+`rc_level::scripts::sound_refs` keeps that as `MapScripts::sounds`. While
+the level loads, every sound its scripts can play is read from
+`GameData/Sounds/<package>.uax` with `rc_combat::read_sounds` (groups too,
+also members kept in another package, such as geo_sound's
+`arena_cloneDeaths` whose takes are in character_voice), measured with
+`rc_audio` and kept in the `ScriptSounds` resource. `SoundStreamed` ones
+(a few music stingers) play their `.ogg` from `GameData/Music`. Across the
+57 campaign maps the scripts name 1,629 sounds; `rc_script_check` finds
+every one in its package. When a script plays one, the sound starts at
+`[sound] volume` (`data/scripts/scripts.toml`) times the action's own
+`Volume`, and is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
+ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
+reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
+script) says one line of speech (a `*_voice` package) at a time, so a new
+line stops its last one unless `bDontOverrideOtherSounds`; effects never
+stop each other; nothing is placed in the world yet (every sound plays at
+full loudness); a group waits for its longest take. Lines pause with the
+game and stop when the level ends. Not done: subtitles (the game's
+`System/subtitles_*.int` files hold them, by sound name), sounds stored
+inside a map, and placing sounds at the speaker.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).
@@ -1674,7 +1702,10 @@ menus fit a phone or a monitor.
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
@@ -1713,7 +1744,8 @@ screen is drawn, then in one go:
    (so a mod can change it);
 4. if the map has a `SkyZoneInfo`, spawns the sky camera
    (`rc_level_viewer::sky`) at camera order -1, under the player's camera
-   (order 0) and the menus' camera (order 1). Once the player's camera
+   (order 0), the first-person arms' camera (order 1) and the menus'
+   camera (order 2). Once the player's camera
    exists, the plugin gives it `SkyViewer` (the sky camera copies its turn
    and field of view every frame, so it lines up at any screen shape) and
    stops it clearing the picture, so the sky shows where the level has
@@ -1843,6 +1875,14 @@ squad:
      the scene has no ambient light, so droids get a steady share of their
      own colour (`ambient`, a guess standing in for each zone's ambient
      light, which we don't read yet).
+     Each animation comes from the first of the mesh's linked animation
+     sets that has it, in the mesh's order, so a character whose own set
+     holds only cutscenes still finds its everyday moves (the Trandoshan
+     mercenary borrows the commandos' `CloneCommandoSet`). `[look] skin`
+     names a material to wear instead of the mesh's own, as the original
+     does with a class's `Skins[0]` (the mercenary's mesh carries only a
+     grey stand-in). `rc_enemy_look_check` (an example program in
+     rc_enemies) loads every enemy file's look and checks it.
    - VR and other platforms: nothing here reads input or the screen; the
      player is found by its `Player` and `PlayerCamera` markers, so a VR
      camera works the same. No platform-specific code.
@@ -2070,10 +2110,75 @@ view is the droid's colour.
   `rc_shoot` it fades at exp(-8 t).
 - The fire sound is full volume for the player and quieter with distance for
   others; the game uses its 3D sound system.
-- Weapon switching is instant; the game plays holster and draw animations
-  (0.37 s and 0.67 s for the DC-17m).
-- The gun's place in view (`[model] offset`) and the bolt colour are ours.
-  The game draws the gun with first-person arms, which aren't done yet.
+- Weapon switching is instant for firing; the arms play the holster and
+  draw animations (0.37 s and 0.67 s for the DC-17m) but you can shoot the
+  new weapon before they finish. In the game you can't.
+- The bolt colour is ours. Weapons without `[arms]` (the picked-up E-5)
+  show their plain model at our `[model] offset`.
+
+### First-person arms (`rc_combat/src/arms.rs`, `arms_view.rs`)
+
+The game draws each player weapon as one animated model: the commando's
+arms and the gun together, from `GameData/Animations/hudarms.ukx`
+(`HudArmsDC17m`, `HudArmsSniper`, `HudArmsAntiArmor`, `HudArmsDC15s`,
+`HudArmsUzi` for the Trandoshan repeater, and more for turrets and the
+other pick-ups). The weapon class's `Mesh` names it, and the textures are
+in `HUDArmsTextures.utx`. A weapon file's `[arms]` section names the mesh;
+it's read at run time like the squad's models (`rc_model`), and posed on the
+CPU each frame.
+
+**Where it goes.** The game's `Weapon.RenderOverlays` puts the model at the
+eye, turned with the view, and draws it after the world with the depth
+cleared and its own field of view (`DisplayFOV`, 85 degrees across 4:3).
+The mesh's own origin is the eye: forward +X, right +Y, up +Z. Measured
+(`rc_model --example rc_arms_probe`): the DC-17m rests 5 to 68 uu in front
+of the eye, 13 left to 37 right, 4 to 50 below; `Holster` ends with
+nothing in view and `Load` starts with nothing in view; `Aim` brings the
+sights to the middle. We copy this with a second camera, a child of the
+player's camera, that sees only render layer 2 (the arms) and draws over
+the world's picture with a fresh depth buffer, so the gun never pokes into
+walls and a wider view setting or the Panini view doesn't bend it. Camera
+orders: sky -1, player 0, arms 1, menus and display 2.
+
+**Which animation** (the game's `Engine.Weapon` script, our words):
+
+| What | Animation |
+| --- | --- |
+| standing still | `ActionBreathe`, over and over |
+| still for 15 s (`PlayIdleTime`) | `Idle` once, then breathing again |
+| moving under 226 uu/s / faster | `Walk` / `Run` |
+| zoomed in | `AimBreathe`, `Aim` when moving, `AimFire` per shot (if the set has them) |
+| each shot | `Fire`, from the start |
+| reload | `Reload` |
+| grenade thrown / melee | `ThrowGrenade` / `MeleeAttack` |
+| switching | old weapon `Holster`, then new one `Load` |
+| switching between DC-17m attachments | `AttachHolster`, then `AttachLoad` |
+
+The game holds the weapon in its `Reloading` state until the `Reload`
+animation ends, so the animation length *is* the reload time. That gave
+the real reload times of the sniper (78 frames, 2.6 s), anti-armour
+(42 frames, 1.4 s) and the Trandoshan repeater (65 frames, 2.17 s), which
+were stand-ins before.
+
+The sniper attachment has `bZoomedUsesNoHUDArms`: its arms are hidden
+while zoomed (`hide_zoomed`). The arms are also hidden while the player is
+down.
+
+**Our choices:** the game changes between breathing, walking and running
+only when the current animation ends; we change at once. No blending
+between animations yet. The arms are drawn unlit at `brightness` 0.75:
+the game lights them by the player's zone, which we don't read yet. The
+DC-17m's ammo counter on the gun (`TexPanner2D` materials, a strip of
+digits the game scrolls) shows the strip unscrolled ("999").
+
+**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
+`rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,
+`Holster`, the pistol's `Fire`, and the rifle again after switching back,
+and that the gun corner of the picture is textured; `rc_game --script`
+checks the arms show the weapon in hand after loading a level.
+
+**VR:** the arms are a child of the player camera with their own camera,
+so a VR mod can hang the same posed model off a tracked hand instead.
 
 ### Fitting the long-term goals
 
@@ -2179,7 +2284,10 @@ only when it actually moves. Details and what is left are in
 
 **Screen shapes and controls.** The view is "Hor+": `video.fov` is the
 angle across a 4:3 screen, as in the original, and wider screens see more
-at the sides. Keyboard, mouse, gamepads and touch all work at once. Details,
+at the sides (upright phones see more above and below). The long side stops
+widening past the screen shape `video.widest_shape` (2.0) so wide windows
+don't get a fish-eye look (`player::view_angle`). Unknown options in
+`settings.toml` are logged as a warning and skipped. Keyboard, mouse, gamepads and touch all work at once. Details,
 numbers and what is still to do (edge stretching on ultrawides, controller
 pictures, gyro) are in `docs/DISPLAY_AND_INPUT.md`.
 
@@ -2331,6 +2439,71 @@ the original's keys.
 sends `LoadGame { slot }` or `SaveGame { slot }` and gets `SaveResult` back.
 Every save and load is logged with the prefix `save:` and a one-line summary
 of each section, so a round trip can be checked from the log.
+
+## Going on to the next map (`rc_scripts`, `rc_save`, `rc_level_plugin`)
+
+**How the original's maps end.** We read every campaign map with
+`rc_script_check`. Three ways, all from the map itself:
+
+- Most maps (37 of 56) have a `Teleporter` actor with a `URL`, like
+  `GEO_01B.ctm#playerstart`: walking into it (the arrows; geo_01a's hint
+  says "Walking through the arrows will load the next level") loads that
+  map. Many are closed at first (`bCollideActors=false`) until the
+  mission's last script runs `ACTION_SetCollision` on their tag; geo_04c's
+  starts switched off (`bEnabled=false`) and an event with its tag
+  switches it on, as UE2 teleporters do. Their size is the map's
+  `CollisionRadius`/`CollisionHeight`, or the game's own defaults (80 and
+  100, from engine.u's NavigationPoint; `data/scripts/scripts.toml`
+  `[exits]`).
+- Briefings, cutscenes and a few levels end with a script action,
+  `ACTION_ChangeLevel` (`URL`).
+- The last level of each campaign shows the debriefing,
+  `ACTION_ShowDebriefingScreen` with a `NewLevel` (the same action with
+  only `Text` is a hint screen, and doesn't leave). The screen itself isn't
+  shown yet; the game goes straight on to `NewLevel`.
+
+Following the first exit of each map from `pro` visits all 56 campaign
+maps in order and ends at `epilogue`; no exit names a missing map.
+
+**Script actions switched off in the map.** 371 actions in the 57 campaign maps carry
+`bDisabled=true` (designers switched them off: debug messages, an
+`ACTION_SetCollision EndPort` at the start of ras_01c that would open the
+exit at once). The director skips them, logged as "switched off in the
+map, skipped". This is our reading of the flag's name; the class that
+uses it is compiled.
+
+**Leaving.** `rc_scripts::Director` sends `Effect::ChangeLevel { url }`
+once and then stops running the map's scripts. `rc_scripts::level_url`
+reads the address into a map name (lower case, no `.ctm`) and a portal
+(after `#`). The scripts part sends `rc_game_core::ChangeLevel { map,
+portal, by }`.
+
+**Carrying the player over.** `rc_save` handles `ChangeLevel` like a load
+of a save, but with only some sections: the ones `data/levels/travel.toml`
+lists (`carry = ["combat"]`: health, shield, weapons and ammo) are read out
+of the game with each part's own `SavePart::save`, the map is loaded fresh
+(`CurrentLevel`, `GameState::Loading`), and on its first frame each
+carried section goes back in with that part's `SavePart::load`, before
+the level-start checkpoint is written, so that checkpoint has them. Not
+carried: the player's place (they arrive), the squad (their places belong
+to the old map; they arrive fresh), doors, scripts and enemies. A mod can
+change the list.
+
+**Arriving.** `rc_save` inserts `ArrivalPortal(portal)`. The level part
+looks for a `Teleporter` with that `Tag` in the new map
+(`MapCollision::arrivals`) and starts the player there, as UE2 does;
+otherwise (`#playerstart`, and 12 of the original's addresses like
+`Geo_04B.ctm#FromA`, whose map has no teleporter by that name) at the map's
+first `PlayerStart`. `rc_script_check` lists which is which: 5 exits
+arrive at a teleporter, 38 at the start.
+
+**Checked by** `rc_scripts` tests (an exit a script opens; one switched on
+by its tag; `ChangeLevel` and the debriefing; disabled actions; an opened
+exit through a save; address reading), `rc_save`'s
+`level_exit_carries_sections_to_the_next_map`, and `rc_game --script`,
+which puts the player into geo_01a's exit with 13 health taken off and
+checks that geo_01b loads with the same health and magazine, the player at
+its start, and its start saved as a checkpoint with that health.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

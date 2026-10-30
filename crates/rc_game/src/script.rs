@@ -9,7 +9,9 @@
 //! the level's walls and sky (looking up), walk forward, pause (nothing
 //! moves), resume, saving (the level-start checkpoint, a checkpoint, a
 //! quicksave), walking away, quickload (the player is back where they
-//! saved, and saving again gives the same numbers), quit to the main menu
+//! saved, and saving again gives the same numbers), the level exit (the
+//! next map loads with the player's health and ammo, and its start is the
+//! new checkpoint), quit to the main menu
 //! (the level is cleared), OPTIONS
 //! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
 //! then QUIT again and YES).
@@ -111,6 +113,9 @@ struct Noted {
     music_volume: f32,
     /// The player's centre and facing when the quicksave was made.
     saved: Option<(rc_movement::Vec3, f32)>,
+    /// The player's health and magazine when walking into the level exit,
+    /// and the map left.
+    leaving: Option<(f32, f32, String)>,
 }
 
 pub struct ScriptPlugin;
@@ -316,6 +321,25 @@ fn steps() -> Vec<Step> {
                 Err(format!("original reticle {original}: {s:?}"))
             }
         }),
+        Check("the first-person arms hold the weapon in hand", |w| {
+            let arms = w
+                .get_resource::<rc_combat::ArmsReadout>()
+                .cloned()
+                .ok_or("no arms readout")?;
+            let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+            let held = q.iter(w).next().and_then(|a| a.current()).map(|c| c.0.clone());
+            let got = format!(
+                "holding {held:?}; the arms show {:?} playing {}{}",
+                arms.weapon,
+                arms.animation,
+                if arms.hidden { " (hidden)" } else { "" }
+            );
+            if held.is_some() && arms.weapon == held && !arms.hidden {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check("the level part loaded walls, props, doors and invisible walls", |w| {
             let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
                 return Err("no LevelInfo".into());
@@ -438,6 +462,15 @@ fn steps() -> Vec<Step> {
         // landing-zone barricade opens once the player heals at the bacta
         // dispenser the scripts switch on.
         Check("the level's scripts run", level_script_running),
+        Until(
+            "the scripts start playing the level's lines",
+            |w| level_script_lines(w).is_ok(),
+            60.0,
+        ),
+        Check(
+            "the scripts play the game's own lines, as long as each one lasts",
+            level_script_lines,
+        ),
         Check("the start barricade blocks the way", |w| level_script_way(w, true)),
         Until("the scripts switch the bacta dispenser on", level_script_dispenser_on, 300.0),
         Note(level_script_stand_at_dispenser),
@@ -676,6 +709,22 @@ fn steps() -> Vec<Step> {
             }
             Ok(notes.join(", "))
         }),
+        // The level exit: geo_01a's arrows lead to geo_01b.
+        Check("the level has an open exit to the next map", level_exit_found),
+        Note(level_exit_walk_in),
+        Until(
+            "the next map loads",
+            |w| {
+                in_state(w, GameState::InGame)
+                    && w.resource::<CurrentLevel>().map.as_deref() == Some("geo_01b")
+                    && count::<Player>(w) == 1
+            },
+            LOAD_TIMEOUT,
+        ),
+        Wait(1.0),
+        Check("the next map has the player's health and ammo", level_exit_carried),
+        Check("the player arrives at the next map's start", level_exit_arrived),
+        Check("the next map's start is saved as a checkpoint, with the health", level_exit_checkpoint),
         Press(Action::Pause),
         Wait(0.2),
         Check("the pause menu is the original's when the install has it", |w| {
@@ -1214,6 +1263,50 @@ fn level_script_running(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// The level's lines and sounds (`rc_scripts_plugin::sounds`): every sound
+/// geo_01a's scripts name was read from the game's packages with its
+/// length, at least two lines have played and reached the sound card, and
+/// nothing asked for was missing.
+fn level_script_lines(w: &mut World) -> Result<String, String> {
+    let Some(sounds) = w.get_resource::<rc_scripts_plugin::ScriptSounds>() else {
+        return Err("no ScriptSounds (sounds not read)".into());
+    };
+    let (read, measured, missing, packages) = (
+        sounds.sounds.len(),
+        sounds.lengths.len(),
+        sounds.missing.len(),
+        format!("{:?}", sounds.packages),
+    );
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no LevelScript".into());
+    };
+    let st = &s.stats;
+    let line = st
+        .sounds_played
+        .iter()
+        .find(|n| sounds.speech.contains(&n.to_ascii_lowercase()))
+        .cloned()
+        .unwrap_or_default();
+    let got = format!(
+        "{read} sounds read from {packages}, {measured} measured, {missing} missing; played {:?}, {} started on the sound card, {} not loaded; first line of speech {line} lasts {:.1} s",
+        st.sounds_played,
+        st.sounds_started,
+        st.sounds_missing.len(),
+        s.director.sound_length(&line),
+    );
+    if read > 50
+        && missing == 0
+        && !line.is_empty()
+        && st.sounds_played.len() >= 2
+        && st.sounds_started >= 2
+        && st.sounds_missing.is_empty()
+    {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 /// Sweep a small box straight through the barricade, across the blocking
 /// volume's thin side, where the prop the scripts blow up stands (the
 /// barricade's other piece, `Blockade02`, stays, as in the original).
@@ -1605,6 +1698,120 @@ fn level_spawn_summary(w: &mut World) -> Result<String, String> {
         alive.len()
     );
     if made as usize == n && alive.is_empty() && heard == 3 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The first open level exit: (name, URL, centre in Unreal units).
+fn level_exit(w: &mut World) -> Option<(String, String, [f32; 3])> {
+    let s = w.get_resource::<rc_scripts_plugin::LevelScript>()?;
+    s.director
+        .exits()
+        .into_iter()
+        .find(|e| e.3)
+        .map(|(n, u, at, _)| (n, u, at))
+}
+
+fn level_exit_found(w: &mut World) -> Result<String, String> {
+    let (name, url, at) = level_exit(w).ok_or("no open level exit")?;
+    let got = format!("{name} at ({:.0}, {:.0}, {:.0}) to {url}", at[0], at[1], at[2]);
+    match rc_scripts::level_url(&url) {
+        Some((m, _)) if m == "geo_01b" => Ok(got),
+        _ => Err(got),
+    }
+}
+
+/// Note the health and magazine, take a little health off (so carrying it
+/// over shows), and put the player in the exit.
+fn level_exit_walk_in(w: &mut World) {
+    let Some((name, _, at)) = level_exit(w) else {
+        return;
+    };
+    let mut q = w.query_filtered::<(&mut rc_combat::Health, &rc_combat::Arsenal), With<Player>>();
+    let Some((mut h, a)) = q.iter_mut(w).next() else {
+        return;
+    };
+    h.current = (h.current - 13.0).max(1.0);
+    let health = h.current;
+    let clip = a.weapons.first().map_or(0.0, |(_, s)| s.clip);
+    let map = w.resource::<CurrentLevel>().map.clone().unwrap_or_default();
+    w.resource_mut::<Noted>().leaving = Some((health, clip, map));
+    let mut q = w.query_filtered::<(&mut Body, &mut Transform), With<Player>>();
+    for (mut b, mut t) in q.iter_mut(w) {
+        b.pawn.location = rc_movement::Vec3::new(at[0], at[1], at[2]);
+        b.pawn.velocity = rc_movement::Vec3::ZERO;
+        t.translation = rc_game_core::units::to_bevy(b.pawn.feet());
+    }
+    w.resource::<GameLog>().line(format!(
+        "script: into level exit {name} at ({:.0}, {:.0}, {:.0}) with health {health:.0}, {clip:.0} in the magazine",
+        at[0], at[1], at[2]
+    ));
+}
+
+fn level_exit_carried(w: &mut World) -> Result<String, String> {
+    let (health, clip, from) = w
+        .resource::<Noted>()
+        .leaving
+        .clone()
+        .ok_or("didn't walk into an exit")?;
+    let mut q = w.query_filtered::<(&rc_combat::Health, &rc_combat::Arsenal), With<Player>>();
+    let (h, a) = q.iter(w).next().ok_or("no player")?;
+    let now_clip = a.weapons.first().map_or(0.0, |(_, s)| s.clip);
+    let got = format!(
+        "{from} -> geo_01b: health {health:.0} -> {:.0} (of {:.0}), magazine {clip:.0} -> {now_clip:.0}",
+        h.current, h.max
+    );
+    if (h.current - health).abs() < 0.5 && h.current < h.max && (now_clip - clip).abs() < 0.01 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn level_exit_arrived(w: &mut World) -> Result<String, String> {
+    let start = *w.get_resource::<rc_game_core::PlayerStart>().ok_or("no PlayerStart")?;
+    let f = feet(w).ok_or("no player")?;
+    let d = ((f.x - start.feet.x).powi(2) + (f.y - start.feet.y).powi(2)).sqrt();
+    let got = format!(
+        "feet ({:.0}, {:.0}, {:.0}), {d:.0} uu from the start ({:.0}, {:.0}, {:.0})",
+        f.x, f.y, f.z, start.feet.x, start.feet.y, start.feet.z
+    );
+    // A second of standing (or the squad nudging) moves the player a little.
+    if d < 200.0 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn level_exit_checkpoint(w: &mut World) -> Result<String, String> {
+    let (health, _, _) = w.resource::<Noted>().leaving.clone().ok_or("didn't leave")?;
+    let cp = save_file(w, &SaveSlot::Checkpoint)?;
+    let combat = cp.part("combat").ok_or("no [combat] in the checkpoint")?;
+    let saved = combat
+        .get("health")
+        .and_then(|h| h.as_float())
+        .ok_or("no health in the checkpoint")? as f32;
+    // The new map's own list of checkpoints starts with its start. (Its
+    // scripts may reach their first checkpoint right away: geo_01b's
+    // "CheckpointLevelStart" does.)
+    let reached: Vec<String> = cp
+        .part("checkpoints")
+        .and_then(|c| c.get("reached").and_then(|r| r.as_array()).cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let got = format!(
+        "map {}, checkpoint {:?}, reached {reached:?}, health {saved:.0}",
+        cp.header.map, cp.header.checkpoint
+    );
+    if cp.header.map == "geo_01b"
+        && reached.first().map(String::as_str) == Some(rc_save::LEVEL_START)
+        && (saved - health).abs() < 0.5
+    {
         Ok(got)
     } else {
         Err(got)

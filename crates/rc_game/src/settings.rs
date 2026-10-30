@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Resource, Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Settings {
     pub game: GameSection,
     pub mods: ModsSection,
@@ -25,7 +25,7 @@ pub struct Settings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct GameSection {
     /// The original game's install folder (the one holding `GameData`).
     /// Empty means: look in the usual places.
@@ -58,7 +58,7 @@ impl Difficulty {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct ModsSection {
     /// The folder holding one sub-folder per mod.
     pub folder: String,
@@ -68,7 +68,7 @@ pub struct ModsSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct VideoSection {
     pub fullscreen: bool,
     pub width: u32,
@@ -78,6 +78,13 @@ pub struct VideoSection {
     /// Wider screens see more at the sides with the same view up and down
     /// ("Hor+"), so nothing is cut off or stretched to fit.
     pub fov: f32,
+    /// The longest screen shape (long side over short side) the view keeps
+    /// widening for. On longer screens (an ultrawide, a phone held
+    /// sideways or upright) a flat view would stretch the sides into a
+    /// fish-eye look, so it sees what this shape sees along its long side
+    /// and a little less along its short side. 0 is no limit. Not used
+    /// while `panini` is on.
+    pub widest_shape: f32,
     /// The widest shape the on-screen display spreads to, as width over
     /// height. On wider screens it stays in a centred area this shape, so
     /// health and ammo aren't in the far corners of an ultrawide.
@@ -90,7 +97,7 @@ pub struct VideoSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct AudioSection {
     /// All volumes are 0 (silent) to 1 (full).
     pub master_volume: f32,
@@ -99,7 +106,7 @@ pub struct AudioSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct SaveSection {
     /// Where save files go. Empty means the system's usual place
     /// (`%APPDATA%\rc_game\saves` on Windows, `~/.local/share/rc_game/saves`
@@ -109,7 +116,7 @@ pub struct SaveSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct ControlsSection {
     /// Our data file with the key and button bindings.
     pub bindings: String,
@@ -156,6 +163,7 @@ impl Default for Settings {
                 height: 720,
                 vsync: true,
                 fov: 85.0,
+                widest_shape: 2.0,
                 hud_max_aspect: 16.0 / 9.0,
                 panini: 0.0,
             },
@@ -240,6 +248,11 @@ vsync = true
 # Field of view across a 4:3 screen, degrees (the original's is 85). Wider
 # screens see more at the sides; the view up and down stays the same.
 fov = 85
+# Longest screen shape (long side / short side) the view keeps widening for.
+# Longer screens, like ultrawides, see what this shape sees across and a
+# little less up and down, so the sides don't get a fish-eye look. 2.0 is
+# 18:9. 0 is no limit (pure Hor+). Not used while panini (below) is on.
+widest_shape = 2.0
 # Widest shape (width / height) the display spreads to; on an ultrawide it
 # stays in a centred area this shape. 1.7777778 is 16:9. 0 fills the screen.
 hud_max_aspect = 1.7777778
@@ -297,12 +310,50 @@ impl Settings {
         toml::from_str(text).map_err(|e| e.to_string())
     }
 
+    /// Options in `text` the game doesn't know: typos, or ones from another
+    /// version of the game. They are skipped with a warning in the log
+    /// rather than stopping the game, so one settings file works with every
+    /// version being tested. As `section.option`.
+    pub fn unknown_options(text: &str) -> Vec<String> {
+        let (Ok(given), Ok(known)) = (
+            text.parse::<toml::Table>(),
+            toml::Table::try_from(Settings::default()),
+        ) else {
+            return vec![];
+        };
+        let mut out = vec![];
+        for (section, value) in &given {
+            let Some(known_section) = known.get(section) else {
+                out.push(section.clone());
+                continue;
+            };
+            if let (Some(v), Some(k)) = (value.as_table(), known_section.as_table()) {
+                out.extend(
+                    v.keys()
+                        .filter(|key| !k.contains_key(*key))
+                        .map(|key| format!("{section}.{key}")),
+                );
+            }
+        }
+        out
+    }
+
     /// Read `path`. If it doesn't exist, write the default file there and
     /// use the defaults. Returns the settings and a note for the log.
     pub fn load_or_create(path: &Path) -> Result<(Settings, String), String> {
         match std::fs::read_to_string(path) {
             Ok(text) => Settings::parse(&text)
-                .map(|s| (s, format!("settings from {}", path.display())))
+                .map(|s| {
+                    let mut note = format!("settings from {}", path.display());
+                    let unknown = Settings::unknown_options(&text);
+                    if !unknown.is_empty() {
+                        note += &format!(
+                            "; WARNING: settings file options this version doesn't know, skipped (a typo, or from another version): {}",
+                            unknown.join(", ")
+                        );
+                    }
+                    (s, note)
+                })
                 .map_err(|e| format!("{}: {e}", path.display())),
             Err(_) => {
                 let note = match std::fs::write(path, DEFAULT_FILE) {
@@ -384,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_options_use_defaults_and_typos_are_errors() {
+    fn missing_options_use_defaults_and_typos_are_warnings() {
         let s = Settings::parse("[audio]\nmusic_volume = 0.2\n").unwrap();
         assert_eq!(s.audio.music_volume, 0.2);
         assert_eq!(s.video.fov, 85.0);
@@ -395,9 +446,16 @@ mod tests {
                 .difficulty,
             Difficulty::Hard
         );
+        // A wrong value is still an error: there is no sensible guess.
         assert!(Settings::parse("[game]\ndifficulty = 'brutal'\n").is_err());
-        let e = Settings::parse("[audio]\nmusic_volum = 0.2\n").unwrap_err();
-        assert!(e.contains("music_volum"), "{e}");
+        // An unknown option is skipped and named for the log warning.
+        let text = "[audio]\nmusic_volum = 0.2\n[gyro]\nspin = 1\n[extra]\na = 1\n";
+        assert_eq!(Settings::parse(text).unwrap(), Settings::default());
+        assert_eq!(
+            Settings::unknown_options(text),
+            ["audio.music_volum", "extra", "gyro.spin"]
+        );
+        assert!(Settings::unknown_options(DEFAULT_FILE).is_empty());
     }
 
     #[test]
@@ -410,6 +468,16 @@ mod tests {
         let (back, _) = Settings::load_or_create(&p).unwrap();
         let _ = std::fs::remove_file(&p);
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn file_from_the_first_fish_eye_fix_still_loads() {
+        // That test build saved `widest_fov`, which no version knows now.
+        let text = "[video]\nfov = 120.0\nwidest_fov = 110.0\n";
+        let s = Settings::parse(text).unwrap();
+        assert_eq!(s.video.fov, 120.0);
+        assert_eq!(s.video.widest_shape, 2.0);
+        assert_eq!(Settings::unknown_options(text), ["video.widest_fov"]);
     }
 
     #[test]

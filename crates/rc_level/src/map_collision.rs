@@ -46,6 +46,36 @@ pub struct MapCollision {
     /// (class, tag). See `crate::scripts::tagged_actors`.
     pub part_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
     pub parts: HashMap<usize, (String, String)>,
+    /// Places to arrive at from another map: each `Teleporter`'s `Tag`,
+    /// feet position and facing, as for `start`. A level address like
+    /// `RAS_03B.ctm#FromA` names one by its tag.
+    pub arrivals: Vec<(String, Vec3, f32)>,
+}
+
+impl MapCollision {
+    /// Feet and facing for arriving through `portal` (a teleporter's tag,
+    /// any case), if the map has one by that name.
+    pub fn arrival(&self, portal: &str) -> Option<(Vec3, f32)> {
+        self.arrivals
+            .iter()
+            .find(|(t, _, _)| t.eq_ignore_ascii_case(portal))
+            .map(|(_, f, y)| (*f, *y))
+    }
+}
+
+/// An actor's own `Tag` (the class name if the map gives none, as in UE2).
+fn actor_tag(pkg: &Package, data: &[u8], export: usize, class: &str) -> String {
+    actors::read_actor_properties(pkg, data, export)
+        .ok()
+        .and_then(|ps| {
+            ps.into_iter().find_map(|p| match p.value {
+                rc_package::properties::Value::Name(n) if pkg.name(p.name) == "Tag" => {
+                    Some(pkg.name(n).to_string())
+                }
+                _ => None,
+            })
+        })
+        .unwrap_or_else(|| class.to_string())
 }
 
 /// Every package file under the game's data folder, by lower-case name.
@@ -148,6 +178,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut placed: Vec<(Placement, (usize, i32))> = Vec::new();
     let mut looks = ClassLooks::new();
     let mut start = None;
+    let mut arrivals = Vec::new();
     let mut mesh_failures = 0;
     let mut class_mesh_actors = 0;
     let mut not_solid = 0;
@@ -160,6 +191,13 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
             let feet = [p.location[0], p.location[1], p.location[2] - collision_height];
             let yaw = p.rotation[1] as f32 / 65536.0 * std::f32::consts::TAU;
             start = Some((feet, yaw));
+        }
+        if p.class == "Teleporter" {
+            // Arriving pawns stand with their centre on it, as at a
+            // PlayerStart.
+            let feet = [p.location[0], p.location[1], p.location[2] - collision_height];
+            let yaw = p.rotation[1] as f32 / 65536.0 * std::f32::consts::TAU;
+            arrivals.push((actor_tag(&map.0, &map.1, a, &p.class), feet, yaw));
         }
         // No mesh in the map: the class may give one (props, double doors).
         let mut owner = map.clone();
@@ -223,6 +261,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         part_triangles,
         parts,
         start,
+        arrivals,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
         mesh_failures,

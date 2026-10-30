@@ -164,6 +164,7 @@ fn find_in(pkg: &Package, path: &str, class: Option<&str>) -> Option<usize> {
         "FinalBlend",
         "TexModifier",
         "TexPanner",
+        "TexPanner2D",
         "TexScaler",
         "TexRotator",
         "TexOscillator",
@@ -237,8 +238,10 @@ fn follow(packs: &mut Packages, start: Place) -> Result<Skin, String> {
                 );
                 "Material"
             }
-            "TexModifier" | "TexPanner" | "TexScaler" | "TexRotator" | "TexOscillator"
-            | "TexEnvMap" | "TexCoordSource" => "Material",
+            // TexPanner2D is Republic Commando's own (the ammo counter's
+            // digits on the first-person rifle): drawn unscrolled for now.
+            "TexModifier" | "TexPanner" | "TexPanner2D" | "TexScaler" | "TexRotator"
+            | "TexOscillator" | "TexEnvMap" | "TexCoordSource" => "Material",
             other => return Err(format!("{name} is a {other}, which we can't follow yet")),
         };
         let next = object(setting).ok_or_else(|| format!("{class} {name} has no {setting}"))?;
@@ -604,6 +607,23 @@ impl Model {
         skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
             .into_iter()
             .map(|p| mesh_point(&self.mesh, p))
+            .collect()
+    }
+
+    /// Points posed at `frame` of animation `key`, in Bevy units (axes as
+    /// [`to_bevy`]) relative to the mesh's own origin: nothing lifted and
+    /// the root bone's travel kept. For models that aren't characters
+    /// standing on a floor, such as the first-person arms, whose origin is
+    /// the eye.
+    pub fn posed_from_origin(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {
+        let local = match self.clips.get(key) {
+            Some(clip) => clip.sample(&self.skeleton, frame),
+            None => self.skeleton.local.clone(),
+        };
+        let pose = globals(&self.skeleton.parents, &local);
+        skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
+            .into_iter()
+            .map(|p| to_bevy(mesh_point(&self.mesh, p)))
             .collect()
     }
 
