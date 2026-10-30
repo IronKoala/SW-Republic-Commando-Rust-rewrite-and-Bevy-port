@@ -151,6 +151,43 @@ at the end of the class" method as the weapon numbers) and `.ini` files:
   `SetStance`, `EngageLocation`...) are native, in `ctgame.dll`. We don't
   read compiled code, so how members pick spots and move is our own design.
 
+## Squad markers (read for the context orders, 2026-10-29)
+
+Read with `rc_probe --classes ctmarkers.u <Class>`, `rc_probe --class`, and
+the new `marker_survey` example over all 50 campaign maps, read only.
+
+- **Three kinds of actor make a marked job.** The *anchor* is the thing
+  itself: `BactaDispenserGEO/RAS/YYY/TRN/CORE`, `BreachDoor...`,
+  `HackDoor...`, `HackTerminal...`, `DemolitionCharge`, or a firing position
+  `MarkerSnipeAnchor...`. The *order marker* is a `CTMarker` class from
+  CTMarkers.u whose `Anchor` names it: `MarkerDoorBreach` (its
+  `AlternateMarkers` names the door's `MarkerHackDoor`), `MarkerHackDoor`,
+  `MarkerHackTerminal`, `MarkerDemolition`, `MarkerSnipe`, `MarkerGrenade`
+  (with a `WeaponTarget` area, sometimes an EMP `GrenadeClass`),
+  `MarkerAntiArmor`, and three we don't do yet: `MarkerDisarmTrap`,
+  `MarkerSetProximityMine`, `MarkerTurret`. Bacta dispensers have no order
+  marker. *`SquadMarkerSpot`s* (`MyAnchor` = the anchor) are where squad
+  mates stand; a door breach has three (CTMarker `Participants`: doorman,
+  grenadier, cover), most firing positions have none.
+- **In the 50 campaign maps:** 240 bacta spots, 159 breach spots (54
+  doors), 101 slice, 82 demolition, 179 sniper, 30 grenade and 46
+  anti-armour markers; 157 we don't do yet (100 mines, 34 traps, 23 turret
+  markers and a few turrets).
+- **Numbers:** `DemolitionCharge` `ChargeExplode` Damage 256, DamageRadius
+  256, `ChargePlaced` Duration 10. `BreachDoor` `DoorDamagedState` Damage
+  200, radius 256, `DoorChargeLockedState` Duration 2.5. Thermal detonator:
+  `ThermalDetonatorProj` FuseTime 2, `CTProjExplosive` Damage 400,
+  DamageRadius 512, speed 2200. `MarkerWeapon` WeaponTargetRadius 512;
+  `CTMarker` TargetingDistance 3000. `MarkerSnipe` Accuracy 1.0.
+  `BactaDispenser` BactaRate 4. Which Duration is the fuse is our reading.
+- **Who goes** (`PreferredPawnClass`): demolition and anti-armour Scorch
+  (`Commando62Delta`), slicing Fixer (`Commando40Delta`), sniping Sev
+  (`Commando07Delta`).
+- **Not readable:** how long each job takes, how the grenadier picks a
+  target, and what a breach does after the blast (the marker names
+  `TossGrenadeEvent` and a thermal detonator, so the grenadier throws one
+  in) are compiled code.
+
 ## Battle droids
 
 Found on 2026-10-29 by reading the installed game's script packages

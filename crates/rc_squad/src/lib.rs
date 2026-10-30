@@ -16,12 +16,14 @@
 //! code is copied.
 
 pub mod fight;
+pub mod jobs;
 pub mod map;
 pub mod nav;
 pub mod settings;
 pub mod squad;
 
 pub use fight::{FightState, Patient, Threat};
+pub use jobs::{JobKind, JobResult, JobSettings};
 pub use map::{MapSquadInfo, MarkerSpot, SquadFactory};
 pub use nav::{Navigator, StraightLine};
 pub use settings::{FightSettings, ReviveSettings, Spawn, SquadSettings, StanceSettings, Tether};

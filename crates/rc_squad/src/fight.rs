@@ -348,7 +348,8 @@ impl Squad {
                 MemberState::Working { .. } | MemberState::Reviving { .. }
             );
         let eye = m.pawn.eye();
-        let sight = self.settings.fight.sight_radius;
+        let f = self.fight_for(i);
+        let sight = f.sight_radius;
         let best = if busy {
             None
         } else {
@@ -365,7 +366,7 @@ impl Squad {
             (_, Some((id, distance))) => {
                 m.fight.target = Some(id);
                 m.fight.seen_for = 0.0;
-                m.fight.burst_left = self.settings.fight.burst_count;
+                m.fight.burst_left = f.burst_count;
                 events.push(SquadEvent::TargetPicked {
                     member: m.settings.name.clone(),
                     target: id,
@@ -392,7 +393,7 @@ impl Squad {
         leader: Leader,
         events: &mut Vec<SquadEvent>,
     ) {
-        let f = self.settings.fight.clone();
+        let f = self.fight_for(i);
         let Some(target) = self.target_of(i).copied() else {
             self.members[i].fight.target = None;
             return;
@@ -491,6 +492,7 @@ impl Squad {
         events.push(SquadEvent::Fire {
             member: m.settings.name.clone(),
             index: i,
+            weapon: f.weapon,
             origin,
             direction,
             target: target.id,

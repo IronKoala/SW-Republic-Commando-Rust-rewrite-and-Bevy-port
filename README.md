@@ -105,6 +105,22 @@ copy of the game.
   still have to be read from the game. Droids still only shoot at you, not
   at the squad.
 
+- **Squad context orders (tested in the cloud sandbox by numbers, not yet
+  on Windows, in a real level, or with eyes).** Each kind of squad marker
+  does its own job: bacta heals the squad mate who uses it; demolition and
+  door breach set a charge that blows after a few seconds and hurts
+  anything near it (a breach first sends a squad mate to every spot at the
+  door); slicing takes longer and makes no bang; sniper, grenade and
+  anti-armour positions are held until you press F4, the sniper firing
+  single long-range shots, the grenadier throwing a grenade every few
+  seconds. Every job is a `[job.*]` part of `data/squad/squad.toml`, so
+  mods can change them or add new ones. Doors don't open yet: the squad
+  reports the job done, and the level scripts part will act on it. The
+  markers are read the way the original's maps lay them out (checked on
+  all 50 campaign maps), and blast sizes, fuses and who does which job
+  are the game's; how long the work takes is our guess. Traps, mines and
+  turrets aren't done yet.
+
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
   room holding the game's own DC-17m model, and shoot battle droids. The
@@ -652,6 +668,17 @@ cargo test --release -p rc_squad_plugin --test fight_room
 ```
 
 It should say `test result: ok. 1 passed`. The log is `logs\fight_room.log`.
+
+The squad's context orders in the test room (bacta heals, a demolition
+charge blows up a stand-in droid), no game files needed:
+
+```
+cargo test --release -p rc_squad_plugin --test jobs_room
+```
+
+It should say `test result: ok. 1 passed`. In `logs\jobs_room.log` look
+for `Fixer healed to 400`, `Scorch set the charge ... 10.0 s`, then ten
+seconds later `BLAST (Demolition, Scorch)` and `blast hurt 1 bodies`.
 
 To check that Sev, Fixer and Scorch are drawn with their original models
 and armour (opens a window for a few seconds):

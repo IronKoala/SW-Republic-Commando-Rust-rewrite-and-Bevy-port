@@ -96,6 +96,8 @@ fn state_parts(s: MemberState) -> (&'static str, f32) {
         MemberState::Moving { urgent: true, .. } => ("urgent", 0.0),
         MemberState::Working { left } => ("working", left),
         MemberState::Reviving { left } => ("reviving", left),
+        MemberState::Ready => ("ready", 0.0),
+        MemberState::Posted => ("posted", 0.0),
     }
 }
 
@@ -103,6 +105,8 @@ fn member_state(name: &str, left: f32) -> MemberState {
     match name {
         "working" => MemberState::Working { left },
         "reviving" => MemberState::Reviving { left },
+        "ready" => MemberState::Ready,
+        "posted" => MemberState::Posted,
         "urgent" => MemberState::Moving {
             urgent: true,
             by_order: false,
