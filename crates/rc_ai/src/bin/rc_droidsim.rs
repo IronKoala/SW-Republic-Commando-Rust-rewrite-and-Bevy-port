@@ -492,6 +492,7 @@ fn main() {
                     AiEvent::Route { .. } => "routes",
                     AiEvent::NoRoute => "no route",
                     AiEvent::Stuck => "stuck",
+                    AiEvent::Throw { .. } => "grenades thrown",
                 })
                 .or_default() += 1;
         }

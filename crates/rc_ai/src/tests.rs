@@ -912,3 +912,189 @@ fn spawn_points_take_turns_and_give_their_own_tags() {
     again.restore(&snap).unwrap();
     assert_eq!(again.tagged("A").len(), 2);
 }
+
+/// A battle droid that throws grenades every chance it gets.
+fn grenadier(count: u32) -> Fighter {
+    let mut p = AiParams::battle_droid();
+    p.grenades.grenade = "thermal_detonator_enemy".into();
+    p.grenades.count = count;
+    p.grenades.probability = 1.0;
+    Fighter::new(
+        1,
+        Arc::new(p),
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    )
+}
+
+fn throws(ev: &[(f32, AiEvent)]) -> Vec<(f32, Vec3, Vec3, Vec3)> {
+    ev.iter()
+        .filter_map(|(t, e)| match e {
+            AiEvent::Throw {
+                origin,
+                velocity,
+                aim_at,
+                ..
+            } => Some((*t, *origin, *velocity, *aim_at)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Where a throw comes back down to `z`, flying under `gravity`.
+fn lands_at(origin: Vec3, v: Vec3, gravity: f32, z: f32) -> Vec3 {
+    let dt = 1.0 / 1000.0;
+    let (mut p, mut v) = (origin, v);
+    loop {
+        p = p + v * dt;
+        v = v - Vec3::new(0.0, 0.0, gravity * dt);
+        if v.z < 0.0 && p.z <= z {
+            return p;
+        }
+    }
+}
+
+#[test]
+fn a_throw_arc_lands_where_it_is_aimed() {
+    let world = flat_floor(vec![]);
+    let from = Vec3::new(0.0, 0.0, 120.0);
+    for to in [
+        Vec3::new(1500.0, 0.0, 24.0),
+        Vec3::new(-400.0, 900.0, 24.0),
+        Vec3::new(2400.0, 300.0, 300.0),
+    ] {
+        let v = brain::throw_arc(&world, from, to, 2200.0, 1100.0).expect("an arc");
+        assert!(v.length() <= 2200.0 + 0.1, "{}", v.length());
+        let landed = lands_at(from, v, 1100.0, to.z);
+        assert!(
+            (landed - to).length_2d() < 15.0,
+            "aimed at {to:?}, lands at {landed:?}"
+        );
+    }
+    // Too far for the fastest throw.
+    assert!(brain::throw_arc(&world, from, Vec3::new(6000.0, 0.0, 24.0), 2200.0, 1100.0).is_none());
+    // A low ceiling over the whole floor: no lob, but a flat throw fits.
+    let low = flat_floor(vec![Brush::cuboid(
+        Vec3::new(-5000.0, -5000.0, 400.0),
+        Vec3::new(5000.0, 5000.0, 420.0),
+    )]);
+    let v = brain::throw_arc(&low, from, Vec3::new(1500.0, 0.0, 24.0), 2200.0, 1100.0)
+        .expect("a flat arc under the ceiling");
+    assert!(v.length() > 2199.0, "full speed: {}", v.length());
+    // A tall wall in the way: nothing.
+    let wall = flat_floor(vec![Brush::cuboid(
+        Vec3::new(700.0, -5000.0, 0.0),
+        Vec3::new(740.0, 5000.0, 3000.0),
+    )]);
+    assert!(brain::throw_arc(&wall, from, Vec3::new(1500.0, 0.0, 24.0), 2200.0, 1100.0).is_none());
+}
+
+#[test]
+fn throws_grenades_by_the_rules() {
+    let world = flat_floor(vec![]);
+    // 1500 uu away: in range. It throws at its first decision in the
+    // fight, then no sooner than min_time (10 s) after, until it has none.
+    let mut f = grenadier(2);
+    let ev = run(&mut f, &world, Some(target_at(1500.0, 0.0)), 30.0);
+    let t = throws(&ev);
+    assert_eq!(t.len(), 2, "{t:?}");
+    assert!(t[0].0 < 1.0, "first throw at {}", t[0].0);
+    assert!(t[1].0 - t[0].0 >= 10.0 - 1e-3, "{} then {}", t[0].0, t[1].0);
+    assert_eq!(f.grenades_left, 0);
+    for &(_, origin, v, aim) in &t {
+        // Within the aim error of (1 - 0.4) x 10 = 6 degrees: 158 uu.
+        assert!(
+            (aim - Vec3::new(1500.0, 0.0, 24.0)).length_2d() <= 160.0,
+            "{aim:?}"
+        );
+        let landed = lands_at(origin, v, 1100.0, aim.z);
+        assert!((landed - aim).length_2d() < 15.0, "{landed:?} vs {aim:?}");
+    }
+    // No shots while throwing.
+    let shots_near = ev.iter().filter(|(time, e)| {
+        matches!(e, AiEvent::Fire { .. }) && *time >= t[0].0 && *time < t[0].0 + 0.99
+    });
+    assert_eq!(shots_near.count(), 0);
+
+    // Too close (300 uu) or too far (3000 uu): no throw, but it shoots.
+    for x in [300.0, 3000.0] {
+        let mut f = grenadier(2);
+        let ev = run(&mut f, &world, Some(target_at(x, 0.0)), 5.0);
+        assert!(throws(&ev).is_empty(), "threw at {x} uu");
+        assert!(ev.iter().any(|(_, e)| matches!(e, AiEvent::Fire { .. })));
+    }
+    // Battle droids carry none.
+    let mut d = droid(0.0);
+    let ev = run(&mut d, &world, Some(target_at(1500.0, 0.0)), 5.0);
+    assert!(throws(&ev).is_empty());
+}
+
+#[test]
+fn does_not_throw_onto_a_friend() {
+    let world = flat_floor(vec![]);
+    let nav = NavGraph::default();
+    let taken = HashSet::new();
+    let mut f = grenadier(2);
+    // A friend standing 200 uu from the target.
+    let allies = [Vec3::new(0.0, 0.0, 80.0), Vec3::new(1400.0, 150.0, 80.0)];
+    let mut thrown = 0;
+    let mut t = 0.0;
+    while t < 5.0 {
+        let view = View {
+            world: &world,
+            nav: &nav,
+            time: t,
+            target: Some(target_at(1500.0, 0.0)),
+            cover_taken: &taken,
+            allies: &allies,
+        };
+        thrown += f
+            .tick(1.0 / 30.0, &view)
+            .iter()
+            .filter(|e| matches!(e, AiEvent::Throw { .. }))
+            .count();
+        t += 1.0 / 30.0;
+    }
+    assert_eq!(thrown, 0);
+}
+
+#[test]
+fn grenades_left_are_saved() {
+    let world = flat_floor(vec![]);
+    let mut p = AiParams::battle_droid();
+    p.grenades.grenade = "thermal_detonator_enemy".into();
+    p.grenades.count = 2;
+    p.grenades.probability = 1.0;
+    let params = Arc::new(p);
+    let make = || Battle::new(params.clone(), NavGraph::default(), vec![factory(0.0)]);
+    let mut b = make();
+    // The spawner switches on (the player is within 3000 uu), makes two,
+    // and each throws once in the 9 s (the next waits 10 s).
+    for _ in 0..270 {
+        b.step(1.0 / 30.0, &world, Some(target_at(1500.0, 0.0)));
+    }
+    let snap = b.snapshot();
+    let left: Vec<_> = snap.fighters.iter().map(|f| f.grenades_left).collect();
+    assert_eq!(left, vec![Some(1), Some(1)], "one throw each");
+    let mut fresh = make();
+    fresh.restore(&snap).unwrap();
+    let again: Vec<_> = fresh
+        .snapshot()
+        .fighters
+        .iter()
+        .map(|f| f.grenades_left)
+        .collect();
+    assert_eq!(again, left);
+    // Battle droids' saves don't mention grenades.
+    let plain = Battle::new(
+        Arc::new(AiParams::battle_droid()),
+        NavGraph::default(),
+        vec![factory(0.0)],
+    );
+    assert!(plain
+        .snapshot()
+        .fighters
+        .iter()
+        .all(|f| f.grenades_left.is_none()));
+}

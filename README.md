@@ -313,6 +313,13 @@ copy of the game.
   rounds but fall to melee). Super battle droids, Geonosian warriors and
   Trandoshan mercenaries each have their own settings file in
   `data/enemies` with the game's health, speed, size and aim.
+- **Enemies throw grenades (tested in the cloud sandbox with automatic
+  tests, not yet in the real game).** Trandoshan mercenaries carry two of
+  the enemies' thermal detonators, as in the original, and now and then lob
+  one at you when you are 600 to 2500 uu away, never onto a friend of
+  theirs and never more often than every 20 seconds. Any enemy type can be
+  given grenades in its `[grenades]` section. Battle droids carry none, as
+  in the original.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -367,8 +374,8 @@ copy of the game.
 - Weapons: no first-person arms or muzzle flash, and switching weapons is
   instant. How the view kick settles back is our own guess. The
   attachments' and the Trandoshan repeater's reload times are stand-ins,
-  grenades have no models yet (a small glowing ball), and nobody but the
-  player throws grenades yet. Grenade explosions play the game's own
+  grenades have no models yet (a small glowing ball), and squad mates only
+  throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors shoot a
   stand-in blaster instead of using their force pike, and walk instead of

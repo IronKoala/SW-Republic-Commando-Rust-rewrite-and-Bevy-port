@@ -158,6 +158,16 @@ pub enum AiEvent {
     },
     /// Couldn't make progress along a route for 2 s; gave up on it.
     Stuck,
+    /// Threw a grenade (`grenade` is its file id): it leaves the hand at
+    /// `origin` with `velocity` (uu/s), aimed to land near `aim_at`.
+    /// `left` is how many it still carries.
+    Throw {
+        grenade: String,
+        origin: Vec3,
+        velocity: Vec3,
+        aim_at: Vec3,
+        left: u32,
+    },
 }
 
 /// One fighter.
@@ -200,6 +210,12 @@ pub struct Fighter {
     pub stunned_until: f32,
     /// Which of the battle's targets it fought last (0 is the player).
     pub target_index: Option<usize>,
+    /// Grenades it still carries.
+    pub grenades_left: u32,
+    /// No grenade before this battle time.
+    next_throw: f32,
+    /// Battle time of its last throw (for the animation).
+    pub last_throw: f32,
     rng: Rng,
 }
 
@@ -221,6 +237,11 @@ impl Fighter {
     ) -> Self {
         let pawn = Pawn::new(params.movement.clone(), feet);
         let home = pawn.location;
+        let grenades_left = if params.grenades.grenade.is_empty() {
+            0
+        } else {
+            params.grenades.count
+        };
         Fighter {
             id,
             burst_left: params.combat.burst_count,
@@ -247,6 +268,9 @@ impl Fighter {
             ally_in_way_since: None,
             stunned_until: f32::NEG_INFINITY,
             target_index: None,
+            grenades_left,
+            next_throw: 0.0,
+            last_throw: f32::NEG_INFINITY,
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -584,6 +608,10 @@ impl Fighter {
             self.set_maneuver(Maneuver::Hold, now, events);
             return;
         }
+        // A grenade, now and then, at an enemy it knows the place of.
+        if self.try_grenade(view, enemy, events) {
+            return;
+        }
         // Walking somewhere for a clear shot, and now it has one: stop and
         // shoot.
         if busy
@@ -666,6 +694,70 @@ impl Fighter {
             }
         }
         self.set_maneuver(Maneuver::Hold, now, events);
+    }
+
+    /// Maybe throw a grenade at the enemy last seen at `enemy`. **Our
+    /// rules** (the original decides in its compiled engine; the numbers
+    /// are its `GrenadeProbability`, `MinGrenadeTime` and the grenade's
+    /// `ValidRange`): it must carry one, its last throw must be
+    /// `min_time` ago, it must have seen the enemy within `seen_within`
+    /// seconds, between `min_range` and `max_range` away, and no friend
+    /// may stand where the grenade will land. Then it throws with chance
+    /// `probability`, if it finds an arc the level doesn't block.
+    fn try_grenade(&mut self, view: &View, enemy: Vec3, events: &mut Vec<AiEvent>) -> bool {
+        let g = self.params.grenades.clone();
+        let now = view.time;
+        if self.grenades_left == 0 || g.grenade.is_empty() || now < self.next_throw {
+            return false;
+        }
+        if now - self.last_seen_time > g.seen_within {
+            return false;
+        }
+        let dist = (enemy - self.pawn.location).length_2d();
+        if dist < g.min_range || dist > g.max_range {
+            return false;
+        }
+        // Aim at the floor by the enemy: `enemy` is the middle of its body.
+        let aim_at = enemy - Vec3::new(0.0, 0.0, 60.0);
+        let me = self.pawn.location;
+        if view
+            .allies
+            .iter()
+            .any(|&p| (p - me).length() >= 1.0 && (p - aim_at).length_2d() < g.radius + 50.0)
+        {
+            return false;
+        }
+        if self.rng.unit() >= g.probability {
+            return false;
+        }
+        let (fwd, right) = rc_movement::axes(self.facing);
+        let origin = self.eye() - Vec3::new(0.0, 0.0, 10.0) + fwd * 30.0 + right * 10.0;
+        // A little aim error, as with its shots.
+        let c = &self.params.combat;
+        let miss = (1.0 - c.accuracy).clamp(0.0, 1.0) * c.max_aim_error;
+        let spread = dist * miss.to_radians().tan();
+        let spin = self.rng.unit() * std::f32::consts::TAU;
+        let r = spread * self.rng.unit().sqrt();
+        let aim_at = aim_at + Vec3::new(r * spin.cos(), r * spin.sin(), 0.0);
+        let Some(velocity) = throw_arc(view.world, origin, aim_at, g.speed, g.gravity) else {
+            // Blocked or too far: try again later rather than every decision.
+            self.next_throw = now + RETRY_AFTER;
+            return false;
+        };
+        self.grenades_left -= 1;
+        self.next_throw = now + g.min_time;
+        self.last_throw = now;
+        // Busy throwing: no shots for a moment.
+        self.next_shot = self.next_shot.max(now + g.throw_time);
+        self.burst_left = c.burst_count;
+        events.push(AiEvent::Throw {
+            grenade: g.grenade.clone(),
+            origin,
+            velocity,
+            aim_at,
+            left: self.grenades_left,
+        });
+        true
     }
 
     fn destination_far_enough(&self) -> bool {
@@ -829,6 +921,58 @@ pub fn ally_in_line(a: Vec3, b: Vec3, allies: &[Vec3], me: Vec3) -> bool {
         let closest = a + d * t;
         let off = p - closest;
         (off.x * off.x + off.y * off.y).sqrt() < ALLY_CLEARANCE && off.z.abs() < 90.0
+    })
+}
+
+/// The starting velocity for a throw from `from` that lands at `to`, with
+/// `gravity` pulling down (uu/s²) and at most `max_speed` (uu/s), whose
+/// path the level doesn't block (`None` if there is none). **Our choice**:
+/// it tries the gentlest lob first (the slowest throw that reaches,
+/// which comes down steeply and rolls on little), then the flattest arc at
+/// full speed (for under a low ceiling).
+pub fn throw_arc(
+    world: &dyn World,
+    from: Vec3,
+    to: Vec3,
+    max_speed: f32,
+    gravity: f32,
+) -> Option<Vec3> {
+    let d = to - from;
+    let flat = d.length_2d();
+    if flat < 1.0 || gravity <= 0.0 {
+        return None;
+    }
+    let dir = d.flat() * (1.0 / flat);
+    let h = d.z;
+    let mut arcs = Vec::new();
+    // Slowest throw: speed² = g (h + r), at tan(angle) = (h + r) / flat.
+    let r = d.length();
+    let v = (gravity * (h + r)).sqrt();
+    if v <= max_speed {
+        arcs.push((v, ((h + r) / flat).atan()));
+    }
+    // Flattest arc at full speed.
+    let v = max_speed;
+    let disc = v.powi(4) - gravity * (gravity * flat * flat + 2.0 * h * v * v);
+    if disc >= 0.0 {
+        arcs.push((v, ((v * v - disc.sqrt()) / (gravity * flat)).atan()));
+    }
+    arcs.into_iter().find_map(|(speed, angle)| {
+        let vel = dir * (speed * angle.cos()) + Vec3::UP * (speed * angle.sin());
+        arc_clear(world, from, vel, gravity, flat / (speed * angle.cos())).then_some(vel)
+    })
+}
+
+/// Does the level leave the arc from `from` at `vel` clear for the first
+/// 90% of its `flight_time` (the end lands on the floor, so isn't checked)?
+fn arc_clear(world: &dyn World, from: Vec3, vel: Vec3, gravity: f32, flight_time: f32) -> bool {
+    const PIECES: usize = 12;
+    let at = |t: f32| from + vel * t - Vec3::new(0.0, 0.0, 0.5 * gravity * t * t);
+    let end = flight_time * 0.9;
+    (0..PIECES).all(|i| {
+        let t0 = end * i as f32 / PIECES as f32;
+        let t1 = end * (i + 1) as f32 / PIECES as f32;
+        clear_line(world, at(t0), at(t1))
     })
 }
 

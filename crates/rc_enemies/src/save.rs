@@ -51,6 +51,9 @@ pub struct DroidSave {
     pub mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<[f32; 3]>,
+    /// Grenades it still carries (only enemies that carry them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grenades_left: Option<u32>,
     /// The spawn point it was made at (its tag and events come from
     /// there); none: at its spawner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,6 +101,7 @@ impl SavePart for EnemiesSave {
                     .map_or(0.0, |h| h.current),
                 mode: f.mode.name().into(),
                 last_seen_at: f.last_seen_at.map(arr),
+                grenades_left: f.grenades_left,
                 spot: f.birth.spot,
                 hurt: f.birth.hurt,
             })
@@ -148,6 +152,7 @@ impl SavePart for EnemiesSave {
                     facing: f.facing,
                     mode: mode(&f.mode),
                     last_seen_at: f.last_seen_at.map(vec),
+                    grenades_left: f.grenades_left,
                     birth: Birth {
                         spot: f.spot,
                         hurt: f.hurt,

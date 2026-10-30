@@ -3,7 +3,7 @@
 //!
 //! The file has sections. `[type]` says which of the game's classes the
 //! file is for. `[movement]` goes to `rc_movement::MoveParams` (same names
-//! as the player's file). `[senses]`, `[combat]`, `[spawning]` and
+//! as the player's file). `[senses]`, `[combat]`, `[grenades]`, `[spawning]` and
 //! `[look]` are read here. Every value has a built-in default (the
 //! battle droid's), so a mod's file only needs the lines it changes. A
 //! misspelt name is an error naming the line.
@@ -82,6 +82,40 @@ pub struct Combat {
     pub damage_table: String,
 }
 
+/// Grenades it throws (`[grenades]`). An empty `grenade` means none (the
+/// battle droid's default: the original's droids carry none).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GrenadeUse {
+    /// A grenade file in `data/grenades/` without `.toml`. Empty for none.
+    pub grenade: String,
+    /// How many it carries.
+    pub count: u32,
+    /// Chance of throwing at each decision when it may (`GrenadeProbability`).
+    pub probability: f32,
+    /// Seconds between one fighter's throws, at least (`MinGrenadeTime`).
+    pub min_time: f32,
+    /// It throws only at enemies between these distances, uu (the
+    /// grenade weapon's `ValidRange`).
+    pub min_range: f32,
+    pub max_range: f32,
+    /// It only throws at an enemy it saw within this many seconds.
+    pub seen_within: f32,
+    /// Seconds the throw takes, during which it doesn't shoot.
+    pub throw_time: f32,
+    /// The grenade's flight, to aim the arc: fastest throw (uu/s),
+    /// downward pull (uu/s²) and blast radius (uu, to keep friends out of
+    /// it). The game fills these from the grenade's own file.
+    pub speed: f32,
+    pub gravity: f32,
+    pub radius: f32,
+}
+
+impl GrenadeUse {
+    pub fn carries(&self) -> bool {
+        !self.grenade.is_empty() && self.count > 0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spawning {
     pub activate_unscripted_within: f32,
@@ -105,6 +139,8 @@ pub struct Look {
     pub crouch: String,
     pub crouch_fire: String,
     pub death: String,
+    /// Throwing a grenade. Empty for none (it plays the idle animation).
+    pub throw: String,
     /// Light the character always gets, 0 to 1 of its full colour, on top
     /// of the level's lights (the original lights characters with each
     /// zone's ambient light, which we don't read yet).
@@ -166,6 +202,7 @@ pub struct AiParams {
     pub movement: MoveParams,
     pub senses: Senses,
     pub combat: Combat,
+    pub grenades: GrenadeUse,
     pub spawning: Spawning,
     pub look: Look,
 }
@@ -245,6 +282,19 @@ impl AiParams {
                 drops: "e5_blaster_pickup".into(),
                 damage_table: "DV_DroidsBattleDroidDamage".into(),
             },
+            grenades: GrenadeUse {
+                grenade: String::new(),
+                count: 0,
+                probability: 0.3,
+                min_time: 10.0,
+                min_range: 600.0,
+                max_range: 2500.0,
+                seen_within: 3.0,
+                throw_time: 1.0,
+                speed: 2200.0,
+                gravity: 1100.0,
+                radius: 600.0,
+            },
             spawning: Spawning {
                 activate_unscripted_within: 3000.0,
                 max_alive_total: 12,
@@ -262,6 +312,7 @@ impl AiParams {
                 crouch: "CrouchBreathe".into(),
                 crouch_fire: "CrouchFire".into(),
                 death: "Death".into(),
+                throw: String::new(),
                 ambient: 0.5,
             },
         }
@@ -335,7 +386,19 @@ impl AiParams {
         };
         let k = &mut self.kind;
         let snd = &mut self.sounds;
+        let g = &mut self.grenades;
         match (section, key) {
+            ("grenades", "grenade") => g.grenade = text(),
+            ("grenades", "count") => g.count = num()?.max(0.0) as u32,
+            ("grenades", "probability") => g.probability = num()?.clamp(0.0, 1.0),
+            ("grenades", "min_time") => g.min_time = num()?,
+            ("grenades", "min_range") => g.min_range = num()?,
+            ("grenades", "max_range") => g.max_range = num()?,
+            ("grenades", "seen_within") => g.seen_within = num()?,
+            ("grenades", "throw_time") => g.throw_time = num()?,
+            ("grenades", "speed") => g.speed = num()?,
+            ("grenades", "gravity") => g.gravity = num()?,
+            ("grenades", "radius") => g.radius = num()?,
             ("sound", "package") => snd.package = text(),
             ("sound", "spotted") => snd.spotted = list()?,
             ("sound", "hurt") => snd.hurt = list()?,
@@ -399,6 +462,7 @@ impl AiParams {
             ("look", "crouch") => l.crouch = text(),
             ("look", "crouch_fire") => l.crouch_fire = text(),
             ("look", "death") => l.death = text(),
+            ("look", "throw") => l.throw = text(),
             ("look", "ambient") => l.ambient = num()?,
             _ => return Err(format!("unknown setting `{key}` in [{section}]")),
         }
@@ -416,6 +480,7 @@ impl AiParams {
         out.push(format!("{:?}", self.kind));
         out.push(format!("{:?}", self.senses));
         out.push(format!("{:?}", self.combat));
+        out.push(format!("{:?}", self.grenades));
         out.push(format!("{:?}", self.spawning));
         out.push(format!("{:?}", self.look));
         out
