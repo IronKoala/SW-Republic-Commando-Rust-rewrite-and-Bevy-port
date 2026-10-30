@@ -33,6 +33,8 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 | `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
 | `rc_ai` | What enemies decide: settings from `data/enemies/*.toml`, the map's spawners, one fighter's brain, and a whole fight on a map (`Battle`). No Bevy. Tool: `rc_droidsim` (droids against a stand-in player, no window). |
+| `rc_pads` | Controllers: which kind each one is, button names for prompts, gyro clean-up, and an SDL3 reader (built from source) for controllers and gyros. Bevy, no window. Tool: `rc_padtest`. |
+| `rc_panini` | The optional Panini view for very wide screens: a full-screen pass that bends the 3D view. Check: `panini_check` example. |
 | `rc_enemies` | Bevy plugin `EnemiesPlugin`: battle droids in the game, shooting and taking damage through `rc_combat`, animated with the game's mesh. Program: `rc_droidview` (watch a fight in a real level, with a picture check). |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
@@ -2041,6 +2043,34 @@ a screenshot of the game shrunk to 320x240: the mean difference must stay
 under 12 of 255 and fewer than 5% of pixels may differ by more than 40.
 centre.
 
+## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
+
+The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:
+
+- **One reader for controllers.** `rc_pads::sdl` starts SDL3 with no
+  window and turns its controller events into the same Bevy gamepad
+  messages gilrs sends, so Bevy keeps each controller's `Gamepad`
+  component up to date and the game's input code doesn't care which reader
+  ran. `rc_game` disables Bevy's `GilrsPlugin` only when SDL started.
+  SDL lives in a non-send resource, so it stays on the main thread.
+- **Gyro readings are messages.** `GyroSample { source, rate, accel, dt }`
+  comes from the SDL reader, and later from Android's sensor service.
+  `PadsPlugin` runs each source through its own `GyroFilter` and puts this
+  frame's turn for the controller used last (or the built-in gyro) in
+  `GyroLook`. `rc_game`'s input code decides whether to use it (mode,
+  ratchet, toggle) and adds it to `ActionState::look`. So a VR mod or
+  another sensor only needs to send `GyroSample`s or write
+  `ActionState`.
+- **Prompts are data.** `InputPrompts` (in `rc_game_core`, so every part
+  can read it) is rebuilt when the last-used device, the controller's kind
+  or the bindings change, from `bindings.toml` and `button_names.toml`.
+- **Rebinding saves differences.** `Bindings::changes_from(base)` writes
+  only the actions that differ from the shipped (and modded) bindings, and
+  `with_changes` lays them back on top at start-up.
+- **Panini** is a `FullscreenMaterial` on the player's camera. After
+  `place_camera` sets the normal field of view, `rc_game/src/panini.rs`
+  widens it with `Fit::new` and updates the camera's `PaniniView`. The
+  shader and `Fit::source` do the same maths, which the tests check.
 ## Saving, loading and checkpoints (`rc_game_core::save`, `rc_save`)
 
 **One interface, one section per part.** A save file is a plain TOML text
