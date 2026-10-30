@@ -7,8 +7,8 @@
 //! stops the game with a message naming it.
 
 use bevy::prelude::Resource;
-use rc_pads::GyroSettings;
 use rc_game_core::paths::resolve;
+use rc_pads::GyroSettings;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -80,6 +80,11 @@ pub struct VideoSection {
     pub width: u32,
     pub height: u32,
     pub vsync: bool,
+    /// With vsync off, the most pictures a second the game draws. 0 is no
+    /// limit. Drawing a menu thousands of times a second only heats the
+    /// graphics card, and on some Windows PCs it can stop the picture
+    /// updating while the game runs on.
+    pub max_fps: u32,
     /// Field of view across a 4:3 screen, degrees. The original's is 85.
     /// Wider screens see more at the sides with the same view up and down
     /// ("Hor+"), so nothing is cut off or stretched to fit.
@@ -181,6 +186,7 @@ impl Default for Settings {
                 width: 1280,
                 height: 720,
                 vsync: true,
+                max_fps: 240,
                 fov: 85.0,
                 widest_shape: 2.0,
                 hud_max_aspect: 16.0 / 9.0,
@@ -268,6 +274,8 @@ display_mode = 'windowed'
 width = 1280
 height = 720
 vsync = true
+# With vsync off, the most pictures a second (0 = no limit).
+max_fps = 240
 # Field of view across a 4:3 screen, degrees (the original's is 85). Wider
 # screens see more at the sides; the view up and down stays the same.
 fov = 85
@@ -338,7 +346,9 @@ impl Settings {
         // place of `display_mode`.
         if let Ok(t) = text.parse::<toml::Table>() {
             let video = t.get("video").and_then(|v| v.as_table());
-            let old = video.and_then(|v| v.get(OLD_FULLSCREEN)).and_then(|v| v.as_bool());
+            let old = video
+                .and_then(|v| v.get(OLD_FULLSCREEN))
+                .and_then(|v| v.as_bool());
             if old == Some(true) && video.is_some_and(|v| !v.contains_key("display_mode")) {
                 s.video.display_mode = DisplayMode::Borderless;
             }
@@ -526,7 +536,10 @@ mod tests {
         let s = Settings::parse("[video]\nfullscreen = false\n").unwrap();
         assert_eq!(s.video.display_mode, DisplayMode::Windowed);
         let both = "[video]\nfullscreen = true\ndisplay_mode = 'fullscreen'\n";
-        assert_eq!(Settings::parse(both).unwrap().video.display_mode, DisplayMode::Fullscreen);
+        assert_eq!(
+            Settings::parse(both).unwrap().video.display_mode,
+            DisplayMode::Fullscreen
+        );
     }
 
     #[test]

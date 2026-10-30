@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Frame rate cap with vsync off; window events in the log (rc_game)
+
+- **Changed:** New `video.max_fps` (default 240, 0 = no limit): with vsync off, `display::limit_frame_rate` waits at the end of each frame. `display::log_window_events` logs the graphics card, backend and driver once, and every focus, hidden/shown and resize of the window.
+- **Why:** The user's picture froze in borderless full screen at 3440x1440 with vsync off while the game kept running (sound, music, menu). Their log: about 1,300 frames a second on the main menu, then a steady 60, no error, no display change. Cause unknown; the uncapped frame rate was the one unusual thing.
+- **Tested how:** `cargo test -p rc_game`; `rc_game` under Xvfb with `max_fps = 10`.
+- **Result:** Tests 36 pass. With `max_fps = 10` the log reads "speed: 10 frames per second, average 100.1 ms". Log shows "display: graphics card llvmpipe ... (Cpu, Vulkan)" and the window events.
+- **Still broken / not tested:** Not tested on Windows. Not known whether this stops the freeze; the cloud's software renderer can't reach 240 frames a second, so the default cap itself is only checked at 10.
+- **Next:** The user plays in borderless again; if it freezes, the new log lines show the card, driver and what the window did.
+
 ## 2026-10-30: Menus spread out on wide screens; windowed, borderless and true full screen (rc_menus, rc_game)
 
 - **Changed:** New `rc_menus::fit`: on screens wider than 4:3 the original menus keep their size and spread out (groups of touching widgets move apart; the options boxes widen with names kept at the left and values at the right; tabs stay joined to their box; the main menu's MAIN MENU bar stretches to keep joining its button box; backdrops cover the screen), up to `[fit] widest_shape = 2.4` in `data/ui/original_menus.toml`. `original_menu::draw` spreads a copy of each page every time it draws (the drop-down list follows its value), and `screens::fit_row_labels` now runs only after that, so names are shrunk only on 4:3 and taller screens. New `rc_game/src/display.rs`: `video.display_mode` (`windowed`, `borderless`, `fullscreen`) replaces `video.fullscreen` (an old `fullscreen = true` loads as borderless); true full screen at another shape than the monitor's draws in a centred box with black bars (`PlayArea`, every camera's viewport, a black `BarsCamera`); the field of view, Panini and menus use the box's shape. FULL SCREEN removed from the VIDEO RESOLUTION list; PORT + has DISPLAY MODE (WINDOWED, BORDERLESS, FULL SCREEN). In borderless, picking a size of another shape than the monitor's switches to a window of that size. `menu::apply_video` moved to `display::apply_video`. `rc_probe --menu/--pages` also paints each page at 16:9, 21:9 and 32:9. Tests: 4 in `rc_menus::fit`, 2 in `display`, 2 in `option_settings`, 1 in `settings`.

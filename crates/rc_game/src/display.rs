@@ -20,11 +20,14 @@ use crate::settings::{DisplayMode, Settings, VideoSection};
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{RenderTarget, Viewport};
 use bevy::prelude::*;
+use bevy::render::renderer::RenderAdapterInfo;
 use bevy::window::{
     Monitor, MonitorSelection, PresentMode, PrimaryMonitor, PrimaryWindow, VideoMode,
     VideoModeSelection, WindowMode, WindowRef,
 };
+use bevy::window::{WindowFocused, WindowOccluded, WindowResized};
 use rc_game_core::GameLog;
+use std::time::{Duration, Instant};
 
 pub struct DisplayPlugin;
 
@@ -35,7 +38,9 @@ impl Plugin for DisplayPlugin {
             .add_systems(
                 Update,
                 (read_desktop, apply_video, find_play_area, fit_cameras).chain(),
-            );
+            )
+            .add_systems(Update, log_window_events)
+            .add_systems(Last, limit_frame_rate);
     }
 }
 
@@ -391,4 +396,69 @@ mod tests {
             (WindowMode::BorderlessFullscreen(at), None)
         );
     }
+}
+
+/// Writes the graphics card in use and every time the window gains or loses
+/// focus, is hidden or changes size, so a log shows what the window was
+/// doing when something went wrong with the picture.
+fn log_window_events(
+    adapter: Option<Res<RenderAdapterInfo>>,
+    mut told_adapter: Local<bool>,
+    mut focused: MessageReader<WindowFocused>,
+    mut occluded: MessageReader<WindowOccluded>,
+    mut resized: MessageReader<WindowResized>,
+    log: Res<GameLog>,
+) {
+    if !*told_adapter {
+        if let Some(a) = adapter {
+            *told_adapter = true;
+            log.line(format!(
+                "display: graphics card {} ({:?}, {:?}), driver {} {}",
+                a.name, a.device_type, a.backend, a.driver, a.driver_info
+            ));
+        }
+    }
+    for e in focused.read() {
+        log.line(format!(
+            "display: window {}",
+            if e.focused { "focused" } else { "lost focus" }
+        ));
+    }
+    for e in occluded.read() {
+        log.line(format!(
+            "display: window {}",
+            if e.occluded { "hidden" } else { "shown again" }
+        ));
+    }
+    if let Some(e) = resized.read().last() {
+        log.line(format!(
+            "display: window resized to {}x{}",
+            e.width, e.height
+        ));
+    }
+}
+
+/// With vsync off, waits at the end of each frame so the game draws at most
+/// `video.max_fps` pictures a second.
+fn limit_frame_rate(settings: Res<Settings>, mut last: Local<Option<Instant>>) {
+    let v = &settings.video;
+    if v.vsync || v.max_fps == 0 {
+        *last = None;
+        return;
+    }
+    let frame = Duration::from_secs_f64(1.0 / v.max_fps as f64);
+    if let Some(start) = *last {
+        let next = start + frame;
+        // Sleep most of the wait (sleeping can overshoot by a millisecond
+        // or more), then spin for the rest.
+        let now = Instant::now();
+        if next > now + Duration::from_millis(2) {
+            std::thread::sleep(next - now - Duration::from_millis(2));
+        }
+        while Instant::now() < next {
+            std::hint::spin_loop();
+        }
+    }
+    // Counting from now, a slow frame isn't made up for by rushing the next.
+    *last = Some(Instant::now());
 }

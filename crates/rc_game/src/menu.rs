@@ -486,7 +486,10 @@ fn change_setting(s: &mut Settings, o: Opt, step: i32) {
         Opt::DisplayMode => {
             use crate::settings::DisplayMode::*;
             let all = [Windowed, Borderless, Fullscreen];
-            let i = all.iter().position(|m| *m == s.video.display_mode).unwrap_or(0) as i32;
+            let i = all
+                .iter()
+                .position(|m| *m == s.video.display_mode)
+                .unwrap_or(0) as i32;
             s.video.display_mode = all[(i + step).rem_euclid(3) as usize];
         }
         Opt::Panini => s.video.panini = (s.video.panini + 0.1 * f).clamp(0.0, 1.0),
