@@ -261,7 +261,7 @@ copy of the game.
   where each mate is, what they're doing, who is down, and the level:
   which doors and lifts are open or moving, and where each of the level's
   scripts has got to (after a load they carry on instead of starting the
-  level over; doors and scripts not yet tested with the game's files). Saves are
+  level over). Saves are
   readable text files in `%APPDATA%\rc_game\saves` on Windows or
   `~/.local/share/rc_game/saves` on Linux (change it with `[save] folder` in
   `settings.toml`), never in the game's folder. The scripted run saves,
