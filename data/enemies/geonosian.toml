@@ -33,6 +33,29 @@ ready_distance = 900      # guess
 drops = ""                # game: the force pike isn't a pick-up
 damage_table = "DV_GeonoshansWarriorDamage" # game: MyDamageVariance
 
+[sound]
+# What the warrior says. Names are groups (SoundMultiple) in
+# GameData/Sounds/character_voice.uax; each time one line from the group
+# plays. List a package's sounds with
+# `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
+#
+# game: GeonosianWarrior AudioTable = WarriorAudio (System/ctaudio.u), a table of one
+# group per event (engine.u EPawnAudioEvent). "hurt_<kind>" and
+# "death_<kind>" are used when that kind of damage did it (blaster,
+# explosion, sonic, electrical, fire, melee, fall, other); otherwise
+# "hurt" and "death". Only the kinds the game's table has are listed.
+# Its other lines (LargeArms, Quiet, HeardSomething, SearchAbort,
+# SeeGrenade, KilledExcited, Retreat, ...) aren't hooked up yet.
+package = "character_voice"
+spotted = ["GWR_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["GWR_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["GWR_DieSmallArms"]         # game: PAE_DieSmallArms
+death_explosion = ["GWR_DieExplosion"]
+hurt_fire = ["GWR_HurtFire"]
+death_fire = ["GWR_DieFire"]
+death_fall = ["GWR_DieFall"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
+
 [look]
 package = "GameData/Animations/geonosian.ukx"   # game: the mesh is in this package
 mesh = "GeonosianWarrior"                        # game: Mesh

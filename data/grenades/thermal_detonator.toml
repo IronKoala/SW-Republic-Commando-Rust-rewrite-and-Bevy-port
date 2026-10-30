@@ -48,7 +48,11 @@ damage_kind = "fire"
 stops = false             # our reading: burning hurts but doesn't stop anyone
 
 [sound]
+# The blast sound is the SpawnSound of the grenade's ExplosionEffect
+# (an Emitter class in Properties/cteffects.u). Not read: the game may use
+# another effect for some surfaces (HitEffectsByMaterial).
 package = "gen_sound"
+blast = "exp_GEN_MedWhistle_01" # game: ThermalDetonatorProjDefaults ExplosionEffect Grenade_ThermDet_Explo_Metal, its SpawnSound
 bounce = "imp_GEN_grenadeBounce_01" # game: ImpactSound
 
 [model]

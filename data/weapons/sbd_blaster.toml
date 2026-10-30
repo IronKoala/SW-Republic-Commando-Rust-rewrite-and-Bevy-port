@@ -31,7 +31,7 @@ range = 200               # MeleeRange
 damage = 100              # MeleeDamage
 
 [sound]
-package = "gen_sound"     # not checked: the sound packages weren't read in the cloud
+package = "gen_sound"     # checked: the sound is in gen_sound.uax
 fire = ["wep_GEN_sbdRocket_01"]   # FireSound (Defaults)
 
 [model]
