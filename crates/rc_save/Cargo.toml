@@ -1,0 +1,19 @@
+[package]
+name = "rc_save"
+version = "0.1.0"
+edition.workspace = true
+description = "Saving, loading and checkpoints: readable save files in a save folder, quicksave and quickload, and saving at checkpoints."
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+# Save files are TOML. serde (MIT OR Apache-2.0), https://serde.rs; toml
+# (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Only the app, ECS and states:
+# no window or renderer, so the tests run without a screen.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state"]

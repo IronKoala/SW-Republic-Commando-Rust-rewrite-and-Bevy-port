@@ -4,6 +4,7 @@
 //! to and from Bevy space at the edges, with the same rule as
 //! `rc_game_core::units`.
 
+use crate::damage_types::DamageTable;
 use crate::health::{Damage, DamageKind, Dead};
 use crate::library::WeaponLibrary;
 use crate::shot::{self, Bolt, Rng};
@@ -39,6 +40,8 @@ pub struct BoltFlight {
     pub weapon: String,
     pub damage: f32,
     pub kind: DamageKind,
+    /// The damage type class, looked up in the target's damage table.
+    pub damage_type: String,
     /// Where it was fired from, Unreal space.
     pub start: Vec3,
 }
@@ -117,6 +120,19 @@ fn gather_targets(q: &Query<(Entity, &GlobalTransform, &Hittable), Without<Dead>
             hit: *hit,
         })
         .collect()
+}
+
+/// `amount` of damage type `ty` against `target`, after the target's
+/// damage table (`DamageTable`): the original's `DamageVariance` lists.
+pub(crate) fn against(
+    lib: &WeaponLibrary,
+    tables: &Query<&DamageTable>,
+    target: Entity,
+    ty: &str,
+    amount: f32,
+) -> f32 {
+    let table = tables.get(target).ok().map(|t| t.0.as_str());
+    amount * lib.damage_types.multiplier(table, ty)
 }
 
 fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &str, volume: f32) {
@@ -278,7 +294,10 @@ pub(crate) fn launch_shots(
     mut rng: ResMut<CombatRng>,
     mut damage: MessageWriter<Damage>,
     mut landed: MessageWriter<ShotLanded>,
+    mut lobbed: MessageWriter<crate::throw::ThrowGrenade>,
     looks: Option<Res<crate::view::BoltLooks>>,
+    tables: Query<&DamageTable>,
+    zoom: Option<Res<crate::melee::Zoom>>,
     log: Option<Res<GameLog>>,
 ) {
     let say = |s: String| match &log {
@@ -297,11 +316,22 @@ pub(crate) fn launch_shots(
             continue;
         };
         let targets = targets.get_or_insert_with(|| gather_targets(&targets_q));
+        // Zoomed in, the player's shots do more (`ZoomDamageMultiplier`).
+        let zoomed = players.contains(f.shooter)
+            && zoom
+                .as_ref()
+                .and_then(|z| z.zoomed())
+                .is_some_and(|w| w == f.weapon);
+        let base = if zoomed {
+            p.damage * p.zoom_damage
+        } else {
+            p.damage
+        };
         let start = to_unreal(f.origin);
         let dir = dir_to_unreal(f.direction).normalize_or_zero();
         let range = match p.shot {
             ShotKind::Instant { range } => range,
-            ShotKind::Bolt { .. } => CROSSHAIR_RANGE,
+            ShotKind::Bolt { .. } | ShotKind::Lobbed { .. } => CROSSHAIR_RANGE,
         };
         // Aim error is added at the point the shot would land.
         let end = start + dir * range;
@@ -325,6 +355,17 @@ pub(crate) fn launch_shots(
         }
 
         match p.shot {
+            ShotKind::Lobbed { speed } => {
+                // The round flies like a grenade: the throw systems take it
+                // from here (and its blast does the damage).
+                let v = dir_to_bevy(dir) * speed / UU_PER_UNIT;
+                lobbed.write(crate::throw::ThrowGrenade {
+                    thrower: f.shooter,
+                    origin: f.origin,
+                    velocity: v,
+                    grenade: p.grenade.clone().unwrap_or_default(),
+                });
+            }
             ShotKind::Instant { range } => {
                 let end = start + dir * range;
                 let hit = trace(level, targets, start, end, Some(f.shooter));
@@ -332,6 +373,10 @@ pub(crate) fn launch_shots(
                 let point = start + (end - start) * t;
                 land(
                     p,
+                    base,
+                    &lib,
+                    &tables,
+                    &log,
                     f.shooter,
                     start,
                     point,
@@ -359,8 +404,9 @@ pub(crate) fn launch_shots(
                         },
                         shooter: f.shooter,
                         weapon: f.weapon.clone(),
-                        damage: p.damage,
+                        damage: base,
                         kind: p.damage_kind,
+                        damage_type: p.damage_type.clone(),
                         start,
                     },
                     Transform::from_translation(to_bevy(start))
@@ -380,6 +426,10 @@ pub(crate) fn launch_shots(
 #[allow(clippy::too_many_arguments)]
 fn land(
     p: &WeaponParams,
+    base: f32,
+    lib: &WeaponLibrary,
+    tables: &Query<&DamageTable>,
+    log: &Option<Res<GameLog>>,
     shooter: Entity,
     start: Vec3,
     point: Vec3,
@@ -390,9 +440,20 @@ fn land(
 ) {
     let target = hit.and_then(|h| h.0);
     if let Some(t) = target {
+        let amount = against(lib, tables, t, &p.damage_type, base);
+        if amount != base {
+            if let Some(l) = log {
+                l.line(format!(
+                    "weapons: {} hit {t:?}: {base} {} x {} = {amount}",
+                    p.id,
+                    p.damage_type,
+                    amount / base.max(f32::EPSILON)
+                ));
+            }
+        }
         damage.write(Damage {
             target: t,
-            amount: p.damage,
+            amount,
             kind: p.damage_kind,
             instigator: Some(shooter),
             point: to_bevy(point),
@@ -417,6 +478,8 @@ pub(crate) fn fly_bolts(
     mut bolts: Query<(Entity, &mut BoltFlight, &mut Transform)>,
     targets_q: Query<(Entity, &GlobalTransform, &Hittable), Without<Dead>>,
     level: Option<Res<LevelCollision>>,
+    lib: Res<WeaponLibrary>,
+    tables: Query<&DamageTable>,
     mut damage: MessageWriter<Damage>,
     mut landed: MessageWriter<ShotLanded>,
 ) {
@@ -434,7 +497,7 @@ pub(crate) fn fly_bolts(
             if let Some(target) = h.entity {
                 damage.write(Damage {
                     target,
-                    amount: b.damage,
+                    amount: against(&lib, &tables, target, &b.damage_type, b.damage),
                     kind: b.kind,
                     instigator: Some(b.shooter),
                     point: to_bevy(point),
@@ -497,6 +560,7 @@ pub(crate) fn weapon_readout(
         // over 50 (the widest weapon so far is 15).
         spread: (p.aim_error / 50.0).clamp(0.0, 1.0),
         on_target: crosshair.is_some_and(|c| c.on_target),
+        zoom_fov: out.zoom_fov,
     };
     if *out != new {
         *out = new;

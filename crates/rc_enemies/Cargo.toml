@@ -16,6 +16,9 @@ rc_level_viewer = { path = "../rc_level_viewer" }
 rc_movement = { path = "../rc_movement" }
 rc_nav = { path = "../rc_nav" }
 rc_package = { path = "../rc_package" }
+# The [enemies] section of save files. serde (MIT OR Apache-2.0),
+# https://serde.rs.
+serde = { version = "1", features = ["derive"] }
 
 # Bevy (MIT OR Apache-2.0), https://bevy.org. The same features as
 # rc_combat (3D meshes and materials for the droids), so the game builds

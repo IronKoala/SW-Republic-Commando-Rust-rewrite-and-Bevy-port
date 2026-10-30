@@ -31,6 +31,10 @@ pub enum ShotKind {
     },
     /// Hits at once along a line up to `range` uu (`bInstantHit` ammo).
     Instant { range: f32 },
+    /// Fires a grenade (the weapon's `grenade` file) at `speed` uu/s along
+    /// the aim: the DC-17m's anti-armour attachment. It flies, falls and
+    /// goes off like a thrown grenade.
+    Lobbed { speed: f32 },
 }
 
 /// Everything about one kind of weapon. Distances are Unreal units (uu),
@@ -60,8 +64,23 @@ pub struct WeaponParams {
     /// Seconds a reload takes (the first-person `Reload` animation).
     pub reload_time: f32,
     pub shot: ShotKind,
+    /// For `Lobbed` shots: the grenade file it fires.
+    pub grenade: Option<String>,
+    /// The zoom steps, fields of view in degrees across a 4:3 screen like
+    /// the game's own setting (`ZoomFOVs` after the first). Each press of
+    /// zoom goes to the next, then back out. Empty: no zoom.
+    pub zoom_fovs: Vec<f32>,
+    /// Damage is multiplied by this while zoomed (`ZoomDamageMultiplier`).
+    pub zoom_damage: f32,
     pub damage: f32,
     pub damage_kind: DamageKind,
+    /// The damage type class (`MyDamageType`), looked up in the target's
+    /// damage table.
+    pub damage_type: String,
+    /// The melee hit with this weapon in hand: reach in uu and damage
+    /// (`MeleeRange`, `MeleeDamage`). `None`: the player's own in
+    /// player.toml.
+    pub melee: Option<(f32, f32)>,
     /// Where shots start, from the eye: forward, right, up (`FPFireOffset`).
     pub fire_offset: [f32; 3],
     /// The camera kick per shot, in rotation units: up, sideways
@@ -109,7 +128,14 @@ impl WeaponParams {
             Some("instant") => ShotKind::Instant {
                 range: need(t.number("shot.range")?, "shot.range")?,
             },
-            Some(o) => return Err(format!("shot.kind `{o}`: use \"bolt\" or \"instant\"")),
+            Some("lobbed") => ShotKind::Lobbed {
+                speed: need(t.number("shot.speed")?, "shot.speed")?,
+            },
+            Some(o) => {
+                return Err(format!(
+                    "shot.kind `{o}`: use \"bolt\", \"instant\" or \"lobbed\""
+                ))
+            }
             None => return Err("`shot.kind` is missing".to_string()),
         };
         let damage_kind = match t.text("shot.damage_kind")? {
@@ -133,7 +159,23 @@ impl WeaponParams {
             recharge_rate: t.number("ammo.recharge_rate")?.unwrap_or(0.0),
             reload_time: t.number("ammo.reload_time")?.unwrap_or(0.0),
             shot,
-            damage: need(t.number("shot.damage")?, "shot.damage")?,
+            grenade: t.text("shot.grenade")?,
+            zoom_fovs: t.numbers("fire.zoom_fovs")?.unwrap_or_default(),
+            zoom_damage: t.number("fire.zoom_damage")?.unwrap_or(1.0),
+            damage_type: t
+                .text("shot.damage_type")?
+                .unwrap_or_else(|| "CTDamageEnergy".to_string()),
+            melee: match (t.number("melee.range")?, t.number("melee.damage")?) {
+                (Some(r), Some(d)) => Some((r, d)),
+                (None, None) => None,
+                _ => return Err("[melee] needs both `range` and `damage`".into()),
+            },
+            // A lobbed shot's damage is its grenade's.
+            damage: if matches!(shot, ShotKind::Lobbed { .. }) {
+                t.number("shot.damage")?.unwrap_or(0.0)
+            } else {
+                need(t.number("shot.damage")?, "shot.damage")?
+            },
             damage_kind,
             fire_offset: t.vec3("fire.offset")?.unwrap_or([0.0; 3]),
             kick: [kick[0], kick[1]],
@@ -157,6 +199,9 @@ impl WeaponParams {
             start_ammo: p.start_ammo.min(p.max_ammo),
             ..p
         };
+        if matches!(p.shot, ShotKind::Lobbed { .. }) && p.grenade.is_none() {
+            return Err("a \"lobbed\" shot needs `shot.grenade`, the grenade file it fires".into());
+        }
         if p.shot_delay < 0.0 || p.max_ammo == 0 {
             return Err("fire.shot_delay must be 0 or more and ammo.max_ammo more than 0".into());
         }

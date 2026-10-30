@@ -13,6 +13,16 @@
 #             BattleDroidBlasterTM). See docs/RESEARCH.md "Battle droids".
 #   "guess" = the original decides this in its compiled engine, which we
 #             don't read. Our own choice; tune freely.
+#
+# Every enemy type has a file like this one in data/enemies/. A file only
+# needs the lines that differ from the battle droid: anything left out
+# takes the battle droid's value. Add a new file to add a new enemy type.
+
+[type]
+id = "battle_droid"       # this file's name
+name = "battle droid"     # for the log
+classes = ["BattleDroid*"] # the game's classes a map's spawner may make; * matches any ending (BattleDroid, BattleDroidTM, ...)
+body = "droid"            # "droid" or "organic": EMP stuns droids, flash grenades blind organics
 
 [movement]
 ground_speed = 375        # game: BattleDroid GroundSpeed
@@ -54,6 +64,9 @@ max_maneuver_time = 10    # game: StateBattleDroidAttack MaxManuverTime
 cover_boredom_time = 15   # game: CTBot CoverBoredomTime (looks for new cover after this long)
 cover_search_radius = 1500 # guess: how far it will go to reach cover
 lost_sight_reposition = 2 # guess: seconds without a clear shot before a stationary droid moves
+uses_cover = true         # guess: looks for cover when shot in the open
+drops = "e5_blaster_pickup" # placeholder: the weapon file it leaves when it falls ("" for none)
+damage_table = "DV_DroidsBattleDroidDamage" # game: BattleDroid DamageVariance (data/combat/damage_types.toml)
 
 [spawning]
 # The original starts most spawners from level scripts. We run proximity
@@ -61,6 +74,15 @@ lost_sight_reposition = 2 # guess: seconds without a clear shot before a station
 # from scripts start when the player comes this close instead.
 activate_unscripted_within = 3000
 max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
+
+[sound]
+# Sound names in GameData/Sounds/<package>.uax; one is picked at random.
+# Empty lists play nothing. List a package's sounds with
+# `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
+package = "droid_sound"   # placeholder: package name to check
+spotted = []              # placeholder: names not read yet
+hurt = []                 # placeholder: names not read yet
+death = []                # placeholder: names not read yet
 
 [look]
 # The animated mesh and which of its animations to play. Names are as

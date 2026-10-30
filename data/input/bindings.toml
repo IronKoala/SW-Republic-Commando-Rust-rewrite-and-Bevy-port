@@ -11,8 +11,15 @@
 # Mouse names: Left, Right, Middle, Back, Forward, WheelUp, WheelDown.
 # Gamepad names: South (A / Cross), East (B / Circle), West (X / Square),
 # North (Y / Triangle), LeftTrigger (LB), LeftTrigger2 (LT), RightTrigger,
-# RightTrigger2, Select, Start, LeftThumb, RightThumb, DPadUp, DPadDown,
-# DPadLeft, DPadRight.
+# RightTrigger2, Select, Start, Mode, LeftThumb, RightThumb, DPadUp, DPadDown,
+# DPadLeft, DPadRight. When SDL reads the controllers there are also
+# RightPaddle1, LeftPaddle1, RightPaddle2, LeftPaddle2 (Steam Deck R4, L4,
+# R5, L5; Xbox Elite and DualSense Edge back buttons), Touchpad
+# (PlayStation) and Misc1 (Share, Capture or Mute).
+#
+# Changing a control in the game doesn't change this file: the change is
+# saved in my_bindings.toml next to settings.toml, which holds only the
+# player's changes. Delete that file to get these defaults back.
 
 [keyboard]
 move_forward = ["KeyW", "ArrowUp"]
@@ -27,6 +34,7 @@ reload = ["KeyR"]
 next_grenade = ["KeyQ"]
 next_weapon = ["Slash"]
 zoom = ["KeyZ"]
+melee = ["KeyV"]          # our choice: the PC original's melee key isn't read yet
 use = ["KeyF", "Enter"]
 squad_command = ["KeyF"]
 flashlight = ["KeyX"]
@@ -34,6 +42,8 @@ squad_search_and_destroy = ["F1"]
 squad_form_up = ["F2"]
 squad_secure_position = ["F3"]
 squad_cancel = ["F4"]
+quick_save = ["F5"]
+quick_load = ["F9"]
 pause = ["Escape", "Pause"]
 menu_up = ["ArrowUp", "KeyW"]
 menu_down = ["ArrowDown", "KeyS"]
@@ -75,6 +85,10 @@ menu_left = ["DPadLeft"]
 menu_right = ["DPadRight"]
 menu_accept = ["South"]
 menu_back = ["East"]
+# Gyro aiming: hold a back button to pause the gyro while re-centring the
+# controller; press the PlayStation touchpad to turn the gyro on or off.
+gyro_ratchet = ["LeftPaddle1", "RightPaddle1"]
+gyro_toggle = ["Touchpad"]
 
 # Sticks: "left" or "right" (or "none").
 [gamepad_sticks]

@@ -1,0 +1,23 @@
+[package]
+name = "rc_scripts_plugin"
+version = "0.1.0"
+edition.workspace = true
+description = "Level scripts in the game: runs the map's own scripting (rc_scripts) in rc_game and carries out what it asks: doors, barricades, the player's health, bacta dispensers, prompts and objectives."
+
+[dependencies]
+rc_combat = { path = "../rc_combat" }
+rc_game_core = { path = "../rc_game_core" }
+rc_level = { path = "../rc_level" }
+rc_level_plugin = { path = "../rc_level_plugin" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_movers_plugin = { path = "../rc_movers_plugin" }
+rc_package = { path = "../rc_package" }
+rc_scripts = { path = "../rc_scripts" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. No window or drawing of its
+# own; it hides what the level part drew.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state", "3d_bevy_render"]

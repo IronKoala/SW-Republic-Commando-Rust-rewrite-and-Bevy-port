@@ -14,6 +14,8 @@
 //!   tell the menus when they've finished loading it.
 //! - [`ActionState`]: what the player asked for this frame (move, look,
 //!   fire, ...), whatever the device. Gameplay never reads keys or buttons.
+//!   [`InputPrompts`] names the button for each action on the device used
+//!   last, for "Press F to use" messages.
 //! - [`PlayerVitals`], [`WeaponReadout`], [`SquadReadout`]: numbers the
 //!   on-screen display shows. Gameplay writes them, the display only reads.
 //! - [`LevelCollision`], [`PlayerStart`], [`Player`], [`PlayerCamera`]: the
@@ -22,6 +24,8 @@
 //! - [`MusicMood`]: calm or battle music; whoever knows a fight started
 //!   sets it.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
+//! - [`save`]: the interface each part fills in so it is saved and loaded
+//!   ([`save::SavePart`]), and the save, load and checkpoint messages.
 //!
 //! This crate has no window or renderer in it, so it builds quickly and its
 //! tests run anywhere.
@@ -30,10 +34,11 @@ mod actions;
 mod hud;
 mod log;
 pub mod paths;
+pub mod save;
 mod state;
 pub mod units;
 
-pub use actions::{Action, ActionState, InputDevice};
+pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
@@ -58,12 +63,18 @@ impl Plugin for CorePlugin {
             .init_resource::<CurrentLevel>()
             .init_resource::<LoadingGate>()
             .init_resource::<ActionState>()
+            .init_resource::<InputPrompts>()
             .init_resource::<PlayerVitals>()
             .init_resource::<WeaponReadout>()
             .init_resource::<SquadReadout>()
             .init_resource::<MusicMood>()
             .add_message::<HudMessage>()
             .add_message::<ViewKick>()
+            .init_resource::<save::SaveList>()
+            .add_message::<save::SaveGame>()
+            .add_message::<save::LoadGame>()
+            .add_message::<save::CheckpointReached>()
+            .add_message::<save::SaveResult>()
             .configure_sets(
                 Update,
                 (

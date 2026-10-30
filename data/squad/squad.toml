@@ -26,9 +26,8 @@ waypoint_radius = 64
 replan_distance = 96
 # Turning speed when standing, degrees per second. Our own.
 turn_rate = 360
-# Seconds a member spends doing a marker job (placing a charge, using a
-# bacta dispenser) before it's done. Our own; the original plays an
-# animation of about this length.
+# Seconds a member spends on a marked job that no [job.*] below matches.
+# Our own; the original plays an animation of about this length.
 marker_work_time = 3
 # Search and destroy: how far from the squad's anchor members look for
 # enemies. Original: Squad.DefaultSearchAndDestroyRadius.
@@ -103,6 +102,158 @@ lp_deactivate = 256
 hp_activate = 768
 hp_deactivate = 384
 prevent_range = 256
+
+# How squad mates fight. The original decides this in compiled code we
+# don't read, so the rules are our own (docs/DESIGN.md, "Squad fighting
+# and reviving"); the numbers say where they come from.
+[fight]
+# Their gun: a file in data/weapons. Delta Squad carries the DC-17m.
+weapon = "dc17m_blaster"
+# 0 = wild, 1 = perfect. Game: Accuracy in Commando07/40/62DeltaDefaults
+# (Properties package); CloneCommando's own is 0.75.
+accuracy = 0.9
+# Aim error in degrees at accuracy 0; the actual error is
+# (1 - accuracy) x this. Our own (same as the droids').
+max_aim_error = 10
+# Farthest they see an enemy, uu. Game: SightRadius in
+# Commando07/40/62DeltaDefaults.
+sight_radius = 5000
+# Seconds from first seeing an enemy to the first shot. Our own.
+reaction_time = 0.5
+# Shots per burst, and seconds between them. The gap is the DC-17m's
+# fire rate (data/weapons/dc17m_blaster.toml); the burst length is our own.
+burst_count = 5
+shot_interval = 0.1
+# Rest between bursts, shortest and longest, seconds. Our own.
+burst_pause_min = 0.6
+burst_pause_max = 1.2
+# A standing commando shoots only this far off where it faces, degrees.
+# Our own (droids: 60, BattleDroid MaxAimYaw).
+max_aim_yaw = 60
+# Hold fire while the player or a squad mate is this close to the line of
+# fire, uu. Our own.
+friendly_clearance = 60
+
+# Reviving a downed commando. Squad mates can't die in the original
+# (bCannotDie): at 0 health they go down until someone revives them. Who
+# goes to revive whom is our own rule (docs/DESIGN.md).
+[revive]
+# Seconds a squad mate kneels to revive someone. Guess: the original
+# revives with the bacta healer (CTInventory.BactaHealer: 5 charges,
+# recharging 1 a second), but how fast a revive uses them is compiled code.
+time = 3
+# Seconds the player holds Use by a downed squad mate. Guess, as above.
+player_time = 3
+# Health they get back, as a share of their maximum (0 to 1). Guess (not
+# stored in the scripts).
+health = 0.5
+# How close the reviver must be to the body, uu. Our own.
+reach = 100
+# Squad mates only go to revive someone this close, uu. Our own.
+range = 4000
+# Squad mates come to revive the player on their own: "yes" or "no".
+revive_player = "yes"
+
+# Marked jobs ("context orders"): aim at a squad marker in the map and
+# press the squad command key (or Use), and a squad mate does the job.
+# A marker gets the first job below whose `match` words (comma separated,
+# any case) appear in the class of its order marker (CTMarkers.u classes
+# like MarkerDoorBreach, MarkerHackDoor, MarkerSnipe, MarkerGrenade), or,
+# for a marker with none (bacta), in the class of the thing it's for (its
+# anchor, like BactaDispenserGEO). Mods can change any job or add new
+# ones; a missing line keeps the built-in value. "game" in a comment names
+# the class the number was read from; the original runs the jobs in
+# compiled code we don't read, so the rest is our own or a guess
+# (docs/DESIGN.md, "Context orders"; docs/RESEARCH.md, "Squad markers").
+#
+# kind = "once": walk to the spot, work `work_time` seconds, done; then,
+#   after `fuse` seconds, a blast (`blast_damage` at the middle, falling
+#   to nothing at `blast_radius` uu) if set, and the `result`:
+#   "heal" (the squad mate gets health and shield back), "trigger" (sets
+#   off the marker's anchor: the level's door or script reacts), "none".
+#   `group = "yes"` sends a squad mate to every spot of the same anchor
+#   and starts when all are in place (door breach: stack up, then blow).
+# kind = "post": walk to the spot and stay until recalled (F4), fighting
+#   from there with `weapon` (a file in data/weapons) and the shooting
+#   numbers given (0 or missing = [fight]'s), or throwing a grenade every
+#   `throw_interval` seconds (it goes off `throw_fuse` seconds later,
+#   `throw_damage` falling to 0 at `throw_radius`): at enemies within
+#   `target_radius` of the marker's target area, or, with no area, at
+#   their own target within `throw_range`.
+# preferred: the squad mate (their `class` or key) who takes the job when
+#   free; otherwise the nearest free one goes.
+
+[job.bacta]
+name = "Bacta"
+match = "bacta"           # anchors BactaDispenserGEO/RAS/YYY/TRN/CORE
+kind = "once"
+work_time = 3             # guess (BactaDispenser BactaRate 4: how it's used is compiled code)
+result = "heal"
+
+[job.demolition]
+name = "Demolition"
+match = "demolition"      # MarkerDemolition at a DemolitionCharge
+kind = "once"
+preferred = "Commando62Delta"  # game: MarkerDemolition PreferredPawnClass (Scorch)
+work_time = 3             # guess
+result = "trigger"
+fuse = 10                 # game: DemolitionCharge ChargePlaced Duration (our reading)
+blast_damage = 256        # game: DemolitionCharge ChargeExplode Damage
+blast_radius = 256        # game: ChargeExplode DamageRadius
+
+[job.breach]
+name = "Breach door"
+match = "breach"          # MarkerDoorBreach at a BreachDoor..., three spots
+kind = "once"
+group = "yes"             # game: three participants (doorman, grenadier, cover)
+work_time = 3             # guess
+result = "trigger"
+fuse = 2.5                # game: BreachDoor DoorChargeLockedState Duration (our reading)
+blast_damage = 200        # game: BreachDoor DoorDamagedState Damage
+blast_radius = 256        # game: DoorDamagedState DamageRadius
+
+[job.slice]
+name = "Slice"
+match = "hack, slice"     # MarkerHackDoor and MarkerHackTerminal
+kind = "once"
+preferred = "Commando40Delta"  # game: PreferredPawnClass (Fixer)
+work_time = 8             # guess: slicing takes longer than a charge
+result = "trigger"
+
+[job.sniper]
+name = "Sniper position"
+match = "snipe"           # MarkerSnipe
+kind = "post"
+preferred = "Commando07Delta"  # game: MarkerSnipe PreferredPawnClass (Sev)
+weapon = "dc17m_sniper"   # from the weapons part; the usual gun until it's there
+sight_radius = 8000       # guess
+accuracy = 1              # game: MarkerSnipe Accuracy
+burst_count = 1
+shot_interval = 0.1
+burst_pause_min = 1.5     # guess
+burst_pause_max = 2.5     # guess
+
+[job.grenade]
+name = "Grenade position"
+match = "grenade"         # MarkerGrenade, with a WeaponTarget area
+kind = "post"
+throw_interval = 6        # guess
+throw_range = 1500        # guess (markers with no target area)
+throw_fuse = 2            # game: ThermalDetonatorProj FuseTime
+throw_damage = 400        # game: CTProjExplosive Damage
+throw_radius = 512        # game: CTProjExplosive DamageRadius
+target_radius = 512       # game: MarkerWeapon WeaponTargetRadius
+
+[job.anti_armour]
+name = "Anti-armour position"
+match = "antiarmor, antiarmour"  # MarkerAntiArmor
+kind = "post"
+preferred = "Commando62Delta"  # game: MarkerAntiArmor PreferredPawnClass (Scorch)
+weapon = "dc17m_antiarmor"  # from the weapons part; the usual gun until it's there
+burst_count = 1
+shot_interval = 0.1
+burst_pause_min = 2       # guess
+burst_pause_max = 3       # guess
 
 # The squad. `class` is the original's character class (CTCharacters),
 # `number` and `name` are what its HUD shows, `hud_slot` its place on the

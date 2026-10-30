@@ -1,0 +1,41 @@
+# Level scripts: the values that are our own choices.
+#
+# Everything a level does (what waits for what, which event opens which
+# door, which barricade a script blows up) comes from the map itself, read
+# when the level loads. See docs/DESIGN.md, "Level scripts". Change a value
+# and run the game again; no rebuild needed.
+
+[timing]
+# A script that plays a line of dialogue and waits for it to finish
+# (bWaitForFinish) waits this many seconds. We don't read the sounds'
+# lengths yet.
+sound_seconds = 3.0
+# A script that plays an animation and waits for its end waits this long.
+anim_seconds = 1.5
+# A character told to walk somewhere (ACTION_MoveToPoint) is taken to be
+# there after this long. Characters don't follow scripts yet.
+move_seconds = 2.0
+# Random waits (ACTION_WaitForRandomTimer) use this seed, so a run can be
+# repeated exactly.
+random_seed = 1138
+
+[actors]
+# Tags that mean "the player" in the game's scripts.
+player_tags = ["PlayerCommando", "Player"]
+# Health of a prop that a map gives no Health. A guess: the game's own
+# default is in native code we haven't read.
+prop_health = 100.0
+# The most actions one script may run in one frame (stops a script that
+# loops with no wait from freezing the game).
+max_actions_per_frame = 64
+
+[bacta]
+# How near the player must stand to use a bacta dispenser, in Unreal units
+# (about 2 cm each). 256 is the game's own value (BactaDispenser's
+# PlayerRange).
+range = 256
+# Health per second while you hold Use at a dispenser. Our choice: the
+# game's BactaRate (4) feeds native code we haven't read.
+heal_per_second = 50
+# Seconds before a used dispenser works again. Our choice.
+recharge_seconds = 10

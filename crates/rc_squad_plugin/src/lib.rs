@@ -12,6 +12,19 @@
 //! - each squad mate is an `rc_combat` target (`Health`, `Shield`, `Team`,
 //!   `Hittable`) with the original's numbers from `data/squad/squad.toml`;
 //!   at 0 health they go down (squad mates can't die) and stop;
+//! - they fight: every living `Team::Separatist` character is a threat
+//!   (`SquadThreats`), and their shots are `rc_combat::FireShot`, so the
+//!   weapons part flies the bolts and does the damage;
+//! - downed commandos are revived: squad mates go to each other and to the
+//!   player (when the player has `Dead`), and the player revives a mate by
+//!   holding `Use` next to them. A revive gives health back and removes
+//!   `Dead`;
+//! - marked jobs ("context orders", `[job.*]` in `squad.toml`) have
+//!   results: bacta gives the squad mate their health and shield back,
+//!   charges and grenades send `rc_combat::Damage` to everyone in the
+//!   blast, and a finished breach, slice or demolition sends
+//!   `SquadJobDone` for whatever owns the anchor (the level's scripts
+//!   and doors) to act on;
 //! - it writes `SquadReadout`, logs to `GameLog`, and runs only while
 //!   playing.
 //!
@@ -20,8 +33,15 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
+pub mod look;
+pub mod save;
+
 use bevy::prelude::*;
-use rc_combat::{Dead, Health, Hittable, Shield, Team};
+use rc_game_core::save::SaveAppExt;
+use rc_combat::{
+    CombatSet, Damage, DamageKind, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield,
+    ShotLanded, Team, WeaponLibrary,
+};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
@@ -30,11 +50,13 @@ use rc_game_core::{
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
 use rc_squad::{
-    aimed_spot, Leader, MapSquadInfo, MemberState, Navigator, Order, Squad, SquadSettings,
-    StraightLine,
+    aimed_spot, JobResult, Leader, MapSquadInfo, MemberState, Navigator, Order, Patient, Squad,
+    SquadEvent, SquadSettings, StraightLine, Threat,
 };
+use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The settings file, under `data/` (or a mod's folder).
 pub const SETTINGS_FILE: &str = "squad/squad.toml";
@@ -44,6 +66,8 @@ pub const ORDER_REACH: f32 = 4096.0;
 pub const MARKER_AIM_ANGLE: f32 = 0.12;
 /// Log every member's position this often, seconds.
 pub const LOG_EVERY: f32 = 1.0;
+/// Log the squad's fight numbers this often, seconds.
+pub const FIGHT_LOG_EVERY: f32 = 5.0;
 
 /// An order from something other than the player's buttons: a script, a
 /// touch menu, a VR gesture, or a test. Aimed orders need their spot
@@ -56,13 +80,46 @@ pub struct SquadOrder(pub Order);
 pub struct SquadState {
     pub squad: Option<Squad>,
     since_log: f32,
+    /// Post weapons not found, logged once each.
+    missing_weapons: std::collections::BTreeSet<String>,
 }
 
-/// Enemies the squad should know about, in Unreal units. Filled by
-/// whatever tracks enemies (until combat ties in, nothing does and the
-/// squad only follows and holds).
+/// Enemies the squad knows about this frame, in Unreal units. Rebuilt
+/// every frame from the living `Team::Separatist` characters that have a
+/// `Hittable` body; `Threat::id` is the entity's bits.
 #[derive(Resource, Default, Debug, Clone)]
-pub struct SquadThreats(pub Vec<UVec3>);
+pub struct SquadThreats(pub Vec<Threat>);
+
+/// The squad's fight so far, per member (in `Squad::members` order), for
+/// the log and tests.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct SquadFightStats {
+    pub shots: Vec<u32>,
+    /// Shots that landed on an enemy.
+    pub hits: Vec<u32>,
+    pub kills: Vec<u32>,
+    /// Revives done: by each member, and by the player.
+    pub revives: Vec<u32>,
+    pub player_revives: u32,
+    /// Seconds from going down to back up, every revive.
+    pub revive_waits: Vec<f32>,
+    /// Squad time each commando went down (index = member, last = player).
+    down_since: Vec<Option<f32>>,
+    since_log: f32,
+}
+
+impl SquadFightStats {
+    fn sized(n: usize) -> Self {
+        SquadFightStats {
+            shots: vec![0; n],
+            hits: vec![0; n],
+            kills: vec![0; n],
+            revives: vec![0; n],
+            down_since: vec![None; n + 1],
+            ..Default::default()
+        }
+    }
+}
 
 /// What the current map tells the squad: marked jobs, where the map would
 /// bring squad mates in, and its path network.
@@ -133,6 +190,85 @@ impl SquadMapData {
     }
 }
 
+/// A squad mate finished a job that sets something off: a door breached
+/// or sliced open, a demolition charge blown. `anchor` is the map actor
+/// the job was for (like `DemolitionCharge2`); the level's scripts and
+/// doors listen for it. Positions are in Bevy space.
+#[derive(Message, Debug, Clone)]
+pub struct SquadJobDone {
+    pub job: String,
+    pub marker: String,
+    pub anchor: String,
+    pub anchor_class: String,
+    pub at: Vec3,
+    /// Who did it.
+    pub member: String,
+}
+
+/// Job results waiting for `carry_out_jobs` (filled by `run_squad`).
+#[derive(Resource, Default, Debug)]
+pub struct SquadJobQueue(pub Vec<SquadEvent>);
+
+/// The squad mates' models, read from the game the first time a squad
+/// is spawned and kept between maps. `None`: couldn't be read (the mate
+/// gets the stand-in body).
+#[derive(Resource, Default)]
+pub struct SquadLooks {
+    tried: bool,
+    pub ambient: f32,
+    pub models: HashMap<String, Option<Arc<rc_model::Model>>>,
+}
+
+impl SquadLooks {
+    fn load(&mut self, paths: Option<&GamePaths>, keys: &[String], log: &Option<Res<GameLog>>) {
+        if self.tried {
+            return;
+        }
+        self.tried = true;
+        let (looks, file) = match look::LooksFile::read(paths) {
+            Ok(x) => x,
+            Err(e) => {
+                log_line(log, format!("{e}; squad mates get stand-in bodies"));
+                return;
+            }
+        };
+        log_line(log, format!("looks from {}", file.display()));
+        self.ambient = looks.ambient;
+        let Some(paths) = paths else {
+            log_line(log, "no game folder; squad mates get stand-in bodies");
+            return;
+        };
+        for key in keys {
+            let t = std::time::Instant::now();
+            let model = match look::load_model(paths, &looks, key) {
+                Ok((m, notes)) => {
+                    for n in notes {
+                        log_line(log, format!("{key}: {n}"));
+                    }
+                    log_line(
+                        log,
+                        format!(
+                            "{key}: model read in {:.0} ms",
+                            t.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    );
+                    Some(Arc::new(m))
+                }
+                Err(e) => {
+                    log_line(
+                        log,
+                        format!(
+                            "{key}: model not loaded, using the stand-in body (placeholder): {e}"
+                        ),
+                    );
+                    None
+                }
+            };
+            self.models.insert(key.clone(), model);
+        }
+    }
+}
+
 /// One squad mate's body in the world. Its `Transform` is at the feet,
 /// turned to face the way they face (like the player's).
 #[derive(Component, Debug)]
@@ -153,9 +289,23 @@ pub struct SquadPlugin;
 impl Plugin for SquadPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SquadOrder>()
+            .add_message::<SquadJobDone>()
+            .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadThreats>()
+            .init_resource::<SquadFightStats>()
+            .init_resource::<SquadLooks>()
+            .add_save_part::<save::SquadSave>()
             .add_systems(OnEnter(GameState::Loading), load_map_data)
+            .add_systems(
+                Update,
+                save::apply_pending
+                    .in_set(GameSet::Simulate)
+                    .in_set(SquadSet)
+                    .after(spawn_squad)
+                    .before(check_down)
+                    .run_if(resource_exists::<save::PendingSquadSave>),
+            )
             .add_systems(OnExit(GameState::InGame), clear_squad)
             .add_systems(
                 Update,
@@ -163,17 +313,27 @@ impl Plugin for SquadPlugin {
                     spawn_squad,
                     check_down,
                     take_orders,
+                    gather_threats,
                     run_squad,
+                    carry_out_jobs,
                     write_readout,
                 )
                     .chain()
                     .in_set(GameSet::Simulate)
                     .in_set(SquadSet)
+                    .before(CombatSet::Fire)
                     .run_if(playing),
             )
             .add_systems(
                 Update,
-                place_bodies
+                count_hits
+                    .in_set(GameSet::Simulate)
+                    .after(CombatSet::ApplyDamage)
+                    .run_if(playing),
+            )
+            .add_systems(
+                Update,
+                (place_bodies, look::animate)
                     .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
             );
@@ -211,7 +371,14 @@ fn load_map_data(
     commands.insert_resource(data);
 }
 
-fn clear_squad(mut state: ResMut<SquadState>) {
+fn clear_squad(
+    mut state: ResMut<SquadState>,
+    stats: Res<SquadFightStats>,
+    log: Option<Res<GameLog>>,
+) {
+    if let Some(squad) = &state.squad {
+        log_line(&log, fight_line(squad, &stats));
+    }
     state.squad = None;
 }
 
@@ -269,6 +436,8 @@ fn spawn_squad(
     log: Option<Res<GameLog>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
+    images: Option<ResMut<Assets<Image>>>,
+    mut looks: ResMut<SquadLooks>,
 ) {
     if state.squad.is_some() {
         return;
@@ -304,17 +473,25 @@ fn spawn_squad(
         &*collision.0,
     );
     if let Some(m) = &map {
-        squad.markers = m
-            .info
-            .markers
-            .iter()
-            .cloned()
-            .map(|s| (s, rc_squad::MarkerState::Open))
-            .collect();
+        squad.set_markers(m.info.markers.clone());
+        for k in 0..squad.markers.len() {
+            let spot = &squad.markers[k].0;
+            log_line(
+                &log,
+                format!(
+                    "marker {} -> {}",
+                    spot.name,
+                    squad
+                        .job_of(k)
+                        .map_or("no job matches (generic job)".into(), |j| j.summary())
+                ),
+            );
+        }
     }
     for e in &events {
         log_line(&log, e.to_string());
     }
+    commands.insert_resource(SquadFightStats::sized(squad.members.len()));
     log_line(
         &log,
         format!(
@@ -331,33 +508,21 @@ fn spawn_squad(
             }
         ),
     );
-    // Stand-in bodies: a capsule the commando's size in their colour, with
-    // a dark visor showing which way they face. Skipped without a renderer.
-    let look = match (meshes, materials) {
-        (Some(mut meshes), Some(mut materials)) => {
-            let radius = 40.0 / rc_game_core::units::UU_PER_UNIT;
-            let height = 168.0 / rc_game_core::units::UU_PER_UNIT;
-            let body = meshes.add(Capsule3d::new(radius, height - 2.0 * radius));
-            let visor = meshes.add(Cuboid::new(0.55, 0.22, 0.3));
-            let visor_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.05, 0.05, 0.06),
-                perceptual_roughness: 0.3,
-                ..default()
-            });
-            let mats: Vec<_> = squad
-                .members
-                .iter()
-                .map(|m| {
-                    let [r, g, b] = m.settings.colour;
-                    materials.add(StandardMaterial {
-                        base_color: Color::srgb(r, g, b),
-                        perceptual_roughness: 0.7,
-                        ..default()
-                    })
-                })
-                .collect();
-            Some((body, visor, visor_mat, mats, height))
-        }
+    // The original models where they could be read; otherwise a stand-in
+    // body (placeholder): a capsule the commando's size in their colour,
+    // with a dark visor showing which way they face. Nothing is drawn
+    // without a renderer.
+    let drawing = meshes.is_some() && materials.is_some() && images.is_some();
+    if drawing {
+        let keys: Vec<String> = squad
+            .members
+            .iter()
+            .map(|m| m.settings.key.clone())
+            .collect();
+        looks.load(paths.as_deref(), &keys, &log);
+    }
+    let mut assets = match (meshes, materials, images) {
+        (Some(meshes), Some(materials), Some(images)) => Some((meshes, materials, images)),
         _ => None,
     };
     for (i, m) in squad.members.iter().enumerate() {
@@ -378,23 +543,64 @@ fn spawn_squad(
             ),
             Team::Republic,
             Hittable::COMMANDO,
+            // The original's squad damage table: droid bolts x0.15,
+            // explosions x0.4, stuns x0.
+            DamageTable("DV_OrganicCTSquadDamage".into()),
         ));
-        if let Some((body, visor, visor_mat, mats, height)) = &look {
-            e.with_children(|c| {
-                c.spawn((
-                    Mesh3d(body.clone()),
-                    MeshMaterial3d(mats[i].clone()),
-                    Transform::from_xyz(0.0, height / 2.0, 0.0),
-                ));
-                c.spawn((
-                    Mesh3d(visor.clone()),
-                    MeshMaterial3d(visor_mat.clone()),
-                    Transform::from_xyz(0.0, height - 0.45, -0.72),
-                ));
-            });
+        let Some((meshes, materials, images)) = assets.as_mut() else {
+            continue;
+        };
+        if let Some(Some(model)) = looks.models.get(&m.settings.key) {
+            let mm = look::spawn_pieces(
+                model.clone(),
+                looks.ambient,
+                &mut e,
+                meshes,
+                materials,
+                images,
+            );
+            e.insert(mm);
+        } else {
+            stand_in_body(&mut e, m.settings.colour, meshes, materials);
         }
     }
     state.squad = Some(squad);
+}
+
+/// The placeholder body for a squad mate whose model couldn't be read.
+fn stand_in_body(
+    e: &mut EntityCommands,
+    colour: [f32; 3],
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let radius = 40.0 / rc_game_core::units::UU_PER_UNIT;
+    let height = 168.0 / rc_game_core::units::UU_PER_UNIT;
+    let body = meshes.add(Capsule3d::new(radius, height - 2.0 * radius));
+    let visor = meshes.add(Cuboid::new(0.55, 0.22, 0.3));
+    let visor_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.05, 0.05, 0.06),
+        perceptual_roughness: 0.3,
+        ..default()
+    });
+    let [r, g, b] = colour;
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(r, g, b),
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+    e.with_children(|c| {
+        c.spawn((
+            Mesh3d(body),
+            MeshMaterial3d(mat),
+            Transform::from_xyz(0.0, height / 2.0, 0.0),
+        ));
+        c.spawn((
+            Mesh3d(visor),
+            MeshMaterial3d(visor_mat),
+            Transform::from_xyz(0.0, height - 0.45, -0.72),
+        ));
+    });
 }
 
 /// The player's eye and aim, in Unreal units.
@@ -471,16 +677,49 @@ fn take_orders(
     }
 }
 
+/// Every living enemy with a body, for the squad to fight.
+fn gather_threats(
+    mut threats: ResMut<SquadThreats>,
+    enemies: Query<(Entity, &Transform, &Team, &Hittable), Without<Dead>>,
+) {
+    threats.0.clear();
+    for (e, t, team, hit) in &enemies {
+        if *team != Team::Separatist {
+            continue;
+        }
+        let feet = to_unreal(t.translation);
+        let centre = feet + UVec3::new(0.0, 0.0, hit.center_up);
+        threats.0.push(Threat {
+            id: e.to_bits(),
+            feet,
+            centre,
+            // Eyes near the top of the body (a battle droid's are 60 uu
+            // above its middle, a commando's 64).
+            eye: centre + UVec3::new(0.0, 0.0, hit.half_height * 0.75),
+        });
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn run_squad(
     time: Res<Time>,
     mut state: ResMut<SquadState>,
-    player: Query<&Transform, With<Player>>,
+    mut player: Query<(Entity, &Transform, Option<&mut Health>, Has<Dead>), With<Player>>,
+    mut mates: Query<(Entity, &SquadMate, &mut Health), Without<Player>>,
+    actions: Option<Res<ActionState>>,
     collision: Option<Res<LevelCollision>>,
     map: Option<Res<SquadMapData>>,
     threats: Res<SquadThreats>,
+    mut stats: ResMut<SquadFightStats>,
+    mut fire: MessageWriter<FireShot>,
+    mut jobs: ResMut<SquadJobQueue>,
+    library: Option<Res<WeaponLibrary>>,
+    mut commands: Commands,
     log: Option<Res<GameLog>>,
 ) {
-    let (Ok(pt), Some(collision)) = (player.single(), collision) else {
+    let (Ok((player_e, pt, mut player_health, player_dead)), Some(collision)) =
+        (player.single_mut(), collision)
+    else {
         return;
     };
     let leader = leader_from(pt);
@@ -490,20 +729,310 @@ fn run_squad(
         return;
     };
     squad.threats.clone_from(&threats.0);
+    if squad.leader_down != player_dead {
+        squad.leader_down = player_dead;
+        let n = stats.down_since.len();
+        if n > 0 {
+            stats.down_since[n - 1] = player_dead.then_some(squad.time);
+        }
+        log_line(
+            &log,
+            format!(
+                "t={:.2} the player is {}",
+                squad.time,
+                if player_dead { "DOWN" } else { "back up" }
+            ),
+        );
+    }
     let world: &dyn World = &*collision.0;
     let nav: &dyn Navigator = match map.as_ref().and_then(|m| m.nav.as_ref()) {
         Some(g) => g,
         None => &StraightLine,
     };
-    let events = squad.update(dt, leader, world, nav);
+    let holding_use = actions.as_ref().is_some_and(|a| a.pressed(Action::Use));
+    let mut events = squad.player_use(dt, leader, holding_use);
+    events.extend(squad.update(dt, leader, world, nav));
+    let usual_weapon = squad.settings.fight.weapon.clone();
+    let revive_health = squad.settings.revive.health.clamp(0.01, 1.0);
     for e in &events {
-        log_line(&log, format!("t={:.2} {e}", squad.time));
+        match e {
+            SquadEvent::Fire {
+                index,
+                origin,
+                direction,
+                burst_start,
+                weapon,
+                ..
+            } => {
+                // A post's own gun, if the weapons part has it.
+                let weapon = match &library {
+                    Some(lib) if !lib.weapons.contains_key(weapon) => {
+                        if state.missing_weapons.insert(weapon.clone()) {
+                            log_line(
+                                &log,
+                                format!("no weapon file `{weapon}`; using {usual_weapon} instead"),
+                            );
+                        }
+                        &usual_weapon
+                    }
+                    _ => weapon,
+                };
+                if let Some((entity, _, _)) = mates.iter().find(|(_, m, _)| m.index == *index) {
+                    fire.write(FireShot {
+                        shooter: entity,
+                        origin: to_bevy(*origin),
+                        direction: Vec3::new(direction.x, direction.z, direction.y),
+                        weapon: weapon.clone(),
+                    });
+                    if let Some(n) = stats.shots.get_mut(*index) {
+                        *n += 1;
+                    }
+                }
+                if *burst_start {
+                    log_line(&log, format!("t={:.2} {e}", squad.time));
+                }
+            }
+            SquadEvent::HeldFire { .. } => log_line(&log, format!("t={:.2} {e}", squad.time)),
+            SquadEvent::JobResult { .. } | SquadEvent::Blast { .. } => {
+                log_line(&log, format!("t={:.2} {e}", squad.time));
+                jobs.0.push(e.clone());
+            }
+            SquadEvent::ReviveDone {
+                member, patient, ..
+            } => {
+                log_line(&log, format!("t={:.2} {e}", squad.time));
+                let by = squad
+                    .members
+                    .iter()
+                    .position(|m| &m.settings.name == member);
+                match by {
+                    Some(i) => stats.revives[i] += 1,
+                    None => stats.player_revives += 1,
+                }
+                let slot = match patient {
+                    Patient::Mate(i) => *i,
+                    Patient::Leader => stats.down_since.len().saturating_sub(1),
+                };
+                if let Some(since) = stats.down_since.get_mut(slot).and_then(|s| s.take()) {
+                    let wait = squad.time - since;
+                    stats.revive_waits.push(wait);
+                    log_line(
+                        &log,
+                        format!(
+                            "t={:.2} {} was down for {wait:.1} s",
+                            squad.time,
+                            e_patient(e)
+                        ),
+                    );
+                }
+                // Health back and `Dead` gone: the game sees them up again.
+                match patient {
+                    Patient::Mate(i) => {
+                        for (entity, mate, mut h) in &mut mates {
+                            if mate.index == *i {
+                                h.current = h.max * revive_health;
+                                commands.entity(entity).remove::<Dead>();
+                            }
+                        }
+                    }
+                    Patient::Leader => {
+                        if let Some(h) = player_health.as_mut() {
+                            h.current = h.max * revive_health;
+                        }
+                        commands.entity(player_e).remove::<Dead>();
+                    }
+                }
+            }
+            _ => log_line(&log, format!("t={:.2} {e}", squad.time)),
+        }
     }
     state.since_log += dt;
     if state.since_log >= LOG_EVERY {
         state.since_log = 0.0;
         log_line(&log, status_line(squad, leader));
     }
+    stats.since_log += dt;
+    if stats.since_log >= FIGHT_LOG_EVERY {
+        stats.since_log = 0.0;
+        log_line(&log, fight_line(squad, &stats));
+    }
+}
+
+/// Carry out finished jobs: bacta heals the squad mate, blasts hurt
+/// everyone near them (friend or foe, as in the original), and jobs that
+/// set off their anchor send `SquadJobDone`.
+#[allow(clippy::type_complexity)]
+fn carry_out_jobs(
+    mut jobs: ResMut<SquadJobQueue>,
+    mut mates: Query<(Entity, &SquadMate, &mut Health, Option<&mut Shield>)>,
+    bodies: Query<(Entity, &Transform, &Hittable), Without<Dead>>,
+    mut damage: MessageWriter<Damage>,
+    mut done: MessageWriter<SquadJobDone>,
+    log: Option<Res<GameLog>>,
+) {
+    for e in jobs.0.drain(..) {
+        match e {
+            SquadEvent::JobResult {
+                member,
+                index,
+                marker,
+                job,
+                result,
+                anchor,
+                anchor_class,
+                at,
+            } => match result {
+                JobResult::Heal => {
+                    for (_, mate, mut h, shield) in &mut mates {
+                        if mate.index == index {
+                            h.current = h.max;
+                            if let Some(mut s) = shield {
+                                s.current = s.max;
+                            }
+                            log_line(&log, format!("{member} healed to {:.0} at {marker}", h.max));
+                        }
+                    }
+                }
+                JobResult::Trigger => {
+                    log_line(
+                        &log,
+                        format!("{job} done: sets off {anchor_class} {anchor} (SquadJobDone)"),
+                    );
+                    done.write(SquadJobDone {
+                        job,
+                        marker,
+                        anchor,
+                        anchor_class,
+                        at: to_bevy(at),
+                        member,
+                    });
+                }
+                JobResult::Nothing => {}
+            },
+            SquadEvent::Blast {
+                index,
+                at,
+                damage: amount,
+                radius,
+                what,
+                ..
+            } => {
+                let by = index.and_then(|i| {
+                    mates
+                        .iter()
+                        .find(|(_, m, _, _)| m.index == i)
+                        .map(|(e, ..)| e)
+                });
+                let mut hit = 0;
+                for (target, t, body) in &bodies {
+                    let centre = to_unreal(t.translation) + UVec3::new(0.0, 0.0, body.center_up);
+                    // Distance to the body's edge, not its middle.
+                    let d = ((centre - at).length() - body.radius).max(0.0);
+                    if radius <= 0.0 || d >= radius {
+                        continue;
+                    }
+                    let falloff = 1.0 - d / radius;
+                    let dir = (centre - at).normalize_or_zero();
+                    damage.write(Damage {
+                        target,
+                        amount: amount * falloff,
+                        kind: DamageKind::Explosion,
+                        instigator: by,
+                        point: to_bevy(centre),
+                        direction: Vec3::new(dir.x, dir.z, dir.y),
+                    });
+                    hit += 1;
+                }
+                log_line(&log, format!("{what} blast hurt {hit} bodies"));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn e_patient(e: &SquadEvent) -> String {
+    match e {
+        SquadEvent::ReviveDone { patient_name, .. } => patient_name.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Hits and kills by squad mates, from the weapons part's messages.
+fn count_hits(
+    state: Res<SquadState>,
+    mut stats: ResMut<SquadFightStats>,
+    mut landed: MessageReader<ShotLanded>,
+    mut died: MessageReader<Died>,
+    mates: Query<&SquadMate>,
+    names: Query<&Name>,
+    log: Option<Res<GameLog>>,
+) {
+    let time = state.squad.as_ref().map_or(0.0, |s| s.time);
+    for l in landed.read() {
+        let (Ok(m), Some(t)) = (mates.get(l.shooter), l.target) else {
+            continue;
+        };
+        if mates.contains(t) {
+            log_line(
+                &log,
+                format!("t={time:.2} {} hit a squad mate by mistake", m.name),
+            );
+            continue;
+        }
+        if let Some(n) = stats.hits.get_mut(m.index) {
+            *n += 1;
+        }
+    }
+    for d in died.read() {
+        if mates.contains(d.entity) {
+            if let Some(slot) = stats.down_since.get_mut(mates.get(d.entity).unwrap().index) {
+                *slot = Some(time);
+            }
+            continue;
+        }
+        let Some(m) = d.killer.and_then(|k| mates.get(k).ok()) else {
+            continue;
+        };
+        if let Some(n) = stats.kills.get_mut(m.index) {
+            *n += 1;
+        }
+        let who = names
+            .get(d.entity)
+            .map_or_else(|_| format!("{:?}", d.entity), |n| n.to_string());
+        log_line(&log, format!("t={time:.2} {} KILLED {who}", m.name));
+    }
+}
+
+/// The squad's fight numbers so far, for the log.
+pub fn fight_line(squad: &Squad, stats: &SquadFightStats) -> String {
+    let mut s = format!("t={:.2} fight:", squad.time);
+    for (i, m) in squad.members.iter().enumerate() {
+        s.push_str(&format!(
+            " {} {} shots, {} hits, {} kills, {} revives, held fire {} times;",
+            m.settings.name,
+            stats.shots.get(i).copied().unwrap_or(0),
+            stats.hits.get(i).copied().unwrap_or(0),
+            stats.kills.get(i).copied().unwrap_or(0),
+            stats.revives.get(i).copied().unwrap_or(0),
+            m.fight.held_fire
+        ));
+    }
+    let waits = &stats.revive_waits;
+    s.push_str(&format!(
+        " player revives {}; revives done {}{}",
+        stats.player_revives,
+        waits.len(),
+        if waits.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", down for {:.1}-{:.1} s",
+                waits.iter().copied().fold(f32::INFINITY, f32::min),
+                waits.iter().copied().fold(0.0, f32::max)
+            )
+        }
+    ));
+    s
 }
 
 /// One line with everyone's position and state, for the log.
@@ -522,6 +1051,9 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
             MemberState::Moving { urgent: true, .. } => "running (urgent)".to_string(),
             MemberState::Moving { .. } => "moving".to_string(),
             MemberState::Working { left } => format!("working {left:.1}s"),
+            MemberState::Reviving { left } => format!("reviving {left:.1}s"),
+            MemberState::Ready => "ready at marker".to_string(),
+            MemberState::Posted => "holding post".to_string(),
         };
         let state = if m.down { "DOWN".to_string() } else { state };
         s.push_str(&format!(
@@ -607,7 +1139,10 @@ fn write_readout(
     }
 }
 
-fn place_bodies(state: Res<SquadState>, mut mates: Query<(&SquadMate, &mut Transform)>) {
+fn place_bodies(
+    state: Res<SquadState>,
+    mut mates: Query<(&SquadMate, &mut Transform), Without<Player>>,
+) {
     let Some(squad) = state.squad.as_ref() else {
         return;
     };

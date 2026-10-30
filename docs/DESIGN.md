@@ -24,11 +24,17 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
-| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log. Bevy, but no window. |
+| `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
+| `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
+| `rc_scripts` | Level scripts: runs a map's own scripting (scripted triggers and sequences, touch triggers, counters, true/false conditions, checkpoints, destructible props) as events and tags. No Bevy. `rc_script_check` reads every map's scripts and runs them without a window. |
+| `rc_scripts_plugin` | `ScriptsPlugin`, level scripts in `rc_game`: carries out what the scripts ask (doors, barricades, the player's health, bacta dispensers, prompts, objectives, checkpoints) and sends every event as a `ScriptEvent`. |
+| `rc_save` | Saving, loading and checkpoints: `SavePlugin` writes and reads the save files, quicksave and quickload, and saves at checkpoints. Bevy, but no window. |
 | `rc_level_plugin` | The level part of the game: `LevelPlugin` loads the chosen map into `rc_game` (its look, sky, collision with props, doors and invisible walls, and the player start). |
 | `rc_game` | The game: one program with the menus, settings, controls, player, on-screen display and music. The other parts (levels, weapons, enemies, squad) plug into it. |
 | `rc_nav` | The level's path network (path nodes and the editor's links between them), shortest routes, and walking a route with the player's physics. Shared by enemies and the squad. No Bevy. Tool: `rc_navcheck`. |
 | `rc_ai` | What enemies decide: settings from `data/enemies/*.toml`, the map's spawners, one fighter's brain, and a whole fight on a map (`Battle`). No Bevy. Tool: `rc_droidsim` (droids against a stand-in player, no window). |
+| `rc_pads` | Controllers: which kind each one is, button names for prompts, gyro clean-up, and an SDL3 reader (built from source) for controllers and gyros. Bevy, no window. Tool: `rc_padtest`. |
+| `rc_panini` | The optional Panini view for very wide screens: a full-screen pass that bends the 3D view. Check: `panini_check` example. |
 | `rc_enemies` | Bevy plugin `EnemiesPlugin`: battle droids in the game, shooting and taking damage through `rc_combat`, animated with the game's mesh. Program: `rc_droidview` (watch a fight in a real level, with a picture check). |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
@@ -1027,7 +1033,28 @@ where the map placed the mover; `rc_walk` sets their `Transform` each
 frame to the mover's move from there (Unreal to Bevy swaps Y and Z, so the
 turn's rows and columns swap the same way).
 
-### How we check movers without looking
+### In the game (`rc_movers_plugin`)
+
+The level part hands over the map's movers and their triangles
+(`LevelMoverData`) while loading. `MoversPlugin` builds the same
+`MoverSet` the walker uses, then swaps `LevelCollision` for "the level plus
+the movers where they are now", so everything that moves or shoots (the
+player, shots, later droids and the squad) runs into doors and stands on
+lifts without knowing about movers. The set sits behind a read-write lock
+inside the `LevelMovers` resource: sweeps read it, and stepping writes it.
+
+Each frame the player's movement calls `LevelMovers::step` just before its
+own step, as in the walker: movers move first (UE2 ticks movers before
+pawns), carrying or pushing the player, then the player moves among them.
+A `MoverSystems` set (in `GameSet::View`) then logs what happened
+(`movers: t=... MoverDB_GEO2 starts opening`), sends each as a
+`MoverHappened` message for sounds and level scripts, and moves the drawn
+`MoverPart`s.
+
+Other parts open a door the way the original's scripts do: by event name.
+`LevelMovers::send("D_Exit")` sets off every mover whose `Tag` is `D_Exit`.
+
+
 
 - **Unit tests** (`cargo test -p rc_movers`): a triggered door opens in its
   `MoveTime`, waits `StayOpenTime` and closes; the smooth curve is at 15.6%
@@ -1060,6 +1087,146 @@ and closed in their `MoveTimes` (72 take over 60 s and weren't run). 33 of
 movers have nothing in the map sending their tag: most likely the game's
 scripts. In the walker, geo_05a's `Mover37` carried the player 12,176
 units up in 18 s with a gap of 0.0 units.
+
+## Level scripts (`rc_scripts`, `rc_scripts_plugin`)
+
+A Republic Commando level is a mission because of its scripting, and the
+scripting is data in the map, not code. It works with **events** and
+**tags**: every actor has a `Tag` (a name), and many have an `Event`
+(another name). "Triggering" an event wakes every actor whose `Tag` is that
+name. The map's own scripts are `ScriptedTrigger` and `ScriptedSequence`
+actors, each holding an `Actions` list of small objects with values:
+
+```
+ScriptedTrigger15:
+  0 WaitForEvent   ExternalEvent=BactaUsed
+  1 SetCollision   CollideActorTag=BactaBarricadeBlockingVolume bCollideActors=false
+  ...
+ 11 HurtActor      TargetTag=PathToGunshipBarricade amount=50000
+```
+
+### Reading (`rc_level::scripts`)
+
+`read` takes every actor in the level (except plain meshes, path nodes and
+lights) with all its values by name: numbers, true/false, names, strings,
+lists of objects, and structs. Republic Commando writes most structs as
+named values too (a dispenser's `BactaRecharging = {Event=BactaUsed, ...}`,
+a random wait's `PauseTime = {Min=2, Max=4}`), so those are read the same
+way. A script's `Actions` list is resolved to the action objects, in
+order; empty slots are skipped, as the original does. New action kinds need
+no code in the reader. All 79 maps read with nothing unreadable: 2,842
+scripts with 19,041 actions of 87 kinds.
+
+`tagged_actors` lists the props and blocking volumes with a `Tag` of their
+own. Those are what scripts switch off or blow up (barricades, bunker
+walls), so the collision loader keeps their triangles apart
+(`MapCollision::part_triangles`) and the level drawing gives them batches
+of their own (`MoverPart`), like movers.
+
+### Running (`rc_scripts::Director`)
+
+The director runs every script one action at a time until it has to wait:
+
+- **Own actions** (run inside the director): `WaitForEvent`,
+  `TriggerEvent`, `WaitForTimer`, `WaitForRandomTimer`, `Label`,
+  `GotoLabel`, `GotoAction`, `IfCondition`/`IfRandomPct` ... `EndSection`
+  (an `If` runs its section only when true, otherwise skips to the matching
+  `EndSection`; sections nest).
+- **Everything else** comes out as an `Effect::Action` for the game. Some
+  also take time: a line of dialogue with `bWaitForFinish`, an animation
+  that waits for its end, a character told to walk. Their lengths are our
+  settings (sound lengths aren't read yet).
+- `HurtActor` and `DestroyActor` on a **prop** are the director's: it keeps
+  each prop's `Health` and reports `PropDestroyed` (and sends the prop's
+  `DestroyedState.Event`).
+
+An event, when sent, goes to: scripts waiting for it; `ScriptedSequence`s
+handed out by a `PawnFactory` with that tag (`AIScriptFromFactory`; a
+sequence also runs from the start if a placed character names it in
+`AIScriptTag`); touch triggers it switches on or off (`OtherTriggerTurnsOn`,
+`...TurnsOff`, `...Toggles`); `Counter`s (count down `NumToCount`, then
+send their own event); `TriggeredCondition`s (a `bToggled` one flips, others
+take the opposite of how they started, `bTriggerControlled` ones go back
+when untriggered); `Checkpoint`s (`Effect::Checkpoint`). Every event also
+comes out as `Effect::Event`, so the game can pass it to doors, factories
+and anything else. All of this is our reading of Unreal Engine 2's public
+descriptions of these classes and of what the maps store; no game code was
+copied.
+
+Scripts run before events are handed out each frame, so a script that has
+just reached a `WaitForEvent` hears an event sent in the same frame. A
+chain settles within the frame (up to 8 rounds); a script that loops
+without waiting stops after 64 actions in a frame and carries on the next
+(`max_actions_per_frame`), so no map can freeze the game.
+
+The level starts by sending the first `PlayerStart`'s `Event` (`levelstart`
+in most campaign maps; `Startup`, `SetupLevel` and others in some).
+
+### In the game (`rc_scripts_plugin`)
+
+While loading, the plugin reads the map's scripts and builds the director
+once the level part has read the triggers (loading gate part `scripts`).
+It inserts `TriggersRunElsewhere`, so the movers part leaves touch triggers
+to the director and one place sends every trigger's event. Each frame of
+play (after the player moves) it steps the director with the player's body
+and carries out the effects:
+
+| Effect | What happens |
+|---|---|
+| any event | `LevelMovers::send`: doors and lifts with that tag; then a `ScriptEvent` message for other parts |
+| a door's own event (`OpenedEvent`, ...) | back into the director, so scripts can wait for doors |
+| player leaves a trigger | `LevelMovers::release` (doors that open only while set off close) |
+| `SetCollision` | `LevelParts::set_solid(tag, bCollideActors)` |
+| prop destroyed, `DestroyActor` | part no longer solid; its drawn `MoverPart`s hidden |
+| `SetHidden` | drawn parts hidden |
+| `HurtActor` on the player (`PlayerCommando`) | `rc_combat` `Damage` to the player |
+| `GotoState` on a bacta dispenser | switched off (`Disabled`) or on |
+| `ShowPrompt` | `HudMessage` (`@`, the button, shows as USE for now) |
+| `ObjectiveUpdate` | kept in `Objectives` (what the numbers mean isn't worked out) |
+| checkpoint | `CheckpointReached { name }`, held while the player is down |
+| anything else | logged with the action's values and the script's own comment, "not done yet" |
+
+**Bacta dispensers.** Hold Use within 256 units of one that's switched on
+(the game's `PlayerRange`) to heal at 50 health per second (our choice).
+Starting sends the dispenser's `BactaActive.Event`; full health sends its
+`BactaRecharging.Event` and it rests 10 s (our choice). In geo_01a those
+are `BactaDispenserActive` (a condition the reminder lines check) and
+`BactaUsed`, which is what opens the landing zone.
+
+### geo_01a, worked through
+
+From the map: `levelstart` starts the gunship intro (`ScriptedTrigger52`),
+which sends `Rappel`; `ScriptedTrigger7` plays the advisor's lines, sends
+`CheckpointLevelStart` (checkpoint0) and `StartBactaTraining`;
+`ScriptedTrigger3` hurts the player 175 (an "anti-infantry round"), plays
+the "heal yourself" lines and sends `StartBactaReminderTimer`;
+`ScriptedTrigger86` switches the dispenser `BactaDispenserLZ` on. Using it
+sends `BactaUsed`, and `ScriptedTrigger15` switches off
+`BactaBarricadeBlockingVolume`, sends `RetreatToGammaSector`, and blows up
+the prop `PathToGunshipBarricade` (`Blockade01`, health 49,000, hurt
+50,000). The barricade's other piece (`Blockade02`, a plain mesh) stays: the
+way through is the gap where `Blockade01` stood.
+
+### How we check it without looking
+
+- **Unit tests** (`cargo test -p rc_scripts`, 7): an event and timer chain
+  in order and on time; `IfCondition` skipping a section only when its
+  condition is on; a counter sending on its last count and a checkpoint
+  asking for a save; touch triggers firing once, and one switched on by
+  another; a prop destroyed when its health runs out; a loop with no wait
+  bounded, and a sequence starting with its factory; the settings file.
+- **Every map** (`rc_script_check`): reads all scripts, lists every action
+  with its values, counts action kinds, sends the level start and runs 30 s
+  (or `--secs`) with no player, logging every event and effect. `--fire
+  BactaUsed@60` stands in for the game.
+- **In the game** (`rc_game --script`): on geo_01a it checks the scripts
+  run and `levelstart` was sent, that a box swept through the barricade at
+  `Blockade01` is stopped, waits for the scripts to switch the dispenser
+  on, stands the player at the dispenser's marker, holds Use, waits for the
+  barricade to go, then checks the same sweep now passes, the volume isn't
+  solid, both drawn parts of the prop are hidden, and that the chain of
+  events happened in order with the player hurt, healed and checkpoint0
+  saved.
 
 ## Sounds
 
@@ -1200,10 +1367,59 @@ instead.
 
 A marked job is two actors in the map: the thing (the "anchor", like
 `BactaDispenserGEO4`) and a `SquadMarkerSpot` next to it whose `MyAnchor`
-names it. The member walks to the spot, works for 3 s (our own; the
-original plays an animation), and the marker is done. Stuck for 10 s on
-the way, it gives the job up. geo_01a has 6: five bacta dispensers and a
-demolition charge.
+names it. Stuck for 10 s on the way, a member gives the job up. geo_01a
+has 6: five bacta dispensers and a demolition charge.
+
+### Context orders (`rc_squad/src/jobs.rs`, `[job.*]` in `squad.toml`)
+
+What a marked job *does* depends on its kind. Each `[job.<name>]` section
+of `squad.toml` describes one; a marker gets the first job whose `match`
+words appear in its order marker's class (`MarkerDoorBreach` matches
+"breach"), or, with none, its anchor's class (`BactaDispenserGEO` matches
+"bacta"). How a map's anchors, order markers and spots fit together is
+in docs/RESEARCH.md, "Squad markers"; `rc_squad::map::read` turns them
+into one `MarkerSpot` per place a squad mate stands (a firing position
+with no spot puts them at the anchor). A marker no job matches is a plain
+"walk there, work `marker_work_time` seconds, done". Blast sizes, fuses,
+grenades and who prefers which job are the game's numbers; how long the
+work takes and the posts' firing rhythm are compiled code in the
+original, so those are our own, marked in the file. A job's `preferred`
+squad mate takes it when free (Scorch demolition and anti-armour, Fixer
+slicing, Sev sniping, as in the original). Mods can change a job or add a new one (say a
+`[job.turret]` matching "turret").
+
+- **Once** jobs (bacta, demolition, breach, slice): walk to the spot,
+  work `work_time` seconds, done. The member is free again at once. Then,
+  after `fuse` seconds (the charge burning), there is a blast if
+  `blast_damage` is set, and the `result`:
+  - `heal` (bacta): the squad mate's health and shield are filled.
+  - `trigger` (breach, slice, demolition): the plugin sends a
+    `SquadJobDone` message naming the anchor. Whoever owns that actor (the
+    level's scripts and doors, still being built in their own part)
+    opens the door or destroys the target. Until then it is logged:
+    `Demolition done: sets off DemolitionCharge DemolitionCharge2`.
+- **Group** jobs (`group = "yes"`, the door breach): ordering one spot
+  sends a free member to every spot sharing the same anchor (the ordered
+  spot first, nearest member each). Members wait at their spots (`Ready`)
+  until all are in place; then the one at the ordered spot does the work
+  and the others stand guard and shoot. When it's done, every spot is
+  done. If someone gives up (stuck or down), the rest go ahead without.
+- **Posts** (sniper, grenade, anti-armour): walk to the spot and stay
+  (`Posted`) until F4 recalls the squad, even if the player walks away.
+  While posted, the job's own shooting numbers replace `[fight]`'s:
+  the sniper sees 8000 uu and fires single aimed shots with
+  `dc17m_sniper`. A grenade post throws a grenade every `throw_interval`
+  seconds; it goes off `throw_fuse` seconds later where the target stood.
+  A grenade marker names a target area (`WeaponTarget`): the grenadier
+  throws at the enemy nearest it within `target_radius`, seen or not.
+  Without one, at its own target within `throw_range`.
+- **Blasts** (charges and grenades) hurt everyone near: `rc_combat::Damage`
+  of kind `Explosion`, `blast_damage` at the middle falling to nothing at
+  the radius, measured to the edge of each body. Friend or foe, as in the
+  original, so stand clear of a demolition charge.
+- **Guns from other parts.** `dc17m_sniper` and `dc17m_antiarmor` come with
+  the weapons part's attachments. If a post's weapon file isn't there, the
+  squad mate uses the usual DC-17m and the log says so once.
 
 ### Where the squad comes from
 
@@ -1228,9 +1444,73 @@ leader. It reads `ActionState`, the `Player` and `PlayerCamera` transforms and
 `LevelCollision`, and writes `SquadReadout`. A `SquadOrder` message lets
 anything else (a script, a touch menu, a VR gesture) give orders. Each
 member is an entity with `SquadMate` and a `Transform` at its feet, facing
-its way like the player's; with a renderer it gets a capsule in its own
-colour (`EnhancedVisionColor` from the Properties package) and a dark
-visor, until the real model is drawn.
+its way like the player's; with a renderer it gets the original model (see
+"How the squad looks" below), or, if that can't be read, a capsule in its
+own colour (`EnhancedVisionColor` from the Properties package) with a dark
+visor, as a placeholder.
+
+### How the squad looks (`rc_model`, `rc_squad_plugin/src/look.rs`)
+
+All three squad mates use the same mesh, `CloneCommando` in
+`GameData/Animations/clone.ukx` (the `Mesh` default of the `CloneCommando`
+class in CTCharacters.u). The mesh's own material is a stand-in
+(`CloneCommandoProxy`); each class's `Skins[0]` (in the Properties package,
+`CommandoNNDeltaDefaults`) replaces it with that commando's armour:
+`CloneTextures.CloneTextures.CloneCommando07_Shader` for Sev, `..40..` for
+Fixer and `..62..` for Scorch. A Shader's `Diffuse` leads to the 1024x1024
+picture. The animations are spread over two sets the mesh links to:
+everyday moves in `CloneCommandoSet`, wounded and healing ones in
+`CloneCommandoSPSet`.
+
+`data/squad/looks.toml` names the package, mesh, replacement materials
+(`skins`, by material slot) and which sequence plays for each pose. The
+poses (`look::Pose`) are picked from the squad's state each frame: knocked
+out plays `WoundedFallDown` once and holds it; reviving plays
+`HealImmobileLoop`; moving picks walk, run, back or side-step from the
+speed and the direction against the facing (as the droids do); a shot in
+the last 0.4 s plays `Fire`; otherwise `ActionBreathe`. Which animations the
+original plays for knocked-out and reviving is compiled code, so those two
+are our picks.
+
+`rc_model` is a new crate with no Bevy. It reads a skeletal mesh, the named
+sequences (looking in each animation set the mesh links to, first set
+first), and a picture for every material. A mesh's triangles are split into
+one "section" per material slot, each drawn as its own Bevy mesh with its
+own picture, so a model made of several materials (like `TrooperNoHelmet`:
+face plus armour) is drawn whole. It follows Shader -> `Diffuse`, Combiner
+-> `Material1`, FinalBlend and texture modifiers -> `Material`, including
+steps into another package (looked up in Textures, Animations and
+StaticMeshes). A material counts as see-through-in-places ("cut-out") when
+the texture is masked, a FinalBlend alpha-tests, or a Shader has an
+`Opacity`; other alpha is left alone, because Unreal often keeps
+shininess there. Posing is as for the droids: CPU skinning every frame,
+copied into each section's mesh. The model faces +X in the game's axes,
+the squad mate's body faces its local -Z, so the meshes hang under a holder
+turned a quarter turn (`look::model_turn`).
+
+The droids (`rc_enemies/src/look.rs`) and the `rc_character` viewer still
+have their own one-material readers; they can switch to `rc_model` later.
+
+Each mate reads its model once (about 0.7 s each in a debug build in the
+cloud). The three share one mesh, so reading it once and swapping only the
+picture would be quicker; not done yet.
+
+How it's checked: `rc_squad_look_check` (an example program in
+`rc_squad_plugin`) stands the three in front of a camera using the game's
+own `spawn_pieces`, plays every animation on the CPU and checks heights
+stay between 20 and 260 uu, checks each `skins` entry against the class's
+`Skins` read from the Properties package, then captures the window. For
+each squad mate and each material it projects our own posed triangles
+(nearest in front) and compares: outline overlap (0.93 or more passes; got
+0.986-0.988), and colour balance on screen against the material's picture
+sampled at each triangle's middle, weighted by size (0.04 or less passes;
+got 0.001-0.003). A capture where textures were lost (magenta or plain
+grey) fails the colour part even with a perfect outline. Finally each mate's
+colour must be nearest its own armour's (own 0.001-0.003, nearest other
+0.020-0.023). With Sev's and Scorch's armour swapped in `looks.toml` the
+original-armour check fails for both, as it should. In `rc_game --script`
+the player turns round, `logs/squad.png` is captured, and a check confirms
+all three mates have their model and pictures.
 
 ### Health and going down
 
@@ -1242,15 +1522,67 @@ mates can't die in the original (`bCannotDie`): when health reaches 0 (or
 combat marks them `Dead`), `check_down` calls `Squad::set_down`. A downed
 member stops where it is, takes no orders, gives up any marked job (the
 marker opens again), and shows as `Incapacitated` with "Down" on the squad
-panel. Health above 0 again brings them back (`Revived`); nothing heals
-them yet, as reviving isn't built.
+panel. Health above 0 again brings them back (`Revived`).
+
+### Squad fighting and reviving (`rc_squad/src/fight.rs`)
+
+The original decides how its squad fights in compiled code (`ctgame.dll`)
+that we don't read, so these rules are **our own**. Every number is in
+`[fight]` and `[revive]` of `squad.toml`, and each one says whether it is
+the game's, a guess, or our own.
+
+*Seeing and picking a target.* The plugin turns every living
+`Team::Separatist` character with a `Hittable` body into a `Threat` each
+frame (`SquadThreats`; the id is the entity's bits). On every think (0.25
+s) a member who is up and not busy with a job or a revive takes the
+nearest threat within `sight_radius` whose eyes it can see (a thin line
+from its eyes to theirs that hits no level geometry). Nothing in sight
+drops the target.
+
+*Shooting.* After `reaction_time` on a new target it fires bursts:
+`burst_count` shots `shot_interval` apart (the DC-17m's fire rate), then a
+pause between `burst_pause_min` and `burst_pause_max`. Each shot aims at
+the target's middle, off by up to `(1 - accuracy) x max_aim_error`; the
+weapons part then adds the gun's own spread, as it does for the player and
+the droids. A standing member turns to face its target and fires only
+within `max_aim_yaw` of its facing; a moving one fires on the move. A
+member holds fire while the player or another squad mate (standing or
+lying) is within `friendly_clearance` of the line of fire, nearer than the
+target. Shots go out as `rc_combat::FireShot` with the squad mate as the
+shooter, so the weapons part flies the bolts, applies the damage, and its
+`ShotLanded` and `Died` messages count hits and kills per member
+(`SquadFightStats`).
+
+*Reviving.* Every frame, each downed commando nobody is seeing to gets the
+nearest member who is up, not on a marked job and not already reviving,
+if one is within `range`. The player counts too when they have `Dead`
+(and `revive_player = "yes"`). The reviver runs to a spot beside the body
+and, once within `reach`, kneels (`MemberState::Reviving`) for `time`
+seconds. Then `ReviveDone` goes out and the plugin sets the patient's
+health to `health` times their maximum and removes `Dead`; next frame
+`check_down` sees them up. The player revives a squad mate by holding
+`Use` within `reach` of the body for `player_time` seconds
+(`Squad::player_use`); letting go starts it over. A revive job ends early
+if the patient is already up (someone else got there) or the reviver goes
+down. While the player is down, `rc_game` keeps their body still (they
+can look around).
+
+Not done yet: droids only shoot at the player (`rc_ai::Battle` takes one
+target), so squad mates are only hurt by stray bolts and the player. The
+original also has the downed player call the squad over with an order;
+here they come on their own.
 
 ### How we check it without looking
 
-`rc_squad_sim` runs the real plugin on a real map with no window, in fixed
-1/60 s steps, with a scripted player. It logs every order, set-off,
-arrival, stuck, job and a once-a-second line with every member's position,
-state and distances, and checks 23 numbers (see `README.md`).
+`rc_squad_sim` runs the real squad and combat plugins on a real map with no
+window, in fixed 1/60 s steps, with a scripted player. It logs every
+order, set-off, arrival, stuck, job, target picked, first shot of each
+burst, kill and revive, a once-a-second line with every member's position,
+state and distances, and every 5 s a fight line with each member's shots,
+hits, kills and revives. For the fight it puts stand-in droids (real
+combat targets with the game's droid size and health that stand still and
+don't shoot back) in sight of the squad. The checks are listed in
+`README.md`.
 
 ## The game program (`rc_game`)
 
@@ -1444,6 +1776,28 @@ squad:
      player is found by its `Player` and `PlayerCamera` markers, so a VR
      camera works the same. No platform-specific code.
 
+### Enemy types
+
+Each enemy type is one file in `data/enemies/`, read on top of the battle
+droid's built-in values, so a file only lists what differs. Its `[type]`
+section names the game classes it stands for (`classes`, a trailing `*`
+matches any ending) and its `body` (droid or organic). When a map loads,
+each spawner's `Prototype` class is matched to a type, and that spawner's
+enemies get the type's health, size, speed, weapon, accuracy, look and
+sounds. A spawner whose class no file claims (squad mates, turrets) is
+left to other parts and logged. `combat.uses_cover = false` makes an enemy
+walk at you instead of taking cover (super battle droids);
+`combat.drops` is the weapon it leaves when it falls. `[sound]` lists
+sound names played when it spots you, is hurt and is destroyed.
+
+**Several enemies to fight.** Droids fight the player and the squad mates
+(every living `Team::Republic` character). Each keeps fighting the one it
+fought last while it can still see it, otherwise picks the nearest one it
+can see, otherwise hunts the player. **Our choice:** the original's target
+choice is in its compiled engine. A stunned droid (flash or EMP grenade)
+stands still and does nothing until the stun wears off, and grenade blasts
+are heard like shots.
+
 **Checking without looking.** `rc_droidsim` (no window) and
 `rc_droidview --check` (a window) run a stand-in player into a spawner's
 trigger on a real map and log every spawn, sighting, state change, route,
@@ -1496,6 +1850,85 @@ weapon), the player from `Player` and `PlayerCamera`, the level from
 - To be hit: add `Hittable` (the cylinder) and `Team`.
 - Recoil: each player shot sends `ViewKick { pitch, yaw }` (radians). The
   player's view applies it; a VR mod can ignore it.
+- To throw a grenade (squad mates, enemies): send `ThrowGrenade { thrower,
+  origin, velocity, grenade }` (Bevy space, units per second). When it goes
+  off, `Blast { grenade, point, radius, instigator, hit }` is sent.
+- `DamageTable(name)` names a character's damage table (the original's
+  `DamageVariance`, in `data/combat/damage_types.toml`). Every hit by a
+  shot, melee or blast is multiplied by the table's entry for the hit's
+  damage type (a weapon's `shot.damage_type`, a grenade's
+  `blast.damage_type`). The player gets one from `player.toml`, enemies
+  from `combat.damage_table`; squad mates should use
+  `DV_OrganicCTSquadDamage`. No table means x1.
+- `Body` (droid or organic) is for logs and AI. `Stunned { left,
+  damage_per_sec, kind, stops, .. }` is a grenade's lasting effect: when
+  `stops` is set the character can't act (AI should check it); it hurts
+  `damage_per_sec` while it lasts.
+- `read_sounds(paths, package, names, audio)` reads sounds by name from a
+  game sound package, for any part.
+
+### Grenades (`grenade.rs`, `throw.rs`)
+
+A grenade kind is a file in `data/grenades`. `grenade.rs` holds the plain
+rules: a thrown grenade starts at the hand (`throw.offset` from the eye)
+with the view's direction times `throw.speed`, plus `throw.toss_up`
+upwards. Gravity pulls it down every frame. When it touches a wall, floor
+or character it bounces off the surface, keeping `flight.bounce` of its
+speed (`flight.actor_bounce` off a character); on a floor, once slower
+than `flight.rest_speed`, it lies still. The fuse is the original's
+(`CTProjExplosive`): it goes off `fuse.time` seconds after the throw, or
+`fuse.after_impact` seconds after it first touches anything if that is
+sooner; `fuse.on_actor` / `fuse.on_world` make it go off on touch.
+`flight.stick_to_world` / `stick_to_actors` make it stick where it lands
+(the sonic detonator), and `fuse.proximity` makes a stuck one go off when a
+character it can see comes that close (checked every
+`fuse.proximity_interval` seconds). The thrower never sets it off.
+
+The blast is the engine's `HurtRadius` rule: a character it went off on
+takes the full damage; every other character within `blast.radius` (plus
+its own radius) whose centre the blast can see takes `damage x (1 -
+(distance - its radius) / radius)`, so full damage up close and nothing at
+the edge. Each hit is then multiplied by the target's damage table for
+`blast.damage_type`. A `[status]` section adds a lasting effect
+(`Stunned`) to every character that can see the blast within the radius
+(plus `status.radius_change`): it lasts `status.max_time` at the centre,
+falling to nothing at the edge, and hurts `status.damage_per_sec`. A
+character whose table gives `status.damage_type` x0 is immune (droids
+aren't stunned or set alight). `half_on_commandos` halves it on clone
+commandos (the EMP), `player_must_face` spares a player looking away (the
+flash), and `stops = false` lets characters keep acting (the thermal's
+burn).
+
+`throw.rs` is the Bevy side: the throw and next-grenade buttons, the
+`ThrowGrenade` message (anyone can throw), grenades in flight, the `Blast`
+message when one goes off, stuns wearing off, and the grenade line on the
+display. The player's kinds and their order are `grenades` in
+`data/combat/player.toml`; each starts with its file's `start_count`.
+
+### Attachments, zoom, melee and pickups
+
+- The DC-17m's sniper and anti-armour attachments are their own weapon
+  files and their own entries in the weapon cycle (rifle, sniper,
+  anti-armour, pistol), each with its own ammo. **Our choice:** the
+  original swaps the attachment onto the rifle with an animation.
+- `fire.zoom_fovs` gives a weapon zoom steps: each press of the zoom
+  button narrows the view to the next one (degrees across a 4:3 screen),
+  and after the last it zooms back out. Combat writes it to
+  `WeaponReadout.zoom_fov` and the game's camera uses it; a VR mod can
+  ignore it. Switching weapon or reloading leaves the zoom. While zoomed,
+  the player's shots do `fire.zoom_damage` times the damage (1.72 for the
+  sniper).
+- `shot.kind = "lobbed"` fires a grenade file (`shot.grenade`) along the
+  aim at `shot.speed`: the anti-armour round is an impact grenade.
+- Melee (`melee.rs`): a line `[melee] range` long from the eye along the
+  view; the first character on it takes `[melee] damage` of type
+  `CTDamageMelee` (times its table: battle droids take x3). The weapon in
+  hand's `[melee]` section wins; `player.toml`'s is the fallback. Walls
+  block it.
+- Pickups (`pickup.rs`): a `WeaponPickup` on the ground is collected by
+  walking within 80 uu of it (our choice). A new weapon joins the cycle;
+  one already carried gets the ammo. Enemies drop the weapon file named by
+  `combat.drops` in their settings file.
 
 ### Modding
 
@@ -1673,6 +2106,101 @@ question in software from the original's pictures, and compares each with
 a screenshot of the game shrunk to 320x240: the mean difference must stay
 under 12 of 255 and fewer than 5% of pixels may differ by more than 40.
 centre.
+
+## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
+
+The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:
+
+- **One reader for controllers.** `rc_pads::sdl` starts SDL3 with no
+  window and turns its controller events into the same Bevy gamepad
+  messages gilrs sends, so Bevy keeps each controller's `Gamepad`
+  component up to date and the game's input code doesn't care which reader
+  ran. `rc_game` disables Bevy's `GilrsPlugin` only when SDL started.
+  SDL lives in a non-send resource, so it stays on the main thread.
+- **Gyro readings are messages.** `GyroSample { source, rate, accel, dt }`
+  comes from the SDL reader, and later from Android's sensor service.
+  `PadsPlugin` runs each source through its own `GyroFilter` and puts this
+  frame's turn for the controller used last (or the built-in gyro) in
+  `GyroLook`. `rc_game`'s input code decides whether to use it (mode,
+  ratchet, toggle) and adds it to `ActionState::look`. So a VR mod or
+  another sensor only needs to send `GyroSample`s or write
+  `ActionState`.
+- **Prompts are data.** `InputPrompts` (in `rc_game_core`, so every part
+  can read it) is rebuilt when the last-used device, the controller's kind
+  or the bindings change, from `bindings.toml` and `button_names.toml`.
+- **Rebinding saves differences.** `Bindings::changes_from(base)` writes
+  only the actions that differ from the shipped (and modded) bindings, and
+  `with_changes` lays them back on top at start-up.
+- **Panini** is a `FullscreenMaterial` on the player's camera. After
+  `place_camera` sets the normal field of view, `rc_game/src/panini.rs`
+  widens it with `Fit::new` and updates the camera's `PaniniView`. The
+  shader and `Fit::source` do the same maths, which the tests check.
+## Saving, loading and checkpoints (`rc_game_core::save`, `rc_save`)
+
+**One interface, one section per part.** A save file is a plain TOML text
+file: a `[save]` header (format number, map, last checkpoint, when, time
+played) and then one `[section]` per part of the game. Each part writes its
+own section by implementing `SavePart` (`rc_game_core/src/save.rs`): a
+struct with `Serialize`/`Deserialize`, a `save` that reads it out of the
+game and a `load` that puts it back, registered with
+`app.add_save_part::<T>()`. The save plugin never knows what's inside a
+section. Sections so far: `[player]` (position, speed, on the ground,
+crouched, facing; in `rc_game/src/player.rs`), `[combat]` (health, shield,
+weapons and ammo; `rc_combat/src/save.rs`), `[enemies]` (the battle clock,
+each spawner's state and each living droid; `rc_enemies/src/save.rs`, using
+`rc_ai::Battle::snapshot` and `restore`), `[squad]` (stance, orders, each
+mate's place, job, revive, health and shield; `rc_squad_plugin/src/save.rs`,
+applied right after the squad appears on its first frame), `[checkpoints]`
+(checkpoints reached on this map; `rc_save`).
+
+**Loading reloads the map.** Loading a save sets `CurrentLevel` to the
+save's map and goes through `Loading` exactly like the menu does, so the
+level is always built fresh. On the first frame of play, after every
+`OnEnter(InGame)` has run and before input is read, each part's `load` gets
+its section, in the order the parts were registered. So parts only put back
+what changed since the map started, and never have to undo half a level.
+While this happens the resource `RestoringSave` exists; level-start things
+(the level-start autosave, opening scripts) check for it and stay quiet. A
+section the file doesn't have calls `load_missing` (the level stays as it
+starts), and a section no part claims is logged and ignored, so older and
+newer saves still load. A file with a higher format number than ours is
+refused with a message.
+
+**Destroyed droids stay destroyed** because each spawner's count of droids
+made is saved; only living droids are listed. A droid that was fighting
+comes back alerted toward where it last saw the player. Its plan (route,
+cover spot, burst) starts over: our choice, since those plans are rebuilt
+every few seconds anyway.
+
+**Checkpoints.** Entering a map from the menu saves `checkpoint.toml`
+under the name "level start". Level scripts send `CheckpointReached { name
+}`; the first time each name arrives it is added to `[checkpoints]` and
+`checkpoint.toml` is written again. Repeats are ignored, also after a load.
+The original does this with placeable `CTGame.Checkpoint` actors. When an
+event matching a checkpoint's `Tag` fires, it waits until the player is up
+(not incapacitated) and autosaves. `rc_level::checkpoints::read` lists a
+map's checkpoints and the actors whose `Event` names each tag. The 50
+campaign maps with checkpoints hold 144: 56 fired by a walk-in `Trigger`
+and 88 by level scripts. The level scripts part fires them and sends
+`CheckpointReached` with the checkpoint actor's name (like `checkpoint1`).
+`DefaultCtrl.ini` binds quicksave to F5 and quickload to F9, as we do.
+
+**Files and folder.** `quicksave.toml`, `checkpoint.toml` and
+`save_NAME.toml` (named saves, for a save menu; only letters, digits, `-`
+and `_` reach the file name). The folder is `[save] folder` in
+`settings.toml`, else `%APPDATA%\rc_game\saves` on Windows,
+`$XDG_DATA_HOME/rc_game/saves` or `~/.local/share/rc_game/saves` on Linux,
+and `saves` beside the settings file elsewhere (the Android app will set
+its own folder). Never the game's install. Each file is written to
+`NAME.toml.writing` and then swapped in, so a crash can't leave half a save.
+`--script` runs save into `logs/script_saves`, emptied at the start.
+
+**Keys and menus.** `Action::QuickSave` (F5) and `Action::QuickLoad` (F9),
+the original's keys.
+`SaveList` lists the saves newest first for a Load Game screen; a menu
+sends `LoadGame { slot }` or `SaveGame { slot }` and gets `SaveResult` back.
+Every save and load is logged with the prefix `save:` and a one-line summary
+of each section, so a round trip can be checked from the log.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

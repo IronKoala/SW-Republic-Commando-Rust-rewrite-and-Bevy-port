@@ -18,6 +18,8 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct Spawner {
     pub factory: Factory,
+    /// The settings of what it makes (its enemy type).
+    pub params: Arc<AiParams>,
     pub active: bool,
     /// Droids made so far.
     pub made: u32,
@@ -41,6 +43,30 @@ pub enum BattleEvent {
     Ai { id: u32, event: AiEvent },
 }
 
+/// What a battle needs to carry on where it was, for save files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BattleSnapshot {
+    pub time: f32,
+    pub next_id: u32,
+    /// Each spawner, in order: switched on, droids made, battle time of
+    /// its next droid.
+    pub spawners: Vec<(bool, u32, f32)>,
+    /// The living fighters.
+    pub fighters: Vec<FighterSnapshot>,
+}
+
+/// One living fighter, for save files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FighterSnapshot {
+    pub id: u32,
+    pub spawner: usize,
+    pub feet: Vec3,
+    pub facing: f32,
+    pub mode: Mode,
+    /// Where it last saw (or heard) the enemy.
+    pub last_seen_at: Option<Vec3>,
+}
+
 pub struct Battle {
     pub params: Arc<AiParams>,
     pub nav: NavGraph,
@@ -57,13 +83,25 @@ impl Battle {
     /// `factories` are the spawners this battle runs (the caller picks,
     /// for example only those making battle droids).
     pub fn new(params: Arc<AiParams>, nav: NavGraph, factories: Vec<Factory>) -> Self {
+        let typed = factories.into_iter().map(|f| (f, params.clone())).collect();
+        Battle::with_types(params, nav, typed)
+    }
+
+    /// Spawners making different enemy types, each with its own settings.
+    /// `params` gives the whole battle's limits (`[spawning]`).
+    pub fn with_types(
+        params: Arc<AiParams>,
+        nav: NavGraph,
+        factories: Vec<(Factory, Arc<AiParams>)>,
+    ) -> Self {
         Battle {
             params,
             nav,
             spawners: factories
                 .into_iter()
-                .map(|factory| Spawner {
+                .map(|(factory, params)| Spawner {
                     factory,
+                    params,
                     active: false,
                     made: 0,
                     next_spawn: 0.0,
@@ -93,6 +131,20 @@ impl Battle {
     /// Advance by `dt` seconds. `player` is where the player is (for
     /// spawners and for droids to look at); `None` while there's no player.
     pub fn step(&mut self, dt: f32, world: &dyn World, player: Option<Target>) -> Vec<BattleEvent> {
+        self.step_with(dt, world, player, &[])
+    }
+
+    /// Like [`Battle::step`], with other enemies of the droids besides the
+    /// player (squad mates). Each droid fights the nearest one it can see,
+    /// and the player when it sees none (so it still hunts the player).
+    /// Spawners only react to the player.
+    pub fn step_with(
+        &mut self,
+        dt: f32,
+        world: &dyn World,
+        player: Option<Target>,
+        others: &[Target],
+    ) -> Vec<BattleEvent> {
         let mut out = Vec::new();
         if let Some(p) = player {
             self.spawn(p.centre, &mut out);
@@ -100,18 +152,26 @@ impl Battle {
         let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
         let allies: Vec<Vec3> = self.alive().map(|f| f.pawn.location).collect();
         let mut heard = Vec::new();
-        let view = View {
-            world,
-            nav: &self.nav,
-            time: self.time,
-            target: player,
-            cover_taken: &taken,
-            allies: &allies,
-        };
+        let mut targets: Vec<Target> = player.into_iter().collect();
+        targets.extend_from_slice(others);
         for f in self.fighters.iter_mut() {
             if f.mode == Mode::Dead {
                 continue;
             }
+            // Stunned (a flash or EMP grenade): stands still, does nothing.
+            if self.time < f.stunned_until {
+                f.pawn.velocity = Vec3::ZERO;
+                continue;
+            }
+            let target = f.choose_target(world, &targets).or(player);
+            let view = View {
+                world,
+                nav: &self.nav,
+                time: self.time,
+                target,
+                cover_taken: &taken,
+                allies: &allies,
+            };
             for e in f.tick(dt, &view) {
                 if let AiEvent::Fire { origin, .. } = e {
                     heard.push(origin);
@@ -151,6 +211,14 @@ impl Battle {
         ev.into_iter()
             .map(|event| BattleEvent::Ai { id, event })
             .collect()
+    }
+
+    /// The droid can't act for `seconds` (a flash or EMP blast).
+    pub fn stun(&mut self, id: u32, seconds: f32) {
+        let until = self.time + seconds;
+        if let Some(f) = self.fighter_mut(id) {
+            f.stunned_until = f.stunned_until.max(until);
+        }
     }
 
     pub fn killed(&mut self, id: u32) -> Vec<BattleEvent> {
@@ -230,15 +298,92 @@ impl Battle {
         }
     }
 
+    /// Everything needed to carry on later (see [`Battle::restore`]).
+    /// Dead fighters are left out: only their spawner's count matters.
+    pub fn snapshot(&self) -> BattleSnapshot {
+        BattleSnapshot {
+            time: self.time,
+            next_id: self.next_id,
+            spawners: self
+                .spawners
+                .iter()
+                .map(|s| (s.active, s.made, s.next_spawn))
+                .collect(),
+            fighters: self
+                .fighters
+                .iter()
+                .zip(&self.made_by)
+                .filter(|(f, _)| f.mode != Mode::Dead)
+                .map(|(f, &spawner)| FighterSnapshot {
+                    id: f.id,
+                    spawner,
+                    feet: f.pawn.feet(),
+                    facing: f.facing,
+                    mode: f.mode,
+                    last_seen_at: f.last_seen_at,
+                })
+                .collect(),
+        }
+    }
+
+    /// Carry on from a snapshot, on a battle freshly made for the same map.
+    /// Returns a `Spawned` event for each fighter put back, so the game
+    /// makes their bodies the usual way. Fighters that were in a fight
+    /// start alerted toward where they last saw the enemy; the rest of
+    /// their plans start over.
+    pub fn restore(&mut self, s: &BattleSnapshot) -> Result<Vec<BattleEvent>, String> {
+        if s.spawners.len() != self.spawners.len() {
+            return Err(format!(
+                "the save has {} spawners, this map has {}",
+                s.spawners.len(),
+                self.spawners.len()
+            ));
+        }
+        for (sp, &(active, made, next)) in self.spawners.iter_mut().zip(&s.spawners) {
+            sp.active = active;
+            sp.made = made;
+            sp.next_spawn = next;
+        }
+        self.time = s.time;
+        self.next_id = s.next_id.max(s.fighters.iter().map(|f| f.id + 1).max().unwrap_or(1));
+        self.fighters.clear();
+        self.made_by.clear();
+        let mut out = Vec::new();
+        for f in &s.fighters {
+            let sp = self
+                .spawners
+                .get(f.spawner)
+                .ok_or(format!("fighter {} names spawner {} of {}", f.id, f.spawner, self.spawners.len()))?;
+            // Its spawner's enemy type, not the battle's default.
+            let (start, params) = (sp.factory.start_state.clone(), sp.params.clone());
+            let mut fighter = Fighter::new(f.id, params, f.feet, f.facing, start);
+            if matches!(f.mode, Mode::Alerted | Mode::Attack | Mode::Investigate) {
+                let at = f.last_seen_at.unwrap_or(fighter.pawn.location);
+                let mut ev = Vec::new();
+                fighter.alert(at, self.time, &mut ev);
+            }
+            self.fighters.push(fighter);
+            self.made_by.push(f.spawner);
+            out.push(BattleEvent::Spawned {
+                id: f.id,
+                spawner: f.spawner,
+                feet: f.feet,
+                yaw: f.facing,
+            });
+        }
+        Ok(out)
+    }
+
     /// Switch spawners on, and make at most one droid per step.
     fn spawn(&mut self, player: Vec3, out: &mut Vec<BattleEvent>) {
         let s = &self.params.spawning;
-        let radius = self.params.movement.collision_radius;
+
         let alive_total = self.alive().count() as u32;
         for i in 0..self.spawners.len() {
             let sp = &mut self.spawners[i];
             let f = &sp.factory;
             if !sp.active {
+                let radius = sp.params.movement.collision_radius;
                 let by_trigger = f
                     .triggers
                     .iter()
@@ -267,20 +412,15 @@ impl Battle {
                 && self.time >= sp.next_spawn
             {
                 let spot = f.spot(sp.made as usize);
-                let feet =
-                    spot.location - Vec3::new(0.0, 0.0, self.params.movement.collision_height);
+                let params = sp.params.clone();
+                let feet = spot.location - Vec3::new(0.0, 0.0, params.movement.collision_height);
                 let id = self.next_id;
                 self.next_id += 1;
                 sp.made += 1;
                 sp.next_spawn = self.time + f.spawn_interval.max(0.1);
                 let start_state = f.start_state.clone();
-                self.fighters.push(Fighter::new(
-                    id,
-                    self.params.clone(),
-                    feet,
-                    spot.yaw,
-                    start_state,
-                ));
+                self.fighters
+                    .push(Fighter::new(id, params, feet, spot.yaw, start_state));
                 self.made_by.push(i);
                 out.push(BattleEvent::Spawned {
                     id,

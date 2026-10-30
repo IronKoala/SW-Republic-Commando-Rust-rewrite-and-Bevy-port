@@ -17,6 +17,8 @@
 !rust-toolchain.toml
 !*.rs
 !*.md
+# Our own shaders (GPU programs).
+!crates/**/*.wgsl
 # Game settings files that mods can edit (our own, never the game's).
 !data/**/*.toml
 # Automatic checks on GitHub (our own workflow files).

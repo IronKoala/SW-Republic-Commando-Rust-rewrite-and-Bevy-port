@@ -7,7 +7,7 @@
 
 use bevy::math::Vec2;
 use bevy::prelude::Resource;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Everything the player can ask for. The name in the bindings file is the
 /// snake_case name from [`Action::name`].
@@ -42,6 +42,9 @@ pub enum Action {
     SquadFormUp,
     SquadSecurePosition,
     SquadCancel,
+    // Saving.
+    QuickSave,
+    QuickLoad,
     // Menus.
     Pause,
     MenuUp,
@@ -50,10 +53,16 @@ pub enum Action {
     MenuRight,
     MenuAccept,
     MenuBack,
+    // Gyro aiming.
+    /// Held: the gyro stops turning the view, so the controller can be
+    /// re-centred (like lifting a mouse off the mat).
+    GyroRatchet,
+    /// Pressed: gyro aiming on or off.
+    GyroToggle,
 }
 
 impl Action {
-    pub const ALL: [Action; 30] = [
+    pub const ALL: [Action; 34] = [
         Action::MoveForward,
         Action::MoveBack,
         Action::StrafeLeft,
@@ -77,6 +86,8 @@ impl Action {
         Action::SquadFormUp,
         Action::SquadSecurePosition,
         Action::SquadCancel,
+        Action::QuickSave,
+        Action::QuickLoad,
         Action::Pause,
         Action::MenuUp,
         Action::MenuDown,
@@ -84,6 +95,8 @@ impl Action {
         Action::MenuRight,
         Action::MenuAccept,
         Action::MenuBack,
+        Action::GyroRatchet,
+        Action::GyroToggle,
     ];
 
     /// The name used in the bindings file.
@@ -112,6 +125,8 @@ impl Action {
             Action::SquadFormUp => "squad_form_up",
             Action::SquadSecurePosition => "squad_secure_position",
             Action::SquadCancel => "squad_cancel",
+            Action::QuickSave => "quick_save",
+            Action::QuickLoad => "quick_load",
             Action::Pause => "pause",
             Action::MenuUp => "menu_up",
             Action::MenuDown => "menu_down",
@@ -119,6 +134,8 @@ impl Action {
             Action::MenuRight => "menu_right",
             Action::MenuAccept => "menu_accept",
             Action::MenuBack => "menu_back",
+            Action::GyroRatchet => "gyro_ratchet",
+            Action::GyroToggle => "gyro_toggle",
         }
     }
 
@@ -164,6 +181,12 @@ impl ActionState {
     pub fn just_released(&self, a: Action) -> bool {
         self.just_released.contains(&a)
     }
+    /// Everything held this frame, in a fixed order (for logs and tests).
+    pub fn all_pressed(&self) -> Vec<Action> {
+        let mut v: Vec<Action> = self.pressed.iter().copied().collect();
+        v.sort();
+        v
+    }
 
     /// Start a new frame: everything held this frame is in `now`. Works
     /// out what was just pressed and just released. Used by the input
@@ -174,5 +197,48 @@ impl ActionState {
         self.pressed = now;
         self.movement = movement.clamp_length_max(1.0);
         self.look = look;
+    }
+}
+
+/// What to show on screen for each action's button right now: "F" or
+/// "Left Mouse" after keyboard and mouse, "X" or "Square" after a
+/// controller (its own names: Xbox, PlayStation, Switch, Steam Deck).
+/// Follows `ActionState::last_device`. Written by the input plugin; menus,
+/// the HUD and level scripts read it for "Press F to use" messages.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct InputPrompts {
+    /// The device the names are for.
+    pub device: InputDevice,
+    /// The controller's kind when `device` is a gamepad, as in
+    /// `data/input/button_names.toml`: "xbox", "ps5", "switch_pro",
+    /// "steam_deck", ...
+    pub controller: String,
+    labels: HashMap<Action, Vec<String>>,
+}
+
+impl InputPrompts {
+    pub fn new(device: InputDevice, controller: String) -> InputPrompts {
+        InputPrompts {
+            device,
+            controller,
+            labels: HashMap::new(),
+        }
+    }
+
+    /// The first button bound to `a` on the current device.
+    pub fn label(&self, a: Action) -> Option<&str> {
+        self.labels.get(&a)?.first().map(String::as_str)
+    }
+
+    /// Every button bound to `a` on the current device.
+    pub fn labels(&self, a: Action) -> &[String] {
+        self.labels.get(&a).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    pub fn add(&mut self, a: Action, label: String) {
+        let l = self.labels.entry(a).or_default();
+        if !l.contains(&label) {
+            l.push(label);
+        }
     }
 }

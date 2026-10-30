@@ -1,12 +1,16 @@
 //! `--script`: a fixed route through the game, in place of the keyboard and
 //! mouse. It presses the same actions a player would (menu down, accept,
 //! pause...), checks the result of each step, logs `CHECK ... PASS/FAIL`,
-//! and exits with code 0 only if every check passed.
+//! and exits with code 0 only if every check passed. The real mouse is
+//! ignored, so moving it over the window doesn't change the route.
 //!
 //! The route: the original main menu (colours checked against the
 //! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
 //! the level's walls and sky (looking up), walk forward, pause (nothing
-//! moves), resume, quit to the main menu (the level is cleared), OPTIONS
+//! moves), resume, saving (the level-start checkpoint, a checkpoint, a
+//! quicksave), walking away, quickload (the player is back where they
+//! saved, and saving again gives the same numbers), quit to the main menu
+//! (the level is cleared), OPTIONS
 //! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
 //! then QUIT again and YES).
 
@@ -22,6 +26,7 @@ use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GameSet, GameState, LevelCollision, Play, Player,
     PlayerCamera,
 };
+use rc_game_core::save::{CheckpointReached, RestoringSave, SaveSlot};
 use std::collections::HashSet;
 
 /// How long to wait for a level to load before failing, seconds.
@@ -99,7 +104,13 @@ struct Shots {
 #[derive(Resource, Default)]
 struct Noted {
     feet: Option<rc_movement::Vec3>,
+    /// Squad mates' feet last frame, and for how many frames in a row none
+    /// of them moved.
+    squad_feet: Vec<Vec3>,
+    squad_still_frames: u32,
     music_volume: f32,
+    /// The player's centre and facing when the quicksave was made.
+    saved: Option<(rc_movement::Vec3, f32)>,
 }
 
 pub struct ScriptPlugin;
@@ -116,8 +127,26 @@ impl Plugin for ScriptPlugin {
         })
         .init_resource::<Noted>()
         .init_resource::<Shots>()
-        .add_systems(Update, run.in_set(GameSet::Input));
+        .add_systems(Update, run.in_set(GameSet::Input))
+        .add_systems(
+            PreUpdate,
+            ignore_pointer
+                .after(bevy::input::InputSystems)
+                .before(bevy::ui::UiSystems::Focus),
+        );
     }
+}
+
+/// The script alone drives the menus: a real mouse moving over the window
+/// (or resting on a button) must not change what is selected, or the route
+/// goes astray. So the menus never see where the pointer is or a click.
+fn ignore_pointer(mut windows: Query<&mut Window>, mut mouse: ResMut<ButtonInput<MouseButton>>) {
+    for mut w in &mut windows {
+        if w.physical_cursor_position().is_some() {
+            w.set_physical_cursor_position(None);
+        }
+    }
+    mouse.reset_all();
 }
 
 fn in_state(w: &mut World, s: GameState) -> bool {
@@ -133,10 +162,29 @@ fn feet(w: &mut World) -> Option<rc_movement::Vec3> {
     q.iter(w).next().map(|b| b.pawn.feet())
 }
 
+/// The player's collision-box centre and facing.
+fn body(w: &mut World) -> Option<(rc_movement::Vec3, f32)> {
+    let mut q = w.query_filtered::<&Body, With<Player>>();
+    q.iter(w).next().map(|b| (b.pawn.location, b.yaw))
+}
+
+fn save_file(w: &mut World, slot: &SaveSlot) -> Result<rc_save::file::SaveFile, String> {
+    let dir = w.resource::<rc_save::SaveFolder>().0.clone();
+    rc_save::file::read(&rc_save::file::slot_path(&dir, slot))
+        .map_err(|e| format!("{}: {e}", slot.file_name()))
+}
+
 fn set_pitch(w: &mut World, pitch: f32) {
     let mut q = w.query_filtered::<&mut Body, With<Player>>();
     for mut b in q.iter_mut(w) {
         b.pitch = pitch;
+    }
+}
+
+fn turn(w: &mut World, by: f32) {
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.yaw += by;
     }
 }
 
@@ -287,6 +335,24 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
+        Check("the map's doors and lifts run", |w| {
+            let Some(m) = w.get_resource::<rc_movers_plugin::LevelMovers>() else {
+                return Err("no LevelMovers".into());
+            };
+            let set = m.read();
+            let got = format!(
+                "{} movers ({} solid), {} triggers, clock {:.1} s",
+                set.movers.len(),
+                set.movers.iter().filter(|m| m.collision.is_some()).count(),
+                set.active_triggers().count(),
+                set.time
+            );
+            if !set.movers.is_empty() && set.time > 0.5 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check("the sky camera turns with the player's camera", |w| {
             let sky = count::<rc_level_plugin::SkyCamera>(w);
             let mut q = w.query_filtered::<&Camera, (
@@ -320,6 +386,38 @@ fn steps() -> Vec<Step> {
         }),
         Note(|w| set_pitch(w, 0.0)),
         Wait(0.2),
+        // Turn round to where the squad stands (behind the player) and
+        // capture logs/squad.png for a person to look at. The squad's
+        // colour check is rc_squad_look_check, which sees them up close.
+        Note(|w| turn(w, std::f32::consts::PI)),
+        Wait(0.5),
+        Shot("squad"),
+        Check("the squad mates wear their original models and armour", |w| {
+            let mut q =
+                w.query::<(&rc_squad_plugin::SquadMate, &rc_squad_plugin::look::MateModel)>();
+            let mut got: Vec<String> = q
+                .iter(w)
+                .map(|(m, mm)| {
+                    let skins: Vec<&str> = mm
+                        .model
+                        .sections
+                        .iter()
+                        .map(|s| s.skin.as_ref().map_or("none", |k| k.texture.as_str()))
+                        .collect();
+                    format!("{} {} {}", m.name, mm.model.name, skins.join("+"))
+                })
+                .collect();
+            got.sort();
+            let mates = count::<rc_squad_plugin::SquadMate>(w);
+            let all_skinned = got.iter().all(|g| !g.contains("none"));
+            if mates == 3 && got.len() == 3 && all_skinned {
+                Ok(got.join(", "))
+            } else {
+                Err(format!("{mates} squad mates, with models: {got:?}"))
+            }
+        }),
+        Note(|w| turn(w, std::f32::consts::PI)),
+        Wait(0.2),
         Note(|w| {
             let f = feet(w);
             w.resource_mut::<Noted>().feet = f;
@@ -336,6 +434,21 @@ fn steps() -> Vec<Step> {
                 Err(format!("only {d:.0} uu"))
             }
         }),
+        // The level's own scripts (see level_script_* below): geo_01a's
+        // landing-zone barricade opens once the player heals at the bacta
+        // dispenser the scripts switch on.
+        Check("the level's scripts run", level_script_running),
+        Check("the start barricade blocks the way", |w| level_script_way(w, true)),
+        Until("the scripts switch the bacta dispenser on", level_script_dispenser_on, 300.0),
+        Note(level_script_stand_at_dispenser),
+        Wait(0.5),
+        Hold(Action::Use, 5.0),
+        Until("the barricade opens", level_script_barricade_gone, 60.0),
+        Wait(3.0),
+        Check("the barricade is gone: not solid, not drawn, the way through is open", |w| {
+            level_script_way(w, false)
+        }),
+        Check("the scripts' events, damage, healing and checkpoint", level_script_chain),
         Press(Action::Pause),
         Wait(0.3),
         Check("pause key pauses", |w| {
@@ -368,6 +481,170 @@ fn steps() -> Vec<Step> {
                 p => Err(format!("{p:?}")),
             }
         }),
+        Check("the level's start was saved as a checkpoint", |w| {
+            let f = save_file(w, &SaveSlot::Checkpoint)?;
+            // The level's own checkpoints (geo_01a's first comes 19 s in)
+            // may have saved over it since; the start is then the first
+            // checkpoint reached.
+            let first = f
+                .part("checkpoints")
+                .and_then(|c| c["reached"].as_array()?.first()?.as_str().map(String::from));
+            let got = format!(
+                "{} at {:?}, first checkpoint {first:?}",
+                f.header.map, f.header.checkpoint
+            );
+            if f.header.checkpoint.as_deref() == Some(rc_save::LEVEL_START)
+                || first.as_deref() == Some(rc_save::LEVEL_START)
+            {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Note(|w| {
+            w.write_message(CheckpointReached {
+                name: "script checkpoint".into(),
+            });
+        }),
+        Wait(0.2),
+        Check("reaching a checkpoint saves it", |w| {
+            let f = save_file(w, &SaveSlot::Checkpoint)?;
+            match f.header.checkpoint.as_deref() {
+                Some("script checkpoint") => Ok("checkpoint.toml at \"script checkpoint\"".into()),
+                c => Err(format!("{c:?}")),
+            }
+        }),
+        // Use some ammo first, so the save differs from a fresh start.
+        Hold(Action::Fire, 0.5),
+        Wait(0.2),
+        // Save while nobody is walking: a squad mate saved mid-step walks on
+        // after the load, and the "same state" check below would see how far
+        // they got.
+        Until("squad mates standing still", squad_still, 15.0),
+        Note(|w| {
+            let b = body(w);
+            w.resource_mut::<Noted>().saved = b;
+        }),
+        Press(Action::QuickSave),
+        Wait(0.2),
+        Check("quicksave writes where the player is", |w| {
+            let f = save_file(w, &SaveSlot::Quick)?;
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no player")?;
+            let p = f.part("player").ok_or("no [player] section")?;
+            let loc: Vec<f32> = p["location"]
+                .as_array()
+                .ok_or("no location")?
+                .iter()
+                .filter_map(|v| v.as_float().map(|f| f as f32))
+                .collect();
+            let d = (rc_movement::Vec3::new(loc[0], loc[1], loc[2]) - at).length();
+            let got = format!(
+                "{} sections, player at ({:.1}, {:.1}, {:.1}), {d:.2} uu from the live player",
+                f.parts.len(),
+                loc[0],
+                loc[1],
+                loc[2]
+            );
+            if d < 1.0 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Hold(Action::MoveForward, 1.0),
+        Check("walked away from the saved spot", |w| {
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let (now, _) = body(w).ok_or("no player")?;
+            let d = (now - at).length_2d();
+            if d > 100.0 {
+                Ok(format!("{d:.0} uu away"))
+            } else {
+                Err(format!("only {d:.0} uu"))
+            }
+        }),
+        Press(Action::QuickLoad),
+        Until(
+            "quickload reloads the level",
+            |w| !in_state(w, GameState::InGame),
+            5.0,
+        ),
+        Until(
+            "quickload finished",
+            |w| in_state(w, GameState::InGame) && !w.contains_resource::<RestoringSave>(),
+            LOAD_TIMEOUT,
+        ),
+        Wait(0.3),
+        Check("quickload puts the player back where they saved", |w| {
+            let (at, yaw) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let (now, now_yaw) = body(w).ok_or("no player")?;
+            let d = (now - at).length();
+            let turn = (now_yaw - yaw).abs();
+            let got = format!("{d:.2} uu from the saved spot, facing {:.3} rad off", turn);
+            if d < 2.0 && turn < 0.001 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("no droid spots the player just after the load", |w| {
+            // Droids look for the player at the camera. It used to lag a
+            // frame behind the body after a load, so droids could spot the
+            // player from across the map.
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let again = rc_save::collect(w, None)?;
+            let before = droid_modes(quick.parts.get("enemies"));
+            let after = droid_modes(again.parts.get("enemies"));
+            let got = format!("droids saved {before:?}, now {after:?}");
+            let woke = before.iter().zip(&after).any(|(b, a)| b == "idle" && a != "idle");
+            if woke || before.len() != after.len() {
+                Err(got)
+            } else {
+                Ok(got)
+            }
+        }),
+        Check("quickload gives back the ammo used before saving", |w| {
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let c = quick.part("combat").ok_or("no [combat] section")?;
+            let saved = c["weapons"].as_array().and_then(|a| a.first()).ok_or("no weapons")?;
+            let saved_clip = saved["clip"].as_float().ok_or("no clip")? as f32;
+            let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+            let a = q.iter(w).next().ok_or("player has no weapons")?;
+            let (id, now) = a.weapons.first().ok_or("no weapons")?;
+            let full = w
+                .resource::<rc_combat::WeaponLibrary>()
+                .weapons
+                .get(id)
+                .map(|p| rc_combat::WeaponState::new(p).clip)
+                .unwrap_or(0.0);
+            let got = format!("{id}: {:.0} in the magazine now, {saved_clip:.0} saved, {full:.0} when full", now.clip);
+            if (now.clip - saved_clip).abs() < 0.01 && saved_clip < full {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Check("saving again after the load gives the same state", |w| {
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let again = rc_save::collect(w, None)?;
+            let mut notes = vec![];
+            for (k, v) in &quick.parts {
+                let Some(b) = again.parts.get(k) else {
+                    return Err(format!("[{k}] missing after the load"));
+                };
+                let diff = rc_save::file::largest_difference(v, b)
+                    .ok_or(format!("[{k}] changed shape: {v} vs {b}"))?;
+                notes.push(format!("[{k}] off by {diff:.3}"));
+                if diff > 2.0 {
+                    return Err(notes.join(", "));
+                }
+            }
+            if again.header.map != quick.header.map
+                || again.header.checkpoint != quick.header.checkpoint
+            {
+                return Err(format!("{:?} vs {:?}", again.header, quick.header));
+            }
+            Ok(notes.join(", "))
+        }),
         Press(Action::Pause),
         Wait(0.2),
         Check("the pause menu is the original's when the install has it", |w| {
@@ -399,8 +676,10 @@ fn steps() -> Vec<Step> {
             }
         }),
         Note(|w| {
-            let v = w.resource::<Settings>().audio.music_volume;
-            w.resource_mut::<Noted>().music_volume = v;
+            // Each run saves the lowered volume to the script's own settings
+            // file; start from full so it never runs down to zero.
+            w.resource_mut::<Settings>().audio.music_volume = 1.0;
+            w.resource_mut::<Noted>().music_volume = 1.0;
         }),
         // MULTIPLAYER, LOAD GAME, PROFILES and EXTRAS are greyed out and
         // skipped.
@@ -678,6 +957,32 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
     shots.stats.insert(name, stats);
 }
 
+/// True once no squad mate has moved for a few frames in a row.
+fn squad_still(w: &mut World) -> bool {
+    let mut q = w.query_filtered::<&Transform, With<rc_squad_plugin::SquadMate>>();
+    let feet: Vec<Vec3> = q.iter(w).map(|t| t.translation).collect();
+    let mut n = w.resource_mut::<Noted>();
+    // Bevy units are metres-ish; 0.01 is about half an Unreal unit.
+    let moved = feet.len() != n.squad_feet.len()
+        || feet.iter().zip(&n.squad_feet).any(|(a, b)| a.distance(*b) > 0.01);
+    n.squad_still_frames = if moved { 0 } else { n.squad_still_frames + 1 };
+    n.squad_feet = feet;
+    n.squad_still_frames >= 3
+}
+
+/// Each droid's mode ("idle", "alerted", ...) in an `[enemies]` section.
+fn droid_modes(section: Option<&toml::Value>) -> Vec<String> {
+    let droids = section.and_then(|e| e.get("droids")).and_then(|d| d.as_array());
+    droids
+        .map(|a| {
+            a.iter()
+                .map(|d| d.get("mode").and_then(|m| m.as_str()).unwrap_or("?"))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn run(world: &mut World) {
     let dt = world.resource::<Time>().delta_secs();
     let log = world.resource::<GameLog>().clone();
@@ -851,4 +1156,177 @@ fn run(world: &mut World) {
     world
         .resource_mut::<ActionState>()
         .update(held, movement, Vec2::ZERO);
+}
+
+// Level scripts (`rc_scripts_plugin`), checked on geo_01a.
+
+const BARRICADE_VOLUME: &str = "BactaBarricadeBlockingVolume";
+const BARRICADE_PROP: &str = "PathToGunshipBarricade";
+
+fn level_script_running(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no LevelScript".into());
+    };
+    let d = &s.director;
+    let got = format!(
+        "{} scripted triggers, {} sequences, {} actions; {} events sent so far, first {:?}",
+        d.stats.scripts,
+        d.stats.sequences,
+        d.stats.actions,
+        d.stats.events_sent,
+        d.history.first().map(|h| &h.1)
+    );
+    if d.stats.scripts > 10 && d.history.iter().any(|h| h.1.eq_ignore_ascii_case("levelstart")) {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// Sweep a small box straight through the barricade, across the blocking
+/// volume's thin side, where the prop the scripts blow up stands (the
+/// barricade's other piece, `Blockade02`, stays, as in the original).
+/// `blocked`: whether it should stop.
+fn level_script_way(w: &mut World, blocked: bool) -> Result<String, String> {
+    let Some(parts) = w.get_resource::<rc_level_plugin::LevelParts>().cloned() else {
+        return Err("no LevelParts".into());
+    };
+    let Some((lo, hi)) = parts.bounds(BARRICADE_VOLUME).first().copied() else {
+        return Err(format!("no {BARRICADE_VOLUME} in the level parts"));
+    };
+    let size = hi - lo;
+    let Some((plo, phi)) = parts.bounds(BARRICADE_PROP).first().copied() else {
+        return Err(format!("no {BARRICADE_PROP} in the level parts"));
+    };
+    let c = (plo + phi) * 0.5;
+    let along_x = size.x < size.y;
+    let reach = if along_x { size.x } else { size.y } * 0.5 + 60.0;
+    let dir = if along_x {
+        rc_movement::Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        rc_movement::Vec3::new(0.0, 1.0, 0.0)
+    };
+    let (a, b) = (c - dir * reach, c + dir * reach);
+    let ext = rc_movement::Vec3::new(10.0, 10.0, 10.0);
+    let world = w.resource::<LevelCollision>().0.clone();
+    let hit = world.sweep(ext, a, b);
+    let solid: Vec<bool> = parts
+        .list()
+        .into_iter()
+        .filter(|p| p.2.eq_ignore_ascii_case(BARRICADE_VOLUME))
+        .map(|p| p.3)
+        .collect();
+    let mut hidden = 0;
+    let mut drawn = 0;
+    let props: Vec<usize> = parts
+        .list()
+        .into_iter()
+        .filter(|p| p.2.eq_ignore_ascii_case(BARRICADE_PROP))
+        .map(|p| p.0)
+        .collect();
+    let mut q = w.query::<(&rc_level_viewer::draw::MoverPart, &Visibility)>();
+    for (p, v) in q.iter(w) {
+        if props.contains(&p.0) {
+            drawn += 1;
+            hidden += (*v == Visibility::Hidden) as usize;
+        }
+    }
+    let got = format!(
+        "{BARRICADE_VOLUME} {:.0}x{:.0}x{:.0}, solid {solid:?}; sweep through it at {BARRICADE_PROP} ({:.0}, {:.0}, {:.0}) {}; {BARRICADE_PROP}: {hidden} of {drawn} drawn parts hidden",
+        size.x,
+        size.y,
+        size.z,
+        c.x,
+        c.y,
+        c.z,
+        match hit {
+            Some(h) => format!("stops at {:.0}%", h.time * 100.0),
+            None => "passes".into(),
+        }
+    );
+    let ok = if blocked {
+        hit.is_some() && solid.iter().all(|s| *s) && hidden == 0
+    } else {
+        // Something else may lie beyond (the floor slopes); the volume
+        // itself must no longer be what stops the box near its middle.
+        hit.is_none_or(|h| h.time > 0.5) && solid.iter().all(|s| !*s) && hidden == drawn
+    };
+    if ok {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn level_script_dispenser_on(w: &mut World) -> bool {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return false;
+    };
+    let told = s
+        .director
+        .history
+        .iter()
+        .any(|h| h.1.eq_ignore_ascii_case("StartBactaReminderTimer"));
+    told && s.dispensers().iter().any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
+}
+
+/// Put the player where a squad mate would stand to use the dispenser.
+fn level_script_stand_at_dispenser(w: &mut World) {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return;
+    };
+    let Some(d) = s
+        .dispensers()
+        .into_iter()
+        .find(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ"))
+    else {
+        return;
+    };
+    let spot = d.stand.unwrap_or(d.location);
+    let log = w.resource::<GameLog>().clone();
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.pawn.location = rc_movement::Vec3::new(spot[0], spot[1], spot[2] + 10.0);
+        log.line(format!(
+            "script: player moved to {}'s marker ({:.0}, {:.0}, {:.0})",
+            d.name, spot[0], spot[1], spot[2]
+        ));
+    }
+}
+
+fn level_script_barricade_gone(w: &mut World) -> bool {
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| s.stats.props_destroyed.iter().any(|p| p.eq_ignore_ascii_case(BARRICADE_PROP)))
+}
+
+fn level_script_chain(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no LevelScript".into());
+    };
+    let h = &s.director.history;
+    let when = |e: &str| h.iter().find(|x| x.1.eq_ignore_ascii_case(e)).map(|x| x.0);
+    let chain = ["levelstart", "Rappel", "CheckpointLevelStart", "StartBactaTraining", "BactaDispenserActive", "BactaUsed", "RetreatToGammaSector", "DialogGetToGunship"];
+    let times: Vec<String> = chain
+        .iter()
+        .map(|e| format!("{e} {}", when(e).map_or("-".into(), |t| format!("{t:.1}s"))))
+        .collect();
+    let in_order = chain.windows(2).all(|p| match (when(p[0]), when(p[1])) {
+        (Some(a), Some(b)) => a <= b,
+        _ => false,
+    });
+    let got = format!(
+        "{}; player hurt {:.0}, healed {:.0}; switched off {:?}; destroyed {:?}; checkpoints {:?}; {} actions not done yet",
+        times.join(", "),
+        s.stats.player_hurt,
+        s.stats.bacta_healed,
+        s.stats.parts_switched_off,
+        s.stats.props_destroyed,
+        s.stats.checkpoints,
+        s.stats.not_done
+    );
+    if in_order && s.stats.player_hurt > 0.0 && s.stats.bacta_healed > 0.0 && s.stats.checkpoints.iter().any(|c| c == "checkpoint0") {
+        Ok(got)
+    } else {
+        Err(got)
+    }
 }

@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
 use rc_ai::{AiParams, Battle, Factory, Mode, SpawnSpot, StartState};
-use rc_combat::{CombatPlugin, Dead, Health, Hittable, Team};
+use rc_combat::{Body, CombatPlugin, Damage, Dead, Health, Hittable, Team};
 use rc_enemies::look::Pose;
 use rc_enemies::{Droid, EnemiesPlugin, Fight};
 use rc_game_core::{
@@ -35,6 +35,11 @@ impl Room {
     /// The player at (-500, 0) facing +X; a spawner 1500 uu ahead whose
     /// walk-in trigger is where the player stands.
     fn new() -> Room {
+        Room::with(AiParams::battle_droid())
+    }
+
+    /// The same room with another enemy type in the spawner.
+    fn with(params: AiParams) -> Room {
         let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatesPlugin, TransformPlugin))
@@ -75,10 +80,11 @@ impl Room {
             team: None,
             triggers: vec![(UVec3::new(-500.0, 0.0, 84.0), 300.0)],
         };
-        let battle = Battle::new(
-            Arc::new(AiParams::battle_droid()),
+        let params = Arc::new(params);
+        let battle = Battle::with_types(
+            params.clone(),
             rc_nav::NavGraph::default(),
-            vec![factory],
+            vec![(factory, params)],
         );
         app.insert_resource(Fight::new(battle));
         app.world_mut()
@@ -175,4 +181,88 @@ fn players_shots_destroy_the_droid() {
     // The fight is over: calm music.
     r.seconds(0.1, &[]);
     assert_eq!(*r.app.world().resource::<MusicMood>(), MusicMood::Calm);
+}
+
+/// An enemy type's settings, read from its file in data/enemies.
+fn enemy_file(id: &str) -> AiParams {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../../data/enemies/{id}.toml"));
+    let mut p = AiParams::battle_droid()
+        .with_overrides(&std::fs::read_to_string(path).unwrap())
+        .unwrap();
+    p.kind.id = id.into();
+    p
+}
+
+#[test]
+fn other_enemy_types_spawn_with_their_own_numbers() {
+    let want = enemy_file("trandoshan");
+    let mut r = Room::with(want.clone());
+    r.seconds(0.5, &[]);
+    let d = r.droids()[0];
+    let w = r.app.world();
+    assert_eq!(
+        *w.get::<Health>(d).unwrap(),
+        Health::new(want.combat.health)
+    );
+    assert_eq!(*w.get::<Body>(d).unwrap(), Body::Organic);
+    assert_eq!(w.get::<Droid>(d).unwrap().kind, "trandoshan");
+    assert_eq!(
+        w.get::<Hittable>(d).unwrap().half_height,
+        want.movement.collision_height
+    );
+    let name = w.get::<Name>(d).unwrap().to_string();
+    assert!(name.starts_with("Trandoshan"), "{name}");
+}
+
+#[derive(Resource, Default)]
+struct MateHits(u32);
+
+fn count_mate_hits(
+    mut hits: ResMut<MateHits>,
+    mut d: bevy::ecs::message::MessageReader<Damage>,
+    mates: Query<(), (With<Team>, Without<Player>, Without<Droid>)>,
+) {
+    hits.0 += d.read().filter(|d| mates.contains(d.target)).count() as u32;
+}
+
+#[test]
+fn droids_shoot_squad_mates_too() {
+    let mut r = Room::new();
+    // A squad mate halfway between, nearer the droid than the player is.
+    let mate = r
+        .app
+        .world_mut()
+        .spawn((
+            Name::new("mate"),
+            Team::Republic,
+            Hittable::COMMANDO,
+            Health::new(100.0),
+            Transform::from_translation(b(300.0, 150.0, 0.0)),
+        ))
+        .id();
+    r.app
+        .init_resource::<MateHits>()
+        .add_systems(Last, count_mate_hits);
+    r.seconds(10.0, &[]);
+    let hits = r.app.world().resource::<MateHits>().0;
+    let fight = r.app.world().resource::<Fight>();
+    println!("mate hits {hits}, {:?}", fight.stats);
+    assert!(hits >= 1, "the droid never hit the mate");
+    assert_eq!(fight.battle.fighters[0].target_index, Some(1));
+    assert!(r.app.world().get::<Health>(mate).unwrap().current < 100.0);
+}
+
+#[test]
+fn a_fallen_droid_leaves_its_blaster() {
+    let mut r = Room::new();
+    r.seconds(1.0, &[]);
+    r.seconds(8.0, &[Action::Fire]);
+    let w = r.app.world_mut();
+    let drops: Vec<String> = w
+        .query::<&rc_combat::WeaponPickup>()
+        .iter(w)
+        .map(|p| p.weapon.clone())
+        .collect();
+    assert_eq!(drops, ["e5_blaster_pickup"]);
 }
