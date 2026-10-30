@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: No more fish-eye on wide windows; tall phones see more (rc_game)
+
+- **Changed:** `crates/rc_game/src/player.rs`: new `view_angle`. The screen's shorter side keeps the original's 69 degrees (for `fov = 85`), the longer side widens to fit, and it stops at the new setting `video.widest_fov` (110 by default, 0 for no limit, off while `panini` is on). Upright phones now get Hor+ turned on its side (more above and below) instead of 42 degrees across. `FieldOfView` now holds both settings. The `player: view ...` log line also gives the setting, the limit and `held at the widest`. `settings.rs`: the new option and its note in the default file. Tests `widest_view_stops_the_fish_eye` and `every_screen_shape` (14 shapes). Docs: `docs/DISPLAY_AND_INPUT.md` table, `docs/DESIGN.md`, `README.md`.
+- **Why:** The user saw a strong fish-eye look with the play-test window maximized. Their `settings.toml` has `fov = 95` (set in the options menu), which is 111 degrees across at 16:9 and 125 or more on an ultrawide; a flat 3D view stretches the edges badly that wide. The camera code itself was doing what it was meant to (log: `player: view 1280x720 (aspect 1.778): 111.0 degrees across, 78.6 up and down`). The user also asked for every major screen shape: TVs, monitors, phones, flip phones.
+- **Tested how:** `cargo test -p rc_game --bins` in the cloud sandbox.
+- **Result:** 27 of 27 pass. Table in `docs/DISPLAY_AND_INPUT.md`, e.g. 16:9 101.4 x 69.0 (unchanged), 3440x1440 110.0 x 61.7 (was 125+ x 69), upright phone 9:16 69.0 x 101.4 (was 42.3 x 69).
+- **Still broken / not tested:** Not tested in the game on the PC or by eye; the cloud has no game files for the script run. 32:9 now shows only 43.8 up and down (the price of the limit; `widest_fov = 0` plus the Panini view keeps the full height). Phone notches and rounded corners (safe areas) are not handled.
+- **Next:** The user maximizes the play test and the log shows `held at the widest`; then decide whether very wide screens should switch the Panini view on by themselves.
+
 ## 2026-10-30: Grenade log says why each one went off (rc_combat)
 
 - **Changed:** `crates/rc_combat/src/throw.rs`: the `grenades: X went off ...` log line now says why: "on touching a character", "on touching the level", "when a character came near" or "when its fuse ran out".

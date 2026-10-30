@@ -78,6 +78,12 @@ pub struct VideoSection {
     /// Wider screens see more at the sides with the same view up and down
     /// ("Hor+"), so nothing is cut off or stretched to fit.
     pub fov: f32,
+    /// The widest the view may get across, degrees, on any screen shape.
+    /// A flat view much wider than this stretches the sides into a
+    /// fish-eye look, so on wide screens (a maximized window, an
+    /// ultrawide) it stops widening here and shows a little less up and
+    /// down instead. 0 is no limit. Not used while `panini` is on.
+    pub widest_fov: f32,
     /// The widest shape the on-screen display spreads to, as width over
     /// height. On wider screens it stays in a centred area this shape, so
     /// health and ammo aren't in the far corners of an ultrawide.
@@ -156,6 +162,7 @@ impl Default for Settings {
                 height: 720,
                 vsync: true,
                 fov: 85.0,
+                widest_fov: 110.0,
                 hud_max_aspect: 16.0 / 9.0,
                 panini: 0.0,
             },
@@ -240,6 +247,11 @@ vsync = true
 # Field of view across a 4:3 screen, degrees (the original's is 85). Wider
 # screens see more at the sides; the view up and down stays the same.
 fov = 85
+# The widest the view may get across, degrees. Past about 110 a flat view
+# stretches the sides into a fish-eye look, so wide windows and ultrawides
+# stop there and show a little less up and down. 0 is no limit (pure Hor+).
+# Not used while panini (below) is on.
+widest_fov = 110
 # Widest shape (width / height) the display spreads to; on an ultrawide it
 # stays in a centred area this shape. 1.7777778 is 16:9. 0 fills the screen.
 hud_max_aspect = 1.7777778
