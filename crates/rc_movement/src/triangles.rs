@@ -13,10 +13,25 @@
 
 use crate::world::{sweep_planes, Hit, Plane, World};
 use crate::Vec3;
-use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Width of one grid column, uu.
 const CELL: f32 = 256.0;
+
+static SWEEPS: AtomicU64 = AtomicU64::new(0);
+static TESTED: AtomicU64 = AtomicU64::new(0);
+static NANOS: AtomicU64 = AtomicU64::new(0);
+
+/// How much collision work was done since the last call, for the speed
+/// readout in the log: sweeps, triangles looked at, and time spent (ms,
+/// added up over every thread).
+pub fn take_counts() -> (u64, u64, f64) {
+    (
+        SWEEPS.swap(0, Ordering::Relaxed),
+        TESTED.swap(0, Ordering::Relaxed),
+        NANOS.swap(0, Ordering::Relaxed) as f64 / 1e6,
+    )
+}
 
 fn cross(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
@@ -81,16 +96,18 @@ impl TriangleWorld {
         (clamp_c(lo.x), clamp_r(lo.y), clamp_c(hi.x), clamp_r(hi.y))
     }
 
-    /// The thin solid for one triangle, as planes.
-    fn planes(t: &[Vec3; 3]) -> Vec<Plane> {
-        let mut planes = Vec::with_capacity(29);
+    /// The thin solid for one triangle, as planes (the first `n` of them).
+    fn planes(t: &[Vec3; 3]) -> ([Plane; 32], usize) {
+        let mut planes = [Plane { normal: Vec3::ZERO, dist: 0.0 }; 32];
+        let mut n_used = 0;
         let mut add = |n: Vec3| {
             let n = n.normalize_or_zero();
             if n == Vec3::ZERO {
                 return;
             }
             let dist = t.iter().map(|p| n.dot(*p)).fold(f32::MIN, f32::max);
-            planes.push(Plane { normal: n, dist });
+            planes[n_used] = Plane { normal: n, dist };
+            n_used += 1;
         };
         let edges = [t[1] - t[0], t[2] - t[1], t[0] - t[2]];
         let face = cross(edges[0], t[2] - t[0]);
@@ -113,7 +130,7 @@ impl TriangleWorld {
                 add(-c);
             }
         }
-        planes
+        (planes, n_used)
     }
 }
 
@@ -122,39 +139,145 @@ impl World for TriangleWorld {
         if self.triangles.is_empty() {
             return None;
         }
-        let lo = Vec3::new(start.x.min(end.x) - extent.x, start.y.min(end.y) - extent.y, 0.0);
-        let hi = Vec3::new(start.x.max(end.x) + extent.x, start.y.max(end.y) + extent.y, 0.0);
-        let z_lo = start.z.min(end.z) - extent.z;
-        let z_hi = start.z.max(end.z) + extent.z;
-        let (c0, r0, c1, r1) = self.cell_range(lo, hi);
-        let mut seen = HashSet::new();
-        let mut best: Option<Hit> = None;
-        for r in r0..=r1 {
-            for c in c0..=c1 {
-                for &i in &self.cells[r * self.columns + c] {
-                    if !seen.insert(i) {
-                        continue;
-                    }
-                    let t = &self.triangles[i as usize];
-                    // Quick reject on height.
-                    let tz_lo = t[0].z.min(t[1].z).min(t[2].z);
-                    let tz_hi = t[0].z.max(t[1].z).max(t[2].z);
-                    if tz_hi < z_lo || tz_lo > z_hi {
-                        continue;
-                    }
-                    if let Some(h) = sweep_planes(&Self::planes(t), extent, start, end) {
-                        if h.start_solid {
-                            return Some(h);
+        let t0 = std::time::Instant::now();
+        let mut tested = 0u64;
+        let hit = self.sweep_inner(extent, start, end, &mut tested);
+        SWEEPS.fetch_add(1, Ordering::Relaxed);
+        TESTED.fetch_add(tested, Ordering::Relaxed);
+        NANOS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        hit
+    }
+}
+
+impl TriangleWorld {
+    fn sweep_inner(&self, extent: Vec3, start: Vec3, end: Vec3, tested: &mut u64) -> Option<Hit> {
+        // The box the whole move covers, a little larger so rounding can't
+        // leave out a triangle the exact test would touch.
+        let lo = Vec3::new(
+            start.x.min(end.x) - extent.x - MARGIN,
+            start.y.min(end.y) - extent.y - MARGIN,
+            start.z.min(end.z) - extent.z - MARGIN,
+        );
+        let hi = Vec3::new(
+            start.x.max(end.x) + extent.x + MARGIN,
+            start.y.max(end.y) + extent.y + MARGIN,
+            start.z.max(end.z) + extent.z + MARGIN,
+        );
+        // Nowhere near these triangles (a far-away part of the level, a
+        // door across the map): nothing to hit.
+        if hi.x < self.min.x
+            || lo.x > self.max.x
+            || hi.y < self.min.y
+            || lo.y > self.max.y
+            || hi.z < self.min.z
+            || lo.z > self.max.z
+        {
+            return None;
+        }
+        let (_, r0, _, r1) = self.cell_range(lo, hi);
+        let delta = end - start;
+        SEEN.with(|seen| {
+            let mut seen = seen.borrow_mut();
+            let stamp = seen.next_stamp(self.triangles.len());
+            let mut best: Option<Hit> = None;
+            for r in r0..=r1 {
+                // Only the columns of this row the move passes over, so a
+                // long diagonal move (a line of sight) doesn't look at the
+                // whole square around it.
+                let row_lo = self.min.y + r as f32 * CELL - extent.y - MARGIN;
+                let row_hi = row_lo + CELL + 2.0 * (extent.y + MARGIN);
+                let (x_lo, x_hi) = if delta.y.abs() < 1e-3 {
+                    (lo.x, hi.x)
+                } else {
+                    let ta = ((row_lo - start.y) / delta.y).clamp(0.0, 1.0);
+                    let tb = ((row_hi - start.y) / delta.y).clamp(0.0, 1.0);
+                    let (xa, xb) = (start.x + delta.x * ta, start.x + delta.x * tb);
+                    (xa.min(xb) - extent.x - MARGIN, xa.max(xb) + extent.x + MARGIN)
+                };
+                let (c0, _, c1, _) = self.cell_range(Vec3::new(x_lo, lo.y, 0.0), Vec3::new(x_hi, hi.y, 0.0));
+                for c in c0..=c1 {
+                    for &i in &self.cells[r * self.columns + c] {
+                        if !seen.first_visit(i, stamp) {
+                            continue;
                         }
-                        if best.map_or(true, |b| h.time < b.time) {
-                            best = Some(h);
+                        let t = &self.triangles[i as usize];
+                        // Quick reject: the triangle's box is outside the
+                        // move's box (its box sides are among the solid's
+                        // sides, so it can't be hit).
+                        let t_lo = Vec3::new(
+                            t[0].x.min(t[1].x).min(t[2].x),
+                            t[0].y.min(t[1].y).min(t[2].y),
+                            t[0].z.min(t[1].z).min(t[2].z),
+                        );
+                        let t_hi = Vec3::new(
+                            t[0].x.max(t[1].x).max(t[2].x),
+                            t[0].y.max(t[1].y).max(t[2].y),
+                            t[0].z.max(t[1].z).max(t[2].z),
+                        );
+                        if t_hi.x < lo.x
+                            || t_lo.x > hi.x
+                            || t_hi.y < lo.y
+                            || t_lo.y > hi.y
+                            || t_hi.z < lo.z
+                            || t_lo.z > hi.z
+                        {
+                            continue;
+                        }
+                        *tested += 1;
+                        let (planes, n) = Self::planes(t);
+                        if let Some(h) = sweep_planes(&planes[..n], extent, start, end) {
+                            if h.start_solid {
+                                return Some(h);
+                            }
+                            if best.map_or(true, |b| h.time < b.time) {
+                                best = Some(h);
+                            }
                         }
                     }
                 }
             }
-        }
-        best
+            best
+        })
     }
+}
+
+/// Slack added around a move's box before leaving triangles out, uu.
+const MARGIN: f32 = 1.0;
+
+/// Which triangles one sweep has already looked at (a triangle can sit in
+/// several grid columns). Each sweep gets a new stamp, so nothing needs
+/// clearing; one list per thread, shared by every triangle world.
+#[derive(Default)]
+struct Seen {
+    stamp: u32,
+    marks: Vec<u32>,
+}
+
+impl Seen {
+    fn next_stamp(&mut self, triangles: usize) -> u32 {
+        if self.marks.len() < triangles {
+            self.marks.resize(triangles, 0);
+        }
+        self.stamp = self.stamp.wrapping_add(1);
+        if self.stamp == 0 {
+            self.marks.iter_mut().for_each(|m| *m = 0);
+            self.stamp = 1;
+        }
+        self.stamp
+    }
+
+    fn first_visit(&mut self, i: u32, stamp: u32) -> bool {
+        let m = &mut self.marks[i as usize];
+        if *m == stamp {
+            return false;
+        }
+        *m = stamp;
+        true
+    }
+}
+
+thread_local! {
+    static SEEN: std::cell::RefCell<Seen> = std::cell::RefCell::new(Seen::default());
 }
 
 #[cfg(test)]
@@ -162,6 +285,57 @@ mod tests {
     use super::*;
     use crate::room::*;
     use crate::{MoveInput, MoveParams, Pawn};
+
+    /// Every triangle, no grid: what the grid search must agree with.
+    fn sweep_all(w: &TriangleWorld, extent: Vec3, start: Vec3, end: Vec3) -> Option<Hit> {
+        let mut best: Option<Hit> = None;
+        for t in &w.triangles {
+            let (planes, n) = TriangleWorld::planes(t);
+            if let Some(h) = sweep_planes(&planes[..n], extent, start, end) {
+                if best.map_or(true, |b| h.time < b.time || (h.start_solid && !b.start_solid)) {
+                    best = Some(h);
+                }
+            }
+        }
+        best
+    }
+
+    /// The grid search (skipping far-away triangles and columns off the
+    /// line) finds the same hits as trying every triangle: random
+    /// triangles and random moves, long and short, near and far.
+    #[test]
+    fn grid_search_matches_trying_every_triangle() {
+        let mut seed = 12345u64;
+        let mut rnd = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as f32) / (1u64 << 31) as f32
+        };
+        let mut tris = Vec::new();
+        for _ in 0..400 {
+            let c = Vec3::new(rnd() * 4000.0 - 2000.0, rnd() * 4000.0 - 2000.0, rnd() * 600.0 - 300.0);
+            let mut p = || c + Vec3::new(rnd() * 400.0 - 200.0, rnd() * 400.0 - 200.0, rnd() * 200.0 - 100.0);
+            tris.push([p(), p(), p()]);
+        }
+        let w = TriangleWorld::new(tris);
+        let mut hits = 0;
+        for k in 0..3000 {
+            let start = Vec3::new(rnd() * 6000.0 - 3000.0, rnd() * 6000.0 - 3000.0, rnd() * 800.0 - 400.0);
+            let len = if k % 3 == 0 { 3000.0 } else { 200.0 };
+            let end = start + Vec3::new(rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0, rnd() * 0.4 - 0.2) * len;
+            let extent = if k % 2 == 0 { Vec3::ZERO } else { Vec3::new(40.0, 40.0, 84.0) };
+            let a = w.sweep(extent, start, end);
+            let b = sweep_all(&w, extent, start, end);
+            assert_eq!(a.is_some(), b.is_some(), "move {k}: {start:?} to {end:?}");
+            if let (Some(a), Some(b)) = (a, b) {
+                hits += 1;
+                assert_eq!(a.start_solid, b.start_solid, "move {k}");
+                if !a.start_solid {
+                    assert!((a.time - b.time).abs() < 1e-5, "move {k}: {} vs {}", a.time, b.time);
+                }
+            }
+        }
+        assert!(hits > 300, "only {hits} hits; the test should hit often");
+    }
 
     /// The test room's solids, cut into triangles.
     fn room_as_triangles() -> TriangleWorld {

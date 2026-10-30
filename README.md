@@ -130,7 +130,19 @@ copy of the game.
   rifle hits or 2 pistol hits. One droid fires back, and its hits take your
   shield before your health. The firing and reload sounds are the game's.
   Every weapon is a text file in `data/weapons`, which mods can edit.
-  `rc_shoot --script` drives itself through 12 checks and passed all of them.
+  `rc_shoot --script` drives itself through 17 checks and passed all of them.
+
+- **First-person arms and weapon animations (tested in the cloud sandbox,
+  not yet on Windows or by playing).** The player holds the original
+  first-person arms and gun for the DC-17m, its sniper and anti-armour
+  attachments, the DC-15s pistol and the picked-up Trandoshan repeater,
+  read from the game's `hudarms.ukx` at run time. They breathe when you
+  stand still, sway when you walk or run, kick on each shot, play the full
+  reload, holster the old weapon and bring up the new one when you switch
+  (with the attachment swap between DC-17m attachments), and play the
+  grenade throw and melee hit. They're drawn by their own camera, so the gun
+  never pokes into walls. The sniper's arms hide while zoomed, as in the
+  game.
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
@@ -209,6 +221,21 @@ copy of the game.
   the next thing happens" works. They follow the original's spawning
   rules (where, how many, how often). `rc_game --script` checks that on
   geo_01a's small bunker (52 of 52 checks).
+  Levels now talk (tested in the cloud sandbox on a silent sound card, not
+  yet listened to or run on Windows): the lines of dialogue and sounds the
+  scripts play (squad and advisor radio lines, explosions on cue) come
+  from the game's own sound files, and a script waiting for a line waits
+  exactly as long as the line lasts. Every one of the 1,629 sounds the
+  campaign maps' scripts name is found. `rc_game --script` checks that
+  geo_01a's intro plays its lines (57 of 57 checks with level changes).
+  Finishing a level now takes you to the next one (tested in the cloud
+  sandbox with the real files, not yet on Windows or by playing through):
+  walking into the exit arrows, or a script's "change level", loads the
+  next map in the campaign, and you keep your health, shield, weapons and
+  ammo. You arrive where the original puts you, and the new map's start is
+  saved as your checkpoint. Following the exits from the prologue goes
+  through all 56 campaign maps to the epilogue. `rc_game --script` walks
+  into geo_01a's exit and checks geo_01b (56 of 56 checks).
   Scripts now direct the enemies too (tested in the cloud sandbox with the
   real files, not yet on Windows or by playing): they walk where the
   level sends them, turn to you, play their scripted animations, wait for
@@ -216,7 +243,8 @@ copy of the game.
   up to ledges they can't walk to (a stand-in for flying). Scripts can also
   set Delta Squad's stance. On geo_01a the lone Geonosian in the trench
   leaps up, turns to you, plays his "seen an enemy" animation and runs off.
-  Squad mates' own scripted moves aren't done yet.
+  Squad mates' own scripted moves aren't done yet. `rc_game --script`
+  checks the Geonosian's whole scene (60 of 60 checks).
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
@@ -273,9 +301,15 @@ copy of the game.
   size is our guess.
 
   Any screen shape works: the view is "Hor+" (wider screens see more at the
-  sides, the view up and down stays the original's), and the HUD stays in a
-  centred 16:9 area on ultrawides (`hud_max_aspect` in `settings.toml`).
-  Checked at 4:3, 16:9, 21:9, 32:9 and an upright phone shape. Keyboard and
+  sides, the view up and down stays the original's; upright phones see more
+  above and below), until the screen is twice as long as it is short,
+  so a maximized window or an ultrawide doesn't look fish-eyed
+  (`widest_shape` in `settings.toml`; the field of view setting still
+  works on every screen). The HUD stays in a centred 16:9 area on ultrawides
+  (`hud_max_aspect`). The angles are checked by a test at 14 shapes, from
+  4:3 to 32:9 and from upright and flip phones to foldables; in the game
+  itself the script run was checked at 4:3, 16:9, 21:9, 32:9 and an upright
+  phone shape before this limit was added (not re-run since). Keyboard and
   mouse and a gamepad work at the same time.
 
 - **Controllers and gyro aiming (tested with pretend controllers only, no
@@ -356,16 +390,24 @@ copy of the game.
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
   doors, barricades, damage to the player, bacta dispensers, prompts,
-  objectives (kept, not shown) and checkpoints. Lines of dialogue, music
-  cues, characters walking or animating, droid factories, the squad
-  joining and leaving, camera moves and level changes are logged as "not
-  done yet". Sound lengths aren't read, so a script waiting for a line
-  waits 3 s. Not tested on Windows.
+  objectives (kept, not shown), checkpoints, enemy spawners, level
+  changes, and lines of dialogue and sounds (the game's own, read from its
+  sound files; a script waiting for a line waits for its real length). No
+  subtitles yet, and every scripted sound plays at full loudness wherever
+  its speaker is. Music cues, characters walking or animating, the squad
+  joining and leaving and camera moves are logged as "not done yet". The
+  end-of-campaign debriefing screen isn't shown: the game goes straight
+  on. Briefings and cutscene maps may wait for events nothing sends yet,
+  so you may get stuck in one. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
   picks from) are played for weapons, grenades and enemy voices. No 3D
   (positional) sound yet: enemy sounds just get quieter with distance.
+- Collision follows each prop's "can be walked through" settings and
+  each mesh part's collision switch (since 2026-10-30; before, every prop
+  was solid). Simplified collision shapes aren't read, so solid props
+  block by their drawn shape. Not tested on Windows or by playing.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
@@ -384,14 +426,15 @@ copy of the game.
   far a shot can miss. No hit reactions or death effects beyond the
   animation. Droids don't use jump links or doors.
 
-- Weapons: no first-person arms or muzzle flash, and switching weapons is
-  instant. How the view kick settles back is our own guess. The
-  attachments' and the Trandoshan repeater's reload times are stand-ins,
-  grenades have no models yet (a small glowing ball), and squad mates only
+- Weapons: no muzzle flash, and switching weapons is instant for firing
+  (the arms do play the holster and draw animations). The first-person
+  arms have no blending between animations, aren't lit by the level (a
+  fixed brightness), and the DC-17m's ammo counter always shows 999. How
+  the view kick settles back is our own guess. Grenades have no models yet (a small glowing ball), and squad mates only
   throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors walk
-  instead of flying, jumping and climbing. The Trandoshan uses a stand-in model.
+  instead of flying, jumping and climbing. Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
 - Enemy voices: battle droids, super battle droids, Trandoshans and
   Geonosian warriors say the game's own lines when they spot you, get hurt
   and die, with the hurt and death lines matched to explosions, EMP and
@@ -571,7 +614,9 @@ cargo run --release -p rc_combat --bin rc_shoot -- --script
 ```
 
 The log goes to `logs\rc_shoot.log`. The last line should be
-`script done: 12 of 12 checks passed`.
+`script done: 17 of 17 checks passed`. With the game folder found, you hold
+the original first-person arms and gun: the log shows lines like
+`arms: dc17m_blaster plays Reload` as the animations change.
 
 To load a level and fly around it:
 

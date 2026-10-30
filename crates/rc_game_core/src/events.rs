@@ -127,3 +127,27 @@ pub enum SquadStanceOrder {
     SearchAndDestroy,
     SecurePosition([f32; 3]),
 }
+/// Leave this map for another one: a level exit was reached (a
+/// `Teleporter` with a `URL`, `ACTION_ChangeLevel`, or the end-of-campaign
+/// debriefing's `NewLevel`). Sent by the level scripts part; the save part
+/// (`rc_save`) carries the player's state over, loads `map` and saves the
+/// new map's start as a checkpoint.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct ChangeLevel {
+    /// The map, as in `GameData/Maps` (`geo_01b`).
+    pub map: String,
+    /// Where on the new map to arrive: the `Tag` of a `Teleporter` there
+    /// (`FromA`). `rc_scripts::level_url` reads both out of the map's
+    /// address (`RAS_03B.ctm#FromA`). `None`, or a name no teleporter has (`playerstart`),
+    /// means the map's player start.
+    pub portal: Option<String>,
+    /// What sent it, for the log.
+    pub by: String,
+}
+
+/// Where the player should arrive on the map being loaded: a `Teleporter`'s
+/// `Tag` (see [`ChangeLevel::portal`]). Put in by the save part before
+/// loading; the level part reads it, uses that teleporter's place as the
+/// player start if there is one, and removes it.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub struct ArrivalPortal(pub String);

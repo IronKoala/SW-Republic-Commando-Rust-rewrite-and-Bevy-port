@@ -134,6 +134,8 @@ enum Check {
     Reloading,
     ShieldFirst,
     Shots(u32),
+    /// The first-person arms show this weapon playing this animation.
+    Arms(&'static str, &'static str),
 }
 
 #[derive(Resource)]
@@ -160,11 +162,13 @@ fn script_steps() -> Vec<Step> {
         Hold(&[Fire], 0.95),
         Hold(&[], 1.0),
         Expect(Down("droid ahead")),
+        Expect(Arms("dc17m_blaster", "ActionBreathe")),
         Expect(Magazine("DC-17m Blaster", 50, 60)),
         Expect(Shots(10)),
         // Reload: the game's 1.5 s animation.
         Hold(&[Reload], 0.1),
         Expect(Reloading),
+        Expect(Arms("dc17m_blaster", "Reload")),
         Hold(&[], 1.5),
         Expect(Magazine("DC-17m Blaster", 60, 50)),
         // The droid to the right, with the pistol: one shot per press,
@@ -173,11 +177,14 @@ fn script_steps() -> Vec<Step> {
         // The pistol is last in the cycle (after the DC-17m's attachments),
         // so "previous weapon" reaches it.
         Hold(&[PrevWeapon], 0.1),
+        // The rifle goes down before the pistol comes up.
+        Expect(Arms("dc17m_blaster", "Holster")),
         Face(26.57, 0.0),
         Hold(&[], 0.1),
         Hold(&[Fire], 0.1),
         Hold(&[], 0.3),
         Hold(&[Fire], 0.1),
+        Expect(Arms("dc15s_pistol", "Fire")),
         Hold(&[], 1.0),
         Expect(Down("droid right")),
         Expect(Shots(12)),
@@ -187,7 +194,9 @@ fn script_steps() -> Vec<Step> {
         Expect(ShieldFirst),
         Hold(&[NextWeapon], 0.1),
         Face(0.0, 0.0),
-        Hold(&[], 0.5),
+        // Pistol down (0.47 s), rifle up (0.67 s).
+        Hold(&[], 1.5),
+        Expect(Arms("dc17m_blaster", "ActionBreathe")),
         Picture,
     ]
 }
@@ -697,6 +706,7 @@ fn run_script(
     lib: Option<Res<WeaponLibrary>>,
     tally: Res<Tally>,
     weapon: Res<WeaponReadout>,
+    arms: Option<Res<rc_combat::ArmsReadout>>,
     players: Query<(&Health, &Shield, &Arsenal), With<Player>>,
     frames: Res<FrameCount>,
     log: Res<GameLog>,
@@ -794,6 +804,16 @@ fn run_script(
                         (
                             h == 200.0 && s < 100.0,
                             format!("the far droid's shots took shield {s}/100, health untouched {h}/200"),
+                        )
+                    }
+                    Check::Arms(id, anim) => {
+                        let now = arms.as_deref().cloned().unwrap_or_default();
+                        (
+                            now.weapon.as_deref() == Some(id) && now.animation == anim,
+                            format!(
+                                "the arms show {id} playing {anim}; they show {:?} playing {}",
+                                now.weapon, now.animation
+                            ),
                         )
                     }
                     Check::Shots(n) => (

@@ -18,7 +18,7 @@ offset = [127.4, 30, -10] # placeholder: the rifle's FPFireOffset
 clip_size = 1             # game: ReloadCount
 max_ammo = 4              # game: DC17mAntiArmorAmmoDefaults MaxAmmo
 start_ammo = 4            # game: PickupAmmoCount
-reload_time = 1.5         # placeholder: the attachment's reload animation isn't read yet
+reload_time = 1.4         # game: the arms' Reload animation, 42 frames at 30 fps
 
 [shot]
 kind = "lobbed"           # flies like a grenade
@@ -43,3 +43,12 @@ empty = "wep_GEN_empty_01"
 package = "weapons"
 mesh = "DC17mBlaster"     # placeholder: the rifle's model until the attachment's is read
 offset = [40, 12, -14]
+
+[arms]
+# The first-person arms holding it: an animated model read from the game
+# at run time (Animations/hudarms.ukx). Leave this section out to show the
+# plain [model] in view instead.
+mesh = "HudArmsAntiArmor"  # game: DC17mAntiArmor's Mesh
+fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
+attachment_group = "dc17m" # our name: weapons that swap with AttachHolster/AttachLoad
+brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet

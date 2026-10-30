@@ -250,6 +250,7 @@ mod tests {
                 ),
             ],
             failures: vec![],
+            sounds: Default::default(),
         }
     }
 
@@ -276,6 +277,7 @@ mod tests {
             held: vec![],
             calls: vec![],
             places: Default::default(),
+            sounds: vec![],
             started: false,
             stats: PlayStats::default(),
         });

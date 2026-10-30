@@ -53,3 +53,12 @@ package = "weapons"
 mesh = "DC17mBlaster"     # the static mesh in StaticMeshes/weapons.usx
 offset = [40, 12, -14]    # our choice: where it sits in view (forward, right, up)
 bolt_colour = [0.3, 0.7, 1.0]  # our choice, from the bolt light's hue 122 (blue)
+
+[arms]
+# The first-person arms holding it: an animated model read from the game
+# at run time (Animations/hudarms.ukx). Leave this section out to show the
+# plain [model] in view instead.
+mesh = "HudArmsDC17m"      # game: DC17mBlaster's Mesh
+fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
+attachment_group = "dc17m" # our name: weapons that swap with AttachHolster/AttachLoad
+brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet

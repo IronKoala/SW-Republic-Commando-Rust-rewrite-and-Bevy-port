@@ -103,6 +103,28 @@ pub struct WeaponParams {
     pub model_offset: [f32; 3],
     /// Colour of the bolt, red, green, blue from 0 to 1.
     pub bolt_colour: [f32; 3],
+    /// The animated first-person arms holding it (`[arms]`). `None`: the
+    /// plain `model` is shown instead.
+    pub arms: Option<ArmsParams>,
+}
+
+/// A weapon's first-person arms: an animated model in the game's
+/// animation packages (the weapon class's `Mesh`, like `HudArmsDC17m`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArmsParams {
+    /// Relative to the game folder.
+    pub package: String,
+    pub mesh: String,
+    /// Field of view the arms are drawn with, degrees across a 4:3 screen
+    /// (`DisplayFOV`), whatever the view's own setting or zoom.
+    pub fov: f32,
+    /// Weapons in the same group swap with the attachment moves
+    /// (`AttachHolster`, `AttachLoad`) instead of `Holster` and `Load`.
+    pub attachment_group: Option<String>,
+    /// Hidden while zoomed in (`bZoomedUsesNoHUDArms`: the sniper scope).
+    pub hide_zoomed: bool,
+    /// How bright the arms are drawn, 0 to 1.
+    pub brightness: f32,
 }
 
 impl WeaponParams {
@@ -193,6 +215,19 @@ impl WeaponParams {
             model: t.text("model.mesh")?,
             model_offset: t.vec3("model.offset")?.unwrap_or([0.0; 3]),
             bolt_colour: t.vec3("model.bolt_colour")?.unwrap_or([1.0, 0.3, 0.1]),
+            arms: match t.text("arms.mesh")? {
+                None => None,
+                Some(mesh) => Some(ArmsParams {
+                    package: t
+                        .text("arms.package")?
+                        .unwrap_or_else(|| "GameData/Animations/hudarms.ukx".to_string()),
+                    mesh,
+                    fov: t.number("arms.fov")?.unwrap_or(85.0),
+                    attachment_group: t.text("arms.attachment_group")?,
+                    hide_zoomed: t.boolean("arms.hide_zoomed")?.unwrap_or(false),
+                    brightness: t.number("arms.brightness")?.unwrap_or(0.75),
+                }),
+            },
         };
         t.finish()?;
         let p = WeaponParams {

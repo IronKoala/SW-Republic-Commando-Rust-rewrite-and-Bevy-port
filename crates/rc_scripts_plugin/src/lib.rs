@@ -20,31 +20,42 @@
 //! - where every script is goes into save files (`[scripts]`, see
 //!   `save.rs`). After a load the scripts carry on from there, and the
 //!   level-start events aren't sent again.
+//! - level exits: walking into an open exit (a `Teleporter` with a `URL`),
+//!   `ACTION_ChangeLevel`, or the end-of-campaign debriefing's `NewLevel`
+//!   sends a [`ChangeLevel`]; the save part loads that map and carries the
+//!   player over;
 //! - enemy spawners (`rc_enemies`) hear every event and switch on by tag;
 //!   `ACTION_StopFactorySpawning` and `ACTION_ResetFactory` become
 //!   [`FactoryOrder`]s for them, and what they send back (a droid's death
 //!   event, a spawner running out) arrives as a `RaiseEvent`.
 //!
+//! - lines of dialogue and sounds (`ACTION_PlaySound`,
+//!   `ACTION_PlayLocalSound`) play from the game's own sound packages, read
+//!   while the level loads; a script waiting for a line waits for its real
+//!   length (see `sounds.rs`).
 //! - characters: actions that name a character, or that belong to the
 //!   `ScriptedSequence` a character runs, go to that character (walk
 //!   there, turn to the player, play an animation, can't be hurt, ...;
 //!   see `characters.rs`). The script waits for walks and animations to
 //!   finish.
 //!
-//! Everything else a script does (lines of dialogue, camera moves) is
-//! logged as "not done yet" with the script's own comment. Every event and effect is logged with a `scripts:` prefix, and
+//! Everything else a script does (camera moves, ...) is logged as "not
+//! done yet" with the script's own comment. Every event and effect is
+//! logged with a `scripts:` prefix, and
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
 pub mod characters;
 pub mod save;
+pub mod sounds;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind, Health};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet,
-    GameState, HudMessage, LevelScriptsRun, LoadingGate, Player, PlayerVitals, RaiseEvent,
+    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
+    GamePaths, GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player,
+    PlayerVitals, RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelMoverData, LevelParts};
@@ -77,18 +88,20 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::SquadStanceOrder>()
+            .add_message::<ChangeLevel>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
                 Update,
-                (bacta, run, characters::cast, hide_parts)
+                (bacta, run, characters::cast, sounds::play, hide_parts)
                     .chain()
                     .in_set(ScriptSystems)
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
             )
-            .add_systems(OnExit(GameState::InGame), forget);
+            .add_systems(Update, (sounds::started, sounds::pause))
+            .add_systems(OnExit(GameState::InGame), (forget, sounds::forget));
     }
 }
 
@@ -96,6 +109,8 @@ impl Plugin for ScriptsPlugin {
 /// `SpawnBarricadeDroids`, `BactaUsed`, ...). Read it with a
 /// `MessageReader` to hook a part of the game to the map's events.
 pub use rc_game_core::ScriptEvent;
+
+pub use sounds::{ScriptSound, ScriptSounds};
 
 /// A script's order to the enemy spawners (see [`rc_game_core::events`]).
 pub use rc_game_core::FactoryOrder;
@@ -152,6 +167,8 @@ pub struct LevelScript {
     pub calls: Vec<characters::Call>,
     /// Where scripts can send characters.
     pub places: characters::Places,
+    /// Sounds the scripts asked for this frame.
+    sounds: Vec<sounds::SoundRequest>,
     started: bool,
     /// Counts for the self-tests.
     pub stats: PlayStats,
@@ -168,8 +185,16 @@ pub struct PlayStats {
     pub checkpoints: Vec<String>,
     /// Orders sent to enemy spawners: `stop TAG` or `reset TAG`.
     pub factory_orders: Vec<String>,
+    /// Where the level was left for (the map's own address), if it was.
+    pub left_for: Option<String>,
     /// Events sent into the scripts by other parts (droids, spawners).
     pub raised: Vec<String>,
+    /// Sounds and lines played, by name, in order.
+    pub sounds_played: Vec<String>,
+    /// How many of them started on the sound card.
+    pub sounds_started: usize,
+    /// Sounds asked for that weren't loaded.
+    pub sounds_missing: Vec<String>,
     pub not_done: usize,
     /// Orders sent to characters: `KIND WHO`.
     pub character_orders: Vec<String>,
@@ -290,6 +315,8 @@ fn build(
     loaded: Option<Res<Loaded>>,
     movers: Option<Res<LevelMoverData>>,
     mut gate: ResMut<LoadingGate>,
+    paths: Res<GamePaths>,
+    audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
     log: Res<GameLog>,
 ) {
     let (Some(loaded), Some(movers)) = (loaded, movers) else {
@@ -300,9 +327,21 @@ fn build(
     // Characters really walk and animate in the game: scripts wait for them.
     director.game_runs_characters = true;
     let places = characters::Places::new(places.clone());
+    // The lines and sounds the scripts play, and how long each lasts.
+    // Without audio (tests) there's nothing to read them into.
+    match audio {
+        Some(mut audio) => {
+            let s = sounds::load(map, &paths, &mut audio, &log);
+            for (name, secs) in &s.lengths {
+                director.set_sound_length(name, *secs);
+            }
+            commands.insert_resource(s);
+        }
+        None => log.line(format!("{PART}: no audio; script sounds not read")),
+    }
     let s = &director.stats;
     log.line(format!(
-        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} counters, {} conditions, {} checkpoints, {} props; level start sends {:?}",
+        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} counters, {} conditions, {} checkpoints, {} props, {} level exits; level start sends {:?}",
         s.scripts,
         s.sequences,
         s.actions,
@@ -311,8 +350,18 @@ fn build(
         s.conditions,
         s.checkpoints,
         s.props,
+        s.exits,
         director.start_events()
     ));
+    for (name, url, at, open) in director.exits() {
+        log.line(format!(
+            "{PART}:   level exit {name} at ({:.0}, {:.0}, {:.0}) to {url}{}",
+            at[0],
+            at[1],
+            at[2],
+            if open { "" } else { " (closed until the scripts open it)" }
+        ));
+    }
     let dispensers: Vec<Dispenser> = map
         .actors
         .iter()
@@ -359,6 +408,7 @@ fn build(
         held: Vec::new(),
         calls: Vec::new(),
         places,
+        sounds: Vec::new(),
         started: false,
         stats: PlayStats::default(),
     });
@@ -473,7 +523,10 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    mut checkpoints: MessageWriter<CheckpointReached>,
+    (mut checkpoints, mut change): (
+        MessageWriter<CheckpointReached>,
+        MessageWriter<ChangeLevel>,
+    ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
     restoring: Option<Res<RestoringSave>>,
@@ -579,6 +632,22 @@ fn run(
             Effect::Checkpoint { name } => {
                 script.held.push(name);
             }
+            Effect::ChangeLevel { url, by } => match rc_scripts::level_url(&url) {
+                Some((map, portal)) => {
+                    log.line(format!(
+                        "{PART}: t={now:.2} {by}: the level is over; on to {map}{}",
+                        portal
+                            .as_ref()
+                            .map(|p| format!(", arriving at {p}"))
+                            .unwrap_or_default()
+                    ));
+                    script.stats.left_for = Some(url);
+                    change.write(ChangeLevel { map, portal, by });
+                }
+                None => log.line(format!(
+                    "{PART}: t={now:.2} {by}: ERROR can't read the level address {url:?}; staying"
+                )),
+            },
             Effect::Action {
                 script: who,
                 index,
@@ -651,7 +720,12 @@ fn carry_out(
             let tag = a.text("CollideActorTag").unwrap_or("");
             let on = a.flag("bCollideActors", true);
             let n = parts.as_ref().map_or(0, |p| p.set_solid(tag, on));
-            if n > 0 {
+            if script.director.is_teleporter(tag) {
+                log.line(format!(
+                    "{at}: level exit {tag} {}",
+                    if on { "open" } else { "closed" }
+                ));
+            } else if n > 0 {
                 if !on {
                     script.stats.parts_switched_off.push(tag.to_string());
                 }
@@ -792,6 +866,30 @@ fn carry_out(
             log.line(format!("{at}: spawners {tag} refilled"));
             script.stats.factory_orders.push(format!("reset {tag}"));
             factories.write(FactoryOrder::Reset { tag });
+        }
+        "playsound" | "playlocalsound" => {
+            if a.flag("bDisabled", false) {
+                log.line(format!("{at}: switched off in the map; not played"));
+            } else {
+                let volume = script.director.settings.sound_volume;
+                script
+                    .sounds
+                    .push(sounds::request(&call.script, call.index, a, volume));
+            }
+        }
+        "changelevel" => {
+            log.line(format!(
+                "{at}: on to {}",
+                a.text("URL").unwrap_or("(no URL)")
+            ));
+        }
+        "showdebriefingscreen" if a.text("NewLevel").is_some() => {
+            script.stats.not_done += 1;
+            log.line(format!(
+                "{at}: the debriefing \"{}\" (not shown yet), then on to {}",
+                a.text("Title").unwrap_or(""),
+                a.text("NewLevel").unwrap_or("")
+            ));
         }
         "objectiveupdate" => {
             let num = a.int("ObjectiveNum").unwrap_or(0);

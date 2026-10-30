@@ -47,6 +47,11 @@ pub struct StaticMesh {
     /// Object reference of each section's material, from the `Materials`
     /// property (0 means none).
     pub materials: Vec<i32>,
+    /// Whether each section blocks movement (`EnableCollision` in the
+    /// `Materials` property; true when not stored). Decorations such as
+    /// hanging cables or light shafts have it off. Same order as
+    /// `materials`; may be empty.
+    pub section_collision: Vec<bool>,
     pub bounding_box: BoundingBox,
     /// Centre (x, y, z) and radius.
     pub bounding_sphere: [f32; 4],
@@ -104,20 +109,22 @@ fn index_buffer(r: &mut Reader, what: &str) -> Result<Vec<u16>> {
 }
 
 /// The `Materials` property is an array of structs; each struct is its own
-/// property list (`Material`, `EnableCollision`) ending in "None".
-fn material_refs(pkg: &Package, props: &[Property]) -> Result<Vec<i32>> {
+/// property list (`Material`, `EnableCollision`) ending in "None". Returns
+/// each section's material and whether it blocks movement.
+fn material_refs(pkg: &Package, props: &[Property]) -> Result<(Vec<i32>, Vec<bool>)> {
     let Some(p) = properties::find(pkg, props, "Materials") else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     let Value::Raw(raw) = &p.value else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     if p.kind != PropertyType::Array {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     let mut r = Reader::new(raw);
     let n = array_len(&mut r, 1, "material")?;
     let mut out = Vec::with_capacity(n);
+    let mut collide = Vec::with_capacity(n);
     for _ in 0..n {
         let fields = properties::read_properties(pkg, &mut r)?;
         out.push(
@@ -126,6 +133,10 @@ fn material_refs(pkg: &Package, props: &[Property]) -> Result<Vec<i32>> {
                 _ => 0,
             },
         );
+        collide.push(!matches!(
+            properties::find(pkg, &fields, "EnableCollision").map(|f| &f.value),
+            Some(Value::Bool(false))
+        ));
     }
     if r.pos() != raw.len() {
         return r.invalid(format!(
@@ -133,7 +144,7 @@ fn material_refs(pkg: &Package, props: &[Property]) -> Result<Vec<i32>> {
             raw.len() - r.pos()
         ));
     }
-    Ok(out)
+    Ok((out, collide))
 }
 
 /// Read a `StaticMesh` export. `data` is the whole package file.
@@ -156,7 +167,7 @@ pub fn read_static_mesh(pkg: &Package, data: &[u8], export: &Export) -> Result<S
         ));
     }
     let properties = properties::read_properties(pkg, &mut r)?;
-    let materials = material_refs(pkg, &properties)?;
+    let (materials, section_collision) = material_refs(pkg, &properties)?;
 
     // UPrimitive: bounding box and sphere.
     let bounding_box = read_box(&mut r)?;
@@ -219,6 +230,7 @@ pub fn read_static_mesh(pkg: &Package, data: &[u8], export: &Export) -> Result<S
     Ok(StaticMesh {
         properties,
         materials,
+        section_collision,
         bounding_box,
         bounding_sphere,
         sections,
@@ -233,6 +245,19 @@ pub fn read_static_mesh(pkg: &Package, data: &[u8], export: &Export) -> Result<S
 }
 
 impl StaticMesh {
+    /// Whether triangle number `k` (its corners at `indices[3k..3k+3]`)
+    /// blocks movement: false when it is in a section with collision off.
+    pub fn triangle_collides(&self, k: usize) -> bool {
+        let at = k * 3;
+        for (s, sec) in self.sections.iter().enumerate() {
+            let first = sec.first_index as usize;
+            if at >= first && at < first + sec.num_faces as usize * 3 {
+                return self.section_collision.get(s).copied().unwrap_or(true);
+            }
+        }
+        true
+    }
+
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
@@ -365,6 +390,42 @@ impl StaticMesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Triangles in a section with collision off don't collide; the rest
+    /// (and meshes that store no flags) do.
+    #[test]
+    fn section_collision_by_triangle() {
+        let sec = |first_index, num_faces| Section {
+            first_index,
+            first_vertex: 0,
+            last_vertex: 0,
+            num_faces,
+        };
+        let mut m = StaticMesh {
+            properties: Vec::new(),
+            materials: vec![0, 0],
+            section_collision: vec![true, false],
+            bounding_box: BoundingBox {
+                min: [0.0; 3],
+                max: [0.0; 3],
+                is_valid: false,
+            },
+            bounding_sphere: [0.0; 4],
+            sections: vec![sec(0, 2), sec(6, 1)],
+            vertices: Vec::new(),
+            colors: Vec::new(),
+            alphas: Vec::new(),
+            uv_sets: Vec::new(),
+            indices: vec![0; 9],
+            indices2: Vec::new(),
+            unread: 0,
+        };
+        assert!(m.triangle_collides(0));
+        assert!(m.triangle_collides(1));
+        assert!(!m.triangle_collides(2));
+        m.section_collision.clear();
+        assert!(m.triangle_collides(2));
+    }
 
     fn f(out: &mut Vec<u8>, v: f32) {
         out.extend_from_slice(&v.to_le_bytes());

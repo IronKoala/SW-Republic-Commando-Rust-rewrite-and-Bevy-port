@@ -71,8 +71,20 @@ pub enum Effect {
     },
     /// A checkpoint was reached: the game saves.
     Checkpoint { name: String },
+    /// Leave for another map: the player walked into a level exit (a
+    /// `Teleporter` with a `URL`), or a script said so
+    /// (`ACTION_ChangeLevel`'s `URL`, the debriefing's `NewLevel`). `url`
+    /// is as the map wrote it, like `GEO_01B.ctm#playerstart`.
+    ChangeLevel { url: String, by: String },
     /// Something the log should show (a script waiting, a counter, ...).
     Note(String),
+}
+
+/// Whether an action plays a sound by name (`ACTION_PlaySound`,
+/// `ACTION_PlayLocalSound`). Its `Sound` value is the name.
+pub fn sound_action(a: &ScriptObject) -> bool {
+    let k = action_kind(a);
+    k.eq_ignore_ascii_case("PlaySound") || k.eq_ignore_ascii_case("PlayLocalSound")
 }
 
 /// What a script is waiting for.
@@ -113,6 +125,26 @@ struct Trigger {
     cooldown: f32,
 }
 
+/// A `Teleporter`. With a `URL` it is a level exit: walking into it
+/// leaves for that map. Without one it is a place to arrive at (the game
+/// reads those itself when a map loads).
+struct Teleporter {
+    name: String,
+    /// Lower-case tag.
+    tag: String,
+    location: [f32; 3],
+    radius: f32,
+    height: f32,
+    url: Option<String>,
+    /// `bEnabled`: an event with its tag switches it on or off.
+    enabled: bool,
+    /// `bCollideActors`: off until a script's `ACTION_SetCollision` puts
+    /// it on (many exits wait for the mission's last objective this way).
+    collide: bool,
+    /// Already sent the player on.
+    used: bool,
+}
+
 struct Counter {
     name: String,
     left: i32,
@@ -149,6 +181,8 @@ pub struct Stats {
     pub conditions: usize,
     pub checkpoints: usize,
     pub props: usize,
+    /// Teleporters with a `URL`: the level's exits.
+    pub exits: usize,
     /// Events sent so far, and actions run so far.
     pub events_sent: usize,
     pub actions_run: usize,
@@ -169,6 +203,9 @@ pub struct Director {
     pub settings: Settings,
     scripts: Vec<Script>,
     triggers: Vec<Trigger>,
+    teleporters: Vec<Teleporter>,
+    /// Set once the level is being left; nothing more is sent after it.
+    leaving: bool,
     counters: HashMap<String, Vec<Counter>>,
     conditions: HashMap<String, Vec<Condition>>,
     /// Checkpoint actor names by lower-case tag.
@@ -192,6 +229,31 @@ pub struct Director {
     /// is done ([`Self::action_done`]). Off (tools with no game), scripts
     /// wait the fixed `anim_seconds` / `move_seconds` instead.
     pub game_runs_characters: bool,
+    /// How long each sound lasts, by lower-case name, as the game read it.
+    /// A script that waits for a sound to finish waits this long; a sound
+    /// not in here waits `settings.sound_seconds`.
+    sound_lengths: HashMap<String, f32>,
+}
+
+/// Read an Unreal level address like `RAS_03B.ctm#FromA`,
+/// `YYY_05A#PlayerStart` or `Geo_01a.ctm` into a map name (lower case, as
+/// in `GameData/Maps`, without `.ctm`) and the portal after `#` (the `Tag`
+/// of the teleporter to arrive at). `None` if there is no map name in it.
+pub fn level_url(url: &str) -> Option<(String, Option<String>)> {
+    // Options (`?Game=...`) aren't used by single-player maps.
+    let url = url.split('?').next().unwrap_or("").trim();
+    let (map, portal) = match url.split_once('#') {
+        Some((m, p)) => (m, Some(p.trim())),
+        None => (url, None),
+    };
+    let mut map = map.trim().to_ascii_lowercase();
+    if let Some(m) = map.strip_suffix(".ctm") {
+        map = m.to_string();
+    }
+    if map.is_empty() || map.contains(['/', '\\', '.']) {
+        return None;
+    }
+    Some((map, portal.filter(|p| !p.is_empty()).map(str::to_string)))
 }
 
 fn low(s: &str) -> String {
@@ -213,6 +275,8 @@ impl Director {
             settings,
             scripts: Vec::new(),
             triggers: Vec::new(),
+            teleporters: Vec::new(),
+            leaving: false,
             counters: HashMap::new(),
             conditions: HashMap::new(),
             checkpoints: HashMap::new(),
@@ -225,6 +289,7 @@ impl Director {
             stats: Stats::default(),
             history: Vec::new(),
             game_runs_characters: false,
+            sound_lengths: HashMap::new(),
         };
         // Placed characters run the sequence named by their AIScriptTag.
         let placed_scripts: Vec<String> = map
@@ -288,6 +353,30 @@ impl Director {
                     .entry(low(o.tag()))
                     .or_default()
                     .push(o.name.clone());
+            } else if class.eq_ignore_ascii_case("Teleporter") {
+                let url = o
+                    .text("URL")
+                    .map(str::trim)
+                    .filter(|u| !u.is_empty())
+                    .map(str::to_string);
+                if url.is_some() {
+                    d.stats.exits += 1;
+                }
+                d.teleporters.push(Teleporter {
+                    name: o.name.clone(),
+                    tag: low(o.tag()),
+                    location: a.location,
+                    radius: o
+                        .float("CollisionRadius")
+                        .unwrap_or(d.settings.teleporter_radius),
+                    height: o
+                        .float("CollisionHeight")
+                        .unwrap_or(d.settings.teleporter_height),
+                    url,
+                    enabled: o.flag("bEnabled", true),
+                    collide: o.flag("bCollideActors", true),
+                    used: false,
+                });
             } else if class.eq_ignore_ascii_case("PlayerStart") {
                 // The player starts at the first one (as the level part
                 // does), and only that one's event is sent.
@@ -349,6 +438,21 @@ impl Director {
         d
     }
 
+    /// Tell the director how long a sound lasts (seconds), so a script
+    /// that waits for it (`bWaitForFinish`) waits just that long.
+    pub fn set_sound_length(&mut self, name: &str, seconds: f32) {
+        self.sound_lengths.insert(low(name), seconds.max(0.0));
+    }
+
+    /// How long a script waits for this sound: its length if the game told
+    /// us, otherwise `settings.sound_seconds`.
+    pub fn sound_length(&self, name: &str) -> f32 {
+        self.sound_lengths
+            .get(&low(name))
+            .copied()
+            .unwrap_or(self.settings.sound_seconds)
+    }
+
     /// The events the map sends when the level starts (the player start's
     /// `Event`, `levelstart` in the campaign maps). Send them with
     /// [`Self::start`] unless a saved game is being restored.
@@ -403,6 +507,28 @@ impl Director {
                 (s.name.clone(), next, what)
             })
             .collect()
+    }
+
+    /// The level's exits: (teleporter name, `URL`, where it is in Unreal
+    /// units, whether it works now: switched on and solid to the player).
+    pub fn exits(&self) -> Vec<(String, String, [f32; 3], bool)> {
+        self.teleporters
+            .iter()
+            .filter_map(|t| {
+                let url = t.url.clone()?;
+                Some((t.name.clone(), url, t.location, t.enabled && t.collide))
+            })
+            .collect()
+    }
+
+    /// Whether some teleporter has this tag.
+    pub fn is_teleporter(&self, tag: &str) -> bool {
+        self.teleporters.iter().any(|t| t.tag == low(tag))
+    }
+
+    /// Whether a level exit was reached or a script left the level.
+    pub fn leaving(&self) -> bool {
+        self.leaving
     }
 
     /// Props not yet destroyed, by tag (lower case): how many.
@@ -467,6 +593,10 @@ impl Director {
     /// Advance by `dt` seconds. `player` is where the player is, if there is
     /// one (touch triggers need it). Returns what the game should do.
     pub fn step(&mut self, dt: f32, player: Option<PlayerBody>) -> Vec<Effect> {
+        // On the way out: the next map takes over.
+        if self.leaving {
+            return std::mem::take(&mut self.out);
+        }
         self.time += dt;
         if let Some(p) = player {
             self.touch(dt, p);
@@ -516,6 +646,28 @@ impl Director {
                 release.push((i.event.clone(), i.name.clone()));
             }
             t.touching = inside;
+        }
+        for t in &mut self.teleporters {
+            let Some(url) = &t.url else { continue };
+            let d = [
+                p.location[0] - t.location[0],
+                p.location[1] - t.location[1],
+                p.location[2] - t.location[2],
+            ];
+            let inside = (d[0] * d[0] + d[1] * d[1]).sqrt() < t.radius + p.radius
+                && d[2].abs() < t.height + p.half_height;
+            if inside && t.enabled && t.collide && !t.used && !self.leaving {
+                t.used = true;
+                self.leaving = true;
+                self.out.push(Effect::Note(format!(
+                    "{}: the player walked into the level exit to {url}",
+                    t.name
+                )));
+                self.out.push(Effect::ChangeLevel {
+                    url: url.clone(),
+                    by: t.name.clone(),
+                });
+            }
         }
         for (e, by) in fire {
             self.out
@@ -588,6 +740,22 @@ impl Director {
                     ));
                 }
             }
+            // Teleporters (UE2): an event with their tag switches them on
+            // or off.
+            for t in &mut self.teleporters {
+                if t.tag == key {
+                    t.enabled = !t.enabled;
+                    heard.push(format!(
+                        "teleporter {} {}",
+                        t.name,
+                        if t.enabled {
+                            "switched on"
+                        } else {
+                            "switched off"
+                        }
+                    ));
+                }
+            }
             // Counters count down, and send their event at zero.
             let mut more = Vec::new();
             if let Some(cs) = self.counters.get_mut(&key) {
@@ -647,7 +815,7 @@ impl Director {
             let mut budget = self.settings.max_actions_per_frame;
             loop {
                 let s = &mut self.scripts[i];
-                if !s.running || s.finished {
+                if !s.running || s.finished || self.leaving {
                     break;
                 }
                 match &s.wait {
@@ -709,11 +877,11 @@ impl Director {
         let name = self.scripts[i].name.clone();
         let kind = action_kind(&a).to_ascii_lowercase();
         let mut next = pc + 1;
-        // The map's own off switch on an action (level designers leave
-        // some in, switched off).
+        // The map's designers switched some actions off (`bDisabled`): the
+        // original skips them.
         if a.flag("bDisabled", false) {
             self.out.push(Effect::Note(format!(
-                "{name} #{pc} {} switched off in the map; skipped",
+                "{name} #{pc} {}: switched off in the map, skipped",
                 action_kind(&a)
             )));
             self.scripts[i].pc = next;
@@ -780,8 +948,12 @@ impl Director {
                 // Everything else is for the game to carry out. Some also
                 // take time.
                 let wait = match kind.as_str() {
-                    "playsound" if a.flag("bWaitForFinish", false) => self.settings.sound_seconds,
-                    "playpropanim" if a.flag("bWaitUntilAnimEnd", true) => {
+                    "playsound"
+                        if a.flag("bWaitForFinish", false) && !a.flag("bDisabled", false) =>
+                    {
+                        self.sound_length(a.text("Sound").unwrap_or(""))
+                    }
+                    "playanim" | "playpropanim" if a.flag("bWaitUntilAnimEnd", true) => {
                         self.settings.anim_seconds
                     }
                     _ => 0.0,
@@ -812,7 +984,45 @@ impl Director {
                         let tag = a.text("DestroyTag").unwrap_or("").to_string();
                         self.destroy_props(&tag);
                     }
+                    "setcollision" => {
+                        let tag = low(a.text("CollideActorTag").unwrap_or(""));
+                        let on = a.flag("bCollideActors", true);
+                        for t in self.teleporters.iter_mut().filter(|t| t.tag == tag) {
+                            t.collide = on;
+                            self.out.push(Effect::Note(format!(
+                                "{name}: teleporter {} {}",
+                                t.name,
+                                if on { "opened" } else { "closed" }
+                            )));
+                        }
+                    }
                     _ => {}
+                }
+                // Leaving the level. The debriefing screen's `NewLevel` is
+                // where the campaign goes on after it (the screen itself
+                // isn't shown yet).
+                let leave = match kind.as_str() {
+                    "changelevel" => a.text("URL"),
+                    "showdebriefingscreen" => a.text("NewLevel"),
+                    _ => None,
+                }
+                .map(str::trim)
+                .filter(|u| !u.is_empty());
+                if let Some(url) = leave {
+                    self.leaving = true;
+                    self.out.push(Effect::Action {
+                        script: name.clone(),
+                        index: pc,
+                        action: a.clone(),
+                        owner: None,
+                        waits: false,
+                    });
+                    self.out.push(Effect::ChangeLevel {
+                        url: url.to_string(),
+                        by: name,
+                    });
+                    self.scripts[i].pc = next;
+                    return;
                 }
                 self.out.push(Effect::Action {
                     script: name,
