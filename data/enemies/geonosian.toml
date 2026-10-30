@@ -5,10 +5,10 @@
 # on top, and its brain GeonosianWarriorBot(+Defaults). "guess" and
 # "placeholder" mark the rest. Anything not listed takes the battle droid's
 # value (battle_droid.toml).
-# Not done: the original's warriors fight with a force pike up close (our
-# enemies can't melee yet, so it shoots a stand-in blaster), and fly and
-# climb walls; ours walk. The other Geonosians (GeonosianDrone,
-# GeonosianElite with its beam) aren't added yet.
+# It fights only with its force pike (ForcePike), rushing in to hit you up
+# close. Not done: the original's warriors also fly and climb walls; ours
+# walk. The other Geonosians (GeonosianDrone, GeonosianElite with its beam)
+# aren't added yet.
 
 [type]
 id = "geonosian"
@@ -27,7 +27,12 @@ base_eye_height = 60      # game: BaseEyeHeight
 health = 100              # game: Health
 accuracy = 0.5            # game: Accuracy (Pawn)
 max_aim_yaw = 80          # game: MaxAimYaw (Pawn)
-weapon = "e5_blaster"     # placeholder: the original's ForcePike is a melee weapon our enemies can't use yet
+weapon = ""               # game: RequiredEquipment is only the ForcePike, a melee weapon (no gun)
+melee_range = 350         # game: ForcePikeDefaults MeleeRange
+melee_damage = 125        # game: ForcePikeDefaults MeleeDamage
+melee_damage_type = "CTDamageMeleeWarrior" # game: ForcePikeDefaults MeleeDamageType
+melee_delay = 1.6         # game: the MeleeAttack animation's length (48 frames at 30 a second)
+lunge_distance = 800      # game: StateGeonosianWarriorAttack LungeDist
 burst_count = 1           # game: GeonosianWarriorBotDefaults BurstCount
 ready_distance = 900      # guess
 drops = ""                # game: the force pike isn't a pick-up
@@ -59,3 +64,4 @@ hurt_interval = 2.0                    # our choice: seconds between hurt lines 
 [look]
 package = "GameData/Animations/geonosian.ukx"   # game: the mesh is in this package
 mesh = "GeonosianWarrior"                        # game: Mesh
+melee = "MeleeAttack"                            # game: GeonosianWarriorSet's pike swing

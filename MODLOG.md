@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: Geonosian warriors fight with their force pike (rc_ai, rc_combat, rc_enemies)
+
+- **Changed:** `rc_ai`: `[combat]` gains `melee_range`, `melee_damage`, `melee_damage_type`, `melee_delay` and `lunge_distance`; new `Maneuver::Charge` (rush at the enemy, straight if the way is clear, else along the paths) and `AiEvent::Melee`; an enemy with `weapon = ""` never shoots. `[look] melee` names the swing animation. `rc_combat`: new public message `MeleeAttack` and system `melee_attacks` (the player's melee rule, skipping the attacker's own team, scaled by the target's damage table). `rc_enemies` sends it, plays the swing, counts `melee_swings`. `data/enemies/geonosian.toml`: no gun, force pike 350 / 125 `CTDamageMeleeWarrior`, `LungeDist` 800. The enemies test room now puts each spawn point at its enemy's own height (it used to start the taller Geonosian 35 uu inside the floor). Tests: 3 in `rc_ai`, 1 in `rc_enemies/tests/fight.rs`.
+- **Why:** The original's Geonosian warriors carry only a force pike; ours shot a stand-in blaster.
+- **Tested how:** `rc_probe --class` (ForcePikeDefaults, GeonosianWarrior, StateGeonosianWarriorAttack) and `rc_character --list` on geonosian.ukx, read-only copies in the cloud sandbox. `cargo test --release --workspace --locked --no-fail-fast`.
+- **Result:** In the test room a Geonosian 1500 uu away starts its charge at 0.5 s, swings at 3.3 s (`melee by ... hit ... at 308 uu for 125 (125 x1 by its table, CTDamageMeleeWarrior)`), then every 1.6 s, and fires no shots. rc_ai tests: it doesn't swing through a wall; a fighter with a gun only rushes in within its lunge distance.
+- **Still broken / not tested:** Not tested in `rc_game` on a real map with Geonosians, or on Windows, or by eye. When to rush and swing are our rules. The hit lands at the start of the swing animation. Warriors don't fly, jump (`JumpDist`, `Lunge`) or climb walls. Pike melee doesn't stagger or knock back.
+- **Next:** Geonosian flying and jumping, or the drone and elite types.
+
 ## 2026-10-30: Enemies throw grenades (rc_ai, rc_enemies)
 
 - **Changed:** `rc_ai`: new `[grenades]` settings (`GrenadeUse`: grenade file, count, `probability`, `min_time`, `min_range`/`max_range`, `seen_within`, `throw_time`, and the arc's speed, gravity and radius), `AiEvent::Throw`, `Fighter::grenades_left`, and `brain::throw_arc` (aims a lob, or a flat throw under a low ceiling, and checks the level doesn't block it). `[look] throw` names the throw animation. Saves keep each enemy's grenades left (`grenades_left`, only for types that carry them). `rc_enemies` turns a throw into `rc_combat::ThrowGrenade`, reads the grenade file's flight numbers to aim, plays the throw animation, and logs `droid N threw ...` and a grenade count in the summary. New `data/grenades/thermal_detonator_enemy.toml`; `data/enemies/trandoshan.toml` carries two; `battle_droid.toml` documents the section (none). Tests: 4 in `rc_ai`, 2 in `rc_enemies/tests/fight.rs`.

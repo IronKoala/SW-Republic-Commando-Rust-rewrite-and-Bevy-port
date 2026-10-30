@@ -1098,3 +1098,99 @@ fn grenades_left_are_saved() {
         .iter()
         .all(|f| f.grenades_left.is_none()));
 }
+
+/// A pike fighter like the Geonosian warrior: no gun, 350 uu reach.
+fn warrior() -> Fighter {
+    let mut p = AiParams::battle_droid();
+    p.combat.weapon = String::new();
+    p.combat.melee_range = 350.0;
+    p.combat.melee_damage = 125.0;
+    p.combat.melee_delay = 1.6;
+    p.combat.lunge_distance = 800.0;
+    p.movement.ground_speed = 450.0;
+    Fighter::new(
+        1,
+        Arc::new(p),
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    )
+}
+
+fn melee_times(ev: &[(f32, AiEvent)]) -> Vec<f32> {
+    ev.iter()
+        .filter(|(_, e)| matches!(e, AiEvent::Melee { .. }))
+        .map(|(t, _)| *t)
+        .collect()
+}
+
+#[test]
+fn a_pike_fighter_rushes_in_and_hits() {
+    let world = flat_floor(vec![]);
+    let mut f = warrior();
+    let ev = run(&mut f, &world, Some(target_at(1500.0, 0.0)), 8.0);
+    assert!(
+        !ev.iter().any(|(_, e)| matches!(e, AiEvent::Fire { .. })),
+        "no gun, no shots"
+    );
+    let hits = melee_times(&ev);
+    // About 1150 uu to run at 450 uu/s after 0.5 s of reacting: the first
+    // hit by about 3.5 s, then one every 1.6 s.
+    assert!(!hits.is_empty(), "never hit");
+    assert!(hits[0] < 4.0, "first hit at {}", hits[0]);
+    for w in hits.windows(2) {
+        assert!(w[1] - w[0] >= 1.6 - 1e-3, "{hits:?}");
+    }
+    assert!(hits.len() >= 3, "{hits:?}");
+    let gap = (Vec3::new(1500.0, 0.0, 0.0) - f.pawn.location).length_2d();
+    assert!(gap <= 350.0 && gap > 100.0, "stands {gap:.0} uu away");
+    for (_, e) in &ev {
+        if let AiEvent::Melee {
+            direction, range, ..
+        } = e
+        {
+            assert!(direction.x > 0.9 && *range == 350.0, "{direction:?}");
+        }
+    }
+}
+
+#[test]
+fn a_fighter_with_a_gun_only_lunges_when_close() {
+    let world = flat_floor(vec![]);
+    let make = || {
+        let mut p = (*warrior().params).clone();
+        p.combat.weapon = "e5_blaster".into();
+        Fighter::new(
+            1,
+            Arc::new(p),
+            Vec3::ZERO,
+            0.0,
+            StartState::StationaryAttack,
+        )
+    };
+    // 1500 uu: beyond its lunge distance, it stays and shoots.
+    let mut f = make();
+    let ev = run(&mut f, &world, Some(target_at(1500.0, 0.0)), 5.0);
+    assert!(melee_times(&ev).is_empty());
+    assert!(ev.iter().any(|(_, e)| matches!(e, AiEvent::Fire { .. })));
+    assert!(f.pawn.location.length_2d() < 50.0, "stayed put");
+    // 700 uu: within 800, it rushes in and hits.
+    let mut f = make();
+    let ev = run(&mut f, &world, Some(target_at(700.0, 0.0)), 5.0);
+    assert!(!melee_times(&ev).is_empty());
+}
+
+#[test]
+fn a_pike_doesnt_reach_through_a_wall() {
+    // A wall between them, too wide to walk round with no path network.
+    let world = flat_floor(vec![Brush::cuboid(
+        Vec3::new(140.0, -5000.0, 0.0),
+        Vec3::new(160.0, 5000.0, 400.0),
+    )]);
+    let mut f = warrior();
+    // It heard the enemy behind the wall.
+    let mut ev = Vec::new();
+    f.alert(Vec3::new(300.0, 0.0, 84.0), 0.0, &mut ev);
+    let ev = run(&mut f, &world, Some(target_at(300.0, 0.0)), 4.0);
+    assert!(melee_times(&ev).is_empty());
+}
