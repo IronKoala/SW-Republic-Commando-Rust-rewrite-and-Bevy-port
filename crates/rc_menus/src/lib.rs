@@ -12,6 +12,7 @@
 //! `screens.rs`.
 
 pub mod assets;
+pub mod fit;
 pub mod gpu;
 pub mod layout;
 pub mod library;

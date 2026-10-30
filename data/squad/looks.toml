@@ -31,6 +31,14 @@ down = "WoundedFallDown"
 # Kneeling by a downed commando with the bacta healer. Our pick, as above.
 revive = "HealImmobileLoop"
 
+# Seconds to blend smoothly from one animation into the next, so the
+# commandos don't snap between poses (0 snaps). Our choice: the original
+# blends inside its compiled engine code, which we can't read.
+[blend]
+time = 0.2    # guess: into any animation not named below
+fire = 0.05   # guess: the firing animation lasts only 0.1 s
+down = 0.25   # guess: falling down wounded (0.25 keeps the start of the fall no faster than the fall itself)
+
 # One block per squad mate, named like [member.<key>] in squad.toml.
 # All three use the CloneCommando mesh (Mesh in the CloneCommando class
 # defaults, CTCharacters.u). Each one's armour is the class's Skins[0]

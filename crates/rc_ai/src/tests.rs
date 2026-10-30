@@ -712,6 +712,7 @@ fn tagged_factory(tag: &str, x: f32) -> Factory {
             first_damaged_event: Some(format!("{tag}DroidHurt")),
             start_state: StartState::StationaryAttack,
             team: None,
+            script: Some(format!("{tag}AI")),
         },
         ..Default::default()
     }
@@ -1193,4 +1194,106 @@ fn a_pike_doesnt_reach_through_a_wall() {
     f.alert(Vec3::new(300.0, 0.0, 84.0), 0.0, &mut ev);
     let ev = run(&mut f, &world, Some(target_at(300.0, 0.0)), 4.0);
     assert!(melee_times(&ev).is_empty());
+}
+
+/// A level script's orders: walk to a point and turn there, turn to the
+/// player, hold still until a time; each ends with `ScriptDone`, and the
+/// droid doesn't shoot while it follows them.
+#[test]
+fn follows_script_orders() {
+    let world = flat_floor(vec![]);
+    let mut f = droid(0.0);
+    let to = Vec3::new(600.0, 300.0, 84.0);
+    f.follow_script(ScriptGoal::MoveTo {
+        to,
+        walk: false,
+        tolerance: 0.0,
+        face: Some(std::f32::consts::PI),
+    });
+    let ev = run(&mut f, &world, None, 8.0);
+    let done: Vec<f32> = ev
+        .iter()
+        .filter(|(_, e)| *e == AiEvent::ScriptDone)
+        .map(|(t, _)| *t)
+        .collect();
+    assert_eq!(done.len(), 1, "{ev:?}");
+    assert!(f.script.is_none());
+    let at = f.pawn.location;
+    assert!((at - to).length_2d() < 60.0, "ended at {at:?}");
+    assert!(
+        brain::angle_diff(f.facing, std::f32::consts::PI).abs() < 0.1,
+        "facing {} {ev:?}",
+        f.facing
+    );
+    // With the player in plain sight the script still comes first: no
+    // shots until it has arrived.
+    let mut g = droid(0.0);
+    g.follow_script(ScriptGoal::MoveTo {
+        to,
+        walk: false,
+        tolerance: 0.0,
+        face: Some(std::f32::consts::PI),
+    });
+    let ev = run(&mut g, &world, Some(target_at(-800.0, 0.0)), 8.0);
+    let done = ev
+        .iter()
+        .find(|(_, e)| *e == AiEvent::ScriptDone)
+        .map(|(t, _)| *t)
+        .unwrap();
+    assert!(!ev
+        .iter()
+        .any(|(t, e)| matches!(e, AiEvent::Fire { .. }) && *t < done));
+    // ... and fights after (it ends facing the player).
+    assert!(ev
+        .iter()
+        .any(|(t, e)| matches!(e, AiEvent::Fire { .. }) && *t > done));
+
+    // Turn to the player, at (600, -500): straight "down" in y.
+    f.follow_script(ScriptGoal::TurnToTarget);
+    let ev = run(&mut f, &world, Some(target_at(600.0, -500.0)), 2.0);
+    assert!(ev.iter().any(|(_, e)| *e == AiEvent::ScriptDone));
+    assert!(brain::angle_diff(f.facing, -std::f32::consts::FRAC_PI_2).abs() < 0.1);
+
+    // Hold until t = 1.0 (the test's clock starts at 0 each run).
+    f.follow_script(ScriptGoal::Hold { until: 1.0 });
+    let ev = run(&mut f, &world, None, 2.0);
+    let t = ev
+        .iter()
+        .find(|(_, e)| *e == AiEvent::ScriptDone)
+        .map(|(t, _)| *t)
+        .unwrap();
+    assert!((1.0..1.1).contains(&t), "{t}");
+
+    // Being hurt ends a hold at once.
+    f.follow_script(ScriptGoal::Hold { until: 100.0 });
+    let mut ev = Vec::new();
+    f.on_damaged(Some(Vec3::new(0.0, 0.0, 84.0)), 0.0, &mut ev);
+    assert!(ev.contains(&AiEvent::ScriptDone));
+    assert!(f.script.is_none());
+}
+
+/// A scripted point well above it: a character that can leap
+/// (`leap_speed`) leaps there; a battle droid (can't) doesn't.
+#[test]
+fn leaps_to_high_script_points() {
+    let world = flat_floor(vec![]);
+    let to = Vec3::new(500.0, 0.0, 600.0);
+    let order = ScriptGoal::MoveTo {
+        to,
+        walk: false,
+        tolerance: 0.0,
+        face: None,
+    };
+    let mut f = droid(0.0);
+    std::sync::Arc::make_mut(&mut f.params).combat.leap_speed = 900.0;
+    f.follow_script(order.clone());
+    let ev = run(&mut f, &world, None, 4.0);
+    assert!(ev.iter().any(|(_, e)| *e == AiEvent::Leapt), "{ev:?}");
+    assert!(ev.iter().any(|(_, e)| *e == AiEvent::ScriptDone));
+    assert!((f.pawn.location - to).length_2d() < 60.0);
+
+    let mut g = droid(0.0);
+    g.follow_script(order);
+    let ev = run(&mut g, &world, None, 4.0);
+    assert!(!ev.iter().any(|(_, e)| *e == AiEvent::Leapt));
 }

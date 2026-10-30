@@ -89,7 +89,10 @@ copy of the game.
   kneeling to revive. Everything is read from the install when the level
   starts; which model and animations are used is in
   `data/squad/looks.toml`. A squad mate whose model can't be read is drawn
-  as a coloured capsule (a placeholder) and the log says why. They don't
+  as a coloured capsule (a placeholder) and the log says why.
+  Squad mates and enemies blend smoothly from one animation into the next
+  instead of snapping (checked from logged numbers with
+  `rc_blend_check`, not looked at). They don't
   hold a weapon yet, and the helmet extras the original adds
   (`AvailableAccessories`) aren't drawn.
 
@@ -236,6 +239,15 @@ copy of the game.
   saved as your checkpoint. Following the exits from the prologue goes
   through all 56 campaign maps to the epilogue. `rc_game --script` walks
   into geo_01a's exit and checks geo_01b (56 of 56 checks).
+  Scripts now direct the enemies too (tested in the cloud sandbox with the
+  real files, not yet on Windows or by playing): they walk where the
+  level sends them, turn to you, play their scripted animations, wait for
+  you, appear, vanish, and can be made unkillable or hurt. Geonosians leap
+  up to ledges they can't walk to (a stand-in for flying). Scripts can also
+  set Delta Squad's stance. On geo_01a the lone Geonosian in the trench
+  leaps up, turns to you, plays his "seen an enemy" animation and runs off.
+  Squad mates' own scripted moves aren't done yet. `rc_game --script`
+  checks the Geonosian's whole scene (60 of 60 checks).
 
 - **The game program, with menus (tested in the cloud sandbox, not yet on
   Windows).** `rc_game` is the one program the whole game is built into. It
@@ -292,16 +304,31 @@ copy of the game.
   The GRAPHICS rows (quality presets, brightness, texture and character
   detail, blur, bloom, squad shadows, FSAA) and SOUND rows (voices volume,
   sound quality, 3D sound, audio channels) work too (checked in a stand-in
-  scene and by tests; not tested in a real level yet). So do SUBTITLES,
-  PROMPT TEXT, the turn keys, the screenshot key (F12) and the weapon keys
-  (1 to 4) (tests only; subtitles not yet checked with the game's files).
-  Rows the port can't do yet (helmet, auto pull, tactical visor, bump
-  mapping, projectors, EAX) are greyed out. Values change with the arrows;
-  the screen size also has a drop-down list, starting with FULL SCREEN and
-  then the window sizes that fit your monitor. Long setting names shrink
-  to fit before their arrows. Our own extra settings (field of view, full
-  screen, controller and gyro) are on a fifth tab, "PORT +", in the same
-  original look. The campaign page keeps the placeholder until its planet
+  scene and by tests; brightness checked by the user on the PC). So do
+  SUBTITLES (checked by the user), PROMPT TEXT, the turn keys, the
+  screenshot key (F12) and the weapon keys (1 to 4). Rows the port can't do
+  yet (helmet, auto pull, tactical visor, bump mapping, projectors, EAX)
+  are greyed out. Values change with the arrows; the screen size
+  also has a drop-down list of the sizes that fit your monitor. Our own
+  extra settings (field of view, display mode, controller and gyro) are on
+  a fifth tab, "PORT +", in the same original look.
+- **Display mode (tested in the cloud's virtual screen only, not on
+  Windows or a real monitor):** PORT + > DISPLAY MODE is WINDOWED,
+  BORDERLESS or FULL SCREEN. Windowed: the screen size is the window's
+  size. Borderless: the window covers the monitor; picking a size of
+  another shape than the monitor's goes back to a window of that size.
+  Full screen: the monitor switches to the chosen size when it has the
+  same shape; another shape is shown at its own shape with black bars
+  filling the rest (checked: 1920x1080 on a 3440x1440 screen draws a
+  2560x1440 picture with bars at the sides).
+- **Menus on wide screens (checked in the cloud at 16:9, 21:9, 19.5:9,
+  32:9, 4:3 and 5:4):** the original menus keep their size and spread out
+  to fill wider screens instead of sitting in a 4:3 box: groups of buttons
+  and pictures move apart, the options box widens, and each option's name
+  stays at the left while its value and arrows move to the right, so long
+  names no longer run into the arrows. Wider than 21.5:9 (32:9) the menu
+  stays in a centred 21.5:9 area. Only on a 4:3 or 5:4 screen, where there
+  is no room to move apart, are a few long option names shrunk to fit. The campaign page keeps the placeholder until its planet
   buttons and level list can be drawn; `logs/rc_game.log` says why
   ("original menus: page campaigns kept the placeholder: ..."). Which
   original menu draws which page is in `data/ui/original_menus.toml`. The
@@ -453,8 +480,9 @@ copy of the game.
   limits, how fast it brakes, and how fast the mouse turns live in the game's
   compiled engine, so those follow Unreal Engine 2's usual behaviour or our
   own choice. See `docs/DESIGN.md`.
-- Characters: only the first material slot, no blending between
-  animations, no sounds or effects from animation events.
+- Characters: only the first material slot (`rc_character` viewer), no
+  sounds or effects from animation events. Blending between animations
+  uses our own times; the original's are in its compiled engine.
 - Android: the game compiles for Android phones but is not an app yet;
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
 - Original menus: the main menu's moving background video isn't played
