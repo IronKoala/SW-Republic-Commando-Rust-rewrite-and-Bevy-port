@@ -3,6 +3,24 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-31: Stuck-frame watchdog; choosing the graphics API (rc_game)
+
+- **Changed:** `display::start_watchdog`: a thread logs "display: WARNING: no new frame for 5 s, the game is stuck" when frames stop after the first one, and "frames again" when they start. New `video.graphics_api` (`auto` default, `vulkan`, `dx12`, `gl`), passed to Bevy's `RenderPlugin` (`display::wgpu_settings`).
+- **Why:** The user's game froze again with the 240 cap. This time the log stopped at 66 s with nothing after, so the game itself stopped. Card: NVIDIA RTX 4080 SUPER, Vulkan, driver 617.42, borderless 3440x1440, vsync off.
+- **Tested how:** `cargo test -p rc_game`; `rc_game` under Xvfb with `graphics_api = 'vulkan'`.
+- **Result:** Tests 36 pass. Log: "display: graphics API vulkan (video.graphics_api)". The watchdog fired on llvmpipe's 11 s first frame before the "after the first frame" rule was added, then said "frames again", so it works; now quiet while starting.
+- **Still broken / not tested:** The freeze's cause is still unknown. `dx12` not tested (no Windows here).
+- **Next:** The user tries `graphics_api = 'dx12'`, then vsync on, to find which setting the freeze follows.
+
+## 2026-10-30: Frame rate cap with vsync off; window events in the log (rc_game)
+
+- **Changed:** New `video.max_fps` (default 240, 0 = no limit): with vsync off, `display::limit_frame_rate` waits at the end of each frame. `display::log_window_events` logs the graphics card, backend and driver once, and every focus, hidden/shown and resize of the window.
+- **Why:** The user's picture froze in borderless full screen at 3440x1440 with vsync off while the game kept running (sound, music, menu). Their log: about 1,300 frames a second on the main menu, then a steady 60, no error, no display change. Cause unknown; the uncapped frame rate was the one unusual thing.
+- **Tested how:** `cargo test -p rc_game`; `rc_game` under Xvfb with `max_fps = 10`.
+- **Result:** Tests 36 pass. With `max_fps = 10` the log reads "speed: 10 frames per second, average 100.1 ms". Log shows "display: graphics card llvmpipe ... (Cpu, Vulkan)" and the window events.
+- **Still broken / not tested:** Not tested on Windows. Not known whether this stops the freeze; the cloud's software renderer can't reach 240 frames a second, so the default cap itself is only checked at 10.
+- **Next:** The user plays in borderless again; if it freezes, the new log lines show the card, driver and what the window did.
+
 ## 2026-10-30: The original load and save pages; pause menu saving works (rc_game, rc_game_core, rc_save)
 
 - **Changed:** New pages `load_game` (`CTLoadGameMenu`) and `save_game` (`CTSaveGameMenu`) in `data/ui/original_menus.toml`, drawn from the install with the campaign page's list. New `rc_game/src/original_saves.rs`: fills both lists from `SaveList` (autosave, quicksave, named saves newest first, with the level's title and time), and does SELECT (load; asks the class's `LoadConfirm` first in a level), NEW (`Geonosis_1`..., at most `MaxSaveSlots`), OVERWRITE (asks; refuses the autosave and quicksave with the class's message), DELETE (asks "DELETE <NAME> ?"), and the pause menu's QUICK SAVE (saves and resumes), QUICK LOAD and LOAD LAST SAVE. `original_menu.rs`: the question box is now general (`OriginalMenus::ask`, `Asking`: quit, confirm, or a one-answer message worded with the page's BACK); LOAD GAME on the main menu opens the load page; buttons opening a load or save page that can't be drawn are greyed out; the pause menu opens on RESUME GAME. `original_lists.rs`: Enter or a double click on a row does the page's A button; leaving a save list for the buttons keeps the save chosen. `rc_game_core::save::DeleteSave` and its handling in `rc_save`. `menu::Page::LoadGame`/`SaveGame`. `rc_game --script`: 12 new checks.
@@ -20,6 +38,7 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** rc_menus tests pass. `rc_probe --pages`: campaigns "USES THE ORIGINAL", 0 overlaps (pause 0). Script: campaign screenshot matches the `rc_probe` painting (mean difference 4.8 of 255); Geonosis lists its 6 missions, the assault ship 4; Enter on PROLOGUE: GEONOSIS opens geo_01a and the level plays. Main menu picture unchanged (3.4).
 - **Still broken / not tested:** Not tested on Windows, with a mouse on the planets, or with a controller. Every mission is listed (the original lists only those reached; no profile progress yet). Briefing maps (`GEO_01Briefing`...) opened from the list are not checked. Load and save pages are still placeholders.
 - **Next:** The original load and save pages (`CTLoadGameMenu`, `CTSaveGameMenu`).
+
 
 ## 2026-10-30: Menus spread out on wide screens; windowed, borderless and true full screen (rc_menus, rc_game)
 
@@ -47,6 +66,24 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** Tests 28 + 11 + 18 pass. `rc_probe --pages`: options, options_sound, options_graphics, options_controls all "USES THE ORIGINAL". Script `SCRIPT DONE: 61 checks passed, 0 failed`; GAME page matches the `rc_probe` painting (mean difference 3.3 of 255), CONTROLS 4.2; music volume 1.0 -> 0.9 with the left arrow; JUMP rebound to K then cancelled back to SPACE. Main, pause and quit pictures byte-identical to before.
 - **Still broken / not tested:** Not tested on Windows, with a mouse on the arrows, or with a controller. Not compared with the real game by eye (a few long labels, such as TACTICAL MODE INTENSITY, touch the left arrow; unknown whether the original does too). Greyed out until built: subtitles, helmet, prompts, auto pull, visor, sound quality/3D/EAX/channels, graphics presets, brightness, detail levels, blur, bloom, projectors, shadows, FSAA, and key rows for actions the port lacks. No "keep these settings?" timer after a screen change. Campaign, load and save pages are still placeholders.
 - **Next:** Campaign page (needs `MenuStringList`, scroll bars), then load/save pages.
+## 2026-10-30: The DC-17m's ammo counter shows the real ammo (rc_combat)
+
+- **Changed:** New `crates/rc_combat/src/counter.rs` (plain rules, 5 tests): what the little screen on the gun shows and how far each piece's picture slides. `arms_view.rs` finds the counter pieces by material name, slides their pictures (`uv_transform`) when the ammo changes, and reads them back into `ArmsReadout::counter`. New `counter_digits` and `counter_bar` in `[arms]` of `data/weapons/dc17m_blaster.toml` and `dc17m_sniper.toml`. `rc_shoot --script` has 2 new checks. Docs: DESIGN (arms section), README.
+- **Why:** The gun's screen always read 999: its `TexPanner2D` pieces were drawn unslid.
+- **Tested how:** Read (never wrote) the game's `hudarms.ukx`, `HUDArmsTextures.utx`, `ctinventory.u` and `Engine.dll` from the PC: the ammo class names the pieces, the picture has a strip of 11 cells (blank, 0-9), and the engine slides each digit by `digit/11 + 2/11` and the bar by `-0.5 * (1 - magazine fill)`; the digits show all ammo carried. `cargo test -p rc_combat`, `cargo check --release --workspace --all-targets`, and `xvfb-run -a -s "-screen 0 1280x1024x24" target/release/rc_shoot --script` in the cloud with the game files copied read only.
+- **Result:** `script done: 19 of 19 checks passed`, including `the gun's ammo counter shows 110, bar 83% full` after 10 shots and `shows 110, bar 100% full` after the reload. Log: `arms: dc17m_blaster: ammo counter on the gun (4 pieces) shows 120, bar 100% full`. I looked at the saved picture: the screen reads "110" and the magazine window shows its blue ticks.
+- **Still broken / not tested:** Not tested on Windows or by playing. The sniper's counter uses the same rule but no check covers it (not tested). Not done: the anti-armour's grenade digit (`PannerClip`) and the DC-15s pistol's charge bar. The game shows leading zeros ("060"); we do the same.
+- **Next:** The user fires the DC-17m in `rc_shoot` or `rc_game` and checks the screen counts down.
+
+## 2026-10-30: Auto pull maneuvers (rc_squad, rc_squad_plugin, rc_game)
+
+- **Changed:** `rc_squad`: jobs gain `pullable` (sniper, grenade and anti-armour posts in `data/squad/squad.toml`); `Squad::auto_pull` (on by default) and `Member::marker_since`; a marker order that needs more squad mates than are free takes the missing ones off pullable posts, longest-held first (`Squad::pull_for`, new `SquadEvent::MarkerPulled`). Off, the order is refused with "recall the squad first". `rc_squad_plugin::SquadOptions` carries the setting; `rc_game` reads `auto_pull_maneuvers` from `[game]` in `settings.toml` and passes it on at start and whenever settings change. Docs: RESEARCH ("Auto pull maneuvers"), DESIGN (Context orders), README. 4 new tests.
+- **Why:** The GAME options page has AUTO PULL MANEUVERS greyed out because nobody knew what it did. Thread "Make auto pull maneuvers work".
+- **Tested how:** Read the game's files from the PC, read only: `User.ini` (`bAutoPullManeuvers=True`), Engine.u and XInterfaceCTMenus.u script text, class defaults with `rc_probe --classes`, and the exported function names and machine code of `ASquadMarker::GetMarkerUsability` and `FillParticipants` in Engine.dll (nothing copied). Then `cargo test -p rc_squad -p rc_squad_plugin -p rc_game` in the cloud.
+- **Result:** The setting lets a new maneuver take squad mates off sniper, grenade, anti-armour (and turret) markers, the longest-running first; off, the helmet says "RECALL SQUAD BEFORE ENGAGING MANEUVER". Tests: rc_squad 34 passed (new: pulls the longest-held post, off refuses until recalled, once jobs are never pulled, shipped posts are pullable).
+- **Still broken / not tested:** Not tested on Windows or by playing; not tested in a real level. The GAME options row is still greyed: the options rows live in draft PR #47, which hooks it up once both are in. The helmet's refusal text isn't shown on screen yet (only the log says it). Turret markers aren't a port job yet, so they can't be pulled.
+- **Next:** Turn on the AUTO PULL MANEUVERS row in the options code (#47's `option_settings.rs`, reading and writing `game.auto_pull_maneuvers`).
+
 ## 2026-10-30: Smooth blending between animations (rc_anim, squad and enemies)
 
 - **Changed:** `crates/rc_anim/src/lib.rs`: new `blend_poses` and `Crossfade` (remembers the pose on screen when the animation changes and mixes it into the new one with an S curve). `rc_model::Model` and `rc_enemies::look::DroidLook` gained `local_pose` and `posed_local`, so a mixed pose can be skinned. Squad mates (`rc_squad_plugin/src/look.rs`) and enemies (`rc_enemies/src/lib.rs`) now blend whenever their animation changes. Blend times are data: `[blend]` in `data/squad/looks.toml` and `blend_time`, `blend_time_fire`, `blend_time_death` in `[look]` of `data/enemies/battle_droid.toml` (other enemies inherit them). New check `crates/rc_model/examples/rc_blend_check.rs`.

@@ -143,6 +143,37 @@ menu in the middle with black sides. Xvfb can't switch the monitor's size,
 so the true full screen video mode change itself is **not tested**; nor is
 anything on Windows, Linux desktops or Android.
 
+### Frame rate cap and window log
+
+With vsync off the game draws at most `video.max_fps` pictures a second
+(default 240, 0 = no limit; `display::limit_frame_rate`). The user's PC
+froze its picture in borderless full screen with vsync off while the game,
+sound and music ran on: the log showed the main menu at about 1,300 frames a
+second, then dropping to a steady 60, and no error. The cause isn't known
+(not seen in the cloud, which only has a software renderer); drawing a menu
+thousands of times a second was the one unusual thing, so it is capped now.
+The log also says which graphics card and driver are in use and every time
+the window gains or loses focus, is hidden or shown, or changes size
+(`display::log_window_events`), so the next report shows what the window
+was doing.
+
+It froze again with the cap (2026-10-31): the log ran at a steady 240 for a
+minute, then stopped mid-run, so that time the whole game stopped, not only
+the picture. The card is an NVIDIA GeForce RTX 4080 SUPER on Vulkan, driver
+617.42. Now a watchdog thread (`display::start_watchdog`) logs "no new frame
+for 5 s, the game is stuck" when frames stop, and `video.graphics_api`
+(`auto`, `vulkan`, `dx12`, `gl`; next start) lets the game use DirectX 12
+on Windows instead of Vulkan, to see whether the freeze is in the Vulkan
+path.
+
+Found (2026-10-31): the freeze comes when the game *starts* in full screen
+with vsync off on Vulkan (switching to full screen from the options didn't
+freeze). The user's original game started freezing at about the same time,
+so a driver change is the likely cause (NVIDIA 617.42). With DirectX 12 the
+same start ran 3 minutes at a steady 240 frames a second with no freeze. So
+`graphics_api = 'auto'` now means DirectX 12 on Windows (Vulkan or the
+library's choice elsewhere; `WGPU_BACKEND` still overrides `auto`).
+
 ## Dual input (done)
 
 Every device is read every frame and added together: keys, mouse, every

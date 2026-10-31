@@ -397,7 +397,11 @@ fn steps() -> Vec<Step> {
                 .cloned()
                 .ok_or("no arms readout")?;
             let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
-            let held = q.iter(w).next().and_then(|a| a.current()).map(|c| c.0.clone());
+            let held = q
+                .iter(w)
+                .next()
+                .and_then(|a| a.current())
+                .map(|c| c.0.clone());
             let got = format!(
                 "holding {held:?}; the arms show {:?} playing {}{}",
                 arms.weapon,
@@ -410,11 +414,13 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
-        Check("the level part loaded walls, props, doors and invisible walls", |w| {
-            let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
-                return Err("no LevelInfo".into());
-            };
-            let got = format!(
+        Check(
+            "the level part loaded walls, props, doors and invisible walls",
+            |w| {
+                let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
+                    return Err("no LevelInfo".into());
+                };
+                let got = format!(
                 "{}: {} collision triangles, {} props ({} with their class's model), {} blocking volumes, start {}",
                 i.map,
                 i.collision_triangles,
@@ -552,8 +558,14 @@ fn steps() -> Vec<Step> {
             "the scripts play the game's own lines, as long as each one lasts",
             level_script_lines,
         ),
-        Check("the start barricade blocks the way", |w| level_script_way(w, true)),
-        Until("the scripts switch the bacta dispenser on", level_script_dispenser_on, 300.0),
+        Check("the start barricade blocks the way", |w| {
+            level_script_way(w, true)
+        }),
+        Until(
+            "the scripts switch the bacta dispenser on",
+            level_script_dispenser_on,
+            300.0,
+        ),
         Note(level_script_stand_at_dispenser),
         Wait(0.5),
         Hold(Action::Use, 5.0),
@@ -828,7 +840,10 @@ fn steps() -> Vec<Step> {
             Ok(notes.join(", "))
         }),
         // The level exit: geo_01a's arrows lead to geo_01b.
-        Check("the level has an open exit to the next map", level_exit_found),
+        Check(
+            "the level has an open exit to the next map",
+            level_exit_found,
+        ),
         Note(level_exit_walk_in),
         Until(
             "the next map loads",
@@ -840,9 +855,18 @@ fn steps() -> Vec<Step> {
             LOAD_TIMEOUT,
         ),
         Wait(1.0),
-        Check("the next map has the player's health and ammo", level_exit_carried),
-        Check("the player arrives at the next map's start", level_exit_arrived),
-        Check("the next map's start is saved as a checkpoint, with the health", level_exit_checkpoint),
+        Check(
+            "the next map has the player's health and ammo",
+            level_exit_carried,
+        ),
+        Check(
+            "the player arrives at the next map's start",
+            level_exit_arrived,
+        ),
+        Check(
+            "the next map's start is saved as a checkpoint, with the health",
+            level_exit_checkpoint,
+        ),
         Press(Action::Pause),
         Wait(0.2),
         Check(
@@ -2451,7 +2475,10 @@ fn level_exit(w: &mut World) -> Option<(String, String, [f32; 3])> {
 
 fn level_exit_found(w: &mut World) -> Result<String, String> {
     let (name, url, at) = level_exit(w).ok_or("no open level exit")?;
-    let got = format!("{name} at ({:.0}, {:.0}, {:.0}) to {url}", at[0], at[1], at[2]);
+    let got = format!(
+        "{name} at ({:.0}, {:.0}, {:.0}) to {url}",
+        at[0], at[1], at[2]
+    );
     match rc_scripts::level_url(&url) {
         Some((m, _)) if m == "geo_01b" => Ok(got),
         _ => Err(got),
@@ -2506,7 +2533,9 @@ fn level_exit_carried(w: &mut World) -> Result<String, String> {
 }
 
 fn level_exit_arrived(w: &mut World) -> Result<String, String> {
-    let start = *w.get_resource::<rc_game_core::PlayerStart>().ok_or("no PlayerStart")?;
+    let start = *w
+        .get_resource::<rc_game_core::PlayerStart>()
+        .ok_or("no PlayerStart")?;
     let f = feet(w).ok_or("no player")?;
     let d = ((f.x - start.feet.x).powi(2) + (f.y - start.feet.y).powi(2)).sqrt();
     let got = format!(
@@ -2522,7 +2551,11 @@ fn level_exit_arrived(w: &mut World) -> Result<String, String> {
 }
 
 fn level_exit_checkpoint(w: &mut World) -> Result<String, String> {
-    let (health, _, _) = w.resource::<Noted>().leaving.clone().ok_or("didn't leave")?;
+    let (health, _, _) = w
+        .resource::<Noted>()
+        .leaving
+        .clone()
+        .ok_or("didn't leave")?;
     let cp = save_file(w, &SaveSlot::Checkpoint)?;
     let combat = cp.part("combat").ok_or("no [combat] in the checkpoint")?;
     let saved = combat

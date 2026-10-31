@@ -373,20 +373,25 @@ fn main() -> AppExit {
     }
 
     let mut app = App::new();
-    let plugins = DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Star Wars Republic Commando (Rust and Bevy)".into(),
-            resolution: (settings.video.width, settings.video.height).into(),
-            mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
-            present_mode: if settings.video.vsync {
-                PresentMode::AutoVsync
-            } else {
-                PresentMode::AutoNoVsync
-            },
+    let plugins = DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Star Wars Republic Commando (Rust and Bevy)".into(),
+                resolution: (settings.video.width, settings.video.height).into(),
+                mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
+                present_mode: if settings.video.vsync {
+                    PresentMode::AutoVsync
+                } else {
+                    PresentMode::AutoNoVsync
+                },
+                ..default()
+            }),
             ..default()
-        }),
-        ..default()
-    });
+        })
+        .set(bevy::render::RenderPlugin {
+            render_creation: display::wgpu_settings(&settings.video, &log).into(),
+            ..default()
+        });
     // SDL reads the controllers instead of gilrs; never both, or every
     // button would count twice.
     app.add_plugins(if sdl.is_some() {
@@ -403,6 +408,9 @@ fn main() -> AppExit {
     .insert_resource(player::FieldOfView::from_settings(&settings))
     .insert_resource(input::LookSettings::from_settings(&settings))
     .insert_resource(settings.gyro.clone())
+    .insert_resource(rc_squad_plugin::SquadOptions {
+        auto_pull_maneuvers: settings.game.auto_pull_maneuvers,
+    })
     .insert_resource(button_names)
     .insert_resource(bindings)
     .insert_resource(input::BaseBindings(base_bindings))

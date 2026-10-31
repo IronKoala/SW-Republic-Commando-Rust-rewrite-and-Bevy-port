@@ -125,6 +125,12 @@ pub struct ArmsParams {
     pub hide_zoomed: bool,
     /// How bright the arms are drawn, 0 to 1.
     pub brightness: f32,
+    /// The ammo counter on the gun (see `counter`): the model's digit
+    /// pieces, hundreds first, by material name (the ammo class's
+    /// `PannerDigit100`, `PannerDigit10`, `PannerDigit1`). Empty: none.
+    pub counter_digits: Vec<String>,
+    /// The counter's magazine bar piece (`PannerCharge`).
+    pub counter_bar: Option<String>,
 }
 
 impl WeaponParams {
@@ -226,6 +232,8 @@ impl WeaponParams {
                     attachment_group: t.text("arms.attachment_group")?,
                     hide_zoomed: t.boolean("arms.hide_zoomed")?.unwrap_or(false),
                     brightness: t.number("arms.brightness")?.unwrap_or(0.75),
+                    counter_digits: t.texts("arms.counter_digits")?.unwrap_or_default(),
+                    counter_bar: t.text("arms.counter_bar")?,
                 }),
             },
         };

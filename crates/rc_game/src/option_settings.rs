@@ -379,7 +379,10 @@ mod tests {
         // Windowed: the size is the window's.
         let mut s = Settings::default();
         pick(&mut s, "1600x900");
-        assert_eq!((s.video.width, s.video.height, s.video.display_mode), (1600, 900, DisplayMode::Windowed));
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1600, 900, DisplayMode::Windowed)
+        );
         // Borderless: a size of the monitor's shape stays borderless...
         assert!(write("display_mode", &mut s, 1, &modes, desktop));
         assert_eq!(s.video.display_mode, DisplayMode::Borderless);
@@ -387,11 +390,17 @@ mod tests {
         assert_eq!(s.video.display_mode, DisplayMode::Borderless);
         // ...another shape goes to a window of that size.
         pick(&mut s, "1280x1024");
-        assert_eq!((s.video.width, s.video.height, s.video.display_mode), (1280, 1024, DisplayMode::Windowed));
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1280, 1024, DisplayMode::Windowed)
+        );
         // True full screen keeps any size (other shapes get black bars).
         assert!(write("display_mode", &mut s, 2, &modes, desktop));
         pick(&mut s, "1024x768");
-        assert_eq!((s.video.width, s.video.height, s.video.display_mode), (1024, 768, DisplayMode::Fullscreen));
+        assert_eq!(
+            (s.video.width, s.video.height, s.video.display_mode),
+            (1024, 768, DisplayMode::Fullscreen)
+        );
         assert_eq!(read("display_mode", &s, &modes), Some(2));
     }
 }
