@@ -33,6 +33,11 @@ pub struct GameSection {
     /// Our own data files (`data` in the project folder).
     pub data_folder: String,
     pub difficulty: Difficulty,
+    /// The original's AUTO PULL MANEUVERS: a new squad order that needs
+    /// more squad mates than are free takes them off sniper, grenade and
+    /// anti-armour posts. Off, the order is refused until you recall the
+    /// squad. On by default, as in the original's `User.ini`.
+    pub auto_pull_maneuvers: bool,
 }
 
 /// The original's three difficulties.
@@ -180,6 +185,7 @@ impl Default for Settings {
                 folder: String::new(),
                 data_folder: "data".into(),
                 difficulty: Difficulty::Medium,
+                auto_pull_maneuvers: true,
             },
             mods: ModsSection {
                 folder: "mods".into(),
@@ -262,6 +268,11 @@ folder = ''
 data_folder = 'data'
 # easy, medium or hard (how much damage reaches you: 0.25, 1, 1.75 times).
 difficulty = 'medium'
+# When a squad order needs more squad mates than are free, take them off
+# sniper, grenade and anti-armour posts (the longest-held first). false:
+# the order is refused until you recall the squad. The original's AUTO
+# PULL MANEUVERS (GAME options page), on by default.
+auto_pull_maneuvers = true
 
 [mods]
 # One sub-folder per mod. A mod holds files with the same names as in

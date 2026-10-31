@@ -1572,6 +1572,16 @@ slicing, Sev sniping, as in the original). Mods can change a job or add a new on
   A grenade marker names a target area (`WeaponTarget`): the grenadier
   throws at the enemy nearest it within `target_radius`, seen or not.
   Without one, at its own target within `throw_range`.
+- **Auto pull maneuvers** (the original's GAME option, on by default;
+  `auto_pull_maneuvers` in `settings.toml`, passed to the squad as
+  `rc_squad_plugin::SquadOptions`): when an order needs more squad mates
+  than are free (one per open spot of its group), the missing ones are
+  taken off `pullable` posts (sniper, grenade, anti-armour in the shipped
+  file), the one who has held a post longest first. The log says
+  `Sev left S0 (pulled for S3)`. Off, the order is refused while
+  everyone is busy, and the log says to recall the squad. Once jobs are
+  never pulled. How the original does it is in docs/RESEARCH.md, "Auto
+  pull maneuvers".
 - **Blasts** (charges and grenades) hurt everyone near: `rc_combat::Damage`
   of kind `Explosion`, `blast_damage` at the middle falling to nothing at
   the radius, measured to the edge of each body. Friend or foe, as in the
@@ -2257,9 +2267,29 @@ down.
 **Our choices:** the game changes between breathing, walking and running
 only when the current animation ends; we change at once. No blending
 between animations yet. The arms are drawn unlit at `brightness` 0.75:
-the game lights them by the player's zone, which we don't read yet. The
-DC-17m's ammo counter on the gun (`TexPanner2D` materials, a strip of
-digits the game scrolls) shows the strip unscrolled ("999").
+the game lights them by the player's zone, which we don't read yet.
+
+**The ammo counter on the gun** (`counter.rs`, plain rules, 5 tests). The
+DC-17m and sniper models have a little screen made of model pieces whose
+materials are `TexPanner2D`s: they slide one picture (`DC17mAmmo`) sideways.
+The ammo class names them (`DC17mBlasterAmmo`: `PannerDigit100`,
+`PannerDigit10`, `PannerDigit1`, `PannerCharge`, `PannerClip`); the weapon
+file lists them as `counter_digits` and `counter_bar` in `[arms]`.
+
+| Piece | Shows | Slide (picture widths, sideways) |
+| --- | --- | --- |
+| three digits | the ammo carried, magazine included ("120" at the start) | strip of 11 cells (blank, 0-9): `(digit - 9) / 11` |
+| bar | how full the magazine is; refills over the reload | `-0.5 * (1 - shots / magazine size)` |
+
+The numbers come from the game's engine (`Engine.dll`, read for its
+numbers: 1/11 and 2/11 per digit, -0.5 for the bar, hundreds = count / 100,
+no blank leading zero). The game slides by `digit / 11 + 2 / 11` on a
+repeating picture; `(digit - 9) / 11` is the same cell without needing the
+repeat. `arms_view` sets each piece's `uv_transform` when it changes and
+reads the slides back into `ArmsReadout::counter`, which `rc_shoot` checks.
+Not done: the anti-armour's grenade digit (`PannerClip`, shown when the
+ammo has `DigitalClipDisplay`) and the DC-15s charge bar (its recharge
+uses other numbers we haven't read); they show their pictures unslid.
 
 **Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
 `rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,

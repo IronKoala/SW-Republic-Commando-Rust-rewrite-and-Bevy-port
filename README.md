@@ -122,7 +122,12 @@ copy of the game.
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
   are the game's; how long the work takes is our guess. Traps, mines and
-  turrets aren't done yet.
+  turrets aren't done yet. With "auto pull maneuvers" on (the default,
+  as in the original), ordering a new job when everyone is busy takes
+  the squad mate who has held a sniper, grenade or anti-armour position
+  longest off it; switch it off in `settings.toml`
+  (`auto_pull_maneuvers = false`) and the order is refused until you
+  recall the squad with F4. Tested by numbers only.
 
 - **Firing the DC-17m and the DC-15s pistol (tested in the cloud sandbox,
   not yet on Windows).** `rc_shoot` is a firing range: you stand in the test
@@ -145,7 +150,10 @@ copy of the game.
   (with the attachment swap between DC-17m attachments), and play the
   grenade throw and melee hit. They're drawn by their own camera, so the gun
   never pokes into walls. The sniper's arms hide while zoomed, as in the
-  game.
+  game. The little screen on the DC-17m and its sniper shows the ammo you
+  carry (three digits, like "120") and a bar that empties with the
+  magazine and fills during a reload (tested in the cloud with
+  `rc_shoot --script`; not yet seen on Windows).
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
@@ -458,7 +466,8 @@ copy of the game.
 - Weapons: no muzzle flash, and switching weapons is instant for firing
   (the arms do play the holster and draw animations). The first-person
   arms have no blending between animations, aren't lit by the level (a
-  fixed brightness), and the DC-17m's ammo counter always shows 999. How
+  fixed brightness), and the anti-armour attachment's grenade digit and
+  the DC-15s pistol's charge bar on the gun don't move yet. How
   the view kick settles back is our own guess. Grenades have no models yet (a small glowing ball), and squad mates only
   throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
