@@ -5,7 +5,8 @@
 //! ignored, so moving it over the window doesn't change the route.
 //!
 //! The route: the original main menu (colours checked against the
-//! original's pictures), CAMPAIGN MAP, Geonosis, its first level, loading,
+//! original's pictures), CAMPAIGN MAP (the original campaign page: its
+//! missions, the planets left and right, EVERY MAP +), geo_01a, loading,
 //! the level's walls and sky (looking up), walk forward, pause (nothing
 //! moves), resume, saving (the level-start checkpoint, a checkpoint, a
 //! quicksave), walking away, quickload (the player is back where they
@@ -16,7 +17,6 @@
 //! (music volume down), back, QUIT, the original's "are you sure?" box (NO,
 //! then QUIT again and YES).
 
-use crate::levels::LevelList;
 use crate::menu::{Menu, Page};
 use crate::original_menu::{self, OriginalMenus};
 use crate::player::Body;
@@ -50,8 +50,6 @@ enum Step {
     Check(&'static str, Probe),
     /// Remember something for a later check.
     Note(fn(&mut World)),
-    /// Press menu-down until the item the function names is selected.
-    SelectItem(&'static str, fn(&mut World) -> Option<usize>),
     /// On the pause menu, press menu-down until the button is focused: on
     /// the original's page the one calling this function, on the
     /// placeholder the item at this index.
@@ -231,38 +229,101 @@ fn steps() -> Vec<Step> {
         Check("main menu matches the original's pictures", |w| {
             compare(w, "main_menu", 0.2)
         }),
-        FocusAfter(Action::MenuDown, "MenuOptions[2]"),
+        FocusAfter(Action::MenuDown, "MenuOptions[1]"),
         FocusAfter(Action::MenuUp, "MenuOptions[0]"),
+        FocusAfter(Action::MenuDown, "MenuOptions[1]"),
+        Press(Action::MenuAccept), // LOAD GAME
+        Wait(0.3),
+        Check("LOAD GAME opens the original load page (no saves yet)", |w| {
+            let items = save_items(w, "load_game")?;
+            match (page(w), shown_page(w)) {
+                (Page::LoadGame, Some(k)) if k == "load_game" && items.is_empty() => {
+                    Ok("load_game (original), empty".into())
+                }
+                (p, k) => Err(format!("{p:?}, original page {k:?}, {items:?}")),
+            }
+        }),
+        Press(Action::MenuBack),
+        Wait(0.2),
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         Press(Action::MenuAccept),
         Wait(0.2),
-        Check("CAMPAIGN MAP opens the campaign list", |w| match page(w) {
-            Page::Campaigns => Ok("campaigns".into()),
-            p => Err(format!("{p:?}")),
+        Check("CAMPAIGN MAP opens the original campaign page", |w| {
+            match (page(w), shown_page(w)) {
+                (Page::Campaigns, Some(k)) if k == "campaigns" => Ok("campaigns (original)".into()),
+                (p, k) => Err(format!("{p:?}, original page {k:?}")),
+            }
         }),
-        // Geonosis' first level (the Prologue is a cut scene where the
-        // player falls; the first Geonosis level is the one rc_walk tests).
-        SelectItem("Geonosis", |w| {
-            w.resource::<LevelList>()
-                .campaigns
-                .iter()
-                .position(|c| c.name == "Geonosis")
-        }),
-        Press(Action::MenuAccept),
-        Wait(0.2),
-        Check("the campaign opens its levels", |w| match page(w) {
-            Page::Levels(i) => Ok(format!("levels of campaign {i}")),
-            p => Err(format!("{p:?}")),
-        }),
-        // Go down to the next item and up again, to test moving around.
-        Press(Action::MenuDown),
-        Press(Action::MenuUp),
-        Check("selection back on the first level", |w| {
-            let s = w.resource::<Menu>().selected;
-            if s == 0 {
-                Ok("0".into())
+        Wait(0.5),
+        Check("Geonosis is chosen and its missions are listed", |w| {
+            let (title, items) = campaign_list(w)?;
+            let focus = focus(w);
+            if title == "GEONOSIS"
+                && items.first().map(String::as_str) == Some("PROLOGUE")
+                && focus.as_deref() == Some("LevelList[0]")
+            {
+                Ok(format!("{title}: {items:?}, focus on {focus:?}"))
             } else {
-                Err(s.to_string())
+                Err(format!("{title}: {items:?}, focus on {focus:?}"))
+            }
+        }),
+        Shot("campaign"),
+        Check("campaign page matches the original's pictures", |w| {
+            compare(w, "campaign", 0.2)
+        }),
+        FocusAfter(Action::MenuDown, "LevelList[1]"),
+        FocusAfter(Action::MenuUp, "LevelList[0]"),
+        Press(Action::MenuRight),
+        Wait(0.1),
+        Check("right goes to the assault ship", |w| {
+            let (title, items) = campaign_list(w)?;
+            if title == "ASSAULT SHIP" && items.len() == 4 {
+                Ok(format!("{title}: {items:?}"))
+            } else {
+                Err(format!("{title}: {items:?}"))
+            }
+        }),
+        Press(Action::MenuLeft),
+        Wait(0.1),
+        Check("left comes back to Geonosis", |w| {
+            let (title, _) = campaign_list(w)?;
+            if title == "GEONOSIS" {
+                Ok(title)
+            } else {
+                Err(title)
+            }
+        }),
+        // Down the six missions to SELECT, then round the buttons to the
+        // port's EVERY MAP +, which lists every Geonosis map.
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        FocusAfter(Action::MenuDown, "LevelList[5]"),
+        FocusAfter(Action::MenuDown, "AButton"),
+        FocusAfter(Action::MenuDown, "BButton"),
+        FocusAfter(Action::MenuDown, "EveryMap"),
+        Press(Action::MenuAccept),
+        Wait(0.1),
+        Check("EVERY MAP + lists every Geonosis map", |w| {
+            let (_, items) = campaign_list(w)?;
+            if items.len() > 10 {
+                Ok(format!("{} maps: {items:?}", items.len()))
+            } else {
+                Err(format!("{items:?}"))
+            }
+        }),
+        // Up comes back to the list's first map; the third is geo_01a,
+        // the level the rest of the route walks.
+        FocusAfter(Action::MenuUp, "LevelList[0]"),
+        Press(Action::MenuDown),
+        FocusAfter(Action::MenuDown, "LevelList[2]"),
+        Check("the third map is geo_01a", |w| {
+            let m = w.resource::<OriginalMenus>();
+            let c = m.campaign.as_ref().ok_or("no campaign")?;
+            match c.map(2) {
+                Some(map) if map.eq_ignore_ascii_case("geo_01a") => Ok(map.to_string()),
+                other => Err(format!("{other:?}")),
             }
         }),
         Press(Action::MenuAccept),
@@ -820,6 +881,123 @@ fn steps() -> Vec<Step> {
             },
         ),
         Shot("paused"),
+        // The original save and load pages, from the pause menu.
+        FocusPauseItem("SaveGameSelected", 0),
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check("SAVE GAME opens the original save page, listing the autosave and quicksave", |w| {
+            let items = save_items(w, "save_game")?;
+            let got = format!("{:?} {items:?}", page(w));
+            match items.as_slice() {
+                [a, q] if page(w) == Page::SaveGame
+                    && a.starts_with("AUTOSAVE")
+                    && q.starts_with("QUICKSAVE") => Ok(got),
+                _ => Err(got),
+            }
+        }),
+        Shot("save_game"),
+        FocusOn("YButton"),
+        Press(Action::MenuAccept), // NEW
+        Wait(0.5),
+        Check("NEW saves a new save named after the campaign", |w| {
+            let file = save_file(w, &SaveSlot::Named("Geonosis_1".into()))?;
+            let items = save_items(w, "save_game")?;
+            let got = format!("map {}, list {items:?}", file.header.map);
+            if items.len() == 3 && items[2].starts_with("GEONOSIS 1") {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        // Up from the buttons comes back to the first save; Enter on the
+        // quicksave tries to overwrite it, which the original refuses.
+        Press(Action::MenuUp),
+        Press(Action::MenuDown),
+        Press(Action::MenuAccept),
+        Wait(0.2),
+        Check("the quicksave can't be overwritten: the original's message", |w| {
+            let asking = w.resource::<OriginalMenus>().asking.clone();
+            match (&asking, question_text(w)) {
+                (Some(original_menu::Asking::Notice), Some(t)) if t.contains("QUICKSAVE") => {
+                    Ok(t)
+                }
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Shot("save_notice"),
+        Press(Action::MenuBack),
+        Wait(0.2),
+        // Down to the new save, then down to the buttons (the save stays
+        // chosen) and round to DELETE.
+        Press(Action::MenuDown),
+        Press(Action::MenuDown),
+        FocusOn("XButton"),
+        Press(Action::MenuAccept),
+        Wait(0.2),
+        Check("DELETE asks first, with the save's name", |w| {
+            match question_text(w) {
+                Some(t) if t.contains("DELETE GEONOSIS 1") => Ok(t),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        FocusOn("AButton"), // YES
+        Press(Action::MenuAccept),
+        Wait(0.5),
+        Check("YES deletes the save and takes it off the list", |w| {
+            let gone = save_file(w, &SaveSlot::Named("Geonosis_1".into())).is_err();
+            let items = save_items(w, "save_game")?;
+            let got = format!("file gone {gone}, list {items:?}");
+            if gone && items.len() == 2 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        FocusPauseItem("LoadGameSelected", 0),
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check("LOAD GAME opens the original load page", |w| {
+            let items = save_items(w, "load_game")?;
+            let got = format!("{:?} {items:?}", page(w));
+            if page(w) == Page::LoadGame && items.len() == 2 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Shot("load_game"),
+        Press(Action::MenuDown), // the quicksave, saved in geo_01a
+        Press(Action::MenuAccept),
+        Wait(0.2),
+        Check("loading in a level asks first (the original's question)", |w| {
+            match question_text(w) {
+                Some(t) if t.contains("UNSAVED PROGRESS") => Ok(t),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        FocusOn("AButton"), // YES
+        Press(Action::MenuAccept),
+        Until(
+            "the load page's YES loads the save",
+            |w| !in_state(w, GameState::InGame),
+            5.0,
+        ),
+        Until(
+            "the save's level is back",
+            |w| in_state(w, GameState::InGame) && !w.contains_resource::<RestoringSave>(),
+            LOAD_TIMEOUT,
+        ),
+        Wait(0.5),
+        Check("the quicksave's map is loaded", |w| {
+            match w.resource::<CurrentLevel>().map.clone() {
+                Some(m) if m == "geo_01a" => Ok(m),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::Pause),
+        Wait(0.2),
         FocusPauseItem("EndMissionSelected", 2),
         Press(Action::MenuAccept), // Quit to main menu
         Until("main menu again", |w| in_state(w, GameState::MainMenu), 5.0),
@@ -846,8 +1024,8 @@ fn steps() -> Vec<Step> {
             w.resource_mut::<Settings>().audio.music_volume = 1.0;
             w.resource_mut::<Noted>().music_volume = 1.0;
         }),
-        // MULTIPLAYER, LOAD GAME, PROFILES and EXTRAS are greyed out and
-        // skipped.
+        // MULTIPLAYER, PROFILES and EXTRAS are greyed out and skipped.
+        FocusAfter(Action::MenuDown, "MenuOptions[1]"), // LOAD GAME
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         FocusAfter(Action::MenuDown, "MenuOptions[4]"),
         Press(Action::MenuAccept), // OPTIONS
@@ -1122,6 +1300,58 @@ fn pause_item_focused(w: &mut World, func: &str, index: usize) -> bool {
 
 /// The focused button of the original screen showing: a box over the
 /// page (question, reassign button), else the page, else the main menu.
+/// The original page showing, by its name in `original_menus.toml`.
+fn shown_page(w: &mut World) -> Option<String> {
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    match w.resource::<OriginalMenus>().shown(&state, play.as_ref(), menu) {
+        Some(original_menu::Shown::Page(k)) => Some(k),
+        _ => None,
+    }
+}
+
+/// What an original load or save page lists.
+fn save_items(w: &mut World, k: &str) -> Result<Vec<String>, String> {
+    let m = w.resource::<OriginalMenus>();
+    let p = m.pages.get(k).ok_or(format!("no original {k} page"))?;
+    Ok(p.screen
+        .layout
+        .lists
+        .lists
+        .first()
+        .map(|l| l.items.clone())
+        .unwrap_or_default())
+}
+
+/// The question box's question, when it shows.
+fn question_text(w: &mut World) -> Option<String> {
+    let q = w.resource::<OriginalMenus>().question.as_ref()?;
+    match &q.layout.widget("Question")?.kind {
+        rc_menus::layout::Kind::Text(t) => Some(t.text.clone()),
+        _ => None,
+    }
+}
+
+/// The original campaign page's planet name and list.
+fn campaign_list(w: &mut World) -> Result<(String, Vec<String>), String> {
+    let m = w.resource::<OriginalMenus>();
+    let p = m.pages.get("campaigns").ok_or("no original campaign page")?;
+    let title = match p.screen.layout.widget("Campaign").map(|w| &w.kind) {
+        Some(rc_menus::layout::Kind::Text(t)) => t.text.clone(),
+        _ => String::new(),
+    };
+    let items = p
+        .screen
+        .layout
+        .lists
+        .lists
+        .first()
+        .map(|l| l.items.clone())
+        .unwrap_or_default();
+    Ok((title, items))
+}
+
 fn focus(w: &mut World) -> Option<String> {
     let state = *w.resource::<State<GameState>>().get();
     let play = w.get_resource::<State<Play>>().map(|p| *p.get());
@@ -1457,21 +1687,6 @@ fn run(world: &mut World) {
                 }
             }
             Step::Note(f) => f(world),
-            Step::SelectItem(what, target) => match target(world) {
-                None => {
-                    log.line(format!("CHECK find {what} in the menu: not there -> FAIL"));
-                    world.resource_mut::<Script>().failed += 1;
-                }
-                Some(i) => {
-                    if world.resource::<Menu>().selected != i {
-                        // Down on even frames, released on odd ones.
-                        if frames % 2 == 0 {
-                            held.insert(Action::MenuDown);
-                        }
-                        done = frames > 200;
-                    }
-                }
-            },
             Step::FocusPauseItem(func, index) => {
                 if !pause_item_focused(world, func, index) {
                     // Down on even frames, released on odd ones.

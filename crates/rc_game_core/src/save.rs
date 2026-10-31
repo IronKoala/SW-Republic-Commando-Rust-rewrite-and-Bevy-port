@@ -209,6 +209,13 @@ pub struct LoadGame {
     pub slot: SaveSlot,
 }
 
+/// Ask for a save file to be deleted (from a Load or Save Game screen).
+/// [`SaveList`] is updated afterwards.
+#[derive(Message, Debug, Clone)]
+pub struct DeleteSave {
+    pub slot: SaveSlot,
+}
+
 /// The player reached a checkpoint. The level's scripts send this with the
 /// checkpoint's name (anything unique within the map, like the trigger's
 /// name). The save plugin saves to [`SaveSlot::Checkpoint`] the first time

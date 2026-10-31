@@ -78,6 +78,8 @@ pub fn widget_box(kind: &Kind, sizes: &mut dyn Sizes) -> Option<[f32; 4]> {
             .into_iter()
             .collect(),
         Kind::Button(b) => [
+            sprite_box(&b.under_blurred, sizes),
+            sprite_box(&b.under_focused, sizes),
             sprite_box(&b.background_blurred, sizes),
             sprite_box(&b.background_focused, sizes),
             text_box(&b.blurred, sizes).filter(|_| !b.blurred.text.is_empty()),
@@ -460,6 +462,8 @@ pub fn shift(kind: &mut Kind, dx: f32) {
             b.focused.pos[0] += dx;
             b.background_blurred.pos[0] += dx;
             b.background_focused.pos[0] += dx;
+            b.under_blurred.pos[0] += dx;
+            b.under_focused.pos[0] += dx;
         }
     }
 }
@@ -585,6 +589,7 @@ mod tests {
             sounds: Default::default(),
             background_movie: String::new(),
             music: None,
+            lists: Default::default(),
         }
     }
 

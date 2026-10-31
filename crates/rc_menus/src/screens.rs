@@ -189,6 +189,7 @@ pub fn add_button_copy(layout: &mut MenuLayout, e: &crate::pages::ExtraButton) -
         &mut b.background_blurred.pos,
         &mut b.background_focused.pos,
     ] {
+        p[0] += e.move_right;
         p[1] += e.move_down;
     }
     w.name = e.name.clone();
@@ -453,6 +454,7 @@ pub fn drop_down(
         sounds: page.sounds.clone(),
         background_movie: String::new(),
         music: None,
+        lists: Default::default(),
     })
 }
 

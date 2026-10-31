@@ -51,6 +51,10 @@ pub enum Page {
     /// The game folder wasn't found.
     NoGame,
     Paused,
+    /// The original LOAD GAME and SAVE GAME pages. Only reachable when
+    /// they can be drawn from the install; there is no placeholder.
+    LoadGame,
+    SaveGame,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -297,6 +301,10 @@ pub fn items(
                 ),
                 it("Quit", Cmd::Quit),
             ],
+        ),
+        Page::LoadGame | Page::SaveGame => (
+            "SAVES (PLACEHOLDER)".into(),
+            vec![it("Back", Cmd::Back)],
         ),
         Page::Paused => (
             "PAUSED".into(),

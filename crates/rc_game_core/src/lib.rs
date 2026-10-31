@@ -88,6 +88,7 @@ impl Plugin for CorePlugin {
             .init_resource::<save::SaveList>()
             .add_message::<save::SaveGame>()
             .add_message::<save::LoadGame>()
+            .add_message::<save::DeleteSave>()
             .add_message::<save::CheckpointReached>()
             .add_message::<save::SaveResult>()
             .configure_sets(

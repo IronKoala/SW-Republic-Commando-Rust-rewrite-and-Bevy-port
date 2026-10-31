@@ -12,10 +12,12 @@
 //! `screens.rs`.
 
 pub mod assets;
+pub mod campaign;
 pub mod fit;
 pub mod gpu;
 pub mod layout;
 pub mod library;
+pub mod lists;
 pub mod pages;
 pub mod quads;
 pub mod render;
