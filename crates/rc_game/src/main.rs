@@ -375,20 +375,25 @@ fn main() -> AppExit {
     }
 
     let mut app = App::new();
-    let plugins = DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Star Wars Republic Commando (Rust and Bevy)".into(),
-            resolution: (settings.video.width, settings.video.height).into(),
-            mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
-            present_mode: if settings.video.vsync {
-                PresentMode::AutoVsync
-            } else {
-                PresentMode::AutoNoVsync
-            },
+    let plugins = DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Star Wars Republic Commando (Rust and Bevy)".into(),
+                resolution: (settings.video.width, settings.video.height).into(),
+                mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
+                present_mode: if settings.video.vsync {
+                    PresentMode::AutoVsync
+                } else {
+                    PresentMode::AutoNoVsync
+                },
+                ..default()
+            }),
             ..default()
-        }),
-        ..default()
-    });
+        })
+        .set(bevy::render::RenderPlugin {
+            render_creation: display::wgpu_settings(&settings.video, &log).into(),
+            ..default()
+        });
     // SDL reads the controllers instead of gilrs; never both, or every
     // button would count twice.
     app.add_plugins(if sdl.is_some() {
