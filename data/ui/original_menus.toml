@@ -17,10 +17,41 @@
 #   quit_game     ask "are you sure?", then quit
 #   play:<map>    start a map
 #   unavailable   greyed out, can't be chosen (not built yet)
+#   switch:<page> show another page in this one's place (the options
+#                 pages' GAME, SOUND, GRAPHICS and CONTROLS tabs)
+#   option_left, option_right   the arrows beside a chooser
+#   restore_defaults            put the page's settings back to defaults
+#   rebind        choose a new key for the row's action (controls page)
+#   prev_set, next_set          flip the controls page's sets of rows
+#
+# Choosers (the original's MenuButtonEnum rows, such as "Options[3]") show
+# a setting: [pages.<page>.choosers] names it, or says "unavailable" (the
+# whole row is greyed out, as the original greys out options it can't
+# offer). The settings are in rc_game/src/option_settings.rs.
+#
+# Key buttons on the controls page ([pages.<page>.keys]) name the action
+# they change, as in data/input/bindings.toml, or "unavailable".
+#
+# [pages.<page>.extra_buttons.<Name>] adds a button the original doesn't
+# have, copied from one of the page's own buttons and moved down. Its text
+# must say it's this port's addition.
+#
+# For the port's own pages, which borrow an original page's look:
+# [pages.<page>.texts] gives widgets new text, [pages.<page>.moves] moves
+# widgets down (negative: up) by a fraction of the screen, and
+# hidden_rows = [...] hides whole rows (by the row's button).
 #
 # Checked 2026-10-29 with `rc_probe --pages` against the install: these are
 # the original's function names. `rc_probe --pages` lists every menu's
 # buttons and says which pages would use their original menu.
+
+
+# Screens wider than 4:3: menus keep the size they have on a 4:3 screen of
+# the same height and spread out, moving things apart rather than shrinking
+# them (rc_menus/src/fit.rs). On screens wider than this shape (width over
+# height) they stay in a centred area this shape. 0 = spread to any width.
+[fit]
+widest_shape = 2.4
 
 [pages.paused]
 class = "XInterfaceCTMenus.CTPausePCMenu"
@@ -53,7 +84,208 @@ back = "back"
 OnBButton = "back"
 SelectCurrentLevel = "unavailable"
 
-# The options pages (CTGraphicsOptionsPCMenu, CTSoundOptionsPCMenu,
-# CTControlsOptionsPCMenu, CTMapKeyMenu) use sliders, check boxes and key
-# lists, which the menu reader can't draw yet, so they would keep the
-# placeholder anyway. They are left out until those widgets are built.
+# The four options pages (checked 2026-10-30 with the install). The GAME,
+# SOUND, GRAPHICS and CONTROLS buttons switch between them; DONE goes back
+# to the page that opened them. Every change is saved straight away, as in
+# the original. Rows this port can't do yet are greyed out.
+[pages.options]
+class = "XInterfaceCTMenus.CTGameOptionsPCMenu"
+back = "back"
+
+[pages.options.buttons]
+SoundSelected = "switch:options_sound"
+GraphicsSelected = "switch:options_graphics"
+ControlsSelected = "switch:options_controls"
+RestoreToDefaultSelected = "restore_defaults"
+DoneSelected = "back"
+OnLeft = "option_left"
+OnRight = "option_right"
+
+[pages.options.choosers]
+"Options[0]" = "mouse_sensitivity"
+"Options[1]" = "invert_mouse"
+"Options[2]" = "unavailable"        # SUBTITLES: no subtitles yet
+"Options[3]" = "unavailable"        # HELMET: the visor frame isn't drawn yet
+"Options[4]" = "unavailable"        # PROMPT TEXT: no prompt text yet
+"Options[5]" = "difficulty"
+"Options[6]" = "unavailable"        # AUTO PULL MANEUVERS
+"Options[7]" = "unavailable"        # TACTICAL VISOR MODE
+"Options[8]" = "unavailable"        # TACTICAL MODE INTENSITY
+
+# Not in the original: our own tab ("PORT +", short enough to fit) for the
+# port's extra settings, on [pages.more_settings] below.
+[pages.options.extra_buttons.PortSettings]
+copy_of = "Controls"
+text = "PORT +"
+move_down = 0.05
+command = "switch:more_settings"
+
+[pages.options_sound]
+class = "XInterfaceCTMenus.CTSoundOptionsPCMenu"
+back = "back"
+
+[pages.options_sound.buttons]
+GameSelected = "switch:options"
+GraphicsSelected = "switch:options_graphics"
+ControlsSelected = "switch:options_controls"
+RestoreToDefaultSelected = "restore_defaults"
+DoneSelected = "back"
+OnLeft = "option_left"
+OnRight = "option_right"
+
+[pages.options_sound.choosers]
+"Options[0]" = "unavailable"        # VOICES VOLUME: no voices yet
+"Options[1]" = "effects_volume"
+"Options[2]" = "music_volume"
+"Options[3]" = "unavailable"        # SOUND QUALITY
+"Options[4]" = "unavailable"        # 3D SOUND
+"Options[5]" = "unavailable"        # EAX (a Windows-only sound system)
+"Options[6]" = "unavailable"        # AUDIO CHANNELS
+
+[pages.options_sound.extra_buttons.PortSettings]
+copy_of = "Controls"
+text = "PORT +"
+move_down = 0.05
+command = "switch:more_settings"
+
+[pages.options_graphics]
+class = "XInterfaceCTMenus.CTGraphicsOptionsPCMenu"
+back = "back"
+
+[pages.options_graphics.buttons]
+GameSelected = "switch:options"
+SoundSelected = "switch:options_sound"
+ControlsSelected = "switch:options_controls"
+SetRecommendedSelected = "restore_defaults"
+DoneSelected = "back"
+OnLeft = "option_left"
+OnRight = "option_right"
+
+[pages.options_graphics.choosers]
+"Options[0]" = "unavailable"        # GRAPHICS QUALITY
+"Options[1]" = "unavailable"        # BRIGHTNESS
+"Options[2]" = "video_resolution"
+"Options[3]" = "unavailable"        # TEXTURE QUALITY
+"Options[4]" = "unavailable"        # CHARACTER DETAIL
+"Options[5]" = "unavailable"        # BUMPMAPPING QUALITY
+"Options[6]" = "unavailable"        # BLUR EFFECTS
+"Options[7]" = "unavailable"        # BLOOM EFFECTS
+"Options[8]" = "unavailable"        # PROJECTORS
+"Options[9]" = "unavailable"        # SQUAD SHADOWS
+"Options[10]" = "vsync"
+"Options[11]" = "unavailable"       # FSAA
+
+[pages.options_graphics.extra_buttons.PortSettings]
+copy_of = "Controls"
+text = "PORT +"
+move_down = 0.05
+command = "switch:more_settings"
+
+# The controls page shows the keys of the keyboard and mouse, or of the
+# controller when that was used last. Choosing a row opens the original
+# "reassign button" box.
+[pages.options_controls]
+class = "XInterfaceCTMenus.CTControlsOptionsPCMenu"
+back = "back"
+
+[pages.options_controls.buttons]
+GameSelected = "switch:options"
+SoundSelected = "switch:options_sound"
+GraphicsSelected = "switch:options_graphics"
+RestoreToDefaultSelected = "restore_defaults"
+DoneSelected = "back"
+PrevSetSelected = "prev_set"
+NextSetSelected = "next_set"
+ActionSelected = "rebind"
+
+[pages.options_controls.keys]
+"OptionSet0[0]" = "move_forward"
+"OptionSet0[1]" = "move_back"
+"OptionSet0[2]" = "unavailable"     # TURN LEFT: turning is the mouse here
+"OptionSet0[3]" = "unavailable"     # TURN RIGHT
+"OptionSet0[4]" = "strafe_left"
+"OptionSet0[5]" = "strafe_right"
+"OptionSet0[6]" = "walk"
+"OptionSet0[7]" = "jump"
+"OptionSet0[8]" = "crouch"
+"OptionSet0[9]" = "use"
+"OptionSet0[10]" = "fire"
+"OptionSet0[11]" = "throw_grenade"
+"OptionSet0[12]" = "zoom"
+"OptionSet0[13]" = "flashlight"     # CYCLE VISOR MODE (the original's headlamp key)
+"OptionSet1[0]" = "unavailable"     # SCREEN SHOT
+"OptionSet1[1]" = "melee"           # MELEE ATTACK
+"OptionSet1[2]" = "reload"
+"OptionSet1[3]" = "unavailable"     # DC15s PISTOL: no key per weapon yet
+"OptionSet1[4]" = "unavailable"     # DC17m BLASTER
+"OptionSet1[5]" = "unavailable"     # DC17m SNIPER
+"OptionSet1[6]" = "unavailable"     # DC17m ANTI-ARMOR
+"OptionSet1[7]" = "next_weapon"     # SECONDARY WEAPONS
+"OptionSet1[8]" = "next_grenade"    # CYCLE DETONATOR
+"OptionSet1[9]" = "squad_search_and_destroy"
+"OptionSet1[10]" = "squad_form_up"
+"OptionSet1[11]" = "squad_secure_position"
+"OptionSet1[12]" = "squad_cancel"   # RECALL
+"OptionSet1[13]" = "unavailable"    # SHOW SCORES (multiplayer)
+"OptionSet2[0]" = "unavailable"     # SWITCH TEAM (multiplayer)
+"OptionSet2[1]" = "quick_load"
+"OptionSet2[2]" = "quick_save"
+"OptionSet2[3]" = "unavailable"     # CHAT (multiplayer)
+"OptionSet2[4]" = "unavailable"     # TEAM CHAT (multiplayer)
+"OptionSet2[5]" = "unavailable"     # SPEECH MENU (multiplayer)
+
+[pages.options_controls.extra_buttons.PortSettings]
+copy_of = "Graphics"
+text = "PORT +"
+move_down = 0.1
+command = "switch:more_settings"
+
+# The port's own settings (the original has none of these), on a page that
+# borrows the original GAME page's look: its rows, arrows, tabs and boxes.
+# The GAME tab's "you are here" bar moves down to the PORT + tab, and a GAME
+# tab (a copy of SOUND) takes its place.
+[pages.more_settings]
+class = "XInterfaceCTMenus.CTGameOptionsPCMenu"
+back = "back"
+hidden_rows = ["Options[8]"]
+
+[pages.more_settings.buttons]
+SoundSelected = "switch:options_sound"
+GraphicsSelected = "switch:options_graphics"
+ControlsSelected = "switch:options_controls"
+RestoreToDefaultSelected = "restore_defaults"
+DoneSelected = "back"
+OnLeft = "option_left"
+OnRight = "option_right"
+
+[pages.more_settings.choosers]
+"Options[0]" = "field_of_view"
+"Options[1]" = "panini"
+"Options[2]" = "display_mode"
+"Options[3]" = "master_volume"
+"Options[4]" = "stick_look_speed"
+"Options[5]" = "look_stick_dead_zone"
+"Options[6]" = "gyro_mode"
+"Options[7]" = "gyro_sensitivity"
+
+[pages.more_settings.texts]
+GameLabel = "PORT +"
+"OptionLabels[0]" = "FIELD OF VIEW"
+"OptionLabels[1]" = "WIDE SCREEN FIX"
+"OptionLabels[2]" = "DISPLAY MODE"
+"OptionLabels[3]" = "MASTER VOLUME"
+"OptionLabels[4]" = "STICK LOOK SPEED"
+"OptionLabels[5]" = "STICK DEAD ZONE"
+"OptionLabels[6]" = "GYRO AIMING"
+"OptionLabels[7]" = "GYRO SENSITIVITY"
+
+[pages.more_settings.moves]
+GameLabel = 0.2
+GameLabelBackground = 0.2
+GameLabelConnector = 0.2
+
+[pages.more_settings.extra_buttons.GameTab]
+copy_of = "Sound"
+text = "GAME"
+move_down = -0.05
+command = "switch:options"

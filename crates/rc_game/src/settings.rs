@@ -7,8 +7,8 @@
 //! stops the game with a message naming it.
 
 use bevy::prelude::Resource;
-use rc_pads::GyroSettings;
 use rc_game_core::paths::resolve;
+use rc_pads::GyroSettings;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -75,10 +75,25 @@ pub struct ModsSection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct VideoSection {
-    pub fullscreen: bool,
+    /// In a window, full screen in a borderless window the size of the
+    /// monitor, or true full screen (the monitor switches to the chosen
+    /// size).
+    pub display_mode: DisplayMode,
+    /// The screen size: the window's size when windowed. In true full
+    /// screen, a size of another shape than the monitor's is shown at that
+    /// shape with black bars filling the rest.
     pub width: u32,
     pub height: u32,
     pub vsync: bool,
+    /// With vsync off, the most pictures a second the game draws. 0 is no
+    /// limit. Drawing a menu thousands of times a second only heats the
+    /// graphics card, and on some Windows PCs it can stop the picture
+    /// updating while the game runs on.
+    pub max_fps: u32,
+    /// Which way the game talks to the graphics card: `auto` (DirectX 12
+    /// on Windows, usually Vulkan elsewhere), `vulkan`, `dx12` (Windows
+    /// only) or `gl`. Takes effect at the next start.
+    pub graphics_api: String,
     /// Field of view across a 4:3 screen, degrees. The original's is 85.
     /// Wider screens see more at the sides with the same view up and down
     /// ("Hor+"), so nothing is cut off or stretched to fit.
@@ -99,6 +114,19 @@ pub struct VideoSection {
     /// 3D view so things near the sides aren't stretched; the middle keeps
     /// its size.
     pub panini: f32,
+}
+
+/// How the game window covers the screen (`video.display_mode`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplayMode {
+    #[default]
+    Windowed,
+    /// A window without edges that covers the whole monitor at its own
+    /// size; quick to switch away from.
+    Borderless,
+    /// The game takes over the monitor and switches it to the chosen size.
+    Fullscreen,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -164,10 +192,12 @@ impl Default for Settings {
                 enabled: vec![],
             },
             video: VideoSection {
-                fullscreen: false,
+                display_mode: DisplayMode::Windowed,
                 width: 1280,
                 height: 720,
                 vsync: true,
+                max_fps: 240,
+                graphics_api: "auto".into(),
                 fov: 85.0,
                 widest_shape: 2.0,
                 hud_max_aspect: 16.0 / 9.0,
@@ -252,10 +282,20 @@ folder = 'mods'
 enabled = []
 
 [video]
-fullscreen = false
+# windowed, borderless (full screen in a window the size of the monitor) or
+# fullscreen (true full screen: the monitor switches to width x height).
+display_mode = 'windowed'
+# The window's size. In true full screen, a size of another shape than the
+# monitor's is shown at that shape with black bars around it.
 width = 1280
 height = 720
 vsync = true
+# With vsync off, the most pictures a second (0 = no limit).
+max_fps = 240
+# How the game talks to the graphics card: 'auto' (DirectX 12 on Windows,
+# usually Vulkan elsewhere), 'vulkan', 'dx12' (Windows only) or 'gl'. Takes
+# effect at the next start.
+graphics_api = 'auto'
 # Field of view across a 4:3 screen, degrees (the original's is 85). Wider
 # screens see more at the sides; the view up and down stays the same.
 fov = 85
@@ -316,9 +356,24 @@ auto_calibrate = true              # learn the gyro's drift while it lies still
 folder = ''
 "#;
 
+/// The option `display_mode` replaced; still read.
+const OLD_FULLSCREEN: &str = "fullscreen";
+
 impl Settings {
     pub fn parse(text: &str) -> Result<Settings, String> {
-        toml::from_str(text).map_err(|e| e.to_string())
+        let mut s: Settings = toml::from_str(text).map_err(|e| e.to_string())?;
+        // Older versions had `fullscreen = true` (a borderless window) in
+        // place of `display_mode`.
+        if let Ok(t) = text.parse::<toml::Table>() {
+            let video = t.get("video").and_then(|v| v.as_table());
+            let old = video
+                .and_then(|v| v.get(OLD_FULLSCREEN))
+                .and_then(|v| v.as_bool());
+            if old == Some(true) && video.is_some_and(|v| !v.contains_key("display_mode")) {
+                s.video.display_mode = DisplayMode::Borderless;
+            }
+        }
+        Ok(s)
     }
 
     /// Options in `text` the game doesn't know: typos, or ones from another
@@ -342,6 +397,7 @@ impl Settings {
                 out.extend(
                     v.keys()
                         .filter(|key| !k.contains_key(*key))
+                        .filter(|key| !(section == "video" && *key == OLD_FULLSCREEN))
                         .map(|key| format!("{section}.{key}")),
                 );
             }
@@ -489,6 +545,21 @@ mod tests {
         assert_eq!(s.video.fov, 120.0);
         assert_eq!(s.video.widest_shape, 2.0);
         assert_eq!(Settings::unknown_options(text), ["video.widest_fov"]);
+    }
+
+    #[test]
+    fn old_full_screen_option_becomes_borderless() {
+        let old = "[video]\nfullscreen = true\n";
+        let s = Settings::parse(old).unwrap();
+        assert_eq!(s.video.display_mode, DisplayMode::Borderless);
+        assert!(Settings::unknown_options(old).is_empty());
+        let s = Settings::parse("[video]\nfullscreen = false\n").unwrap();
+        assert_eq!(s.video.display_mode, DisplayMode::Windowed);
+        let both = "[video]\nfullscreen = true\ndisplay_mode = 'fullscreen'\n";
+        assert_eq!(
+            Settings::parse(both).unwrap().video.display_mode,
+            DisplayMode::Fullscreen
+        );
     }
 
     #[test]

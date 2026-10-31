@@ -42,9 +42,12 @@ How it works:
   rewritten by hand: the border grows by one row for QUIT, Xbox Live and
   controller items are hidden, NEW GAME starts `PRO`, QUIT asks "are you
   sure?" (starting on NO), and so on. No script text is copied.
+- `rc_menus::fit` spreads a menu over a screen wider than 4:3 (see
+  "Wide screens" below).
 - `rc_game/src/original_menu.rs` draws the rectangles with Bevy UI in the
-  largest centred 4:3 area of the window (black at the sides), and moves
-  focus with the menu actions, so keyboard, gamepad and mouse all work.
+  menu area (the whole screen up to 21.5:9, a centred 4:3 area on taller
+  screens), and moves focus with the menu actions, so keyboard, gamepad
+  and mouse all work.
 - Colours: the original multiplied and blended colours in sRGB numbers,
   Bevy does it in linear light. `rc_menus::gpu` bakes each tint into its
   own copy of the picture and adjusts transparency so the result matches
@@ -88,8 +91,7 @@ against the install the same evening with `rc_probe --pages`:
   arrows), `MenuStringList` (the level list), `MenuScrollBar`,
   `MenuScrollArea`, `MenuActiveWidget`. Its buttons are BACK
   (`OnBButton`) and SELECT (`SelectCurrentLevel`).
-- The options classes use sliders and key lists too, so they aren't
-  listed yet.
+- **Options (2026-10-30): use the original.** See below.
 - `rc_game --script` picks pause items by the original's function name
   (`FocusPauseItem`), so it works with either pause page.
 
@@ -99,6 +101,118 @@ button's function in `logs/rc_menu.log`, a painting in `extracted/menus/`),
 then ends with a summary saying which pages would use the original and
 why the others wouldn't. In the game, the same reasons are in
 `logs\rc_game.log` on lines starting `original menus: page`.
+
+## The options pages (2026-10-30)
+
+The four PC options classes are drawn from the install: `CTGameOptionsPCMenu`
+(GAME, 9 rows), `CTSoundOptionsPCMenu` (SOUND, 7), `CTGraphicsOptionsPCMenu`
+(GRAPHICS, 12) and `CTControlsOptionsPCMenu` (CONTROLS, three sets of key
+rows with PREV/NEXT). The tabs on the left switch pages, DONE goes back.
+
+New in the reader:
+
+- `rc_package::class::string_list_value` reads arrays of strings (each
+  chooser's `Items`), and `read_property_info` gives each property's fixed
+  array size, so arrays such as `OptionSet0[14]` are filled to their full
+  length the way the engine does.
+- `MenuButtonEnum` (a row with a list of values, `Current`, `bNoWrap`) and
+  `MenuButtonSprite` (picture buttons; the small arrows have
+  `bIgnoreController`, so they're for the mouse only) are drawn. A chooser's
+  value text uses `DefaultMenuButtonText` when it has no style of its own.
+- Sub-widgets are copied (Blurred to Focused) both before and after the
+  style is applied, as `MenuBase`'s own comments describe. The main, pause
+  and question pictures are byte-for-byte unchanged by this.
+
+What each row does is in `data/ui/original_menus.toml`: `choosers` maps a row
+to a setting in `rc_game/src/option_settings.rs` (mouse sensitivity is value
+times 0.5 in the original, default 6 of 10; volumes are value / 10), `keys`
+maps a CONTROLS row to an action, and `unavailable` greys a row out. Working:
+mouse sensitivity, invert mouse, difficulty, effects volume, music volume,
+screen size (the original's list plus wide and ultrawide sizes) and vsync,
+plus RESTORE DEFAULTS / SET RECOMMENDED. Key rows open `CTMapKeyMenu`
+("REASSIGN BUTTON"): press a key, then ACCEPT, CANCEL or press again.
+Values change only with the arrows (the small ones beside each row, or
+left and right on keys and controllers), as the user asked. The one
+exception is the screen size: choosing its value (a click on the numbers,
+or Enter / A) opens a drop-down list, which the original doesn't have. It is
+built only from pieces of the page (`rc_menus::screens::drop_down`): the
+page's own display box over a black square, and copies of the chooser for
+its rows. It shows 10 sizes and scrolls with the keys or the mouse wheel; a
+click outside or Back closes it. The list offers the sizes that fit the
+monitor (a window can't be bigger than the screen it is on), the monitor's
+own size and the current size. Full screen is not in this list: it is the
+DISPLAY MODE row on PORT + (WINDOWED, BORDERLESS, FULL SCREEN; see
+`rc_game/src/display.rs`).
+
+Long setting names (AUTO PULL MANEUVERS, TACTICAL VISOR MODE, BUMPMAPPING
+QUALITY and others) can run into the arrows on a 4:3 screen, because our
+font is wider than the original's. On wider screens the names and the
+arrows move apart (below). Only where that isn't enough (4:3 and taller)
+does `rc_menus::screens::fit_row_labels` shrink a label that would reach
+the first button of its row, keeping its left edge and middle line. The
+log names the labels it shrank ("labels shrunk to fit before their
+arrows") and any text still running into a button ("STILL OVERLAPPING").
+
+## Wide screens: moving apart, not shrinking
+
+The user asked (2026-10-30) for the menus to fit every screen shape we
+support, preferring to move things apart over shrinking them. Phones only
+need landscape. `rc_menus::fit::spread` does it, on a copy of each page
+every time it is drawn:
+
+- Every picture and letter keeps the size it has on a 4:3 screen of the
+  same height. The menu is `across` 4:3 widths wide: the screen's shape
+  over 4:3, at least 1, up to `[fit] widest_shape` in
+  `data/ui/original_menus.toml` (2.4, which covers 21:9 monitors; wider
+  screens get black at the sides).
+- Widgets that touch form groups. A text joins only pictures it touches,
+  never a button or another text, so an option's name and its value are
+  separate groups.
+- Each group keeps its middle at the same fraction of the width (so gaps
+  grow, nothing overlaps that didn't, and nothing leaves the screen).
+- Big stretchable boxes ("frames": `MSCM_Stretch`/`FitStretch` sprites at
+  least 0.3 wide and 0.15 high) widen when they hold groups at both their
+  left and right edges: groups at the left edge stay with it, groups at
+  the right edge go with the right edge, others keep their fraction. A
+  frame lined up with a widening frame widens too (the help box under the
+  options box). Groups touching a widening frame from outside (the tabs
+  and their connectors) keep touching it, and the frame's edges are placed
+  so those groups keep the same share of the screen at the sides as on
+  4:3. A centred text on its own (the help line) counts as middle, so the
+  layout doesn't change with the button in focus.
+- A frame that doesn't widen moves as one with what it holds (the main
+  menu's button box). A stretchable bar joining a group to such a frame
+  (the main menu's MAIN MENU bar) grows to keep joining it.
+- Backdrops (pictures covering the whole menu) grow to cover the screen,
+  keeping their shape (a little is cut off at the top and bottom).
+- The drop-down list moves with the value it opened from.
+
+The game logs each page once per screen shape: "original menus: options
+at 2.37 wide: 14 groups spread over 1.78 4:3 widths, widened OptionsBorder,
+OptionsDescBorder (OptionsBorder holds [...] at its left and [...] at its
+right)". `rc_probe --pages` and `rc_probe --menu` paint every page at 16:9,
+21:9 and 32:9 as well as 4:3 (`extracted/menus/<class>_16x9.png` and so on)
+and log the same, plus any text still running into a button.
+
+Greyed out for now: subtitles, helmet and prompt options, auto pull, visor
+and its intensity, sound quality, 3D sound, EAX, channels, graphics quality
+presets, brightness, texture, character and bump detail, blur, bloom,
+projectors, squad shadows, FSAA, and the CONTROLS rows whose action the
+port doesn't have. Not done: the original's "keep these settings?" timer
+after a screen change (ours applies at once).
+
+Our own settings the original doesn't have (field of view, Panini "wide
+screen fix", full screen, master volume, controller look speed and dead
+zone, gyro mode and sensitivity) are on a fifth tab, "PORT +"
+(`[pages.more_settings]`). It borrows the original GAME page's look: its
+rows get our labels (`texts`), its ninth row is hidden (`hidden_rows`), the
+GAME tab's "you are here" bar moves down to PORT + (`moves`), and a GAME tab
+copied from SOUND takes its place. The amber placeholder page is only used
+if the install's menus can't be read.
+
+`rc_game --script` checks GAME, SOUND and CONTROLS, changes the music volume
+with an arrow, checks greyed rows can't be reached, rebinds JUMP to K and
+cancels, and compares screenshots with `rc_probe` paintings.
 
 ## What the original's menus are made of (checked 2026-10-29)
 

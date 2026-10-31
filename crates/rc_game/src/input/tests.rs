@@ -155,7 +155,7 @@ fn app(log_name: &str) -> (App, std::path::PathBuf) {
         .insert_resource(BaseBindings(shipped()))
         .insert_resource(UserBindingsPath(dir.join("my_bindings.toml")))
         .insert_resource(LogInput(true))
-        .add_plugins((PadsPlugin, DeviceInputPlugin));
+        .add_plugins((PadsPlugin, DeviceInputPlugin, crate::rebind::RebindPlugin));
     app.update();
     (app, dir)
 }

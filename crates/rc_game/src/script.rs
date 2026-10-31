@@ -58,6 +58,12 @@ enum Step {
     FocusPauseItem(&'static str, usize),
     /// Press an action, then check which original menu button has focus.
     FocusAfter(Action, &'static str),
+    /// On an original page, press menu-down until the widget with this
+    /// name has focus.
+    FocusOn(&'static str),
+    /// Press and release a key on the keyboard itself (for choosing a new
+    /// key, which reads the keyboard, not the actions).
+    Key(KeyCode),
     /// Capture the window, save it to `logs/<name>.png` and measure its
     /// colours (retried while the capture comes back black).
     Shot(&'static str),
@@ -330,7 +336,11 @@ fn steps() -> Vec<Step> {
                 .cloned()
                 .ok_or("no arms readout")?;
             let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
-            let held = q.iter(w).next().and_then(|a| a.current()).map(|c| c.0.clone());
+            let held = q
+                .iter(w)
+                .next()
+                .and_then(|a| a.current())
+                .map(|c| c.0.clone());
             let got = format!(
                 "holding {held:?}; the arms show {:?} playing {}{}",
                 arms.weapon,
@@ -343,11 +353,13 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
-        Check("the level part loaded walls, props, doors and invisible walls", |w| {
-            let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
-                return Err("no LevelInfo".into());
-            };
-            let got = format!(
+        Check(
+            "the level part loaded walls, props, doors and invisible walls",
+            |w| {
+                let Some(i) = w.get_resource::<rc_level_plugin::LevelInfo>() else {
+                    return Err("no LevelInfo".into());
+                };
+                let got = format!(
                 "{}: {} collision triangles, {} props ({} with their class's model), {} blocking volumes, start {}",
                 i.map,
                 i.collision_triangles,
@@ -485,8 +497,14 @@ fn steps() -> Vec<Step> {
             "the scripts play the game's own lines, as long as each one lasts",
             level_script_lines,
         ),
-        Check("the start barricade blocks the way", |w| level_script_way(w, true)),
-        Until("the scripts switch the bacta dispenser on", level_script_dispenser_on, 300.0),
+        Check("the start barricade blocks the way", |w| {
+            level_script_way(w, true)
+        }),
+        Until(
+            "the scripts switch the bacta dispenser on",
+            level_script_dispenser_on,
+            300.0,
+        ),
         Note(level_script_stand_at_dispenser),
         Wait(0.5),
         Hold(Action::Use, 5.0),
@@ -761,7 +779,10 @@ fn steps() -> Vec<Step> {
             Ok(notes.join(", "))
         }),
         // The level exit: geo_01a's arrows lead to geo_01b.
-        Check("the level has an open exit to the next map", level_exit_found),
+        Check(
+            "the level has an open exit to the next map",
+            level_exit_found,
+        ),
         Note(level_exit_walk_in),
         Until(
             "the next map loads",
@@ -773,9 +794,18 @@ fn steps() -> Vec<Step> {
             LOAD_TIMEOUT,
         ),
         Wait(1.0),
-        Check("the next map has the player's health and ammo", level_exit_carried),
-        Check("the player arrives at the next map's start", level_exit_arrived),
-        Check("the next map's start is saved as a checkpoint, with the health", level_exit_checkpoint),
+        Check(
+            "the next map has the player's health and ammo",
+            level_exit_carried,
+        ),
+        Check(
+            "the player arrives at the next map's start",
+            level_exit_arrived,
+        ),
+        Check(
+            "the next map's start is saved as a checkpoint, with the health",
+            level_exit_checkpoint,
+        ),
         Press(Action::Pause),
         Wait(0.2),
         Check(
@@ -821,24 +851,186 @@ fn steps() -> Vec<Step> {
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         FocusAfter(Action::MenuDown, "MenuOptions[4]"),
         Press(Action::MenuAccept), // OPTIONS
-        Wait(0.2),
-        Check("OPTIONS opens the options page", |w| match page(w) {
-            Page::Options => Ok("options".into()),
-            p => Err(format!("{p:?}")),
+        Wait(0.3),
+        Check("OPTIONS opens the original GAME options page", |w| {
+            match (page(w), original_page_shown(w)) {
+                (Page::Options, Some(k)) if k == "options" => Ok("options (original)".into()),
+                other => Err(format!("{other:?}")),
+            }
         }),
+        Check(
+            "mouse sensitivity shows the setting (default 6)",
+            |w| match button_text(w, "Options[0]") {
+                Some(t) if t == "6" => Ok(t),
+                other => Err(format!("{other:?}")),
+            },
+        ),
+        Shot("options_game"),
+        Check("GAME options page matches the original's pictures", |w| {
+            compare(w, "options_game", 0.03)
+        }),
+        FocusOn("Sound"),
+        Press(Action::MenuAccept), // SOUND
+        Wait(0.3),
+        Check(
+            "SOUND switches to the original SOUND page",
+            |w| match page(w) {
+                Page::OptionsSound => Ok("options_sound".into()),
+                p => Err(format!("{p:?}")),
+            },
+        ),
+        FocusOn("Options[2]"),   // MUSIC VOLUME
         Press(Action::MenuLeft), // music volume down a step
         Wait(0.2),
         Check("left lowers the music volume", |w| {
             let before = w.resource::<Noted>().music_volume;
             let now = w.resource::<Settings>().audio.music_volume;
-            if now < before {
-                Ok(format!("{before:.1} -> {now:.1}"))
+            let shown = button_text(w, "Options[2]").unwrap_or_default();
+            if now < before && shown == format!("{:.0}", now * 10.0) {
+                Ok(format!("{before:.1} -> {now:.1}, shows {shown}"))
             } else {
-                Err(format!("{before:.1} -> {now:.1}"))
+                Err(format!("{before:.1} -> {now:.1}, shows {shown}"))
             }
         }),
-        Press(Action::MenuBack),
+        Check("greyed-out rows can't be reached (VOICES, EAX...)", |w| {
+            let focusable = original_focusable(w);
+            if focusable
+                .iter()
+                .any(|n| n == "Options[0]" || n == "Options[5]")
+            {
+                Err(format!("{focusable:?}"))
+            } else {
+                Ok(format!("{} buttons reachable", focusable.len()))
+            }
+        }),
+        // Only the arrows (and left and right) change a value.
+        Note(|w| {
+            let v = w.resource::<Settings>().audio.music_volume;
+            w.resource_mut::<Noted>().music_volume = v;
+        }),
+        FocusOn("Options[2]"),
+        Press(Action::MenuAccept),
         Wait(0.2),
+        Check(
+            "choosing a value doesn't change it (only the arrows do)",
+            |w| {
+                let before = w.resource::<Noted>().music_volume;
+                let now = w.resource::<Settings>().audio.music_volume;
+                if now == before {
+                    Ok(format!("music volume stays {now:.1}"))
+                } else {
+                    Err(format!("{before:.1} -> {now:.1}"))
+                }
+            },
+        ),
+        // The screen size's value opens a drop-down list.
+        FocusOn("Graphics"),
+        Press(Action::MenuAccept), // GRAPHICS
+        Wait(0.3),
+        FocusOn("Options[2]"), // VIDEO RESOLUTION
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check("choosing the screen size opens its drop-down list", |w| {
+            let v = w.resource::<Settings>().video.clone();
+            let m = w.resource::<OriginalMenus>();
+            let l = m.list.as_ref().ok_or("no list")?;
+            let at = l.focused_item().map(|i| l.items[i].clone());
+            let now = format!("{}x{}", v.width, v.height);
+            if at.as_deref() == Some(now.as_str()) {
+                Ok(format!("{} sizes, on {now}", l.items.len()))
+            } else {
+                Err(format!("{} sizes, focus {at:?}, size {now}", l.items.len()))
+            }
+        }),
+        Shot("options_list"),
+        Press(Action::MenuDown),
+        Wait(0.2),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("Back closes the list without changing the size", |w| {
+            let v = w.resource::<Settings>().video.clone();
+            let open = w.resource::<OriginalMenus>().list.is_some();
+            let shown = button_text(w, "Options[2]").unwrap_or_default();
+            let now = format!("{}x{}", v.width, v.height);
+            if !open && shown.eq_ignore_ascii_case(&now) {
+                Ok(format!("closed, still {now}"))
+            } else {
+                Err(format!("open {open}, shows {shown}, size {now}"))
+            }
+        }),
+        // The port's own settings, in the original GAME page's look.
+        FocusOn("PortSettings"),
+        Press(Action::MenuAccept), // PORT +
+        Wait(0.3),
+        Check(
+            "PORT + opens the port's settings in the original's look",
+            |w| {
+                let fov = w.resource::<Settings>().video.fov;
+                match (
+                    page(w),
+                    original_page_shown(w),
+                    button_text(w, "Options[0]"),
+                ) {
+                    (Page::MoreSettings, Some(k), Some(t))
+                        if k == "more_settings" && t == format!("{fov:.0}") =>
+                    {
+                        Ok(format!("original look, FIELD OF VIEW shows {t}"))
+                    }
+                    other => Err(format!("{other:?}")),
+                }
+            },
+        ),
+        Shot("options_port"),
+        FocusOn("Controls"),
+        Press(Action::MenuAccept), // CONTROLS
+        Wait(0.3),
+        Check("CONTROLS shows each action's keys", |w| {
+            match (page(w), button_text(w, "OptionSet0[7]")) {
+                (Page::OptionsControls, Some(t)) if t.contains("SPACE") => {
+                    Ok(format!("JUMP is {t}"))
+                }
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Shot("options_controls"),
+        Check("CONTROLS page matches the original's pictures", |w| {
+            compare(w, "options_controls", 0.03)
+        }),
+        FocusOn("OptionSet0[7]"), // JUMP
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check(
+            "choosing JUMP opens the original reassign box",
+            |w| match &w.resource::<OriginalMenus>().rebind {
+                Some(r) if !r.chosen && r.action == Action::Jump => Ok("waiting for a key".into()),
+                Some(r) => Err(format!("{:?} chosen={}", r.action, r.chosen)),
+                None => Err("no box".into()),
+            },
+        ),
+        Key(KeyCode::KeyK),
+        Wait(0.3),
+        Check("pressing K makes K the jump key", |w| {
+            let chosen = w
+                .resource::<OriginalMenus>()
+                .rebind
+                .as_ref()
+                .map(|r| r.chosen);
+            match (chosen, keys_of(w, Action::Jump).as_slice()) {
+                (Some(true), [KeyCode::KeyK]) => Ok("K, ACCEPT/CANCEL/CLEAR showing".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuBack), // CANCEL
+        Wait(0.3),
+        Check("CANCEL puts SPACE back and closes the box", |w| {
+            let open = w.resource::<OriginalMenus>().rebind.is_some();
+            match (open, keys_of(w, Action::Jump).as_slice()) {
+                (false, [KeyCode::Space]) => Ok("Space".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuBack), // DONE
+        Wait(0.3),
         Check("Back returns to the original main menu", |w| {
             match page(w) {
                 Page::Main if w.resource::<OriginalMenus>().active() => Ok("main".into()),
@@ -891,6 +1083,29 @@ fn steps() -> Vec<Step> {
     ]
 }
 
+fn original_page_shown(w: &mut World) -> Option<String> {
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    match w
+        .resource::<OriginalMenus>()
+        .shown(&state, play.as_ref(), menu)
+    {
+        Some(original_menu::Shown::Page(k)) => Some(k),
+        _ => None,
+    }
+}
+
+/// The buttons keys and controllers can reach on the original page
+/// showing.
+fn original_focusable(w: &mut World) -> Vec<String> {
+    let Some(k) = original_page_shown(w) else {
+        return vec![];
+    };
+    let m = w.resource::<OriginalMenus>();
+    m.pages[&k].screen.reachable_names()
+}
+
 fn pause_item_focused(w: &mut World, func: &str, index: usize) -> bool {
     let state = *w.resource::<State<GameState>>().get();
     let play = w.get_resource::<State<Play>>().map(|p| *p.get());
@@ -905,11 +1120,56 @@ fn pause_item_focused(w: &mut World, func: &str, index: usize) -> bool {
     }
 }
 
+/// The focused button of the original screen showing: a box over the
+/// page (question, reassign button), else the page, else the main menu.
 fn focus(w: &mut World) -> Option<String> {
-    w.resource::<OriginalMenus>()
-        .main
-        .as_ref()
-        .and_then(|m| m.focused_name().map(str::to_string))
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    let m = w.resource::<OriginalMenus>();
+    if let Some(q) = &m.question {
+        return q.focused_name().map(str::to_string);
+    }
+    if let Some(r) = &m.rebind {
+        return r.screen.focused_name().map(str::to_string);
+    }
+    if let Some(l) = &m.list {
+        return l.screen.focused_name().map(str::to_string);
+    }
+    match m.shown(&state, play.as_ref(), menu) {
+        Some(original_menu::Shown::Page(k)) => {
+            m.pages[&k].screen.focused_name().map(str::to_string)
+        }
+        _ => m
+            .main
+            .as_ref()
+            .and_then(|s| s.focused_name().map(str::to_string)),
+    }
+}
+
+/// The text a button on the original page showing has now.
+fn button_text(w: &mut World, name: &str) -> Option<String> {
+    let state = *w.resource::<State<GameState>>().get();
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let menu = w.resource::<Menu>();
+    let m = w.resource::<OriginalMenus>();
+    let Some(original_menu::Shown::Page(k)) = m.shown(&state, play.as_ref(), menu) else {
+        return None;
+    };
+    match &m.pages[&k].screen.layout.widget(name)?.kind {
+        rc_menus::layout::Kind::Button(b) => Some(b.blurred.text.clone()),
+        _ => None,
+    }
+}
+
+/// The keys bound to an action on the keyboard.
+fn keys_of(w: &mut World, action: Action) -> Vec<KeyCode> {
+    w.resource::<crate::input::Bindings>()
+        .keys
+        .iter()
+        .filter(|(a, _)| *a == action)
+        .map(|(_, k)| *k)
+        .collect()
 }
 
 /// Compare the menu area of a screenshot with the same menu painted in
@@ -926,7 +1186,8 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
         .get(name)
         .cloned()
         .ok_or("no screenshot")?;
-    let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32));
+    let across = w.resource::<OriginalMenus>().across;
+    let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32), across);
     let ours = shrink(&shot, area, W, H);
     let mut menus = w.resource_mut::<OriginalMenus>();
     let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
@@ -1226,6 +1487,41 @@ fn run(world: &mut World) {
                     }
                 }
             }
+            Step::FocusOn(want) => {
+                if focus(world).as_deref() != Some(want) {
+                    if frames % 2 == 0 {
+                        held.insert(Action::MenuDown);
+                    }
+                    done = frames > 200;
+                    if done {
+                        log.line(format!("CHECK focus reaches {want}: not reached -> FAIL"));
+                        world.resource_mut::<Script>().failed += 1;
+                    }
+                }
+            }
+            Step::Key(key) => {
+                use bevy::input::keyboard::{Key, KeyboardInput, NativeKey};
+                use bevy::input::ButtonState;
+                let window = world
+                    .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+                    .iter(world)
+                    .next();
+                if let (Some(window), true) = (window, frames < 2) {
+                    world.write_message(KeyboardInput {
+                        key_code: key,
+                        logical_key: Key::Unidentified(NativeKey::Unidentified),
+                        state: if frames == 0 {
+                            ButtonState::Pressed
+                        } else {
+                            ButtonState::Released
+                        },
+                        text: None,
+                        repeat: false,
+                        window,
+                    });
+                }
+                done = frames >= 2;
+            }
             Step::FocusAfter(a, want) => {
                 if frames == 0 {
                     held.insert(a);
@@ -1286,7 +1582,11 @@ fn run(world: &mut World) {
             // wait ends this frame's turn.
             if matches!(
                 step,
-                Step::Press(_) | Step::Hold(..) | Step::Wait(_) | Step::FocusAfter(..)
+                Step::Press(_)
+                    | Step::Hold(..)
+                    | Step::Wait(_)
+                    | Step::FocusAfter(..)
+                    | Step::Key(_)
             ) {
                 break;
             }
@@ -1960,7 +2260,10 @@ fn level_exit(w: &mut World) -> Option<(String, String, [f32; 3])> {
 
 fn level_exit_found(w: &mut World) -> Result<String, String> {
     let (name, url, at) = level_exit(w).ok_or("no open level exit")?;
-    let got = format!("{name} at ({:.0}, {:.0}, {:.0}) to {url}", at[0], at[1], at[2]);
+    let got = format!(
+        "{name} at ({:.0}, {:.0}, {:.0}) to {url}",
+        at[0], at[1], at[2]
+    );
     match rc_scripts::level_url(&url) {
         Some((m, _)) if m == "geo_01b" => Ok(got),
         _ => Err(got),
@@ -2015,7 +2318,9 @@ fn level_exit_carried(w: &mut World) -> Result<String, String> {
 }
 
 fn level_exit_arrived(w: &mut World) -> Result<String, String> {
-    let start = *w.get_resource::<rc_game_core::PlayerStart>().ok_or("no PlayerStart")?;
+    let start = *w
+        .get_resource::<rc_game_core::PlayerStart>()
+        .ok_or("no PlayerStart")?;
     let f = feet(w).ok_or("no player")?;
     let d = ((f.x - start.feet.x).powi(2) + (f.y - start.feet.y).powi(2)).sqrt();
     let got = format!(
@@ -2031,7 +2336,11 @@ fn level_exit_arrived(w: &mut World) -> Result<String, String> {
 }
 
 fn level_exit_checkpoint(w: &mut World) -> Result<String, String> {
-    let (health, _, _) = w.resource::<Noted>().leaving.clone().ok_or("didn't leave")?;
+    let (health, _, _) = w
+        .resource::<Noted>()
+        .leaving
+        .clone()
+        .ok_or("didn't leave")?;
     let cp = save_file(w, &SaveSlot::Checkpoint)?;
     let combat = cp.part("combat").ok_or("no [combat] in the checkpoint")?;
     let saved = combat

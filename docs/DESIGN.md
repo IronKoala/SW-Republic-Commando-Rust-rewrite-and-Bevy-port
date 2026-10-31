@@ -2389,6 +2389,35 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   otherwise the placeholder page stays and every reason is logged. So a
   mod can switch a page to another class, or teach it a button, without
   code, and an unfinished page never shows half-working.
+- The options pages (GAME, SOUND, GRAPHICS, CONTROLS) are original too.
+  `rc_menus::layout` draws the original's choosers (`MenuButtonEnum`: a
+  row with a list of values and arrows) and its picture buttons
+  (`MenuButtonSprite`; the arrows are mouse only, as in the original), and
+  fills fixed-size arrays to their full length. In
+  `data/ui/original_menus.toml` each page's `choosers` table names the
+  setting behind each row (`rc_game/src/option_settings.rs` turns a
+  setting into "which value" and back), `keys` names the action behind
+  each key row of CONTROLS, and `extra_buttons` adds a copy of an original
+  button (here the "PORT +" tab). The port's own settings page
+  (`more_settings`: FOV, Panini, full screen, master volume, controller
+  look and gyro) borrows the original GAME page with `texts`, `moves` and
+  `hidden_rows`. The screen size opens a drop-down list made from the
+  page's own pieces (`screens::drop_down`); other values change only with
+  their arrows. The size list holds only sizes that fit the primary monitor
+  (`option_settings::items`, monitor in `display::Desktop`). On screens
+  wider than 4:3 `rc_menus::fit::spread` moves the menus apart rather than
+  shrinking anything (`docs/ORIGINAL_MENUS.md`, "Wide screens");
+  `screens::fit_row_labels` shrinks row labels that would reach their row's
+  first button only where that isn't enough (4:3). Changing the size in a
+  level marks every camera's `Projection` changed (`display::apply_video`): Bevy only re-reads a
+  camera's target size on a resize event or a projection change, so before
+  this the player camera resized while the arms and sky cameras kept the old
+  size, and the GPU refused to draw ("Attachments have differing sizes").
+  A row naming `unavailable` is greyed
+  out and skipped, as the original greys options it can't offer. Key rows
+  open the original's REASSIGN BUTTON box (`CTMapKeyMenu`), which uses
+  `rebind.rs` for the actual capture. The effects volume now scales every
+  sound that isn't music (`music.rs`, `effects_volume`).
 - `rc_game/src/original_hud.rs` swaps the placeholder HUD's drawn shapes
   for the original's pictures, named in `data/ui/hud.toml` (the original
   places them in native code, so placement is ours). It reads its own

@@ -1,7 +1,8 @@
 //! Turns a menu class's default values into a list of things to draw:
-//! pictures (`MenuSprite`), text (`MenuText`) and buttons
-//! (`MenuButtonText`), with every default filled in the way the original
-//! menu code does.
+//! pictures (`MenuSprite`), text (`MenuText`), buttons
+//! (`MenuButtonText`), picture buttons such as arrows (`MenuButtonSprite`)
+//! and choosers that step through a list of values (`MenuButtonEnum`), with
+//! every default filled in the way the original menu code does.
 //!
 //! The rules come from the comments in the game's own `MenuBase` and
 //! `XInterface` script classes (read from the install, not copied):
@@ -9,11 +10,13 @@
 //! 1. Positions are interpolated down arrays (`MenuOptions[0]` and
 //!    `MenuOptions[1]` set the first position and the step; later items
 //!    continue the line).
-//! 2. Other values are copied down arrays.
-//! 3. A widget's `Style` names a template in the class (such as
-//!    `ButtonTextStyle1`) whose values fill in what the widget leaves unset.
-//! 4. Sub-widgets are copied: `Blurred` -> `Focused`, `BackgroundBlurred` ->
+//! 2. Other values are copied down arrays, to the array's full size (the
+//!    controls page sets only the first two of its fourteen key buttons).
+//! 3. Sub-widgets are copied: `Blurred` -> `Focused`, `BackgroundBlurred` ->
 //!    `BackgroundFocused`, and so on.
+//! 4. A widget's `Style` names a template in the class (such as
+//!    `ButtonTextStyle1`) whose values fill in what the widget leaves unset
+//!    (then sub-widgets are copied again, for what the style added).
 //! 5. The class's `DefaultMenu...` blocks fill in the rest.
 //!
 //! "Non-zero properties aren't overwritten": every step only fills fields
@@ -105,6 +108,51 @@ pub struct Button {
     pub on_select: String,
     pub disabled: bool,
     pub help: String,
+    /// A chooser's values (`MenuButtonEnum`'s `Items`); empty for an
+    /// ordinary button. The chosen one is shown as the button's text.
+    pub items: Vec<String>,
+    /// The chosen value, an index into `items`.
+    pub current: usize,
+    /// Stops at the ends instead of going round.
+    pub no_wrap: bool,
+    /// Only the mouse can use it (`bIgnoreController`): the arrows beside
+    /// a chooser. Keys and controllers skip it.
+    pub mouse_only: bool,
+}
+
+impl Button {
+    /// A chooser (`MenuButtonEnum`).
+    pub fn is_chooser(&self) -> bool {
+        !self.items.is_empty()
+    }
+
+    /// Show value `i` of a chooser.
+    pub fn choose(&mut self, i: usize) {
+        if self.items.is_empty() {
+            return;
+        }
+        self.current = i.min(self.items.len() - 1);
+        self.blurred.text = self.items[self.current].clone();
+        self.focused.text = self.items[self.current].clone();
+    }
+
+    /// Step a chooser one value left (-1) or right (1). Returns whether
+    /// the value changed.
+    pub fn step(&mut self, step: i32) -> bool {
+        let n = self.items.len() as i32;
+        if n == 0 {
+            return false;
+        }
+        let at = self.current as i32 + step;
+        let next = if self.no_wrap {
+            at.clamp(0, n - 1)
+        } else {
+            at.rem_euclid(n)
+        } as usize;
+        let changed = next != self.current;
+        self.choose(next);
+        changed
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -170,7 +218,16 @@ impl MenuLayout {
             .find(|w| w.name.eq_ignore_ascii_case(name))
     }
 
-    /// The buttons a player can move between, in order.
+    /// The buttons a key or controller can move between, in order (not
+    /// the mouse-only arrows).
+    pub fn focusable_on_pc(&self) -> Vec<usize> {
+        self.buttons_on_pc()
+            .into_iter()
+            .filter(|&i| matches!(&self.widgets[i].kind, Kind::Button(b) if !b.mouse_only))
+            .collect()
+    }
+
+    /// Every button shown on a PC, mouse-only ones included, in order.
     pub fn buttons_on_pc(&self) -> Vec<usize> {
         (0..self.widgets.len())
             .filter(|&i| {
@@ -181,7 +238,13 @@ impl MenuLayout {
     }
 }
 
-const DRAWN: &[&str] = &["MenuSprite", "MenuText", "MenuButtonText"];
+const DRAWN: &[&str] = &[
+    "MenuSprite",
+    "MenuText",
+    "MenuButtonText",
+    "MenuButtonSprite",
+    "MenuButtonEnum",
+];
 const SUBWIDGET_COPIES: &[(&str, &str)] = &[
     ("Blurred", "Focused"),
     ("Blurred", "SelectedBlurred"),
@@ -224,8 +287,21 @@ pub fn build(class: &ClassData) -> MenuLayout {
     let mut widgets = Vec::new();
     for (name, mut elems) in groups {
         elems.sort_by_key(|e| e.0);
-        let is_array = elems.len() > 1 || elems[0].0 > 0;
-        let mut values: Vec<V> = elems.into_iter().map(|e| e.1).collect();
+        let size = class.array_size(&name) as usize;
+        let is_array = size > 1 || elems.len() > 1 || elems[0].0 > 0;
+        // Every element of a fixed array, set or not (an unset one is
+        // filled from the one before it).
+        let kind = elems[0].1.kind().to_string();
+        let count = size.max(elems.last().map_or(0, |e| e.0 as usize + 1));
+        let mut values: Vec<V> = (0..count)
+            .map(|i| match elems.iter().find(|e| e.0 as usize == i) {
+                Some(e) => e.1.clone(),
+                None => V::Struct {
+                    kind: kind.clone(),
+                    fields: Vec::new(),
+                },
+            })
+            .collect();
         if values.len() > 1 {
             interpolate_positions(&mut values);
             for i in 1..values.len() {
@@ -278,9 +354,21 @@ fn resolve(class: &ClassData, v: &mut V, depth: usize) {
     if depth > 8 {
         return;
     }
+    // The widget's own sub-widgets first ("Sub-widgets like Blurred &
+    // Focused are copied", then "Properties from the MenuDefault blocks
+    // are copied", in MenuBase's own order): a button that places only its
+    // `Blurred` text keeps its focused text in the same place.
+    copy_subwidgets(v);
     apply_style(class, v, depth);
     copy_subwidgets(v);
-    let default_name = format!("Default{}", v.kind());
+    // A struct with no `Default...` block of its own uses its parent
+    // struct's: `MenuButtonEnum extends MenuButtonText` (XInterface's
+    // `MenuBase`), so a chooser's value is centred like a button's text.
+    let kind = match v.kind() {
+        "MenuButtonEnum" if class.get("DefaultMenuButtonEnum").is_none() => "MenuButtonText",
+        k => k,
+    };
+    let default_name = format!("Default{kind}");
     if let Some(d) = class.get(&default_name) {
         let mut d = d.clone();
         apply_style(class, &mut d, depth + 1);
@@ -348,6 +436,16 @@ fn set_path(v: &mut V, path: &[String], value: f32) {
     let (last, rest) = path.split_last().unwrap();
     let mut cur = v;
     for n in rest {
+        // An unset array element has no sub-structs yet.
+        if cur.get(n).is_none() {
+            cur.set(
+                n,
+                V::Struct {
+                    kind: String::new(),
+                    fields: Vec::new(),
+                },
+            );
+        }
         match cur.get_mut(n) {
             Some(c) => cur = c,
             None => return,
@@ -469,7 +567,7 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
     let kind = match v.kind() {
         "MenuSprite" => Kind::Sprite(sprite(v)),
         "MenuText" => Kind::Text(text(v)),
-        "MenuButtonText" => {
+        "MenuButtonText" | "MenuButtonEnum" => {
             let e = empty();
             let mut background_blurred = sprite(v.get("BackgroundBlurred").unwrap_or(&e));
             let mut background_focused = sprite(v.get("BackgroundFocused").unwrap_or(&e));
@@ -483,7 +581,7 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
                     b.pos[1] += blurred.pos[1];
                 }
             }
-            Kind::Button(Button {
+            let mut b = Button {
                 blurred,
                 focused,
                 background_blurred,
@@ -491,6 +589,28 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
                 on_select: v.text("OnSelect"),
                 disabled: v.int("bDisabled") != 0,
                 help: v.text("HelpText"),
+                items: v.list("Items"),
+                current: 0,
+                no_wrap: v.int("bNoWrap") != 0,
+                mouse_only: v.int("bIgnoreController") != 0,
+            };
+            if b.is_chooser() {
+                b.choose(v.int("Current").max(0) as usize);
+            }
+            Kind::Button(b)
+        }
+        // A picture that works as a button: `Blurred` and `Focused` are
+        // pictures, drawn as the button's background.
+        "MenuButtonSprite" => {
+            let e = empty();
+            Kind::Button(Button {
+                background_blurred: sprite(v.get("Blurred").unwrap_or(&e)),
+                background_focused: sprite(v.get("Focused").unwrap_or(&e)),
+                on_select: v.text("OnSelect"),
+                disabled: v.int("bDisabled") != 0,
+                help: v.text("HelpText"),
+                mouse_only: v.int("bIgnoreController") != 0,
+                ..Default::default()
             })
         }
         _ => return None,

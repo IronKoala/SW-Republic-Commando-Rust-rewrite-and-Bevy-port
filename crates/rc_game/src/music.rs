@@ -83,7 +83,28 @@ pub struct MusicPlugin;
 impl Plugin for MusicPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NowPlaying>()
-            .add_systems(Update, (choose_music, set_volume, watch_started));
+            .add_systems(Update, (choose_music, set_volume, watch_started))
+            .add_systems(
+                PostUpdate,
+                effects_volume.before(bevy::transform::TransformSystems::Propagate),
+            );
+    }
+}
+
+/// Every other sound (weapons, droids, menu clicks) is turned down by the
+/// master and SOUND FX volumes as it starts. The sound parts play at their
+/// own loudness; this scales it before Bevy starts the sound (Bevy's audio
+/// runs after the transform update in `PostUpdate`).
+fn effects_volume(
+    settings: Res<Settings>,
+    mut new: Query<&mut PlaybackSettings, (Added<PlaybackSettings>, Without<Track>)>,
+) {
+    let scale = (settings.audio.master_volume * settings.audio.effects_volume).clamp(0.0, 1.0);
+    if scale >= 1.0 {
+        return;
+    }
+    for mut p in &mut new {
+        p.volume = Volume::Linear(p.volume.to_linear() * scale);
     }
 }
 

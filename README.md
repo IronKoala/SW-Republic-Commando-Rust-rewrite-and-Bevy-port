@@ -304,7 +304,33 @@ copy of the game.
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on
   Windows): its eleven buttons, with saving, loading and hints greyed out
-  until built. The campaign page keeps the placeholder until its planet
+  until built. **The options pages are the original's too** (tested in
+  the cloud sandbox with the install, not yet on Windows): GAME, SOUND,
+  GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
+  sensitivity, invert mouse, difficulty, effects and music volume, screen
+  size and vsync work; key rows open the original's REASSIGN BUTTON box.
+  Rows the port can't do yet (subtitles, brightness, detail levels and so
+  on) are greyed out. Values change with the arrows; the screen size
+  also has a drop-down list of the sizes that fit your monitor. Our own
+  extra settings (field of view, display mode, controller and gyro) are on
+  a fifth tab, "PORT +", in the same original look.
+- **Display mode (tested in the cloud's virtual screen only, not on
+  Windows or a real monitor):** PORT + > DISPLAY MODE is WINDOWED,
+  BORDERLESS or FULL SCREEN. Windowed: the screen size is the window's
+  size. Borderless: the window covers the monitor; picking a size of
+  another shape than the monitor's goes back to a window of that size.
+  Full screen: the monitor switches to the chosen size when it has the
+  same shape; another shape is shown at its own shape with black bars
+  filling the rest (checked: 1920x1080 on a 3440x1440 screen draws a
+  2560x1440 picture with bars at the sides).
+- **Menus on wide screens (checked in the cloud at 16:9, 21:9, 19.5:9,
+  32:9, 4:3 and 5:4):** the original menus keep their size and spread out
+  to fill wider screens instead of sitting in a 4:3 box: groups of buttons
+  and pictures move apart, the options box widens, and each option's name
+  stays at the left while its value and arrows move to the right, so long
+  names no longer run into the arrows. Wider than 21.5:9 (32:9) the menu
+  stays in a centred 21.5:9 area. Only on a 4:3 or 5:4 screen, where there
+  is no room to move apart, are a few long option names shrunk to fit. The campaign page keeps the placeholder until its planet
   buttons and level list can be drawn; `logs/rc_game.log` says why
   ("original menus: page campaigns kept the placeholder: ..."). Which
   original menu draws which page is in `data/ui/original_menus.toml`. The
@@ -464,12 +490,14 @@ copy of the game.
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
 - Original menus: the main menu's moving background video isn't played
   (it uses a video format with no Rust decoder yet), and the sides of
-  screens wider than 4:3 stay black. Only the main menu and its quit
-  question are the original's so far. Mouse use wasn't tested by the
+  screens wider than 4:3 stay black. The campaign, load and save
+  pages are still placeholders. On the options pages, rows the port can't
+  do yet are greyed out, and the original's "keep these settings?" timer
+  after changing screen size isn't there (changes apply at once). Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
   being built to plug into it). No briefings or cut scenes. Saving: there's no Load Game screen yet (the
-  menu's LOAD GAME stays greyed out). Options are a short list. Not tested on Windows,
+  menu's LOAD GAME stays greyed out). Not tested on Windows,
   with a real controller, or with a touch screen.
 - Controllers: no button pictures yet (words only), no rebinding screen
   yet, no rumble or aim assist. Gyro on phones isn't started. Building with

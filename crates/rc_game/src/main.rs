@@ -14,11 +14,13 @@
 //! numbers to the log, to check a controller.
 //! Everything is logged to `logs/rc_game.log`.
 
+mod display;
 mod hud;
 mod input;
 mod levels;
 mod menu;
 mod music;
+mod option_settings;
 mod original_hud;
 mod original_menu;
 mod panini;
@@ -29,7 +31,7 @@ mod settings;
 mod theme;
 
 use bevy::prelude::*;
-use bevy::window::{PresentMode, WindowMode};
+use bevy::window::PresentMode;
 use rc_game_core::{CorePlugin, CurrentLevel, GameLog, GamePaths, GameSet, GameState};
 use settings::{Settings, SettingsPath};
 use std::path::PathBuf;
@@ -267,7 +269,10 @@ fn main() -> AppExit {
     let bindings = match std::fs::read_to_string(&user_bindings) {
         Ok(t) => match base_bindings.with_changes(&t) {
             Ok(b) => {
-                log.line(format!("controls: your changes from {}", user_bindings.display()));
+                log.line(format!(
+                    "controls: your changes from {}",
+                    user_bindings.display()
+                ));
                 b
             }
             Err(e) => {
@@ -294,7 +299,10 @@ fn main() -> AppExit {
         {
             Ok(n) => n,
             Err(e) => {
-                log.line(format!("ERROR in {}: {e}; prompts use plain names", p.display()));
+                log.line(format!(
+                    "ERROR in {}: {e}; prompts use plain names",
+                    p.display()
+                ));
                 rc_pads::ButtonNames::default()
             }
         },
@@ -363,24 +371,25 @@ fn main() -> AppExit {
     }
 
     let mut app = App::new();
-    let plugins = DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Star Wars Republic Commando (Rust and Bevy)".into(),
-            resolution: (settings.video.width, settings.video.height).into(),
-            mode: if settings.video.fullscreen {
-                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-            } else {
-                WindowMode::Windowed
-            },
-            present_mode: if settings.video.vsync {
-                PresentMode::AutoVsync
-            } else {
-                PresentMode::AutoNoVsync
-            },
+    let plugins = DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Star Wars Republic Commando (Rust and Bevy)".into(),
+                resolution: (settings.video.width, settings.video.height).into(),
+                mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
+                present_mode: if settings.video.vsync {
+                    PresentMode::AutoVsync
+                } else {
+                    PresentMode::AutoNoVsync
+                },
+                ..default()
+            }),
             ..default()
-        }),
-        ..default()
-    });
+        })
+        .set(bevy::render::RenderPlugin {
+            render_creation: display::wgpu_settings(&settings.video, &log).into(),
+            ..default()
+        });
     // SDL reads the controllers instead of gilrs; never both, or every
     // button would count twice.
     app.add_plugins(if sdl.is_some() {
@@ -415,6 +424,7 @@ fn main() -> AppExit {
     .add_plugins(rc_pads::PadsPlugin)
     .add_plugins((
         menu::MenuPlugin,
+        display::DisplayPlugin,
         original_menu::OriginalMenuPlugin,
         hud::HudPlugin,
         original_hud::OriginalHudPlugin,
@@ -473,8 +483,18 @@ fn main() -> AppExit {
     #[cfg(not(all(feature = "sdl", not(target_os = "android"))))]
     app.insert_resource(rc_pads::PadReader::Gilrs);
 
+    // Changing a key (the controls page); the script uses it too.
+    app.add_plugins(rebind::RebindPlugin);
     if use_script {
         app.add_plugins(script::ScriptPlugin);
+        // The scripted run has no real devices, but the controls page still
+        // shows the keyboard's names.
+        app.add_systems(
+            Update,
+            input::update_prompts
+                .in_set(GameSet::Input)
+                .after(rebind::RebindSet),
+        );
     } else {
         app.add_plugins(input::DeviceInputPlugin);
     }

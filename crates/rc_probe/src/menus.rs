@@ -77,13 +77,19 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
                 t.color
             ),
             Kind::Button(b) => format!(
-                "button {:?} -> {} {}box {:?} text colour {:?} focused {:?}",
+                "button {:?} -> {} {}{}box {:?} text colour {:?} focused {:?}{}",
                 b.blurred.text,
                 b.on_select,
                 if b.disabled { "(disabled) " } else { "" },
+                if b.mouse_only { "(mouse only) " } else { "" },
                 quads::sprite_box(&b.background_blurred, &mut assets).map(round),
                 b.blurred.color,
-                b.focused.color
+                b.focused.color,
+                if b.is_chooser() {
+                    format!(" choices {:?}", b.items)
+                } else {
+                    String::new()
+                }
             ),
         };
         log.line(format!("  [{shown}] pass {} {}: {line}", w.pass, w.name));
@@ -125,6 +131,31 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
     match std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f)) {
         Ok(()) => log.line(format!("painted to {}", path.display())),
         Err(e) => log.line(format!("couldn't write {}: {e}", path.display())),
+    }
+    // The same menu spread over wider screens (rc_menus::fit), painted
+    // 480 pixels high.
+    for (shape, aspect) in [("16x9", 16.0 / 9.0), ("21x9", 2.39), ("32x9", 32.0 / 9.0)] {
+        let mut wide = layout.clone();
+        let across = rc_menus::fit::across_for(aspect, rc_menus::pages::DEFAULT_WIDEST_SHAPE);
+        let spread = rc_menus::fit::spread(&mut wide, &mut assets, across);
+        let screen = aspect / (4.0 / 3.0);
+        let left = 0.5 - screen / 2.0;
+        let mut q = quads::menu_quads(&wide, focus, &mut assets);
+        for quad in &mut q {
+            quad.dst[0] = (quad.dst[0] - left) / screen;
+            quad.dst[2] = (quad.dst[2] - left) / screen;
+        }
+        let picture = render::render(&q, &mut assets, (480.0 * aspect).round() as usize, 480, [0, 0, 0, 255]);
+        let path = out_dir.join(format!("{name}_{shape}.png"));
+        let _ = std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f));
+        log.line(format!(
+            "{shape}: {} groups spread over {across:.2} 4:3 widths, widened {:?}, bridged {:?}; still overlapping: {:?}; painted to {}",
+            spread.groups,
+            spread.widened,
+            spread.bridged,
+            rc_menus::fit::text_overlaps(&wide, &mut assets),
+            path.display()
+        ));
     }
     for p in &assets.problems {
         log.line(format!("  PROBLEM {p}"));

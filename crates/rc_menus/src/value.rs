@@ -27,7 +27,9 @@ pub enum V {
         kind: String,
         fields: Vec<Field>,
     },
-    /// Anything we don't read yet (dynamic arrays, maps).
+    /// A dynamic array of strings (a menu option's choices).
+    List(Vec<String>),
+    /// Anything we don't read yet (other dynamic arrays, maps).
     Other,
 }
 
@@ -53,6 +55,7 @@ impl V {
             V::Str(s) => s.is_empty(),
             V::Object { path, .. } => path.is_empty(),
             V::Color(c) => *c == [0, 0, 0, 0],
+            V::List(l) => l.is_empty(),
             V::Struct { fields, .. } => fields.iter().all(|f| f.value.is_zero()),
             V::Other => true,
         }
@@ -122,6 +125,13 @@ impl V {
             Some(V::Str(s)) => s.clone(),
             Some(V::Name(n)) if !n.eq_ignore_ascii_case("None") => n.clone(),
             _ => String::new(),
+        }
+    }
+
+    pub fn list(&self, name: &str) -> Vec<String> {
+        match self.get(name) {
+            Some(V::List(l)) => l.clone(),
+            _ => Vec::new(),
         }
     }
 
@@ -204,6 +214,10 @@ pub fn decode(pkg: &Package, p: &Property) -> V {
         (Value::Raw(_), PropertyType::Str | PropertyType::String) => {
             V::Str(class::string_value(p).unwrap_or_default())
         }
+        (Value::Raw(_), PropertyType::Array) => match class::string_list_value(p) {
+            Some(l) => V::List(l),
+            None => V::Other,
+        },
         (Value::Raw(_), PropertyType::Struct) => match class::color_value(p) {
             Some(c) => V::Color(c),
             None => V::Other,

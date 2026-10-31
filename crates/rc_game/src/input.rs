@@ -406,7 +406,6 @@ impl Plugin for DeviceInputPlugin {
         app.init_resource::<TouchTaps>()
             .init_resource::<GyroAim>()
             .init_resource::<LogInput>()
-            .add_plugins(crate::rebind::RebindPlugin)
             .add_systems(
                 Update,
                 (read_devices, update_prompts, log_input)
@@ -602,7 +601,7 @@ fn read_devices(
 }
 
 /// The name to show for each action on the device used last.
-fn update_prompts(
+pub(crate) fn update_prompts(
     state: Res<ActionState>,
     active: Res<ActivePad>,
     bindings: Res<Bindings>,

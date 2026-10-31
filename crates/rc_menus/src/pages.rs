@@ -14,7 +14,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 /// What choosing a button on an original page asks the game to do.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PageCmd {
     /// Close the pause menu and carry on playing.
     Resume,
@@ -32,17 +32,36 @@ pub enum PageCmd {
     /// Start a map by name.
     Play(String),
     /// A button this port can't offer yet: greyed out, can't be chosen.
+    #[default]
     Unavailable,
+    /// Show another page in this one's place (the options pages' GAME,
+    /// SOUND, GRAPHICS and CONTROLS tabs): DONE then goes back to the page
+    /// before them all.
+    Switch(String),
+    /// The arrows beside a chooser: step that row's value.
+    OptionLeft,
+    OptionRight,
+    /// Put this page's settings back to the game's defaults.
+    RestoreDefaults,
+    /// Choose a new key for this row's action (the controls page).
+    Rebind,
+    /// Show the previous or next set of rows (the controls page).
+    PrevSet,
+    NextSet,
 }
 
 impl PageCmd {
     /// Read a command as written in the data file: `resume`, `restart`,
     /// `back`, `quit_to_menu`, `quit_game`, `unavailable`, `open:<page>`,
-    /// `play:<map>`.
+    /// `play:<map>`, `switch:<page>`, `option_left`, `option_right`,
+    /// `restore_defaults`, `rebind`, `prev_set`, `next_set`.
     pub fn parse(s: &str) -> Option<PageCmd> {
         let s = s.trim();
         if let Some(p) = s.strip_prefix("open:") {
             return Some(PageCmd::Open(p.trim().to_ascii_lowercase()));
+        }
+        if let Some(p) = s.strip_prefix("switch:") {
+            return Some(PageCmd::Switch(p.trim().to_ascii_lowercase()));
         }
         if let Some(m) = s.strip_prefix("play:") {
             return Some(PageCmd::Play(m.trim().to_string()));
@@ -54,6 +73,12 @@ impl PageCmd {
             "quit_to_menu" => PageCmd::QuitToMenu,
             "quit_game" => PageCmd::QuitGame,
             "unavailable" => PageCmd::Unavailable,
+            "option_left" => PageCmd::OptionLeft,
+            "option_right" => PageCmd::OptionRight,
+            "restore_defaults" => PageCmd::RestoreDefaults,
+            "rebind" => PageCmd::Rebind,
+            "prev_set" => PageCmd::PrevSet,
+            "next_set" => PageCmd::NextSet,
             _ => return None,
         })
     }
@@ -73,6 +98,48 @@ pub struct PagePlan {
     pub back: Option<PageCmd>,
     /// Draw over the game (the pause menu) instead of over black.
     pub over_game: bool,
+    /// Chooser (by widget name, such as `Options[3]`) to the setting it
+    /// shows, or `unavailable`.
+    pub choosers: Vec<(String, String)>,
+    /// Key button (by widget name, such as `OptionSet0[2]`) to the action
+    /// it rebinds, or `unavailable`.
+    pub keys: Vec<(String, String)>,
+    /// Buttons this port adds to the original page, clearly marked.
+    pub extra_buttons: Vec<ExtraButton>,
+    /// New text for widgets (a label or a button), by widget name: lets
+    /// the port's own page reuse an original page's look.
+    pub texts: Vec<(String, String)>,
+    /// Widgets moved down (up when negative) by a fraction of the screen.
+    pub moves: Vec<(String, f32)>,
+    /// Rows hidden whole (the row's button, label and arrows), by the
+    /// row button's name.
+    pub hidden_rows: Vec<String>,
+}
+
+/// A button the port adds to an original page, made as a copy of one of
+/// the page's own buttons, moved down. Its text should say it's an
+/// addition.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ExtraButton {
+    /// The new widget's name.
+    pub name: String,
+    /// The page's button to copy the look from.
+    pub copy_of: String,
+    pub text: String,
+    /// How far down from the copied button, as a fraction of the screen.
+    pub move_down: f32,
+    pub command: PageCmd,
+}
+
+/// Whether a chooser or key row's entry means "not in this port yet".
+pub fn is_unavailable(setting: &str) -> bool {
+    setting.trim().eq_ignore_ascii_case("unavailable")
+}
+
+fn lookup<'a>(list: &'a [(String, String)], widget: &str) -> Option<&'a str> {
+    list.iter()
+        .find(|(w, _)| w.eq_ignore_ascii_case(widget))
+        .map(|(_, s)| s.as_str())
 }
 
 impl PagePlan {
@@ -89,6 +156,10 @@ impl PagePlan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PageButtons {
     pub commands: Vec<(usize, PageCmd)>,
+    /// Choosers that show a setting: widget index and setting name.
+    pub choosers: Vec<(usize, String)>,
+    /// Key buttons: widget index and the action they rebind.
+    pub keys: Vec<(usize, String)>,
 }
 
 impl PageButtons {
@@ -97,6 +168,20 @@ impl PageButtons {
             .iter()
             .find(|(i, _)| *i == widget)
             .map(|(_, c)| c)
+    }
+
+    pub fn chooser(&self, widget: usize) -> Option<&str> {
+        self.choosers
+            .iter()
+            .find(|(i, _)| *i == widget)
+            .map(|(_, s)| s.as_str())
+    }
+
+    pub fn key(&self, widget: usize) -> Option<&str> {
+        self.keys
+            .iter()
+            .find(|(i, _)| *i == widget)
+            .map(|(_, s)| s.as_str())
     }
 }
 
@@ -108,16 +193,66 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
     for s in &layout.skipped {
         why.push(format!("widget {s} is a kind we can't draw yet"));
     }
+    for (name, text) in &plan.texts {
+        if !crate::screens::set_widget_text(layout, name, text) {
+            why.push(format!("text for {name}, which isn't on this page"));
+        }
+    }
+    for (name, by) in &plan.moves {
+        if !crate::screens::move_widget(layout, name, *by) {
+            why.push(format!("move for {name}, which isn't on this page"));
+        }
+    }
+    for name in &plan.hidden_rows {
+        for i in crate::screens::row_widgets(layout, name) {
+            layout.widgets[i].hidden = true;
+        }
+    }
+    for e in &plan.extra_buttons {
+        if !crate::screens::add_button_copy(layout, e) {
+            why.push(format!(
+                "extra button {} copies {}, which isn't a button on this page",
+                e.name, e.copy_of
+            ));
+        }
+    }
     let mut commands = Vec::new();
+    let mut choosers = Vec::new();
+    let mut keys = Vec::new();
     let mut greyed = Vec::new();
+    let mut greyed_rows = Vec::new();
     for i in layout.buttons_on_pc() {
         let w = &layout.widgets[i];
         let Kind::Button(b) = &w.kind else { continue };
         if b.disabled {
             continue;
         }
+        if let Some(e) = plan.extra_buttons.iter().find(|e| e.name == w.name) {
+            commands.push((i, e.command.clone()));
+            continue;
+        }
+        if b.is_chooser() {
+            match lookup(&plan.choosers, &w.name) {
+                Some(s) if is_unavailable(s) => greyed_rows.push(w.name.clone()),
+                Some(s) => choosers.push((i, s.to_string())),
+                None => why.push(format!(
+                    "chooser {} ({:?}...) has no setting in original_menus.toml",
+                    w.name,
+                    b.items.first().map(String::as_str).unwrap_or("")
+                )),
+            }
+            continue;
+        }
         match plan.command(&b.on_select) {
             Some(PageCmd::Unavailable) => greyed.push(w.name.clone()),
+            Some(PageCmd::Rebind) => match lookup(&plan.keys, &w.name) {
+                Some(a) if is_unavailable(a) => greyed_rows.push(w.name.clone()),
+                Some(a) => keys.push((i, a.to_string())),
+                None => why.push(format!(
+                    "key button {} has no action in original_menus.toml",
+                    w.name
+                )),
+            },
             Some(c) => commands.push((i, c.clone())),
             None => why.push(format!(
                 "button {} calls {:?}, which has no command in original_menus.toml",
@@ -134,8 +269,18 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
     for name in greyed {
         crate::screens::disable(layout, &name);
     }
+    for name in greyed_rows {
+        crate::screens::disable_row(layout, &name);
+    }
+    // A row's arrows go with its chooser: drop the arrows of a greyed row.
+    commands.retain(|(i, _)| matches!(&layout.widgets[*i].kind, Kind::Button(b) if !b.disabled));
     crate::screens::setup_titled(layout);
-    Ok(PageButtons { commands })
+    crate::screens::show_set(layout, 0);
+    Ok(PageButtons {
+        commands,
+        choosers,
+        keys,
+    })
 }
 
 /// `data/ui/original_menus.toml`.
@@ -143,6 +288,33 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
 #[serde(default, deny_unknown_fields)]
 struct PagesFile {
     pages: BTreeMap<String, PageDef>,
+    fit: FitDef,
+}
+
+/// `[fit]`: how menus use screens wider than 4:3 (`fit.rs`).
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FitDef {
+    widest_shape: f32,
+}
+
+impl Default for FitDef {
+    fn default() -> Self {
+        FitDef {
+            widest_shape: DEFAULT_WIDEST_SHAPE,
+        }
+    }
+}
+
+/// The widest screen shape (width over height) menus spread out to; on a
+/// wider screen they stay in a centred area this shape. 21.5:9 covers the
+/// usual ultrawide monitors.
+pub const DEFAULT_WIDEST_SHAPE: f32 = 2.4;
+
+/// `[fit] widest_shape` from `data/ui/original_menus.toml` (0 is no limit).
+pub fn parse_widest_shape(text: &str) -> Result<f32, String> {
+    let f: PagesFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    Ok(f.fit.widest_shape.max(0.0))
 }
 
 #[derive(Deserialize)]
@@ -154,6 +326,28 @@ struct PageDef {
     back: Option<String>,
     #[serde(default)]
     buttons: BTreeMap<String, String>,
+    #[serde(default)]
+    choosers: BTreeMap<String, String>,
+    #[serde(default)]
+    keys: BTreeMap<String, String>,
+    #[serde(default)]
+    extra_buttons: BTreeMap<String, ExtraDef>,
+    #[serde(default)]
+    texts: BTreeMap<String, String>,
+    #[serde(default)]
+    moves: BTreeMap<String, f32>,
+    #[serde(default)]
+    hidden_rows: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExtraDef {
+    copy_of: String,
+    text: String,
+    #[serde(default)]
+    move_down: f32,
+    command: String,
 }
 
 /// Read `data/ui/original_menus.toml`.
@@ -167,12 +361,28 @@ pub fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
             buttons.push((f.clone(), cmd(c)?));
         }
         let back = d.back.as_deref().map(cmd).transpose()?;
+        let mut extra_buttons = Vec::new();
+        for (name, e) in d.extra_buttons {
+            extra_buttons.push(ExtraButton {
+                command: cmd(&e.command)?,
+                name,
+                copy_of: e.copy_of,
+                text: e.text,
+                move_down: e.move_down,
+            });
+        }
         out.push(PagePlan {
             page: page.to_ascii_lowercase(),
             class: d.class,
             buttons,
             back,
             over_game: d.over_game,
+            choosers: d.choosers.into_iter().collect(),
+            keys: d.keys.into_iter().collect(),
+            extra_buttons,
+            texts: d.texts.into_iter().collect(),
+            moves: d.moves.into_iter().collect(),
+            hidden_rows: d.hidden_rows,
         });
     }
     Ok(out)
@@ -218,6 +428,7 @@ mod tests {
             ],
             back: Some(PageCmd::Resume),
             over_game: true,
+            ..Default::default()
         }
     }
 
