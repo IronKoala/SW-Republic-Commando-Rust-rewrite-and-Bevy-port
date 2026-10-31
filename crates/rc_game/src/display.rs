@@ -20,11 +20,14 @@ use crate::settings::{DisplayMode, Settings, VideoSection};
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{RenderTarget, Viewport};
 use bevy::prelude::*;
+use bevy::render::renderer::RenderAdapterInfo;
 use bevy::window::{
     Monitor, MonitorSelection, PresentMode, PrimaryMonitor, PrimaryWindow, VideoMode,
     VideoModeSelection, WindowMode, WindowRef,
 };
+use bevy::window::{WindowFocused, WindowOccluded, WindowResized};
 use rc_game_core::GameLog;
+use std::time::{Duration, Instant};
 
 pub struct DisplayPlugin;
 
@@ -35,7 +38,10 @@ impl Plugin for DisplayPlugin {
             .add_systems(
                 Update,
                 (read_desktop, apply_video, find_play_area, fit_cameras).chain(),
-            );
+            )
+            .add_systems(Startup, start_watchdog)
+            .add_systems(Update, log_window_events)
+            .add_systems(Last, (tick_frame_clock, limit_frame_rate));
     }
 }
 
@@ -389,6 +395,165 @@ mod tests {
         assert_eq!(
             window_plan(&video(DisplayMode::Borderless, 1600, 900), &desktop),
             (WindowMode::BorderlessFullscreen(at), None)
+        );
+    }
+}
+
+/// Writes the graphics card in use and every time the window gains or loses
+/// focus, is hidden or changes size, so a log shows what the window was
+/// doing when something went wrong with the picture.
+fn log_window_events(
+    adapter: Option<Res<RenderAdapterInfo>>,
+    mut told_adapter: Local<bool>,
+    mut focused: MessageReader<WindowFocused>,
+    mut occluded: MessageReader<WindowOccluded>,
+    mut resized: MessageReader<WindowResized>,
+    log: Res<GameLog>,
+) {
+    if !*told_adapter {
+        if let Some(a) = adapter {
+            *told_adapter = true;
+            log.line(format!(
+                "display: graphics card {} ({:?}, {:?}), driver {} {}",
+                a.name, a.device_type, a.backend, a.driver, a.driver_info
+            ));
+        }
+    }
+    for e in focused.read() {
+        log.line(format!(
+            "display: window {}",
+            if e.focused { "focused" } else { "lost focus" }
+        ));
+    }
+    for e in occluded.read() {
+        log.line(format!(
+            "display: window {}",
+            if e.occluded { "hidden" } else { "shown again" }
+        ));
+    }
+    if let Some(e) = resized.read().last() {
+        log.line(format!(
+            "display: window resized to {}x{}",
+            e.width, e.height
+        ));
+    }
+}
+
+/// With vsync off, waits at the end of each frame so the game draws at most
+/// `video.max_fps` pictures a second.
+fn limit_frame_rate(settings: Res<Settings>, mut last: Local<Option<Instant>>) {
+    let v = &settings.video;
+    if v.vsync || v.max_fps == 0 {
+        *last = None;
+        return;
+    }
+    let frame = Duration::from_secs_f64(1.0 / v.max_fps as f64);
+    if let Some(start) = *last {
+        let next = start + frame;
+        // Sleep most of the wait (sleeping can overshoot by a millisecond
+        // or more), then spin for the rest.
+        let now = Instant::now();
+        if next > now + Duration::from_millis(2) {
+            std::thread::sleep(next - now - Duration::from_millis(2));
+        }
+        while Instant::now() < next {
+            std::hint::spin_loop();
+        }
+    }
+    // Counting from now, a slow frame isn't made up for by rushing the next.
+    *last = Some(Instant::now());
+}
+
+/// The graphics settings for `video.graphics_api`. `auto` is DirectX 12 on
+/// Windows and the graphics library's choice (usually Vulkan) elsewhere;
+/// the `WGPU_BACKEND` environment variable overrides `auto`.
+pub fn wgpu_settings(v: &VideoSection, log: &GameLog) -> bevy::render::settings::WgpuSettings {
+    use bevy::render::settings::{Backends, WgpuSettings};
+    let mut w = WgpuSettings::default();
+    // On Windows, `auto` uses DirectX 12: with Vulkan on the user's NVIDIA
+    // card (driver 617.42), starting in full screen with vsync off froze
+    // the game within a minute; DirectX 12 ran without a freeze.
+    let auto = if cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
+        Some(Backends::DX12)
+    } else {
+        None
+    };
+    let chosen = match v.graphics_api.to_ascii_lowercase().as_str() {
+        "auto" | "" => auto,
+        "vulkan" => Some(Backends::VULKAN),
+        "dx12" | "directx" | "directx12" => Some(Backends::DX12),
+        "gl" | "opengl" => Some(Backends::GL),
+        other => {
+            log.line(format!(
+                "display: WARNING: video.graphics_api '{other}' isn't auto, vulkan, dx12 or gl; using auto"
+            ));
+            None
+        }
+    };
+    if let Some(b) = chosen {
+        w.backends = Some(b);
+        log.line(format!(
+            "display: graphics API {b:?} (video.graphics_api = {})",
+            v.graphics_api
+        ));
+    }
+    w
+}
+
+/// When the last frame finished, in milliseconds since the game started.
+#[derive(Resource, Clone)]
+struct FrameClock {
+    start: Instant,
+    last_ms: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Watches from its own thread for the game stopping between frames, and
+/// says so in the log: when the picture freezes, the log then shows whether
+/// the whole game stopped or only the picture.
+fn start_watchdog(mut commands: Commands, log: Res<GameLog>) {
+    use std::sync::atomic::Ordering;
+    let clock = FrameClock {
+        start: Instant::now(),
+        last_ms: Default::default(),
+    };
+    let (start, last_ms, log) = (clock.start, clock.last_ms.clone(), log.clone());
+    let spawned = std::thread::Builder::new()
+        .name("frame watchdog".into())
+        .spawn(move || {
+            let mut stuck_since = None;
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let now = start.elapsed().as_millis() as u64;
+                let last = last_ms.load(Ordering::Relaxed);
+                let gap = now.saturating_sub(last);
+                // Before the first frame the game is still starting up.
+                if last > 0 && gap >= 5000 {
+                    if stuck_since != Some(last) {
+                        stuck_since = Some(last);
+                        log.line(format!(
+                            "display: WARNING: no new frame for {:.0} s, the game is stuck (last frame at {:.1} s)",
+                            gap as f64 / 1000.0,
+                            last as f64 / 1000.0
+                        ));
+                    }
+                } else if let Some(at) = stuck_since.take() {
+                    log.line(format!(
+                        "display: frames again after being stuck from {:.1} s",
+                        at as f64 / 1000.0
+                    ));
+                }
+            }
+        });
+    if spawned.is_ok() {
+        commands.insert_resource(clock);
+    }
+}
+
+fn tick_frame_clock(clock: Option<Res<FrameClock>>) {
+    if let Some(c) = clock {
+        c.last_ms.store(
+            c.start.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
         );
     }
 }
