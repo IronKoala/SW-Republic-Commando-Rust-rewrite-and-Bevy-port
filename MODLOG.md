@@ -3,15 +3,6 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
-## 2026-10-31: Open in a window, then go full screen (rc_game)
-
-- **Changed:** The game window always opens as a plain window at the chosen size (`display::startup_window`); `display::apply_video` switches to borderless or true full screen after 10 frames, once the monitor is known.
-- **Why:** The user found the trigger for the freezes: choosing full screen with vsync off in the options works, but starting the game with those settings froze it a little later (NVIDIA RTX 4080 SUPER, Vulkan, Windows).
-- **Tested how:** `cargo test -p rc_game`; `rc_game` under Xvfb at 3440x1440 with openbox, `display_mode = 'borderless'`, 1920x1080.
-- **Result:** Tests 36 pass. Log: "window resized to 1920x1080" at start, then "display: Borderless (1920x1080 chosen), window mode BorderlessFullscreen(Current)" and "window resized to 3440x1440" 1.5 s later; the game runs on.
-- **Still broken / not tested:** Not tested on Windows; whether this stops the freeze is for the user to see.
-- **Next:** The user starts the game with full screen and vsync off saved.
-
 ## 2026-10-31: Stuck-frame watchdog; choosing the graphics API (rc_game)
 
 - **Changed:** `display::start_watchdog`: a thread logs "display: WARNING: no new frame for 5 s, the game is stuck" when frames stop after the first one, and "frames again" when they start. New `video.graphics_api` (`auto` default, `vulkan`, `dx12`, `gl`), passed to Bevy's `RenderPlugin` (`display::wgpu_settings`).

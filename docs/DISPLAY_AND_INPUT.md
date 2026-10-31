@@ -166,13 +166,6 @@ for 5 s, the game is stuck" when frames stop, and `video.graphics_api`
 on Windows instead of Vulkan, to see whether the freeze is in the Vulkan
 path.
 
-The user then found the trigger (2026-10-31): switching to full screen with
-vsync off from the options works, but starting the game with those settings
-freezes it soon after. So the game now always opens as a plain window at
-the chosen size, and `apply_video` switches to the chosen display mode
-after 10 frames, once the monitor is known (`display::startup_window`,
-`STARTUP_FRAMES`).
-
 ## Dual input (done)
 
 Every device is read every frame and added together: keys, mouse, every
