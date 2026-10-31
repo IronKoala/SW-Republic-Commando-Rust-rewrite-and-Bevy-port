@@ -146,6 +146,15 @@ pub fn window_plan(v: &VideoSection, desktop: &Desktop) -> (WindowMode, Option<(
     }
 }
 
+/// Frames the game draws in a plain window before going full screen.
+const STARTUP_FRAMES: u32 = 10;
+
+/// The window the game opens with: always a plain window at the chosen
+/// size; `apply_video` switches it to full screen once the game is running.
+pub fn startup_window(v: &VideoSection) -> (WindowMode, Option<(u32, u32)>) {
+    (WindowMode::Windowed, Some((v.width, v.height)))
+}
+
 fn read_desktop(monitors: Query<&Monitor, With<PrimaryMonitor>>, mut desktop: ResMut<Desktop>) {
     let Ok(m) = monitors.single() else {
         return;
@@ -176,12 +185,23 @@ pub fn apply_video(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut projections: Query<&mut Projection>,
     mut last: Local<Option<((WindowMode, Option<(u32, u32)>), bool)>>,
+    mut frames: Local<u32>,
     log: Res<GameLog>,
 ) {
     let v = &settings.video;
     let plan = window_plan(v, &desktop);
+    if last.is_none() {
+        // The window opens as a plain window (`startup_window`) and goes
+        // full screen here once the game has drawn a few frames: on the
+        // user's PC (NVIDIA, Windows) opening straight into full screen
+        // froze the game a little later, switching after start didn't.
+        *frames += 1;
+        if *frames < STARTUP_FRAMES || desktop.size.is_none() {
+            return;
+        }
+        *last = Some((startup_window(v), v.vsync));
+    }
     let Some((before, vsync_before)) = last.replace((plan, v.vsync)) else {
-        // The window was made from these settings.
         return;
     };
     let Ok(mut w) = windows.single_mut() else {

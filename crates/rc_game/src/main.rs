@@ -376,7 +376,7 @@ fn main() -> AppExit {
             primary_window: Some(Window {
                 title: "Star Wars Republic Commando (Rust and Bevy)".into(),
                 resolution: (settings.video.width, settings.video.height).into(),
-                mode: display::window_plan(&settings.video, &display::Desktop::default()).0,
+                mode: display::startup_window(&settings.video).0,
                 present_mode: if settings.video.vsync {
                     PresentMode::AutoVsync
                 } else {
