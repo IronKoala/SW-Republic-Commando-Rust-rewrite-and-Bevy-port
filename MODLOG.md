@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-31: Stuck-frame watchdog; choosing the graphics API (rc_game)
+
+- **Changed:** `display::start_watchdog`: a thread logs "display: WARNING: no new frame for 5 s, the game is stuck" when frames stop after the first one, and "frames again" when they start. New `video.graphics_api` (`auto` default, `vulkan`, `dx12`, `gl`), passed to Bevy's `RenderPlugin` (`display::wgpu_settings`).
+- **Why:** The user's game froze again with the 240 cap. This time the log stopped at 66 s with nothing after, so the game itself stopped. Card: NVIDIA RTX 4080 SUPER, Vulkan, driver 617.42, borderless 3440x1440, vsync off.
+- **Tested how:** `cargo test -p rc_game`; `rc_game` under Xvfb with `graphics_api = 'vulkan'`.
+- **Result:** Tests 36 pass. Log: "display: graphics API vulkan (video.graphics_api)". The watchdog fired on llvmpipe's 11 s first frame before the "after the first frame" rule was added, then said "frames again", so it works; now quiet while starting.
+- **Still broken / not tested:** The freeze's cause is still unknown. `dx12` not tested (no Windows here).
+- **Next:** The user tries `graphics_api = 'dx12'`, then vsync on, to find which setting the freeze follows.
+
 ## 2026-10-30: Frame rate cap with vsync off; window events in the log (rc_game)
 
 - **Changed:** New `video.max_fps` (default 240, 0 = no limit): with vsync off, `display::limit_frame_rate` waits at the end of each frame. `display::log_window_events` logs the graphics card, backend and driver once, and every focus, hidden/shown and resize of the window.

@@ -157,6 +157,15 @@ the window gains or loses focus, is hidden or shown, or changes size
 (`display::log_window_events`), so the next report shows what the window
 was doing.
 
+It froze again with the cap (2026-10-31): the log ran at a steady 240 for a
+minute, then stopped mid-run, so that time the whole game stopped, not only
+the picture. The card is an NVIDIA GeForce RTX 4080 SUPER on Vulkan, driver
+617.42. Now a watchdog thread (`display::start_watchdog`) logs "no new frame
+for 5 s, the game is stuck" when frames stop, and `video.graphics_api`
+(`auto`, `vulkan`, `dx12`, `gl`; next start) lets the game use DirectX 12
+on Windows instead of Vulkan, to see whether the freeze is in the Vulkan
+path.
+
 ## Dual input (done)
 
 Every device is read every frame and added together: keys, mouse, every

@@ -39,8 +39,9 @@ impl Plugin for DisplayPlugin {
                 Update,
                 (read_desktop, apply_video, find_play_area, fit_cameras).chain(),
             )
+            .add_systems(Startup, start_watchdog)
             .add_systems(Update, log_window_events)
-            .add_systems(Last, limit_frame_rate);
+            .add_systems(Last, (tick_frame_clock, limit_frame_rate));
     }
 }
 
@@ -461,4 +462,89 @@ fn limit_frame_rate(settings: Res<Settings>, mut last: Local<Option<Instant>>) {
     }
     // Counting from now, a slow frame isn't made up for by rushing the next.
     *last = Some(Instant::now());
+}
+
+/// The graphics settings for `video.graphics_api`. `auto` also lets the
+/// `WGPU_BACKEND` environment variable choose.
+pub fn wgpu_settings(v: &VideoSection, log: &GameLog) -> bevy::render::settings::WgpuSettings {
+    use bevy::render::settings::{Backends, WgpuSettings};
+    let mut w = WgpuSettings::default();
+    let chosen = match v.graphics_api.to_ascii_lowercase().as_str() {
+        "auto" | "" => None,
+        "vulkan" => Some(Backends::VULKAN),
+        "dx12" | "directx" | "directx12" => Some(Backends::DX12),
+        "gl" | "opengl" => Some(Backends::GL),
+        other => {
+            log.line(format!(
+                "display: WARNING: video.graphics_api '{other}' isn't auto, vulkan, dx12 or gl; using auto"
+            ));
+            None
+        }
+    };
+    if let Some(b) = chosen {
+        w.backends = Some(b);
+        log.line(format!(
+            "display: graphics API {} (video.graphics_api)",
+            v.graphics_api
+        ));
+    }
+    w
+}
+
+/// When the last frame finished, in milliseconds since the game started.
+#[derive(Resource, Clone)]
+struct FrameClock {
+    start: Instant,
+    last_ms: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Watches from its own thread for the game stopping between frames, and
+/// says so in the log: when the picture freezes, the log then shows whether
+/// the whole game stopped or only the picture.
+fn start_watchdog(mut commands: Commands, log: Res<GameLog>) {
+    use std::sync::atomic::Ordering;
+    let clock = FrameClock {
+        start: Instant::now(),
+        last_ms: Default::default(),
+    };
+    let (start, last_ms, log) = (clock.start, clock.last_ms.clone(), log.clone());
+    let spawned = std::thread::Builder::new()
+        .name("frame watchdog".into())
+        .spawn(move || {
+            let mut stuck_since = None;
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let now = start.elapsed().as_millis() as u64;
+                let last = last_ms.load(Ordering::Relaxed);
+                let gap = now.saturating_sub(last);
+                // Before the first frame the game is still starting up.
+                if last > 0 && gap >= 5000 {
+                    if stuck_since != Some(last) {
+                        stuck_since = Some(last);
+                        log.line(format!(
+                            "display: WARNING: no new frame for {:.0} s, the game is stuck (last frame at {:.1} s)",
+                            gap as f64 / 1000.0,
+                            last as f64 / 1000.0
+                        ));
+                    }
+                } else if let Some(at) = stuck_since.take() {
+                    log.line(format!(
+                        "display: frames again after being stuck from {:.1} s",
+                        at as f64 / 1000.0
+                    ));
+                }
+            }
+        });
+    if spawned.is_ok() {
+        commands.insert_resource(clock);
+    }
+}
+
+fn tick_frame_clock(clock: Option<Res<FrameClock>>) {
+    if let Some(c) = clock {
+        c.last_ms.store(
+            c.start.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
 }
