@@ -6,7 +6,8 @@
 //! stretch it. Here that is a second camera, a child of the player's camera,
 //! that sees only the arms (render layer [`ARMS_LAYER`]) and draws over the
 //! player camera's picture. Camera orders: sky -1, player 0, arms
-//! [`ARMS_CAMERA_ORDER`], menus and display 2.
+//! [`ARMS_CAMERA_ORDER`], the helmet frame 2 (in `rc_game`), menus and
+//! display 3.
 //!
 //! The model is posed on the CPU each frame like the squad's (`rc_anim`
 //! moves its points). It's drawn unlit at the weapon's `arms.brightness`:
@@ -38,7 +39,7 @@ use std::sync::Arc;
 
 /// The render layer only the arms camera sees (the sky has layer 1).
 pub const ARMS_LAYER: usize = 2;
-/// Drawn after the player's view (0) and before menus and the display (2).
+/// Drawn after the player's view (0) and before the helmet frame (2).
 pub const ARMS_CAMERA_ORDER: isize = 1;
 
 /// What the arms show, for displays, tests and mods: the weapon drawn and

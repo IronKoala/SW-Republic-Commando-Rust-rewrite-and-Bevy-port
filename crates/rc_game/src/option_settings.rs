@@ -21,6 +21,7 @@ pub const ALL: &[&str] = &[
     "difficulty",
     "subtitles",
     "prompt_text",
+    "helmet",
     "auto_pull_maneuvers",
     "effects_volume",
     "music_volume",
@@ -296,6 +297,7 @@ pub fn fallback_items(name: &str) -> Option<Vec<String>> {
         "vsync"
         | "subtitles"
         | "prompt_text"
+        | "helmet"
         | "auto_pull_maneuvers"
         | "blur"
         | "bloom"
@@ -383,6 +385,7 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         "vsync" => yes_no(s.video.vsync),
         "subtitles" => on_off_index(items, s.game.subtitles),
         "prompt_text" => on_off_index(items, s.game.prompt_text),
+        "helmet" => on_off_index(items, s.game.helmet),
         "auto_pull_maneuvers" => on_off_index(items, s.game.auto_pull_maneuvers),
         "blur" => on_off_index(items, s.video.blur),
         "bloom" => on_off_index(items, s.video.bloom),
@@ -502,6 +505,7 @@ pub fn write(
         "vsync" => s.video.vsync = first,
         "subtitles" => s.game.subtitles = on_off_value(items, i),
         "prompt_text" => s.game.prompt_text = on_off_value(items, i),
+        "helmet" => s.game.helmet = on_off_value(items, i),
         "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = on_off_value(items, i),
         "blur" => s.video.blur = on_off_value(items, i),
         "bloom" => s.video.bloom = on_off_value(items, i),
@@ -542,6 +546,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "difficulty" => s.game.difficulty = d.game.difficulty,
         "subtitles" => s.game.subtitles = d.game.subtitles,
         "prompt_text" => s.game.prompt_text = d.game.prompt_text,
+        "helmet" => s.game.helmet = d.game.helmet,
         "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = d.game.auto_pull_maneuvers,
         "effects_volume" => s.audio.effects_volume = d.audio.effects_volume,
         "music_volume" => s.audio.music_volume = d.audio.music_volume,
@@ -627,6 +632,7 @@ mod tests {
                 | "sound_3d"
                 | "subtitles"
                 | "prompt_text"
+                | "helmet"
                 | "auto_pull_maneuvers" => list(&["ON", "OFF"]),
                 "sound_quality" => list(&["LOW", "HIGH"]),
                 "audio_channels" => list(&["16", "32", "64"]),

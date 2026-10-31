@@ -2473,6 +2473,56 @@ a screenshot of the game shrunk to 320x240: the mean difference must stay
 under 12 of 255 and fewer than 5% of pixels may differ by more than 40.
 centre.
 
+## The helmet frame (`rc_menus::helmet`, `rc_game/src/helmet.rs`)
+
+**What the original does.** The HUD class `CTGame.CTHUD` has
+`StaticMesh = Helmet` and `DisplayFOV = 84`: the frame round the view is a
+3D model, `HUDMeshes.HelmetSurface.Helmet` in
+`StaticMeshes/hudmeshes.usx`, drawn at the eye with its own 84-degree view
+(degrees across a 4:3 screen). It has two parts: the metal
+(`HUDTextures.Helmet.HelmetMetal_Shader`, picture `Helmet_HUD`, 1,008
+triangles) and a glass sheet (`HelmetFinalBlend`, whose shader names no
+picture, so there is nothing of it to draw). Its points lie 9.6 to 14.9
+Unreal units in front of the eye. The options menu's HELMET row sets the
+player's `bVisor`. All read from the install with `rc_probe --class
+CTHUD`, `rc_probe --meshes` and `rc_probe --helmet`; nothing is copied.
+
+**Fitting every screen shape.** The model was made for 4:3. Seen from the
+eye, a point's place across the screen is `y / x`. On a wider screen,
+points further from the middle than `sides_from` (half of a 4:3 screen's
+half width) move out by exactly the extra width, keeping their shape;
+points nearer the middle (the bars across the top) spread evenly so
+nothing tears. Up and down never change. Narrower screens (5:4) move the
+sides in the same way. `rc_menus::helmet::check_shapes` paints the frame in
+software at 14 landscape shapes (5:4 to 32:9, phones, flip and fold
+phones, the user's 3440x1369 window) and checks that the sides still
+reach the screen edges as at 4:3, the top bar still spans the screen, the
+bottom corner pieces keep their size in screen heights, and the middle
+stays open.
+
+**Drawing.** `HelmetPlugin` reads the model once when a level first shows,
+then gives the player's camera a child camera (order 2, render layer 3,
+its own depth) that sees only the helmet, so it draws over the world and
+the first-person arms (order 1) and under the menus and display (now order
+3). Unlit at `brightness` (0.5, a guess) from `data/ui/helmet.toml`. The
+mesh is refitted when the window changes shape. Settings `[game] helmet`
+and the plan's `enabled` show or hide it; `HelmetReadout` says what is on
+screen for tests and mods. For VR later, the helmet is its own camera and
+model, so it can be put in front of each eye instead.
+
+**Checks.** `rc_probe --helmet` (software, every shape);
+`cargo run -p rc_game --example helmet_check` (the graphics card's
+picture against the software painting at six shapes, and the setting
+off and on); the game script's "the original helmet frame is drawn round
+the view" (95% of its pixels match in geo_01a) and "HELMET OFF takes the
+frame away".
+
+**Not done.** The original's lighting of the frame (lights inside the
+helmet, `AmbientGlow` 20, its bump map); the visor's effects that the
+`Helmet` class also runs (blood, cracks, wipe, rain); the frame shows a few
+seconds late on the cloud's software graphics while its shaders are
+prepared.
+
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
 The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:

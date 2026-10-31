@@ -16,6 +16,7 @@
 
 mod display;
 mod graphics;
+mod helmet;
 mod hud;
 mod input;
 mod levels;
@@ -438,14 +439,16 @@ fn main() -> AppExit {
         graphics::GraphicsOptionsPlugin,
         sound_options::SoundOptionsPlugin,
         subtitles::SubtitlesPlugin,
+        helmet::HelmetPlugin,
         screenshot::ScreenshotPlugin,
     ))
     .add_systems(Startup, |mut commands: Commands| {
-        // The camera for menus and the display; the 3D view has its own.
+        // The camera for menus and the display; the 3D view has its own
+        // (sky -1, player 0, arms 1, helmet 2).
         commands.spawn((
             Camera2d,
             Camera {
-                order: 2,
+                order: 3,
                 clear_color: ClearColorConfig::None,
                 ..default()
             },
