@@ -298,7 +298,10 @@ fn decode_texture(pkg: &Package, data: &[u8], export: &Export) -> Result<Rgba, S
         Some(_) => return Err("palette is in another package (not supported yet)".into()),
         None => None,
     };
-    let mip = tex.mips.first().ok_or("texture has no mipmaps")?;
+    // Models are the squad, the arms and weapons: CHARACTER DETAIL.
+    let mip = tex
+        .mip_for(texture::Detail::Characters)
+        .ok_or("texture has no mipmaps")?;
     rc_image::decode(
         format,
         mip.width as usize,

@@ -39,6 +39,54 @@ pub struct Texture {
     pub leftover: usize,
 }
 
+/// Which group of pictures a texture belongs to, for the TEXTURE QUALITY
+/// and CHARACTER DETAIL options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Detail {
+    /// Walls, floors, props, the sky.
+    World = 0,
+    /// The squad, enemies, the player's arms and weapons.
+    Characters = 1,
+}
+
+static SKIP_MIPS: [std::sync::atomic::AtomicU8; 2] =
+    [std::sync::atomic::AtomicU8::new(0), std::sync::atomic::AtomicU8::new(0)];
+
+/// Never go below this size when skipping mipmaps (and never below the
+/// 4x4 block the compressed formats need).
+const SMALLEST_SKIPPED_TO: i32 = 32;
+
+/// Use a smaller picture for this group: 0 is full size, 1 is half size,
+/// 2 is quarter size. Applies to pictures decoded from now on (the game
+/// sets it from the options and it takes effect on the next level load).
+pub fn set_skip_mips(group: Detail, skip: u8) {
+    SKIP_MIPS[group as usize].store(skip.min(4), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn skip_mips(group: Detail) -> u8 {
+    SKIP_MIPS[group as usize].load(std::sync::atomic::Ordering::Relaxed)
+}
+
+impl Texture {
+    /// The picture to draw for this group's detail setting: the full-size
+    /// one, or a smaller mipmap if the setting asks for less detail and the
+    /// texture has one big enough.
+    pub fn mip_for(&self, group: Detail) -> Option<&Mip> {
+        pick_mip(&self.mips, skip_mips(group) as usize)
+    }
+}
+
+fn pick_mip(mips: &[Mip], skip: usize) -> Option<&Mip> {
+    let mut best = mips.first()?;
+    for m in mips.iter().skip(1).take(skip) {
+        if m.width.min(m.height) < SMALLEST_SKIPPED_TO || m.data_len == 0 {
+            break;
+        }
+        best = m;
+    }
+    Some(best)
+}
+
 /// Name of a texture format number (UE2's ETextureFormat).
 pub fn format_name(format: u8) -> &'static str {
     match format {
@@ -236,5 +284,29 @@ mod tests {
         assert_eq!(expected_mip_bytes(0, 32, 32), Some(1024));
         assert_eq!(expected_mip_bytes(5, 32, 32), Some(4096));
         assert_eq!(expected_mip_bytes(6, 32, 32), None);
+    }
+
+    fn mip(size: i32) -> Mip {
+        Mip {
+            width: size,
+            height: size,
+            u_bits: 0,
+            v_bits: 0,
+            data_offset: 0,
+            data_len: (size * size) as usize,
+            skip_pos: 0,
+        }
+    }
+
+    #[test]
+    fn lower_detail_picks_smaller_mipmaps_but_not_tiny_ones() {
+        let mips = [mip(256), mip(128), mip(64), mip(32), mip(16)];
+        assert_eq!(pick_mip(&mips, 0).unwrap().width, 256);
+        assert_eq!(pick_mip(&mips, 1).unwrap().width, 128);
+        assert_eq!(pick_mip(&mips, 2).unwrap().width, 64);
+        assert_eq!(pick_mip(&mips, 9).unwrap().width, 32);
+        // A small texture keeps its only usable picture.
+        assert_eq!(pick_mip(&mips[3..], 2).unwrap().width, 32);
+        assert!(pick_mip(&[], 1).is_none());
     }
 }

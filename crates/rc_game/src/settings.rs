@@ -33,6 +33,11 @@ pub struct GameSection {
     /// Our own data files (`data` in the project folder).
     pub data_folder: String,
     pub difficulty: Difficulty,
+    /// SUBTITLES: the words of what is said, at the bottom of the screen
+    /// (from the game's `System/subtitles*.int` files).
+    pub subtitles: bool,
+    /// PROMPT TEXT: the level's hints, such as "Press USE to open".
+    pub prompt_text: bool,
     /// The original's AUTO PULL MANEUVERS: a new squad order that needs
     /// more squad mates than are free takes them off sniper, grenade and
     /// anti-armour posts. Off, the order is refused until you recall the
@@ -114,6 +119,28 @@ pub struct VideoSection {
     /// 3D view so things near the sides aren't stretched; the middle keeps
     /// its size.
     pub panini: f32,
+    /// GRAPHICS QUALITY last chosen, as its place in the list: 0 lowest, 1
+    /// highest. It sets the detail options below; changing one of those by
+    /// hand makes it CUSTOM.
+    pub quality: f32,
+    /// BRIGHTNESS: 0 (one stop darker) to 1 (one stop brighter); 0.5
+    /// changes nothing.
+    pub brightness: f32,
+    /// TEXTURE QUALITY for walls, floors and props: 0 (lowest, quarter-size
+    /// pictures) to 1 (full size). Used from the next level load.
+    pub texture_detail: f32,
+    /// CHARACTER DETAIL: the same for the squad, enemies, arms and weapons.
+    pub character_detail: f32,
+    /// BLUR EFFECTS: motion blur when turning and moving quickly.
+    pub blur: bool,
+    /// BLOOM EFFECTS: a glow around bright lights.
+    pub bloom: bool,
+    /// SQUAD SHADOWS: the level's moving lights cast shadows (the squad,
+    /// droids and props in the light). Off is faster.
+    pub squad_shadows: bool,
+    /// FSAA: smooths jagged edges by drawing this many samples per pixel
+    /// (1 is off, 2 or 4; more counts as 4).
+    pub fsaa: u32,
 }
 
 /// How the game window covers the screen (`video.display_mode`).
@@ -136,6 +163,17 @@ pub struct AudioSection {
     pub master_volume: f32,
     pub music_volume: f32,
     pub effects_volume: f32,
+    /// Speech: squad mates, enemies and the level's lines.
+    pub voices_volume: f32,
+    /// SOUND QUALITY low: sounds kept at no more than 22050 samples a
+    /// second (less memory, duller). Used from the next level load.
+    pub low_quality: bool,
+    /// 3D SOUND: sounds with a place in the level (enemies) are heard from
+    /// their side.
+    pub sound_3d: bool,
+    /// AUDIO CHANNELS: the most sounds playing at once. When more start, the
+    /// oldest effect stops (speech and music are never cut).
+    pub channels: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -185,6 +223,8 @@ impl Default for Settings {
                 folder: String::new(),
                 data_folder: "data".into(),
                 difficulty: Difficulty::Medium,
+                subtitles: true,
+                prompt_text: true,
                 auto_pull_maneuvers: true,
             },
             mods: ModsSection {
@@ -202,11 +242,23 @@ impl Default for Settings {
                 widest_shape: 2.0,
                 hud_max_aspect: 16.0 / 9.0,
                 panini: 0.0,
+                quality: 0.75,
+                brightness: 0.5,
+                texture_detail: 1.0,
+                character_detail: 1.0,
+                blur: false,
+                bloom: false,
+                squad_shadows: false,
+                fsaa: 1,
             },
             audio: AudioSection {
                 master_volume: 1.0,
                 music_volume: 0.6,
                 effects_volume: 1.0,
+                voices_volume: 1.0,
+                low_quality: false,
+                sound_3d: true,
+                channels: 32,
             },
             controls: ControlsSection {
                 bindings: "input/bindings.toml".into(),
@@ -268,6 +320,8 @@ folder = ''
 data_folder = 'data'
 # easy, medium or hard (how much damage reaches you: 0.25, 1, 1.75 times).
 difficulty = 'medium'
+subtitles = true     # the words of what is said, at the bottom of the screen
+prompt_text = true   # the level's hints, such as "Press USE to open"
 # When a squad order needs more squad mates than are free, take them off
 # sniper, grenade and anti-armour posts (the longest-held first). false:
 # the order is refused until you recall the squad. The original's AUTO
@@ -311,11 +365,24 @@ hud_max_aspect = 1.7777778
 # view), up to 1. Around 0.3 to 0.5 takes the stretching out of the sides on
 # 21:9 and 32:9; the middle stays the same size, a little softer.
 panini = 0.0
+# The GRAPHICS options page sets these.
+quality = 0.75           # GRAPHICS QUALITY chosen: 0 lowest, 1 highest (sets the rows below)
+brightness = 0.5         # 0 darkest, 0.5 unchanged, 1 brightest
+texture_detail = 1.0     # walls and props: 0 quarter-size pictures, 1 full size (next level load)
+character_detail = 1.0   # squad, enemies, arms and weapons: the same
+blur = false             # motion blur
+bloom = false            # glow around bright lights
+squad_shadows = false    # moving lights cast shadows
+fsaa = 1                 # edge smoothing: 1 (off), 2 or 4 samples
 
 [audio]
 master_volume = 1.0   # 0 is silent, 1 is full
 music_volume = 0.6
 effects_volume = 1.0
+voices_volume = 1.0   # speech: squad, enemies, the level's lines
+low_quality = false   # true keeps sounds at 22050 per second or less (next level load)
+sound_3d = true       # enemies are heard from their side
+channels = 32         # most sounds at once; the oldest effect stops for a new one
 
 [controls]
 bindings = 'input/bindings.toml'   # inside data_folder (or a mod)

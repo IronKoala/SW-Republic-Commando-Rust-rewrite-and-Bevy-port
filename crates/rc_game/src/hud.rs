@@ -436,6 +436,8 @@ fn update_messages(
     theme: Res<Theme>,
     list: Query<Entity, With<MessageList>>,
     mut shown: Query<(Entity, &mut Message)>,
+    settings: Res<Settings>,
+    script: Option<Res<rc_scripts_plugin::LevelScript>>,
     log: Res<GameLog>,
 ) {
     let dt = time.delta_secs();
@@ -449,6 +451,16 @@ fn update_messages(
         return;
     };
     for msg in incoming.read() {
+        // PROMPT TEXT off: the level scripts' hints (ACTION_ShowPrompt,
+        // which the scripts note in their stats) aren't shown. Other
+        // messages (saved, picked up) still are.
+        let prompt = script
+            .as_ref()
+            .is_some_and(|s| s.stats.prompts.contains(&msg.text));
+        if prompt && !settings.game.prompt_text {
+            log.line(format!("hud: prompt \"{}\" not shown (PROMPT TEXT off)", msg.text));
+            continue;
+        }
         log.line(format!(
             "hud: message \"{}\" for {:.1} s",
             msg.text, msg.seconds

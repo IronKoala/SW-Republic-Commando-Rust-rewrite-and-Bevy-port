@@ -4436,6 +4436,7 @@ name = "rc_combat"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rc_audio",
  "rc_game_core",
  "rc_level_viewer",
  "rc_model",
@@ -4468,6 +4469,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "blake3",
+ "rc_audio",
  "rc_combat",
  "rc_enemies",
  "rc_game_core",
@@ -4477,6 +4479,7 @@ dependencies = [
  "rc_menus",
  "rc_movement",
  "rc_movers_plugin",
+ "rc_package",
  "rc_pads",
  "rc_panini",
  "rc_save",

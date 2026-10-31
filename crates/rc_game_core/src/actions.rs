@@ -21,6 +21,10 @@ pub enum Action {
     Jump,
     Crouch,
     Walk,
+    /// Turning with keys (at the controller's look speed), for players who
+    /// don't use the mouse to turn.
+    TurnLeft,
+    TurnRight,
     // Fighting.
     Fire,
     /// The weapon's second mode (the DC-17m's sniper or grenade attachment).
@@ -31,6 +35,11 @@ pub enum Action {
     NextGrenade,
     NextWeapon,
     PrevWeapon,
+    /// Straight to one weapon, as the original's number keys.
+    WeaponPistol,
+    WeaponBlaster,
+    WeaponSniper,
+    WeaponAntiArmor,
     Zoom,
     /// Use, pick up, or interact (doors, consoles, revive a squad mate).
     Use,
@@ -53,6 +62,9 @@ pub enum Action {
     MenuRight,
     MenuAccept,
     MenuBack,
+    /// Save a picture of the screen (to the `screenshots` folder next to the
+    /// settings file).
+    Screenshot,
     // Gyro aiming.
     /// Held: the gyro stops turning the view, so the controller can be
     /// re-centred (like lifting a mouse off the mat).
@@ -62,7 +74,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 34] = [
+    pub const ALL: [Action; 41] = [
         Action::MoveForward,
         Action::MoveBack,
         Action::StrafeLeft,
@@ -70,6 +82,8 @@ impl Action {
         Action::Jump,
         Action::Crouch,
         Action::Walk,
+        Action::TurnLeft,
+        Action::TurnRight,
         Action::Fire,
         Action::AltFire,
         Action::Reload,
@@ -78,6 +92,10 @@ impl Action {
         Action::NextGrenade,
         Action::NextWeapon,
         Action::PrevWeapon,
+        Action::WeaponPistol,
+        Action::WeaponBlaster,
+        Action::WeaponSniper,
+        Action::WeaponAntiArmor,
         Action::Zoom,
         Action::Use,
         Action::Flashlight,
@@ -95,6 +113,7 @@ impl Action {
         Action::MenuRight,
         Action::MenuAccept,
         Action::MenuBack,
+        Action::Screenshot,
         Action::GyroRatchet,
         Action::GyroToggle,
     ];
@@ -109,6 +128,8 @@ impl Action {
             Action::Jump => "jump",
             Action::Crouch => "crouch",
             Action::Walk => "walk",
+            Action::TurnLeft => "turn_left",
+            Action::TurnRight => "turn_right",
             Action::Fire => "fire",
             Action::AltFire => "alt_fire",
             Action::Reload => "reload",
@@ -117,6 +138,10 @@ impl Action {
             Action::NextGrenade => "next_grenade",
             Action::NextWeapon => "next_weapon",
             Action::PrevWeapon => "prev_weapon",
+            Action::WeaponPistol => "weapon_pistol",
+            Action::WeaponBlaster => "weapon_blaster",
+            Action::WeaponSniper => "weapon_sniper",
+            Action::WeaponAntiArmor => "weapon_anti_armor",
             Action::Zoom => "zoom",
             Action::Use => "use",
             Action::Flashlight => "flashlight",
@@ -134,6 +159,7 @@ impl Action {
             Action::MenuRight => "menu_right",
             Action::MenuAccept => "menu_accept",
             Action::MenuBack => "menu_back",
+            Action::Screenshot => "screenshot",
             Action::GyroRatchet => "gyro_ratchet",
             Action::GyroToggle => "gyro_toggle",
         }

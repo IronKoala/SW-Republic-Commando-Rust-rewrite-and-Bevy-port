@@ -33,6 +33,14 @@ alt_fire = ["KeyE"]
 reload = ["KeyR"]
 next_grenade = ["KeyQ"]
 next_weapon = ["Slash"]
+# Our choice (the original's DefaultCtrl.ini not checked for these yet).
+weapon_pistol = ["Digit1"]
+weapon_blaster = ["Digit2"]
+weapon_sniper = ["Digit3"]
+weapon_anti_armor = ["Digit4"]
+screenshot = ["F12"]
+# turn_left and turn_right have no key: the mouse turns. Give them one in
+# the CONTROLS page if you like.
 zoom = ["KeyZ"]
 melee = ["KeyV"]          # our choice: the PC original's melee key isn't read yet
 use = ["KeyF", "Enter"]

@@ -152,6 +152,87 @@ impl Wav {
     }
 }
 
+impl Wav {
+    /// The sound as a 16-bit `.wav` file.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let data_len = self.samples.len() * 2;
+        let align = self.channels as u32 * 2;
+        let mut out = Vec::with_capacity(44 + data_len);
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data_len as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&self.channels.to_le_bytes());
+        out.extend_from_slice(&self.sample_rate.to_le_bytes());
+        out.extend_from_slice(&(self.sample_rate * align).to_le_bytes());
+        out.extend_from_slice(&(align as u16).to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(data_len as u32).to_le_bytes());
+        for s in &self.samples {
+            out.extend_from_slice(&s.to_le_bytes());
+        }
+        out
+    }
+
+    /// The sound at half the sample rate: each pair of frames averaged into
+    /// one. Half the memory, and the highest sounds are lost.
+    pub fn halved(&self) -> Wav {
+        let ch = self.channels as usize;
+        let frames = self.frames() / 2;
+        let mut samples = Vec::with_capacity(frames * ch);
+        for f in 0..frames {
+            for c in 0..ch {
+                let a = self.samples[2 * f * ch + c] as i32;
+                let b = self.samples[(2 * f + 1) * ch + c] as i32;
+                samples.push(((a + b) / 2) as i16);
+            }
+        }
+        Wav {
+            sample_rate: self.sample_rate / 2,
+            bits_per_sample: 16,
+            samples,
+            trailing_bytes: 0,
+            other_chunks: vec![],
+            ..self.clone()
+        }
+    }
+}
+
+static LOW_QUALITY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// SOUND QUALITY: with low quality on, sounds read from now on are kept at
+/// no more than 22050 samples a second (most of the game's already are).
+pub fn set_low_quality(on: bool) {
+    LOW_QUALITY.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn low_quality() -> bool {
+    LOW_QUALITY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The highest sample rate low quality keeps.
+pub const LOW_QUALITY_RATE: u32 = 22050;
+
+/// A `.wav` file's bytes as the SOUND QUALITY setting wants them: as they
+/// are, or at a lower sample rate. Anything that isn't a `.wav` we can read
+/// (an Ogg file) is returned as it is.
+pub fn for_quality(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if !low_quality() {
+        return bytes.into();
+    }
+    match Wav::parse(bytes) {
+        Ok(mut w) if w.sample_rate > LOW_QUALITY_RATE => {
+            while w.sample_rate > LOW_QUALITY_RATE {
+                w = w.halved();
+            }
+            w.to_bytes().into()
+        }
+        _ => bytes.into(),
+    }
+}
+
 /// Numbers that describe a sound without listening to it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Stats {
@@ -282,5 +363,30 @@ mod tests {
         assert_eq!((s.peak, s.rms), (0.0, 0.0));
         assert_eq!(s.peak_db(), f64::NEG_INFINITY);
         assert_ne!(Stats::of(&[0, 1]).checksum, Stats::of(&[1, 0]).checksum);
+    }
+
+    #[test]
+    fn low_quality_halves_44khz_sounds_only() {
+        let samples: [i16; 8] = [0, 100, 200, 300, -10, -20, 7, 9];
+        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let hi = wav(2, 44100, 16, &data);
+        let lo = wav(1, 22050, 16, &data);
+        set_low_quality(false);
+        assert_eq!(&*for_quality(&hi), &hi[..]);
+        set_low_quality(true);
+        let half = Wav::parse(&for_quality(&hi)).unwrap();
+        assert_eq!((half.sample_rate, half.channels), (22050, 2));
+        // Frames (0,100)+(200,300) -> (100,200); (-10,-20)+(7,9) -> (-1,-5).
+        assert_eq!(half.samples, [100, 200, -1, -5]);
+        assert_eq!(&*for_quality(&lo), &lo[..]);
+        set_low_quality(false);
+    }
+
+    #[test]
+    fn writing_reads_back_the_same() {
+        let w = Wav::parse(&wav(1, 11025, 8, &[128, 255, 0])).unwrap();
+        let again = Wav::parse(&w.to_bytes()).unwrap();
+        assert_eq!(again.samples, w.samples);
+        assert_eq!(again.sample_rate, 11025);
     }
 }
