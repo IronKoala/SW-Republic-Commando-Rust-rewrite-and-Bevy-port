@@ -22,6 +22,8 @@ pub const ALL: &[&str] = &[
     "subtitles",
     "prompt_text",
     "auto_pull_maneuvers",
+    "tactical_visor",
+    "tactical_intensity",
     "effects_volume",
     "music_volume",
     "voices_volume",
@@ -384,6 +386,11 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         "subtitles" => on_off_index(items, s.game.subtitles),
         "prompt_text" => on_off_index(items, s.game.prompt_text),
         "auto_pull_maneuvers" => on_off_index(items, s.game.auto_pull_maneuvers),
+        // The original's list is in its own setting's order (ON, OFF,
+        // CYCLE), so the value's place is the setting.
+        "tactical_visor" => (s.game.tactical_visor.choice().number() as usize).min(n - 1),
+        // Its numbers 0 to 10 are tenths.
+        "tactical_intensity" => rc_visor::rules::intensity_step(s.game.tactical_intensity).min(n - 1),
         "blur" => on_off_index(items, s.video.blur),
         "bloom" => on_off_index(items, s.video.bloom),
         "squad_shadows" => on_off_index(items, s.video.squad_shadows),
@@ -503,6 +510,11 @@ pub fn write(
         "subtitles" => s.game.subtitles = on_off_value(items, i),
         "prompt_text" => s.game.prompt_text = on_off_value(items, i),
         "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = on_off_value(items, i),
+        "tactical_visor" => {
+            s.game.tactical_visor =
+                crate::settings::TacticalVisor::from_choice(rc_visor::VisorChoice::from_number(i))
+        }
+        "tactical_intensity" => s.game.tactical_intensity = rc_visor::rules::intensity_from_step(i),
         "blur" => s.video.blur = on_off_value(items, i),
         "bloom" => s.video.bloom = on_off_value(items, i),
         "squad_shadows" => s.video.squad_shadows = on_off_value(items, i),
@@ -543,6 +555,8 @@ pub fn restore(name: &str, s: &mut Settings) {
         "subtitles" => s.game.subtitles = d.game.subtitles,
         "prompt_text" => s.game.prompt_text = d.game.prompt_text,
         "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = d.game.auto_pull_maneuvers,
+        "tactical_visor" => s.game.tactical_visor = d.game.tactical_visor,
+        "tactical_intensity" => s.game.tactical_intensity = d.game.tactical_intensity,
         "effects_volume" => s.audio.effects_volume = d.audio.effects_volume,
         "music_volume" => s.audio.music_volume = d.audio.music_volume,
         "voices_volume" => s.audio.voices_volume = d.audio.voices_volume,
@@ -630,6 +644,7 @@ mod tests {
                 | "auto_pull_maneuvers" => list(&["ON", "OFF"]),
                 "sound_quality" => list(&["LOW", "HIGH"]),
                 "audio_channels" => list(&["16", "32", "64"]),
+                "tactical_visor" => list(&["ON", "OFF", "CYCLE"]),
                 _ => list(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]),
             });
             let mut s = s0.clone();

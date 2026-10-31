@@ -1,0 +1,28 @@
+[package]
+name = "rc_visor"
+version = "0.1.0"
+edition.workspace = true
+description = "The commando's visor modes: normal, tactical (squad mates and pickups glow) and low light, switched with CYCLE VISOR MODE."
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+# Reading each glowing thing's colour from the original's class defaults.
+rc_package = { path = "../rc_package" }
+# Reading data/visor/tactical.toml. serde (MIT OR Apache-2.0),
+# https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The glow's material and
+# shader, and the lamp. No window: the game brings that.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["default_app", "std", "bevy_state", "3d_bevy_render"]
+
+[dev-dependencies]
+# Saving the visor_check example's pictures as PNG.
+rc_image = { path = "../rc_image" }
+# Only for the visor_check example, which opens a window: the same Bevy
+# with window and renderer features switched on.
+bevy = { version = "0.20.1", default-features = false, features = ["default_app", "std", "bevy_state", "3d_bevy_render", "bevy_winit", "x11", "wayland", "png"] }

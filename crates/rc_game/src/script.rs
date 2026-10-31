@@ -353,6 +353,52 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
+        Check("the visor starts in tactical mode and the squad glows", |w| {
+            let mode = w.resource::<rc_visor::VisorState>().mode;
+            let r = w.resource::<rc_visor::VisorReadout>().clone();
+            let mut q = w.query_filtered::<&rc_visor::TacticalGlow, With<rc_squad_plugin::SquadMate>>();
+            let mates: Vec<String> = q.iter(w).map(|g| g.0.clone()).collect();
+            let got = format!(
+                "{} mode, {} glow colours from the game, {} glowing copies ({} shown), squad {mates:?}",
+                mode.name(),
+                r.colours,
+                r.shells,
+                r.shown
+            );
+            if mode == rc_visor::VisorMode::Tactical && r.colours >= 4 && r.shown > 0 && !mates.is_empty() {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Press(Action::Flashlight),
+        Wait(0.3),
+        Check("CYCLE VISOR MODE (X) switches to low light with the lamp on", |w| {
+            let mode = w.resource::<rc_visor::VisorState>().mode;
+            let shown = w.resource::<rc_visor::VisorReadout>().shown;
+            let lamps = count::<rc_visor::Headlamp>(w);
+            let got = format!("{} mode, {lamps} lamp, {shown} glowing copies shown", mode.name());
+            if mode == rc_visor::VisorMode::LowLight && lamps == 1 && shown == 0 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Press(Action::Flashlight),
+        Wait(0.3),
+        Press(Action::Flashlight),
+        Wait(0.3),
+        Check("two more presses go through normal and back to tactical", |w| {
+            let mode = w.resource::<rc_visor::VisorState>().mode;
+            let r = w.resource::<rc_visor::VisorReadout>().clone();
+            let lamps = count::<rc_visor::Headlamp>(w);
+            let got = format!("{} mode after {} changes, {lamps} lamp, {} shown", mode.name(), r.changes, r.shown);
+            if mode == rc_visor::VisorMode::Tactical && lamps == 0 && r.shown > 0 && r.changes >= 3 {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check(
             "the level part loaded walls, props, doors and invisible walls",
             |w| {
@@ -845,6 +891,11 @@ fn steps() -> Vec<Step> {
             // file; start from full so it never runs down to zero.
             w.resource_mut::<Settings>().audio.music_volume = 1.0;
             w.resource_mut::<Noted>().music_volume = 1.0;
+            // The same for the visor rows: start from the original's
+            // defaults (CYCLE, 2).
+            let mut s = w.resource_mut::<Settings>();
+            s.game.tactical_visor = crate::settings::TacticalVisor::Cycle;
+            s.game.tactical_intensity = 0.2;
         }),
         // MULTIPLAYER, LOAD GAME, PROFILES and EXTRAS are greyed out and
         // skipped.
@@ -869,6 +920,38 @@ fn steps() -> Vec<Step> {
         Check("GAME options page matches the original's pictures", |w| {
             compare(w, "options_game", 0.03)
         }),
+        FocusOn("Options[7]"),   // TACTICAL VISOR MODE
+        Press(Action::MenuLeft), // CYCLE -> OFF
+        Wait(0.2),
+        Check("TACTICAL VISOR MODE works: left turns it OFF", |w| {
+            let now = w.resource::<Settings>().game.tactical_visor;
+            let visor = w.resource::<rc_visor::VisorSettings>().choice;
+            let shown = button_text(w, "Options[7]").unwrap_or_default();
+            let got = format!("setting {now:?}, visor {visor:?}, shows {shown}");
+            if now == crate::settings::TacticalVisor::Off && visor == rc_visor::VisorChoice::Off {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Press(Action::MenuRight), // back to CYCLE
+        FocusOn("Options[8]"),    // TACTICAL MODE INTENSITY
+        Press(Action::MenuRight), // 2 -> 3
+        Wait(0.2),
+        Check("TACTICAL MODE INTENSITY works: right raises it a step", |w| {
+            let shown = button_text(w, "Options[8]").unwrap_or_default();
+            let s = &w.resource::<Settings>().game;
+            let got = format!("visor {:?}, intensity {:.1}, shows {shown}", s.tactical_visor, s.tactical_intensity);
+            if s.tactical_visor == crate::settings::TacticalVisor::Cycle
+                && (s.tactical_intensity - 0.3).abs() < 1e-4
+                && shown == "3"
+            {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Press(Action::MenuLeft), // back to 2
         FocusOn("Sound"),
         Press(Action::MenuAccept), // SOUND
         Wait(0.3),

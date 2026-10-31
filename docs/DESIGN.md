@@ -35,6 +35,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_ai` | What enemies decide: settings from `data/enemies/*.toml`, the map's spawners, one fighter's brain, and a whole fight on a map (`Battle`). No Bevy. Tool: `rc_droidsim` (droids against a stand-in player, no window). |
 | `rc_pads` | Controllers: which kind each one is, button names for prompts, gyro clean-up, and an SDL3 reader (built from source) for controllers and gyros. Bevy, no window. Tool: `rc_padtest`. |
 | `rc_panini` | The optional Panini view for very wide screens: a full-screen pass that bends the 3D view. Check: `panini_check` example. |
+| `rc_visor` | The visor's modes (normal, tactical, low light): `VisorPlugin` makes squad mates and pickups glow in tactical mode, in the colours the install gives them, and switches modes with CYCLE VISOR MODE. Check: `visor_check` example. |
 | `rc_enemies` | Bevy plugin `EnemiesPlugin`: battle droids in the game, shooting and taking damage through `rc_combat`, animated with the game's mesh. Program: `rc_droidview` (watch a fight in a real level, with a picture check). |
 
 Format readers stay plain Rust with no Bevy in them, so they can be tested alone.
@@ -2653,6 +2654,69 @@ exit through a save; address reading), `rc_save`'s
 which puts the player into geo_01a's exit with 13 health taken off and
 checks that geo_01b loads with the same health and magazine, the player at
 its start, and its start saved as a checkpoint with that health.
+
+## The visor: tactical and low light modes (`rc_visor`)
+
+The commando's visor has three modes, stepped through with CYCLE VISOR
+MODE (X on PC, the original's `ToggleHeadlamp`): **normal** (the plain
+view), **tactical** (squad mates glow in their own colour, things to pick
+up glow pale blue) and **low light** (the helmet lamp). The rules come from
+the original's scripts (`PlayerController` in Engine.u, `CTPlayer` in
+CTGame.u, read, rewritten by hand in `rc_visor/src/rules.rs`):
+
+- TACTICAL VISOR MODE (`VisorModeDefault`): ON (0) skips normal, OFF (1)
+  skips tactical, CYCLE (2, the default) steps through all three.
+- The visor starts in tactical mode on every level start and load, unless
+  the option is OFF. Changing the option during play moves off a mode it no
+  longer allows.
+- TACTICAL MODE INTENSITY (`TacticalModeIntensity`, 0 to 1, default 0.2)
+  is the glow's strength; the menu shows tenths (0 to 10).
+- Each thing's glow colour is its class's `EnhancedVisionColor`, stored
+  blue, green, red. Black means no glow, which is why enemies, walls and
+  props don't glow. Sev (`Commando07DeltaDefaults`) is red, Fixer (40)
+  green, Scorch (62) yellow, and every pickup (`CTPickupDefaults` and the
+  ammo, weapon and bacta pickups) pale blue. These are read at run time from
+  the install; `data/visor/tactical.toml` only names the classes, and can
+  give colours of its own for mods.
+- Switching to tactical or low light shows the mode's name ("TACTICAL
+  MODE", "LOW LIGHT MODE", from the `Helmet` class's defaults) on the
+  display for `VisorModeTextTime` (3 s).
+
+**How the glow is drawn.** A `TacticalGlow("sev")` component marks a body;
+every mesh under it (now or added later, such as a pickup's model) gets a
+child copy (a "shell") with the same mesh and `TacticalGlowMaterial`
+(`tactical_glow.wesl`), drawn additively on top. The shader makes edges
+(where the surface turns away from the eye) glow most, so the body gets a
+coloured outline, plus a small fill over the middle. Because the squad's
+meshes are posed on the CPU, the shells share the same mesh and follow
+every animation for free. Shells are hidden (cost nothing) outside tactical
+mode or at intensity 0. The cost is one extra, very cheap draw per glowing
+mesh: no textures, no extra screen passes, so it suits phones and VR.
+
+**Our guess, not the original's.** The original draws the glow in its
+compiled renderer (`UFrameFX::GetTacticalSkelMeshShader`), which we can't
+read, so the glow's shape (`[glow]` in the data file: strength scale, edge
+sharpness, fill) is ours, to be compared with the real game. Also not done:
+the faint film grain the original's tactical mode adds over the whole
+picture (`VisionShaderEnhance`), its `EnhancedVisionFade` flag on clones
+(meaning unknown), and the low light mode's night-vision picture
+(`VisionNight`); low light is only the lamp for now (a placeholder).
+
+**Plugging in.** `rc_game/src/visor.rs` copies the settings into
+`VisorSettings` and puts `TacticalGlow` on squad mates (by name) and weapon
+pickups. The visor never moves a camera or draws on the screen itself: the
+glow is part of the 3D world (a VR headset sees it in both eyes, each from
+its own eye position), the lamp hangs off whatever `PlayerCamera` is, and
+the mode's name goes to the display as a `HudMessage`.
+
+**Checked by** `rc_visor`'s tests (the rules, colour bytes, the data file,
+and the install's colours when `RC_GAME_DIR` is set), the `visor_check`
+example (a stand-in ball and box drawn in every mode, colours measured: no
+red in normal mode, a red edge at 0.2, stronger at 1.0, edges redder than
+the middle, a blue box edge, no glow and a lit floor in low light, the same
+picture after cycling round), and `rc_game --script` (starts in tactical
+with the squad glowing, X goes to low light with the lamp and back, the two
+GAME page rows change the settings).
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

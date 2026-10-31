@@ -33,6 +33,7 @@ mod settings;
 mod sound_options;
 mod subtitles;
 mod theme;
+mod visor;
 
 use bevy::prelude::*;
 use bevy::window::PresentMode;
@@ -472,6 +473,7 @@ fn main() -> AppExit {
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
     app.add_plugins(rc_save::SavePlugin);
+    app.add_plugins(visor::GameVisorPlugin);
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),
