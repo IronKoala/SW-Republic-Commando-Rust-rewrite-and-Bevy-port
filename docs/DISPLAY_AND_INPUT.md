@@ -166,6 +166,14 @@ for 5 s, the game is stuck" when frames stop, and `video.graphics_api`
 on Windows instead of Vulkan, to see whether the freeze is in the Vulkan
 path.
 
+Found (2026-10-31): the freeze comes when the game *starts* in full screen
+with vsync off on Vulkan (switching to full screen from the options didn't
+freeze). The user's original game started freezing at about the same time,
+so a driver change is the likely cause (NVIDIA 617.42). With DirectX 12 the
+same start ran 3 minutes at a steady 240 frames a second with no freeze. So
+`graphics_api = 'auto'` now means DirectX 12 on Windows (Vulkan or the
+library's choice elsewhere; `WGPU_BACKEND` still overrides `auto`).
+
 ## Dual input (done)
 
 Every device is read every frame and added together: keys, mouse, every

@@ -464,13 +464,22 @@ fn limit_frame_rate(settings: Res<Settings>, mut last: Local<Option<Instant>>) {
     *last = Some(Instant::now());
 }
 
-/// The graphics settings for `video.graphics_api`. `auto` also lets the
-/// `WGPU_BACKEND` environment variable choose.
+/// The graphics settings for `video.graphics_api`. `auto` is DirectX 12 on
+/// Windows and the graphics library's choice (usually Vulkan) elsewhere;
+/// the `WGPU_BACKEND` environment variable overrides `auto`.
 pub fn wgpu_settings(v: &VideoSection, log: &GameLog) -> bevy::render::settings::WgpuSettings {
     use bevy::render::settings::{Backends, WgpuSettings};
     let mut w = WgpuSettings::default();
+    // On Windows, `auto` uses DirectX 12: with Vulkan on the user's NVIDIA
+    // card (driver 617.42), starting in full screen with vsync off froze
+    // the game within a minute; DirectX 12 ran without a freeze.
+    let auto = if cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
+        Some(Backends::DX12)
+    } else {
+        None
+    };
     let chosen = match v.graphics_api.to_ascii_lowercase().as_str() {
-        "auto" | "" => None,
+        "auto" | "" => auto,
         "vulkan" => Some(Backends::VULKAN),
         "dx12" | "directx" | "directx12" => Some(Backends::DX12),
         "gl" | "opengl" => Some(Backends::GL),
@@ -484,7 +493,7 @@ pub fn wgpu_settings(v: &VideoSection, log: &GameLog) -> bevy::render::settings:
     if let Some(b) = chosen {
         w.backends = Some(b);
         log.line(format!(
-            "display: graphics API {} (video.graphics_api)",
+            "display: graphics API {b:?} (video.graphics_api = {})",
             v.graphics_api
         ));
     }

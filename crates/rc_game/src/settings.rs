@@ -85,9 +85,9 @@ pub struct VideoSection {
     /// graphics card, and on some Windows PCs it can stop the picture
     /// updating while the game runs on.
     pub max_fps: u32,
-    /// Which way the game talks to the graphics card: `auto` (the
-    /// graphics library's choice, usually Vulkan), `vulkan`, `dx12`
-    /// (Windows only) or `gl`. Takes effect at the next start.
+    /// Which way the game talks to the graphics card: `auto` (DirectX 12
+    /// on Windows, usually Vulkan elsewhere), `vulkan`, `dx12` (Windows
+    /// only) or `gl`. Takes effect at the next start.
     pub graphics_api: String,
     /// Field of view across a 4:3 screen, degrees. The original's is 85.
     /// Wider screens see more at the sides with the same view up and down
@@ -281,8 +281,9 @@ height = 720
 vsync = true
 # With vsync off, the most pictures a second (0 = no limit).
 max_fps = 240
-# How the game talks to the graphics card: 'auto', 'vulkan', 'dx12' (Windows
-# only) or 'gl'. Takes effect at the next start.
+# How the game talks to the graphics card: 'auto' (DirectX 12 on Windows,
+# usually Vulkan elsewhere), 'vulkan', 'dx12' (Windows only) or 'gl'. Takes
+# effect at the next start.
 graphics_api = 'auto'
 # Field of view across a 4:3 screen, degrees (the original's is 85). Wider
 # screens see more at the sides; the view up and down stays the same.
