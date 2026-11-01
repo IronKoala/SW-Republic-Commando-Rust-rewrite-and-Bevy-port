@@ -146,6 +146,12 @@ pub struct Stats {
     /// furthest one moved (Unreal units).
     pub props_settled: usize,
     pub settle_drop_max: f32,
+    /// Props whose own spot is inside solid rock or wall (BSP zone 0, which
+    /// has no ambient light), placed in the zone their corners face instead
+    /// (see `prop_zone`).
+    pub props_zone_from_corners: usize,
+    /// Props with bump-mapped light (a stored light direction per corner).
+    pub props_bump_lit: usize,
     pub backdrop_polygons: usize,
     /// Terrains (outdoor ground): read, triangles drawn, painted layers
     /// drawn, layers left out with why, terrains that couldn't be read.
@@ -608,6 +614,67 @@ fn zone_ambients(
     by_zone
 }
 
+/// How much more of the zone's ambient light bump-mapped props get than
+/// other props: the zone's whole ambient instead of half of it.
+///
+/// Props whose materials are bump-mapped (Republic Commando's `HsBump...`
+/// materials) store a second list of light directions (see
+/// `actors::read_baked_light`), so the original draws them with its bump
+/// shader, not like other props. Measured on the user's original-game
+/// screenshot of yyy_06a's start tunnel (1600x1200), against our view from
+/// the same spot: with half the ambient the parts lit only by it came out
+/// at about half the original's brightness (left wall 7 against 18, near
+/// floor 13 against 40, ceiling 13 against 38), while the parts a lamp
+/// lights were close (38 against 41). One screenshot, so a calibration,
+/// not a proof. Not used on geo_04a-style props without bump maps, which
+/// matched with half.
+const BUMP_PROP_AMBIENT: f32 = 2.0;
+
+/// Which zone a placed prop is drawn in, for its ambient light.
+///
+/// Usually the zone at the prop's own spot (`Location`). But level pieces
+/// such as tunnel walls, floors and ceilings often have their spot inside
+/// the solid rock behind them, which is BSP zone 0: no zone, no ambient
+/// light. In yyy_06a that is 247 of 556 props, the whole start tunnel. The
+/// original game shows them lit like the rest of the zone (its dark parts
+/// match the zone's ambient), so for those props each corner is moved a
+/// little off the surface, the way it faces, and the zone most corners land
+/// in is used. If no corner lands in a zone, zone 0 stays.
+fn prop_zone(bsp: &Bsp, p: &Placement, mesh: &StaticMesh, stats: &mut Stats) -> Option<u8> {
+    let zone = bsp.point_zone(p.location);
+    if zone != Some(0) || mesh.vertices.is_empty() {
+        return zone;
+    }
+    /// How far off the surface to test, in Unreal units (a hand's width).
+    const NUDGE: f32 = 8.0;
+    let axes = rotation_axes(p.rotation);
+    let mut counts = [0usize; 256];
+    for v in &mesh.vertices {
+        let w = p.transform_point(v.position);
+        let mut n = [0.0f32; 3];
+        for (k, axis) in axes.iter().enumerate() {
+            for c in 0..3 {
+                n[c] += v.normal[k] * axis[c];
+            }
+        }
+        let len = bsp::dot(n, n).sqrt();
+        if len < 1e-6 {
+            continue;
+        }
+        let at = [0, 1, 2].map(|c| w[c] + n[c] / len * NUDGE);
+        if let Some(z) = bsp.point_zone(at).filter(|&z| z != 0) {
+            counts[z as usize] += 1;
+        }
+    }
+    match (1..256).max_by_key(|&z| counts[z]).filter(|&z| counts[z] > 0) {
+        Some(z) => {
+            stats.props_zone_from_corners += 1;
+            Some(z as u8)
+        }
+        None => zone,
+    }
+}
+
 /// Average of the batches' corner colours (red, green, blue, 0-255).
 fn average_light<'a>(batches: impl Iterator<Item = &'a Batch>) -> Option<[f32; 3]> {
     let mut sum = [0.0f64; 3];
@@ -956,21 +1023,27 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         match load_mesh(ctx.mats, &mut mesh_cache, &owner, p.static_mesh) {
             Ok(m) => {
                 ctx.stats.mesh_actors_drawn += 1;
-                let colours = if p.static_mesh_instance != 0 {
-                    actors::read_vertex_colours(pkg, data, p.static_mesh_instance).ok()
+                let baked = if p.static_mesh_instance != 0 {
+                    actors::read_baked_light(pkg, data, p.static_mesh_instance).ok()
                 } else {
                     None
                 };
-                let zone = bsp.point_zone(p.location);
+                let bump_lit = baked.as_ref().is_some_and(|b| !b.directions.is_empty());
+                ctx.stats.props_bump_lit += bump_lit as usize;
+                let colours = baked.map(|b| b.colours);
+                let zone = prop_zone(&bsp, &p, &m.0, &mut ctx.stats);
                 let in_sky = sky_zone.is_some() && zone == sky_zone;
                 // The game adds the zone's ambient light when it draws a
                 // prop: it isn't in the stored colours (corners facing away
                 // from every light store 0,0,0; see `zone_ambients`). Half
-                // of it, like the lightmaps (see `zone_ambients`).
+                // of it, like the lightmaps (see `zone_ambients`), except on
+                // bump-mapped props (see `BUMP_PROP_AMBIENT`).
                 let colours = match (colours, zone.and_then(|z| zone_ambient.get(&z))) {
                     (Some(c), Some(a)) => {
                         ctx.stats.props_with_ambient += 1;
-                        Some(c.iter().map(|v| add_light(*v, *a)).collect())
+                        let k = if bump_lit { BUMP_PROP_AMBIENT } else { 1.0 };
+                        let a = a.map(|x| x * k);
+                        Some(c.iter().map(|v| add_light(*v, a)).collect())
                     }
                     (c, _) => c,
                 };

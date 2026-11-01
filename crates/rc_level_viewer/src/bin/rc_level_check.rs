@@ -126,8 +126,8 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         log.line(format!("  terrain: {e}"));
     }
     log.line(format!(
-        "  zone ambient light: {} zones have one; added to {} props",
-        s.zones_with_ambient, s.props_with_ambient
+        "  zone ambient light: {} zones have one; added to {} props ({} of them stand inside solid, zone taken from their corners; {} bump-mapped props get the whole ambient)",
+        s.zones_with_ambient, s.props_with_ambient, s.props_zone_from_corners, s.props_bump_lit
     ));
     log.line(format!(
         "  physics props that fall at the start moved down onto the ground: {}, furthest {:.0} units",
