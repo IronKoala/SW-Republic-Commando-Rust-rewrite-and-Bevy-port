@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-01: Drag the list's scroll bar; "EVERY MAP +" fits its button (rc_menus, rc_game)
+
+- **Changed:** `rc_menus::lists::drag_to` and `handle`: a scroll bar's handle can be moved to any height and the list follows. `original_menu.rs`: each list's track gets a mouse target (`BarHit`, under the scroll arrows); new system `drag_bars`: click and hold the handle to drag it with the grip kept, or click the track elsewhere to bring the handle there and drag from there, as in a browser. `original_lists::follow_selection`, `drag`. `rc_menus::screens::fit_button_to_text`: this port's added buttons widen their background on whichever side their text runs past (only "EVERY MAP +" needs it; "PORT +" fits). `rc_game --script`: new `Pointer` step (the script holds a pretend mouse pointer) and 2 new checks.
+- **Why:** The user: the campaign page's "EVERY MAP +" and "MISSIONS +" text ran out of its button, and they want to click and hold the scroll bar to move it, like in a browser.
+- **Tested how:** `cargo test -p rc_menus` (new `dragging_the_handle_scrolls_the_list`); `xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/rc_game --script` in the cloud with the game files copied read-only from the PC.
+- **Result:** Script: pressing on the handle at the top of the track and moving the pointer to the bottom scrolls EVERY MAP's 15 Geonosis maps to show the last 6 (`first shown 9 of 15`); "EVERY MAP +" text 0.387..0.613 inside its button 0.347..0.653. `SCRIPT DONE: 98 checks passed, 0 failed`.
+- **Still broken / not tested:** Not tested with a real mouse on Windows. Clicking the track jumps the handle to the pointer rather than paging one screen at a time.
+- **Next:** The user tries the drag on the PC.
+
 ## 2026-10-31: Stuck-frame watchdog; choosing the graphics API (rc_game)
 
 - **Changed:** `display::start_watchdog`: a thread logs "display: WARNING: no new frame for 5 s, the game is stuck" when frames stop after the first one, and "frames again" when they start. New `video.graphics_api` (`auto` default, `vulkan`, `dx12`, `gl`), passed to Bevy's `RenderPlugin` (`display::wgpu_settings`).

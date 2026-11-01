@@ -68,7 +68,16 @@ enum Step {
     /// Log the result so far, and make the exit code an error if anything
     /// failed (before Quit closes the game with success).
     Summary,
+    /// Put the mouse pointer somewhere (window pixels) with the left button
+    /// down or up, worked out from the game as it is now; `None` gives the
+    /// pointer back to nobody (the menus see no pointer again).
+    Pointer(fn(&mut World) -> Option<(Vec2, bool)>),
 }
+
+/// Where the script holds the mouse pointer, if anywhere (see
+/// `Step::Pointer`).
+#[derive(Resource, Default)]
+struct ScriptPointer(Option<(Vec2, bool)>);
 
 #[derive(Resource)]
 struct Script {
@@ -136,6 +145,7 @@ impl Plugin for ScriptPlugin {
         })
         .init_resource::<Noted>()
         .init_resource::<Shots>()
+        .init_resource::<ScriptPointer>()
         .add_systems(Update, run.in_set(GameSet::Input))
         .add_systems(
             PreUpdate,
@@ -149,7 +159,23 @@ impl Plugin for ScriptPlugin {
 /// The script alone drives the menus: a real mouse moving over the window
 /// (or resting on a button) must not change what is selected, or the route
 /// goes astray. So the menus never see where the pointer is or a click.
-fn ignore_pointer(mut windows: Query<&mut Window>, mut mouse: ResMut<ButtonInput<MouseButton>>) {
+fn ignore_pointer(
+    mut windows: Query<&mut Window>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    pointer: Res<ScriptPointer>,
+) {
+    // Except where the script itself points (dragging a scroll bar).
+    if let Some((at, down)) = pointer.0 {
+        for mut w in &mut windows {
+            w.set_physical_cursor_position(Some(at.as_dvec2()));
+        }
+        if down && !mouse.pressed(MouseButton::Left) {
+            mouse.press(MouseButton::Left);
+        } else if !down {
+            mouse.release_all();
+        }
+        return;
+    }
     for mut w in &mut windows {
         if w.physical_cursor_position().is_some() {
             w.set_physical_cursor_position(None);
@@ -313,6 +339,51 @@ fn steps() -> Vec<Step> {
                 Err(format!("{items:?}"))
             }
         }),
+        Wait(0.3),
+        Shot("campaign_every_map"),
+        Check("EVERY MAP + fits inside its button", |w| {
+            let mut m = w.resource_mut::<OriginalMenus>();
+            let p = m.pages.get("campaigns").ok_or("no campaign page")?;
+            let b = match &p.screen.layout.widget("EveryMap").ok_or("no EveryMap")?.kind {
+                rc_menus::layout::Kind::Button(b) => b.clone(),
+                _ => return Err("not a button".into()),
+            };
+            let sizes = m.assets.as_mut().ok_or("no assets")?;
+            let t = rc_menus::quads::text_box(&b.blurred, sizes).ok_or("no text")?;
+            let bg = rc_menus::quads::sprite_box(&b.background_blurred, sizes)
+                .ok_or("no background")?;
+            let got = format!("text {:.3}..{:.3}, button {:.3}..{:.3}", t[0], t[2], bg[0], bg[2]);
+            if t[0] >= bg[0] && t[2] <= bg[2] {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        // Click and hold the scroll bar's handle (at the top of its track)
+        // and drag it to the bottom: the list follows, as in a browser.
+        Pointer(|w| bar_point(w, 0.03).map(|p| (p, false))),
+        Wait(0.1),
+        Pointer(|w| bar_point(w, 0.03).map(|p| (p, true))),
+        Wait(0.2),
+        Pointer(|w| bar_point(w, 0.5).map(|p| (p, true))),
+        Wait(0.2),
+        Pointer(|w| bar_point(w, 1.2).map(|p| (p, true))),
+        Wait(0.3),
+        Check("dragging the scroll bar down scrolls to the last maps", |w| {
+            let m = w.resource::<OriginalMenus>();
+            let p = m.pages.get("campaigns").ok_or("no campaign page")?;
+            let l = p.screen.layout.lists.lists.first().ok_or("no list")?;
+            let got = format!("first shown {} of {} ({} rows)", l.position, l.items.len(), l.rows);
+            if l.items.len() > l.rows && l.position == l.items.len() - l.rows {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Shot("campaign_dragged"),
+        Pointer(|w| bar_point(w, 1.2).map(|p| (p, false))),
+        Wait(0.1),
+        Pointer(|_| None),
         // Up comes back to the list's first map; the third is geo_01a,
         // the level the rest of the route walks.
         FocusAfter(Action::MenuUp, "LevelList[0]"),
@@ -1311,6 +1382,20 @@ fn shown_page(w: &mut World) -> Option<String> {
     }
 }
 
+/// A point on the first scroll bar's track on screen, in window pixels:
+/// `along` 0 at its top, 1 at its bottom (more goes past it).
+fn bar_point(w: &mut World, along: f32) -> Option<Vec2> {
+    let mut q = w.query::<(
+        &original_menu::BarHit,
+        &bevy::ui::ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+    )>();
+    let (_, node, at) = q.iter(w).find(|(b, _, _)| b.bar == 0)?;
+    let size = node.size();
+    let centre = at.translation;
+    Some(Vec2::new(centre.x, centre.y - size.y / 2.0 + size.y * along))
+}
+
 /// What an original load or save page lists.
 fn save_items(w: &mut World, k: &str) -> Result<Vec<String>, String> {
     let m = w.resource::<OriginalMenus>();
@@ -1687,6 +1772,11 @@ fn run(world: &mut World) {
                 }
             }
             Step::Note(f) => f(world),
+            Step::Pointer(f) => {
+                let at = f(world);
+                log.line(format!("script: pointer {at:?}"));
+                world.resource_mut::<ScriptPointer>().0 = at;
+            }
             Step::FocusPauseItem(func, index) => {
                 if !pause_item_focused(world, func, index) {
                     // Down on even frames, released on odd ones.

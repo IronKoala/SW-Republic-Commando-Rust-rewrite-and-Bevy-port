@@ -293,6 +293,9 @@ pub struct OriginalMenus {
     /// The campaign page's planets and missions, when it uses the
     /// original (`original_lists.rs`).
     pub campaign: Option<rc_menus::campaign::Campaign>,
+    /// A scroll bar being dragged with the mouse: the bar, and the grip
+    /// (handle centre minus pointer height).
+    drag: Option<(usize, f32)>,
     /// The list row last clicked, and when (for double clicks).
     pub(crate) last_click: Option<(usize, std::time::Instant)>,
     /// This frame's button press was used here (for example to open the
@@ -413,6 +416,7 @@ impl Plugin for OriginalMenuPlugin {
                     navigate,
                     apply_options,
                     original_saves::apply_saves,
+                    drag_bars,
                     draw,
                     fit_area,
                 )
@@ -479,6 +483,14 @@ fn load(
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {
                 check_names(&mut layout, &mut buttons, &plan.page, &log);
+                for e in &plan.extra_buttons {
+                    if screens::fit_button_to_text(&mut layout, &e.name, &mut assets) {
+                        log.line(format!(
+                            "original menus: page {}: {} widened to fit its text",
+                            plan.page, e.name
+                        ));
+                    }
+                }
                 log.line(format!(
                     "original menus: page {} uses {} ({} buttons)",
                     plan.page,
@@ -782,6 +794,16 @@ struct OriginalRoot;
 /// question box, widget index).
 #[derive(Component)]
 struct HitBox(bool, usize);
+
+/// A mouse target over a list's scroll bar track: the bar, and the
+/// track's top and bottom (menu heights; spreading never moves things up
+/// or down).
+#[derive(Component)]
+pub(crate) struct BarHit {
+    pub(crate) bar: usize,
+    top: f32,
+    bottom: f32,
+}
 
 fn play_sound(
     commands: &mut Commands,
@@ -1684,8 +1706,8 @@ fn draw(
             },
         ));
     }
-    // (on top?, pictures, mouse areas by widget index)
-    type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>);
+    // (on top?, pictures, mouse areas by widget index, scroll bar tracks)
+    type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>, Vec<(BarHit, [f32; 4])>);
     let mut list: Vec<Drawn> = Vec::new();
     let left = fit::left_edge(across);
     let to_area = |b: [f32; 4]| [(b[0] - left) / across, b[1], (b[2] - left) / across, b[3]];
@@ -1710,7 +1732,34 @@ fn draw(
                 })
                 .collect()
         };
-        list.push((*on_top, q, boxes));
+        // The scroll bars' tracks, where the handle can be grabbed (a
+        // little wider than the handle, so it's easy to hit).
+        let bars = if under {
+            Vec::new()
+        } else {
+            layout
+                .lists
+                .bars
+                .iter()
+                .enumerate()
+                .filter_map(|(b, bar)| {
+                    let Kind::Sprite(s) = &layout.widget(&bar.name)?.kind else {
+                        return None;
+                    };
+                    let half = (bar.min_size[0] / 2.0).max(0.015);
+                    let bx = [s.pos[0] - half, bar.top, s.pos[0] + half, bar.bottom];
+                    Some((
+                        BarHit {
+                            bar: b,
+                            top: bar.top,
+                            bottom: bar.bottom,
+                        },
+                        to_area(bx),
+                    ))
+                })
+                .collect()
+        };
+        list.push((*on_top, q, boxes, bars));
     }
     let key = (page_name.clone(), (across * 100.0).round() as u32);
     if !menus.fit_logged.contains(&key) {
@@ -1774,7 +1823,7 @@ fn draw(
                 },
             ))
             .with_children(|area| {
-                for (is_question, quads, boxes) in &list {
+                for (is_question, quads, boxes, bars) in &list {
                     for q in quads {
                         let Some(image) = images.get(&(
                             q.texture.to_ascii_lowercase(),
@@ -1805,6 +1854,27 @@ fn draw(
                             },
                         ));
                     }
+                    // Under the buttons, so the scroll arrows at the
+                        // track's ends still take their clicks.
+                    for (hit, b) in bars {
+                        area.spawn((
+                            BarHit {
+                                bar: hit.bar,
+                                top: hit.top,
+                                bottom: hit.bottom,
+                            },
+                            Interaction::None,
+                            bevy::ui::RelativeCursorPosition::default(),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Percent(b[0] * 100.0),
+                                top: Val::Percent(b[1] * 100.0),
+                                width: Val::Percent((b[2] - b[0]) * 100.0),
+                                height: Val::Percent((b[3] - b[1]) * 100.0),
+                                ..default()
+                            },
+                        ));
+                    }
                     for (i, b) in boxes {
                         area.spawn((
                             HitBox(*is_question, *i),
@@ -1822,6 +1892,72 @@ fn draw(
                 }
             });
         });
+}
+
+/// Click and hold a list's scroll bar to drag it, as in a browser:
+/// grabbing the handle keeps the grip, clicking the track elsewhere brings
+/// the handle's centre to the pointer and drags from there.
+fn drag_bars(
+    state: Res<State<GameState>>,
+    play: Option<Res<State<Play>>>,
+    menu: Res<Menu>,
+    mut menus: ResMut<OriginalMenus>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    bars: Query<(&BarHit, &Interaction, &bevy::ui::RelativeCursorPosition)>,
+    log: Res<GameLog>,
+) {
+    let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
+    let overlay = menus.question.is_some() || menus.rebind.is_some() || menus.list.is_some();
+    let (Some(Shown::Page(k)), false, true) = (shown, overlay, mouse.pressed(MouseButton::Left))
+    else {
+        menus.drag = None;
+        return;
+    };
+    // The pointer's height on the track, from the newest track box (the
+    // menu is redrawn as the list moves; a new box knows the pointer a
+    // frame later).
+    let at = |want: Option<usize>| {
+        bars.iter().find_map(|(hit, i, rel)| {
+            let n = rel.normalized?;
+            let pressed = *i == Interaction::Pressed;
+            match want {
+                Some(b) if hit.bar == b => Some((b, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
+                None if pressed => Some((hit.bar, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
+                _ => None,
+            }
+        })
+    };
+    let menus = &mut *menus;
+    let Some(page) = menus.pages.get_mut(&k) else {
+        return;
+    };
+    let (b, offset) = match menus.drag {
+        Some(d) => d,
+        None if mouse.just_pressed(MouseButton::Left) => {
+            let Some((b, y)) = at(None) else {
+                return;
+            };
+            let Some((centre, size)) = rc_menus::lists::handle(&page.screen.layout, b) else {
+                return;
+            };
+            let offset = if (y - centre).abs() <= size / 2.0 {
+                centre - y
+            } else {
+                0.0
+            };
+            menus.drag = Some((b, offset));
+            menus.used_input = true;
+            log.line(format!("original menus: page {k}: dragging scroll bar {b}"));
+            (b, offset)
+        }
+        None => return,
+    };
+    let Some((_, y)) = at(Some(b)) else {
+        return;
+    };
+    if original_lists::drag(&mut page.screen, b, y, offset) {
+        menus.dirty = true;
+    }
 }
 
 /// The menu area: the largest box `across` 4:3 menus wide that fits the

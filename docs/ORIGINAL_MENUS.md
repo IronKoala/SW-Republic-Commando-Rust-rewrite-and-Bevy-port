@@ -101,7 +101,9 @@ against the install the same evening with `rc_probe --pages`:
   Our own "EVERY MAP +" button (a copy of BACK) swaps in the class's
   developer list of every map, named with the game's level titles. The
   list and scroll bar are `rc_menus::lists`; the page's script is
-  `rc_menus::campaign`.
+  `rc_menus::campaign`. The scroll bar's handle can be clicked and dragged
+  (or the track clicked to bring it there), as in a browser. Our added
+  buttons widen to fit their text (`screens::fit_button_to_text`).
 - **Load and save (`CTLoadGameMenu`, `CTSaveGameMenu`, 2026-10-30): use
   the original.** Both list the saves (autosave, which is our checkpoint
   save, then the quicksave, then named saves newest first) with the

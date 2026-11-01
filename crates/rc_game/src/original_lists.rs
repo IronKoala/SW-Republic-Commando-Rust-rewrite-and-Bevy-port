@@ -96,6 +96,29 @@ fn unpick(screen: &mut Screen, campaign: Option<&Campaign>) {
     }
 }
 
+/// After the list scrolled: the chosen row moves with it, and focus on a
+/// row follows it while it's on screen.
+pub fn follow_selection(screen: &mut Screen) {
+    let sel = screen.layout.lists.lists.first().and_then(|l| l.selected);
+    if screen
+        .focus
+        .is_some_and(|f| lists::row_of(&screen.layout, f).is_some())
+    {
+        screen.focus = sel.and_then(|s| lists::widget_of(&screen.layout, 0, s));
+    }
+}
+
+/// Dragging a scroll bar with the mouse (`original_menu::drag_bars`):
+/// bar `b`'s handle follows the pointer at height `y`, keeping the grip
+/// `offset` (the handle's centre minus the pointer when the drag began).
+pub fn drag(screen: &mut Screen, b: usize, y: f32, offset: f32) -> bool {
+    let moved = lists::drag_to(&mut screen.layout, b, y + offset);
+    if moved {
+        follow_selection(screen);
+    }
+    moved
+}
+
 /// When a page with a list opens: its first item has focus.
 pub fn focus_first(menus: &mut OriginalMenus, k: &str) {
     let campaign = if k == CAMPAIGNS {

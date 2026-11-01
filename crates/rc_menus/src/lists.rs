@@ -203,6 +203,35 @@ pub fn bar_track(layout: &MenuLayout, b: usize) -> Option<[f32; 4]> {
     Some([bar.x - half, bar.top, bar.x + half, bar.bottom])
 }
 
+/// Scroll bar `b`'s handle: its centre's height and its height.
+pub fn handle(layout: &MenuLayout, b: usize) -> Option<(f32, f32)> {
+    let bar = layout.lists.bars.get(b)?;
+    match &layout.widget(&bar.name)?.kind {
+        Kind::Sprite(s) => Some((s.pos[1], s.scale[1])),
+        _ => None,
+    }
+}
+
+/// Dragging scroll bar `b`'s handle so its centre is at height `centre`
+/// (as a browser's scroll bar does): scroll its list to the matching item.
+/// Returns whether the list moved.
+pub fn drag_to(layout: &mut MenuLayout, b: usize, centre: f32) -> bool {
+    let (Some(bar), Some(list)) = (layout.lists.bars.get(b), layout.lists.lists.get(b)) else {
+        return false;
+    };
+    let Some((_, size)) = handle(layout, b) else {
+        return false;
+    };
+    let (len, rows) = (list.items.len(), list.rows.max(1));
+    let travel = bar.bottom - bar.top - size;
+    if len <= rows || travel <= 0.0 {
+        return false;
+    }
+    let along = ((centre - bar.top - size / 2.0) / travel).clamp(0.0, 1.0);
+    let position = (along * (len - rows) as f32).round() as i32;
+    scroll_to(layout, b, position)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +322,21 @@ mod tests {
         assert!((bottom_y - 0.75).abs() < 1e-5);
         assert_eq!(bar_click(&l, 0, 0.6), -1);
         assert_eq!(bar_click(&l, 0, 0.76), 0);
+    }
+
+    #[test]
+    fn dragging_the_handle_scrolls_the_list() {
+        let mut l = page(9);
+        // The handle (0.1 high) can travel from 0.55 to 0.75: 6 steps.
+        assert!(drag_to(&mut l, 0, 0.65));
+        assert_eq!(l.lists.lists[0].position, 3);
+        assert_eq!(handle(&l, 0).map(|h| (h.0 * 100.0).round()), Some(65.0));
+        assert!(drag_to(&mut l, 0, 2.0), "past the end: the last item");
+        assert_eq!(l.lists.lists[0].position, 6);
+        assert!(drag_to(&mut l, 0, -1.0));
+        assert_eq!(l.lists.lists[0].position, 0);
+        assert!(!drag_to(&mut l, 0, 0.551), "the same place: no move");
+        assert!(!drag_to(&mut page(2), 0, 0.7), "nothing to scroll");
     }
 
     #[test]
