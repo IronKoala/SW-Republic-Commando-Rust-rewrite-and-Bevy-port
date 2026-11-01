@@ -21,6 +21,7 @@ pub const ALL: &[&str] = &[
     "difficulty",
     "subtitles",
     "prompt_text",
+    "helmet",
     "auto_pull_maneuvers",
     "tactical_visor",
     "tactical_intensity",
@@ -298,6 +299,7 @@ pub fn fallback_items(name: &str) -> Option<Vec<String>> {
         "vsync"
         | "subtitles"
         | "prompt_text"
+        | "helmet"
         | "auto_pull_maneuvers"
         | "blur"
         | "bloom"
@@ -385,6 +387,7 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         "vsync" => yes_no(s.video.vsync),
         "subtitles" => on_off_index(items, s.game.subtitles),
         "prompt_text" => on_off_index(items, s.game.prompt_text),
+        "helmet" => on_off_index(items, s.game.helmet),
         "auto_pull_maneuvers" => on_off_index(items, s.game.auto_pull_maneuvers),
         // The original's list is in its own setting's order (ON, OFF,
         // CYCLE), so the value's place is the setting.
@@ -509,6 +512,7 @@ pub fn write(
         "vsync" => s.video.vsync = first,
         "subtitles" => s.game.subtitles = on_off_value(items, i),
         "prompt_text" => s.game.prompt_text = on_off_value(items, i),
+        "helmet" => s.game.helmet = on_off_value(items, i),
         "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = on_off_value(items, i),
         "tactical_visor" => {
             s.game.tactical_visor =
@@ -554,6 +558,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "difficulty" => s.game.difficulty = d.game.difficulty,
         "subtitles" => s.game.subtitles = d.game.subtitles,
         "prompt_text" => s.game.prompt_text = d.game.prompt_text,
+        "helmet" => s.game.helmet = d.game.helmet,
         "auto_pull_maneuvers" => s.game.auto_pull_maneuvers = d.game.auto_pull_maneuvers,
         "tactical_visor" => s.game.tactical_visor = d.game.tactical_visor,
         "tactical_intensity" => s.game.tactical_intensity = d.game.tactical_intensity,
@@ -641,6 +646,7 @@ mod tests {
                 | "sound_3d"
                 | "subtitles"
                 | "prompt_text"
+                | "helmet"
                 | "auto_pull_maneuvers" => list(&["ON", "OFF"]),
                 "sound_quality" => list(&["LOW", "HIGH"]),
                 "audio_channels" => list(&["16", "32", "64"]),
