@@ -5,7 +5,7 @@ use crate::settings::SettingsPath;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
-use rc_game_core::{Action, ActionState, GameLog};
+use rc_game_core::{Action, ActionState, CurrentLevel, GameLog, Player};
 use std::path::PathBuf;
 
 pub struct ScreenshotPlugin;
@@ -29,12 +29,30 @@ fn take(
     mut commands: Commands,
     actions: Res<ActionState>,
     settings: Res<SettingsPath>,
+    level: Option<Res<CurrentLevel>>,
+    body: Query<&crate::player::Body, With<Player>>,
+    log: Res<GameLog>,
     mut count: Local<u32>,
 ) {
     if !actions.just_pressed(Action::Screenshot) {
         return;
     }
     *count += 1;
+    // Where it was taken, so the same view can be found in the original
+    // game (Unreal units, as the original's editor shows them).
+    if let Ok(b) = body.single() {
+        let eye = b.pawn.eye();
+        log.line(format!(
+            "screenshot {}: map {}, eye at ({:.0}, {:.0}, {:.0}), facing {:.0} deg, looking {:.0} deg up",
+            *count,
+            level.as_ref().and_then(|l| l.map.as_deref()).unwrap_or("?"),
+            eye.x,
+            eye.y,
+            eye.z,
+            b.yaw.to_degrees(),
+            b.pitch.to_degrees()
+        ));
+    }
     let dir = folder(&settings);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

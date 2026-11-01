@@ -468,6 +468,15 @@ copy of the game.
   placeholder). Checked by `cargo run -p rc_visor --example visor_check`
   and `rc_game --script`.
 
+- **Explore mode (tested in the cloud sandbox, not yet on Windows).** F6
+  in a level (or `rc_game --explore`): no damage, enemies don't notice you;
+  F7 flies through walls; Page Down / Page Up jump to the next / previous
+  campaign map in the original's order (read from the game's `engine.u`).
+  Screenshots log where they were taken. Tested: flying, changing level
+  both ways, and a scripted 175-damage hit doing nothing. Not tested:
+  enemies ignoring you with enemies actually on screen. Doors aren't
+  opened (fly through them instead).
+
 ## What doesn't work yet
 
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
@@ -583,6 +592,16 @@ you run it from; if your game isn't in a usual Steam folder, open that file
 and set `folder` under `[game]`. `--map geo_01a` skips the menus.
 `--script` plays itself through the menus and a level and checks each step
 (the log is `logs/rc_game.log`).
+
+**Explore mode**, for walking every level to compare it with the original
+(not part of the original game): press **F6** in a level, or start with
+`--explore`. While it's on you take no damage and enemies ignore you.
+**F7** flies through walls where you look (Space up, C down, Shift
+slower; F7 again to drop back down). **Page Down / Page Up** go to the
+next / previous campaign map, in the original's own order (prologue,
+briefings and epilogue included). Each **F12** screenshot writes the map,
+the spot and the facing to the log, so the same view can be found in the
+original. The keys can be changed in `data/input/bindings.toml`.
 
 To check a controller without the game (lists every controller, which kind
 it is taken for and whether it has a gyro, then logs its buttons, sticks

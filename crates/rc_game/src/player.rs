@@ -266,6 +266,7 @@ fn move_body(
     movers: Option<Res<rc_movers_plugin::LevelMovers>>,
     mut kicks: MessageReader<ViewKick>,
     mut body: Query<(&mut Body, &mut Transform, Has<rc_combat::Dead>), With<Player>>,
+    explore: Option<Res<crate::explore::Explore>>,
     log: Res<GameLog>,
 ) {
     let Ok((mut body, mut t, down)) = body.single_mut() else {
@@ -296,6 +297,28 @@ fn move_body(
             walk: actions.pressed(Action::Walk),
         }
     };
+    // Explore mode's flying: straight where the player looks, through
+    // everything. Afterwards they fall from wherever they are.
+    if explore.is_some_and(|e| e.on && e.fly) {
+        let up = actions.pressed(Action::Jump) as i32 as f32
+            - actions.pressed(Action::Crouch) as i32 as f32;
+        let step = crate::explore::fly_step(
+            body.yaw,
+            body.pitch,
+            actions.movement.y,
+            actions.movement.x,
+            up,
+            actions.pressed(Action::Walk),
+            dt,
+        );
+        body.pawn.location = body.pawn.location + step;
+        body.pawn.velocity = UVec3::ZERO;
+        body.pawn.mode = Mode::Falling;
+        body.time += dt;
+        t.translation = to_bevy(body.pawn.feet());
+        t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
+        return;
+    }
     // Doors and lifts move first, carrying or pushing the player; the
     // player then moves among them (they are in `LevelCollision`).
     if let Some(m) = &movers {

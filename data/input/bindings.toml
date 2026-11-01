@@ -59,6 +59,14 @@ menu_left = ["ArrowLeft", "KeyA"]
 menu_right = ["ArrowRight", "KeyD"]
 menu_accept = ["Enter", "Space"]
 menu_back = ["Escape", "Backspace"]
+# Explore mode, for walking levels to compare them with the original (not
+# in the original game). F6 turns it on: no damage, enemies ignore you.
+# Then F7 flies through walls (Space up, C down, Shift slower), and
+# Page Down / Page Up go to the next / previous campaign map.
+explore_mode = ["F6"]
+explore_fly = ["F7"]
+next_level = ["PageDown"]
+prev_level = ["PageUp"]
 
 [mouse]
 fire = ["Left"]

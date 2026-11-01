@@ -3,7 +3,7 @@
 //! into (see docs/PLUGINS.md).
 //!
 //! Usage:
-//!   rc_game [--settings FILE] [--map NAME] [--script] [--frames N] [--log-input]
+//!   rc_game [--settings FILE] [--map NAME] [--script] [--frames N] [--log-input] [--explore]
 //!
 //! `--settings` picks the settings file (default `settings.toml` in the
 //! folder you run from; written with defaults if missing). `--map` skips the
@@ -11,10 +11,12 @@
 //! and a level instead of reading the keyboard, checks every step, and exits
 //! with code 0 if all passed. `--frames N` closes after N frames.
 //! `--log-input` writes every button press and the move, look and gyro
-//! numbers to the log, to check a controller.
+//! numbers to the log, to check a controller. `--explore` starts with
+//! explore mode on (see `explore.rs`).
 //! Everything is logged to `logs/rc_game.log`.
 
 mod display;
+mod explore;
 mod graphics;
 mod helmet;
 mod hud;
@@ -165,6 +167,7 @@ fn main() -> AppExit {
     let mut use_script = false;
     let mut frames = None;
     let mut log_input = false;
+    let mut explore = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -173,10 +176,11 @@ fn main() -> AppExit {
             "--script" => use_script = true,
             "--frames" => frames = args.next().and_then(|n| n.parse().ok()),
             "--log-input" => log_input = true,
+            "--explore" => explore = true,
             other => {
                 eprintln!("unknown option {other}");
                 eprintln!(
-                    "usage: rc_game [--settings FILE] [--map NAME] [--script] [--frames N] [--log-input]"
+                    "usage: rc_game [--settings FILE] [--map NAME] [--script] [--frames N] [--log-input] [--explore]"
                 );
                 return AppExit::from_code(2);
             }
@@ -493,6 +497,7 @@ fn main() -> AppExit {
     app.add_plugins(rc_squad_plugin::SquadPlugin);
     app.add_plugins(rc_save::SavePlugin);
     app.add_plugins(visor::GameVisorPlugin);
+    app.add_plugins(explore::ExplorePlugin { start_on: explore });
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),

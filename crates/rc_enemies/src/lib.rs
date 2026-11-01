@@ -41,7 +41,7 @@ use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, CurrentLevel, FactoryOrder, GameLog, GamePaths, GameSet, GameState, LevelCollision,
-    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
+    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags, Unseen,
 };
 use rc_nav::NavGraph;
 use rc_package::Package;
@@ -640,11 +640,12 @@ fn summary(f: &Fight, log: &GameLog) {
 
 /// Where the player is, for droids to look at (Unreal units).
 fn player_target(
-    player: &Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
+    player: &Query<(&Transform, Option<&Hittable>, Has<Dead>, Has<Unseen>), With<Player>>,
     camera: &Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
 ) -> Option<Target> {
-    let (t, hit, dead) = player.single().ok()?;
-    if dead {
+    let (t, hit, dead, unseen) = player.single().ok()?;
+    // Down, or unseen (explore mode): nothing to look for.
+    if dead || unseen {
         return None;
     }
     let feet = to_unreal(t.translation);
@@ -664,7 +665,7 @@ fn think(
     time: Res<Time>,
     mut fight: ResMut<Fight>,
     collision: Option<Res<LevelCollision>>,
-    player: Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
+    player: Query<(&Transform, Option<&Hittable>, Has<Dead>, Has<Unseen>), With<Player>>,
     camera: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
     allies: Query<(&Transform, &Hittable, &Team), (Without<Player>, Without<Dead>, Without<Droid>)>,
     mut droids: Query<&mut Droid>,

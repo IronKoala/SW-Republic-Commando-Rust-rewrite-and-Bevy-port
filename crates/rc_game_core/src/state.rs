@@ -115,6 +115,12 @@ pub struct LevelCollision(pub Arc<dyn World + Send + Sync>);
 #[derive(Component, Debug, Default)]
 pub struct Player;
 
+/// On the player: enemies don't notice them (explore mode). Enemies act as
+/// if there were no player to look for, so spawners that wait for the
+/// player to walk near stay off.
+#[derive(Component, Debug, Default)]
+pub struct Unseen;
+
 /// The camera that shows the player's view. Weapons in first person and the
 /// on-screen display attach to this. A VR mod replaces this camera, not the
 /// gameplay around it.

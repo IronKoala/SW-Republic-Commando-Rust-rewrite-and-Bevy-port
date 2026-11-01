@@ -58,7 +58,7 @@ pub use sound::{SoundAt, Voice};
 pub use paths::GamePaths;
 pub use state::{
     playing, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate, MusicMood, Play,
-    Player, PlayerCamera, PlayerStart,
+    Player, PlayerCamera, PlayerStart, Unseen,
 };
 
 use bevy::prelude::*;

@@ -2571,6 +2571,39 @@ a screenshot of the game shrunk to 320x240: the mean difference must stay
 under 12 of 255 and fewer than 5% of pixels may differ by more than 40.
 centre.
 
+## Explore mode (`rc_game/src/explore.rs`)
+
+For walking every level to compare it with the original. Not in the
+original game, and off unless the player turns it on (F6, or `--explore`).
+
+- **State:** the `Explore` resource (on, flying, and the campaign order once
+  read). It lives for the whole run, so it stays on from map to map; each
+  new map shows "Explore mode on" so it's never on unnoticed.
+- **No damage, not noticed:** while on, the player gets
+  `rc_combat::Invulnerable` (checked every frame, so a level script can't
+  switch it off) and the shared marker `rc_game_core::Unseen`. The enemies
+  part treats an `Unseen` player like a downed one: there's no target to
+  look for, so spawners that wait for the player to come near stay off. Turning
+  explore mode off removes only what it added.
+- **Flying:** `player.rs` skips the walking step and moves the body by
+  `explore::fly_step` (along the view, sideways, straight up or down,
+  1500 units a second, 300 holding walk). No collision, doors and lifts
+  don't carry it. Afterwards the body is falling, so it drops from there.
+- **Changing level:** Page Down / Page Up send the same `ChangeLevel`
+  message a level exit sends, so loading, carrying health and ammo and the
+  start checkpoint all work as usual. The order is the original's campaign
+  list, `GameEngine.ProgressLevels` in `engine.u` (56 maps, prologue to
+  epilogue, briefings included), read with `rc_package::class_library` the
+  first time it's needed. If that can't be read, our level list's order is
+  used.
+- **Comparing:** every screenshot logs the map, eye position (Unreal units)
+  and facing, so the same spot can be found in the original.
+- **Keys:** four actions (`explore_mode`, `explore_fly`, `next_level`,
+  `prev_level`) in `data/input/bindings.toml`, changeable like any other.
+  The fly and level keys do nothing while explore mode is off.
+- **For VR later:** it only reads `ActionState` and moves the body, so a VR
+  camera follows it like any other movement.
+
 ## The helmet frame (`rc_menus::helmet`, `rc_game/src/helmet.rs`)
 
 **What the original does.** The HUD class `CTGame.CTHUD` has

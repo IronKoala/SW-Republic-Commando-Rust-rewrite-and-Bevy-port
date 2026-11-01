@@ -71,10 +71,19 @@ pub enum Action {
     GyroRatchet,
     /// Pressed: gyro aiming on or off.
     GyroToggle,
+    // Explore mode, for walking levels to compare them with the original
+    // (not part of the original game).
+    /// Explore mode on or off: no damage, enemies don't notice the player.
+    ExploreMode,
+    /// In explore mode: fly through walls on or off.
+    ExploreFly,
+    /// In explore mode: go to the next or previous campaign map.
+    NextLevel,
+    PrevLevel,
 }
 
 impl Action {
-    pub const ALL: [Action; 41] = [
+    pub const ALL: [Action; 45] = [
         Action::MoveForward,
         Action::MoveBack,
         Action::StrafeLeft,
@@ -116,6 +125,10 @@ impl Action {
         Action::Screenshot,
         Action::GyroRatchet,
         Action::GyroToggle,
+        Action::ExploreMode,
+        Action::ExploreFly,
+        Action::NextLevel,
+        Action::PrevLevel,
     ];
 
     /// The name used in the bindings file.
@@ -162,6 +175,10 @@ impl Action {
             Action::Screenshot => "screenshot",
             Action::GyroRatchet => "gyro_ratchet",
             Action::GyroToggle => "gyro_toggle",
+            Action::ExploreMode => "explore_mode",
+            Action::ExploreFly => "explore_fly",
+            Action::NextLevel => "next_level",
+            Action::PrevLevel => "prev_level",
         }
     }
 
