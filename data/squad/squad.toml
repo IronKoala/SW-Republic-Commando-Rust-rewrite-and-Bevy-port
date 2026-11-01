@@ -65,7 +65,11 @@ radius = 110
 # they're within `lp_activate` of it. Further away they set off back, and
 # stop once they're within `lp_deactivate` of it or at their spot.
 # Beyond `hp_activate` the pull is urgent (always run). `prevent_range`
-# is how far from it a member may go to fight. Values: the stance's
+# is how far from it a member may go to fight (and to take cover).
+# `seek_cover_after` is how many seconds into a fight a member looks for
+# cover (the game's TimeBeforeSeekingCover); `cover_near_tether = "yes"`
+# picks the cover nearest what they're tied to rather than nearest
+# themselves (the game's FavorCombatNearestTether). Values: the stance's
 # class defaults, falling back to SquadStance's.
 [stance.form_up]          # F2 in the original. CTGame.StanceFormUp
 name = "Form up"
@@ -75,6 +79,8 @@ lp_deactivate = 192       # StanceFormUp
 hp_activate = 1280        # StanceFormUp
 hp_deactivate = 768       # StanceFormUp
 prevent_range = 1024      # SquadStance
+seek_cover_after = 2      # StanceFormUp
+cover_near_tether = "yes" # StanceFormUp
 
 [stance.secure_position]  # F3, aimed at a spot. CTGame.StanceSecurePosition
 name = "Secure area"
@@ -84,6 +90,8 @@ lp_deactivate = 128       # StanceSecurePosition
 hp_activate = 1024        # SquadStance
 hp_deactivate = 512       # SquadStance
 prevent_range = 640       # StanceSecurePosition
+seek_cover_after = 0      # StanceSecurePosition
+cover_near_tether = "yes" # StanceSecurePosition
 
 [stance.search_and_destroy]  # F1. CTGame.StanceSearchAndDestroy
 name = "Search and destroy"
@@ -93,6 +101,8 @@ lp_deactivate = 256
 hp_activate = 2048
 hp_deactivate = 1280
 prevent_range = 1024      # SquadStance
+seek_cover_after = 0      # StanceSearchAndDestroy
+cover_near_tether = "no"
 
 [stance.hold]             # no key in the PC version. CTGame.StanceHold
 name = "Hold"
@@ -102,6 +112,8 @@ lp_deactivate = 256
 hp_activate = 768
 hp_deactivate = 384
 prevent_range = 256
+seek_cover_after = 6      # SquadStance
+cover_near_tether = "no"
 
 # How squad mates fight. The original decides this in compiled code we
 # don't read, so the rules are our own (docs/DESIGN.md, "Squad fighting
@@ -135,6 +147,34 @@ max_aim_yaw = 60
 # the shot can stray. Our own. It used to be measured from the body's
 # middle only, which let shots pass over shoulders into friends.
 friendly_clearance = 20
+
+# Taking cover in a fight. Squad mates use the map's cover points (the
+# level designers' CoverPoint actors, the same ones the droids use): once
+# they've fought for their order's `seek_cover_after`, each one heads for
+# a free cover point within the order's `prevent_range` that faces the
+# enemy and still gives a clear shot when standing, crouches there between
+# bursts and stands up to fire. Which point and when to leave are our own
+# rules (the original decides in compiled code; docs/DESIGN.md, "Taking
+# cover"); the numbers say where they come from.
+[cover]
+# "yes" or "no". "no" keeps them standing in the open, as before.
+use_cover = "yes"
+# How far from themselves they look for a cover point, uu. Guess (the
+# same as the droids').
+search_radius = 1500
+# A cover point shields from enemies within this angle around the way it
+# faces, degrees (the whole cone). Game: CoverPoint FOVdegrees.
+fov = 140
+# A cover point with the enemy closer than this is no use, uu. Our own.
+min_enemy_distance = 256
+# Seconds at one cover point before looking for another. Game: CTBot
+# CoverBoredomTime.
+boredom_time = 15
+# Seconds with no enemy in sight before leaving cover and going back to
+# their place in the order. Our own.
+calm_time = 4
+# Crouch in cover between bursts: "yes" or "no".
+crouch = "yes"
 
 # Reviving a downed commando. Squad mates can't die in the original
 # (bCannotDie): at 0 health they go down until someone revives them. Who

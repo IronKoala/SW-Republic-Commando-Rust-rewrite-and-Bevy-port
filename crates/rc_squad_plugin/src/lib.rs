@@ -120,6 +120,8 @@ pub struct SquadFightStats {
     /// Revives done: by each member, and by the player.
     pub revives: Vec<u32>,
     pub player_revives: u32,
+    /// Times each member headed for a cover point.
+    pub covers: Vec<u32>,
     /// Seconds from going down to back up, every revive.
     pub revive_waits: Vec<f32>,
     /// Squad time each commando went down (index = member, last = player).
@@ -134,6 +136,7 @@ impl SquadFightStats {
             hits: vec![0; n],
             kills: vec![0; n],
             revives: vec![0; n],
+            covers: vec![0; n],
             down_since: vec![None; n + 1],
             ..Default::default()
         }
@@ -197,8 +200,11 @@ impl SquadMapData {
         }
         match NavGraph::from_map(&pkg, &data) {
             Ok(g) => {
-                out.notes
-                    .push(format!("path network: {} nodes", g.nodes.len()));
+                let covers = g.nodes.iter().filter(|n| n.is_cover()).count();
+                out.notes.push(format!(
+                    "path network: {} nodes, {covers} cover points",
+                    g.nodes.len()
+                ));
                 out.nav = Some(g);
             }
             Err(e) => out
@@ -671,7 +677,10 @@ fn take_orders(
         squad.auto_pull = auto_pull;
         log_line(
             &log,
-            format!("auto pull maneuvers {}", if auto_pull { "on" } else { "off" }),
+            format!(
+                "auto pull maneuvers {}",
+                if auto_pull { "on" } else { "off" }
+            ),
         );
     }
     let leader = leader_from(pt);
@@ -904,6 +913,18 @@ fn run_squad(
                     }
                 }
             }
+            SquadEvent::CoverTaken { member, .. } => {
+                log_line(&log, format!("t={:.2} {e}", squad.time));
+                if let Some(i) = squad
+                    .members
+                    .iter()
+                    .position(|m| &m.settings.name == member)
+                {
+                    if let Some(n) = stats.covers.get_mut(i) {
+                        *n += 1;
+                    }
+                }
+            }
             _ => log_line(&log, format!("t={:.2} {e}", squad.time)),
         }
     }
@@ -1080,13 +1101,14 @@ pub fn fight_line(squad: &Squad, stats: &SquadFightStats) -> String {
     let mut s = format!("t={:.2} fight:", squad.time);
     for (i, m) in squad.members.iter().enumerate() {
         s.push_str(&format!(
-            " {} {} shots, {} hits, {} kills, {} revives, held fire {} times;",
+            " {} {} shots, {} hits, {} kills, {} revives, held fire {} times, took cover {} times;",
             m.settings.name,
             stats.shots.get(i).copied().unwrap_or(0),
             stats.hits.get(i).copied().unwrap_or(0),
             stats.kills.get(i).copied().unwrap_or(0),
             stats.revives.get(i).copied().unwrap_or(0),
-            m.fight.held_fire
+            m.fight.held_fire,
+            stats.covers.get(i).copied().unwrap_or(0)
         ));
     }
     let waits = &stats.revive_waits;
@@ -1213,15 +1235,27 @@ fn write_readout(
 
 fn place_bodies(
     state: Res<SquadState>,
-    mut mates: Query<(&SquadMate, &mut Transform), Without<Player>>,
+    mut mates: Query<(&SquadMate, &mut Transform, Option<&mut Hittable>), Without<Player>>,
 ) {
     let Some(squad) = state.squad.as_ref() else {
         return;
     };
-    for (mate, mut t) in &mut mates {
+    for (mate, mut t, hit) in &mut mates {
         if let Some(m) = squad.members.get(mate.index) {
             t.translation = to_bevy(m.pawn.feet());
             t.rotation = yaw_rotation(m.yaw);
+            // Crouched behind cover, they're a smaller target.
+            if let Some(mut hit) = hit {
+                let h = if m.pawn.crouched {
+                    m.pawn.extent().z
+                } else {
+                    Hittable::COMMANDO.half_height
+                };
+                if hit.half_height != h {
+                    hit.half_height = h;
+                    hit.center_up = h;
+                }
+            }
         }
     }
 }

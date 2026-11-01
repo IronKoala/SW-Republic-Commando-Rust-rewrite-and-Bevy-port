@@ -1149,3 +1149,189 @@ fn shipped_posts_are_pullable_and_once_jobs_are_not() {
         assert_eq!(j.pullable, j.kind == JobKind::Post, "{}", j.key);
     }
 }
+
+// ---- Taking cover -------------------------------------------------------
+
+fn cover_at(id: usize, x: f32, y: f32, facing_deg: f32) -> CoverSpot {
+    // Placed at a standing body's middle, like the map's cover points.
+    CoverSpot {
+        id,
+        centre: Vec3::new(x, y, 84.0),
+        facing: facing_deg.to_radians(),
+    }
+}
+
+/// Four cover points facing a droid at (900, 600), one facing away, one
+/// beyond form up's 1024 uu reach from the leader at the origin.
+fn cover_room() -> StraightWithCover {
+    let toward = |x: f32, y: f32| (600.0 - y).atan2(900.0 - x).to_degrees();
+    StraightWithCover(vec![
+        cover_at(10, -150.0, -250.0, toward(-150.0, -250.0)),
+        cover_at(11, -150.0, 250.0, toward(-150.0, 250.0)),
+        cover_at(12, 200.0, 300.0, toward(200.0, 300.0)),
+        cover_at(13, -300.0, 0.0, toward(-300.0, 0.0)),
+        // Faces away from the droid: no use.
+        cover_at(20, 100.0, -100.0, toward(100.0, -100.0) + 180.0),
+        // Too far from the leader for form up (prevent range 1024).
+        cover_at(21, -1300.0, 0.0, toward(-1300.0, 0.0)),
+    ])
+}
+
+fn run_nav(
+    squad: &mut Squad,
+    leader: Leader,
+    secs: f32,
+    world: &BrushWorld,
+    nav: &dyn Navigator,
+    mut each: impl FnMut(&Squad),
+) -> Vec<SquadEvent> {
+    let mut events = Vec::new();
+    let mut t = 0.0;
+    while t < secs {
+        events.extend(squad.update(DT, leader, world, nav));
+        each(squad);
+        t += DT;
+    }
+    events
+}
+
+#[test]
+#[allow(clippy::needless_range_loop)]
+fn squad_mates_take_cover_and_crouch_between_bursts() {
+    let world = test_room();
+    let nav = cover_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    squad.threats = vec![threat(7, Vec3::new(900.0, 600.0, 0.0))];
+    // Form up waits 2 s of fighting (StanceFormUp TimeBeforeSeekingCover).
+    let early = run_nav(&mut squad, start, 1.5, &world, &nav, |_| {});
+    assert!(
+        !has(&early, |e| matches!(e, SquadEvent::CoverTaken { .. })),
+        "took cover before the order's wait"
+    );
+    let mut crouched_in_cover = [false; 3];
+    let mut shots_from_cover = [0usize; 3];
+    let mut events = Vec::new();
+    let mut t = 0.0;
+    while t < 8.0 {
+        let ev = squad.update(DT, start, &world, &nav);
+        for i in 0..3 {
+            if squad.in_cover(i) {
+                crouched_in_cover[i] |= squad.members[i].pawn.crouched;
+                shots_from_cover[i] += shots(&ev).iter().filter(|s| s.0 == i).count();
+            }
+        }
+        events.extend(ev);
+        t += DT;
+    }
+    let taken: Vec<usize> = squad
+        .members
+        .iter()
+        .map(|m| m.cover.expect("everyone in cover").spot.id)
+        .collect();
+    let unique: std::collections::HashSet<_> = taken.iter().collect();
+    assert_eq!(unique.len(), 3, "two took the same cover: {taken:?}");
+    assert!(
+        taken.iter().all(|id| (10..=13).contains(id)),
+        "used a cover point facing away or too far: {taken:?}"
+    );
+    for i in 0..3 {
+        assert!(squad.in_cover(i), "member {i} not at their cover");
+        assert!(crouched_in_cover[i], "member {i} never crouched in cover");
+    }
+    // Someone still shoots from cover (standing up to fire).
+    assert!(
+        shots_from_cover.iter().sum::<usize>() > 0,
+        "nobody fired from cover"
+    );
+}
+
+#[test]
+fn squad_mates_leave_cover_when_the_fight_is_over() {
+    let world = test_room();
+    let nav = cover_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.threats = vec![threat(7, Vec3::new(900.0, 600.0, 0.0))];
+    run_nav(&mut squad, start, 8.0, &world, &nav, |_| {});
+    assert!(squad.members.iter().all(|m| m.cover.is_some()));
+    squad.threats.clear();
+    // 4 s calm (`calm_time`) and a think later, they're out.
+    let ev = run_nav(&mut squad, start, 3.0, &world, &nav, |_| {});
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::CoverLeft { .. })));
+    let ev = run_nav(&mut squad, start, 4.0, &world, &nav, |_| {});
+    assert!(has(
+        &ev,
+        |e| matches!(e, SquadEvent::CoverLeft { why, .. } if why == "no enemy in sight")
+    ));
+    assert!(squad
+        .members
+        .iter()
+        .all(|m| m.cover.is_none() && !m.pawn.crouched));
+}
+
+#[test]
+fn squad_mates_leave_cover_to_follow_a_leader_who_moves_on() {
+    let world = test_room();
+    let nav = cover_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.threats = vec![threat(7, Vec3::new(900.0, 600.0, 0.0))];
+    run_nav(&mut squad, start, 8.0, &world, &nav, |_| {});
+    assert!(squad.members.iter().all(|m| m.cover.is_some()));
+    // The player runs 1500 uu away: past form up's 1024 uu reach.
+    let away = leader_at(-1800.0, 0.0, 180.0);
+    let ev = run_nav(&mut squad, away, 1.0, &world, &nav, |_| {});
+    assert!(has(&ev, |e| matches!(e, SquadEvent::CoverLeft { .. })));
+    // Back to following: the cover beyond the old reach (id 21) is now
+    // near the leader and faces the droid, so they may take it, but no
+    // one stays at the far ones.
+    for m in &squad.members {
+        if let Some(c) = m.cover {
+            assert!(
+                (c.feet - away.feet).length_2d() <= 1024.0,
+                "{:?}",
+                c.spot.id
+            );
+        }
+    }
+}
+
+#[test]
+fn a_new_order_calls_everyone_out_of_cover() {
+    let world = test_room();
+    let nav = cover_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    squad.threats = vec![threat(7, Vec3::new(900.0, 600.0, 0.0))];
+    run_nav(&mut squad, start, 8.0, &world, &nav, |_| {});
+    let ev = squad.command(Order::FormUp, start, &world);
+    assert_eq!(
+        ev.iter()
+            .filter(|e| matches!(e, SquadEvent::CoverLeft { why, .. } if why == "new order"))
+            .count(),
+        3
+    );
+    assert!(squad.members.iter().all(|m| m.cover.is_none()));
+}
+
+#[test]
+fn cover_can_be_switched_off_in_the_settings() {
+    let world = test_room();
+    let nav = cover_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let settings = SquadSettings::default()
+        .with_overrides("[cover]\nuse_cover = \"no\"\n[stance.form_up]\nseek_cover_after = 1\ncover_near_tether = \"no\"\n")
+        .unwrap();
+    assert!(!settings.cover.use_cover);
+    assert_eq!(settings.form_up.seek_cover_after, 1.0);
+    assert!(!settings.form_up.cover_near_tether);
+    let mut squad = Squad::new(settings, MoveParams::player_commando(), start, &world).0;
+    squad.threats = vec![threat(7, Vec3::new(900.0, 600.0, 0.0))];
+    let ev = run_nav(&mut squad, start, 6.0, &world, &nav, |_| {});
+    assert!(!has(&ev, |e| matches!(e, SquadEvent::CoverTaken { .. })));
+    assert!(SquadSettings::default()
+        .with_overrides("[cover]\nfov = \"wide\"\n")
+        .is_err());
+}

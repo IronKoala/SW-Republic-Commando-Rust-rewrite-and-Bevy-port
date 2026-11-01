@@ -414,7 +414,12 @@ impl Squad {
                 m.state,
                 MemberState::Working { .. } | MemberState::Reviving { .. }
             );
-        let eye = m.pawn.eye();
+        // In cover they see from where they stand up to shoot.
+        let eye = if self.in_cover(i) {
+            crate::cover::standing_eye(&m.pawn)
+        } else {
+            m.pawn.eye()
+        };
         let f = self.fight_for(i);
         let sight = f.sight_radius;
         let best = if busy {
@@ -461,8 +466,12 @@ impl Squad {
         events: &mut Vec<SquadEvent>,
     ) {
         let f = self.fight_for(i);
+        let in_cover = self.in_cover(i);
+        let crouch_ok = in_cover && self.settings.cover.crouch;
         let Some(target) = self.target_of(i).copied() else {
             self.members[i].fight.target = None;
+            // In cover with no one in sight: stay down.
+            self.members[i].crouch = crouch_ok;
             return;
         };
         let now = self.time;
@@ -473,6 +482,7 @@ impl Squad {
                 MemberState::Working { .. } | MemberState::Reviving { .. }
             )
         {
+            self.members[i].crouch = false;
             return;
         }
         let origin = m.pawn.eye() - Vec3::new(0.0, 0.0, 12.0);
@@ -487,6 +497,15 @@ impl Squad {
         self.members[i].fight.seen_for += dt;
         let m = &self.members[i];
         if m.fight.seen_for < f.reaction_time || now < m.fight.next_shot {
+            // Resting between bursts: duck down behind the cover.
+            let resting = m.fight.burst_left == f.burst_count;
+            self.members[i].crouch = crouch_ok && resting;
+            return;
+        }
+        // Time to shoot: stand up from cover first.
+        let crouched = m.pawn.crouched;
+        self.members[i].crouch = false;
+        if crouched {
             return;
         }
         if !moving && off_facing > f.max_aim_yaw {

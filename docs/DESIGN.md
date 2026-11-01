@@ -1818,6 +1818,55 @@ target), so squad mates are only hurt by stray bolts and the player. The
 original also has the downed player call the squad over with an order;
 here they come on their own.
 
+### Taking cover (`rc_squad/src/cover.rs`, `[cover]` in `squad.toml`)
+
+In the original, squad mates in a fight run to the map's cover points and
+crouch behind them between bursts. How they pick one is compiled code, so
+the rules are **our own**, but they lean on numbers the game stores:
+
+| What | Value | From |
+|---|---|---|
+| Seconds of fighting before looking for cover | form up 2, secure area 0, search and destroy 0, hold 6 | each stance's `TimeBeforeSeekingCover` (SquadStance 6) |
+| How far from what the order ties them to | the stance's `prevent_range` (1024 / 640 / 1024 / 256) | `PreventRange` |
+| Cover nearest the tether, not nearest themselves | form up, secure area | `FavorCombatNearestTether` |
+| A cover point shields enemies within | 140° around the way it faces | CoverPoint `FOVdegrees` |
+| Look for another after | 15 s at one point | CTBot `CoverBoredomTime` |
+| Look within | 1500 uu of themselves | guess (the droids' value) |
+| Enemy at least this far from the point | 256 uu | our own |
+| Leave cover after no enemy in sight for | 4 s | our own |
+
+*Cover points.* The path network (`rc_nav::NavGraph`) already reads every
+`CoverPoint` actor with the way it faces; `Navigator::cover_near` lists
+them for the squad (`StraightWithCover` in tests).
+
+*Taking one.* On each think, a member who is up, not on a job or a
+revive, has had an enemy in sight for the order's wait, and holds no cover
+yet, checks the cover points near it, nearest first: not taken by another
+squad mate, within the order's prevent range of the tether, the enemy
+inside the point's 140° cone and between 256 uu and its sight radius, and
+a clear line from standing eye height at the point to the enemy's eyes (at
+most 12 such line tests per look). With `cover_near_tether` the cheapest is
+the one nearest the tether, otherwise the one nearest the member. The goal
+becomes the floor under the point (`TakenCover::feet`), and the member
+goes there ordered, all the way. Finding none, it tries again in 1 s.
+
+*In cover.* Standing still at the point (`Squad::in_cover`), the member
+crouches whenever it isn't about to fire: between bursts, and with no
+enemy in sight. When the next shot is due it stands up first (one frame or
+more until the body has risen), then fires. It sees from standing eye
+height while in cover, so ducking doesn't lose the target. Crouched, its
+`Hittable` body is the crouched height, so it's harder to hit, and it plays
+the original's `CrouchBreathe` animation (`crouch` in `looks.toml`).
+
+*Leaving.* No enemy in sight for `calm_time`; the point is further than the
+prevent range from the tether (the player walked on); a new squad order
+(every non-marker order calls everyone out, and the order's wait starts
+again); a marked job or a revive; going down. After `boredom_time` at one
+point with an enemy still in sight, it moves to another point if there is
+one. Each take and leave is logged (`takes cover at ...`, `leaves cover:
+why`), the map's cover point count is in the `path network:` line, and the
+5-second `fight:` line counts covers taken.
+
 ### How we check it without looking
 
 `rc_squad_sim` runs the real squad and combat plugins on a real map with no

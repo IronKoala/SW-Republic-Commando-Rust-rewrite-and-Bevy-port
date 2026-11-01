@@ -76,7 +76,7 @@ copy of the game.
   F4 cancel, and aiming at a squad marker (like a bacta dispenser) and
   pressing the squad order key sends one of them to do it. Distances are
   the game's own; every number is in `data/squad/squad.toml`. The
-  windowless test run `rc_squad_sim` passes 33 checks on geo_01a. They
+  windowless test run `rc_squad_sim` passes 36 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
   and stays put until revived. They are in the game program (`rc_game`):
   start a level and they stand with you.
@@ -119,6 +119,18 @@ copy of the game.
   and `[revive]` parts of `data/squad/squad.toml`; the ones marked "guess"
   still have to be read from the game. Droids still only shoot at you, not
   at the squad.
+
+- **The squad takes cover (tested in the cloud sandbox by numbers, not yet
+  on Windows or with eyes).** In a fight, squad mates run to the map's
+  cover points (the same ones the droids use), crouch behind them between
+  bursts and stand up to shoot, and are harder to hit while crouched. They
+  wait the original's time for each order before looking (2 s when
+  following you, at once for secure area and search and destroy), only use
+  cover within the order's reach of you or the ordered spot, and leave it
+  when the enemies are gone, when you move on, or when you give a new
+  order. Which cover they pick is our own rule; the `[cover]` part of
+  `data/squad/squad.toml` has every number (`use_cover = "no"` turns it
+  off).
 
 - **Squad context orders (tested in the cloud sandbox by numbers, not yet
   on Windows, in a real level, or with eyes).** Each kind of squad marker
@@ -837,12 +849,13 @@ To run the squad's test on the first level (no window; about a minute):
 cargo run --release -p rc_squad_plugin --example rc_squad_sim
 ```
 
-It logs to `logs\rc_squad_sim.log` and should end with `SIM DONE: 33 checks
+It logs to `logs\rc_squad_sim.log` and should end with `SIM DONE: 36 checks
 passed, 0 failed`. Lines starting `squad: t=` show each squad mate's
 position and distance to you once a second; `ORDER`, `sets off`,
 `arrived`, `STUCK` and `working at` lines show what they decided;
 `targets`, `fires at`, `KILLED`, `goes to revive`, `revived` and the
-`fight:` lines every 5 s show their fight.
+`fight:` lines every 5 s show their fight; `takes cover at` and
+`leaves cover:` lines show them using the map's cover points.
 
 The squad's fight in the test room, with no game files needed (a few
 seconds):
