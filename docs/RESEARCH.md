@@ -497,12 +497,16 @@ objects. It now reads groups too.
 -> `SBDAudio`, `TrandoshanMercenary` -> `TranMercAudio`,
 `GeonosianWarrior` -> `WarriorAudio`). Its one property, `Table`, is an
 array of 34 object references: entry *i* is the line group for event
-*i*+1 of the enum `EPawnAudioEvent` in engine.u (`PAE_DieQuiet`,
+*i* of the enum `EPawnAudioEvent` in engine.u (entry 0 is `PAE_Invalid`
+and empty; then `PAE_DieQuiet`,
 `PAE_DieFall`, `PAE_DieExplosion`, `PAE_DieLargeArms`, `PAE_DieSmallArms`,
 `PAE_DieElectricity`, `PAE_DieFire`, `PAE_HurtFall`, `PAE_HurtExplosion`,
 `PAE_HurtLargeArms`, `PAE_HurtMelee`, `PAE_HurtSmallArms`,
 `PAE_HurtElectricity`, `PAE_HurtFire`, `PAE_SpottedEnemy`, ...; checked by
-the group names matching, e.g. entry 0 is `BD1_DieQuiet`). Empty entries
+the group names matching, e.g. entry 1 is `BD1_DieQuiet`. An earlier
+note here said entry 0, one off: corrected 2026-11-01, when all 193 events
+of the Delta squad tables were checked name by name with
+`cargo run -p rc_combat --example rc_audio_tables`). Empty entries
 mean the character has no line for that event. The groups are
 `SoundMultiple`s in `character_voice.uax` (prefixes `BD1_`, `SBD_`, `TMC_`,
 `GWR_`), each holding 2 to 10 takes. Which take plays, and how often a

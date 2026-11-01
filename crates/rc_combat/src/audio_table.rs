@@ -3,8 +3,10 @@
 //! Every character class names an "audio table" class in
 //! `GameData/System/CTAudio.u` (`Delta07Audio` for Sev, `BattleDroidAudio`
 //! for a battle droid). Its one default value, `Table`, is a list of sound
-//! references: entry *i* is the sound for event *i*+1 of the enum
-//! `EPawnAudioEvent` in `GameData/System/Engine.u` (event 0 is "none").
+//! references: entry *i* is the sound for event *i* of the enum
+//! `EPawnAudioEvent` in `GameData/System/Engine.u`. Entry 0 is event 0,
+//! `PAE_Invalid`, and is always empty. Checked against the group names:
+//! Sev's entry 105 is `D07_FormUp` and event 105 is `PAE_FormUp`.
 //! An empty entry means the character has nothing to say for that event.
 //! See docs/RESEARCH.md, "Grenade explosion sounds and enemy voices".
 
@@ -62,7 +64,8 @@ pub fn read_audio_table(
     Err(format!("{class} has no Table"))
 }
 
-/// The list's bytes: a count, then one object reference per event.
+/// The list's bytes: a count, then one object reference per event,
+/// starting with event 0 (`Invalid`).
 fn table_entries(
     pkg: &Package,
     bytes: &[u8],
@@ -77,9 +80,9 @@ fn table_entries(
             continue;
         }
         let event = events
-            .get(i + 1)
+            .get(i)
             .cloned()
-            .unwrap_or_else(|| format!("event{}", i + 1));
+            .unwrap_or_else(|| format!("event{i}"));
         out.push((event, pkg.object_name(obj).to_string()));
     }
     Ok(out)
