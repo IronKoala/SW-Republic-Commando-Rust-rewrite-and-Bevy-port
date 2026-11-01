@@ -523,5 +523,26 @@ fn main() -> AppExit {
     } else {
         app.add_plugins(input::DeviceInputPlugin);
     }
+    app.insert_resource(bevy::render::error_handler::RenderErrorHandler(
+        log_render_error,
+    ));
     app.run()
+}
+
+/// Bevy quits on any error from the graphics card's driver layer (wgpu).
+/// It still does, but the reason now goes into the log first, since the
+/// terminal scrolls it away under the shutdown warnings.
+fn log_render_error(
+    error: &bevy::render::error_handler::RenderError,
+    main_world: &mut World,
+    _render_world: &mut World,
+) -> bevy::render::error_handler::RenderErrorPolicy {
+    if let Some(log) = main_world.get_resource::<GameLog>() {
+        log.crash_line(format!(
+            "CRASH: graphics error ({:?}), quitting: {}",
+            error.ty, error.description
+        ));
+    }
+    main_world.write_message(AppExit::error());
+    bevy::render::error_handler::RenderErrorPolicy::StopRendering
 }
