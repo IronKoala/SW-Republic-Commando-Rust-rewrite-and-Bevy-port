@@ -41,10 +41,12 @@ pub enum Pose {
     Down,
     /// Kneeling by a downed commando.
     Revive,
+    /// Crouched behind cover between bursts.
+    Crouch,
 }
 
 impl Pose {
-    pub const ALL: [Pose; 9] = [
+    pub const ALL: [Pose; 10] = [
         Pose::Idle,
         Pose::Walk,
         Pose::Run,
@@ -54,6 +56,7 @@ impl Pose {
         Pose::Fire,
         Pose::Down,
         Pose::Revive,
+        Pose::Crouch,
     ];
 
     pub fn key(self) -> &'static str {
@@ -67,6 +70,7 @@ impl Pose {
             Pose::Fire => "fire",
             Pose::Down => "down",
             Pose::Revive => "revive",
+            Pose::Crouch => "crouch",
         }
     }
 
@@ -88,6 +92,9 @@ pub struct Animations {
     pub fire: String,
     pub down: String,
     pub revive: String,
+    /// Optional in mods' files: without it a crouched commando uses `idle`.
+    #[serde(default)]
+    pub crouch: String,
 }
 
 impl Animations {
@@ -102,6 +109,8 @@ impl Animations {
             Pose::Fire => &self.fire,
             Pose::Down => &self.down,
             Pose::Revive => &self.revive,
+            Pose::Crouch if self.crouch.is_empty() => &self.idle,
+            Pose::Crouch => &self.crouch,
         }
     }
 }
@@ -358,6 +367,8 @@ pub fn choose_pose(member: &rc_squad::squad::Member, just_fired: bool, run_speed
     }
     if just_fired {
         Pose::Fire
+    } else if member.pawn.crouched {
+        Pose::Crouch
     } else {
         Pose::Idle
     }

@@ -9,6 +9,7 @@
 //! distances are the original game's. Where each one stands (its slot) is
 //! our own choice.
 
+use crate::cover::TakenCover;
 use crate::fight::{FightState, Patient, Rng, Threat};
 use crate::jobs::{JobKind, JobResult, JobSettings};
 use crate::map::MarkerSpot;
@@ -119,6 +120,18 @@ pub struct Member {
     pub fight: FightState,
     /// Seconds to the next grenade from a grenade post.
     pub throw_in: f32,
+    /// The cover point they hold or are going to, if any.
+    pub cover: Option<TakenCover>,
+    /// Seconds they've been fighting (reset once calm).
+    pub fight_time: f32,
+    /// Seconds since they last had an enemy in sight.
+    pub calm_time: f32,
+    /// Seconds at their current cover point.
+    pub cover_time: f32,
+    /// Seconds before they look for cover again after finding none.
+    pub(crate) cover_retry_in: f32,
+    /// Crouching this frame (in cover, between bursts).
+    pub crouch: bool,
     path: Vec<Vec3>,
     pub(crate) planned_for: Option<Vec3>,
     pub(crate) think_in: f32,
@@ -301,6 +314,19 @@ pub enum SquadEvent {
         radius: f32,
         what: String,
     },
+    /// Heading for a cover point in a fight.
+    CoverTaken {
+        member: String,
+        at: Vec3,
+        distance: f32,
+        enemy_distance: f32,
+        why: String,
+    },
+    /// Left their cover point.
+    CoverLeft {
+        member: String,
+        why: String,
+    },
     /// A grenade thrown from a grenade post; it goes off in `fuse` seconds.
     Throw {
         member: String,
@@ -410,6 +436,12 @@ impl fmt::Display for SquadEvent {
                 "BLAST ({what}, {member}) at {}: {damage:.0} damage within {radius:.0} uu",
                 p(at)
             ),
+            SquadEvent::CoverTaken { member, at, distance, enemy_distance, why } => write!(
+                f,
+                "{member} takes cover at {} ({distance:.0} uu away, enemy {enemy_distance:.0} uu from it; {why})",
+                p(at)
+            ),
+            SquadEvent::CoverLeft { member, why } => write!(f, "{member} leaves cover: {why}"),
             SquadEvent::Throw { member, to, target, fuse, .. } => write!(
                 f,
                 "{member} throws a grenade at enemy {target}, landing {} in {fuse:.1} s",
@@ -554,6 +586,12 @@ impl Squad {
                     revive: None,
                     fight: FightState::default(),
                     throw_in: 0.0,
+                    cover: None,
+                    fight_time: 0.0,
+                    calm_time: 0.0,
+                    cover_time: 0.0,
+                    cover_retry_in: 0.0,
+                    crouch: false,
                     path: Vec::new(),
                     planned_for: None,
                     think_in: 0.0,
@@ -659,6 +697,14 @@ impl Squad {
     /// Give an order. Members not on a marked job set off at once.
     pub fn command(&mut self, order: Order, leader: Leader, world: &dyn World) -> Vec<SquadEvent> {
         let mut events = Vec::new();
+        if !matches!(order, Order::Marker(_)) {
+            // A new order calls everyone out of cover; they look again
+            // once the new order's wait (`seek_cover_after`) has passed.
+            for i in 0..self.members.len() {
+                self.leave_cover(i, "new order", &mut events);
+                self.members[i].fight_time = 0.0;
+            }
+        }
         match order {
             Order::FormUp => self.stance = Stance::FormUp,
             Order::SearchAndDestroy => self.stance = Stance::SearchAndDestroy,
@@ -888,7 +934,7 @@ impl Squad {
     }
 
     /// What member `i` is tied to under the current order.
-    fn tether_point(&self, i: usize, leader: Leader) -> Vec3 {
+    pub(crate) fn tether_point(&self, i: usize, leader: Leader) -> Vec3 {
         let m = &self.members[i];
         if let Some(p) = m.revive {
             return self.patient_feet(p, leader);
@@ -911,6 +957,9 @@ impl Squad {
         }
         if let Some(k) = m.marker {
             return self.markers[k].0.stand;
+        }
+        if let Some(c) = m.cover {
+            return c.feet;
         }
         let slot = m.settings.slot - 1;
         // A slot behind a wall or over a drop moves to where a body fits,
@@ -1060,12 +1109,15 @@ impl Squad {
             | MemberState::Ready
             | MemberState::Posted => {}
             MemberState::Idle => {
-                if m.marker.is_some() && !(to_goal <= arrive && close_height) {
+                if (m.marker.is_some() || m.cover.is_some()) && !(to_goal <= arrive && close_height)
+                {
                     m.state = MemberState::Moving {
                         urgent: false,
                         by_order: true,
                     };
-                } else if td > st.lp_activate || (engaging.is_some() && to_goal > arrive) {
+                } else if m.cover.is_none()
+                    && (td > st.lp_activate || (engaging.is_some() && to_goal > arrive))
+                {
                     let urgent = td > st.hp_activate;
                     m.state = MemberState::Moving {
                         urgent,
@@ -1083,8 +1135,11 @@ impl Squad {
             }
             MemberState::Moving { urgent, by_order } => {
                 let at_goal = to_goal <= arrive && close_height;
-                let close_enough =
-                    !by_order && m.marker.is_none() && engaging.is_none() && td <= st.lp_deactivate;
+                let close_enough = !by_order
+                    && m.marker.is_none()
+                    && m.cover.is_none()
+                    && engaging.is_none()
+                    && td <= st.lp_deactivate;
                 if at_goal || close_enough {
                     m.state = MemberState::Idle;
                     m.slow_time = 0.0;
@@ -1194,9 +1249,11 @@ impl Squad {
                 if self.members[i].think_in <= 0.0 {
                     self.members[i].think_in = self.settings.think_interval;
                 }
+                self.think_cover(i, leader, world, nav, &mut events);
                 self.think(i, leader, world, &mut events);
                 self.pick_target(i, world, &mut events);
             }
+            self.tick_cover(i, dt);
             self.shoot(i, dt, leader, &mut events);
             let facing = self.facing_for(i, leader);
             let near_tether = dist(self.members[i].pawn.feet(), self.tether_point(i, leader))
@@ -1230,6 +1287,7 @@ impl Squad {
             m.yaw = (m.yaw + d.clamp(-step, step)).rem_euclid(TAU);
             m.input = MoveInput {
                 yaw: m.yaw,
+                crouch: m.crouch,
                 ..Default::default()
             };
             m.slow_time = 0.0;

@@ -30,6 +30,8 @@ fire = "Fire"
 down = "WoundedFallDown"
 # Kneeling by a downed commando with the bacta healer. Our pick, as above.
 revive = "HealImmobileLoop"
+# Crouched behind cover between bursts (CloneCommandoSet).
+crouch = "CrouchBreathe"
 
 # Seconds to blend smoothly from one animation into the next, so the
 # commandos don't snap between poses (0 snaps). Our choice: the original

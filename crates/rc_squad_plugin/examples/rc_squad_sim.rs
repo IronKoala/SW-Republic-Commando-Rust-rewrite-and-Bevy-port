@@ -60,8 +60,14 @@ enum Step {
     KnockDown(usize),
     /// Knock the player down.
     KnockDownPlayer,
-    /// Put this many stand-in droids in sight of the player.
-    SpawnDroids(usize),
+    /// Put this many stand-in droids in sight of the player, with this
+    /// much health each.
+    SpawnDroids(usize, f32),
+    /// Put stand-in droids (this many, this much health) in front of the
+    /// map's cover point nearest the player, where it shields the squad.
+    SpawnDroidsBeforeCover(usize, f32),
+    /// Remove every stand-in droid still standing.
+    ClearDroids,
     /// Stand next to this (downed) squad mate.
     GoTo(usize),
     /// Hold the Use button for this long (seconds), standing still.
@@ -101,6 +107,12 @@ struct Sim {
     /// Stand-in droids spawned, and how many are still standing.
     droids: Vec<Entity>,
     droids_alive: usize,
+    /// Squad mates seen crouched (in cover) at some point.
+    crouched_seen: usize,
+    /// Squad mates crouched right now.
+    members_crouched: usize,
+    /// The map's cover points: middle and the way each faces.
+    cover_points: Vec<(UVec3, f32)>,
     /// The player: down, and health.
     player_down: bool,
     player_health: f32,
@@ -310,12 +322,15 @@ fn steps() -> Vec<Step> {
         // spreads out ahead.
         Press(Action::SquadFormUp),
         Hold(3.0, idle),
-        SpawnDroids(3),
+        SpawnDroids(3, 100.0),
         Hold(20.0, idle),
+        // Three 100-health droids take 15 DC-17m hits (20 each); since the
+        // friendly-fire fix the squad hits with nearly every shot, so 20
+        // was more than they need (it failed on main too).
         Check(
             "fight: squad shots fired",
             |s| Sim::total(&s.fight.shots),
-            20.0,
+            15.0,
             1e9,
         ),
         Check(
@@ -341,6 +356,32 @@ fn steps() -> Vec<Step> {
             |s| s.player_health,
             200.0,
             200.0,
+        ),
+        // Cover: droids that take a long time to kill. Following the
+        // player, squad mates look for cover after 2 s of fighting
+        // (StanceFormUp TimeBeforeSeekingCover) and crouch there between
+        // bursts.
+        SpawnDroidsBeforeCover(2, 100_000.0),
+        Hold(12.0, idle),
+        Check(
+            "cover: squad mates headed for cover points",
+            |s| Sim::total(&s.fight.covers),
+            1.0,
+            1e9,
+        ),
+        Check(
+            "cover: squad mates crouched in cover (most at once)",
+            |s| s.crouched_seen as f32,
+            1.0,
+            3.0,
+        ),
+        ClearDroids,
+        Hold(6.0, idle),
+        Check(
+            "cover: nobody still crouched 6 s after the enemies are gone",
+            |s| s.members_crouched as f32,
+            0.0,
+            0.0,
         ),
         // The player goes down: a squad mate comes to revive them.
         KnockDownPlayer,
@@ -393,8 +434,14 @@ fn steps() -> Vec<Step> {
 /// Up to `n` spots a droid can stand in sight of the player, 600 to 1400
 /// uu ahead, spread across the view.
 fn droid_spots(world: &TriangleWorld, pawn: &Pawn, yaw: f32, n: usize) -> Vec<UVec3> {
+    spots_ahead(world, pawn.eye(), pawn.feet(), yaw, n)
+}
+
+/// Up to `n` spots a droid can stand, seen from `eye`, around `yaw` from
+/// `feet`.
+fn spots_ahead(world: &TriangleWorld, eye: UVec3, feet: UVec3, yaw: f32, n: usize) -> Vec<UVec3> {
     use rc_movement::World;
-    let eye = pawn.eye();
+    let from = feet;
     let ext = UVec3::new(35.0, 35.0, 80.0);
     let mut out: Vec<UVec3> = Vec::new();
     for dist in [1000.0f32, 800.0, 1300.0, 600.0] {
@@ -403,7 +450,7 @@ fn droid_spots(world: &TriangleWorld, pawn: &Pawn, yaw: f32, n: usize) -> Vec<UV
                 return out;
             }
             let a = yaw + deg.to_radians();
-            let want = pawn.feet() + UVec3::new(a.cos() * dist, a.sin() * dist, 0.0);
+            let want = from + UVec3::new(a.cos() * dist, a.sin() * dist, 0.0);
             // The floor under it (from a bit above eye height).
             let top = UVec3::new(want.x, want.y, eye.z + 100.0);
             let bottom = top - UVec3::new(0.0, 0.0, 1200.0);
@@ -492,6 +539,9 @@ fn drive_player(
         for m in &s.members {
             s.lowest_member_z = s.lowest_member_z.min(m.1.z);
         }
+        let crouched = sq.members.iter().filter(|m| m.pawn.crouched).count();
+        s.crouched_seen = s.crouched_seen.max(crouched);
+        s.members_crouched = crouched;
         s.stance = sq.stance_settings().name.clone();
         s.secure_spot = sq.objective;
         s.markers = sq
@@ -623,13 +673,46 @@ fn drive_player(
                     log.line("sim: the player is knocked down");
                 }
             }
-            Step::SpawnDroids(n) => {
-                let spots = droid_spots(&s.world, &s.pawn, s.yaw, n);
+            Step::ClearDroids => {
+                for e in s.droids.drain(..) {
+                    if droids.contains(e) {
+                        commands.entity(e).despawn();
+                    }
+                }
+                log.line("sim: stand-in droids removed");
+            }
+            Step::SpawnDroids(n, health) | Step::SpawnDroidsBeforeCover(n, health) => {
+                let spots = if matches!(step, Step::SpawnDroidsBeforeCover(..)) {
+                    let me = s.pawn.feet();
+                    let nearest = s
+                        .cover_points
+                        .iter()
+                        .copied()
+                        .min_by(|a, b| (a.0 - me).length().total_cmp(&(b.0 - me).length()));
+                    match nearest {
+                        Some((centre, facing)) => {
+                            log.line(format!(
+                                "sim: cover point at ({:.0}, {:.0}, {:.0}) facing {:.0} deg, {:.0} uu from the player",
+                                centre.x,
+                                centre.y,
+                                centre.z,
+                                facing.to_degrees(),
+                                (centre - me).length()
+                            ));
+                            let eye = centre + UVec3::new(0.0, 0.0, 60.0);
+                            let feet = centre - UVec3::new(0.0, 0.0, 84.0);
+                            spots_ahead(&s.world, eye, feet, facing, n)
+                        }
+                        None => Vec::new(),
+                    }
+                } else {
+                    droid_spots(&s.world, &s.pawn, s.yaw, n)
+                };
                 for (k, feet) in spots.iter().enumerate() {
                     let e = commands
                         .spawn((
                             Name::new(format!("stand-in droid {k}")),
-                            Health::new(100.0),
+                            Health::new(health),
                             Team::Separatist,
                             Hittable {
                                 radius: 35.0,
@@ -776,6 +859,15 @@ fn main() -> AppExit {
     for n in &map_data.notes {
         log.line(format!("squad: {n}"));
     }
+    let cover_points: Vec<(UVec3, f32)> = map_data
+        .nav
+        .iter()
+        .flat_map(|g| g.nodes.iter())
+        .filter_map(|n| match n.kind {
+            rc_nav::NodeKind::Cover { facing, .. } => Some((n.location, facing)),
+            _ => None,
+        })
+        .collect();
 
     let mut app = App::new();
     app.add_plugins((
@@ -815,6 +907,9 @@ fn main() -> AppExit {
         fight: SquadFightStats::default(),
         droids: vec![],
         droids_alive: 0,
+        crouched_seen: 0,
+        members_crouched: 0,
+        cover_points,
         player_down: false,
         player_health: 0.0,
         down: vec![false; 3],

@@ -15,6 +15,7 @@
 //! compiled code, which we don't read, so that part is our own. No game
 //! code is copied.
 
+pub mod cover;
 pub mod fight;
 pub mod jobs;
 pub mod map;
@@ -22,11 +23,14 @@ pub mod nav;
 pub mod settings;
 pub mod squad;
 
+pub use cover::TakenCover;
 pub use fight::{FightState, Patient, Threat};
 pub use jobs::{JobKind, JobResult, JobSettings};
 pub use map::{MapSquadInfo, MarkerSpot, SquadFactory};
-pub use nav::{Navigator, StraightLine};
-pub use settings::{FightSettings, ReviveSettings, Spawn, SquadSettings, StanceSettings, Tether};
+pub use nav::{CoverSpot, Navigator, StraightLine, StraightWithCover};
+pub use settings::{
+    CoverSettings, FightSettings, ReviveSettings, Spawn, SquadSettings, StanceSettings, Tether,
+};
 pub use squad::{
     aimed_spot, Leader, MarkerState, MemberState, MemberStatus, Order, Squad, SquadEvent, Stance,
 };

@@ -31,6 +31,45 @@ pub struct StanceSettings {
     pub hp_activate: f32,
     pub hp_deactivate: f32,
     pub prevent_range: f32,
+    /// Seconds of fighting before a member looks for cover.
+    pub seek_cover_after: f32,
+    /// Prefer the cover nearest what they're tied to, rather than the
+    /// cover nearest themselves.
+    pub cover_near_tether: bool,
+}
+
+/// Taking cover in a fight. See `[cover]` in `squad.toml`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverSettings {
+    /// Squad mates use the map's cover points at all.
+    pub use_cover: bool,
+    /// How far from themselves they look for cover, uu.
+    pub search_radius: f32,
+    /// A cover point shields from enemies within this angle of the way it
+    /// faces (the whole cone, radians).
+    pub fov: f32,
+    /// Enemies nearer the cover point than this make it no use, uu.
+    pub min_enemy_distance: f32,
+    /// Seconds in cover with no enemy in sight before looking for another.
+    pub boredom_time: f32,
+    /// Seconds with no enemy in sight at all before leaving cover.
+    pub calm_time: f32,
+    /// Crouch in cover between bursts.
+    pub crouch: bool,
+}
+
+impl Default for CoverSettings {
+    fn default() -> Self {
+        CoverSettings {
+            use_cover: true,
+            search_radius: 1500.0,
+            fov: 140f32.to_radians(),
+            min_enemy_distance: 256.0,
+            boredom_time: 15.0,
+            calm_time: 4.0,
+            crouch: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +194,7 @@ pub struct SquadSettings {
     pub hold: StanceSettings,
     pub fight: FightSettings,
     pub revive: ReviveSettings,
+    pub cover: CoverSettings,
     /// The marked jobs ("context orders"), in the order they're matched.
     pub jobs: Vec<JobSettings>,
     pub members: Vec<MemberSettings>,
@@ -166,6 +206,7 @@ fn stance(
     lp: (f32, f32),
     hp: (f32, f32),
     prevent: f32,
+    cover: (f32, bool),
 ) -> StanceSettings {
     StanceSettings {
         name: name.into(),
@@ -175,6 +216,8 @@ fn stance(
         hp_activate: hp.0,
         hp_deactivate: hp.1,
         prevent_range: prevent,
+        seek_cover_after: cover.0,
+        cover_near_tether: cover.1,
     }
 }
 
@@ -224,6 +267,7 @@ impl Default for SquadSettings {
                 (768.0, 192.0),
                 (1280.0, 768.0),
                 1024.0,
+                (2.0, true),
             ),
             secure_position: stance(
                 "Secure area",
@@ -231,6 +275,7 @@ impl Default for SquadSettings {
                 (768.0, 128.0),
                 (1024.0, 512.0),
                 640.0,
+                (0.0, true),
             ),
             search_and_destroy: stance(
                 "Search and destroy",
@@ -238,6 +283,7 @@ impl Default for SquadSettings {
                 (512.0, 256.0),
                 (2048.0, 1280.0),
                 1024.0,
+                (0.0, false),
             ),
             hold: stance(
                 "Hold",
@@ -245,9 +291,11 @@ impl Default for SquadSettings {
                 (512.0, 256.0),
                 (768.0, 384.0),
                 256.0,
+                (6.0, false),
             ),
             fight: FightSettings::default(),
             revive: ReviveSettings::default(),
+            cover: CoverSettings::default(),
             jobs: default_jobs(),
             members: vec![
                 member("sev", "Commando07Delta", "Sev", "07", 1, [0.71, 0.18, 0.17]),
@@ -333,6 +381,7 @@ impl SquadSettings {
                         | "stance.hold"
                         | "fight"
                         | "revive"
+                        | "cover"
                 ) {
                     return Err(format!("line {n}: unknown section [{section}]"));
                 }
@@ -434,6 +483,7 @@ impl SquadSettings {
             }
             "fight" => set_fight(&mut self.fight, key, value)?,
             "revive" => set_revive(&mut self.revive, key, value)?,
+            "cover" => set_cover(&mut self.cover, key, value)?,
             "formation_secure" => match key {
                 "radius" => self.secure_radius = one(value)?,
                 _ => return Err(unknown()),
@@ -475,14 +525,16 @@ impl SquadSettings {
             &self.hold,
         ] {
             out.push(format!(
-                "stance {}: tether {:?}, low-priority {} / {}, high-priority {} / {}, prevent {}",
+                "stance {}: tether {:?}, low-priority {} / {}, high-priority {} / {}, prevent {}, cover after {} s{}",
                 s.name,
                 s.tether,
                 s.lp_activate,
                 s.lp_deactivate,
                 s.hp_activate,
                 s.hp_deactivate,
-                s.prevent_range
+                s.prevent_range,
+                s.seek_cover_after,
+                if s.cover_near_tether { " (nearest the tether)" } else { "" }
             ));
         }
         let f = &self.fight;
@@ -509,6 +561,17 @@ impl SquadSettings {
             r.reach,
             r.range,
             if r.revive_player { "yes" } else { "no" }
+        ));
+        let c = &self.cover;
+        out.push(format!(
+            "cover: {}, looks within {} uu, shields {:.0} deg, enemy at least {} uu away, bored after {} s, leaves {} s after the last enemy, crouch {}",
+            if c.use_cover { "used" } else { "not used" },
+            c.search_radius,
+            c.fov.to_degrees(),
+            c.min_enemy_distance,
+            c.boredom_time,
+            c.calm_time,
+            if c.crouch { "yes" } else { "no" }
         ));
         out.extend(self.jobs.iter().map(JobSettings::summary));
         for m in &self.members {
@@ -570,9 +633,13 @@ fn set_stance(st: &mut StanceSettings, key: &str, value: Value) -> Result<(), St
                 }
             };
         }
+        "cover_near_tether" => {
+            st.cover_near_tether = yes_no(key, value)?;
+        }
         _ => {
             let v = one(value)?;
             *match key {
+                "seek_cover_after" => &mut st.seek_cover_after,
                 "lp_activate" => &mut st.lp_activate,
                 "lp_deactivate" => &mut st.lp_deactivate,
                 "hp_activate" => &mut st.hp_activate,
@@ -630,6 +697,33 @@ fn set_fight(f: &mut FightSettings, key: &str, value: Value) -> Result<(), Strin
         "max_aim_yaw" => f.max_aim_yaw = v.to_radians(),
         "friendly_clearance" => f.friendly_clearance = v,
         _ => return Err(format!("unknown setting `{key}` in [fight]")),
+    }
+    Ok(())
+}
+
+fn yes_no(key: &str, value: Value) -> Result<bool, String> {
+    match value {
+        Value::Text(t) if t == "yes" => Ok(true),
+        Value::Text(t) if t == "no" => Ok(false),
+        _ => Err(format!("{key} must be \"yes\" or \"no\"")),
+    }
+}
+
+fn set_cover(c: &mut CoverSettings, key: &str, value: Value) -> Result<(), String> {
+    match key {
+        "use_cover" => c.use_cover = yes_no(key, value)?,
+        "crouch" => c.crouch = yes_no(key, value)?,
+        _ => {
+            let v = one(value)?;
+            match key {
+                "search_radius" => c.search_radius = v,
+                "fov" => c.fov = v.to_radians(),
+                "min_enemy_distance" => c.min_enemy_distance = v,
+                "boredom_time" => c.boredom_time = v,
+                "calm_time" => c.calm_time = v,
+                _ => return Err(format!("unknown setting `{key}` in [cover]")),
+            }
+        }
     }
     Ok(())
 }
