@@ -43,6 +43,9 @@
 //!   rc_probe --pages [file]  the same for every page in
 //!                            `data/ui/original_menus.toml`, then say which
 //!                            pages would use their original menu, and why not
+//!   rc_probe --helmet [file]  read the helmet frame (plan: `data/ui/helmet.toml`),
+//!                            check it fits every screen shape and paint it to
+//!                            `extracted/menus/helmet_*.png`
 //!
 //! The game folder comes from the RC_GAME_DIR environment variable, or the
 //! default Steam path below. (Env-var idea from muffinmxn/gang-beasts-rust.)
@@ -50,6 +53,7 @@
 mod characters;
 mod class_scan;
 mod classes;
+mod helmet;
 mod menus;
 mod meshes;
 mod pixels;
@@ -117,6 +121,7 @@ fn main() {
     let menu_mode = args.first().is_some_and(|a| a == "--menu");
     let pages_mode = args.first().is_some_and(|a| a == "--pages");
     let hud_mode = args.first().is_some_and(|a| a == "--hud");
+    let helmet_mode = args.first().is_some_and(|a| a == "--helmet");
     if texture_mode
         || sound_mode
         || mesh_mode
@@ -127,6 +132,7 @@ fn main() {
         || menu_mode
         || pages_mode
         || hud_mode
+        || helmet_mode
     {
         args.remove(0);
     }
@@ -175,7 +181,7 @@ fn main() {
         CLASSES_LOG_PATH
     } else if font_mode {
         FONT_LOG_PATH
-    } else if menu_mode || pages_mode || hud_mode {
+    } else if menu_mode || pages_mode || hud_mode || helmet_mode {
         MENU_LOG_PATH
     } else {
         LOG_PATH
@@ -236,6 +242,17 @@ fn main() {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("data/ui/hud.toml"));
         menus::hud(&mut log, &game.join("GameData"), &file, Path::new(MENU_EXTRACT_DIR))
+    } else if helmet_mode {
+        let file = args
+            .first()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("data/ui/helmet.toml"));
+        helmet::probe(
+            &mut log,
+            &game.join("GameData"),
+            &file,
+            Path::new(MENU_EXTRACT_DIR),
+        )
     } else if target.is_dir() {
         scan_folder(&mut log, &target)
     } else {

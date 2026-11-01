@@ -96,6 +96,18 @@ copy of the game.
   hold a weapon yet, and the helmet extras the original adds
   (`AvailableAccessories`) aren't drawn.
 
+- **The original helmet frame (tested in the cloud sandbox with the
+  game's files, at 14 screen shapes in software and 6 on the graphics card;
+  not yet on Windows).** The commando's helmet round the edge of the view
+  is the original's own 3D model and picture, read from the install
+  (`HUDMeshes`, `HUDTextures`), drawn over the world and the gun. On
+  screens wider than 4:3 the frame's sides keep their shape and move out to
+  the screen's edges; only the bars across the top stretch. The GAME
+  page's HELMET row turns it on and off. Its brightness is a guess (the
+  original lights it with lights inside the helmet, not copied yet), and
+  the visor's cracks, blood and wipe effects aren't drawn. Check it with
+  `rc_probe --helmet` (pictures in `extracted/menus/`).
+
 - **The squad fights and revives (tested in the cloud sandbox by numbers,
   not yet on Windows or with eyes).** Sev, Fixer and Scorch shoot enemies
   they can see with the DC-17m, in bursts, and hold fire when you or
@@ -314,9 +326,9 @@ copy of the game.
   sound quality, 3D sound, audio channels) work too (checked in a stand-in
   scene and by tests; brightness checked by the user on the PC). So do
   SUBTITLES (checked by the user), PROMPT TEXT, the turn keys, the
-  screenshot key (F12) and the weapon keys (1 to 4). Rows the port can't do
-  yet (helmet, auto pull, tactical visor, bump mapping, projectors, EAX)
-  are greyed out. Values change with the arrows; the screen size
+  screenshot key (F12) and the weapon keys (1 to 4). HELMET shows or hides
+  the helmet frame (see below). Rows the port can't do yet (tactical
+  visor, bump mapping, projectors, EAX) are greyed out. Values change with the arrows; the screen size
   also has a drop-down list of the sizes that fit your monitor. Our own
   extra settings (field of view, display mode, controller and gyro) are on
   a fifth tab, "PORT +", in the same original look.
