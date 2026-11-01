@@ -15,6 +15,7 @@ pub mod assets;
 pub mod fit;
 pub mod gpu;
 pub mod helmet;
+pub mod hud;
 pub mod layout;
 pub mod library;
 pub mod pages;

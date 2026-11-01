@@ -153,7 +153,7 @@ fn sprite_quads(s: &Sprite, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Q
 }
 
 /// The width of a line of text in base pixels, before scaling.
-fn line_width(font: &FontData, text: &str, kerning: i32) -> f32 {
+pub fn line_width(font: &FontData, text: &str, kerning: i32) -> f32 {
     text.chars().map(|c| advance(font, c, kerning)).sum()
 }
 
