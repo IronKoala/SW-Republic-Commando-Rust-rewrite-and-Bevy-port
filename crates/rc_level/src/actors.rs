@@ -219,21 +219,47 @@ pub fn read_placement(pkg: &Package, data: &[u8], index: usize) -> Result<Placem
     Ok(p)
 }
 
-/// The baked light of one placed static mesh: a `StaticMeshInstance`
-/// object, which is an (empty) property list, then a count and one colour
-/// per mesh vertex, stored red, green, blue, alpha. Then come a number
-/// whose meaning isn't known, and the list of lights baked into the colours
-/// (a count, then per light an object reference and a 4-byte value, always 1
-/// so far); those are ignored. Layout measured on the game's maps (no
-/// reference describes it); `index` is the object reference from
-/// `Placement`.
+/// The baked light of one placed static mesh, from its `StaticMeshInstance`.
+#[derive(Debug, Clone, Default)]
+pub struct BakedLight {
+    /// One colour per mesh vertex (red, green, blue, alpha): the light
+    /// reaching that corner, already weakened by how squarely the corner
+    /// faces each light.
+    pub colours: Vec<[u8; 4]>,
+    /// For bump-mapped props only (empty otherwise): per vertex, the
+    /// direction the light mostly comes from, in the mesh's own axes (red,
+    /// green, blue = x, y, z, each 0-255 for -1..1), and in alpha how strong
+    /// that light is before the facing is taken into account.
+    pub directions: Vec<[u8; 4]>,
+}
+
+/// Read a `StaticMeshInstance` object: an (empty) property list, a count
+/// and one colour per mesh vertex (red, green, blue, alpha); then a number
+/// whose meaning isn't known (2 when the next list is filled, 0 so far
+/// otherwise); then the list of lights baked into the colours (a count,
+/// then per light an object reference and a 4-byte value, always 1 so far);
+/// then a second per-vertex list (count, 4 bytes each) that is empty except
+/// on props whose materials are bump-mapped; then a 4-byte number. Layout
+/// measured on the game's maps (no reference describes it): on yyy_06a all
+/// 556 instances read to their last byte. `index` is the object reference
+/// from `Placement`.
 ///
-/// The byte order was checked against the lights each mesh lists: props lit
-/// only by geo_04a's orange sun (hue 30) store 75:62:46, ras_01a's red-tinted
-/// lights (hue 0) 69:57:57, and yyy_06a's blue-green one (hue 144) 51:62:76,
-/// each matching its light's colour in that order. (It was read as blue,
-/// green, red before 2026-11-01, which drew the orange canyon blue-grey.)
-pub fn read_vertex_colours(pkg: &Package, data: &[u8], index: i32) -> Result<Vec<[u8; 4]>> {
+/// What the second list holds was measured on yyy_06a's 62,507 bump-mapped
+/// corners: red, green, blue decode to a direction of length 1 (median
+/// 0.99), and in the mesh's own axes it points at the weighted lights 0.67
+/// of the time on average (0.96 on unturned props; 0.18 if read blue-first,
+/// 0.32 in world axes), so it is the light's direction for the bump map.
+/// The colour's brightest channel is 0.75 x alpha x (that direction · the
+/// corner's normal) (middle half of corners 0.69-0.77), so alpha is the
+/// light's strength before facing.
+///
+/// The colour byte order was checked against the lights each mesh lists:
+/// props lit only by geo_04a's orange sun (hue 30) store 75:62:46, ras_01a's
+/// red-tinted lights (hue 0) 69:57:57, and yyy_06a's blue-green one (hue
+/// 144) 51:62:76, each matching its light's colour in that order. (It was
+/// read as blue, green, red before 2026-11-01, which drew the orange canyon
+/// blue-grey.)
+pub fn read_baked_light(pkg: &Package, data: &[u8], index: i32) -> Result<BakedLight> {
     let Some(e) = usize::try_from(index - 1)
         .ok()
         .and_then(|i| pkg.exports.get(i))
@@ -244,9 +270,32 @@ pub fn read_vertex_colours(pkg: &Package, data: &[u8], index: i32) -> Result<Vec
     };
     let mut r = Reader::new(object_bytes(data, e)?);
     read_properties(pkg, &mut r)?;
+    let colours = read_colour_list(&mut r, "vertex colour")?;
+    // The rest is optional: older or odd instances may stop early, and the
+    // colours are still good then.
+    let directions = (|| -> Result<Vec<[u8; 4]>> {
+        let _unknown = r.u32()?;
+        let lights = r.compact_index()?;
+        if lights < 0 || lights as usize * 5 > r.len() - r.pos() {
+            return r.invalid(format!("light count {lights} doesn't fit"));
+        }
+        for _ in 0..lights {
+            r.compact_index()?;
+            r.u32()?;
+        }
+        read_colour_list(&mut r, "light direction")
+    })()
+    .unwrap_or_default();
+    Ok(BakedLight {
+        colours,
+        directions,
+    })
+}
+
+fn read_colour_list(r: &mut Reader, what: &str) -> Result<Vec<[u8; 4]>> {
     let n = r.compact_index()?;
     if n < 0 || n as usize * 4 > r.len() - r.pos() {
-        return r.invalid(format!("vertex colour count {n} doesn't fit"));
+        return r.invalid(format!("{what} count {n} doesn't fit"));
     }
     Ok(r.bytes(n as usize * 4)?
         .as_chunks::<4>()
@@ -254,6 +303,11 @@ pub fn read_vertex_colours(pkg: &Package, data: &[u8], index: i32) -> Result<Vec
         .iter()
         .map(|c| [c[0], c[1], c[2], c[3]])
         .collect())
+}
+
+/// Just the colours of `read_baked_light`.
+pub fn read_vertex_colours(pkg: &Package, data: &[u8], index: i32) -> Result<Vec<[u8; 4]>> {
+    read_baked_light(pkg, data, index).map(|b| b.colours)
 }
 
 /// Unreal's rotation as three axis directions (forward X, right Y, up Z) in
