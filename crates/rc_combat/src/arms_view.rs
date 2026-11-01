@@ -12,14 +12,21 @@
 //! moves its points). It's drawn unlit at the weapon's `arms.brightness`:
 //! the game lights it by the zone the player stands in, which we don't read
 //! yet.
+//!
+//! The DC-17m's ammo counter (see `counter`) is pieces of the model whose
+//! materials slide their picture sideways (`uv_transform`), set each frame
+//! from the weapon's ammo.
 
 use crate::arms::{Arms, ArmsAnim, ArmsClips, ArmsInput};
+use crate::counter::{bar_shift, digit_of_shift, digit_shift, CounterReading};
 use crate::library::WeaponLibrary;
 use crate::melee::{MeleeSwing, Zoom};
+use crate::weapon::ArmsParams;
 use crate::{Arsenal, Dead, ThrowGrenade};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::camera::Exposure;
+use bevy::math::Affine2;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -43,6 +50,10 @@ pub struct ArmsReadout {
     /// Seconds into it.
     pub time: f32,
     pub hidden: bool,
+    /// What the ammo counter on the gun shows, read back from its pieces'
+    /// slid pictures: the digits ("110") and how full the bar is (0 to 1).
+    /// `None` when the gun in hand has no counter.
+    pub counter: Option<(String, f32)>,
 }
 
 /// The camera that draws the arms.
@@ -55,6 +66,34 @@ pub(crate) struct ArmsPieces {
     weapon: String,
     /// Per material section, its mesh.
     meshes: Vec<(usize, Handle<Mesh>)>,
+    /// The ammo counter's pieces, by their material.
+    counter: Vec<(CounterPart, Handle<StandardMaterial>)>,
+}
+
+/// A piece of the ammo counter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CounterPart {
+    /// 0 hundreds, 1 tens, 2 ones.
+    Digit(usize),
+    Bar,
+}
+
+/// Which counter piece a section is, by its material's name (the last
+/// part, `DC17mDigit1` of `HudArmsTextures.DC17mDigit1`).
+fn counter_part(a: &ArmsParams, material: &str) -> Option<CounterPart> {
+    let name = material.rsplit('.').next().unwrap_or(material);
+    if let Some(i) = a
+        .counter_digits
+        .iter()
+        .position(|d| d.eq_ignore_ascii_case(name))
+    {
+        // Fewer than three pieces: the last ones are the lower digits.
+        return Some(CounterPart::Digit(i + 3 - a.counter_digits.len().min(3)));
+    }
+    a.counter_bar
+        .as_deref()
+        .is_some_and(|b| b.eq_ignore_ascii_case(name))
+        .then_some(CounterPart::Bar)
 }
 
 /// Arms models read so far, by weapon id (an error if it couldn't be).
@@ -318,12 +357,20 @@ pub(crate) fn animate_arms(
         p.fov = vertical_fov(a.fov);
     }
     let hidden = down || (zoomed && params.is_some_and(|a| a.hide_zoomed));
-    commands.insert_resource(ArmsReadout {
+    // The shown weapon's ammo (while switching, the shown one may not be
+    // the current one yet).
+    let reading = arms.shown.as_ref().and_then(|id| {
+        let p = lib.weapons.get(id)?;
+        let (_, w) = arsenal.weapons.iter().find(|(i, _)| i == id)?;
+        Some(CounterReading::of(p, w))
+    });
+    let mut readout = ArmsReadout {
         weapon: arms.shown.clone(),
         animation: arms.anim.sequence(),
         time: arms.time,
         hidden,
-    });
+        counter: None,
+    };
 
     // The model in hand: keep it, or swap it for the shown weapon's.
     let mut drawn = None;
@@ -342,18 +389,23 @@ pub(crate) fn animate_arms(
     let (Some(mut meshes), Some(mut materials), Some(mut images)) =
         (assets.0.take(), assets.1.take(), assets.2.take())
     else {
+        commands.insert_resource(readout);
         return;
     };
-    let Some(id) = arms.shown.as_ref() else {
-        return;
-    };
-    let Some(Ok(model)) = models.0.get(id) else {
+    let (Some(id), Some(Ok(model))) = (
+        arms.shown.as_ref(),
+        arms.shown.as_ref().and_then(|id| models.0.get(id)),
+    ) else {
+        commands.insert_resource(readout);
         return;
     };
     let points = pose(model, arms.anim, arms.time);
     let normals = model.normals(&points);
     match drawn.and_then(|e| pieces.get(e).ok()) {
         Some((_, p, _)) => {
+            if let Some(r) = reading {
+                readout.counter = show_counter(&p.counter, r, &mut materials);
+            }
             for (section, handle) in &p.meshes {
                 let (pos, nrm) =
                     model.section_attributes(&model.sections[*section], &points, &normals);
@@ -374,11 +426,35 @@ pub(crate) fn animate_arms(
                 &mut materials,
                 &mut images,
             );
+            let counter: Vec<_> = params
+                .map(|a| {
+                    made.iter()
+                        .filter_map(|(s, _, m)| {
+                            Some((counter_part(a, &model.sections[*s].material)?, m.clone()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(r) = reading {
+                readout.counter = show_counter(&counter, r, &mut materials);
+            }
+            if let Some((text, bar)) = &readout.counter {
+                let line = format!(
+                    "arms: {id}: ammo counter on the gun ({} pieces) shows {text}, bar {:.0}% full",
+                    counter.len(),
+                    bar * 100.0
+                );
+                match &log {
+                    Some(l) => l.line(line),
+                    None => println!("{line}"),
+                }
+            }
             commands.entity(camera).with_children(|c| {
                 c.spawn((
                     ArmsPieces {
                         weapon: id.clone(),
                         meshes: made.iter().map(|(s, m, _)| (*s, m.clone())).collect(),
+                        counter,
                     },
                     // The model's axes (to_bevy: forward +X, right +Z) to
                     // the camera's (forward -Z, right +X): a quarter turn.
@@ -403,6 +479,42 @@ pub(crate) fn animate_arms(
             });
         }
     }
+    commands.insert_resource(readout);
+}
+
+/// Slide the counter's pictures to show `r`, and read back what they show.
+fn show_counter(
+    parts: &[(CounterPart, Handle<StandardMaterial>)],
+    r: CounterReading,
+    materials: &mut Assets<StandardMaterial>,
+) -> Option<(String, f32)> {
+    if parts.is_empty() {
+        return None;
+    }
+    let mut digits = [None; 3];
+    let mut bar = None;
+    for (part, handle) in parts {
+        let shift = match part {
+            CounterPart::Digit(i) => digit_shift(r.digits[*i]),
+            CounterPart::Bar => bar_shift(r.bar),
+        };
+        let want = Affine2::from_translation(Vec2::new(shift, 0.0));
+        // Touch the material only when it changes: a change sends it to
+        // the graphics card again.
+        let now = materials.get(handle).map(|m| m.uv_transform);
+        if now.is_some_and(|t| t != want) {
+            if let Some(mut m) = materials.get_mut(handle) {
+                m.uv_transform = want;
+            }
+        }
+        let shown = materials.get(handle)?.uv_transform.translation.x;
+        match part {
+            CounterPart::Digit(i) => digits[*i] = Some(digit_of_shift(shown)),
+            CounterPart::Bar => bar = Some(1.0 + shown / crate::counter::BAR_TRAVEL),
+        }
+    }
+    let text = digits.iter().flatten().map(|d| d.to_string()).collect();
+    Some((text, bar.unwrap_or(0.0)))
 }
 
 /// The points at `time` seconds into `anim`. Moves that play once stop on

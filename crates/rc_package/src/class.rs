@@ -281,13 +281,19 @@ pub fn read_enum(pkg: &Package, data: &[u8], export: &Export) -> Result<Vec<Stri
 /// out from the bytes of the game's `XInterface.u` (generic UE2 also stores
 /// the field chain and a 4-byte array size).
 pub fn read_property_category(pkg: &Package, data: &[u8], export: &Export) -> Result<String> {
+    read_property_info(pkg, data, export).map(|(_, c)| c)
+}
+
+/// A property export's fixed array size (1 for a plain value) and its
+/// editor category; see [`read_property_category`].
+pub fn read_property_info(pkg: &Package, data: &[u8], export: &Export) -> Result<(u16, String)> {
     let object = export_data(data, export)?;
     let mut r = Reader::new(object);
     properties::read_properties(pkg, &mut r)?;
-    r.u16()?;
+    let dim = r.u16()?;
     r.u32()?;
     let category = r.compact_index()?;
-    Ok(pkg.name(category).to_string())
+    Ok((dim, pkg.name(category).to_string()))
 }
 
 /// A colour stored as plain bytes (`Color` struct): blue, green, red, alpha
@@ -310,10 +316,47 @@ pub fn string_value(p: &Property) -> Option<String> {
     }
 }
 
+/// A dynamic array of strings (`array<string>`, such as a menu option's
+/// choices): a count, then each string. `None` when the bytes aren't
+/// exactly that, so other arrays aren't misread.
+pub fn string_list_value(p: &Property) -> Option<Vec<String>> {
+    let (Value::Raw(b), PropertyType::Array) = (&p.value, p.kind) else {
+        return None;
+    };
+    let mut r = Reader::new(b);
+    let n = r.compact_index().ok()?;
+    if !(0..=1024).contains(&n) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        out.push(r.fstring().ok()?);
+    }
+    (r.pos() == r.len()).then_some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::properties::tests::package_with_names;
+
+    #[test]
+    fn reads_a_string_list() {
+        let p = Property {
+            name: 0,
+            kind: PropertyType::Array,
+            struct_name: None,
+            array_index: 0,
+            size: 10,
+            value: Value::Raw(vec![2, 4, b'Y', b'E', b'S', 0, 3, b'N', b'O', 0]),
+        };
+        assert_eq!(string_list_value(&p), Some(vec!["YES".into(), "NO".into()]));
+        let bad = Property {
+            value: Value::Raw(vec![2, 4, b'Y', b'E', b'S', 0]),
+            ..p
+        };
+        assert_eq!(string_list_value(&bad), None);
+    }
 
     #[test]
     fn finds_list_at_end_after_junk() {

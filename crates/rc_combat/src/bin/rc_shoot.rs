@@ -136,6 +136,8 @@ enum Check {
     Shots(u32),
     /// The first-person arms show this weapon playing this animation.
     Arms(&'static str, &'static str),
+    /// The ammo counter on the gun shows these digits and a bar this full.
+    Counter(&'static str, f32),
 }
 
 #[derive(Resource)]
@@ -165,12 +167,15 @@ fn script_steps() -> Vec<Step> {
         Expect(Arms("dc17m_blaster", "ActionBreathe")),
         Expect(Magazine("DC-17m Blaster", 50, 60)),
         Expect(Shots(10)),
+        // 50 in the magazine and 60 spare: 110 carried.
+        Expect(Counter("110", 50.0 / 60.0)),
         // Reload: the game's 1.5 s animation.
         Hold(&[Reload], 0.1),
         Expect(Reloading),
         Expect(Arms("dc17m_blaster", "Reload")),
         Hold(&[], 1.5),
         Expect(Magazine("DC-17m Blaster", 60, 50)),
+        Expect(Counter("110", 1.0)),
         // The droid to the right, with the pistol: one shot per press,
         // 55 damage each, so two shots. The view turns a frame before the
         // trigger is pulled (the camera's position is read a frame late).
@@ -813,6 +818,18 @@ fn run_script(
                             format!(
                                 "the arms show {id} playing {anim}; they show {:?} playing {}",
                                 now.weapon, now.animation
+                            ),
+                        )
+                    }
+                    Check::Counter(digits, bar) => {
+                        let now = arms.as_deref().and_then(|a| a.counter.clone());
+                        (
+                            now.as_ref().is_some_and(|(d, b)| {
+                                d == digits && (b - bar).abs() < 0.01
+                            }),
+                            format!(
+                                "the gun's ammo counter shows {digits}, bar {:.0}% full; it shows {now:?}",
+                                bar * 100.0
                             ),
                         )
                     }

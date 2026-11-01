@@ -84,6 +84,25 @@ pub struct SquadState {
     missing_weapons: std::collections::BTreeSet<String>,
 }
 
+/// Player options that change how the squad takes orders. The game sets
+/// it from its settings file and options menu; missing means the defaults.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub struct SquadOptions {
+    /// The original's AUTO PULL MANEUVERS (GAME options page, on by
+    /// default): a new order that needs more squad mates than are free
+    /// takes them off sniper, grenade and anti-armour posts. Off, the
+    /// order is refused until the squad is recalled.
+    pub auto_pull_maneuvers: bool,
+}
+
+impl Default for SquadOptions {
+    fn default() -> Self {
+        SquadOptions {
+            auto_pull_maneuvers: true,
+        }
+    }
+}
+
 /// Enemies the squad knows about this frame, in Unreal units. Rebuilt
 /// every frame from the living `Team::Separatist` characters that have a
 /// `Hittable` body; `Threat::id` is the entity's bits.
@@ -302,6 +321,7 @@ impl Plugin for SquadPlugin {
             .add_message::<SquadJobDone>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
+            .init_resource::<SquadOptions>()
             .init_resource::<SquadThreats>()
             .init_resource::<SquadFightStats>()
             .init_resource::<SquadLooks>()
@@ -638,6 +658,7 @@ fn take_orders(
     player: Query<&Transform, With<Player>>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     collision: Option<Res<LevelCollision>>,
+    options: Option<Res<SquadOptions>>,
     log: Option<Res<GameLog>>,
 ) {
     let (Some(squad), Ok(pt)) = (state.squad.as_mut(), player.single()) else {
@@ -645,6 +666,14 @@ fn take_orders(
         from_scripts.clear();
         return;
     };
+    let auto_pull = options.map_or(true, |o| o.auto_pull_maneuvers);
+    if squad.auto_pull != auto_pull {
+        squad.auto_pull = auto_pull;
+        log_line(
+            &log,
+            format!("auto pull maneuvers {}", if auto_pull { "on" } else { "off" }),
+        );
+    }
     let leader = leader_from(pt);
     let mut wanted: Vec<Order> = orders.read().map(|o| o.0).collect();
     // The level's scripts give squad orders too.

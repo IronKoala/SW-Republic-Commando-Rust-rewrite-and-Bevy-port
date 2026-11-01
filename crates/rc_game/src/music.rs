@@ -66,8 +66,9 @@ impl MusicPlan {
     }
 }
 
+/// The music playing (not an effect, never cut for other sounds).
 #[derive(Component)]
-struct Track;
+pub(crate) struct Track;
 
 #[derive(Resource, Default)]
 struct NowPlaying {

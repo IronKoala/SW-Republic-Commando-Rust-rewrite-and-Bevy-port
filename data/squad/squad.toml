@@ -182,6 +182,12 @@ revive_player = "yes"
 #   `throw_damage` falling to 0 at `throw_radius`): at enemies within
 #   `target_radius` of the marker's target area, or, with no area, at
 #   their own target within `throw_range`.
+#   `pullable = "yes"`: with AUTO PULL MANEUVERS on (the GAME options
+#   page, or `auto_pull_maneuvers` in settings.toml), a new order that
+#   needs more squad mates than are free takes them off posts like this
+#   one, the longest-held first. Off, the order is refused until you
+#   recall the squad (the original's "RECALL SQUAD BEFORE ENGAGING
+#   MANEUVER").
 # preferred: the squad mate (their `class` or key) who takes the job when
 #   free; otherwise the nearest free one goes.
 
@@ -226,6 +232,7 @@ result = "trigger"
 name = "Sniper position"
 match = "snipe"           # MarkerSnipe
 kind = "post"
+pullable = "yes"         # game: MarkerWeapon bCancelIfMembersNeeded (auto pull maneuvers)
 preferred = "Commando07Delta"  # game: MarkerSnipe PreferredPawnClass (Sev)
 weapon = "dc17m_sniper"   # from the weapons part; the usual gun until it's there
 sight_radius = 8000       # guess
@@ -239,6 +246,7 @@ burst_pause_max = 2.5     # guess
 name = "Grenade position"
 match = "grenade"         # MarkerGrenade, with a WeaponTarget area
 kind = "post"
+pullable = "yes"         # game: MarkerWeapon bCancelIfMembersNeeded (auto pull maneuvers)
 throw_interval = 6        # guess
 throw_range = 1500        # guess (markers with no target area)
 throw_fuse = 2            # game: ThermalDetonatorProj FuseTime
@@ -250,6 +258,7 @@ target_radius = 512       # game: MarkerWeapon WeaponTargetRadius
 name = "Anti-armour position"
 match = "antiarmor, antiarmour"  # MarkerAntiArmor
 kind = "post"
+pullable = "yes"         # game: MarkerWeapon bCancelIfMembersNeeded (auto pull maneuvers)
 preferred = "Commando62Delta"  # game: MarkerAntiArmor PreferredPawnClass (Scorch)
 weapon = "dc17m_antiarmor"  # from the weapons part; the usual gun until it's there
 burst_count = 1

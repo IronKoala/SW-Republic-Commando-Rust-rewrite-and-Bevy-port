@@ -697,6 +697,13 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                 _ => return Err("group must be \"yes\" or \"no\"".into()),
             }
         }
+        "pullable" => {
+            j.pullable = match text(value)?.as_str() {
+                "yes" => true,
+                "no" => false,
+                _ => return Err("pullable must be \"yes\" or \"no\"".into()),
+            }
+        }
         _ => {
             let v = one(value)?;
             match key {

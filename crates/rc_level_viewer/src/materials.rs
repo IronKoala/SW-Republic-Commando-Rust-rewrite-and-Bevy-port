@@ -130,7 +130,9 @@ fn decode_texture(pkg: &Package, data: &[u8], index: usize) -> Result<Picture, F
         Some(_) => return Err("palette in another package".into()),
         None => None,
     };
-    let mip = tex.mips.first().ok_or("texture has no mipmaps")?;
+    let mip = tex
+        .mip_for(texture::Detail::World)
+        .ok_or("texture has no mipmaps")?;
     let bytes = &data[mip.data_offset..mip.data_offset + mip.data_len];
     let image = rc_image::decode(
         format,

@@ -25,6 +25,7 @@
 
 mod arms_view;
 pub mod arms;
+pub mod counter;
 mod damage;
 pub mod damage_types;
 pub mod data;

@@ -240,7 +240,8 @@ fn follow(packs: &mut Packages, start: Place) -> Result<Skin, String> {
                 "Material"
             }
             // TexPanner2D is Republic Commando's own (the ammo counter's
-            // digits on the first-person rifle): drawn unscrolled for now.
+            // digits on the first-person rifle): followed to its picture
+            // here; rc_combat's arms_view slides it by the ammo count.
             "TexModifier" | "TexPanner" | "TexPanner2D" | "TexScaler" | "TexRotator"
             | "TexOscillator" | "TexEnvMap" | "TexCoordSource" => "Material",
             other => return Err(format!("{name} is a {other}, which we can't follow yet")),
@@ -297,7 +298,10 @@ fn decode_texture(pkg: &Package, data: &[u8], export: &Export) -> Result<Rgba, S
         Some(_) => return Err("palette is in another package (not supported yet)".into()),
         None => None,
     };
-    let mip = tex.mips.first().ok_or("texture has no mipmaps")?;
+    // Models are the squad, the arms and weapons: CHARACTER DETAIL.
+    let mip = tex
+        .mip_for(texture::Detail::Characters)
+        .ok_or("texture has no mipmaps")?;
     rc_image::decode(
         format,
         mip.width as usize,
