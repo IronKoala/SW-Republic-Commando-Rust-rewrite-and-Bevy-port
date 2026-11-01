@@ -38,6 +38,9 @@ pub struct GameSection {
     pub subtitles: bool,
     /// PROMPT TEXT: the level's hints, such as "Press USE to open".
     pub prompt_text: bool,
+    /// HELMET: the helmet frame round the edge of the view (the original's
+    /// `bVisor`).
+    pub helmet: bool,
     /// The original's AUTO PULL MANEUVERS: a new squad order that needs
     /// more squad mates than are free takes them off sniper, grenade and
     /// anti-armour posts. Off, the order is refused until you recall the
@@ -225,6 +228,7 @@ impl Default for Settings {
                 difficulty: Difficulty::Medium,
                 subtitles: true,
                 prompt_text: true,
+                helmet: true,
                 auto_pull_maneuvers: true,
             },
             mods: ModsSection {
@@ -322,6 +326,7 @@ data_folder = 'data'
 difficulty = 'medium'
 subtitles = true     # the words of what is said, at the bottom of the screen
 prompt_text = true   # the level's hints, such as "Press USE to open"
+helmet = true        # the helmet frame round the edge of the view
 # When a squad order needs more squad mates than are free, take them off
 # sniper, grenade and anti-armour posts (the longest-held first). false:
 # the order is refused until you recall the squad. The original's AUTO

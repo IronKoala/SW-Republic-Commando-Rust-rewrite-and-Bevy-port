@@ -1,0 +1,19 @@
+# The commando's helmet frame round the edge of the view. The original
+# draws it as a 3D model (HUDMeshes.HelmetSurface.Helmet, named by the HUD class), read
+# from the player's install at run time; nothing from the game is here.
+# The GAME options page's HELMET row turns it on and off (settings.toml
+# [game] helmet). See it and check every screen shape with:
+#   rc_probe --helmet
+
+enabled = true
+hud_class = "CTGame.CTHUD"
+mesh = "HUDMeshes.HelmetSurface.Helmet"
+# Used only if the HUD class can't be read (it says 84).
+display_fov = 84.0
+# 0 to 1. The original lights the frame with a dim glow and lights inside
+# the helmet, which we don't copy yet: this is a guess.
+brightness = 0.5
+# On screens wider than 4:3 the frame's sides keep their shape and move out
+# to the screen edges; only the part nearer the middle than this (a share
+# of a 4:3 screen's half width) stretches. Narrower screens move them in.
+sides_from = 0.5
