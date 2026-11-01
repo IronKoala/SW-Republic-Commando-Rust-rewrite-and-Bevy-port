@@ -538,6 +538,8 @@ fn read_devices(
         axis(Action::StrafeRight, Action::StrafeLeft),
         axis(Action::MoveForward, Action::MoveBack),
     );
+    // Turn keys turn at the controller's full-stick speed.
+    turn.x += axis(Action::TurnRight, Action::TurnLeft) * look.stick_look_speed * dt;
     // The mouse only turns the view while it is captured (during play).
     let grabbed = cursor
         .single()

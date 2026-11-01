@@ -6,6 +6,8 @@ edition.workspace = true
 
 [dependencies]
 rc_game_core = { path = "../rc_game_core" }
+# Sound quality (lower sample rate) for the SOUND options.
+rc_audio = { path = "../rc_audio" }
 rc_level_viewer = { path = "../rc_level_viewer" }
 rc_model = { path = "../rc_model" }
 rc_movement = { path = "../rc_movement" }

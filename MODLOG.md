@@ -3,6 +3,42 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-10-30: FSAA and VSYNC change, squad shadows show, F12 doesn't pause, AUTO PULL MANEUVERS row (rc_game, rc_menus)
+
+- **Changed:** FSAA and VSYNC use our own value lists (OFF, 2X, 4X; ON, OFF) instead of the original's, which the original fills from the graphics card while it runs. `rc_menus::pages::check` switches on any row that `original_menus.toml` gives a setting, even if the original stores it switched off or with no values; `original_menu.rs` logs the original's list when it is replaced. SQUAD SHADOWS now also puts a soft round shadow under each squad mate (`graphics.rs` `squad_blobs`), since few of the levels' lights move. F12 packs and writes the picture on a separate thread. AUTO PULL MANEUVERS (GAME page) is an on/off row for `game.auto_pull_maneuvers`, now that PR #50 is in main (merged in).
+- **Why:** User: "squad shadows settings does nothing, fsaa cant be changed, Vsync cant be changed", and F12 "caused the game to freeze for a sec".
+- **Tested how:** `cargo test -p rc_game -p rc_menus` (new tests: a switched-off empty row given a setting becomes a working chooser; the stand-in FSAA list writes and reads 4X); `graphics_check` example under Xvfb.
+- **Result:** rc_game 50 and rc_menus 16 pass; `GRAPHICS CHECK: 34 passed, 0 failed`.
+- **Still broken / not tested:** Not tested with the game files or on Windows: why FSAA and VSYNC couldn't be changed on the PC is a guess (empty or switched-off rows in the original); the log line `... has [...] in the original; using [...]` will show. The squad blob shadows aren't tested in a level (no game files in this session); they sit flat at the squad mate's feet, so on stairs or slopes they can float or cut in. F12's pause not measured. BUMPMAPPING and PROJECTORS stay greyed on purpose: the port doesn't draw bump maps or projected pictures yet.
+- **Next:** User re-checks on the PC.
+
+## 2026-10-30: GRAPHICS QUALITY no longer gets stuck on LOW (rc_game)
+
+- **Changed:** `settings.toml` `[video] quality` keeps the GRAPHICS QUALITY value last chosen; `option_settings` shows that value while the rows still match it, instead of the first value whose preset matches.
+- **Why:** User: after going to the lowest value, the arrows wouldn't go above LOW. On their five-value list LOW and MEDIUM both set the middle preset, so stepping to MEDIUM read back as LOW.
+- **Tested how:** New test `graphics_quality_steps_through_values_that_share_a_preset` (LOWEST..HIGHEST, up and down); `cargo test -p rc_game`.
+- **Result:** 45 tests pass.
+- **Still broken / not tested:** Not tested on the PC yet. The short freeze when choosing the highest value is Bevy preparing the bloom, shadow and edge-smoothing drawing for the first time (expected once per run; not measured).
+- **Next:** User re-checks on the PC.
+
+## 2026-10-30: GAME and CONTROLS option rows: subtitles, prompt text, turn keys, weapon keys, screenshot (rc_game, rc_game_core, rc_combat)
+
+- **Changed:** SUBTITLES: new `rc_game/src/subtitles.rs` reads every `GameData/System/subtitles*.int` (pairs `SubtitleSound[n]` with `SubtitleText[n]`) and shows a line's words at the bottom middle of the display area, above the readouts, while the level script's speech plays (at least 1.5 s, at most 3 lines; placeholder font as the rest of the stand-in display). PROMPT TEXT: the level scripts' hints (`ACTION_ShowPrompt`) are left off the display when it is off (`hud.rs`). New actions in `rc_game_core::Action`: `turn_left`, `turn_right` (keys turn at the controller's look speed; no key by default), `weapon_pistol`, `weapon_blaster`, `weapon_sniper`, `weapon_anti_armor` (1 to 4, straight to that weapon, `rc_combat/src/fire.rs`) and `screenshot` (F12, saves a PNG in `screenshots` next to the settings file, `rc_game/src/screenshot.rs`). `data/ui/original_menus.toml` names them; `data/input/bindings.toml` gives the keys (our choice, DefaultCtrl.ini not checked for these).
+- **Why:** User: "all of the setting functional and working".
+- **Tested how:** `cargo test -p rc_game -p rc_game_core -p rc_combat -p rc_image -p rc_pads`. In the cloud (no game files): `rc_game --frames 500 --log-input` on a plain Xvfb, F12 pressed with xdotool.
+- **Result:** All pass (rc_game 43, including the subtitles file parser and "a line shows while it plays and only with the option on"). F12: log `input: ... pressed ["screenshot"]` then `screenshot: saved screenshots/rc_game_..._001.png (1280x720)`; the picture is the menu, colours right.
+- **Still broken / not tested:** Subtitles not tested with the real `subtitles*.int` files (their exact name and layout come from an earlier thread's notes, not checked in this session) or in a level. Enemy voice lines get no subtitles (only the level scripts' lines). Turn and weapon keys not tested in a level. Still greyed on the GAME page: HELMET (the helmet frame isn't drawn), AUTO PULL MANEUVERS (not known what it does in the original), TACTICAL VISOR MODE and its INTENSITY (the visor's outline view isn't built).
+- **Next:** Check the subtitles with the install; the helmet frame and tactical visor are each a bigger piece of work.
+
+## 2026-10-30: GRAPHICS and SOUND option rows work (rc_game, rc_package, rc_audio)
+
+- **Changed:** New `rc_game/src/graphics.rs`: BRIGHTNESS (exposure, one stop down to one stop up), BLUR (Bevy motion blur on the level view), BLOOM (Bevy bloom, wide colour range), SQUAD SHADOWS (the level's moving lights cast shadows), FSAA (MSAA 1, 2 or 4; 8 counts as 4), and GRAPHICS QUALITY presets that set those rows (CUSTOM after a hand change). TEXTURE QUALITY and CHARACTER DETAIL pick a smaller mipmap (`rc_package::texture::mip_for`, half or quarter size) from the next level load. New `rc_game/src/sound_options.rs` (replaces `music.rs`'s effects volume): VOICES VOLUME for sounds tagged `rc_game_core::Voice` (level script speech, enemy voice packages), 3D SOUND for sounds tagged `rc_game_core::SoundAt` (enemy sounds), AUDIO CHANNELS (the oldest effect stops when too many play; speech and music never do), SOUND QUALITY low (`rc_audio::for_quality`: 44 kHz sounds halved to 22 kHz, from the next level load). New settings in `settings.toml` `[video]` and `[audio]`. `data/ui/original_menus.toml` names them. Example `rc_game/examples/graphics_check.rs`.
+- **Why:** User: "all of the setting functional and working".
+- **Tested how:** `cargo test` on rc_game, rc_package, rc_audio, rc_combat, rc_enemies, rc_scripts_plugin, rc_game_core, rc_level_viewer, rc_character, rc_model. `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p rc_game --example graphics_check` (a stand-in scene with the game's stack of four cameras; no game files).
+- **Result:** All tests pass (rc_game 41). `GRAPHICS CHECK: 34 passed, 0 failed`: level brightness 158 -> 199 at brightness 1, 124 at 0; the same 199 with bloom on (applied once, not once per camera); shadows 158 -> 143; FSAA 8 asked for gave no graphics card errors (8 had failed on the cloud's card before being capped at 4); the display box drawn in every step.
+- **Still broken / not tested:** Not tested in a real level or on Windows (no game files in this cloud session). Blur not measured (no error, but its look not checked). Bloom barely shows on this game's dark levels at the threshold used. Not tested by ear: voices volume, 3D sound, channels, sound quality. The meaning of each row is ours where the original's engine differs (its presets, its 3D sound kinds). Still greyed: BUMPMAPPING (bump maps aren't drawn yet), PROJECTORS (no projected decals or blob shadows yet), EAX (Creative's Windows-only sound card effects). The original's item lists for these rows weren't seen in this session; the code reads their words (ON/OFF, LOW, 2X, numbers), not their order.
+- **Next:** GAME page rows (subtitles, prompt text), CONTROLS rows (turn keys, screenshot, weapon keys).
+
 ## 2026-10-31: Stuck-frame watchdog; choosing the graphics API (rc_game)
 
 - **Changed:** `display::start_watchdog`: a thread logs "display: WARNING: no new frame for 5 s, the game is stuck" when frames stop after the first one, and "frames again" when they start. New `video.graphics_api` (`auto` default, `vulkan`, `dx12`, `gl`), passed to Bevy's `RenderPlugin` (`display::wgpu_settings`).

@@ -197,6 +197,9 @@ pub struct Looks {
 pub struct EnemySounds {
     tried: std::collections::HashSet<String>,
     by_type: HashMap<String, HashMap<String, rc_combat::GameSound>>,
+    /// Types whose sounds come from a speech package (`*_voice`): their
+    /// lines follow the VOICES volume.
+    speaking: std::collections::HashSet<String>,
     picks: u32,
     /// When each droid last said a hurt line (battle time), for
     /// `hurt_interval`.
@@ -237,6 +240,9 @@ impl EnemySounds {
             names.len(),
             snd.package
         ));
+        if snd.package.to_ascii_lowercase().contains("voice") {
+            self.speaking.insert(t.kind.id.clone());
+        }
         self.by_type.insert(t.kind.id.clone(), found);
     }
 
@@ -258,10 +264,14 @@ impl EnemySounds {
         let name = &names[self.picks as usize % names.len()];
         let h = self.by_type.get(kind)?.get(name)?.pick()?;
         let volume = listener.map_or(0.5, |l| 1.0 / (1.0 + (l - at).length() / 1000.0));
-        commands.spawn((
+        let mut e = commands.spawn((
             AudioPlayer(h),
             bevy::audio::PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume)),
+            rc_game_core::SoundAt::place(rc_game_core::units::to_bevy(at)),
         ));
+        if self.speaking.contains(kind) {
+            e.insert(rc_game_core::Voice);
+        }
         Some(name.clone())
     }
 }

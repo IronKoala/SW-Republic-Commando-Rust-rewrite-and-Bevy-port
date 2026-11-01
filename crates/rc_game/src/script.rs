@@ -892,11 +892,10 @@ fn steps() -> Vec<Step> {
                 Err(format!("{before:.1} -> {now:.1}, shows {shown}"))
             }
         }),
-        Check("greyed-out rows can't be reached (VOICES, EAX...)", |w| {
+        Check("the greyed-out EAX row can't be reached, VOICES can", |w| {
             let focusable = original_focusable(w);
-            if focusable
-                .iter()
-                .any(|n| n == "Options[0]" || n == "Options[5]")
+            if focusable.iter().any(|n| n == "Options[5]")
+                || !focusable.iter().any(|n| n == "Options[0]")
             {
                 Err(format!("{focusable:?}"))
             } else {

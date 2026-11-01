@@ -216,6 +216,39 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
             ));
         }
     }
+    // A row the original fills or switches on while it runs (FSAA and VSYNC,
+    // from what the graphics card can do) can be stored switched off or
+    // with no values. A row given a setting here is switched on, and gets a
+    // stand-in value for the game to replace with the setting's own list.
+    for (name, setting) in &plan.choosers {
+        if is_unavailable(setting) {
+            continue;
+        }
+        let Some(at) = layout
+            .widgets
+            .iter()
+            .position(|w| w.name.eq_ignore_ascii_case(name))
+        else {
+            continue;
+        };
+        if !matches!(&layout.widgets[at].kind, Kind::Button(_)) {
+            continue;
+        }
+        let row = layout.widgets[at].name.clone();
+        for i in crate::screens::row_widgets(layout, &row)
+            .into_iter()
+            .chain([at])
+        {
+            if let Kind::Button(b) = &mut layout.widgets[i].kind {
+                b.disabled = false;
+            }
+        }
+        if let Kind::Button(b) = &mut layout.widgets[at].kind {
+            if b.items.is_empty() {
+                b.items.push(String::new());
+            }
+        }
+    }
     let mut commands = Vec::new();
     let mut choosers = Vec::new();
     let mut keys = Vec::new();
@@ -445,6 +478,24 @@ mod tests {
             Some(PageCmd::Play("geo_01a".into()))
         );
         assert_eq!(PageCmd::parse("fly"), None);
+    }
+
+    #[test]
+    fn a_row_switched_off_or_empty_in_the_original_works_when_given_a_setting() {
+        // As the original's FSAA row: stored switched off with no values.
+        let mut fsaa = button("Options[11]", "");
+        if let Kind::Button(b) = &mut fsaa.kind {
+            b.disabled = true;
+        }
+        let mut l = layout(vec![button("Options[0]", "resumeselected"), fsaa]);
+        let mut p = plan();
+        p.choosers = vec![("Options[11]".into(), "fsaa".into())];
+        let got = check(&mut l, &p).unwrap();
+        assert_eq!(got.chooser(1), Some("fsaa"));
+        let Kind::Button(b) = &l.widgets[1].kind else {
+            panic!()
+        };
+        assert!(!b.disabled && b.is_chooser());
     }
 
     #[test]

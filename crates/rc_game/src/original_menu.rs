@@ -523,6 +523,23 @@ fn check_names(layout: &mut MenuLayout, buttons: &mut PageButtons, page: &str, l
         }
         ok
     });
+    // The original fills some lists (FSAA, VSYNC) while it runs, so the
+    // stored list can be too short to choose from.
+    for (i, name) in &buttons.choosers {
+        let w = &mut layout.widgets[*i];
+        let Kind::Button(b) = &mut w.kind else {
+            continue;
+        };
+        if b.items.len() < 2 {
+            if let Some(items) = option_settings::fallback_items(name) {
+                log.line(format!(
+                    "original menus: page {page}: {} ({name}) has {:?} in the original; using {:?}",
+                    w.name, b.items, items
+                ));
+                b.items = items;
+            }
+        }
+    }
     for (i, why) in bad {
         let name = layout.widgets[i].name.clone();
         log.line(format!(
