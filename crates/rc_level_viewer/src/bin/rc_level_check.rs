@@ -140,8 +140,8 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
     }
     log.line(match &scene.sky {
         Some(sky) => format!(
-            "  sky: from {}, {} sky box polygons, {} sky props, {} backdrop polygons",
-            sky.from, s.sky_polygons, s.sky_props, s.backdrop_polygons
+            "  sky: from {}, {} sky box polygons, {} sky props ({} with no stored light, drawn full bright), {} backdrop polygons",
+            sky.from, s.sky_polygons, s.sky_props, s.sky_props_unlit, s.backdrop_polygons
         ),
         None => format!(
             "  sky: none (no SkyZoneInfo); {} backdrop polygons",

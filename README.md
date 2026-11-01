@@ -503,7 +503,8 @@ copy of the game.
   (geo_03a, geo_04a, yyy_01b, yyy_35a), but its light is our estimate
   (sun and ambient, scaled to match the props), the bushes and palms the
   game scatters on it aren't placed, and it isn't tested on Windows.
-  Levels are darker than the original and some skies show black.
+  Levels are darker than the original. Sky domes were drawn black until
+  2026-11-01 (now full brightness; not tested on Windows).
 - No levels yet: walking only works in the hand-made test room. No weapons,
   enemies, health or sound.
 - Enemies: only battle droids so far. Level scripts don't run yet, so

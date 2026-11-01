@@ -164,12 +164,13 @@ fn setup(
         Some(sky) => {
             sky::spawn_sky_camera(&mut commands, sky, background);
             log.line(format!(
-                "sky: camera at {:?} (Bevy units) from {}; {} sky batches, {} sky box polygons, {} sky props, {} backdrop polygons left open",
+                "sky: camera at {:?} (Bevy units) from {}; {} sky batches, {} sky box polygons, {} sky props ({} with no stored light, drawn full bright), {} backdrop polygons left open",
                 sky.position,
                 sky.from,
                 r.sky_batches,
                 scene.stats.sky_polygons,
                 scene.stats.sky_props,
+                scene.stats.sky_props_unlit,
                 scene.stats.backdrop_polygons
             ));
             true

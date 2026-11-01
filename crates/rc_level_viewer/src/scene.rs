@@ -136,6 +136,8 @@ pub struct Stats {
     pub movers: usize,
     pub movers_drawn: usize,
     pub sky_props: usize,
+    /// Sky props whose stored light is all black, drawn at full brightness.
+    pub sky_props_unlit: usize,
     pub backdrop_polygons: usize,
     /// Terrains (outdoor ground): read, triangles drawn, painted layers
     /// drawn, layers left out with why, terrains that couldn't be read.
@@ -849,6 +851,19 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 } else {
                     None
                 };
+                let in_sky = sky_zone.is_some() && bsp.point_zone(p.location) == sky_zone;
+                // Sky domes and backdrops store no light at all (every
+                // corner 0,0,0 on geo_04a, yyy_04a, yyy_05a, yyy_06a), and
+                // the game shows them lit: geo_04a's sky zone has ambient
+                // brightness 255. Draw them at full brightness instead of
+                // black.
+                let colours = match colours {
+                    Some(c) if in_sky && c.iter().all(|v| v[0] == 0 && v[1] == 0 && v[2] == 0) => {
+                        ctx.stats.sky_props_unlit += 1;
+                        None
+                    }
+                    other => other,
+                };
                 let colours = match colours {
                     Some(c) if c.len() == m.0.vertices.len() => {
                         ctx.stats.mesh_actors_with_colours += 1;
@@ -863,7 +878,6 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                         None
                     }
                 };
-                let in_sky = sky_zone.is_some() && bsp.point_zone(p.location) == sky_zone;
                 ctx.stats.sky_props += in_sky as usize;
                 let mover = mover_exports.contains(&p.export).then_some(p.export);
                 ctx.stats.movers_drawn += mover.is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m)) as usize;

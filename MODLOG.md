@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-01: Sky domes are no longer drawn black (rc_level_viewer)
+
+- **Changed:** `crates/rc_level_viewer/src/scene.rs`: a prop in the sky zone whose stored light is black on every corner is drawn at full brightness instead (new count `sky_props_unlit`, in the `rc_level_viewer` and `rc_level_check` sky lines).
+- **Why:** The user's GEO_04A screenshot: black above the canyon where the sky should be, with only a sliver of yellow. The sky dome models store 0,0,0 light on every corner, so multiplying by it drew them black. geo_04a's sky zone has ambient brightness 255, which fits the game lighting them fully.
+- **Tested how:** In the cloud with the game files copied from the PC: `rc_level_check geo_04a yyy_04a yyy_06a`; `xvfb-run -a -s "-screen 0 1280x720x24" rc_level_viewer geo_04a --pitch 45 --capture`.
+- **Result:** Every sky dome checked was all black: geo_04a, yyy_04a, yyy_05a, yyy_06a (1 each). Looking up in geo_04a now shows an orange-yellow cloudy sky over the canyon (before: black).
+- **Still broken / not tested:** Not tested on Windows or by playing. Full brightness is our reading of the sky zone's ambient 255; yyy_04a's sky zone sets no ambient, so it's a guess there.
+- **Next:** Brightness of the rest of the level (waiting for original-game screenshots).
+
 ## 2026-11-01: Outdoor ground (terrain) is drawn and solid (rc_level, rc_level_viewer, rc_level_plugin)
 
 - **Changed:** New `crates/rc_level/src/terrain.rs` reads `TerrainInfo` actors: the grid's points (stored already placed in the world after the properties), which squares are holes, which way each square is split, and the painted layers. `collision.rs`: `add_terrains`, used by `map_collision.rs` (so `rc_game` and `rc_walk` can stand on it; `MapCollision` gains `terrains`, `terrain_triangles`, `terrain_failures`). `scene.rs`: draws each terrain as one batch per painted layer (later layers see-through by their alpha map), with light from the sun and zone ambient scaled to match the map's props; checkerboard (`Chex`) decoration layers are left out. `draw.rs`: terrain layers blend by corner alpha and get a small depth bias. Logs: `rc_level_check`, `rc_level_viewer` and the game's level part report terrains, triangles, layers and the terrain's light next to the props'.
