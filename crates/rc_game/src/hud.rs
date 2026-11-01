@@ -1,5 +1,7 @@
-//! PLACEHOLDER: our own stand-in for the original's HUD, to be replaced by
-//! the original's look (see `docs/ORIGINAL_MENUS.md`).
+//! PLACEHOLDER: our own stand-in for the original's HUD. When the install's
+//! HUD pictures can be read, `original_hud.rs` draws the original's
+//! pictures instead and hides these drawings (only the crosshair bars are
+//! still used, as a fallback); see `docs/ORIGINAL_MENUS.md`.
 //!
 //! The on-screen display during play, styled after the commando's visor:
 //! amber corner brackets, the crosshair in the middle, shield and health at
@@ -50,6 +52,11 @@ struct ShieldFill;
 struct HealthFill;
 #[derive(Component)]
 pub(crate) struct CrossBar(pub(crate) Vec2);
+
+/// The placeholder's own drawings (everything but the crosshair), hidden
+/// while the original's HUD pictures are drawn (`original_hud.rs`).
+#[derive(Component)]
+pub(crate) struct PlaceholderPart;
 
 /// The HUD's update systems (the original HUD pictures run after them).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -144,7 +151,11 @@ fn bracket(parent: &mut ChildSpawnerCommands, theme: &Theme, top: bool, left: bo
     } else {
         node.right = m;
     }
-    parent.spawn((node, BorderColor::all(theme.text.with_alpha(0.6))));
+    parent.spawn((
+        PlaceholderPart,
+        node,
+        BorderColor::all(theme.text.with_alpha(0.6)),
+    ));
 }
 
 fn spawn_hud(
@@ -206,27 +217,33 @@ fn spawn_hud(
                 }
             });
             // Shield and health, bottom left.
-            root.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: Val::VMin(5.0),
-                bottom: Val::VMin(5.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::VMin(0.8),
-                ..default()
-            })
+            root.spawn((
+                PlaceholderPart,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::VMin(5.0),
+                    bottom: Val::VMin(5.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::VMin(0.8),
+                    ..default()
+                },
+            ))
             .with_children(|p| {
                 bar(p, "SHIELD", theme.shield, ShieldFill, &theme);
                 bar(p, "HEALTH", theme.health, HealthFill, &theme);
             });
             // Weapon and ammunition, bottom right.
-            root.spawn(Node {
-                position_type: PositionType::Absolute,
-                right: Val::VMin(5.0),
-                bottom: Val::VMin(5.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::FlexEnd,
-                ..default()
-            })
+            root.spawn((
+                PlaceholderPart,
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::VMin(5.0),
+                    bottom: Val::VMin(5.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::FlexEnd,
+                    ..default()
+                },
+            ))
             .with_children(|p| {
                 p.spawn((
                     WeaponName,
@@ -249,6 +266,7 @@ fn spawn_hud(
             });
             // Squad, top left.
             root.spawn((
+                PlaceholderPart,
                 SquadPanel,
                 Node {
                     position_type: PositionType::Absolute,
@@ -261,6 +279,7 @@ fn spawn_hud(
             ));
             // Messages, top middle.
             root.spawn((
+                PlaceholderPart,
                 MessageList,
                 Node {
                     position_type: PositionType::Absolute,
