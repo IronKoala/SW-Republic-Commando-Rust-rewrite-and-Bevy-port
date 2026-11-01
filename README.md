@@ -517,8 +517,12 @@ copy of the game.
   (geo_03a, geo_04a, yyy_01b, yyy_35a), but its light is our estimate
   (sun and ambient, scaled to match the props), the bushes and palms the
   game scatters on it aren't placed, and it isn't tested on Windows.
-  Levels are darker than the original. Sky domes were drawn black until
-  2026-11-01 (now full brightness; not tested on Windows).
+  Levels were darker than the original; since 2026-11-01 the colours, zone
+  ambient light, and Kashyyyk's tunnel pieces (yyy_06a, built from props
+  standing inside the rock) are matched to the user's original-game
+  screenshots of geo_04a and yyy_06a, within about 20% on yyy_06a's start
+  tunnel. Other maps not compared. Sky domes were drawn black until
+  2026-11-01 (now full brightness). Not tested on Windows.
 - No levels yet: walking only works in the hand-made test room. No weapons,
   enemies, health or sound.
 - Enemies: only battle droids so far. Level scripts don't run yet, so

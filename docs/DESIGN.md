@@ -282,9 +282,20 @@ game's own defaults in `Engine.u` haven't been read yet.
 were worked out when the level was built and saved into the map:
 - **Static meshes** (props, most walls): each `StaticMeshActor` has a
   `StaticMeshInstance` holding one colour per mesh corner (vertex). Layout: an
-  empty property list, a count, then that many 4-byte colours (blue, green,
-  red, alpha). It read correctly on all 1,267 instances in the four maps. A
-  few bytes after the colours (4 + 6 x n) are not understood yet. Many of the
+  empty property list, a count, then that many 4-byte colours (red, green,
+  blue, alpha; see "How baked light is drawn"). It read correctly on all
+  1,267 instances in the four maps. After the colours come a 4-byte number
+  (2 when the next list is filled, else 0), the lights baked in (a count,
+  then per light an object reference and a 4-byte 1), a second per-corner
+  list (count, 4 bytes each), and a 4-byte number; all 556 instances on
+  yyy_06a read to their last byte (`actors::read_baked_light`). The second
+  list is empty except on props with bump-mapped (`HsBump...`) materials,
+  where it holds the light's direction for the bump map: red, green, blue
+  are x, y, z in the mesh's own axes (0-255 for -1..1; length 0.99 median;
+  it points at the lights, 0.96 on unturned props), and alpha is the light's
+  strength before facing (the colour's brightest channel is 0.75 x alpha x
+  how squarely the corner faces that direction, middle half 0.69-0.77, over
+  62,507 corners). Many of the
   colours are black (60-80%), so the game probably brightens them when
   drawing (UE2 often doubled vertex light). The actor points to its instance
   with a `StaticMeshInstance` property. In `geo_01a` all 355 drawn props have
@@ -349,8 +360,22 @@ shadows = false
   colour is the zone's own stored `AmbientVector` (Republic Commando only),
   which equals Unreal's hue and saturation (`hue_saturation_to_rgb`) times
   `brightness_curve(AmbientBrightness)` on every zone checked (6 maps).
-  Props in zone 0 (outside every zone: 247 on yyy_06a, which is built almost
-  entirely from props) get nothing unless the `LevelInfo` has an ambient.
+  A prop whose position is inside solid rock or wall (BSP zone 0, outside
+  every zone: 245 of 556 on yyy_06a, the whole start tunnel, which is built
+  from props) takes the zone most of its corners face instead: each corner
+  is moved 8 units off the surface along its normal and looked up in the
+  BSP (`prop_zone`). Before that they got no ambient at all and the tunnel
+  was black away from the lamps.
+- Bump-mapped props (those with the light-direction list above) get the
+  zone's whole ambient instead of half (`BUMP_PROP_AMBIENT`). The original
+  draws them with its bump shader, and against the user's original-game
+  screenshot of yyy_06a's start tunnel, half left the parts lit only by the
+  ambient at about half the original's brightness while the lamp-lit floor
+  was close. With the whole ambient, six areas of the view (near and middle
+  floor, far tunnel, both walls, ceiling) are within about 20% of the
+  original (middle values 19-47 against 18-44). One screenshot, so it is a
+  calibration, not a proof. The bump maps themselves (the pixel-by-pixel
+  shading the direction list is for) are not drawn yet.
 - Colours from hue and saturation follow Unreal's model: hue fades in a
   straight line red to green to blue (so hue 30 is 65% red, 35% green, not
   orange-yellow), checked against the light baked into props on geo_04a,
