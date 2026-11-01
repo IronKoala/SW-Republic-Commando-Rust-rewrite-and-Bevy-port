@@ -130,6 +130,10 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         s.zones_with_ambient, s.props_with_ambient
     ));
     log.line(format!(
+        "  physics props that fall at the start moved down onto the ground: {}, furthest {:.0} units",
+        s.props_settled, s.settle_drop_max
+    ));
+    log.line(format!(
         "  blocking volumes {} ({} stop players, {} stop the AI, {} unreadable, {} scaled); {} path points inside one, {} volumes near a path point",
         s.blocking_volumes,
         s.volumes_block_players,

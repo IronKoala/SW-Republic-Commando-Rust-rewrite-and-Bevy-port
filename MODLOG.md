@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-01: Falling rocks rest on the ground (rc_level, rc_level_viewer)
+
+- **Changed:** New `crates/rc_level/src/settle.rs`: physics props (`KarmaProp`) whose Karma settings start them awake (`KStartEnabled`, and the map doesn't switch `Physics` off) are moved straight down onto whatever is under them when the level loads. `collision.rs`: new `add_meshes`. `map_collision.rs` and `scene.rs` both do it, so what you see and what you bump into match. Both logs count the props moved and the furthest move.
+- **Why:** The user's GEO_04A screenshot: rocks floating in the air near the start. The map leaves geo_04a's `K_GEO4_FallingRock` rocks 40 to 125 units above the ground. Their physics is on from the start, so in the game they drop as the level begins. The port has no physics for them yet. The ground height itself is right: the terrain's own heightmap (`TerrainMap`) matches the points we draw to 0.1 unit.
+- **Tested how:** In the cloud with the game files copied read only from the PC: `rc_level_check` on geo_01a, geo_03a, geo_04a, ras_01a, yyy_01b, yyy_06a; `cargo test -p rc_level` (new `rock_drops_onto_floor`); `cargo check --workspace --exclude rc_soundtest`.
+- **Result:** geo_04a: 16 rocks moved down, the furthest 124 units. On the other 5 maps, nothing moved: their physics props start asleep. That includes ras_01a's 47 cans hung near the ceiling, which a first try wrongly dropped up to 500 units.
+- **Still broken / not tested:** Not tested on Windows or by playing. Not checked with a picture of the exact spot. Rocks don't turn to lie flat on a slope. geo_04a's other 17 rocks (`K_GEO4Rock`, physics switched off in the map) stay where the map puts them, 20 to 180 units up in places, which may also be how the original shows them until something hits them; not compared.
+- **Next:** The user checks the rocks at the GEO_04A start.
+
 ## 2026-11-01: Levels have the right colours and ambient light (rc_level, rc_package, rc_level_viewer)
 
 - **Changed:** `crates/rc_level/src/actors.rs`: props' stored light is read red, green, blue, alpha (was blue, green, red). `crates/rc_package/src/light.rs`: `hue_saturation_to_rgb` uses Unreal's hue model (straight fades between red, green and blue); new `brightness_curve`; `ZoneAmbient` keeps the stored `AmbientVector` and gains `rgb()`. `crates/rc_level_viewer/src/scene.rs`: new `zone_ambients` finds each zone's ambient by where its `ZoneInfo` stands, and half of it is added to every prop in that zone; terrain is lit by its zone's ambient plus the sun on the props' own scale instead of being scaled to the props' average (maps without a sun keep the props' average, flat). Both logs report zones with ambient and props it was added to.

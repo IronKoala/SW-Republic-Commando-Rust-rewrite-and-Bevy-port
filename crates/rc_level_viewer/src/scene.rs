@@ -142,6 +142,10 @@ pub struct Stats {
     /// and props that had it added to their stored light.
     pub zones_with_ambient: usize,
     pub props_with_ambient: usize,
+    /// Physics props (`KarmaProp`) moved down onto the ground, and the
+    /// furthest one moved (Unreal units).
+    pub props_settled: usize,
+    pub settle_drop_max: f32,
     pub backdrop_polygons: usize,
     /// Terrains (outdoor ground): read, triangles drawn, painted layers
     /// drawn, layers left out with why, terrains that couldn't be read.
@@ -889,6 +893,8 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     mover_exports.extend(rc_level::scripts::tagged_actors(pkg, data, &level).into_keys());
     ctx.stats.movers = movers.movers.len();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
+    #[allow(clippy::type_complexity)]
+    let mut loose: Vec<(Placement, Rc<(StaticMesh, Loaded)>, Option<Vec<[u8; 4]>>, bool, Option<usize>)> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
         let p = match actors::read_placement(pkg, data, a) {
@@ -999,6 +1005,19 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 ctx.stats.movers_drawn += mover
                     .is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m))
                     as usize;
+                // Physics props that fall as the level starts (loose
+                // rocks) are drawn after the ground is known, moved down
+                // onto it (`rc_level::settle`).
+                let is_karma = rc_level::settle::starts_awake(pkg, data, p.export) && {
+                    let mats = &mut *ctx.mats;
+                    class_looks
+                        .for_actor(pkg, p.export, &mut |n: &str| mats.package(n))
+                        .is_some_and(|l| l.is_a("KarmaProp"))
+                };
+                if is_karma {
+                    loose.push((p, m, colours, in_sky, mover));
+                    continue;
+                }
                 add_mesh_actor(
                     &mut b,
                     &mut ctx,
@@ -1018,6 +1037,20 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         rc_level::terrain::read_terrains(pkg, data, level.actors.iter().flatten().copied());
     ctx.stats.terrains = terrains.len();
     ctx.stats.terrain_failures = terrain_failures;
+    {
+        let pairs: Vec<_> = placed.iter().map(|(p, m)| (p, &m.0)).collect();
+        let mut ground = rc_level::collision::collision_triangles(&bsp, &pairs);
+        rc_level::collision::add_terrains(&mut ground, &terrains);
+        let ground = rc_level::settle::Ground::new(&ground.triangles);
+        for (mut p, m, colours, in_sky, mover) in loose {
+            if let Some(d) = rc_level::settle::settle(&mut p, &m.0, &ground) {
+                ctx.stats.props_settled += 1;
+                ctx.stats.settle_drop_max = ctx.stats.settle_drop_max.max(d);
+            }
+            add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref(), mover);
+            placed.push((p, m));
+        }
+    }
     ctx.stats.prop_light = average_light(b.batches.iter().filter(|b| b.from_mesh));
     for t in &terrains {
         let zone = bsp.point_zone(t.point(t.size_x / 2, t.size_y / 2));

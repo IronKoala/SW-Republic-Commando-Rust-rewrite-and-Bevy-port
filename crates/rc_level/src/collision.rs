@@ -52,6 +52,14 @@ pub fn collision_triangles(bsp: &Bsp, meshes: &[(&Placement, &StaticMesh)]) -> C
             out.sources.push(Source::Bsp(poly.node));
         }
     }
+    add_meshes(&mut out, meshes);
+    out
+}
+
+/// Add placed props' triangles (as `collision_triangles` does for its
+/// props), for props placed after the rest, such as settled physics props
+/// (`crate::settle`).
+pub fn add_meshes(out: &mut CollisionMesh, meshes: &[(&Placement, &StaticMesh)]) {
     for (p, mesh) in meshes {
         let world: Vec<Vec3> = mesh
             .vertices
@@ -69,7 +77,6 @@ pub fn collision_triangles(bsp: &Bsp, meshes: &[(&Placement, &StaticMesh)]) -> C
             }
         }
     }
-    out
 }
 
 /// Add the drawn triangles of the map's terrains (outdoor ground). Returns

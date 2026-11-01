@@ -990,6 +990,15 @@ terrain yet, so their ground gets the props' average light, flat. The terrain's
 triangles also go into collision (`collision::add_terrains`, used by
 `map_collision` and so by `rc_game` and `rc_walk`).
 
+Falling rocks (`rc_level::settle`): physics props (`KarmaProp`) whose
+`KarmaParams` say `KStartEnabled` (and whose `Physics` the map doesn't
+switch off) drop onto the ground as the game's level starts. The port has
+no physics for them, so `scene.rs` and `map_collision.rs` place them first
+and then move them straight down onto the ground (BSP, other props,
+terrain) until their lowest corner touches it, up to 512 units. They don't
+turn to lie flat. Props whose physics starts asleep stay where the map puts
+them.
+
 ### Showing a level (`rc_level_viewer`)
 
 Before Bevy starts, the viewer reads the map, then every material and static
