@@ -75,6 +75,11 @@ pub struct Stats {
     pub unique_meshes: usize,
     pub mesh_failures: BTreeMap<String, usize>,
     pub materials_ok: usize,
+    /// Materials drawn with see-through holes, and materials whose picture
+    /// has low alpha that the material doesn't use for holes (usually a
+    /// shine mask), so they are drawn solid.
+    pub materials_see_through: usize,
+    pub materials_alpha_ignored: usize,
     pub material_failures: BTreeMap<String, usize>,
     /// Baked lighting.
     pub lightmap_entries: usize,
@@ -238,6 +243,8 @@ fn picture(
     let p = match mats.resolve(pkg, data, index) {
         Ok(p) => {
             stats.materials_ok += 1;
+            stats.materials_see_through += p.has_alpha as usize;
+            stats.materials_alpha_ignored += (p.alpha_pixels && !p.has_alpha) as usize;
             Some(p)
         }
         Err(e) => {
@@ -288,6 +295,17 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, sky_zone: Option<u
             ctx.data,
             poly.material,
         );
+        // A surface marked "masked" cuts holes where its picture's alpha
+        // is low, whatever the material itself says.
+        let (key, pic) = if poly.poly_flags & poly_flags::MASKED != 0 {
+            let pic = pic.map(|mut p| {
+                p.has_alpha = p.alpha_pixels;
+                p
+            });
+            (format!("{key} (masked)"), pic)
+        } else {
+            (key, pic)
+        };
         let size = tex_size(&pic);
         let translucent = poly.poly_flags & poly_flags::TRANSLUCENT != 0;
         let two_sided = poly.poly_flags & poly_flags::TWO_SIDED != 0;

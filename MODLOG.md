@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-01: Solid walls and floors no longer have holes cut in them (rc_level_viewer)
+
+- **Changed:** `crates/rc_level_viewer/src/materials.rs`: a picture now records two things: whether some pixels have low alpha (`alpha_pixels`), and whether the material says to use that alpha for see-through holes (`has_alpha`). Holes are cut only when the texture has `bMasked` or `bAlphaTexture`, a `FinalBlend` wrapper has `AlphaTest` or alpha blending (`FrameBufferBlending` 2), or a `Shader` has an `Opacity` map or masked output. `scene.rs`: BSP surfaces flagged "masked" (0x2) still cut holes. Both logs count see-through materials and materials whose alpha was ignored.
+- **Why:** The user's playtest showed floors, walls and props missing on every level. Every prop's model was loading; the problem was that any texture with some low-alpha pixels was drawn with holes, but many Republic Commando textures store a shine (specular) mask in alpha, so whole surfaces vanished.
+- **Tested how:** `rc_level_check` on 12 maps and `xvfb-run -a -s "-screen 0 1280x720x24" rc_level_viewer yyy_06a --capture` before and after, in the cloud with the game files copied read only from the PC; `cargo test -p rc_level_viewer`.
+- **Result:** 1 to 30 materials per level were wrongly see-through (for example geo_03a 30, geo_03d 27, ras_01a 21, yyy_06a 20, geo_05a 17); they are now drawn solid. Kashyyyk leaves stay see-through (4 to 8 materials per Kashyyyk map). On yyy_06a's start, the floor in front of the player went from 94% black (average colour 1,1,1) to 33% black (15,20,16), and the metal grate floor shows.
+- **Still broken / not tested:** Not tested on Windows or by playing. Outdoor ground (terrain) isn't drawn at all on geo_03a, geo_04a, yyy_01b and yyy_35a. Levels are still darker than the original, and some skies show black.
+- **Next:** Draw terrain (own PR), then brightness and sky.
+
 ## 2026-11-01: Drag the list's scroll bar; "EVERY MAP +" fits its button (rc_menus, rc_game)
 
 - **Changed:** `rc_menus::lists::drag_to` and `handle`: a scroll bar's handle can be moved to any height and the list follows. `original_menu.rs`: each list's track gets a mouse target (`BarHit`, under the scroll arrows); new system `drag_bars`: click and hold the handle to drag it with the grip kept, or click the track elsewhere to bring the handle there and drag from there, as in a browser. `original_lists::follow_selection`, `drag`. `rc_menus::screens::fit_button_to_text`: this port's added buttons widen their background on whichever side their text runs past (only "EVERY MAP +" needs it; "PORT +" fits). `rc_game --script`: new `Pointer` step (the script holds a pretend mouse pointer) and 2 new checks.

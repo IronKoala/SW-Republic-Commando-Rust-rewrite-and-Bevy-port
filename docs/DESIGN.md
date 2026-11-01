@@ -154,6 +154,17 @@ per pixel):
 - **G16**: 16-bit grey; we keep the top 8 bits.
 - **V8U8 and L6V5U5** (bump maps): see the next section.
 
+**When alpha means see-through.** Low alpha does not always mean a hole.
+Many Republic Commando textures (DXT3/DXT5 walls, floors and props) keep a
+shine (specular) mask in their alpha channel. Like the original engine, the
+level viewer only cuts holes where the material asks for it: the texture has
+`bMasked` or `bAlphaTexture`, a `FinalBlend` around it has `AlphaTest` or
+alpha blending (`FrameBufferBlending` 2), a `Shader` has an `Opacity` map or
+masked output (`OutputBlending` 1), or a BSP surface has the "masked" flag
+(0x2). Everything else is drawn solid (`materials.rs`, `Picture::has_alpha`
+and `alpha_pixels`). Before 2026-11-01 any low-alpha pixel cut a hole, which
+made whole floors and walls vanish in-game.
+
 PNG files are written uncompressed (simplest valid PNG), so they're large but
 open anywhere. They go to `extracted/textures/<package>/<texture>.png`.
 

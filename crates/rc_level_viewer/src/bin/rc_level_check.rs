@@ -110,8 +110,8 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         log.line(format!("  mesh not shown ({n}x): {e}"));
     }
     log.line(format!(
-        "  materials {} shown, {} not",
-        s.materials_ok, mat_fail
+        "  materials {} shown, {} not; {} see-through, {} with a shine mask in alpha drawn solid",
+        s.materials_ok, mat_fail, s.materials_see_through, s.materials_alpha_ignored
     ));
     for (e, n) in &s.material_failures {
         log.line(format!("  material not shown ({n}x): {e}"));

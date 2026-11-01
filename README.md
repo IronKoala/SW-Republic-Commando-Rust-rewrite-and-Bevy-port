@@ -495,8 +495,13 @@ copy of the game.
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
   colour there. The level viewer's camera flies through walls (`rc_walk`
   has collision).
-- Models are drawn without bump maps or transparency. Only a
-  material's main colour texture is used.
+- Models are drawn without bump maps. Only a material's main colour
+  texture is used. See-through parts (leaves, grates) follow the
+  material's own settings (since 2026-11-01; before, floors and walls
+  with a shine mask were cut full of holes). Not tested on Windows.
+- Outdoor ground (Unreal "terrain") isn't drawn yet, so geo_03a, geo_04a,
+  yyy_01b and yyy_35a have no ground under the props. Levels are darker
+  than the original and some skies show black.
 - No levels yet: walking only works in the hand-made test room. No weapons,
   enemies, health or sound.
 - Enemies: only battle droids so far. Level scripts don't run yet, so

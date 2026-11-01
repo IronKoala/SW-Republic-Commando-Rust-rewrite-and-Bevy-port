@@ -421,10 +421,12 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         log.line(format!("  mesh not shown ({n}x): {e}"));
     }
     log.line(format!(
-        "materials: {} shown with a texture, {} not ({} reasons)",
+        "materials: {} shown with a texture, {} not ({} reasons); {} see-through, {} with low alpha that isn't used for holes (drawn solid)",
         s.materials_ok,
         s.material_failures.values().sum::<usize>(),
-        s.material_failures.len()
+        s.material_failures.len(),
+        s.materials_see_through,
+        s.materials_alpha_ignored
     ));
     for (e, n) in &s.material_failures {
         log.line(format!("  material not shown ({n}x): {e}"));
