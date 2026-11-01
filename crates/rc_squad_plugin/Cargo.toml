@@ -7,6 +7,8 @@ edition.workspace = true
 [dependencies]
 # Health, shields and teams: squad mates are targets like everyone else.
 rc_combat = { path = "../rc_combat" }
+# Reading the length of each squad line (WAV header).
+rc_audio = { path = "../rc_audio" }
 rc_game_core = { path = "../rc_game_core" }
 rc_movement = { path = "../rc_movement" }
 rc_nav = { path = "../rc_nav" }
