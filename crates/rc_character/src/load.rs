@@ -340,7 +340,9 @@ fn decode_texture(pkg: &Package, data: &[u8], export: &rc_package::Export) -> Re
         Some(_) => return Err("palette is in another package (not supported yet)".into()),
         None => None,
     };
-    let mip = tex.mips.first().ok_or("texture has no mipmaps")?;
+    let mip = tex
+        .mip_for(texture::Detail::Characters)
+        .ok_or("texture has no mipmaps")?;
     rc_image::decode(
         format,
         mip.width as usize,

@@ -20,6 +20,10 @@ rc_panini = { path = "../rc_panini" }
 rc_image = { path = "../rc_image" }
 rc_menus = { path = "../rc_menus" }
 rc_movement = { path = "../rc_movement" }
+# Texture detail (which mipmap to draw) for the GRAPHICS options.
+rc_package = { path = "../rc_package" }
+# Sound quality (lower sample rate) for the SOUND options.
+rc_audio = { path = "../rc_audio" }
 # Reading our TOML settings files. serde (MIT OR Apache-2.0),
 # https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
 serde = { version = "1", features = ["derive"] }

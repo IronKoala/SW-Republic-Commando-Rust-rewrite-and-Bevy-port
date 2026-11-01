@@ -15,6 +15,8 @@
 //! Everything is logged to `logs/rc_game.log`.
 
 mod display;
+mod graphics;
+mod helmet;
 mod hud;
 mod input;
 mod levels;
@@ -29,7 +31,10 @@ mod panini;
 mod player;
 mod rebind;
 mod script;
+mod screenshot;
 mod settings;
+mod sound_options;
+mod subtitles;
 mod theme;
 
 use bevy::prelude::*;
@@ -184,6 +189,20 @@ fn main() -> AppExit {
         }
     };
     log.line(format!("rc_game {}", env!("CARGO_PKG_VERSION")));
+    // A crash's reason goes into the log too, not only the terminal, where
+    // it scrolls away under Bevy's shutdown warnings.
+    {
+        let log = log.clone();
+        let terminal = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current();
+            log.crash_line(format!(
+                "CRASH in thread {}: {info}",
+                thread.name().unwrap_or("unnamed")
+            ));
+            terminal(info);
+        }));
+    }
 
     // A scripted run uses its own settings file, so it never changes yours.
     let settings_path = settings_file.unwrap_or_else(|| {
@@ -433,13 +452,19 @@ fn main() -> AppExit {
         music::MusicPlugin,
         player::PlayerPlugin,
         panini::PaniniViewPlugin,
+        graphics::GraphicsOptionsPlugin,
+        sound_options::SoundOptionsPlugin,
+        subtitles::SubtitlesPlugin,
+        helmet::HelmetPlugin,
+        screenshot::ScreenshotPlugin,
     ))
     .add_systems(Startup, |mut commands: Commands| {
-        // The camera for menus and the display; the 3D view has its own.
+        // The camera for menus and the display; the 3D view has its own
+        // (sky -1, player 0, arms 1, helmet 2).
         commands.spawn((
             Camera2d,
             Camera {
-                order: 2,
+                order: 3,
                 clear_color: ClearColorConfig::None,
                 ..default()
             },
@@ -500,5 +525,26 @@ fn main() -> AppExit {
     } else {
         app.add_plugins(input::DeviceInputPlugin);
     }
+    app.insert_resource(bevy::render::error_handler::RenderErrorHandler(
+        log_render_error,
+    ));
     app.run()
+}
+
+/// Bevy quits on any error from the graphics card's driver layer (wgpu).
+/// It still does, but the reason now goes into the log first, since the
+/// terminal scrolls it away under the shutdown warnings.
+fn log_render_error(
+    error: &bevy::render::error_handler::RenderError,
+    main_world: &mut World,
+    _render_world: &mut World,
+) -> bevy::render::error_handler::RenderErrorPolicy {
+    if let Some(log) = main_world.get_resource::<GameLog>() {
+        log.crash_line(format!(
+            "CRASH: graphics error ({:?}), quitting: {}",
+            error.ty, error.description
+        ));
+    }
+    main_world.write_message(AppExit::error());
+    bevy::render::error_handler::RenderErrorPolicy::StopRendering
 }

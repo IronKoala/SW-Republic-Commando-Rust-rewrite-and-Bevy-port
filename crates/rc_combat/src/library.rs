@@ -408,8 +408,9 @@ pub fn read_sounds(
         let export = &pkg.exports[i];
         match read_sound(&pkg, &data, export) {
             Ok(snd) => {
+                // SOUND QUALITY may want it at a lower sample rate.
                 let h = audio.add(AudioSource {
-                    bytes: snd.bytes(&data).to_vec().into(),
+                    bytes: rc_audio::for_quality(snd.bytes(&data)).into_owned().into(),
                 });
                 cache.insert(i, h.clone());
                 Some(h)
