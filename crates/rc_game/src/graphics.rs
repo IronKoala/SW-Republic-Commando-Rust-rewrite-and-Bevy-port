@@ -29,7 +29,8 @@ impl Plugin for GraphicsOptionsPlugin {
         app.add_systems(
             Update,
             (apply_detail, apply_to_cameras, apply_shadows, squad_blobs),
-        );
+        )
+        .add_observer(match_new_camera);
     }
 }
 
@@ -77,6 +78,24 @@ fn msaa(samples: u32) -> Msaa {
         // range bloom needs (the cloud test's isn't), and 4 is: every card
         // and phone can do 4.
         _ => Msaa::Sample4,
+    }
+}
+
+/// Gives a camera the edge smoothing (and wide colour range) the others
+/// have the moment it is made. Cameras that draw into the same window must
+/// agree, or the graphics card refuses the frame and Bevy quits ("the depth
+/// attachment's texture view has count 1 but ... the color attachment ...
+/// has count 4"). [`apply_to_cameras`] alone was a frame late: the black
+/// bars' camera (true full screen at a size other than the screen's) is made
+/// after it runs, and was drawn once with Bevy's default of 4 samples.
+fn match_new_camera(add: On<Add<Camera>>, settings: Option<Res<Settings>>, mut commands: Commands) {
+    let Some(settings) = settings else {
+        return;
+    };
+    let mut c = commands.entity(add.entity);
+    c.insert(msaa(settings.video.fsaa));
+    if settings.video.bloom {
+        c.insert(Hdr);
     }
 }
 
@@ -303,6 +322,24 @@ fn apply_shadows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A camera made at any time (like the black bars' one) has the
+    /// setting's edge smoothing straight away, not a frame later.
+    #[test]
+    fn a_new_camera_matches_the_others_at_once() {
+        for (fsaa, bloom, want) in [(1, false, Msaa::Off), (4, true, Msaa::Sample4)] {
+            let mut world = World::new();
+            let mut settings = Settings::default();
+            settings.video.fsaa = fsaa;
+            settings.video.bloom = bloom;
+            world.insert_resource(settings);
+            world.add_observer(match_new_camera);
+            let e = world.spawn(Camera::default()).id();
+            world.flush();
+            assert_eq!(world.get::<Msaa>(e), Some(&want));
+            assert_eq!(world.get::<Hdr>(e).is_some(), bloom);
+        }
+    }
 
     #[test]
     fn detail_levels_skip_up_to_two_halvings() {
