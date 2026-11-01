@@ -124,8 +124,9 @@ fn the_squad_kills_droids_and_revives_each_other_and_the_player() {
         assert!(app.world().get::<Dead>(d).is_some(), "a droid is still up");
     }
     assert_eq!(stats.kills.iter().sum::<u32>(), 3);
-    // A droid takes 5 DC-17m hits (100 health, 20 a hit).
-    assert!(stats.hits.iter().sum::<u32>() >= 15, "{stats:?}");
+    // A droid takes 5 DC-17m hits (100 health, 20 a hit), or one from
+    // Sev's sniper (175) once the droid is far enough for him to use it.
+    assert!(stats.hits.iter().sum::<u32>() >= 3, "{stats:?}");
     let p = player(&mut app);
     assert_eq!(
         app.world().get::<Health>(p).unwrap().current,
@@ -155,4 +156,52 @@ fn the_squad_kills_droids_and_revives_each_other_and_the_player() {
     for w in &stats.revive_waits {
         assert!((3.0..8.0).contains(w), "down for {w} s");
     }
+}
+
+/// A stand-in super battle droid: the game's 500 health and its damage
+/// table (the DC-17m does 15%).
+fn super_droid(app: &mut App, feet: UVec3) -> Entity {
+    let e = droid(app, feet);
+    app.world_mut().entity_mut(e).insert((
+        Health::new(500.0),
+        rc_combat::DamageTable("DV_DroidsSuperBattleDroidDamage".into()),
+    ));
+    e
+}
+
+#[test]
+fn the_squad_uses_their_specialities_on_their_own() {
+    let mut app = app();
+    run(&mut app, 1.0);
+    // A super battle droid off to the left: Scorch's anti-armour.
+    let sbd = super_droid(&mut app, UVec3::new(-600.0, 1500.0, 0.0));
+    run(&mut app, 12.0);
+    let squad = app.world().resource::<SquadState>().squad.as_ref().unwrap();
+    let scorch = squad.members[2].fight.special_shots;
+    println!("Scorch anti-armour rounds: {scorch}");
+    assert!(scorch >= 1, "Scorch never used anti-armour");
+    assert!(
+        app.world().get::<Dead>(sbd).is_some(),
+        "the super battle droid is still up"
+    );
+
+    // Two droids together: Fixer's grenade.
+    let pair = [
+        droid(&mut app, UVec3::new(1100.0, 700.0, 0.0)),
+        droid(&mut app, UVec3::new(1200.0, 780.0, 0.0)),
+    ];
+    run(&mut app, 8.0);
+    let squad = app.world().resource::<SquadState>().squad.as_ref().unwrap();
+    let throws = squad.members[1].fight.throws;
+    println!("Fixer grenades: {throws}");
+    assert!(throws >= 1, "Fixer never threw");
+    for d in pair {
+        assert!(app.world().get::<Dead>(d).is_some(), "a droid is still up");
+    }
+    let p = player(&mut app);
+    assert_eq!(
+        app.world().get::<Health>(p).unwrap().current,
+        200.0,
+        "the squad hurt the player"
+    );
 }

@@ -120,6 +120,8 @@ pub struct Member {
     pub fight: FightState,
     /// Seconds to the next grenade from a grenade post.
     pub throw_in: f32,
+    /// Seconds before they throw a grenade on their own again.
+    pub auto_throw_in: f32,
     /// The cover point they hold or are going to, if any.
     pub cover: Option<TakenCover>,
     /// Seconds they've been fighting (reset once calm).
@@ -327,7 +329,16 @@ pub enum SquadEvent {
         member: String,
         why: String,
     },
-    /// A grenade thrown from a grenade post; it goes off in `fuse` seconds.
+    /// Changed to (`on`) or back from their speciality's gun.
+    Speciality {
+        member: String,
+        job: String,
+        weapon: String,
+        on: bool,
+        why: String,
+    },
+    /// A grenade thrown from a grenade post, or on their own (`own`); it
+    /// goes off in `fuse` seconds.
     Throw {
         member: String,
         index: usize,
@@ -335,6 +346,7 @@ pub enum SquadEvent {
         to: Vec3,
         target: u64,
         fuse: f32,
+        own: bool,
     },
 }
 
@@ -442,9 +454,16 @@ impl fmt::Display for SquadEvent {
                 p(at)
             ),
             SquadEvent::CoverLeft { member, why } => write!(f, "{member} leaves cover: {why}"),
-            SquadEvent::Throw { member, to, target, fuse, .. } => write!(
+            SquadEvent::Speciality { member, job, weapon, on: true, why } => {
+                write!(f, "{member} uses their speciality ({job}, {weapon}): {why}")
+            }
+            SquadEvent::Speciality { member, weapon, on: false, why, .. } => {
+                write!(f, "{member} puts away the {weapon}: {why}")
+            }
+            SquadEvent::Throw { member, to, target, fuse, own, .. } => write!(
                 f,
-                "{member} throws a grenade at enemy {target}, landing {} in {fuse:.1} s",
+                "{member} throws a grenade{} at enemy {target}, landing {} in {fuse:.1} s",
+                if *own { " on their own" } else { "" },
                 p(to)
             ),
         }
@@ -586,6 +605,7 @@ impl Squad {
                     revive: None,
                     fight: FightState::default(),
                     throw_in: 0.0,
+                    auto_throw_in: 0.0,
                     cover: None,
                     fight_time: 0.0,
                     calm_time: 0.0,
@@ -671,6 +691,7 @@ impl Squad {
         let m = &self.members[i];
         let job = match (m.state, m.marker) {
             (MemberState::Posted, Some(k)) => self.job_of(k),
+            _ if m.fight.special => self.speciality_of(i),
             _ => None,
         };
         if let Some(j) = job {
@@ -692,6 +713,22 @@ impl Squad {
             }
         }
         f
+    }
+
+    /// The job member `i` uses on their own in fights (their
+    /// `speciality`), if specialities are on and it has an `auto` rule.
+    pub fn speciality_of(&self, i: usize) -> Option<&JobSettings> {
+        if !self.settings.fight.use_specialities {
+            return None;
+        }
+        let key = &self.members.get(i)?.settings.speciality;
+        if key.is_empty() {
+            return None;
+        }
+        self.settings
+            .jobs
+            .iter()
+            .find(|j| &j.key == key && j.auto != crate::jobs::AutoUse::Never)
     }
 
     /// Give an order. Members not on a marked job set off at once.
@@ -1251,10 +1288,11 @@ impl Squad {
                 }
                 self.think_cover(i, leader, world, nav, &mut events);
                 self.think(i, leader, world, &mut events);
-                self.pick_target(i, world, &mut events);
+                self.pick_target(i, leader, world, &mut events);
             }
             self.tick_cover(i, dt);
             self.shoot(i, dt, leader, &mut events);
+            self.throw_on_own(i, dt, leader, &mut events);
             let facing = self.facing_for(i, leader);
             let near_tether = dist(self.members[i].pawn.feet(), self.tether_point(i, leader))
                 <= self.stance_settings().lp_activate;
@@ -1567,9 +1605,22 @@ impl Squad {
         let Some(t) = t else {
             return;
         };
-        let m = &self.members[i];
-        let name = m.settings.name.clone();
         self.members[i].throw_in = interval;
+        self.throw_at(i, from, &t, (fuse, damage, radius), false, events);
+    }
+
+    /// Member `i` throws a grenade from `from` at `t`; it goes off after
+    /// `fuse` seconds with `damage` falling off to nothing at `radius`.
+    pub(crate) fn throw_at(
+        &mut self,
+        i: usize,
+        from: Vec3,
+        t: &Threat,
+        (fuse, damage, radius): (f32, f32, f32),
+        own: bool,
+        events: &mut Vec<SquadEvent>,
+    ) {
+        let name = self.members[i].settings.name.clone();
         events.push(SquadEvent::Throw {
             member: name.clone(),
             index: i,
@@ -1577,6 +1628,7 @@ impl Squad {
             to: t.feet,
             target: t.id,
             fuse,
+            own,
         });
         self.pending.push(Pending {
             left: fuse,

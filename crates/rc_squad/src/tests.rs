@@ -55,6 +55,7 @@ fn threat(id: u64, feet: Vec3) -> Threat {
         feet,
         centre: feet + Vec3::new(0.0, 0.0, 80.0),
         eye: feet + Vec3::new(0.0, 0.0, 140.0),
+        blaster_share: 1.0,
     }
 }
 
@@ -397,6 +398,20 @@ fn squad_mates_ignore_enemies_out_of_sight_range() {
     let world = test_room();
     let start = leader_at(0.0, 0.0, 0.0);
     let mut squad = new_squad(&world, start);
+    // About 7400 uu away: past the usual 5000, inside Sev's 8000 scope.
+    squad.threats = vec![threat(1, Vec3::new(3900.0, 1900.0, 6000.0))];
+    let events = run(&mut squad, start, 2.0, &world);
+    assert!(
+        shots(&events).iter().all(|s| s.0 == 0),
+        "only Sev sees that far"
+    );
+    assert!(events.iter().all(|e| match e {
+        SquadEvent::Fire { weapon, .. } => weapon == "dc17m_sniper",
+        _ => true,
+    }));
+    // With specialities off, nobody does.
+    let mut squad = new_squad(&world, start);
+    squad.settings.fight.use_specialities = false;
     squad.threats = vec![threat(1, Vec3::new(3900.0, 1900.0, 6000.0))];
     let events = run(&mut squad, start, 2.0, &world);
     assert!(shots(&events).is_empty());
@@ -1334,4 +1349,190 @@ fn cover_can_be_switched_off_in_the_settings() {
     assert!(SquadSettings::default()
         .with_overrides("[cover]\nfov = \"wide\"\n")
         .is_err());
+}
+
+// ---- Specialities: used on their own in fights ----
+
+/// Weapons each member fired, by member index.
+fn weapons_fired(events: &[SquadEvent]) -> Vec<(usize, String)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            SquadEvent::Fire { index, weapon, .. } => Some((*index, weapon.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn own_throws(events: &[SquadEvent]) -> Vec<(usize, u64)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            SquadEvent::Throw {
+                index,
+                target,
+                own: true,
+                ..
+            } => Some((*index, *target)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn sev_snipes_far_enemies_and_uses_the_blaster_up_close() {
+    let world = test_room();
+    let start = leader_at(-800.0, -500.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    // About 4300 uu away: far.
+    squad.threats = vec![threat(1, Vec3::new(3500.0, -1200.0, 0.0))];
+    let events = run(&mut squad, start, 6.0, &world);
+    let fired = weapons_fired(&events);
+    let sev: Vec<&String> = fired.iter().filter(|f| f.0 == 0).map(|f| &f.1).collect();
+    assert!(!sev.is_empty(), "Sev never fired: {fired:?}");
+    assert!(sev.iter().all(|w| *w == "dc17m_sniper"), "{sev:?}");
+    assert!(has(&events, |e| matches!(e,
+        SquadEvent::Speciality { member, on: true, .. } if member == "Sev")));
+    // The others keep their usual guns, and Scorch's anti-armour is for
+    // armour only: a battle droid isn't.
+    assert!(fired
+        .iter()
+        .filter(|f| f.0 != 0)
+        .all(|f| f.1 == "dc17m_blaster"));
+    // One droid alone: no grenade.
+    assert!(own_throws(&events).is_empty());
+
+    // Up close (about 900 uu), Sev puts the sniper away.
+    squad.threats = vec![threat(2, Vec3::new(0.0, 100.0, 0.0))];
+    let events = run(&mut squad, start, 4.0, &world);
+    assert!(has(&events, |e| matches!(e,
+        SquadEvent::Speciality { member, on: false, .. } if member == "Sev")));
+    let late: Vec<(usize, String)> = weapons_fired(&events)
+        .into_iter()
+        .filter(|f| f.0 == 0)
+        .collect();
+    assert!(late.iter().all(|f| f.1 == "dc17m_blaster"), "{late:?}");
+}
+
+/// A super battle droid: takes 0.15 of the DC-17m's damage.
+fn armoured(id: u64, feet: Vec3) -> Threat {
+    Threat {
+        blaster_share: 0.15,
+        ..threat(id, feet)
+    }
+}
+
+#[test]
+fn scorch_fires_anti_armour_at_armour_but_not_near_friends() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    // A battle droid nearer and a super battle droid farther: Scorch
+    // goes for the armour.
+    squad.threats = vec![
+        threat(1, Vec3::new(700.0, 900.0, 0.0)),
+        armoured(2, Vec3::new(-600.0, 1500.0, 0.0)),
+    ];
+    let events = run(&mut squad, start, 6.0, &world);
+    let aa: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, SquadEvent::Fire { index: 2, weapon, target: 2, .. } if weapon == "dc17m_antiarmor"))
+        .collect();
+    assert!(!aa.is_empty(), "Scorch never fired anti-armour");
+    // One round, then 2-3 s: at most 3 in 6 s.
+    assert!(aa.len() <= 3, "{} rounds", aa.len());
+    assert!(squad.members[2].fight.special_shots >= 1);
+    // Nobody else used it.
+    assert!(weapons_fired(&events)
+        .iter()
+        .all(|f| f.0 == 2 || f.1 != "dc17m_antiarmor"));
+
+    // With the player inside the keep-clear distance of the target, he
+    // keeps to the blaster.
+    let mut squad = new_squad(&world, start);
+    for j in &mut squad.settings.jobs {
+        if j.key == "anti_armour" {
+            j.auto_clearance = 2000.0;
+        }
+    }
+    run(&mut squad, start, 0.5, &world);
+    squad.threats = vec![armoured(2, Vec3::new(-600.0, 1500.0, 0.0))];
+    let events = run(&mut squad, start, 6.0, &world);
+    assert!(weapons_fired(&events)
+        .iter()
+        .all(|f| f.1 != "dc17m_antiarmor"));
+}
+
+#[test]
+fn fixer_throws_grenades_at_bunched_enemies_on_his_own() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    // Two droids together, about 1300 uu away.
+    squad.threats = vec![
+        threat(1, Vec3::new(1100.0, 700.0, 0.0)),
+        threat(2, Vec3::new(1200.0, 780.0, 0.0)),
+    ];
+    let events = run(&mut squad, start, 25.0, &world);
+    let throws = own_throws(&events);
+    assert!(!throws.is_empty(), "Fixer never threw");
+    assert!(
+        throws.iter().all(|t| t.0 == 1),
+        "only Fixer throws: {throws:?}"
+    );
+    // Every 10 s: 3 in 25 s (at about 1, 11 and 21 s).
+    assert!((2..=3).contains(&throws.len()), "{throws:?}");
+    assert_eq!(squad.members[1].fight.throws as usize, throws.len());
+    // Each one goes off after the thermal detonator's 2 s fuse.
+    assert!(has(&events, |e| matches!(e, SquadEvent::Blast { .. })));
+
+    // Not with a friend within the keep-clear distance.
+    let mut squad = new_squad(&world, start);
+    for j in &mut squad.settings.jobs {
+        if j.key == "grenade" {
+            j.auto_clearance = 2000.0;
+        }
+    }
+    run(&mut squad, start, 0.5, &world);
+    squad.threats = vec![
+        threat(1, Vec3::new(1100.0, 700.0, 0.0)),
+        threat(2, Vec3::new(1200.0, 780.0, 0.0)),
+    ];
+    let events = run(&mut squad, start, 6.0, &world);
+    assert!(own_throws(&events).is_empty());
+
+    // Not with specialities off.
+    let mut squad = new_squad(&world, start);
+    squad.settings.fight.use_specialities = false;
+    run(&mut squad, start, 0.5, &world);
+    squad.threats = vec![
+        threat(1, Vec3::new(1100.0, 700.0, 0.0)),
+        threat(2, Vec3::new(1200.0, 780.0, 0.0)),
+    ];
+    let events = run(&mut squad, start, 6.0, &world);
+    assert!(own_throws(&events).is_empty());
+}
+
+#[test]
+fn speciality_settings_read_from_the_file() {
+    let s = SquadSettings::default()
+        .with_overrides(
+            "[fight]\nuse_specialities = \"no\"\narmoured_below = 0.3\n\
+             [job.grenade]\nauto = \"no\"\nauto_interval = 4\n\
+             [member.sev]\nspeciality = \"grenade\"\n",
+        )
+        .unwrap();
+    assert!(!s.fight.use_specialities);
+    assert_eq!(s.fight.armoured_below, 0.3);
+    let g = s.jobs.iter().find(|j| j.key == "grenade").unwrap();
+    assert_eq!(g.auto, AutoUse::Never);
+    assert_eq!(g.auto_interval, 4.0);
+    assert_eq!(s.members[0].speciality, "grenade");
+    let e = SquadSettings::default()
+        .with_overrides("[job.sniper]\nauto = \"sometimes\"\n")
+        .unwrap_err();
+    assert!(e.contains("line 2") && e.contains("far"), "{e}");
 }
