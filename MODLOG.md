@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-01: Levels have the right colours and ambient light (rc_level, rc_package, rc_level_viewer)
+
+- **Changed:** `crates/rc_level/src/actors.rs`: props' stored light is read red, green, blue, alpha (was blue, green, red). `crates/rc_package/src/light.rs`: `hue_saturation_to_rgb` uses Unreal's hue model (straight fades between red, green and blue); new `brightness_curve`; `ZoneAmbient` keeps the stored `AmbientVector` and gains `rgb()`. `crates/rc_level_viewer/src/scene.rs`: new `zone_ambients` finds each zone's ambient by where its `ZoneInfo` stands, and half of it is added to every prop in that zone; terrain is lit by its zone's ambient plus the sun on the props' own scale instead of being scaled to the props' average (maps without a sun keep the props' average, flat). Both logs report zones with ambient and props it was added to.
+- **Why:** The user's original-game screenshots of GEO_04A and YYY_06A showed the port 3 to 6 times darker, and grey-blue where the game is orange-brown. Measured: props lit only by geo_04a's orange sun store 75:62:46 in the order we read as blue, green, red; ras_01a and yyy_06a lights matched the same way, so the order was backwards. Corners facing away from every light store 0 (no ambient), while the lightmaps hold half the ambient.
+- **Tested how:** In the cloud with the game files copied read only from the PC: `xvfb-run -a -s "-screen 0 1280x720x24" rc_level_viewer geo_04a --frames 60 --capture` and the same for yyy_06a, with average colours sampled in the same areas as in the user's screenshots; `rc_level_check` on geo_01a, geo_03a, geo_04a, geo_05a, ras_01a, ras_02a, yyy_01b, yyy_04a, yyy_06a, yyy_35a; `cargo test -p rc_package -p rc_level -p rc_level_viewer` (new `ambient_matches_stored_vector`).
+- **Result:** geo_04a start, average colour on screen: ground 17,12,5 before, 118,84,54 after (original 110,82,56); canyon walls 23-29 grey before, 40-74 brown after (original 20-77). Every map checked loads (exit 0). `AmbientVector` matched our hue, saturation and brightness formula to 3 decimals on every zone of 6 maps.
+- **Still broken / not tested:** Not tested on Windows or by playing. YYY_06A's tunnel is still about 3 times too dark (floor 15,13,6 vs 40,38,31): its props are in zone 0 (no ambient) and store almost no light even next to lights, so the game must light them another way (likely at run time); not worked out yet. Terrain on maps without a sun is still the props' average.
+- **Next:** Find how the game lights props like YYY_06A's tunnel walls.
+
 ## 2026-11-01: Sky domes are no longer drawn black (rc_level_viewer)
 
 - **Changed:** `crates/rc_level_viewer/src/scene.rs`: a prop in the sky zone whose stored light is black on every corner is drawn at full brightness instead (new count `sky_props_unlit`, in the `rc_level_viewer` and `rc_level_check` sky lines).

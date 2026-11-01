@@ -126,6 +126,10 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         log.line(format!("  terrain: {e}"));
     }
     log.line(format!(
+        "  zone ambient light: {} zones have one; added to {} props",
+        s.zones_with_ambient, s.props_with_ambient
+    ));
+    log.line(format!(
         "  blocking volumes {} ({} stop players, {} stop the AI, {} unreadable, {} scaled); {} path points inside one, {} volumes near a path point",
         s.blocking_volumes,
         s.volumes_block_players,

@@ -205,7 +205,9 @@ copy of the game.
   corner lands inside its own patch of light). On the user's PC it still
   draws at a steady 144 frames per second. `lighting.cfg` lets anyone
   change the brightness without touching code (see `docs/DESIGN.md`,
-  "Lighting in Bevy").
+  "Lighting in Bevy"). Since 2026-11-01 props get the right colours (they
+  were read in the wrong byte order) and their zone's ambient light; GEO_04A's
+  start now matches the original's brightness (tested in the cloud only).
 
 - **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
   `rc_level_check` loads every map in the game without a window and logs

@@ -334,7 +334,27 @@ shadows = false
   because the baked light already contains each zone's ambient.
 - Props use their per-corner colours as Bevy vertex colours on an unlit
   material, which multiplies texture and colour directly. Real-time lights
-  don't reach them yet (see below).
+  don't reach them yet (see below). The colours are stored red, green,
+  blue, alpha (checked against the colour of the lights each prop lists;
+  they were read as blue, green, red until 2026-11-01, which drew geo_04a's
+  orange canyon blue-grey).
+- Zone ambient light is **not** in the props' stored colours: corners that
+  face away from every light store 0. The game adds it when drawing, so
+  `scene.rs` (`zone_ambients`) adds it per prop, by the zone at the prop's
+  position (a zone's settings sit on the `ZoneInfo` standing in it; zones
+  without one use the `LevelInfo`). It adds half the ambient, because the
+  lightmaps hold half (their darkest texels are half the zone's ambient,
+  e.g. 21, 21, 27 for 36, 40, 50 on yyy_06a, with the sun on top at the same
+  scale as on props); both are then drawn at double strength. The ambient's
+  colour is the zone's own stored `AmbientVector` (Republic Commando only),
+  which equals Unreal's hue and saturation (`hue_saturation_to_rgb`) times
+  `brightness_curve(AmbientBrightness)` on every zone checked (6 maps).
+  Props in zone 0 (outside every zone: 247 on yyy_06a, which is built almost
+  entirely from props) get nothing unless the `LevelInfo` has an ambient.
+- Colours from hue and saturation follow Unreal's model: hue fades in a
+  straight line red to green to blue (so hue 30 is 65% red, 35% green, not
+  orange-yellow), checked against the light baked into props on geo_04a,
+  ras_01a and yyy_06a.
 - Surfaces without baked light (marked unlit by the level designer, skies,
   and the 33-327 BSP polygons per map without a lightmap) are drawn at full
   brightness, as before.
@@ -959,9 +979,14 @@ painted with the editor's checkerboard (`Chex`) mark where decorations
 placed yet.
 
 Light: the game's own terrain light wasn't found in the map, so each
-corner gets the zones' ambient light plus the `Sunlight` by how squarely
-it faces it, then the whole terrain is scaled to the average brightness of
-the map's props, so the ground and the props match. The terrain's
+corner gets its zone's ambient light (halved, as for props, see "How baked
+light is drawn") plus the `Sunlight`'s colour x brightness by how squarely
+it faces it, on the same 0-255 scale the props store: on geo_04a the
+props' light rises in a straight line with how squarely they face the sun.
+That made geo_04a's ground 118, 84, 54 on screen against 110, 82, 56 in the
+user's original-game screenshot at the same spot. Maps without a sun
+(geo_03a, yyy_01b, yyy_35a) are lit by ordinary lights, not worked out for
+terrain yet, so their ground gets the props' average light, flat. The terrain's
 triangles also go into collision (`collision::add_terrains`, used by
 `map_collision` and so by `rc_game` and `rc_walk`).
 

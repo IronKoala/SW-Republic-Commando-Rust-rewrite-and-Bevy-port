@@ -138,6 +138,10 @@ pub struct Stats {
     pub sky_props: usize,
     /// Sky props whose stored light is all black, drawn at full brightness.
     pub sky_props_unlit: usize,
+    /// Zones with an ambient light found (by where their ZoneInfo stands),
+    /// and props that had it added to their stored light.
+    pub zones_with_ambient: usize,
+    pub props_with_ambient: usize,
     pub backdrop_polygons: usize,
     /// Terrains (outdoor ground): read, triangles drawn, painted layers
     /// drawn, layers left out with why, terrains that couldn't be read.
@@ -193,7 +197,16 @@ struct Builder {
 
 /// Material, translucent, two-sided, from a mesh, lightmap page, has
 /// colours, in the sky, mover.
-type BatchKey = (String, bool, bool, bool, Option<usize>, bool, bool, Option<usize>);
+type BatchKey = (
+    String,
+    bool,
+    bool,
+    bool,
+    Option<usize>,
+    bool,
+    bool,
+    Option<usize>,
+);
 
 impl Builder {
     #[allow(clippy::too_many_arguments)]
@@ -340,7 +353,17 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, sky_zone: Option<u
         } else {
             ctx.stats.bsp_polygons_unlit += 1;
         }
-        let batch = b.batch(&key, &pic, translucent, two_sided, false, page, false, sky, None);
+        let batch = b.batch(
+            &key,
+            &pic,
+            translucent,
+            two_sided,
+            false,
+            page,
+            false,
+            sky,
+            None,
+        );
         let base = batch.positions.len() as u32;
         let n = dir_to_bevy(poly.normal);
         for (p, uv) in poly.points.iter().zip(&poly.uvs) {
@@ -458,7 +481,17 @@ fn add_mesh_actor(
                 )
             }
         };
-        let batch = b.batch(&key, &pic, false, false, true, None, colours.is_some(), sky, mover);
+        let batch = b.batch(
+            &key,
+            &pic,
+            false,
+            false,
+            true,
+            None,
+            colours.is_some(),
+            sky,
+            mover,
+        );
         let first = sec.first_index as usize;
         let count = sec.num_faces as usize * 3;
         let Some(tris) = mesh.indices.get(first..first + count) else {
@@ -507,6 +540,70 @@ fn add_mesh_actor(
     }
 }
 
+/// A stored corner colour with extra light added (0-255 scale, alpha kept).
+fn add_light(c: [u8; 4], extra: [f32; 3]) -> [u8; 4] {
+    let mut out = c;
+    for k in 0..3 {
+        out[k] = (c[k] as f32 + extra[k]).round().clamp(0.0, 255.0) as u8;
+    }
+    out
+}
+
+/// Each zone's ambient light (0-255 red, green, blue), by zone number.
+///
+/// A zone's settings sit on the `ZoneInfo` (or `SkyZoneInfo`) actor placed
+/// inside it, so the zone is the one at that actor's spot. The map's
+/// `LevelInfo` holds the settings for zones without one.
+///
+/// The ambient isn't part of the light stored on props: on geo_04a the
+/// props' corners that face away from the sun store 0 (the middle value
+/// over 6,859 such corners is 1), while the zone there has ambient
+/// brightness 36. The sky zone's props store 0 everywhere and have 255.
+/// So the game must add it when drawing, as Unreal's zones are described
+/// to ("Legacy:ZoneInfo" on the Unreal Wiki).
+///
+/// The values returned are half the zone's ambient, because that is how
+/// much of it the lightmaps hold: their darkest texels are half the
+/// ambient (geo_04a: 35 for an ambient of 73 at its brightest; yyy_06a:
+/// 21, 21, 27 for 36, 40, 50), with the sun on top at the same scale as on
+/// the props (geo_04a: up to about 90 on both). Lightmaps and prop colours
+/// are both drawn at double strength (`LightingSettings`), so the ambient
+/// ends up at its full value on screen.
+fn zone_ambients(
+    pkg: &Package,
+    data: &[u8],
+    level: &actors::LevelInfo,
+    bsp: &Bsp,
+) -> HashMap<u8, [f32; 3]> {
+    let mut by_zone = HashMap::new();
+    let mut fallback = None;
+    for &a in level.actors.iter().flatten() {
+        let class = pkg.export_class_name(&pkg.exports[a]).to_ascii_lowercase();
+        let is_level = class == "levelinfo";
+        if !is_level && !class.contains("zoneinfo") {
+            continue;
+        }
+        let Ok(props) = actors::read_actor_properties(pkg, data, a) else {
+            continue;
+        };
+        let Some(z) = light::zone_ambient(pkg, &props).filter(|z| z.brightness > 0) else {
+            continue;
+        };
+        let half = z.rgb().map(|c| c * 0.5);
+        if is_level {
+            fallback = Some(half);
+        } else if let Some(zone) = bsp.point_zone(light::location(pkg, &props)) {
+            by_zone.insert(zone, half);
+        }
+    }
+    if let Some(f) = fallback {
+        for zone in bsp.nodes.iter().flat_map(|n| n.zone) {
+            by_zone.entry(zone).or_insert(f);
+        }
+    }
+    by_zone
+}
+
 /// Average of the batches' corner colours (red, green, blue, 0-255).
 fn average_light<'a>(batches: impl Iterator<Item = &'a Batch>) -> Option<[f32; 3]> {
     let mut sum = [0.0f64; 3];
@@ -522,11 +619,15 @@ fn average_light<'a>(batches: impl Iterator<Item = &'a Batch>) -> Option<[f32; 3
     (n > 0).then(|| sum.map(|v| (v / n as f64) as f32))
 }
 
-/// The light a terrain corner gets (before scaling, see `add_terrain`): the
-/// zones' ambient light plus each sun (`Sunlight`) by how squarely it faces
-/// the corner. The game's own terrain light isn't read yet (it isn't in the
-/// map's terrain data as far as we can tell), so this is our approximation:
-/// no shadows, and other lights are left out.
+/// The light a terrain corner gets: its zone's ambient light (the halved value
+/// from `zone_ambients`, as for props) plus each sun
+/// (`Sunlight`) by how squarely it faces the corner. The game's own terrain
+/// light isn't stored in the map's terrain data as far as we can tell, so
+/// this is worked out the way the props' stored light behaves: on geo_04a
+/// the props' light rises in a straight line with how squarely they face
+/// the sun (half the sun's colour x brightness at half-facing, and so on;
+/// measured 2026-11-01). It is about 20% brighter than the props there,
+/// and has no shadows; other lights are left out.
 fn terrain_light(normal: [f32; 3], suns: &[(Vec3f, [f32; 3])], ambient: [f32; 3]) -> [f32; 3] {
     let mut c = ambient;
     for (dir, colour) in suns {
@@ -551,7 +652,11 @@ fn alpha_at(p: &Picture, x: usize, y: usize, size_x: usize, size_y: usize) -> u8
     let w = p.image.width.max(1);
     let h = p.image.height.max(1);
     let get = |px: usize, py: usize| {
-        p.image.pixels.get((py.min(h - 1) * w + px.min(w - 1)) * 4 + 3).copied().unwrap_or(0) as f32
+        p.image
+            .pixels
+            .get((py.min(h - 1) * w + px.min(w - 1)) * 4 + 3)
+            .copied()
+            .unwrap_or(0) as f32
     };
     // Pixel centres sit at (i + 0.5) / w across the grid.
     let fx = ((x as f32 / (size_x.max(2) - 1) as f32) * w as f32 - 0.5).max(0.0);
@@ -581,9 +686,9 @@ fn add_terrain(
     ctx: &mut Ctx,
     t: &rc_level::terrain::Terrain,
     lights: &[Light],
-    ambients: &[light::ZoneAmbient],
+    ambient: [f32; 3],
     sky: bool,
-    reference: Option<[f32; 3]>,
+    props_light: Option<[f32; 3]>,
 ) {
     let tris = t.triangles();
     if tris.is_empty() {
@@ -599,37 +704,30 @@ fn add_terrain(
             (dir, c.map(|v| v * l.brightness))
         })
         .collect();
-    // The brightest zone ambient: outdoor zones are usually the bright
-    // ones. Zones aren't matched to the terrain yet.
-    let ambient = ambients
+    // On the same 0-255 scale as the light baked into props, so the two
+    // match: props lit by geo_04a's sun store about brightness x colour
+    // x how squarely they face it (see `terrain_light`).
+    // Without a sun (geo_03a, yyy_01b, yyy_35a) the ground is lit by
+    // ordinary lights, which aren't worked out for terrain yet. Until they
+    // are, it gets the props' average light, flat, so it isn't left darker
+    // than everything around it.
+    let flat = suns.is_empty().then_some(props_light).flatten();
+    let light: Vec<[u8; 4]> = normals
         .iter()
-        .max_by_key(|z| z.brightness)
-        .map(|z| light::hue_saturation_to_rgb(z.hue, z.saturation).map(|c| c * z.brightness as f32))
-        .unwrap_or([0.0; 3]);
-    let raw: Vec<[f32; 3]> = normals
-        .iter()
-        .map(|n| terrain_light(*n, &suns, ambient))
-        .collect();
-    // Scale it so the terrain is on average as bright as the map's props.
-    // The props' light was baked by the game; ours is only a shape (which
-    // way each slope faces the sun), so this keeps the two matching while
-    // the overall brightness is still being worked out.
-    let luma = |c: &[f32; 3]| (c[0] + c[1] + c[2]) / 3.0;
-    let mean = raw.iter().map(luma).sum::<f32>() / raw.len().max(1) as f32;
-    let target = reference.map(|c| luma(&c)).unwrap_or(mean);
-    let light: Vec<[u8; 4]> = raw
-        .iter()
-        .map(|c| {
-            let c = if mean > 1e-3 {
-                c.map(|v| v * target / mean)
-            } else {
-                [target; 3]
-            };
+        .map(|n| {
+            let c = flat.unwrap_or_else(|| terrain_light(*n, &suns, ambient));
             [c[0], c[1], c[2], 255.0].map(|v| v.clamp(0.0, 255.0).round() as u8)
         })
         .collect();
     for (li, layer) in t.layers.iter().enumerate() {
-        let (key, pic) = picture(ctx.mats, &mut ctx.stats, &mut ctx.seen, ctx.pkg, ctx.data, layer.texture);
+        let (key, pic) = picture(
+            ctx.mats,
+            &mut ctx.stats,
+            &mut ctx.seen,
+            ctx.pkg,
+            ctx.data,
+            layer.texture,
+        );
         if pic.is_none() {
             ctx.stats
                 .terrain_layer_failures
@@ -637,9 +735,9 @@ fn add_terrain(
             continue;
         }
         if is_decoration_layer(&key) {
-            ctx.stats
-                .terrain_layer_failures
-                .push(format!("layer {li}: {key} is a decoration placement layer, not drawn"));
+            ctx.stats.terrain_layer_failures.push(format!(
+                "layer {li}: {key} is a decoration placement layer, not drawn"
+            ));
             continue;
         }
         // Layer 0 covers everything. The others need their alpha map.
@@ -766,6 +864,8 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
 
     let mut lights = Vec::new();
     let mut ambients = Vec::new();
+    let zone_ambient = zone_ambients(pkg, data, &level, &bsp);
+    ctx.stats.zones_with_ambient = zone_ambient.len();
 
     let mut spawn = None;
     let mut floor_points = Vec::new();
@@ -774,9 +874,13 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     // Doors and lifts get batches of their own, so they can move.
     let movers = {
         let mats = &mut *ctx.mats;
-        rc_level::movers::read_movers(&mut class_looks, pkg, data, &level.actors, &mut |n: &str| {
-            mats.package(n)
-        })
+        rc_level::movers::read_movers(
+            &mut class_looks,
+            pkg,
+            data,
+            &level.actors,
+            &mut |n: &str| mats.package(n),
+        )
     };
     let mut mover_exports: std::collections::HashSet<usize> =
         movers.movers.iter().map(|m| m.place.export).collect();
@@ -851,12 +955,24 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 } else {
                     None
                 };
-                let in_sky = sky_zone.is_some() && bsp.point_zone(p.location) == sky_zone;
+                let zone = bsp.point_zone(p.location);
+                let in_sky = sky_zone.is_some() && zone == sky_zone;
+                // The game adds the zone's ambient light when it draws a
+                // prop: it isn't in the stored colours (corners facing away
+                // from every light store 0,0,0; see `zone_ambients`). Half
+                // of it, like the lightmaps (see `zone_ambients`).
+                let colours = match (colours, zone.and_then(|z| zone_ambient.get(&z))) {
+                    (Some(c), Some(a)) => {
+                        ctx.stats.props_with_ambient += 1;
+                        Some(c.iter().map(|v| add_light(*v, *a)).collect())
+                    }
+                    (c, _) => c,
+                };
                 // Sky domes and backdrops store no light at all (every
                 // corner 0,0,0 on geo_04a, yyy_04a, yyy_05a, yyy_06a), and
-                // the game shows them lit: geo_04a's sky zone has ambient
-                // brightness 255. Draw them at full brightness instead of
-                // black.
+                // the game shows them lit, usually by the sky zone's bright
+                // ambient (geo_04a: 255), added above. If the sky zone has
+                // no ambient, draw them at full brightness instead of black.
                 let colours = match colours {
                     Some(c) if in_sky && c.iter().all(|v| v[0] == 0 && v[1] == 0 && v[2] == 0) => {
                         ctx.stats.sky_props_unlit += 1;
@@ -880,8 +996,19 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 };
                 ctx.stats.sky_props += in_sky as usize;
                 let mover = mover_exports.contains(&p.export).then_some(p.export);
-                ctx.stats.movers_drawn += mover.is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m)) as usize;
-                add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref(), mover);
+                ctx.stats.movers_drawn += mover
+                    .is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m))
+                    as usize;
+                add_mesh_actor(
+                    &mut b,
+                    &mut ctx,
+                    in_sky,
+                    &p,
+                    &m.0,
+                    &m.1,
+                    colours.as_deref(),
+                    mover,
+                );
                 placed.push((p, m));
             }
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
@@ -891,12 +1018,16 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         rc_level::terrain::read_terrains(pkg, data, level.actors.iter().flatten().copied());
     ctx.stats.terrains = terrains.len();
     ctx.stats.terrain_failures = terrain_failures;
-    let prop_light = average_light(b.batches.iter().filter(|b| b.from_mesh));
-    ctx.stats.prop_light = prop_light;
+    ctx.stats.prop_light = average_light(b.batches.iter().filter(|b| b.from_mesh));
     for t in &terrains {
-        let in_sky = sky_zone.is_some()
-            && bsp.point_zone(t.point(t.size_x / 2, t.size_y / 2)) == sky_zone;
-        add_terrain(&mut b, &mut ctx, t, &lights, &ambients, in_sky, prop_light);
+        let zone = bsp.point_zone(t.point(t.size_x / 2, t.size_y / 2));
+        let in_sky = sky_zone.is_some() && zone == sky_zone;
+        let ambient = zone
+            .and_then(|z| zone_ambient.get(&z))
+            .copied()
+            .unwrap_or([0.0; 3]);
+        let props_light = ctx.stats.prop_light;
+        add_terrain(&mut b, &mut ctx, t, &lights, ambient, in_sky, props_light);
     }
     let pairs: Vec<_> = placed.iter().map(|(p, m)| (p, &m.0)).collect();
     let mut collision = rc_level::collision::collision_triangles(&bsp, &pairs);

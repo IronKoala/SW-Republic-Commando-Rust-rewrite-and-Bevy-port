@@ -442,6 +442,10 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         log.line(format!("  terrain: {e}"));
     }
     log.line(format!(
+        "zone ambient light: {} zones have one; added to {} props",
+        s.zones_with_ambient, s.props_with_ambient
+    ));
+    log.line(format!(
         "blocking volumes (invisible walls): {} read, {} stop players, {} stop the AI, {} unreadable, {} with a scale not applied; {} PathNodes/PlayerStarts inside one (should be 0 or close), {} volumes within 512 units of a path point",
         s.blocking_volumes,
         s.volumes_block_players,

@@ -221,10 +221,18 @@ pub fn read_placement(pkg: &Package, data: &[u8], index: usize) -> Result<Placem
 
 /// The baked light of one placed static mesh: a `StaticMeshInstance`
 /// object, which is an (empty) property list, then a count and one colour
-/// per mesh vertex, stored blue, green, red, alpha. Returned as red, green,
-/// blue, alpha. A few bytes after the colours are not understood yet and
-/// are ignored. Layout measured on the game's maps (no reference describes
-/// it); `index` is the object reference from `Placement`.
+/// per mesh vertex, stored red, green, blue, alpha. Then come a number
+/// whose meaning isn't known, and the list of lights baked into the colours
+/// (a count, then per light an object reference and a 4-byte value, always 1
+/// so far); those are ignored. Layout measured on the game's maps (no
+/// reference describes it); `index` is the object reference from
+/// `Placement`.
+///
+/// The byte order was checked against the lights each mesh lists: props lit
+/// only by geo_04a's orange sun (hue 30) store 75:62:46, ras_01a's red-tinted
+/// lights (hue 0) 69:57:57, and yyy_06a's blue-green one (hue 144) 51:62:76,
+/// each matching its light's colour in that order. (It was read as blue,
+/// green, red before 2026-11-01, which drew the orange canyon blue-grey.)
 pub fn read_vertex_colours(pkg: &Package, data: &[u8], index: i32) -> Result<Vec<[u8; 4]>> {
     let Some(e) = usize::try_from(index - 1)
         .ok()
@@ -244,7 +252,7 @@ pub fn read_vertex_colours(pkg: &Package, data: &[u8], index: i32) -> Result<Vec
         .as_chunks::<4>()
         .0
         .iter()
-        .map(|c| [c[2], c[1], c[0], c[3]])
+        .map(|c| [c[0], c[1], c[2], c[3]])
         .collect())
 }
 
