@@ -69,6 +69,9 @@ pub struct ZoneAmbient {
     pub brightness: u8,
     pub hue: u8,
     pub saturation: u8,
+    /// Republic Commando's `AmbientVector`: the same light as red, green,
+    /// blue (0..1), worked out by the editor from the three numbers above.
+    pub vector: Option<[f32; 3]>,
 }
 
 fn float(pkg: &Package, props: &[Property], name: &str) -> Option<f32> {
@@ -167,27 +170,59 @@ pub fn zone_ambient(pkg: &Package, props: &[Property]) -> Option<ZoneAmbient> {
         brightness,
         hue: byte(pkg, props, "AmbientHue").unwrap_or(0),
         saturation: byte(pkg, props, "AmbientSaturation").unwrap_or(255),
+        vector: raw12(pkg, props, "AmbientVector").map(|v| v.map(f32::from_le_bytes)),
     })
 }
 
+/// How bright a light of Unreal brightness 0-255 is, 0..1. Not a straight
+/// line: dim settings come out brighter than brightness/255 (17 gives 0.21,
+/// 36 gives 0.30, 128 gives 0.57, 255 gives 0.82).
+///
+/// Fitted to Republic Commando's own numbers: every zone's stored
+/// `AmbientVector` equals `hue_saturation_to_rgb` x this, to 3 decimals, on
+/// yyy_06a (brightness 17: 0.143, 0.155, 0.195) and geo_04a (36). The curve
+/// is v x 1.4 / 255, then times 0.7 / (0.01 + its square root), at most 1.
+pub fn brightness_curve(brightness: f32) -> f32 {
+    let b = brightness.max(0.0) * 1.4 / 255.0;
+    (b * 0.7 / (0.01 + b.sqrt())).clamp(0.0, 1.0)
+}
+
 /// Unreal's hue and saturation as a red, green, blue colour, each 0..1, at
-/// full brightness. Hue goes round the colour wheel in 256 steps. Saturation
-/// works backwards from what the word suggests: 255 is white, 0 is the pure
-/// colour.
+/// full brightness. Hue goes round in 256 steps, 0 red, 85 green, 170 blue,
+/// fading straight from one to the next (so halfway between red and green
+/// is half red, half green, not yellow; the last stretch, blue back to red,
+/// is 84 steps). Saturation works backwards from
+/// what the word suggests: 255 is white, 0 is the pure colour.
+///
+/// Checked against the light the game baked into its props: geo_04a's sun
+/// (hue 30, saturation 130) left 75:62:46 on the props it lit, and this
+/// gives 0.83:0.68:0.51 (the same 1 : 0.83 : 0.61 shape); yyy_06a's hue 144
+/// light gives 0.67 : 0.81 : 1 against 0.67 : 0.81 : 1 measured. An ordinary
+/// colour wheel (full red and full green at hue 30) was 20% off.
 pub fn hue_saturation_to_rgb(hue: u8, saturation: u8) -> [f32; 3] {
-    let h = hue as f32 / 256.0 * 6.0;
-    let sector = h.floor() as i32 % 6;
-    let f = h - h.floor();
-    let pure = match sector {
-        0 => [1.0, f, 0.0],
-        1 => [1.0 - f, 1.0, 0.0],
-        2 => [0.0, 1.0, f],
-        3 => [0.0, 1.0 - f, 1.0],
-        4 => [f, 0.0, 1.0],
-        _ => [1.0, 0.0, 1.0 - f],
+    let h = hue as f32;
+    let pure = if h < 86.0 {
+        [(85.0 - h) / 85.0, h / 85.0, 0.0]
+    } else if h < 171.0 {
+        [0.0, (170.0 - h) / 85.0, (h - 85.0) / 85.0]
+    } else {
+        [(h - 170.0) / 85.0, 0.0, (255.0 - h) / 84.0]
     };
     let white = saturation as f32 / 255.0;
-    pure.map(|c| c + (1.0 - c) * white)
+    pure.map(|c| (c.clamp(0.0, 1.0) + (1.0 - c.clamp(0.0, 1.0)) * white).min(1.0))
+}
+
+impl ZoneAmbient {
+    /// The zone's ambient light as red, green, blue on the same 0-255 scale
+    /// as the light baked into props: the stored `AmbientVector` if there is
+    /// one, otherwise worked out the same way the editor does.
+    pub fn rgb(&self) -> [f32; 3] {
+        let v = self.vector.unwrap_or_else(|| {
+            let k = brightness_curve(self.brightness as f32);
+            hue_saturation_to_rgb(self.hue, self.saturation).map(|c| c * k)
+        });
+        v.map(|c| c * 255.0)
+    }
 }
 
 impl Light {
@@ -206,10 +241,36 @@ mod tests {
         assert_eq!(hue_saturation_to_rgb(0, 0), [1.0, 0.0, 0.0]);
         let g = hue_saturation_to_rgb(85, 0);
         assert!(g[1] == 1.0 && g[0] < 0.02 && g[2] == 0.0, "{g:?}");
-        let b = hue_saturation_to_rgb(171, 0);
+        let b = hue_saturation_to_rgb(170, 0);
         assert!(b[2] == 1.0 && b[0] < 0.02 && b[1] < 0.02, "{b:?}");
+        // Halfway from red to green is half of each (not yellow), as the
+        // game's baked prop light shows (see the function's notes).
+        let rg = hue_saturation_to_rgb(30, 130);
+        let shape = [1.0, rg[1] / rg[0], rg[2] / rg[0]];
+        assert!(
+            (shape[1] - 0.83).abs() < 0.02 && (shape[2] - 0.62).abs() < 0.02,
+            "{shape:?}"
+        );
         // Saturation 255 is white whatever the hue.
         assert_eq!(hue_saturation_to_rgb(123, 255), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn ambient_matches_stored_vector() {
+        // yyy_06a's zones: brightness 17, hue 154, saturation 176, stored
+        // AmbientVector 0.1429, 0.1550, 0.1950.
+        let k = brightness_curve(17.0);
+        let c = hue_saturation_to_rgb(154, 176).map(|v| v * k);
+        for (got, want) in c.iter().zip([0.1429, 0.1550, 0.1950]) {
+            assert!((got - want).abs() < 0.002, "{c:?}");
+        }
+        let z = ZoneAmbient {
+            brightness: 17,
+            hue: 154,
+            saturation: 176,
+            vector: None,
+        };
+        assert!((z.rgb()[2] - 0.1950 * 255.0).abs() < 0.6);
     }
 
     #[test]

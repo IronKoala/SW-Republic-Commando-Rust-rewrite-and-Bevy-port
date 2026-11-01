@@ -110,12 +110,29 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         log.line(format!("  mesh not shown ({n}x): {e}"));
     }
     log.line(format!(
-        "  materials {} shown, {} not",
-        s.materials_ok, mat_fail
+        "  materials {} shown, {} not; {} see-through, {} with a shine mask in alpha drawn solid",
+        s.materials_ok, mat_fail, s.materials_see_through, s.materials_alpha_ignored
     ));
     for (e, n) in &s.material_failures {
         log.line(format!("  material not shown ({n}x): {e}"));
     }
+    log.line(format!(
+        "  terrain: {} read, {} triangles, {} painted layers drawn; light terrain {:?} vs props {:?} (0-255)",
+        s.terrains, s.terrain_triangles, s.terrain_layers,
+        s.terrain_light.map(|c| c.map(|v| v.round())),
+        s.prop_light.map(|c| c.map(|v| v.round()))
+    ));
+    for e in s.terrain_failures.iter().chain(&s.terrain_layer_failures) {
+        log.line(format!("  terrain: {e}"));
+    }
+    log.line(format!(
+        "  zone ambient light: {} zones have one; added to {} props",
+        s.zones_with_ambient, s.props_with_ambient
+    ));
+    log.line(format!(
+        "  physics props that fall at the start moved down onto the ground: {}, furthest {:.0} units",
+        s.props_settled, s.settle_drop_max
+    ));
     log.line(format!(
         "  blocking volumes {} ({} stop players, {} stop the AI, {} unreadable, {} scaled); {} path points inside one, {} volumes near a path point",
         s.blocking_volumes,
@@ -131,8 +148,8 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
     }
     log.line(match &scene.sky {
         Some(sky) => format!(
-            "  sky: from {}, {} sky box polygons, {} sky props, {} backdrop polygons",
-            sky.from, s.sky_polygons, s.sky_props, s.backdrop_polygons
+            "  sky: from {}, {} sky box polygons, {} sky props ({} with no stored light, drawn full bright), {} backdrop polygons",
+            sky.from, s.sky_polygons, s.sky_props, s.sky_props_unlit, s.backdrop_polygons
         ),
         None => format!(
             "  sky: none (no SkyZoneInfo); {} backdrop polygons",

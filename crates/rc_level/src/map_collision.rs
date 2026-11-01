@@ -34,6 +34,11 @@ pub struct MapCollision {
     /// couldn't be read.
     pub blocking_volumes: usize,
     pub volume_failures: usize,
+    /// Terrains (outdoor ground) read, their triangles added, and the ones
+    /// that couldn't be read with why.
+    pub terrains: usize,
+    pub terrain_triangles: usize,
+    pub terrain_failures: Vec<String>,
     /// The map's doors, lifts and their triggers (`crate::movers`). Their
     /// triangles are not in `triangles`: they are in `mover_triangles`,
     /// by the mover's export index, placed where the map puts them, so
@@ -182,6 +187,9 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut mesh_failures = 0;
     let mut class_mesh_actors = 0;
     let mut not_solid = 0;
+    // Physics props that fall as the level starts, moved down onto the
+    // ground below (`crate::settle`).
+    let mut karma = std::collections::HashSet::new();
     for &a in level.actors.iter().flatten() {
         let Ok(mut p) = actors::read_placement(&map.0, &map.1, a) else {
             continue;
@@ -219,6 +227,13 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
             not_solid += 1;
             continue;
         }
+        if crate::settle::starts_awake(&map.0, &map.1, a)
+            && looks
+                .for_actor(&map.0, a, &mut |n| pkgs.get(n))
+                .is_some_and(|l| l.is_a("KarmaProp"))
+        {
+            karma.insert(a);
+        }
         let key = (Rc::as_ptr(&owner) as usize, p.static_mesh);
         let mesh = cache
             .entry(key)
@@ -233,7 +248,24 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         .iter()
         .filter_map(|(p, i)| cache.get(i).and_then(|m| m.as_ref()).map(|m| (p, m)))
         .collect();
-    let mut mesh = collision_triangles(&bsp, &pairs);
+    let (loose, fixed): (Vec<_>, Vec<_>) = pairs.iter().partition(|(p, _)| karma.contains(&p.export));
+    let mut mesh = collision_triangles(&bsp, &fixed);
+    let (terrains, terrain_failures) =
+        crate::terrain::read_terrains(&map.0, &map.1, level.actors.iter().flatten().copied());
+    let terrain_triangles = crate::collision::add_terrains(&mut mesh, &terrains);
+    let settled: Vec<(Placement, &StaticMesh)> = {
+        let ground = crate::settle::Ground::new(&mesh.triangles);
+        loose
+            .iter()
+            .map(|(p, m)| {
+                let mut p = (*p).clone();
+                crate::settle::settle(&mut p, m, &ground);
+                (p, *m)
+            })
+            .collect()
+    };
+    let settled_refs: Vec<(&Placement, &StaticMesh)> = settled.iter().map(|(p, m)| (p, *m)).collect();
+    crate::collision::add_meshes(&mut mesh, &settled_refs);
     let volumes = crate::volumes::blocking_volumes(&map.0, &map.1, &level);
     let blocking_volumes = add_blocking_volumes(&mut mesh, &volumes.volumes, true);
     // Take the movers' triangles out, so they can move.
@@ -269,5 +301,8 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         not_solid_props: not_solid,
         blocking_volumes,
         volume_failures: volumes.failures.len(),
+        terrains: terrains.len(),
+        terrain_triangles,
+        terrain_failures,
     })
 }

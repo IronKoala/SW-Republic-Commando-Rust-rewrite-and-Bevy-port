@@ -274,6 +274,16 @@ fn load(world: &mut World) {
         lvl.volume_failures,
         load_ms
     ));
+    log.line(format!(
+        "{PART}: {} terrains (outdoor ground) solid with {} triangles{}",
+        lvl.terrains,
+        lvl.terrain_triangles,
+        if lvl.terrain_failures.is_empty() {
+            String::new()
+        } else {
+            format!("; NOT read: {}", lvl.terrain_failures.join("; "))
+        }
+    ));
     let mut info = LevelInfo {
         map: map.clone(),
         collision_triangles: lvl.triangles.len(),

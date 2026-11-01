@@ -41,8 +41,17 @@ fn links_for(class: &str) -> &'static [&'static str] {
 #[derive(Clone)]
 pub struct Picture {
     pub image: Rgba,
-    /// True if some pixels are see-through.
+    /// True if the surface should have see-through holes: some pixels have
+    /// a low alpha AND the material says to use alpha that way (see
+    /// `alpha_pixels`).
     pub has_alpha: bool,
+    /// True if some pixels have a low alpha (below 128), whatever it is for.
+    /// Many Republic Commando textures keep a shine (specular) mask in
+    /// alpha, so low alpha alone does not mean see-through. Unreal only cuts
+    /// holes when the texture says `bMasked` or `bAlphaTexture`, or a
+    /// wrapper turns it on (`FinalBlend` with `AlphaTest` or alpha
+    /// blending, a `Shader` with an `Opacity` map or masked output).
+    pub alpha_pixels: bool,
     /// Glow that adds light instead of covering what's behind (the game's
     /// `HsFalloff` light shafts).
     pub additive: bool,
@@ -142,10 +151,18 @@ fn decode_texture(pkg: &Package, data: &[u8], index: usize) -> Result<Picture, F
         palette.as_deref(),
     )
     .map_err(|e| e.to_string())?;
-    let has_alpha = image.pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 128);
+    let alpha_pixels = image.pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 128);
+    let flag = |name: &str| {
+        matches!(
+            tex.property(pkg, name).map(|p| &p.value),
+            Some(Value::Bool(true))
+        )
+    };
+    let uses_alpha = flag("bMasked") || flag("bAlphaTexture");
     Ok(Picture {
         image,
-        has_alpha,
+        has_alpha: alpha_pixels && uses_alpha,
+        alpha_pixels,
         additive: false,
     })
 }
@@ -280,14 +297,37 @@ impl Materials {
                     }
                     ObjectRef::None => continue,
                 };
+                let cuts_holes = wrapper_uses_alpha(pkg, &class, &props);
                 return found.map(|mut p| {
                     p.additive |= additive;
+                    if cuts_holes {
+                        p.has_alpha = p.alpha_pixels;
+                    }
                     p
                 });
             }
         }
         let names: Vec<_> = props.iter().map(|p| pkg.name(p.name).to_string()).collect();
         Err(format!("{class} has none of {links:?} (it has {names:?})"))
+    }
+}
+
+/// Whether a wrapper material turns on see-through pixels for what it
+/// wraps. Property names and values are from the game's `Engine.u`:
+/// `FinalBlend.FrameBufferBlending` 2 is `FB_AlphaBlend`, and
+/// `Shader.OutputBlending` 1 is `OB_Masked`.
+fn wrapper_uses_alpha(pkg: &Package, class: &str, props: &[properties::Property]) -> bool {
+    let get = |name: &str| properties::find(pkg, props, name).map(|p| &p.value);
+    match class {
+        "FinalBlend" => {
+            matches!(get("AlphaTest"), Some(Value::Bool(true)))
+                || matches!(get("FrameBufferBlending"), Some(Value::Byte(2)))
+        }
+        "Shader" => {
+            matches!(get("Opacity"), Some(Value::Object(o)) if *o != 0)
+                || matches!(get("OutputBlending"), Some(Value::Byte(1)))
+        }
+        _ => false,
     }
 }
 
@@ -313,6 +353,7 @@ fn constant_colour(pkg: &Package, data: &[u8], k: usize, name: &str) -> Result<P
             pixels: rgba.to_vec(),
         },
         has_alpha: rgba[3] < 255,
+        alpha_pixels: rgba[3] < 255,
         additive: false,
     })
 }

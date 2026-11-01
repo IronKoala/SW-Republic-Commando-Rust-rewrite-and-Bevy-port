@@ -154,6 +154,17 @@ per pixel):
 - **G16**: 16-bit grey; we keep the top 8 bits.
 - **V8U8 and L6V5U5** (bump maps): see the next section.
 
+**When alpha means see-through.** Low alpha does not always mean a hole.
+Many Republic Commando textures (DXT3/DXT5 walls, floors and props) keep a
+shine (specular) mask in their alpha channel. Like the original engine, the
+level viewer only cuts holes where the material asks for it: the texture has
+`bMasked` or `bAlphaTexture`, a `FinalBlend` around it has `AlphaTest` or
+alpha blending (`FrameBufferBlending` 2), a `Shader` has an `Opacity` map or
+masked output (`OutputBlending` 1), or a BSP surface has the "masked" flag
+(0x2). Everything else is drawn solid (`materials.rs`, `Picture::has_alpha`
+and `alpha_pixels`). Before 2026-11-01 any low-alpha pixel cut a hole, which
+made whole floors and walls vanish in-game.
+
 PNG files are written uncompressed (simplest valid PNG), so they're large but
 open anywhere. They go to `extracted/textures/<package>/<texture>.png`.
 
@@ -323,7 +334,27 @@ shadows = false
   because the baked light already contains each zone's ambient.
 - Props use their per-corner colours as Bevy vertex colours on an unlit
   material, which multiplies texture and colour directly. Real-time lights
-  don't reach them yet (see below).
+  don't reach them yet (see below). The colours are stored red, green,
+  blue, alpha (checked against the colour of the lights each prop lists;
+  they were read as blue, green, red until 2026-11-01, which drew geo_04a's
+  orange canyon blue-grey).
+- Zone ambient light is **not** in the props' stored colours: corners that
+  face away from every light store 0. The game adds it when drawing, so
+  `scene.rs` (`zone_ambients`) adds it per prop, by the zone at the prop's
+  position (a zone's settings sit on the `ZoneInfo` standing in it; zones
+  without one use the `LevelInfo`). It adds half the ambient, because the
+  lightmaps hold half (their darkest texels are half the zone's ambient,
+  e.g. 21, 21, 27 for 36, 40, 50 on yyy_06a, with the sun on top at the same
+  scale as on props); both are then drawn at double strength. The ambient's
+  colour is the zone's own stored `AmbientVector` (Republic Commando only),
+  which equals Unreal's hue and saturation (`hue_saturation_to_rgb`) times
+  `brightness_curve(AmbientBrightness)` on every zone checked (6 maps).
+  Props in zone 0 (outside every zone: 247 on yyy_06a, which is built almost
+  entirely from props) get nothing unless the `LevelInfo` has an ambient.
+- Colours from hue and saturation follow Unreal's model: hue fades in a
+  straight line red to green to blue (so hue 30 is 65% red, 35% green, not
+  orange-yellow), checked against the light baked into props on geo_04a,
+  ras_01a and yyy_06a.
 - Surfaces without baked light (marked unlit by the level designer, skies,
   and the 33-327 BSP polygons per map without a lightmap) are drawn at full
   brightness, as before.
@@ -926,6 +957,47 @@ Which polygons and props are in the sky box comes from the BSP zone tree
 **Collision without Bevy** (`rc_level::map_collision`). Loads a map's BSP,
 placed props (with class models) and player-blocking volumes as triangles,
 plus the first `PlayerStart`. `rc_walk` uses it, and other programs can.
+
+### Outdoor ground: terrain (`rc_level::terrain`)
+
+Outdoor maps (geo_03a, geo_04a, yyy_01b, yyy_35a among those checked) put
+their ground in `TerrainInfo` actors, not the BSP. Republic Commando saves
+the grid's points already placed in the world, right after the actor's
+properties: a list of `TerrainSector` objects, then a point count and that
+many points (three floats each), row by row with X fastest. Grids are
+square (16x16 to 128x128 points, 64 to 768 units apart). Each square is
+two triangles; `EdgeTurnBitmap` picks the diagonal and
+`QuadVisibilityBitmap` leaves out squares (holes for caves).
+
+Painted layers (`Layers`): layer 0 covers everything; each later layer is
+drawn over it, see-through by its `AlphaMap` (often smaller than the grid,
+so it is blended between pixels), as a separate batch pulled slightly
+towards the camera (`depth_bias`). A texture repeats every `UScale` grid
+squares (checked against the layers' stored `TerrainMatrix`). Layers
+painted with the editor's checkerboard (`Chex`) mark where decorations
+(bushes, palms) go, so they are left out; the decorations themselves aren't
+placed yet.
+
+Light: the game's own terrain light wasn't found in the map, so each
+corner gets its zone's ambient light (halved, as for props, see "How baked
+light is drawn") plus the `Sunlight`'s colour x brightness by how squarely
+it faces it, on the same 0-255 scale the props store: on geo_04a the
+props' light rises in a straight line with how squarely they face the sun.
+That made geo_04a's ground 118, 84, 54 on screen against 110, 82, 56 in the
+user's original-game screenshot at the same spot. Maps without a sun
+(geo_03a, yyy_01b, yyy_35a) are lit by ordinary lights, not worked out for
+terrain yet, so their ground gets the props' average light, flat. The terrain's
+triangles also go into collision (`collision::add_terrains`, used by
+`map_collision` and so by `rc_game` and `rc_walk`).
+
+Falling rocks (`rc_level::settle`): physics props (`KarmaProp`) whose
+`KarmaParams` say `KStartEnabled` (and whose `Physics` the map doesn't
+switch off) drop onto the ground as the game's level starts. The port has
+no physics for them, so `scene.rs` and `map_collision.rs` place them first
+and then move them straight down onto the ground (BSP, other props,
+terrain) until their lowest corner touches it, up to 512 units. They don't
+turn to lie flat. Props whose physics starts asleep stay where the map puts
+them.
 
 ### Showing a level (`rc_level_viewer`)
 

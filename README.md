@@ -205,7 +205,9 @@ copy of the game.
   corner lands inside its own patch of light). On the user's PC it still
   draws at a steady 144 frames per second. `lighting.cfg` lets anyone
   change the brightness without touching code (see `docs/DESIGN.md`,
-  "Lighting in Bevy").
+  "Lighting in Bevy"). Since 2026-11-01 props get the right colours (they
+  were read in the wrong byte order) and their zone's ambient light; GEO_04A's
+  start now matches the original's brightness (tested in the cloud only).
 
 - **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
   `rc_level_check` loads every map in the game without a window and logs
@@ -495,8 +497,16 @@ copy of the game.
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
   colour there. The level viewer's camera flies through walls (`rc_walk`
   has collision).
-- Models are drawn without bump maps or transparency. Only a
-  material's main colour texture is used.
+- Models are drawn without bump maps. Only a material's main colour
+  texture is used. See-through parts (leaves, grates) follow the
+  material's own settings (since 2026-11-01; before, floors and walls
+  with a shine mask were cut full of holes). Not tested on Windows.
+- Outdoor ground (Unreal "terrain") is drawn and solid since 2026-11-01
+  (geo_03a, geo_04a, yyy_01b, yyy_35a), but its light is our estimate
+  (sun and ambient, scaled to match the props), the bushes and palms the
+  game scatters on it aren't placed, and it isn't tested on Windows.
+  Levels are darker than the original. Sky domes were drawn black until
+  2026-11-01 (now full brightness; not tested on Windows).
 - No levels yet: walking only works in the hand-made test room. No weapons,
   enemies, health or sound.
 - Enemies: only battle droids so far. Level scripts don't run yet, so
