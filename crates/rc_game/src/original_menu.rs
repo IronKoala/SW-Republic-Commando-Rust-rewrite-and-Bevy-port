@@ -23,6 +23,8 @@
 use crate::input::{BaseBindings, Bindings};
 use crate::menu::{GamePathsFound, Menu, Page};
 use crate::option_settings;
+use crate::original_lists;
+use crate::original_saves;
 use crate::rebind::{RebindDone, StartRebind, UserBindingsPath};
 use crate::settings::Settings;
 use crate::settings::SettingsPath;
@@ -50,9 +52,9 @@ const MENU_ASPECT: f32 = 4.0 / 3.0;
 /// Main menu buttons this port can't offer yet; they are greyed out the way
 /// the original greys out buttons in its demo versions. Multiplayer stays
 /// off for good: this port is single-player and offline only.
+/// LOAD GAME joins them when its page can't be shown.
 const UNAVAILABLE: &[MainAction] = &[
     MainAction::Multiplayer,
-    MainAction::LoadGame,
     MainAction::Profiles,
     MainAction::Extras,
 ];
@@ -66,7 +68,7 @@ pub struct Screen {
 
 impl Screen {
     /// The buttons keys and controllers move between.
-    fn buttons(&self) -> Vec<usize> {
+    pub(crate) fn buttons(&self) -> Vec<usize> {
         self.layout
             .focusable_on_pc()
             .into_iter()
@@ -158,6 +160,8 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::Paused => Some("paused"),
         // The port's own settings, drawn in the original GAME page's look.
         Page::MoreSettings => Some("more_settings"),
+        Page::LoadGame => Some(original_saves::LOAD),
+        Page::SaveGame => Some(original_saves::SAVE),
         Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
@@ -171,6 +175,8 @@ fn page_from_key(key: &str) -> Option<Page> {
         "options_controls" => Some(Page::OptionsControls),
         "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
+        original_saves::LOAD => Some(Page::LoadGame),
+        original_saves::SAVE => Some(Page::SaveGame),
         _ => None,
     }
 }
@@ -226,6 +232,18 @@ enum OptionWork {
     RebindAgain,
 }
 
+/// What the question box is asking.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Asking {
+    /// Quit the program? (YES quits.)
+    Quit,
+    /// Load, overwrite or delete a save? (YES does it.)
+    Confirm(original_saves::SaveDo),
+    /// A message with one answer (BACK), such as "you can't overwrite the
+    /// quicksave".
+    Notice,
+}
+
 /// The original menus, when the install has them.
 #[derive(Resource, Default)]
 pub struct OriginalMenus {
@@ -236,6 +254,12 @@ pub struct OriginalMenus {
     pub pages: HashMap<String, PageScreen>,
     /// The "are you sure?" box over the screen showing.
     pub question: Option<Screen>,
+    /// What it is asking.
+    pub asking: Option<Asking>,
+    /// The screen showing (for the question box's background).
+    showing: Option<Shown>,
+    /// The load and save pages' texts and work (`original_saves.rs`).
+    pub saves: original_saves::SavePages,
     /// The question box's layout, kept for when QUIT is chosen again.
     question_layout: Option<MenuLayout>,
     /// The "reassign button" box while it shows, and its layout.
@@ -266,6 +290,14 @@ pub struct OriginalMenus {
     /// The quads last drawn, for the script's colour check, in fractions
     /// of the menu area (`area_for`).
     pub drawn: Vec<Quad>,
+    /// The campaign page's planets and missions, when it uses the
+    /// original (`original_lists.rs`).
+    pub campaign: Option<rc_menus::campaign::Campaign>,
+    /// A scroll bar being dragged with the mouse: the bar, and the grip
+    /// (handle centre minus pointer height).
+    drag: Option<(usize, f32)>,
+    /// The list row last clicked, and when (for double clicks).
+    pub(crate) last_click: Option<(usize, std::time::Instant)>,
     /// This frame's button press was used here (for example to open the
     /// campaign page), so the placeholder pages must not act on it too.
     pub used_input: bool,
@@ -290,6 +322,46 @@ impl OriginalMenus {
         self.pages
             .contains_key(key)
             .then(|| Shown::Page(key.to_string()))
+    }
+
+    /// Redraw on the next frame.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Show the question box over the screen showing, asking `text`.
+    /// Without the box (the install's question class can't be read), a
+    /// quit quits and anything else is only logged.
+    pub fn ask(&mut self, text: &str, asking: Asking) -> bool {
+        let Some(l) = &self.question_layout else {
+            return false;
+        };
+        let mut layout = l.clone();
+        let under = self
+            .showing
+            .as_ref()
+            .and_then(|s| self.screen(s))
+            .map(|s| &s.layout);
+        let mut focus = screens::setup_question(&mut layout, text, under);
+        if asking == Asking::Notice {
+            // One answer: BACK, worded as the page's own BACK button.
+            let back = under
+                .and_then(|u| u.widget("BButton"))
+                .and_then(|w| match &w.kind {
+                    Kind::Button(b) => Some(b.blurred.text.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "BACK".into());
+            screens::set_widget_text(&mut layout, "BButton", &back);
+            if let Some(w) = layout.widget_mut("AButton") {
+                w.hidden = true;
+            }
+            focus = layout.widgets.iter().position(|w| w.name == "BButton");
+        }
+        self.question = Some(Screen { layout, focus });
+        self.asking = Some(asking);
+        self.dirty = true;
+        true
     }
 
     fn screen(&self, shown: &Shown) -> Option<&Screen> {
@@ -339,7 +411,15 @@ impl Plugin for OriginalMenuPlugin {
             .add_systems(OnEnter(Play::Paused), load)
             .add_systems(
                 Update,
-                (focus_new_page, navigate, apply_options, draw, fit_area)
+                (
+                    focus_new_page,
+                    navigate,
+                    apply_options,
+                    original_saves::apply_saves,
+                    drag_bars,
+                    draw,
+                    fit_area,
+                )
                     .chain()
                     .in_set(GameSet::Hud)
                     // Before the placeholder menu reads the same actions.
@@ -352,6 +432,7 @@ fn load(
     mut menus: ResMut<OriginalMenus>,
     paths: Res<GamePaths>,
     found: Res<GamePathsFound>,
+    levels: Option<Res<crate::levels::LevelList>>,
     log: Res<GameLog>,
 ) {
     if menus.tried {
@@ -402,6 +483,14 @@ fn load(
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {
                 check_names(&mut layout, &mut buttons, &plan.page, &log);
+                for e in &plan.extra_buttons {
+                    if screens::fit_button_to_text(&mut layout, &e.name, &mut assets) {
+                        log.line(format!(
+                            "original menus: page {}: {} widened to fit its text",
+                            plan.page, e.name
+                        ));
+                    }
+                }
                 log.line(format!(
                     "original menus: page {} uses {} ({} buttons)",
                     plan.page,
@@ -431,12 +520,58 @@ fn load(
             }
         }
     }
+    if let Some(plan) = menus.pages.get(original_lists::CAMPAIGNS).map(|p| p.plan.clone()) {
+        let ok = assets
+            .library
+            .class(&plan.class)
+            .is_ok_and(|c| original_lists::setup_campaign(&mut menus, &c, levels.as_deref(), &log));
+        if !ok {
+            menus.pages.remove(original_lists::CAMPAIGNS);
+        }
+    }
+    // The load and save pages' texts; pages pointing at a load or save
+    // page that can't be shown grey that button out.
+    let mut class_of = |k: &str| {
+        menus
+            .pages
+            .get(k)
+            .and_then(|p| assets.library.class(&p.plan.class).ok())
+    };
+    let (load_class, save_class) = (class_of(original_saves::LOAD), class_of(original_saves::SAVE));
+    menus.saves = original_saves::read(load_class.as_deref(), save_class.as_deref());
+    let present: Vec<String> = menus.pages.keys().cloned().collect();
+    for (k, p) in menus.pages.iter_mut() {
+        let missing: Vec<usize> = p
+            .buttons
+            .commands
+            .iter()
+            .filter(|(_, c)| {
+                matches!(c, PageCmd::Open(to) | PageCmd::Switch(to)
+                    if (to == original_saves::LOAD || to == original_saves::SAVE)
+                        && !present.contains(to))
+            })
+            .map(|(i, _)| *i)
+            .collect();
+        for i in missing {
+            let name = p.screen.layout.widgets[i].name.clone();
+            log.line(format!(
+                "original menus: page {k}: {name} greyed out: its page can't be shown"
+            ));
+            screens::disable_row(&mut p.screen.layout, &name);
+            p.buttons.commands.retain(|(w, _)| *w != i);
+            p.buttons.commands.push((i, PageCmd::Unavailable));
+        }
+    }
+    let mut unavailable = UNAVAILABLE.to_vec();
+    if !present.iter().any(|k| k == original_saves::LOAD) {
+        unavailable.push(MainAction::LoadGame);
+    }
     let quit_text = match main.get("QuitGameConfirm") {
         Some(V::Str(s)) => s.clone(),
         _ => "Quit?".into(),
     };
     let mut layout = rc_menus::build(&main);
-    for l in screens::setup_main_menu(&mut layout, UNAVAILABLE) {
+    for l in screens::setup_main_menu(&mut layout, &unavailable) {
         log.line(format!("original menus: {l}"));
     }
     let map_key_layout = if menus.pages.values().any(|p| !p.buttons.keys.is_empty()) {
@@ -646,6 +781,19 @@ fn focus_new_page(
         refresh_page(p, &settings, &prompts, desktop);
         let screen = &mut p.screen;
         screen.focus = screen.buttons().first().copied();
+        // The pause menu opens on RESUME GAME (now that the save and load
+        // buttons above it work), so pause and Enter goes back to play.
+        if k == "paused" {
+            let buttons = screen.buttons();
+            if let Some(r) = buttons
+                .into_iter()
+                .find(|&i| screen.on_select(i).eq_ignore_ascii_case("ResumeGameSelected"))
+            {
+                screen.focus = Some(r);
+            }
+        }
+        original_lists::focus_first(&mut menus, k);
+        let screen = &menus.pages[k].screen;
         log.line(format!(
             "original menus: page {k} opened, focus on {}",
             screen.focused_name().unwrap_or("none")
@@ -663,6 +811,16 @@ struct OriginalRoot;
 /// question box, widget index).
 #[derive(Component)]
 struct HitBox(bool, usize);
+
+/// A mouse target over a list's scroll bar track: the bar, and the
+/// track's top and bottom (menu heights; spreading never moves things up
+/// or down).
+#[derive(Component)]
+pub(crate) struct BarHit {
+    pub(crate) bar: usize,
+    top: f32,
+    bottom: f32,
+}
 
 fn play_sound(
     commands: &mut Commands,
@@ -859,6 +1017,7 @@ fn navigate(
         return;
     };
     let menus = &mut *menus;
+    menus.showing = Some(shown.clone());
     // While the "reassign button" box waits for a key, the key goes to the
     // rebinding, not to the menu.
     if menus.rebind.as_ref().is_some_and(|r| !r.chosen) {
@@ -897,7 +1056,20 @@ fn navigate(
     let in_question = menus.question.is_some();
     let in_rebind = menus.rebind.is_some();
     let in_overlay = in_question || in_rebind;
+    // Pages with a list move along it with the keys and the wheel.
+    if let (false, Shown::Page(k)) = (in_overlay, &shown) {
+        if let Some(moved) = original_lists::keys(menus, k, &actions, wheel_y, &log) {
+            menus.used_input = true;
+            if moved {
+                menus.dirty = true;
+                let s = menus.focus_sound.clone();
+                play_sound(&mut commands, menus, &mut sources, s, &log);
+            }
+            return;
+        }
+    }
     let mut chosen = None;
+    let mut by_key = false;
     let mut moved = false;
     // A chooser stepped by left or right: (widget, step).
     let mut stepped = None;
@@ -937,6 +1109,10 @@ fn navigate(
             match i {
                 Interaction::Hovered | Interaction::Pressed => {
                     let pointing = mouse_moved || *i == Interaction::Pressed;
+                    // A list row takes focus only when clicked, not under
+                    // a moving pointer (the original's bNoMouseOverFocus).
+                    let row = rc_menus::lists::row_of(&screen.layout, hit.1).is_some();
+                    let pointing = pointing && (!row || *i == Interaction::Pressed);
                     if pointing && screen.focus != Some(hit.1) && screen.buttons().contains(&hit.1)
                     {
                         screen.focus = Some(hit.1);
@@ -950,6 +1126,7 @@ fn navigate(
             }
         }
         if actions.just_pressed(Action::MenuAccept) {
+            by_key = chosen.is_none();
             chosen = chosen.or(screen.focus);
         }
         if moved {
@@ -979,13 +1156,19 @@ fn navigate(
         let s = menus.select_sound.clone();
         play_sound(&mut commands, menus, &mut sources, s, &log);
         // In the question box, A is YES and B is NO (MenuQuestionYesNo).
-        if answer == "OnAButton" {
-            log.line("original menus: quit question answered YES; quitting");
-            exit.write(AppExit::Success);
-        } else {
-            log.line("original menus: quit question answered NO");
-            menus.question = None;
-            menus.dirty = true;
+        let yes = answer == "OnAButton";
+        menus.question = None;
+        menus.dirty = true;
+        match (menus.asking.take(), yes) {
+            (Some(Asking::Quit) | None, true) => {
+                log.line("original menus: quit question answered YES; quitting");
+                exit.write(AppExit::Success);
+            }
+            (Some(Asking::Confirm(d)), true) => {
+                log.line(format!("original menus: question answered YES: {d:?}"));
+                menus.saves.asks.push(original_saves::SaveAsk::Do(d));
+            }
+            (asking, _) => log.line(format!("original menus: question {asking:?} answered NO")),
         }
         return;
     }
@@ -1030,6 +1213,7 @@ fn navigate(
                 MainAction::NewGame => PageCmd::Play("pro".into()),
                 MainAction::CampaignMap => PageCmd::Open("campaigns".into()),
                 MainAction::Options => PageCmd::Open("options".into()),
+                MainAction::LoadGame => PageCmd::Open(original_saves::LOAD.into()),
                 MainAction::Quit => PageCmd::QuitGame,
                 other => {
                     log.line(format!("original menus: {other:?} isn't available yet"));
@@ -1075,6 +1259,19 @@ fn navigate(
     menus.used_input = true;
     let s = menus.select_sound.clone();
     play_sound(&mut commands, menus, &mut sources, s, &log);
+    // A list's own commands, and what only one page does.
+    let cmd = match &shown {
+        Shown::Page(k) => match original_lists::command(menus, k, chosen, by_key, cmd, &log)
+            .and_then(|c| original_saves::command(menus, k, c, &log))
+        {
+            Some(c) => c,
+            None => {
+                menus.dirty = true;
+                return;
+            }
+        },
+        Shown::Main => cmd,
+    };
     let resume = |next_play: &mut Option<ResMut<NextState<Play>>>| {
         if let Some(n) = next_play.as_mut() {
             n.set(Play::Running);
@@ -1111,22 +1308,14 @@ fn navigate(
         }
         PageCmd::Resume => resume(&mut next_play),
         PageCmd::QuitToMenu => next_state.set(GameState::MainMenu),
-        PageCmd::QuitGame => match &menus.question_layout {
-            Some(l) => {
-                let mut layout = l.clone();
-                let under = menus.screen(&shown).map(|s| &s.layout);
-                let focus = screens::setup_question(&mut layout, &menus.quit_text, under);
-                menus.question = Some(Screen { layout, focus });
-                menus.dirty = true;
-                log.line(format!(
-                    "original menus: question box: {:?}",
-                    menus.quit_text
-                ));
-            }
-            None => {
+        PageCmd::QuitGame => {
+            let text = menus.quit_text.clone();
+            if menus.ask(&text, Asking::Quit) {
+                log.line(format!("original menus: question box: {text:?}"));
+            } else {
                 exit.write(AppExit::Success);
             }
-        },
+        }
         PageCmd::OptionLeft | PageCmd::OptionRight => {
             let step = if cmd == PageCmd::OptionLeft { -1 } else { 1 };
             if let (Some(arrow), Some(screen)) = (chosen, menus.screen_mut(&shown)) {
@@ -1168,8 +1357,12 @@ fn navigate(
                 menus.dirty = true;
             }
         }
-        // Handled above: they belong to the row.
-        PageCmd::Rebind => {}
+        // Handled above: they belong to the row, or to the page's list.
+        PageCmd::Rebind
+        | PageCmd::ScrollUp
+        | PageCmd::ScrollDown
+        | PageCmd::ListPick
+        | PageCmd::Act(_) => {}
         PageCmd::Unavailable => {}
     }
 }
@@ -1530,8 +1723,8 @@ fn draw(
             },
         ));
     }
-    // (on top?, pictures, mouse areas by widget index)
-    type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>);
+    // (on top?, pictures, mouse areas by widget index, scroll bar tracks)
+    type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>, Vec<(BarHit, [f32; 4])>);
     let mut list: Vec<Drawn> = Vec::new();
     let left = fit::left_edge(across);
     let to_area = |b: [f32; 4]| [(b[0] - left) / across, b[1], (b[2] - left) / across, b[3]];
@@ -1556,7 +1749,34 @@ fn draw(
                 })
                 .collect()
         };
-        list.push((*on_top, q, boxes));
+        // The scroll bars' tracks, where the handle can be grabbed (a
+        // little wider than the handle, so it's easy to hit).
+        let bars = if under {
+            Vec::new()
+        } else {
+            layout
+                .lists
+                .bars
+                .iter()
+                .enumerate()
+                .filter_map(|(b, bar)| {
+                    let Kind::Sprite(s) = &layout.widget(&bar.name)?.kind else {
+                        return None;
+                    };
+                    let half = (bar.min_size[0] / 2.0).max(0.015);
+                    let bx = [s.pos[0] - half, bar.top, s.pos[0] + half, bar.bottom];
+                    Some((
+                        BarHit {
+                            bar: b,
+                            top: bar.top,
+                            bottom: bar.bottom,
+                        },
+                        to_area(bx),
+                    ))
+                })
+                .collect()
+        };
+        list.push((*on_top, q, boxes, bars));
     }
     let key = (page_name.clone(), (across * 100.0).round() as u32);
     if !menus.fit_logged.contains(&key) {
@@ -1620,7 +1840,7 @@ fn draw(
                 },
             ))
             .with_children(|area| {
-                for (is_question, quads, boxes) in &list {
+                for (is_question, quads, boxes, bars) in &list {
                     for q in quads {
                         let Some(image) = images.get(&(
                             q.texture.to_ascii_lowercase(),
@@ -1651,6 +1871,27 @@ fn draw(
                             },
                         ));
                     }
+                    // Under the buttons, so the scroll arrows at the
+                        // track's ends still take their clicks.
+                    for (hit, b) in bars {
+                        area.spawn((
+                            BarHit {
+                                bar: hit.bar,
+                                top: hit.top,
+                                bottom: hit.bottom,
+                            },
+                            Interaction::None,
+                            bevy::ui::RelativeCursorPosition::default(),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Percent(b[0] * 100.0),
+                                top: Val::Percent(b[1] * 100.0),
+                                width: Val::Percent((b[2] - b[0]) * 100.0),
+                                height: Val::Percent((b[3] - b[1]) * 100.0),
+                                ..default()
+                            },
+                        ));
+                    }
                     for (i, b) in boxes {
                         area.spawn((
                             HitBox(*is_question, *i),
@@ -1668,6 +1909,72 @@ fn draw(
                 }
             });
         });
+}
+
+/// Click and hold a list's scroll bar to drag it, as in a browser:
+/// grabbing the handle keeps the grip, clicking the track elsewhere brings
+/// the handle's centre to the pointer and drags from there.
+fn drag_bars(
+    state: Res<State<GameState>>,
+    play: Option<Res<State<Play>>>,
+    menu: Res<Menu>,
+    mut menus: ResMut<OriginalMenus>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    bars: Query<(&BarHit, &Interaction, &bevy::ui::RelativeCursorPosition)>,
+    log: Res<GameLog>,
+) {
+    let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
+    let overlay = menus.question.is_some() || menus.rebind.is_some() || menus.list.is_some();
+    let (Some(Shown::Page(k)), false, true) = (shown, overlay, mouse.pressed(MouseButton::Left))
+    else {
+        menus.drag = None;
+        return;
+    };
+    // The pointer's height on the track, from the newest track box (the
+    // menu is redrawn as the list moves; a new box knows the pointer a
+    // frame later).
+    let at = |want: Option<usize>| {
+        bars.iter().find_map(|(hit, i, rel)| {
+            let n = rel.normalized?;
+            let pressed = *i == Interaction::Pressed;
+            match want {
+                Some(b) if hit.bar == b => Some((b, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
+                None if pressed => Some((hit.bar, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
+                _ => None,
+            }
+        })
+    };
+    let menus = &mut *menus;
+    let Some(page) = menus.pages.get_mut(&k) else {
+        return;
+    };
+    let (b, offset) = match menus.drag {
+        Some(d) => d,
+        None if mouse.just_pressed(MouseButton::Left) => {
+            let Some((b, y)) = at(None) else {
+                return;
+            };
+            let Some((centre, size)) = rc_menus::lists::handle(&page.screen.layout, b) else {
+                return;
+            };
+            let offset = if (y - centre).abs() <= size / 2.0 {
+                centre - y
+            } else {
+                0.0
+            };
+            menus.drag = Some((b, offset));
+            menus.used_input = true;
+            log.line(format!("original menus: page {k}: dragging scroll bar {b}"));
+            (b, offset)
+        }
+        None => return,
+    };
+    let Some((_, y)) = at(Some(b)) else {
+        return;
+    };
+    if original_lists::drag(&mut page.screen, b, y, offset) {
+        menus.dirty = true;
+    }
 }
 
 /// The menu area: the largest box `across` 4:3 menus wide that fits the

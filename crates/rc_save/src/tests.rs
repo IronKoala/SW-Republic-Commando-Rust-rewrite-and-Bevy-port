@@ -334,6 +334,23 @@ fn saving_from_the_menu_is_refused() {
 }
 
 #[test]
+fn deleting_a_save_removes_its_file_and_list_entry() {
+    let dir = temp_dir("delete");
+    let mut app = game(&dir);
+    let slot = SaveSlot::Named("gone".into());
+    app.world_mut().write_message(SaveGame { slot: slot.clone() });
+    app.update();
+    assert!(slot_path(&dir, &slot).exists());
+    assert!(app.world().resource::<SaveList>().get(&slot).is_some());
+    app.world_mut()
+        .write_message(rc_game_core::save::DeleteSave { slot: slot.clone() });
+    app.update();
+    assert!(!slot_path(&dir, &slot).exists());
+    assert!(app.world().resource::<SaveList>().get(&slot).is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn differences_between_sections() {
     let a: toml::Value = toml::from_str("a = [1.0, 2.0]\nb = 'x'\n[c]\nd = 3\n").unwrap();
     let b: toml::Value = toml::from_str("a = [1.5, 2.0]\nb = 'x'\n[c]\nd = 3\n").unwrap();

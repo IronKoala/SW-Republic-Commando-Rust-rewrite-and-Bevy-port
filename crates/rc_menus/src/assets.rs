@@ -76,6 +76,8 @@ impl Assets {
                 Kind::Button(b) => {
                     add(&b.background_blurred.texture);
                     add(&b.background_focused.texture);
+                    add(&b.under_blurred.texture);
+                    add(&b.under_focused.texture);
                     fonts.push(b.blurred.font.clone());
                     fonts.push(b.focused.font.clone());
                 }
