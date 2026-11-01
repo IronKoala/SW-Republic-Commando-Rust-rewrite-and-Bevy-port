@@ -6,7 +6,7 @@
 use crate::Log;
 use rc_menus::layout::Kind;
 use rc_menus::quads::{self, Sizes};
-use rc_menus::{render, screens, Assets, Library};
+use rc_menus::{campaign, render, screens, Assets, Library};
 use std::path::Path;
 
 pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path) -> bool {
@@ -48,6 +48,25 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
         .any(|c| c.ends_with(".MenuTemplateTitled"))
     {
         screens::setup_titled(&mut layout);
+    }
+    if class.eq_ignore_ascii_case(campaign::CAMPAIGN_MENU) {
+        // As the game shows it: Geonosis chosen, its third mission picked.
+        if let Some(mut c) = campaign::read(&data) {
+            campaign::setup(&mut layout, &c);
+            campaign::choose(&mut layout, &mut c, 0);
+            for p in &c.planets {
+                log.line(format!(
+                    "planet {} {:?}: {} missions {:?}, {} maps in the every-map list",
+                    p.button,
+                    p.title,
+                    p.missions.len(),
+                    p.missions,
+                    p.every_map.len()
+                ));
+            }
+            campaign::highlight(&mut layout, &c, Some(2));
+            focus = rc_menus::lists::widget_of(&layout, 0, 2);
+        }
     }
     log.line(format!(
         "{} widgets ({} shown on PC), skipped: {:?}",
@@ -185,12 +204,32 @@ pub(crate) fn pages(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path
     for plan in &plans {
         log.line(format!("=== page {}: {} ===", plan.page, plan.class));
         probe(log, game_data, &plan.class, out_dir);
-        let mut library = Library::new(game_data);
-        let verdict = match library.class(&plan.class) {
+        let mut assets = Assets::new(Library::new(game_data));
+        let verdict = match assets.library.class(&plan.class) {
             Ok(c) => {
                 let mut layout = rc_menus::build(&c);
                 match rc_menus::pages::check(&mut layout, plan) {
-                    Ok(b) => format!("USES THE ORIGINAL ({} buttons)", b.commands.len()),
+                    Ok(b) => {
+                        // Fill the campaign page's list as the game does,
+                        // so its rows are checked too.
+                        if let Some(mut camp) = campaign::read(&c) {
+                            campaign::setup(&mut layout, &camp);
+                            campaign::choose(&mut layout, &mut camp, 0);
+                        }
+                        let overlaps = quads::text_overlaps(&layout, &mut assets);
+                        for (a, b, by) in &overlaps {
+                            log.line(format!(
+                                "  OVERLAP page {}: {a} and {b} cross by {:.1}% of the width",
+                                plan.page,
+                                by * 100.0
+                            ));
+                        }
+                        format!(
+                            "USES THE ORIGINAL ({} buttons), {} overlapping texts",
+                            b.commands.len(),
+                            overlaps.len()
+                        )
+                    }
                     Err(why) => format!("keeps the placeholder: {}", why.join("; ")),
                 }
             }
@@ -203,4 +242,79 @@ pub(crate) fn pages(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path
         log.line(v);
     }
     true
+}
+
+/// `rc_probe --hud [hud.toml]`: paints the HUD from the original's
+/// pictures and fonts, with made-up numbers, at several screen shapes, to
+/// `extracted/menus/hud_<width>x<height>.png`, over a grey background
+/// standing in for the game. Logs any overlap `check_plan` finds.
+pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) -> bool {
+    use rc_menus::hud::{check_plan, hud_quads, HudLayout, HudValues, SquadLine};
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) => {
+            log.line(format!("FAILED: can't read {}: {e}", file.display()));
+            return false;
+        }
+    };
+    let layout = match HudLayout::parse(&text) {
+        Ok(l) => l,
+        Err(e) => {
+            log.line(format!("FAILED: {}: {e}", file.display()));
+            return false;
+        }
+    };
+    let mut assets = Assets::new(Library::new(game_data));
+    let member = |number: &str, name: &str, health: f32, down: bool, order: &str| SquadLine {
+        number: number.into(),
+        name: name.into(),
+        health,
+        down,
+        order: order.into(),
+    };
+    let values = HudValues {
+        shield: 0.7,
+        health: 0.45,
+        weapon: "DC-17m Blaster".into(),
+        clip: Some(42),
+        clip_size: Some(60),
+        reserve: Some(180),
+        grenade: Some(("Thermal Detonator".into(), 2)),
+        squad: vec![
+            member("07", "Sev", 1.0, false, "Form up"),
+            member("40", "Fixer", 0.6, false, "Search and destroy"),
+            member("62", "Scorch", 0.0, true, ""),
+        ],
+        messages: vec![
+            "Picked up 2 thermal detonators".into(),
+            "Objective: find a way into the hive".into(),
+        ],
+    };
+    let mut ok = true;
+    for (w, h) in [
+        (1024, 768),
+        (1920, 1080),
+        (3440, 1440),
+        (3840, 1080),
+        (2400, 1080),
+        (2208, 1768),
+    ] {
+        let (wf, hf) = (w as f32, h as f32);
+        for p in check_plan(&layout, wf, hf, 16.0 / 9.0, 3) {
+            log.line(format!("  OVERLAP {p}"));
+            ok = false;
+        }
+        let quads = hud_quads(&layout, &values, wf, hf, 16.0 / 9.0, &mut assets);
+        let picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);
+        let _ = std::fs::create_dir_all(out_dir);
+        let path = out_dir.join(format!("hud_{w}x{h}.png"));
+        match std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f)) {
+            Ok(()) => log.line(format!("{w}x{h}: {} pictures, painted to {}", quads.len(), path.display())),
+            Err(e) => log.line(format!("couldn't write {}: {e}", path.display())),
+        }
+    }
+    for p in &assets.problems {
+        log.line(format!("  PROBLEM {p}"));
+    }
+    ok && assets.problems.is_empty()
 }

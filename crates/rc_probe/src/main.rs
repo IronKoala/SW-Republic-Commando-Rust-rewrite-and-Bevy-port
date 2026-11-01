@@ -37,6 +37,9 @@
 //!   rc_probe --menu [Package.Class]  build one of the original menus (default
 //!                            the main menu), log its widgets to `logs/rc_menu.log`
 //!                            and paint it to `extracted/menus/`
+//!   rc_probe --hud [file]  paint the HUD from the original's pictures at
+//!                            several screen shapes (default file:
+//!                            data/ui/hud.toml) to `extracted/menus/`
 //!   rc_probe --pages [file]  the same for every page in
 //!                            `data/ui/original_menus.toml`, then say which
 //!                            pages would use their original menu, and why not
@@ -117,6 +120,7 @@ fn main() {
     let font_mode = args.first().is_some_and(|a| a == "--fonts");
     let menu_mode = args.first().is_some_and(|a| a == "--menu");
     let pages_mode = args.first().is_some_and(|a| a == "--pages");
+    let hud_mode = args.first().is_some_and(|a| a == "--hud");
     let helmet_mode = args.first().is_some_and(|a| a == "--helmet");
     if texture_mode
         || sound_mode
@@ -127,6 +131,7 @@ fn main() {
         || font_mode
         || menu_mode
         || pages_mode
+        || hud_mode
         || helmet_mode
     {
         args.remove(0);
@@ -176,7 +181,7 @@ fn main() {
         CLASSES_LOG_PATH
     } else if font_mode {
         FONT_LOG_PATH
-    } else if menu_mode || pages_mode || helmet_mode {
+    } else if menu_mode || pages_mode || hud_mode || helmet_mode {
         MENU_LOG_PATH
     } else {
         LOG_PATH
@@ -231,6 +236,12 @@ fn main() {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("data/ui/original_menus.toml"));
         menus::pages(&mut log, &game.join("GameData"), &file, Path::new(MENU_EXTRACT_DIR))
+    } else if hud_mode {
+        let file = args
+            .first()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("data/ui/hud.toml"));
+        menus::hud(&mut log, &game.join("GameData"), &file, Path::new(MENU_EXTRACT_DIR))
     } else if helmet_mode {
         let file = args
             .first()

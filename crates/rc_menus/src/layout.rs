@@ -24,6 +24,7 @@
 //! `MenuDefault`; they are never drawn.
 
 use crate::library::ClassData;
+use crate::lists::{Lists, ScrollBar, StringList};
 use crate::value::{fill_zero, Field, V};
 
 /// `ERenderStyle` from the game's `Engine.u` (read with `rc_probe --classes`).
@@ -96,6 +97,10 @@ pub struct Text {
     /// Break the text into lines at spaces to fit `max_size_x`, instead
     /// of cutting it short with "...".
     pub word_wrap: bool,
+    /// Squeeze a line wider than `max_size_x` narrower so it fits, instead
+    /// of cutting it short (this port's choice for list rows, so a mission
+    /// or save name is never cut).
+    pub squeeze: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -104,6 +109,13 @@ pub struct Button {
     pub focused: Text,
     pub background_blurred: Sprite,
     pub background_focused: Sprite,
+    /// Drawn under everything else: a picture button's own background
+    /// (`MenuButtonSprite`'s `BackgroundBlurred` and `BackgroundFocused`,
+    /// such as the ring behind each planet on the campaign page). For a
+    /// picture button the picture itself is `background_blurred` and
+    /// `background_focused`.
+    pub under_blurred: Sprite,
+    pub under_focused: Sprite,
     /// Name of the script function the original calls when chosen.
     pub on_select: String,
     pub disabled: bool,
@@ -203,6 +215,8 @@ pub struct MenuLayout {
     /// `Movies/menu_bg.avi` for it).
     pub background_movie: String,
     pub music: Option<String>,
+    /// Scrolling lists, their scroll bars and wheel areas (`lists.rs`).
+    pub lists: crate::lists::Lists,
 }
 
 impl MenuLayout {
@@ -245,6 +259,13 @@ const DRAWN: &[&str] = &[
     "MenuButtonSprite",
     "MenuButtonEnum",
 ];
+/// Kinds that make up scrolling lists (`lists.rs`).
+const LISTS: &[&str] = &[
+    "MenuStringList",
+    "MenuScrollBar",
+    "MenuScrollArea",
+    "MenuActiveWidget",
+];
 const SUBWIDGET_COPIES: &[(&str, &str)] = &[
     ("Blurred", "Focused"),
     ("Blurred", "SelectedBlurred"),
@@ -258,11 +279,16 @@ pub fn build(class: &ClassData) -> MenuLayout {
     // Group the widget properties by name, keeping declaration order.
     let mut groups: Vec<(String, Vec<(u32, V)>)> = Vec::new();
     let mut skipped = Vec::new();
+    let mut list_parts: Vec<(String, V)> = Vec::new();
     for f in &class.defaults {
         let V::Struct { kind, .. } = &f.value else {
             continue;
         };
         if !kind.starts_with("Menu") || class.category(&f.name) == "MenuDefault" {
+            continue;
+        }
+        if LISTS.contains(&kind.as_str()) {
+            list_parts.push((f.name.clone(), f.value.clone()));
             continue;
         }
         if !DRAWN.contains(&kind.as_str()) {
@@ -321,6 +347,7 @@ pub fn build(class: &ClassData) -> MenuLayout {
             }
         }
     }
+    let lists = build_lists(class, list_parts, &mut widgets);
     // Draw by pass; the sort is stable so declaration order stays within a
     // pass.
     widgets.sort_by_key(|w| w.pass);
@@ -329,7 +356,7 @@ pub fn build(class: &ClassData) -> MenuLayout {
         Some(V::Object { path, .. }) if !path.is_empty() => Some(path.clone()),
         _ => None,
     };
-    MenuLayout {
+    let mut layout = MenuLayout {
         class: class.path.clone(),
         widgets,
         skipped,
@@ -345,7 +372,96 @@ pub fn build(class: &ClassData) -> MenuLayout {
             _ => String::new(),
         },
         music: obj("BackgroundMusic"),
+        lists,
+    };
+    crate::lists::refresh(&mut layout);
+    layout
+}
+
+/// Turn the page's `MenuStringList`s into row buttons, its
+/// `MenuScrollBar`s into handle pictures, and note its `MenuScrollArea`s
+/// (see `lists.rs`). `MenuActiveWidget`s (the bar above and below the
+/// handle) need nothing: the game works them out from the handle.
+fn build_lists(class: &ClassData, parts: Vec<(String, V)>, widgets: &mut Vec<Widget>) -> Lists {
+    let mut out = Lists::default();
+    for (name, mut v) in parts {
+        resolve(class, &mut v, 0);
+        match v.kind() {
+            "MenuStringList" => {
+                let Some(template) = v.get("Template").cloned() else {
+                    continue;
+                };
+                let rows = v.int("DisplayCount").max(1) as usize;
+                let from = [v.float("PosX1"), v.float("PosY1")];
+                let to = [v.float("PosX2"), v.float("PosY2")];
+                for r in 0..rows {
+                    let along = if rows > 1 {
+                        r as f32 / (rows - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    let mut t = template.clone();
+                    if let Some(b) = t.get_mut("Blurred") {
+                        b.set("PosX", V::Float(from[0] + (to[0] - from[0]) * along));
+                        b.set("PosY", V::Float(from[1] + (to[1] - from[1]) * along));
+                    }
+                    // A row's focused text sits where its blurred text is.
+                    if let Some(f) = t.get_mut("Focused") {
+                        f.set("PosX", V::Float(0.0));
+                        f.set("PosY", V::Float(0.0));
+                    }
+                    if let V::Struct { kind: k, .. } = &mut t {
+                        if k.is_empty() {
+                            *k = "MenuButtonText".into();
+                        }
+                    }
+                    resolve(class, &mut t, 0);
+                    if let Some(mut w) = to_widget(format!("{name}[{r}]"), &t) {
+                        if let Kind::Button(b) = &mut w.kind {
+                            b.blurred.squeeze = true;
+                            b.focused.squeeze = true;
+                        }
+                        w.pass = v.int("Pass");
+                        w.hidden = true;
+                        w.platform = v.byte("Platform");
+                        widgets.push(w);
+                    }
+                }
+                out.lists.push(StringList {
+                    name,
+                    rows,
+                    ..Default::default()
+                });
+            }
+            "MenuScrollBar" => {
+                let e = empty();
+                let mut handle = sprite(v.get("Blurred").unwrap_or(&e));
+                handle.pivot = 8;
+                widgets.push(Widget {
+                    name: name.clone(),
+                    pass: v.int("Pass"),
+                    hidden: v.int("bHidden") != 0,
+                    platform: v.byte("Platform"),
+                    kind: Kind::Sprite(handle),
+                });
+                out.bars.push(ScrollBar {
+                    name,
+                    x: v.float("PosX1"),
+                    top: v.float("PosY1"),
+                    bottom: v.float("PosY2"),
+                    min_size: [v.float("MinScaleX"), v.float("MinScaleY")],
+                });
+            }
+            "MenuScrollArea" => out.wheel_areas.push([
+                v.float("X1"),
+                v.float("Y1"),
+                v.float("X2"),
+                v.float("Y2"),
+            ]),
+            _ => {}
+        }
     }
+    out
 }
 
 /// Fill in a widget from its style, its sub-widgets and the class's
@@ -553,6 +669,7 @@ pub fn text(v: &V) -> Text {
         kerning: v.int("Kerning"),
         max_size_x: v.float("MaxSizeX"),
         word_wrap: v.int("bWordWrap") != 0,
+        squeeze: false,
     }
 }
 
@@ -593,6 +710,7 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
                 current: 0,
                 no_wrap: v.int("bNoWrap") != 0,
                 mouse_only: v.int("bIgnoreController") != 0,
+                ..Default::default()
             };
             if b.is_chooser() {
                 b.choose(v.int("Current").max(0) as usize);
@@ -603,9 +721,13 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
         // pictures, drawn as the button's background.
         "MenuButtonSprite" => {
             let e = empty();
+            let under_blurred = sprite(v.get("BackgroundBlurred").unwrap_or(&e));
+            let under_focused = sprite(v.get("BackgroundFocused").unwrap_or(&e));
             Kind::Button(Button {
                 background_blurred: sprite(v.get("Blurred").unwrap_or(&e)),
                 background_focused: sprite(v.get("Focused").unwrap_or(&e)),
+                under_blurred,
+                under_focused,
                 on_select: v.text("OnSelect"),
                 disabled: v.int("bDisabled") != 0,
                 help: v.text("HelpText"),

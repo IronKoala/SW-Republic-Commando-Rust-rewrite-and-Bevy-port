@@ -10,7 +10,8 @@
 //!   time each checkpoint is reached ([`CheckpointReached`]);
 //! - loads a save by loading its map fresh and then handing each part its
 //!   section on the first frame of play;
-//! - keeps [`SaveList`] up to date for a Load Game screen;
+//! - keeps [`SaveList`] up to date for the Load and Save Game screens, and
+//!   deletes saves for them ([`DeleteSave`]);
 //! - goes on to the next map when a level exit is reached
 //!   ([`ChangeLevel`]): the sections listed in `data/levels/travel.toml`
 //!   (the player's health, shield and weapons) are carried over, the map
@@ -25,7 +26,7 @@ pub mod file;
 use bevy::prelude::*;
 use file::{Header, SaveFile};
 use rc_game_core::save::{
-    CheckpointReached, LoadGame, RestoringSave, SaveAppExt, SaveGame, SaveList, SavePart,
+    CheckpointReached, DeleteSave, LoadGame, RestoringSave, SaveAppExt, SaveGame, SaveList, SavePart,
     SaveParts, SaveResult, SaveSlot,
 };
 use rc_game_core::{
@@ -125,6 +126,7 @@ enum Request {
         checkpoint: Option<String>,
     },
     Load(SaveSlot),
+    Delete(SaveSlot),
     Travel(ChangeLevel),
 }
 
@@ -309,6 +311,7 @@ fn gather(
     restoring: Option<Res<RestoringSave>>,
     mut saves: MessageReader<SaveGame>,
     mut loads: MessageReader<LoadGame>,
+    mut deletes: MessageReader<DeleteSave>,
     mut reached: MessageReader<CheckpointReached>,
     mut travel: MessageReader<ChangeLevel>,
     mut checkpoints: ResMut<Checkpoints>,
@@ -351,6 +354,9 @@ fn gather(
     for l in loads.read() {
         requests.0.push(Request::Load(l.slot.clone()));
     }
+    for d in deletes.read() {
+        requests.0.push(Request::Delete(d.slot.clone()));
+    }
     for c in travel.read() {
         if in_game && restoring.is_none() {
             requests.0.push(Request::Travel(c.clone()));
@@ -380,6 +386,7 @@ fn run_requests(world: &mut World) {
                     break;
                 }
             }
+            Request::Delete(slot) => delete(world, &slot),
             Request::Travel(c) => match start_travel(world, &c) {
                 Ok(()) => break,
                 Err(e) => {
@@ -419,6 +426,17 @@ fn finish(world: &mut World, slot: SaveSlot, loading: bool, outcome: Result<(), 
         loading,
         outcome,
     });
+}
+
+/// Delete a save's file and take it off [`SaveList`].
+fn delete(world: &mut World, slot: &SaveSlot) {
+    let path = file::slot_path(&folder(world), slot);
+    let line = match std::fs::remove_file(&path) {
+        Ok(()) => format!("save: deleted {} ({})", slot.label(), path.display()),
+        Err(e) => format!("save: FAILED to delete {}: {e}", path.display()),
+    };
+    world.resource::<GameLog>().line(line);
+    world.resource_mut::<SaveList>().0.retain(|s| &s.slot != slot);
 }
 
 fn folder(world: &World) -> PathBuf {

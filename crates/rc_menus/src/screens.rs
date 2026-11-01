@@ -189,6 +189,7 @@ pub fn add_button_copy(layout: &mut MenuLayout, e: &crate::pages::ExtraButton) -
         &mut b.background_blurred.pos,
         &mut b.background_focused.pos,
     ] {
+        p[0] += e.move_right;
         p[1] += e.move_down;
     }
     w.name = e.name.clone();
@@ -235,6 +236,52 @@ pub fn move_widget(layout: &mut MenuLayout, name: &str, by: f32) -> bool {
         }
     }
     true
+}
+
+/// Widen button `name`'s background (both looks) on each side its text
+/// runs past, with a little room. For this port's
+/// added buttons ("EVERY MAP +"), which copy an original button whose
+/// background was made for a shorter word. Returns whether it widened.
+pub fn fit_button_to_text(
+    layout: &mut MenuLayout,
+    name: &str,
+    sizes: &mut dyn crate::quads::Sizes,
+) -> bool {
+    use crate::layout::pivot_fraction;
+    use crate::quads::{sprite_box, text_box};
+    const ROOM: f32 = 0.015;
+    let Some(Kind::Button(b)) = layout.widget_mut(name).map(|w| &mut w.kind) else {
+        return false;
+    };
+    let text = [text_box(&b.blurred, sizes), text_box(&b.focused, sizes)]
+        .into_iter()
+        .flatten()
+        .reduce(|a, c| [a[0].min(c[0]), a[1], a[2].max(c[2]), a[3]]);
+    let Some(text) = text else {
+        return false;
+    };
+    let mut widened = false;
+    for bg in [&mut b.background_blurred, &mut b.background_focused] {
+        let Some(bx) = sprite_box(bg, sizes) else {
+            continue;
+        };
+        // Only the sides the text runs past move (a left-aligned "PORT +"
+        // keeps its left edge in line with the buttons above it).
+        if text[0] >= bx[0] && text[2] <= bx[2] {
+            continue;
+        }
+        let x0 = if text[0] < bx[0] { text[0] - ROOM } else { bx[0] };
+        let x1 = if text[2] > bx[2] { text[2] + ROOM } else { bx[2] };
+        let w = bx[2] - bx[0];
+        if w <= 0.0 {
+            continue;
+        }
+        bg.scale[0] *= (x1 - x0) / w;
+        let (px, _) = pivot_fraction(bg.pivot);
+        bg.pos[0] = x0 + (x1 - x0) * px;
+        widened = true;
+    }
+    widened
 }
 
 /// Shrink each options row's label that would run into its own row's
@@ -453,6 +500,7 @@ pub fn drop_down(
         sounds: page.sounds.clone(),
         background_movie: String::new(),
         music: None,
+        lists: Default::default(),
     })
 }
 

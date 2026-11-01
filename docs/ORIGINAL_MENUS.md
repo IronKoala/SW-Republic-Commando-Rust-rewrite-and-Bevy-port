@@ -81,16 +81,42 @@ against the install the same evening with `rc_probe --pages`:
 
 - **Pause (`CTPausePCMenu`): uses the original.** 11 buttons: LOAD LAST
   SAVE, QUICK SAVE, QUICK LOAD, RESUME GAME, RESTART LEVEL, SAVE GAME,
-  LOAD GAME, OPTIONS, ENABLE HINTS, END MISSION, QUIT PROGRAM. Saving,
-  loading and hints are greyed out until built. END MISSION goes to the
+  LOAD GAME, OPTIONS, ENABLE HINTS, END MISSION, QUIT PROGRAM. Hints are
+  greyed out until built. QUICK SAVE saves and goes back to the game;
+  QUICK LOAD and LOAD LAST SAVE load at once; SAVE GAME and LOAD GAME
+  open the original pages below. END MISSION goes to the
   main menu; QUIT PROGRAM asks the quit question. Its `Background` is a
   black square at alpha 120 over the game. Two of the night's guesses
   were wrong (QUIT was thought to mean "to the main menu").
-- **Campaign (`CTCampaignMenu`): keeps the placeholder.** It needs widget
-  kinds the reader doesn't draw yet: `MenuButtonSprite` (the planets and
-  arrows), `MenuStringList` (the level list), `MenuScrollBar`,
-  `MenuScrollArea`, `MenuActiveWidget`. Its buttons are BACK
-  (`OnBButton`) and SELECT (`SelectCurrentLevel`).
+- **Campaign (`CTCampaignMenu`, 2026-10-30): uses the original.** The
+  three planets (Geonosis, the assault ship, Kashyyyk) with their rings
+  and mission blips, the planet's name, the mission list with its scroll
+  bar, BACK and SELECT. Clicking a planet (or left and right) changes
+  planet; up and down move along the list (the chosen mission's blip
+  lights green); Enter, a double click or SELECT opens the mission's
+  first map. The missions and their names come from the class itself
+  (`GEO_SubMissions` and `GEO_SubMissionDescs`, and the same for `RAS_`
+  and `YYY_`). The original lists only the missions the profile has
+  reached; the port has no profile progress yet, so it lists them all.
+  Our own "EVERY MAP +" button (a copy of BACK) swaps in the class's
+  developer list of every map, named with the game's level titles. The
+  list and scroll bar are `rc_menus::lists`; the page's script is
+  `rc_menus::campaign`. The scroll bar's handle can be clicked and dragged
+  (or the track clicked to bring it there), as in a browser. Our added
+  buttons widen to fit their text (`screens::fit_button_to_text`).
+- **Load and save (`CTLoadGameMenu`, `CTSaveGameMenu`, 2026-10-30): use
+  the original.** Both list the saves (autosave, which is our checkpoint
+  save, then the quicksave, then named saves newest first) with the
+  level's name and the time. LOAD GAME: SELECT (or Enter on a row, or a
+  double click) loads; in a level it first asks the class's `LoadConfirm`.
+  SAVE GAME: NEW saves as the campaign's name and a number
+  (`Geonosis_1`), at most `MaxSaveSlots` (5); OVERWRITE asks first and
+  refuses the autosave and quicksave with the class's own message. DELETE
+  asks "DELETE <NAME> ?" on both. Every question uses the original
+  question box; a message with one answer hides YES and words NO as the
+  page's BACK. Code: `rc_game/src/original_saves.rs`; deleting is
+  `rc_game_core::save::DeleteSave`, done by `rc_save`. LOAD GAME on the
+  main menu is greyed out only when the page can't be drawn.
 - **Options (2026-10-30): use the original.** See below.
 - `rc_game --script` picks pause items by the original's function name
   (`FocusPauseItem`), so it works with either pause page.
@@ -326,6 +352,35 @@ screenshot has 461 near-white pixels at the centre. Its size and the red
 tint were not compared with the real game. Not done:
 spread (the bars move apart; the picture doesn't grow yet), shield,
 health, ammo and squad pictures.
+
+**Done (2026-10-30): the rest of the HUD**, matched by eye to a
+screenshot of the original the user took. Bottom left: the squad mates'
+numbers (07 40 62) over three panels, each showing an order icon (form up,
+search and destroy, secure area, hold; a red X when down). Either side of
+the bottom middle: two green stepped meters, the left one the shield
+(with health as the column of ticks beside it) and the right one, mirrored,
+the magazine, with shots and spare ammo over it. Bottom right: the
+selected grenade in a panel with its count above. Short messages at the
+top middle. The pictures are parts of `Icons.CloneVisorIcons` (a sheet of
+many small pictures); the numbers use the `OrbitFonts` fonts.
+`rc_menus::hud` lays them out from `[layout]` and the `[[element]]` list
+in `data/ui/hud.toml`: each element is a part of a picture or a line of
+text, pinned to a corner or edge of the HUD area, measured in units of a
+640 x 480 design area. One unit is `min(height / 480, width / 640)`
+pixels (the width being the HUD area, at most `hud_max_aspect` wide), so
+the design area always fits the screen and groups that don't overlap in
+it can't overlap anywhere. A test checks that at 18 shapes from 4:3 to
+32:9, phones and flip phones on their side (phones held upright are not
+supported: the user said the game is played sideways). Each text is cut
+short with "..." to its box and drawn with the smallest original font at
+least as tall as it is on screen. `rc_probe --hud` paints the HUD without
+a GPU at six shapes to `extracted/menus/hud_*.png`. **Our choice, not
+the original's:** which meter is shield, health and magazine, the ammo
+numbers and the green tint. The original's screenshot looks like 4:3
+stretched to 16:9; we pin the squad and grenade to the corners and the
+meters to the bottom middle instead of stretching. Not drawn: the visor
+frame (the `Helmet` static mesh with `CloneVisor`), visor cracks and
+blood.
 
 The plan for the HUD is to place these original pictures where the original
 shows them, matched by eye and by measuring against screenshots of the
