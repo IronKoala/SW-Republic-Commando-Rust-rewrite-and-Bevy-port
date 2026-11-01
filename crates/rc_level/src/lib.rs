@@ -13,4 +13,5 @@ pub mod lightmap;
 pub mod map_collision;
 pub mod movers;
 pub mod scripts;
+pub mod terrain;
 pub mod volumes;

@@ -18,6 +18,8 @@ pub enum Source {
     Actor(usize),
     /// Export index of a blocking volume (0-based).
     Volume(usize),
+    /// Export index of a terrain (outdoor ground, `crate::terrain`).
+    Terrain(usize),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -68,6 +70,19 @@ pub fn collision_triangles(bsp: &Bsp, meshes: &[(&Placement, &StaticMesh)]) -> C
         }
     }
     out
+}
+
+/// Add the drawn triangles of the map's terrains (outdoor ground). Returns
+/// how many triangles were added.
+pub fn add_terrains(mesh: &mut CollisionMesh, terrains: &[crate::terrain::Terrain]) -> usize {
+    let before = mesh.triangles.len();
+    for t in terrains {
+        for tri in t.triangle_points() {
+            mesh.triangles.push(tri);
+            mesh.sources.push(Source::Terrain(t.export));
+        }
+    }
+    mesh.triangles.len() - before
 }
 
 /// Add the faces of the blocking volumes that stop players (or, with

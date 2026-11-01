@@ -81,10 +81,12 @@ fn lightmap_image(p: &rc_image::Rgba) -> Image {
     image
 }
 
-/// sRGB 0-255 to linear light, times `gain` (already linear).
-fn colour_to_linear(c: [u8; 4], gain: f32) -> [f32; 4] {
+/// sRGB 0-255 to linear light, times `gain` (already linear). Alpha is
+/// kept only when `keep_alpha` (terrain layers painted over each other).
+fn colour_to_linear(c: [u8; 4], gain: f32, keep_alpha: bool) -> [f32; 4] {
     let lin = |v: u8| Color::srgb_u8(v, 0, 0).to_linear().red * gain;
-    [lin(c[0]), lin(c[1]), lin(c[2]), 1.0]
+    let a = if keep_alpha { c[3] as f32 / 255.0 } else { 1.0 };
+    [lin(c[0]), lin(c[1]), lin(c[2]), a]
 }
 
 /// Spawn every draw batch of `scene` and its real-time lights. The camera
@@ -138,13 +140,17 @@ pub fn spawn_level(
             let c: Vec<[f32; 4]> = b
                 .colours
                 .iter()
-                .map(|c| colour_to_linear(*c, colour_gain))
+                .map(|c| colour_to_linear(*c, colour_gain, b.terrain_layer.is_some_and(|l| l > 0)))
                 .collect();
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, c);
         }
         mesh.insert_indices(Indices::U32(b.indices.clone()));
         triangles += b.indices.len() / 3;
-        let alpha_mode = if b.picture.as_ref().is_some_and(|p| p.additive) {
+        // Terrain layers above the first are painted on by their alpha.
+        let over_layer = b.terrain_layer.filter(|&l| l > 0);
+        let alpha_mode = if over_layer.is_some() {
+            AlphaMode::Blend
+        } else if b.picture.as_ref().is_some_and(|p| p.additive) {
             AlphaMode::Add
         } else if b.translucent {
             AlphaMode::Blend
@@ -173,6 +179,9 @@ pub fn spawn_level(
                 images.add(to_image(p))
             }),
             alpha_mode,
+            // Terrain layers share the same triangles; pull each later one
+            // slightly towards the camera so it wins over the one below.
+            depth_bias: over_layer.map_or(0.0, |l| l as f32),
             double_sided: b.two_sided,
             cull_mode: if b.two_sided {
                 None

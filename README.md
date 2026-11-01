@@ -499,9 +499,11 @@ copy of the game.
   texture is used. See-through parts (leaves, grates) follow the
   material's own settings (since 2026-11-01; before, floors and walls
   with a shine mask were cut full of holes). Not tested on Windows.
-- Outdoor ground (Unreal "terrain") isn't drawn yet, so geo_03a, geo_04a,
-  yyy_01b and yyy_35a have no ground under the props. Levels are darker
-  than the original and some skies show black.
+- Outdoor ground (Unreal "terrain") is drawn and solid since 2026-11-01
+  (geo_03a, geo_04a, yyy_01b, yyy_35a), but its light is our estimate
+  (sun and ambient, scaled to match the props), the bushes and palms the
+  game scatters on it aren't placed, and it isn't tested on Windows.
+  Levels are darker than the original and some skies show black.
 - No levels yet: walking only works in the hand-made test room. No weapons,
   enemies, health or sound.
 - Enemies: only battle droids so far. Level scripts don't run yet, so

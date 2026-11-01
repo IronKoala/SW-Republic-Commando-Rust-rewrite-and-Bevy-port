@@ -117,6 +117,15 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         log.line(format!("  material not shown ({n}x): {e}"));
     }
     log.line(format!(
+        "  terrain: {} read, {} triangles, {} painted layers drawn; light terrain {:?} vs props {:?} (0-255)",
+        s.terrains, s.terrain_triangles, s.terrain_layers,
+        s.terrain_light.map(|c| c.map(|v| v.round())),
+        s.prop_light.map(|c| c.map(|v| v.round()))
+    ));
+    for e in s.terrain_failures.iter().chain(&s.terrain_layer_failures) {
+        log.line(format!("  terrain: {e}"));
+    }
+    log.line(format!(
         "  blocking volumes {} ({} stop players, {} stop the AI, {} unreadable, {} scaled); {} path points inside one, {} volumes near a path point",
         s.blocking_volumes,
         s.volumes_block_players,

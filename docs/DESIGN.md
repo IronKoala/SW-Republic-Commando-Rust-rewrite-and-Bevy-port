@@ -938,6 +938,33 @@ Which polygons and props are in the sky box comes from the BSP zone tree
 placed props (with class models) and player-blocking volumes as triangles,
 plus the first `PlayerStart`. `rc_walk` uses it, and other programs can.
 
+### Outdoor ground: terrain (`rc_level::terrain`)
+
+Outdoor maps (geo_03a, geo_04a, yyy_01b, yyy_35a among those checked) put
+their ground in `TerrainInfo` actors, not the BSP. Republic Commando saves
+the grid's points already placed in the world, right after the actor's
+properties: a list of `TerrainSector` objects, then a point count and that
+many points (three floats each), row by row with X fastest. Grids are
+square (16x16 to 128x128 points, 64 to 768 units apart). Each square is
+two triangles; `EdgeTurnBitmap` picks the diagonal and
+`QuadVisibilityBitmap` leaves out squares (holes for caves).
+
+Painted layers (`Layers`): layer 0 covers everything; each later layer is
+drawn over it, see-through by its `AlphaMap` (often smaller than the grid,
+so it is blended between pixels), as a separate batch pulled slightly
+towards the camera (`depth_bias`). A texture repeats every `UScale` grid
+squares (checked against the layers' stored `TerrainMatrix`). Layers
+painted with the editor's checkerboard (`Chex`) mark where decorations
+(bushes, palms) go, so they are left out; the decorations themselves aren't
+placed yet.
+
+Light: the game's own terrain light wasn't found in the map, so each
+corner gets the zones' ambient light plus the `Sunlight` by how squarely
+it faces it, then the whole terrain is scaled to the average brightness of
+the map's props, so the ground and the props match. The terrain's
+triangles also go into collision (`collision::add_terrains`, used by
+`map_collision` and so by `rc_game` and `rc_walk`).
+
 ### Showing a level (`rc_level_viewer`)
 
 Before Bevy starts, the viewer reads the map, then every material and static

@@ -38,7 +38,7 @@ fn export_index(i: i32) -> Option<usize> {
     }
 }
 
-fn object_bytes<'a>(data: &'a [u8], e: &Export) -> Result<&'a [u8]> {
+pub(crate) fn object_bytes<'a>(data: &'a [u8], e: &Export) -> Result<&'a [u8]> {
     let start = e.serial_offset as usize;
     match data.get(start..start + e.serial_size as usize) {
         Some(b) => Ok(b),
@@ -48,7 +48,7 @@ fn object_bytes<'a>(data: &'a [u8], e: &Export) -> Result<&'a [u8]> {
 
 /// Skip the state frame if the object has one. Returns the frame's "node"
 /// reference (0 if there is no frame).
-fn skip_state_frame(r: &mut Reader, e: &Export) -> Result<i32> {
+pub(crate) fn skip_state_frame(r: &mut Reader, e: &Export) -> Result<i32> {
     if e.object_flags & RF_HAS_STACK == 0 {
         return Ok(0);
     }
