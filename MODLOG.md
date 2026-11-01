@@ -21,6 +21,14 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not tested on Windows or by playing. Which meter shows shield, health and ammo is our guess. Visor frame (a 3D helmet model in the original), visor cracks/blood and objective markers are not drawn.
 - **Next:** The user compares with the original; the DC-17m's 999 counter on the gun (its own thread).
 
+## 2026-10-30: The original tactical visor: normal, tactical and low light modes (rc_visor, rc_game)
+
+- **Changed:** New crate `rc_visor`. X (CYCLE VISOR MODE, our `Action::Flashlight`, the original's ToggleHeadlamp) steps through the original's three modes: normal, tactical and low light, and shows the original's "TACTICAL MODE" / "LOW LIGHT MODE" words on the HUD. Levels start in tactical mode. In tactical mode each squad mate and each weapon pickup gets a see-through glowing copy of its model (an added rim glow, `tactical_glow.wesl`) in the colour the original gives it (`EnhancedVisionColor`, read from the install: Sev red, Fixer green, Scorch yellow, pickups pale blue). Look settings and class names are in `data/visor/tactical.toml`. Low light switches on a lamp at the eye (placeholder). The GAME page's TACTICAL VISOR MODE (ON, OFF, CYCLE, saved as `game.tactical_visor`) and TACTICAL MODE INTENSITY (0 to 10, `game.tactical_intensity`) work as in the original. `.gitignore` lets `.wesl` shader files in.
+- **Why:** User asked for a thread for the tactical visor.
+- **Tested how:** `cargo test -p rc_visor -p rc_game` (with `RC_GAME_DIR` set to the staged install for the colour test); `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p rc_visor --example visor_check` (a ball and a box, every mode and intensity, colours measured on screen); `rc_game --script` with the staged install (new checks: starts tactical and the squad glows, X steps through low light, normal and back, both GAME rows change their setting).
+- **Result:** rc_visor 10 and rc_game 50 tests pass; `VISOR CHECK: 17 passed, 0 failed` (normal: no red; tactical edge red 69 at 0.2 and 170 at 1.0; low light: no glow, floor brighter 56.7 -> 69.6); `SCRIPT DONE: 78 checks passed, 0 failed` (colours read from the game: Sev 181,46,43, Fixer 53,125,43, Scorch 217,203,34, pickups 190,224,241).
+- **Still broken / not tested:** The glow's shape is a guess: the original draws it in native code that can't be read. Low light is only a lamp; the original's night-vision picture isn't built. Not done: the tactical film grain, `EnhancedVisionFade`, greying the intensity row when the option is OFF. Not tested on Windows, on a phone or against the real game.
+- **Next:** Match the glow to a screenshot of the real game's tactical mode.
 
 ## 2026-10-30: The original helmet frame, and the GAME page's HELMET row (rc_menus, rc_game, rc_probe)
 

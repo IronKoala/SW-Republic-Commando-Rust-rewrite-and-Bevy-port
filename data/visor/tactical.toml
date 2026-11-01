@@ -1,0 +1,50 @@
+# The commando's visor modes (read by rc_visor). Press CYCLE VISOR MODE
+# (X) to step through normal, tactical and low light; the GAME options page
+# sets which modes it steps through and how strong the tactical glow is.
+#
+# In tactical mode squad mates glow in their own colour and things to pick
+# up glow pale blue. The colours are read at run time from the game's
+# classes named below (each class's EnhancedVisionColor); nothing from the
+# game is stored here. Enemies, walls and props have no glow colour in the
+# original, so they don't glow.
+
+# Script packages searched for the classes below, in the install.
+packages = [
+    "GameData/System/Engine.u",
+    "GameData/System/CTGame.u",
+    "GameData/System/CTCharacters.u",
+    "GameData/System/CTInventory.u",
+    "GameData/Properties/Properties.u",
+]
+
+# The glow's shape. Our own guess: the original draws it in its compiled
+# renderer, which we can't read. Compare with the real game and adjust.
+[glow]
+# Strength at TACTICAL MODE INTENSITY 10. The original's default is 2.
+strength_scale = 2.5
+# How sharply the glow gathers at a body's edges (higher: thinner outline).
+edge_power = 2.0
+# Share of the glow that also covers the middle of a body, 0 to 1.
+fill = 0.12
+
+# What glows, and which original class's colour it takes. Squad mates by
+# name in lower case (as in data/squad/squad.toml).
+[colours]
+sev = "Commando07DeltaDefaults"
+fixer = "Commando40DeltaDefaults"
+scorch = "Commando62DeltaDefaults"
+# Every weapon, ammo box and bacta pickup in the original uses this colour.
+pickup = "CTPickupDefaults"
+
+# Colours used instead of the game's: red, green, blue from 0 to 255.
+# For mods, or for something the original doesn't colour.
+[colour_overrides]
+# sev = [255, 40, 40]
+
+# The helmet lamp in low light mode. PLACEHOLDER: the original's low light
+# mode also changes the whole picture (a night-vision shader), which isn't
+# done yet; for now it is only this lamp.
+[headlamp]
+lumens = 400000.0
+range = 1500.0
+angle = 50.0

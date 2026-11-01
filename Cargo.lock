@@ -4486,6 +4486,7 @@ dependencies = [
  "rc_scripts",
  "rc_scripts_plugin",
  "rc_squad_plugin",
+ "rc_visor",
  "serde",
  "toml 0.8.23",
 ]
@@ -4706,6 +4707,18 @@ dependencies = [
  "bevy",
  "rc_image",
  "rc_package",
+]
+
+[[package]]
+name = "rc_visor"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "rc_image",
+ "rc_package",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]
