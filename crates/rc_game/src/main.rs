@@ -187,6 +187,20 @@ fn main() -> AppExit {
         }
     };
     log.line(format!("rc_game {}", env!("CARGO_PKG_VERSION")));
+    // A crash's reason goes into the log too, not only the terminal, where
+    // it scrolls away under Bevy's shutdown warnings.
+    {
+        let log = log.clone();
+        let terminal = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current();
+            log.crash_line(format!(
+                "CRASH in thread {}: {info}",
+                thread.name().unwrap_or("unnamed")
+            ));
+            terminal(info);
+        }));
+    }
 
     // A scripted run uses its own settings file, so it never changes yours.
     let settings_path = settings_file.unwrap_or_else(|| {

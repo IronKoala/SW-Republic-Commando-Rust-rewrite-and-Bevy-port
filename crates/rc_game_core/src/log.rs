@@ -52,4 +52,20 @@ impl GameLog {
             }
         }
     }
+
+    /// Write a line for a crash: like [`GameLog::line`], but it never waits
+    /// for the file, so a crash in the middle of another line can't hang.
+    pub fn crash_line(&self, s: impl AsRef<str>) {
+        let s = format!(
+            "[{:>8.3}s] {}",
+            self.start.elapsed().as_secs_f64(),
+            s.as_ref()
+        );
+        if let Ok(mut f) = self.file.try_lock() {
+            if let Some(f) = f.as_mut() {
+                let _ = writeln!(f, "{s}");
+                let _ = f.flush();
+            }
+        }
+    }
 }
