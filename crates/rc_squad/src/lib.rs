@@ -22,6 +22,7 @@ pub mod map;
 pub mod nav;
 pub mod settings;
 pub mod squad;
+pub mod voice;
 
 pub use cover::TakenCover;
 pub use fight::{FightState, Patient, Threat};
@@ -34,6 +35,7 @@ pub use settings::{
 pub use squad::{
     aimed_spot, Leader, MarkerState, MemberState, MemberStatus, Order, Squad, SquadEvent, Stance,
 };
+pub use voice::{Chatter, Heard, Say, Trigger, VoiceLine, VoiceSettings, Who};
 
 #[cfg(test)]
 mod tests;

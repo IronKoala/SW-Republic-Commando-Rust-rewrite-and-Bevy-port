@@ -27,6 +27,7 @@ use rc_game_core::{
 };
 use rc_movement::{MoveInput, MoveParams, Pawn, TriangleWorld, Vec3 as UVec3};
 use rc_squad::{MarkerState, MemberState};
+use rc_squad_plugin::voice::SquadVoiceStats;
 use rc_squad_plugin::{
     yaw_rotation, SquadFightStats, SquadMapData, SquadMate, SquadPlugin, SquadSet, SquadState,
 };
@@ -104,6 +105,8 @@ struct Sim {
     readout: Vec<(f32, bool)>,
     /// The squad's fight numbers.
     fight: SquadFightStats,
+    /// What the squad has said.
+    voice: SquadVoiceStats,
     /// Stand-in droids spawned, and how many are still standing.
     droids: Vec<Entity>,
     droids_alive: usize,
@@ -428,6 +431,26 @@ fn steps() -> Vec<Step> {
             -1e9,
             1e9,
         ),
+        // Voices: the game's own lines, said by the voice rules
+        // (data/squad/voice.toml) through the whole run.
+        Check(
+            "voices: squad lines said",
+            |s| s.voice.said.iter().filter(|l| l.0 != "the player").count() as f32,
+            3.0,
+            f32::INFINITY,
+        ),
+        Check(
+            "voices: the player's order lines said",
+            |s| s.voice.said.iter().filter(|l| l.0 == "the player").count() as f32,
+            1.0,
+            f32::INFINITY,
+        ),
+        Check(
+            "voices: lines a rule wanted but nobody had",
+            |s| s.voice.missing as f32,
+            0.0,
+            0.0,
+        ),
     ]
 }
 
@@ -500,6 +523,7 @@ fn drive_player(
         ),
     >,
     stats: Res<SquadFightStats>,
+    voice: Res<SquadVoiceStats>,
     mut damage: MessageWriter<Damage>,
     mut commands: Commands,
     log: Res<GameLog>,
@@ -507,6 +531,7 @@ fn drive_player(
 ) {
     let s = &mut *sim;
     s.fight = stats.clone();
+    s.voice = voice.clone();
     s.droids_alive = s.droids.iter().filter(|e| droids.contains(**e)).count();
     let player_entity = players.single().ok().map(|p| p.0);
     if let Ok((_, h, dead)) = players.single() {
@@ -878,6 +903,9 @@ fn main() -> AppExit {
         rc_combat::CombatPlugin,
         SquadPlugin,
     ))
+    // Sounds are read (for the squad's voices) but not played.
+    .add_plugins(bevy::asset::AssetPlugin::default())
+    .init_asset::<AudioSource>()
     .insert_resource(GamePaths::new(game.clone(), vec![PathBuf::from("data")]))
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
         DT,
@@ -905,6 +933,7 @@ fn main() -> AppExit {
         hurt_at: None,
         readout: vec![],
         fight: SquadFightStats::default(),
+        voice: SquadVoiceStats::default(),
         droids: vec![],
         droids_alive: 0,
         crouched_seen: 0,

@@ -23,8 +23,9 @@
 // Bevy queries read best written out in place.
 #![allow(clippy::type_complexity)]
 
-mod arms_view;
 pub mod arms;
+mod arms_view;
+pub mod audio_table;
 pub mod counter;
 mod damage;
 pub mod damage_types;
