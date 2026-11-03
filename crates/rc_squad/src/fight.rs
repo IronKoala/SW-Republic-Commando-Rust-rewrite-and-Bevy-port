@@ -28,6 +28,7 @@
 //!
 //! Everything is in Unreal units with Z up, like the rest of `rc_squad`.
 
+use crate::jobs::AutoUse;
 use crate::squad::{Leader, MemberState, Squad, SquadEvent};
 use rc_movement::{Vec3, World};
 use std::fmt;
@@ -43,6 +44,10 @@ pub struct Threat {
     pub centre: Vec3,
     /// Its eyes: what has to be visible to see it.
     pub eye: Vec3,
+    /// The share of the squad's usual gun's damage it takes (from its
+    /// damage table): 1 for a battle droid, 0.15 for a super battle droid.
+    /// At or below `[fight] armoured_below` it counts as armoured.
+    pub blaster_share: f32,
 }
 
 /// Someone down and waiting to be revived.
@@ -94,6 +99,12 @@ pub struct FightState {
     pub shots: u32,
     /// Times they held fire because a friend was in the way (for the log).
     pub held_fire: u32,
+    /// Using their speciality's gun on this target (sniper, anti-armour).
+    pub special: bool,
+    /// Shots fired with it, all game.
+    pub special_shots: u32,
+    /// Grenades thrown on their own, all game.
+    pub throws: u32,
 }
 
 impl fmt::Display for Patient {
@@ -400,10 +411,12 @@ impl Squad {
         self.threats.iter().find(|t| t.id == id)
     }
 
-    /// Pick (or drop) member `i`'s target. Called every think.
+    /// Pick (or drop) member `i`'s target, and whether to use their
+    /// speciality's gun on it. Called every think.
     pub(crate) fn pick_target(
         &mut self,
         i: usize,
+        leader: Leader,
         world: &dyn World,
         events: &mut Vec<SquadEvent>,
     ) {
@@ -420,16 +433,39 @@ impl Squad {
         } else {
             m.pawn.eye()
         };
-        let f = self.fight_for(i);
+        // Their speciality, when free to use it (not on a marked job).
+        let special = if m.marker.is_none() && !busy {
+            self.speciality_of(i).cloned()
+        } else {
+            None
+        };
+        let armoured_below = self.settings.fight.armoured_below;
+        let armoured = |t: &Threat| t.blaster_share <= armoured_below;
+        let mut f = self.fight_for(i);
+        if let Some(j) = &special {
+            // A sniper sees as far as the scope does.
+            if j.auto == AutoUse::Far && j.sight_radius > f.sight_radius {
+                f.sight_radius = j.sight_radius;
+            }
+        }
         let sight = f.sight_radius;
+        let prefer_armour = special
+            .as_ref()
+            .is_some_and(|j| j.auto == AutoUse::Armoured);
         let best = if busy {
             None
         } else {
+            // The nearest they can see; an anti-armour specialist takes
+            // the nearest armoured one first.
             self.threats
                 .iter()
                 .filter(|t| dist(t.centre, eye) <= sight)
                 .filter(|t| world.sweep(Vec3::ZERO, eye, t.eye).is_none())
-                .min_by(|a, b| dist(a.centre, eye).total_cmp(&dist(b.centre, eye)))
+                .min_by(|a, b| {
+                    let key = |t: &Threat| (prefer_armour && !armoured(t), dist(t.centre, eye));
+                    let (ka, kb) = (key(a), key(b));
+                    ka.0.cmp(&kb.0).then(ka.1.total_cmp(&kb.1))
+                })
                 .map(|t| (t.id, dist(t.centre, eye)))
         };
         let m = &mut self.members[i];
@@ -455,6 +491,171 @@ impl Squad {
             }
             (None, None) => {}
         }
+        // Speciality gun or the usual one for this target?
+        let target = self.target_of(i).copied();
+        let (want, why) = match (&special, target) {
+            (Some(j), Some(t)) => {
+                let d = dist(t.centre, eye);
+                match j.auto {
+                    AutoUse::Far if d >= j.auto_range => {
+                        (true, format!("enemy {} at {d:.0} uu", t.id))
+                    }
+                    AutoUse::Far => (
+                        false,
+                        format!("enemy {} closer than {} uu", t.id, j.auto_range),
+                    ),
+                    AutoUse::Armoured if !armoured(&t) => {
+                        (false, format!("enemy {} not armoured", t.id))
+                    }
+                    AutoUse::Armoured if d < j.auto_range => (
+                        false,
+                        format!("armoured enemy {} too close ({d:.0} uu)", t.id),
+                    ),
+                    AutoUse::Armoured => {
+                        match self.friend_near(i, t.feet, j.auto_clearance, leader) {
+                            Some(friend) => {
+                                (false, format!("{friend} too close to enemy {}", t.id))
+                            }
+                            None => (
+                                true,
+                                format!(
+                                "armoured enemy {} at {d:.0} uu (takes {:.0}% from the blaster)",
+                                t.id,
+                                t.blaster_share * 100.0
+                            ),
+                            ),
+                        }
+                    }
+                    _ => (false, String::new()),
+                }
+            }
+            (_, None) => (false, "no target".into()),
+            (None, _) => (false, "busy".into()),
+        };
+        if want != self.members[i].fight.special {
+            let job = special
+                .as_ref()
+                .or_else(|| self.speciality_of(i))
+                .map(|j| (j.name.clone(), j.weapon.clone()))
+                .unwrap_or_default();
+            let usual = self.settings.fight.weapon.clone();
+            let switch = self.settings.fight.switch_time;
+            let now = self.time;
+            let m = &mut self.members[i];
+            m.fight.special = want;
+            let f = self.fight_for(i);
+            let m = &mut self.members[i];
+            m.fight.burst_left = f.burst_count;
+            m.fight.next_shot = m.fight.next_shot.max(now + switch);
+            events.push(SquadEvent::Speciality {
+                member: m.settings.name.clone(),
+                job: job.0,
+                weapon: if job.1.is_empty() { usual } else { job.1 },
+                on: want,
+                why,
+            });
+        }
+    }
+
+    /// The first friend (the player, another squad mate, or member `i`
+    /// itself) standing within `radius` of `at`, by name. `radius` 0
+    /// checks nothing.
+    pub(crate) fn friend_near(
+        &self,
+        i: usize,
+        at: Vec3,
+        radius: f32,
+        leader: Leader,
+    ) -> Option<String> {
+        if radius <= 0.0 {
+            return None;
+        }
+        if dist(leader.feet, at) < radius {
+            return Some("the player".into());
+        }
+        self.members
+            .iter()
+            .enumerate()
+            .find(|(_, m)| dist(m.pawn.feet(), at) < radius)
+            .map(|(j, m)| {
+                if j == i {
+                    "themselves".into()
+                } else {
+                    m.settings.name.clone()
+                }
+            })
+    }
+
+    /// A squad mate whose speciality is a throw (Fixer's grenades) throws
+    /// one on their own when their target is far enough, has enough other
+    /// enemies near it, no friend is near it, and the last one was
+    /// `auto_interval` ago.
+    pub(crate) fn throw_on_own(
+        &mut self,
+        i: usize,
+        dt: f32,
+        leader: Leader,
+        events: &mut Vec<SquadEvent>,
+    ) {
+        let m = &mut self.members[i];
+        m.auto_throw_in = (m.auto_throw_in - dt).max(0.0);
+        if m.auto_throw_in > 0.0
+            || m.down
+            || m.marker.is_some()
+            || m.revive.is_some()
+            || m.pawn.crouched
+            || matches!(
+                m.state,
+                MemberState::Working { .. } | MemberState::Reviving { .. }
+            )
+        {
+            return;
+        }
+        let Some(j) = self.speciality_of(i) else {
+            return;
+        };
+        if j.auto != AutoUse::Group || j.throw_range <= 0.0 {
+            return;
+        }
+        let j = j.clone();
+        let Some(t) = self.target_of(i).copied() else {
+            return;
+        };
+        let m = &self.members[i];
+        // Only once they've had time to take aim, like a shot.
+        if m.fight.seen_for < self.settings.fight.reaction_time {
+            return;
+        }
+        let from = m.pawn.eye();
+        let d = dist(from, t.feet);
+        if d < j.auto_range || d > j.throw_range {
+            return;
+        }
+        let together = self
+            .threats
+            .iter()
+            .filter(|o| dist(o.feet, t.feet) <= j.throw_radius)
+            .count() as u32;
+        if together < j.auto_min_enemies {
+            return;
+        }
+        if self
+            .friend_near(i, t.feet, j.auto_clearance, leader)
+            .is_some()
+        {
+            return;
+        }
+        let m = &mut self.members[i];
+        m.auto_throw_in = j.auto_interval;
+        m.fight.throws += 1;
+        self.throw_at(
+            i,
+            from,
+            &t,
+            (j.throw_fuse, j.throw_damage, j.throw_radius),
+            true,
+            events,
+        );
     }
 
     /// Member `i` shoots at its target if it's time and the line is clear.
@@ -534,6 +735,16 @@ impl Squad {
                 spread,
             )
         });
+        // A speciality gun's blast (anti-armour): nobody near the target.
+        let blocker = blocker.or_else(|| {
+            let m = &self.members[i];
+            if !m.fight.special {
+                return None;
+            }
+            let clear = self.speciality_of(i).map_or(0.0, |j| j.auto_clearance);
+            self.friend_near(i, target.feet, clear, leader)
+                .map(|n| (n, target.feet, false))
+        });
         if let Some((friend, _, _)) = blocker {
             let m = &mut self.members[i];
             m.fight.held_fire += 1;
@@ -558,6 +769,9 @@ impl Squad {
         let m = &mut self.members[i];
         let burst_start = m.fight.burst_left == f.burst_count;
         m.fight.shots += 1;
+        if m.fight.special {
+            m.fight.special_shots += 1;
+        }
         m.fight.burst_left = m.fight.burst_left.saturating_sub(1);
         if m.fight.burst_left == 0 {
             m.fight.burst_left = f.burst_count;

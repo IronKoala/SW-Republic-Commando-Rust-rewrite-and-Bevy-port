@@ -189,7 +189,11 @@ pub struct VoiceSettings {
     pub leader_table: String,
     /// Seconds of quiet after any squad line before the next.
     pub gap: f32,
-    /// Quieter with distance: full volume within this many uu.
+    /// Squad mates are heard from where they stand (and quieter further
+    /// away). Off, they are heard at full volume from everywhere, like a
+    /// helmet radio.
+    pub positional: bool,
+    /// With `positional`: full volume within this many uu.
     pub full_volume_within: f32,
     /// The rules, in file order. Every rule that fits an event is tried.
     pub lines: Vec<VoiceLine>,
@@ -203,6 +207,7 @@ impl Default for VoiceSettings {
             package: "character_voice".into(),
             leader_table: "Delta38Audio".into(),
             gap: 0.5,
+            positional: false,
             full_volume_within: 512.0,
             lines: Vec::new(),
         }
@@ -274,6 +279,7 @@ impl VoiceSettings {
             "leader_table" => self.leader_table = text(value)?,
             "gap" => self.gap = one(value)?,
             "full_volume_within" => self.full_volume_within = one(value)?,
+            "positional" => self.positional = yes_no(key, value)?,
             _ => return Err(format!("unknown setting `{key}` in [voice]")),
         }
         Ok(())
@@ -352,6 +358,10 @@ pub struct Say {
     /// The rule (`[line.<key>]`) that chose it.
     pub rule: String,
     pub urgent: bool,
+    /// Any standing squad mate may say it instead (`who = "any"` or
+    /// `"other"`), if the chosen one has no recording of it: the members
+    /// to try, in order.
+    pub stand_ins: Vec<usize>,
 }
 
 /// What `Chatter::hear` decided about one event, for the log.
@@ -634,11 +644,26 @@ impl Chatter {
             })
             .map(|e| e.replace("{me}", &me))
             .collect();
+        let stand_ins = match line.who {
+            Who::Any | Who::Other => {
+                let skip = if line.who == Who::Other {
+                    about.or(doer)
+                } else {
+                    None
+                };
+                (1..n)
+                    .map(|k| (speaker.unwrap_or(0) + k) % n)
+                    .filter(|&i| standing(i) && Some(i) != skip)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
         Heard::Say(Say {
             speaker,
             events,
             rule: line.key.clone(),
             urgent: line.urgent,
+            stand_ins,
         })
     }
 }
@@ -719,6 +744,12 @@ mod tests {
         assert!(s.enabled);
         assert!(s.lines.len() > 20, "{}", s.lines.len());
         assert!(s.lines.iter().any(|l| l.on == Trigger::Spotted));
+        // The player's own order lines are never dropped for a squad mate
+        // who is talking, and squad mates are heard like a helmet radio.
+        for l in s.lines.iter().filter(|l| l.who == Who::Leader) {
+            assert!(l.urgent, "{} is not urgent", l.key);
+        }
+        assert!(!s.positional);
     }
 
     #[test]
@@ -803,6 +834,10 @@ mod tests {
         };
         assert_ne!(s.speaker, Some(0));
         assert_eq!(s.events, vec!["Delta07Down", "AllyDown"]);
+        // Another standing mate can say it if this one has no recording,
+        // never the one who is down.
+        assert_eq!(s.stand_ins.len(), 1);
+        assert!(!s.stand_ins.contains(&0) && Some(s.stand_ins[0]) != s.speaker);
     }
 
     #[test]
