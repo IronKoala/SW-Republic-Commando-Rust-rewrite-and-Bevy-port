@@ -9,7 +9,8 @@
 //!   sounds from `Sounds/character_voice.uax`, all at run time. Nothing is
 //!   copied into the project.
 //! - One squad line at a time (our choice); a line is a `Voice` sound
-//!   (VOICES VOLUME) placed at the speaker (`SoundAt`).
+//!   (VOICES VOLUME), at full volume like a helmet radio, or placed at
+//!   the speaker (`SoundAt`) with `[voice] positional = "yes"`.
 //! - Everything said or skipped goes to the log (`squad: voice ...`).
 
 use crate::{log_line, SquadMate, SquadState};
@@ -271,10 +272,12 @@ pub fn speak(
             );
             continue;
         };
-        // Quieter with distance (our choice, like the enemies' voices);
-        // the player's own lines at full volume.
+        // Full volume like a helmet radio (our choice), unless the file
+        // asks for positional voices: then quieter with distance, like the
+        // enemies'. The player's own lines are always full volume.
+        let positional = chatter.settings.positional;
         let volume = match (s.speaker, at, listener) {
-            (Some(_), Some(at), Some(l)) => {
+            (Some(_), Some(at), Some(l)) if positional => {
                 let d = (to_unreal(at) - l).length();
                 (full / d.max(full)).max(0.25)
             }
@@ -288,7 +291,7 @@ pub fn speak(
             rc_game_core::Voice,
             SquadLine,
         ));
-        if let (Some(_), Some(at)) = (s.speaker, at) {
+        if let (Some(_), Some(at), true) = (s.speaker, at, positional) {
             e.insert(rc_game_core::SoundAt::place(at));
         }
         log_line(

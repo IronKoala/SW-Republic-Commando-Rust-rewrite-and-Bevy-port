@@ -34,7 +34,11 @@
 #   package             sound package the tables point into
 #   leader_table        the player's own table, for who = "leader" (Boss is 38)
 #   gap                 seconds of quiet after any squad line before the next
-#   full_volume_within  lines further than this (uu) get quieter
+#   positional          "no": squad mates are heard at full volume wherever
+#                       they are, like a helmet radio. "yes": heard from where
+#                       they stand (with 3D SOUND) and quieter further away
+#   full_volume_within  with positional = "yes": further than this (uu) is
+#                       quieter
 #
 # [line.<any name>]  one rule; every rule that fits a happening is tried
 #   on      what happened:
@@ -68,6 +72,7 @@ enabled = "yes"
 package = "character_voice"
 leader_table = "Delta38Audio"
 gap = 0.5
+positional = "no"
 full_volume_within = 512
 
 # --- Orders: the player calls it, then one squad mate answers. ---
@@ -75,21 +80,25 @@ full_volume_within = 512
 on = "order:form_up"
 event = "FormUp"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 
 [line.boss_secure]
 on = "order:secure_position"
 event = "SecurePosition"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 
 [line.boss_search]
 on = "order:search_and_destroy"
 event = "SearchAndDestroy"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 
 [line.boss_recall]
 on = "order:cancel"
 event = "Recall"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 
 [line.answer_form_up]
 on = "order:form_up"
@@ -127,6 +136,7 @@ cooldown = 3
 on = "job_assigned:sniper"
 event = "SnipeInitiate"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 [line.snipe_confirm]
 on = "job_assigned:sniper"
 event = "SnipeConfirm AcknowledgeOrder"
@@ -139,6 +149,7 @@ event = "SnipeReady"
 on = "job_assigned:grenade"
 event = "GrenadeInitiate"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 [line.grenade_confirm]
 on = "job_assigned:grenade"
 event = "GrenadeConfirm AcknowledgeOrder"
@@ -151,6 +162,7 @@ event = "GrenadeReady"
 on = "job_assigned:anti_armour"
 event = "AntiArmorInitiate"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 [line.anti_armour_confirm]
 on = "job_assigned:anti_armour"
 event = "AntiArmorConfirm AcknowledgeOrder"
@@ -163,6 +175,7 @@ event = "AntiArmorReady"
 on = "job_assigned:breach"
 event = "BreachInitiate"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 [line.breach_confirm]
 on = "job_assigned:breach"
 event = "BreachConfirm AcknowledgeOrder"
@@ -179,6 +192,7 @@ wait = 2
 on = "job_assigned:slice"
 event = "HackDoorInitiate"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 [line.slice_confirm]
 on = "job_assigned:slice"
 event = "HackDoorConfirm AcknowledgeOrder"
@@ -195,6 +209,7 @@ wait = 2
 on = "job_assigned:demolition"
 event = "DemolitionInitiate"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 [line.demolition_confirm]
 on = "job_assigned:demolition"
 event = "DemolitionConfirm AcknowledgeOrder"
@@ -211,6 +226,7 @@ wait = 2
 on = "job_assigned:bacta"
 event = "BactaInitiate"
 who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
 [line.bacta_confirm]
 on = "job_assigned:bacta"
 event = "AcknowledgeOrder"

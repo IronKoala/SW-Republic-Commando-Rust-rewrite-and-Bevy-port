@@ -189,7 +189,11 @@ pub struct VoiceSettings {
     pub leader_table: String,
     /// Seconds of quiet after any squad line before the next.
     pub gap: f32,
-    /// Quieter with distance: full volume within this many uu.
+    /// Squad mates are heard from where they stand (and quieter further
+    /// away). Off, they are heard at full volume from everywhere, like a
+    /// helmet radio.
+    pub positional: bool,
+    /// With `positional`: full volume within this many uu.
     pub full_volume_within: f32,
     /// The rules, in file order. Every rule that fits an event is tried.
     pub lines: Vec<VoiceLine>,
@@ -203,6 +207,7 @@ impl Default for VoiceSettings {
             package: "character_voice".into(),
             leader_table: "Delta38Audio".into(),
             gap: 0.5,
+            positional: false,
             full_volume_within: 512.0,
             lines: Vec::new(),
         }
@@ -274,6 +279,7 @@ impl VoiceSettings {
             "leader_table" => self.leader_table = text(value)?,
             "gap" => self.gap = one(value)?,
             "full_volume_within" => self.full_volume_within = one(value)?,
+            "positional" => self.positional = yes_no(key, value)?,
             _ => return Err(format!("unknown setting `{key}` in [voice]")),
         }
         Ok(())
@@ -719,6 +725,12 @@ mod tests {
         assert!(s.enabled);
         assert!(s.lines.len() > 20, "{}", s.lines.len());
         assert!(s.lines.iter().any(|l| l.on == Trigger::Spotted));
+        // The player's own order lines are never dropped for a squad mate
+        // who is talking, and squad mates are heard like a helmet radio.
+        for l in s.lines.iter().filter(|l| l.who == Who::Leader) {
+            assert!(l.urgent, "{} is not urgent", l.key);
+        }
+        assert!(!s.positional);
     }
 
     #[test]
