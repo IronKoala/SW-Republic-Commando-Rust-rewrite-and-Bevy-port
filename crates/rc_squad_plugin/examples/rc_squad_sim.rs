@@ -324,19 +324,19 @@ fn steps() -> Vec<Step> {
         Hold(3.0, idle),
         SpawnDroids(3, 100.0),
         Hold(20.0, idle),
-        // Three 100-health droids take 15 DC-17m hits (20 each); since the
-        // friendly-fire fix the squad hits with nearly every shot, so 20
-        // was more than they need (it failed on main too).
+        // Three 100-health droids take 15 DC-17m hits (20 each), but one
+        // from Sev's sniper (175) when they're 1500+ uu away, so at least
+        // 3 shots, all of which may hit.
         Check(
             "fight: squad shots fired",
             |s| Sim::total(&s.fight.shots),
-            15.0,
+            3.0,
             1e9,
         ),
         Check(
             "fight: squad shots that hit a droid",
             |s| Sim::total(&s.fight.hits),
-            5.0,
+            3.0,
             1e9,
         ),
         Check(

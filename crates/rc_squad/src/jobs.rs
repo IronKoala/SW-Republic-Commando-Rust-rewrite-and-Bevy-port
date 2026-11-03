@@ -22,6 +22,21 @@ pub enum JobKind {
     Post,
 }
 
+/// When a squad mate whose `speciality` is this job uses it on their own
+/// in a fight, with no marker (the original's Sev snipes, Fixer throws
+/// grenades and Scorch fires anti-armour rounds without being told).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoUse {
+    /// Only from a marked post.
+    Never,
+    /// The job's gun, at enemies at least `auto_range` away (Sev).
+    Far,
+    /// The job's gun, at armoured enemies (Scorch).
+    Armoured,
+    /// The job's throw, at a bunch of enemies (Fixer).
+    Group,
+}
+
 /// What happens when a one-off job is finished.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobResult {
@@ -84,6 +99,19 @@ pub struct JobSettings {
     /// Post with a target area (a grenade marker's `WeaponTarget`): throw
     /// only at enemies this close to it.
     pub target_radius: f32,
+    /// Used on their own by a squad mate with this `speciality` (see
+    /// `AutoUse`), and the conditions for it.
+    pub auto: AutoUse,
+    /// The target must be at least this far away, uu (Far: what counts as
+    /// far; the others: out of the blast).
+    pub auto_range: f32,
+    /// Group: seconds between throws on their own.
+    pub auto_interval: f32,
+    /// Group: enemies within `throw_radius` of the target, counting it.
+    pub auto_min_enemies: u32,
+    /// No friend (the player, a squad mate, or the thrower) within this
+    /// of the target, uu. 0 = don't check.
+    pub auto_clearance: f32,
 }
 
 impl JobSettings {
@@ -114,6 +142,11 @@ impl JobSettings {
             throw_damage: 0.0,
             throw_radius: 0.0,
             target_radius: 0.0,
+            auto: AutoUse::Never,
+            auto_range: 0.0,
+            auto_interval: 0.0,
+            auto_min_enemies: 1,
+            auto_clearance: 0.0,
         }
     }
 
@@ -181,6 +214,20 @@ impl JobSettings {
                 }
             }
         }
+        match self.auto {
+            AutoUse::Never => {}
+            AutoUse::Far => {
+                s += &format!(", on their own at enemies {}+ uu away", self.auto_range)
+            }
+            AutoUse::Armoured => s += &format!(
+                ", on their own at armoured enemies {}+ uu away, friends {}+ uu from them",
+                self.auto_range, self.auto_clearance
+            ),
+            AutoUse::Group => s += &format!(
+                ", on their own every {} s at {}+ enemies together {}+ uu away, friends {}+ uu from them",
+                self.auto_interval, self.auto_min_enemies, self.auto_range, self.auto_clearance
+            ),
+        }
         s
     }
 }
@@ -220,6 +267,8 @@ pub fn default_jobs() -> Vec<JobSettings> {
     sniper.shot_interval = 0.1;
     sniper.burst_pause_min = 1.5;
     sniper.burst_pause_max = 2.5;
+    sniper.auto = AutoUse::Far;
+    sniper.auto_range = 1500.0;
 
     let mut grenade = JobSettings::new("grenade", "Grenade position", &["grenade"], JobKind::Post);
     grenade.pullable = true;
@@ -229,6 +278,11 @@ pub fn default_jobs() -> Vec<JobSettings> {
     grenade.throw_damage = 400.0;
     grenade.throw_radius = 512.0;
     grenade.target_radius = 512.0;
+    grenade.auto = AutoUse::Group;
+    grenade.auto_range = 600.0;
+    grenade.auto_interval = 10.0;
+    grenade.auto_min_enemies = 2;
+    grenade.auto_clearance = 512.0;
 
     let mut anti_armour = JobSettings::new(
         "anti_armour",
@@ -243,6 +297,9 @@ pub fn default_jobs() -> Vec<JobSettings> {
     anti_armour.shot_interval = 0.1;
     anti_armour.burst_pause_min = 2.0;
     anti_armour.burst_pause_max = 3.0;
+    anti_armour.auto = AutoUse::Armoured;
+    anti_armour.auto_range = 600.0;
+    anti_armour.auto_clearance = 400.0;
 
     vec![
         bacta,

@@ -132,6 +132,16 @@ copy of the game.
   `data/squad/squad.toml` has every number (`use_cover = "no"` turns it
   off).
 
+- **The squad uses their specialities (tested in the cloud sandbox by
+  numbers, not yet on Windows or with eyes).** Without being told, Sev
+  switches to the sniper attachment for enemies 1500 units or more away,
+  Scorch fires anti-armour rounds at armoured enemies like super battle
+  droids (never with you or a squad mate near the target), and Fixer
+  throws a thermal detonator at two or more enemies bunched together, at
+  most every 10 s. The original does this too, but when exactly is
+  compiled code we don't read, so the rules are our own; every number is
+  in `data/squad/squad.toml` (`use_specialities = "no"` turns it off).
+
 - **Squad context orders (tested in the cloud sandbox by numbers, not yet
   on Windows, in a real level, or with eyes).** Each kind of squad marker
   does its own job: bacta heals the squad mate who uses it; demolition and

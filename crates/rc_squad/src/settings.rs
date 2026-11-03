@@ -7,7 +7,7 @@
 //! only needs the lines it changes. An unknown section or name, or a bad
 //! value, is an error naming the line, so a typo is reported, not ignored.
 
-use crate::jobs::{default_jobs, JobKind, JobResult, JobSettings};
+use crate::jobs::{default_jobs, AutoUse, JobKind, JobResult, JobSettings};
 use std::collections::BTreeMap;
 
 /// What a stance ties each member to.
@@ -89,6 +89,9 @@ pub struct MemberSettings {
     pub shield_recharge_rate: f32,
     /// Seconds after a hit before the shield recharges.
     pub shield_recharge_delay: f32,
+    /// The `[job.*]` key of what they use on their own in a fight
+    /// (`sniper`, `grenade`, `anti_armour`); "" for nothing.
+    pub speciality: String,
 }
 
 /// How squad mates fight. See `[fight]` in `squad.toml`.
@@ -114,6 +117,13 @@ pub struct FightSettings {
     /// Hold fire when the line of fire passes this close to a friend's
     /// body, uu (on top of the body itself and the shot's possible stray).
     pub friendly_clearance: f32,
+    /// Squad mates use their `speciality` on their own.
+    pub use_specialities: bool,
+    /// An enemy counts as armoured when the usual gun does no more than
+    /// this share of its damage to it (its damage table).
+    pub armoured_below: f32,
+    /// Seconds to change to or from a speciality gun before firing.
+    pub switch_time: f32,
 }
 
 impl Default for FightSettings {
@@ -130,6 +140,9 @@ impl Default for FightSettings {
             burst_pause_max: 1.2,
             max_aim_yaw: 60f32.to_radians(),
             friendly_clearance: 20.0,
+            use_specialities: true,
+            armoured_below: 0.5,
+            switch_time: 0.5,
         }
     }
 }
@@ -242,6 +255,7 @@ fn member(
         max_shields: 50.0,
         shield_recharge_rate: 15.0,
         shield_recharge_delay: 4.0,
+        speciality: String::new(),
     }
 }
 
@@ -298,23 +312,32 @@ impl Default for SquadSettings {
             cover: CoverSettings::default(),
             jobs: default_jobs(),
             members: vec![
-                member("sev", "Commando07Delta", "Sev", "07", 1, [0.71, 0.18, 0.17]),
-                member(
-                    "fixer",
-                    "Commando40Delta",
-                    "Fixer",
-                    "40",
-                    2,
-                    [0.21, 0.49, 0.17],
-                ),
-                member(
-                    "scorch",
-                    "Commando62Delta",
-                    "Scorch",
-                    "62",
-                    3,
-                    [0.85, 0.80, 0.13],
-                ),
+                MemberSettings {
+                    speciality: "sniper".into(),
+                    ..member("sev", "Commando07Delta", "Sev", "07", 1, [0.71, 0.18, 0.17])
+                },
+                MemberSettings {
+                    speciality: "grenade".into(),
+                    ..member(
+                        "fixer",
+                        "Commando40Delta",
+                        "Fixer",
+                        "40",
+                        2,
+                        [0.21, 0.49, 0.17],
+                    )
+                },
+                MemberSettings {
+                    speciality: "anti_armour".into(),
+                    ..member(
+                        "scorch",
+                        "Commando62Delta",
+                        "Scorch",
+                        "62",
+                        3,
+                        [0.85, 0.80, 0.13],
+                    )
+                },
             ],
         }
     }
@@ -539,7 +562,7 @@ impl SquadSettings {
         }
         let f = &self.fight;
         out.push(format!(
-            "fight: {}, accuracy {}, aim error up to {:.1} deg, sees {} uu, reacts in {} s, bursts of {} every {} s, pause {}-{} s, aims {:.0} deg off facing, friendly clearance {} uu",
+            "fight: {}, accuracy {}, aim error up to {:.1} deg, sees {} uu, reacts in {} s, bursts of {} every {} s, pause {}-{} s, aims {:.0} deg off facing, friendly clearance {} uu, specialities {} (armoured below {}, switch {} s)",
             f.weapon,
             f.accuracy,
             f.max_aim_error.to_degrees(),
@@ -550,7 +573,10 @@ impl SquadSettings {
             f.burst_pause_min,
             f.burst_pause_max,
             f.max_aim_yaw.to_degrees(),
-            f.friendly_clearance
+            f.friendly_clearance,
+            if f.use_specialities { "on" } else { "off" },
+            f.armoured_below,
+            f.switch_time
         ));
         let r = &self.revive;
         out.push(format!(
@@ -576,7 +602,7 @@ impl SquadSettings {
         out.extend(self.jobs.iter().map(JobSettings::summary));
         for m in &self.members {
             out.push(format!(
-                "member {} ({}, {}): HUD slot {}, formation slot {}, health {}, shields {} (+{}/s after {} s)",
+                "member {} ({}, {}): HUD slot {}, formation slot {}, health {}, shields {} (+{}/s after {} s), speciality {}",
                 m.name,
                 m.number,
                 m.class,
@@ -585,7 +611,8 @@ impl SquadSettings {
                 m.max_health,
                 m.max_shields,
                 m.shield_recharge_rate,
-                m.shield_recharge_delay
+                m.shield_recharge_delay,
+                if m.speciality.is_empty() { "none" } else { &m.speciality }
             ));
         }
         out
@@ -671,6 +698,7 @@ fn set_member(m: &mut MemberSettings, key: &str, value: Value) -> Result<(), Str
         "max_shields" => m.max_shields = one(value)?,
         "shield_recharge_rate" => m.shield_recharge_rate = one(value)?,
         "shield_recharge_delay" => m.shield_recharge_delay = one(value)?,
+        "speciality" => m.speciality = text(value)?,
         _ => return Err(format!("unknown setting `{key}` for a squad member")),
     }
     Ok(())
@@ -684,8 +712,14 @@ fn set_fight(f: &mut FightSettings, key: &str, value: Value) -> Result<(), Strin
         }
         return Ok(());
     }
+    if key == "use_specialities" {
+        f.use_specialities = yes_no(key, value)?;
+        return Ok(());
+    }
     let v = one(value)?;
     match key {
+        "armoured_below" => f.armoured_below = v,
+        "switch_time" => f.switch_time = v,
         "accuracy" => f.accuracy = v,
         "max_aim_error" => f.max_aim_error = v.to_radians(),
         "sight_radius" => f.sight_radius = v,
@@ -791,6 +825,19 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                 _ => return Err("group must be \"yes\" or \"no\"".into()),
             }
         }
+        "auto" => {
+            j.auto = match text(value)?.as_str() {
+                "no" => AutoUse::Never,
+                "far" => AutoUse::Far,
+                "armoured" => AutoUse::Armoured,
+                "group" => AutoUse::Group,
+                t => {
+                    return Err(format!(
+                        "auto must be \"no\", \"far\", \"armoured\" or \"group\", not \"{t}\""
+                    ))
+                }
+            }
+        }
         "pullable" => {
             j.pullable = match text(value)?.as_str() {
                 "yes" => true,
@@ -817,6 +864,10 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                 "throw_damage" => j.throw_damage = v,
                 "throw_radius" => j.throw_radius = v,
                 "target_radius" => j.target_radius = v,
+                "auto_range" => j.auto_range = v,
+                "auto_interval" => j.auto_interval = v,
+                "auto_min_enemies" => j.auto_min_enemies = v.max(1.0) as u32,
+                "auto_clearance" => j.auto_clearance = v,
                 _ => return Err(format!("unknown setting `{key}` for a job")),
             }
         }
