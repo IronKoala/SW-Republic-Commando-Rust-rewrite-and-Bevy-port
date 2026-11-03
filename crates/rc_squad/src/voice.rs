@@ -358,6 +358,10 @@ pub struct Say {
     /// The rule (`[line.<key>]`) that chose it.
     pub rule: String,
     pub urgent: bool,
+    /// Any standing squad mate may say it instead (`who = "any"` or
+    /// `"other"`), if the chosen one has no recording of it: the members
+    /// to try, in order.
+    pub stand_ins: Vec<usize>,
 }
 
 /// What `Chatter::hear` decided about one event, for the log.
@@ -640,11 +644,26 @@ impl Chatter {
             })
             .map(|e| e.replace("{me}", &me))
             .collect();
+        let stand_ins = match line.who {
+            Who::Any | Who::Other => {
+                let skip = if line.who == Who::Other {
+                    about.or(doer)
+                } else {
+                    None
+                };
+                (1..n)
+                    .map(|k| (speaker.unwrap_or(0) + k) % n)
+                    .filter(|&i| standing(i) && Some(i) != skip)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
         Heard::Say(Say {
             speaker,
             events,
             rule: line.key.clone(),
             urgent: line.urgent,
+            stand_ins,
         })
     }
 }
@@ -815,6 +834,10 @@ mod tests {
         };
         assert_ne!(s.speaker, Some(0));
         assert_eq!(s.events, vec!["Delta07Down", "AllyDown"]);
+        // Another standing mate can say it if this one has no recording,
+        // never the one who is down.
+        assert_eq!(s.stand_ins.len(), 1);
+        assert!(!s.stand_ins.contains(&0) && Some(s.stand_ins[0]) != s.speaker);
     }
 
     #[test]

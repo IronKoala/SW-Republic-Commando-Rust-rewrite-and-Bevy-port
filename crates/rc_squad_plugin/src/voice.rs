@@ -238,27 +238,44 @@ pub fn speak(
             }
             Heard::Say(s) => s,
         };
-        let (who, table, at) = match s.speaker {
+        // The chosen speaker first; for "any"/"other" lines, the next squad
+        // mate who has a recording of it (Fixer and Scorch have no
+        // AcknowledgeOrder in the game, for one).
+        let candidates: Vec<Option<usize>> = std::iter::once(s.speaker)
+            .chain(s.stand_ins.iter().map(|&i| Some(i)))
+            .collect();
+        let mut chosen = None;
+        for &c in &candidates {
+            let table = match c {
+                Some(i) => squad.members[i].settings.audio_table.clone(),
+                None => chatter.settings.leader_table.clone(),
+            };
+            let lines = voices.tables.get(&table.to_ascii_lowercase());
+            let found = s.events.iter().find_map(|e| {
+                lines
+                    .and_then(|t| t.get(&e.to_ascii_lowercase()))
+                    .and_then(|(g, snd)| snd.pick().map(|h| (e.clone(), g.clone(), h)))
+            });
+            if let Some(f) = found {
+                chosen = Some((c, f));
+                break;
+            }
+        }
+        let speaker = chosen.as_ref().map_or(s.speaker, |c| c.0);
+        let (who, at) = match speaker {
             Some(i) => {
-                let m = &squad.members[i];
                 let at = mates
                     .iter()
                     .find(|(mm, _)| mm.index == i)
                     .map(|(_, t)| t.translation);
-                (m.settings.name.clone(), m.settings.audio_table.clone(), at)
+                (squad.members[i].settings.name.clone(), at)
             }
             None => (
                 "the player".to_string(),
-                chatter.settings.leader_table.clone(),
                 player.single().ok().map(|t| t.translation),
             ),
         };
-        let lines = voices.tables.get(&table.to_ascii_lowercase());
-        let found = s.events.iter().find_map(|e| {
-            lines
-                .and_then(|t| t.get(&e.to_ascii_lowercase()))
-                .map(|(g, snd)| (e.clone(), g.clone(), snd.pick()))
-        });
+        let found = chosen.map(|c| (c.1 .0, c.1 .1, Some(c.1 .2)));
         let Some((event, group, Some(sound))) = found else {
             stats.missing += 1;
             log_line(
@@ -276,7 +293,7 @@ pub fn speak(
         // asks for positional voices: then quieter with distance, like the
         // enemies'. The player's own lines are always full volume.
         let positional = chatter.settings.positional;
-        let volume = match (s.speaker, at, listener) {
+        let volume = match (speaker, at, listener) {
             (Some(_), Some(at), Some(l)) if positional => {
                 let d = (to_unreal(at) - l).length();
                 (full / d.max(full)).max(0.25)
@@ -291,7 +308,7 @@ pub fn speak(
             rc_game_core::Voice,
             SquadLine,
         ));
-        if let (Some(_), Some(at), true) = (s.speaker, at, positional) {
+        if let (Some(_), Some(at), true) = (speaker, at, positional) {
             e.insert(rc_game_core::SoundAt::place(at));
         }
         log_line(
