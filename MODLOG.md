@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Squad mates ride lifts (rc_movers, rc_movers_plugin, rc_game_core, rc_squad_plugin)
+
+- **Changed:** `rc_movers::MoverSet::step` remembers which movers moved and from where; new `MoverSet::carry` (and `forget_moves`) carries or pushes any other body by those moves, with the same "when blocked" rule as for the player. `rc_movers_plugin`: `LevelMovers::carry`, `LevelMovers::floors`, forgets the moves at the start of each frame, inserts the new `rc_game_core::MovingFloors` resource (trait `CarryBodies`). `rc_squad_plugin`: new `ride_movers` system before the squad moves, `SquadState::riding`, logs `Sev stands on Mover37`. New test `rc_squad_plugin/tests/lift_room.rs`; 4 new tests in `rc_movers`. Notes in `docs/DESIGN.md` ("Squad mates (and other bodies) ride too"), `docs/PLUGINS.md`, README.
+- **Why:** Blocker #5 of the level audit: squad mates didn't ride lifts, so on geo_05a, b and c (which start on a lift) the squad was left behind. In the original every pawn standing on a mover rides it.
+- **Tested how:** `cargo test -p rc_movers -p rc_movers_plugin -p rc_squad_plugin -p rc_game_core` in the cloud, no game files.
+- **Result:** `lift_room`: Sev, Fixer and Scorch stand on a 400 uu lift with the player and all arrive at z 410.1 with the player, never more than 0.1 uu off the lift top on the way; without `MovingFloors`, 3 of 3 are left at the bottom (the old behaviour). `rc_movers`: a squad mate rides up and back down, a closing door turns back for a squad mate in the way, nobody is moved after `forget_moves`. 17 of 17 `rc_movers` tests pass.
+- **Still broken / not tested:** Not tested on a real map (geo_05a, b, c) or on Windows. Squad mates don't set off triggers or bump-opened doors (only the player does, as before). Squad mates who aren't on a lift when it leaves don't wait or catch up. Droids don't ride lifts yet (they can use `MovingFloors` the same way).
+- **Next:** Play geo_05a on Windows and check the log for `squad: ... stands on Mover...` and the squad arriving at the top.
+
 ## 2026-11-09: No squad and no grown arms in the prologue (rc_squad, rc_squad_plugin, rc_game_core, rc_scripts_plugin, rc_combat, rc_game)
 
 - **Changed:** `rc_squad::map::MapSquadInfo` gets `has_squad_actor` and `wants_squad()`; `rc_squad_plugin::SquadMapData::squadless` stops squad mates coming in on maps without a `CTSquad` actor, squad markers or squad-mate spawners. `rc_game_core::Cutscene::briefing_weapon` is set from `ACTION_Briefing`'s `BriefingWeapon` (`bSetBriefingWeapon`) and cleared by `bEndBriefing`; while set, `rc_combat` hides the first-person arms and the plain gun model. `rc_game/src/cutscene.rs` logs it.

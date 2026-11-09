@@ -272,7 +272,9 @@ copy of the game.
   map and logs the numbers: all 863 that could be timed opened and closed
   on time, and all 33 rideable lifts carried the player. They also run
   in the game itself (`rc_game`, tested in the cloud sandbox on geo_01a):
-  doors are solid where they stand and move when set off. Doors that the
+  doors are solid where they stand and move when set off. Squad mates
+  ride lifts with you and get pushed by doors (tested in the cloud with a
+  test lift, not yet on a real map or on Windows). Doors that the
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
 

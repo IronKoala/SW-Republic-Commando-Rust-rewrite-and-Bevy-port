@@ -21,6 +21,8 @@
 //! - [`LevelCollision`], [`PlayerStart`], [`Player`], [`PlayerCamera`]: the
 //!   level's solid surfaces, where the player starts, the player's body and
 //!   the player's eyes.
+//! - [`MovingFloors`]: lifts and doors that carry or push bodies other than
+//!   the player (squad mates, droids).
 //! - [`MusicMood`]: calm or battle music; whoever knows a fight started
 //!   sets it.
 //! - [`Voice`] and [`SoundAt`]: tags for a sound a part plays (speech;
@@ -59,8 +61,8 @@ pub use log::GameLog;
 pub use sound::{SoundAt, Voice};
 pub use paths::GamePaths;
 pub use state::{
-    playing, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate, MusicMood, Play,
-    Player, PlayerCamera, PlayerStart,
+    playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
+    MovingFloors, MusicMood, Play, Player, PlayerCamera, PlayerStart,
 };
 
 use bevy::prelude::*;

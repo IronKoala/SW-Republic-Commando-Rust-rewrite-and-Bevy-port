@@ -725,6 +725,32 @@ pub struct MoverSet {
     pub riding: Option<usize>,
     /// Triggers whose state we don't run (not `NormalTrigger`).
     pub unhandled_triggers: Vec<String>,
+    /// The movers that moved in the last `step`, for carrying other bodies
+    /// afterwards (`carry`). Emptied by `forget_moves` and by each `step`.
+    moved: Vec<FrameMove>,
+}
+
+/// One mover's move in the last step: where it was before.
+#[derive(Debug, Clone, Copy)]
+struct FrameMove {
+    mover: usize,
+    from: Pose,
+    phase: Phase,
+    key: usize,
+    /// It carried the player this step (so it can't be put back).
+    carried_player: bool,
+}
+
+/// What a mover did to a body other than the player (a squad mate, a
+/// droid) in [`MoverSet::carry`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Ride {
+    /// The mover the body stands on, if any (moving or not).
+    pub on: Option<usize>,
+    /// How far the movers moved it this step, uu.
+    pub moved_by: Vec3,
+    /// A mover that ran into it and stopped or went back (`Blocked`).
+    pub events: Vec<MoverEvent>,
 }
 
 /// The fixed level plus the movers where they are now. `skip` leaves one
@@ -817,6 +843,7 @@ impl MoverSet {
             time: 0.0,
             riding: None,
             unhandled_triggers: unhandled,
+            moved: Vec::new(),
         };
         let mut ev = Vec::new();
         for i in 0..set.movers.len() {
@@ -869,6 +896,7 @@ impl MoverSet {
     pub fn restore(&mut self, snap: &SetSnapshot) -> RestoreReport {
         let mut report = RestoreReport::default();
         self.time = snap.time;
+        self.moved.clear();
         for s in &snap.movers {
             let Some(m) = self
                 .movers
@@ -1013,6 +1041,7 @@ impl MoverSet {
     /// carries or pushes it. Call before the player's own move.
     pub fn step(&mut self, dt: f32, fixed: &dyn World, player: &mut Pawn) -> Vec<MoverEvent> {
         let mut events = Vec::new();
+        self.moved.clear();
         self.time += dt;
         let now = self.time;
         let extent = player.extent();
@@ -1135,6 +1164,13 @@ impl MoverSet {
                 }
                 if allowed {
                     let m = &mut self.movers[i];
+                    self.moved.push(FrameMove {
+                        mover: i,
+                        from: old,
+                        phase: m.phase,
+                        key: m.key,
+                        carried_player: carried,
+                    });
                     m.stats.carried_frames += carried as u32;
                     m.pose = pose;
                     m.phase = phase;
@@ -1147,6 +1183,96 @@ impl MoverSet {
         // Don't log the same block every frame.
         events.dedup();
         events
+    }
+
+    /// Forget the last step's moves, so [`Self::carry`] moves nobody until
+    /// the next [`Self::step`]. For a frame where the movers don't step
+    /// (the game paused the player's movement for a cutscene, say).
+    pub fn forget_moves(&mut self) {
+        self.moved.clear();
+    }
+
+    /// Carry or push a body other than the player by what the movers did in
+    /// the last [`Self::step`], as the original carries every pawn based on
+    /// a mover (squad mates and droids ride lifts too). Call it after
+    /// `step`, before the body's own move, once per body per step.
+    ///
+    /// A body a mover can't push out of its way stops it or sends it back,
+    /// as its `MoverEncroachType` says (the same as for the player), unless
+    /// the mover carried the player this step. Triggers and bump-opened
+    /// doors still only answer the player.
+    pub fn carry(&mut self, fixed: &dyn World, pawn: &mut Pawn) -> Ride {
+        let extent = pawn.extent();
+        let start = pawn.location;
+        let down = Vec3::new(0.0, 0.0, -self.settings.stand_reach);
+        let min_floor = pawn.params.min_floor_z;
+        // What it stood on, judged where the movers were before they moved
+        // (where its feet still are).
+        let mut ride = Ride::default();
+        let mut best = f32::MAX;
+        for (i, m) in self.movers.iter().enumerate() {
+            let before = self
+                .moved
+                .iter()
+                .find(|f| f.mover == i)
+                .map_or(m.pose, |f| f.from);
+            let at = Motion::new(m.built, before);
+            if let Some(h) = m.sweep_at(&at, extent, start, start + down) {
+                if !h.start_solid && h.normal.z >= min_floor && h.time < best {
+                    best = h.time;
+                    ride.on = Some(i);
+                }
+            }
+        }
+        let now = self.time;
+        for k in 0..self.moved.len() {
+            let f = self.moved[k];
+            let i = f.mover;
+            let step = Motion::new(f.from, self.movers[i].pose);
+            let delta = step.apply(pawn.location) - pawn.location;
+            let others = WithMovers {
+                fixed,
+                movers: &self.movers,
+                skip: Some(i),
+            };
+            if ride.on == Some(i) {
+                shove(pawn, delta, &others);
+            }
+            let m = &self.movers[i];
+            if !m.overlaps_at(&m.motion(), extent, pawn.location) {
+                continue;
+            }
+            // In the way: try pushing it along with the mover.
+            let save = pawn.location;
+            shove(pawn, delta, &others);
+            if !m.overlaps_at(&m.motion(), extent, pawn.location) {
+                continue;
+            }
+            pawn.location = save;
+            let what = m.info.encroach;
+            let still_moving = matches!(m.phase, Phase::Moving { .. });
+            if matches!(what, Encroach::Stop | Encroach::Return) && !f.carried_player && still_moving {
+                // Put it back where it was, as `step` does for the player.
+                let m = &mut self.movers[i];
+                m.pose = f.from;
+                m.phase = f.phase;
+                m.key = f.key;
+                m.stats.blocked += 1;
+                ride.events.push(MoverEvent::Blocked { mover: i, what });
+                if what == Encroach::Return {
+                    if m.opening {
+                        m.start_closing(i, now, &mut ride.events);
+                    } else {
+                        m.start_opening(i, now, &mut ride.events);
+                    }
+                }
+                // Nobody else gets moved by it this step.
+                self.moved[k].from = self.movers[i].pose;
+            }
+        }
+        self.send_queued(&mut ride.events);
+        ride.moved_by = pawn.location - start;
+        ride
     }
 }
 
