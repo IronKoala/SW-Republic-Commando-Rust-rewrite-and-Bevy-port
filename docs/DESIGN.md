@@ -234,9 +234,9 @@ small difference compared with a deliberately mismatched pair. Results
 
 Each format has one clear winner. With these layouts all 133 bump maps decode;
 for the 121 that have a mip 1, the median mip difference is 1.8 and only one is
-over 10 (11.2). Not checked: which way "up" points for V. Bevy may need its
-`flip_normal_map_y` setting, which can only be told by lighting a bump-mapped
-wall and comparing with the game.
+over 10 (11.2). Which way each channel points was measured later, see "Drawing bump maps":
+in these two formats the two tilts are the other way round from their
+Direct3D names, so `materials.rs` swaps them before drawing.
 
 ## Lights in maps
 
@@ -375,7 +375,8 @@ shadows = false
   floor, far tunnel, both walls, ceiling) are within about 20% of the
   original (middle values 19-47 against 18-44). One screenshot, so it is a
   calibration, not a proof. The bump maps themselves (the pixel-by-pixel
-  shading the direction list is for) are not drawn yet.
+  shading the direction list is for) are drawn since 2026-11-09, see
+  "Drawing bump maps".
 - Colours from hue and saturation follow Unreal's model: hue fades in a
   straight line red to green to blue (so hue 30 is 65% red, 35% green, not
   orange-yellow), checked against the light baked into props on geo_04a,
@@ -418,6 +419,99 @@ works on Windows, Linux and Android alike. The cost is memory (4 bytes per
 pixel instead of 0.5-1); re-compressing into a phone-friendly format (ETC2 or
 ASTC) can come later if memory gets tight. Baked lighting with few real-time
 lights is also the cheap option for phone GPUs.
+
+## Drawing bump maps (`rc_level_viewer/src/bump.rs`, `bump_lit.wesl`)
+
+Props whose material has a bump map (`HsBump...` materials name it
+`NormalMap`, with `BumpUVScale` for how often it repeats; a `Shader` names
+it `Bumpmap`) are drawn with it, so walls show their rivets, panels and
+grooves. `materials.rs` finds and decodes the bump map next to the main
+picture (`Picture::bump`).
+
+**What the game gives us.** For these props the map stores, per corner,
+the baked light colour (as for every prop) and the direction the main
+light comes from, with its strength (see "Lights in maps"). The corner's
+colour is 0.75 x strength x how squarely the corner faces that direction.
+So per pixel we draw:
+
+```
+light = stored corner colour (with the zone's ambient)
+      + light colour x (pixel facing - corner facing)
+```
+
+"Facing" is how squarely the surface faces the light (0 to 1): the bump
+map's tilt for the pixel, the plain surface for the corner. The light's
+colour is the corner's own colour where it is lit enough to tell (16 of
+255 or more), else the prop's average lit colour, else white; its
+strength is 0.75 x the stored strength. A pixel the bump map leaves flat
+gets exactly the stored colour, so a surface is on average as bright as
+before and the brightness calibrated against the original game holds.
+How the original's shader mixes these exactly is compiled code we
+haven't read; this rule is ours, built to fit the stored numbers.
+
+**Which way the bump maps point (measured).** Nothing documents it.
+A tilt map is the slope of some height map, and slopes of a height map
+must fit together (how the tilt along the width changes going down equals
+how the tilt along the height changes going across). Trying the four ways
+of reading the two tilt channels shows which is right:
+
+| Bump maps | Best reading | How clear |
+|---|---|---|
+| Colour normal maps on level props (16 used by yyy_06a, geo_01a, ras_01a) | red along the width, green down the picture, as stored | all 16, error 0.05-0.79 of the next best |
+| L6V5U5 (format 14, 104 maps, mostly characters and weapons) | the two swapped | 59 best, 49 clearly (half the error or less); 2 clearly another way |
+| V8U8 (format 12, 29 maps) | mixed: 9 clearly swapped, 4 clearly not | read like L6V5U5 |
+
+Whether a tilt means a bump or a dent comes from the main picture: grooves
+are painted darker, so where tilts point inwards (the height map dips) the
+picture should be darker. For the 13 level bump maps that repeat like their
+picture, 11 agree with "red/green lean towards where the surface faces"
+(correlation +0.2 to +0.6), 1 is about 0, 1 the other way (-0.4). That is
+the usual normal-map convention, with green pointing down the picture
+(Direct3D's way). None of the bump maps on level props in these three maps
+are in the two-byte formats.
+
+**The shader.** Our own, `bump_lit.wesl`, a Bevy `Material`
+(`BumpLitMaterial`). Each corner carries its stored colour, the direction
+along the picture's width (Bevy's tangent attribute, worked out on the CPU
+from positions and picture coordinates, `bump::surface_tangents`), the
+light direction and the light colour (two attributes of our own). The
+stored colours are turned into linear light per corner and blended across
+the triangle exactly as flat props are, so `bump_strength = 0` draws the
+same picture as the flat props (checked, below). Only opaque, one-sided
+props use it; see-through, glowing and two-sided ones stay flat.
+
+**Cost.** One extra texture read, a few dozen sums and three powers per
+pixel, no loops, no real-time lights: within what phone GPUs and VR
+headsets manage. Bump maps are decoded to plain RGBA on the CPU like every
+other texture. Settings in `lighting.cfg`:
+
+```
+bump_maps = true      # false draws bump-mapped props flat
+bump_strength = 1     # 0 flat (through the bump shader), up to 2
+```
+
+**How it is checked (colours, not outlines).** `rc_level_viewer MAP
+--view-bump` puts the camera in front of the bump-mapped surface where the
+stored light is strongest. `rc_capture_compare A.bmp B.bmp --same|--bumped`
+compares two captures by the average colour of each square of a 4 x 4
+grid, by how many pixels changed and by "detail" (how much neighbouring
+pixels differ):
+
+- flat (`bump_maps = false`) vs `bump_strength = 0` must be the same
+  (squares within 2 of 255, 99% of pixels within 3): proves the shader's
+  light maths matches the flat props';
+- flat vs bump maps on must keep every square's colour within 4, change at
+  least 5% of pixels and add at least 3% detail.
+
+Results are in the MODLOG entry of 2026-11-09.
+
+**Not done.** BSP walls with a bump-mapped material (1-50 polygons per map)
+store no light direction, so they stay flat. The bump maps' extra channel
+(alpha, sometimes named "spec") and the materials' shine (`Specularity`,
+`Specular`) are not drawn. `DiffUVScale` and `BlendTexture` on
+`HsBumpDiffBlend...` materials aren't used (that was already so). Characters
+and weapons don't use bump maps yet. Not compared side by side with the
+original game.
 
 ## Showing a texture in Bevy (`rc_viewer`)
 
@@ -2008,7 +2102,11 @@ state and distances, and every 5 s a fight line with each member's shots,
 hits, kills and revives. For the fight it puts stand-in droids (real
 combat targets with the game's droid size and health that stand still and
 don't shoot back) in sight of the squad. The checks are listed in
-`README.md`.
+`README.md`. `rc_squad_sim MAP --jobs` is a second run, a marker-job tour:
+for each job kind the map has it puts the player near the open marker of
+that kind nearest the squad, orders it, and checks after 45 s that the job
+was done (or the post taken), that the player asked for it once and that a
+squad mate answered.
 
 ### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
 
@@ -2028,6 +2126,12 @@ quiet moment). One squad line at a time; a line keeps the squad quiet for
 its WAV length plus `gap`. The player's order lines are urgent and answers
 wait for them; a new order drops answers to older ones. If the chosen
 squad mate has no recording of a line, another standing one says it.
+A rule marked `optional` may find no recording at all (Sev has no
+GrenadeReady in the game); that is not counted as a missing line. Squad
+events name jobs as the squad panel does ("Breach door"); `Chatter` turns
+that into the job's key ("breach") for `job_assigned:breach` and the like.
+A player (`leader`) rule speaks at most once per frame, because a breach
+gives every squad mate a spot at once.
 `rc_squad_plugin::voice` gathers events in `SquadHeard`, plays lines as
 `Voice` sounds and logs every line said or skipped (`squad: ... voice:`).
 
