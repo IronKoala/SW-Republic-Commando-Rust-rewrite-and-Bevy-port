@@ -31,6 +31,8 @@
 //!   exit sends the player on to the next map.
 //! - [`save`]: the interface each part fills in so it is saved and loaded
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
+//! - [`PlaceLight`] and [`LitByPlace`]: the level's light at any point, and
+//!   the tag that draws a character, the gun or the helmet by it.
 //!
 //! This crate has no window or renderer in it, so it builds quickly and its
 //! tests run anywhere.
@@ -40,6 +42,7 @@ pub mod events;
 mod hud;
 mod log;
 pub mod paths;
+pub mod place_light;
 pub mod save;
 pub mod sound;
 mod state;
@@ -56,6 +59,7 @@ pub use hud::{
 pub use log::GameLog;
 pub use sound::{SoundAt, Voice};
 pub use paths::GamePaths;
+pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use state::{
     playing, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate, MusicMood, Play,
     Player, PlayerCamera, PlayerStart,

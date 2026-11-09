@@ -148,7 +148,8 @@ crouch_fire = "CrouchFire"
 death = "Death"
 throw = ""                # throwing a grenade; empty: battle droids don't
 melee = ""                # a close-up hit; empty: battle droids don't
-ambient = 0.5             # guess: light the droid always gets (0 to 1); the original uses each zone's ambient light, which we don't read yet
+ambient = 0.5             # light the droid gets (0 to 1) when the level's light can't be measured
+light_scale = 1.1         # how strongly the level's light where it stands shows on it; matched to the squad in two original screenshots
 # Seconds to blend smoothly from one animation into the next, so the droid
 # doesn't snap between poses (0 snaps). Our choice: the original blends
 # inside its compiled engine code, which we can't read.

@@ -123,8 +123,12 @@ pub struct ArmsParams {
     pub attachment_group: Option<String>,
     /// Hidden while zoomed in (`bZoomedUsesNoHUDArms`: the sniper scope).
     pub hide_zoomed: bool,
-    /// How bright the arms are drawn, 0 to 1.
+    /// How bright the arms are drawn, 0 to 1, when the level's light can't
+    /// be measured.
     pub brightness: f32,
+    /// How strongly the level's light where the player is shows on the
+    /// arms (`rc_game_core::place_light`); 0 keeps `brightness` always.
+    pub light_scale: f32,
     /// The ammo counter on the gun (see `counter`): the model's digit
     /// pieces, hundreds first, by material name (the ammo class's
     /// `PannerDigit100`, `PannerDigit10`, `PannerDigit1`). Empty: none.
@@ -232,6 +236,7 @@ impl WeaponParams {
                     attachment_group: t.text("arms.attachment_group")?,
                     hide_zoomed: t.boolean("arms.hide_zoomed")?.unwrap_or(false),
                     brightness: t.number("arms.brightness")?.unwrap_or(0.75),
+                    light_scale: t.number("arms.light_scale")?.unwrap_or(0.85).max(0.0),
                     counter_digits: t.texts("arms.counter_digits")?.unwrap_or_default(),
                     counter_bar: t.text("arms.counter_bar")?,
                 }),

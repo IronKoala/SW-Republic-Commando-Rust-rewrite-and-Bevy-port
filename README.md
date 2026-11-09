@@ -103,8 +103,9 @@ copy of the game.
   (`HUDMeshes`, `HUDTextures`), drawn over the world and the gun. On
   screens wider than 4:3 the frame's sides keep their shape and move out to
   the screen's edges; only the bars across the top stretch. The GAME
-  page's HELMET row turns it on and off. Its brightness is a guess (the
-  original lights it with lights inside the helmet, not copied yet), and
+  page's HELMET row turns it on and off. Its brightness follows the light
+  where you are (see "Characters, the gun and the helmet lit by where they
+  are" below), and
   the visor's cracks, blood and wipe effects aren't drawn. Check it with
   `rc_probe --helmet` (pictures in `extracted/menus/`).
 
@@ -239,6 +240,16 @@ copy of the game.
   "Lighting in Bevy"). Since 2026-11-01 props get the right colours (they
   were read in the wrong byte order) and their zone's ambient light; GEO_04A's
   start now matches the original's brightness (tested in the cloud only).
+
+- **Characters, the gun and the helmet lit by where they are (tested in
+  the cloud against two original screenshots, not on Windows).** Squad
+  mates, droids, the first-person gun and the helmet frame are drawn by the
+  level's baked light around them, so they are dim in a dark tunnel and
+  bright in the sun, instead of always at one fixed brightness. In
+  YYY_06A's start tunnel the gun and helmet are now within about 15% of the
+  original (the gun was 2 to 3 times too bright). How strongly each shows
+  the light is in its data file (`light_scale`). It has no direction yet:
+  the sunny side of a character isn't brighter than the other.
 
 - **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
   `rc_level_check` loads every map in the game without a window and logs

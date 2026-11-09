@@ -825,6 +825,15 @@ fn think(
                         MeshMaterial3d(material.clone()),
                         NoFrustumCulling,
                     ));
+                    // Lit by the level's light where it stands (its
+                    // material becomes its own copy; see place_light).
+                    e.insert(rc_game_core::LitByPlace {
+                        target: rc_game_core::LightTarget::Emissive,
+                        own: 0.0,
+                        scale: p.look.light_scale,
+                        height: 1.0,
+                        made_at: p.look.ambient.max(0.0).powf(1.0 / 2.2),
+                    });
                 }
                 fight.entities.insert(id, e.id());
                 fight.stats.spawned += 1;
