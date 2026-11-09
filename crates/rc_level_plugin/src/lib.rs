@@ -31,6 +31,7 @@ use rc_game_core::{
     ArrivalPortal, CurrentLevel, GameLog, GamePaths, GameState, LevelCollision, LoadingGate, PlayerCamera,
     PlayerStart,
 };
+use rc_level_viewer::bump::{BumpLitMaterial, BumpMapPlugin};
 use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
 use rc_level_viewer::sky::{self, SkyViewer};
@@ -59,8 +60,7 @@ pub struct LevelPlugin;
 
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(sky::SkyPlugin)
-            .add_plugins(prop_light::PropLightPlugin)
+        app.add_plugins((sky::SkyPlugin, BumpMapPlugin, prop_light::PropLightPlugin))
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
             .add_systems(
@@ -354,17 +354,20 @@ fn load(world: &mut World) {
             let report = world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
                     world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
-                        world.resource_scope(|world, mut props: Mut<Assets<prop_light::PropMaterial>>| {
+                        world.resource_scope(|world, mut bumps: Mut<Assets<BumpLitMaterial>>| {
+                          world.resource_scope(|world, mut props: Mut<Assets<prop_light::PropMaterial>>| {
                             let mut commands = world.commands();
                             draw::spawn_level(
                                 &mut commands,
                                 &mut meshes,
                                 &mut images,
                                 &mut mats,
+                                Some(&mut bumps),
                                 &mut props,
                                 &sc,
                                 &settings,
                             )
+                          })
                         })
                     })
                 })

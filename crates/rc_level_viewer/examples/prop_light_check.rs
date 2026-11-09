@@ -1,17 +1,19 @@
 //! Checks that real-time lights reach props, without the game's files.
 //!
-//! Two identical "props" (flat squares carrying baked corner colours, as
-//! the map's props do) are drawn side by side through `draw::spawn_level`:
+//! Three "props" (flat squares carrying baked corner colours, as the map's
+//! props do) are drawn side by side through `draw::spawn_level`:
 //! - left: the normal settings (`live_light_on_props = 1`);
+//! - middle: the same, but with a (flat) bump map and a stored light
+//!   direction, so it is drawn by the bump-map shader (`bump_lit.wesl`);
 //! - right: `live_light_on_props = 0`, which draws exactly the old way
 //!   (baked colours only), so it is the yardstick.
 //!
 //! A real-time ("bDynamicLight") point light from the left one's map shines
-//! on both. The steps switch it off, on, move it away and back, and measure
-//! the colour in the middle of each square:
+//! on all three. The steps switch it off, on, move it away and back, and
+//! measure the colour in the middle of each square:
 //! - light off: left = right (the baked light looks the same as before);
-//! - light on: left clearly brighter, right unchanged;
-//! - light moved far away: left back to the right's colour;
+//! - light on: left and middle clearly brighter, right unchanged;
+//! - light moved far away: left and middle back to their unlit colour;
 //! - light moved next to the right square: the left one gets less.
 //!
 //! Run (Linux, no screen needed):
@@ -24,8 +26,11 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::render::view::Tonemapping;
+use rc_image::Rgba;
+use rc_level_viewer::bump::{BumpLitMaterial, BumpMapPlugin};
 use rc_level_viewer::draw;
 use rc_level_viewer::lighting::LightingSettings;
+use rc_level_viewer::materials::{Bump, Picture};
 use rc_level_viewer::prop_light::{PropLightPlugin, PropMaterial};
 use rc_level_viewer::scene::{Batch, Scene, Spawn, Stats};
 use rc_package::light::{Light, LightKind};
@@ -35,8 +40,11 @@ const FRAMES_PER_STEP: u32 = 30;
 const W: u32 = 640;
 const H: u32 = 360;
 /// Where the squares' middles are, in Bevy units along x.
-const LEFT_X: f32 = -1.2;
-const RIGHT_X: f32 = 1.2;
+const LEFT_X: f32 = -1.8;
+const MIDDLE_X: f32 = 0.0;
+const RIGHT_X: f32 = 1.8;
+/// Half a square's width.
+const HALF: f32 = 0.75;
 /// The baked corner colour (0-255, the game's brightness curve).
 const BAKED: [u8; 4] = [70, 60, 50, 255];
 
@@ -65,6 +73,7 @@ const STEPS: &[(&str, LampAt)] = &[
 #[derive(Debug, Clone, Copy, Default)]
 struct Measured {
     left: f32,
+    middle: f32,
     right: f32,
 }
 
@@ -84,7 +93,7 @@ fn main() -> AppExit {
             }),
             ..default()
         }))
-        .add_plugins(PropLightPlugin)
+        .add_plugins((PropLightPlugin, BumpMapPlugin))
         .init_resource::<Run>()
         .add_systems(Startup, setup)
         .add_systems(Update, drive)
@@ -93,7 +102,7 @@ fn main() -> AppExit {
 
 /// One flat square facing the camera, centred at `x`, with baked colours.
 fn square(x: f32) -> Batch {
-    let (a, b) = (x - 1.0, x + 1.0);
+    let (a, b) = (x - HALF, x + HALF);
     Batch {
         two_sided: true,
         from_mesh: true,
@@ -106,9 +115,38 @@ fn square(x: f32) -> Batch {
     }
 }
 
-fn scene(batch: Batch, lights: Vec<Light>) -> Scene {
+/// A square drawn by the bump-map shader: a grey picture, a flat bump map
+/// (so only the real-time light can change it) and a stored light coming
+/// straight at it.
+fn bump_square(x: f32) -> Batch {
+    let solid = |c: [u8; 4]| Rgba {
+        width: 4,
+        height: 4,
+        pixels: c.repeat(16),
+    };
+    let mut b = square(x);
+    b.two_sided = false;
+    b.picture = Some(Picture {
+        image: solid([200, 200, 200, 255]),
+        has_alpha: false,
+        alpha_pixels: false,
+        additive: false,
+        bump: Some(Arc::new(Bump {
+            image: solid([128, 128, 255, 255]),
+            uv_scale: 1.0,
+            two_byte_format: false,
+            name: "flat test bump".into(),
+        })),
+    });
+    b.bump_lit = true;
+    b.light_dirs = vec![[0.0, 0.0, 1.0]; 4];
+    b.light_colours = vec![[0.1, 0.1, 0.1]; 4];
+    b
+}
+
+fn scene(batches: Vec<Batch>, lights: Vec<Light>) -> Scene {
     Scene {
-        batches: vec![batch],
+        batches,
         lightmap_pages: vec![],
         lights,
         stats: Stats::default(),
@@ -127,6 +165,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut props: ResMut<Assets<PropMaterial>>,
+    mut bumps: ResMut<Assets<BumpLitMaterial>>,
 ) {
     commands.spawn((
         Camera3d::default(),
@@ -163,8 +202,9 @@ fn setup(
         &mut meshes,
         &mut images,
         &mut materials,
+        Some(&mut bumps),
         &mut props,
-        &scene(square(LEFT_X), vec![lamp]),
+        &scene(vec![square(LEFT_X), bump_square(MIDDLE_X)], vec![lamp]),
         &on,
     );
     let r = draw::spawn_level(
@@ -172,13 +212,14 @@ fn setup(
         &mut meshes,
         &mut images,
         &mut materials,
+        None,
         &mut props,
-        &scene(square(RIGHT_X), vec![]),
+        &scene(vec![square(RIGHT_X)], vec![]),
         &off,
     );
     println!(
-        "left: {} coloured batches, {} lit by real-time lights, {} point lights; right: {} coloured, {} lit by real-time lights",
-        l.coloured, l.coloured_live, l.lights.point, r.coloured, r.coloured_live
+        "left and middle: {} coloured batches ({} bump-lit), {} lit by real-time lights, {} point lights; right: {} coloured, {} lit by real-time lights",
+        l.coloured, l.bump_lit, l.coloured_live, l.lights.point, r.coloured, r.coloured_live
     );
 }
 
@@ -214,7 +255,7 @@ fn drive(
             t.translation = match at {
                 LampAt::Off | LampAt::Middle => Vec3::new(0.0, 0.0, 2.0),
                 LampAt::Far => Vec3::new(0.0, 0.0, 60.0),
-                LampAt::ByRight => Vec3::new(RIGHT_X + 1.0, 0.0, 1.0),
+                LampAt::ByRight => Vec3::new(RIGHT_X + 1.2, 0.0, 1.0),
             };
         }
         println!("step: {name} ({at:?})");
@@ -266,10 +307,14 @@ fn measure(captured: &ScreenshotCaptured, step: usize, results: &Mutex<Vec<(usiz
     };
     let m = Measured {
         left: average(LEFT_X),
+        middle: average(MIDDLE_X),
         right: average(RIGHT_X),
     };
     let name = STEPS.get(step).map(|s| s.0).unwrap_or("?");
-    println!("  {name}: left {:.1}, right {:.1}", m.left, m.right);
+    println!(
+        "  {name}: left {:.1}, middle (bump) {:.1}, right {:.1}",
+        m.left, m.middle, m.right
+    );
     let _ = std::fs::create_dir_all("logs");
     let mut pixels = Vec::with_capacity(w * h * 4);
     for y in 0..h {
@@ -325,6 +370,20 @@ fn report(run: &Run) -> usize {
                     off.left, on.left
                 ),
                 on.left - off.left >= 20.0,
+            );
+            check(
+                format!(
+                    "light on: bump-mapped middle brighter by 20+ ({:.1} -> {:.1})",
+                    off.middle, on.middle
+                ),
+                on.middle - off.middle >= 20.0,
+            );
+            check(
+                format!(
+                    "light far away: middle back to its unlit colour ({:.1} vs {:.1})",
+                    far.middle, off.middle
+                ),
+                (far.middle - off.middle).abs() <= 2.0 && off.middle > 5.0,
             );
             check(
                 format!(

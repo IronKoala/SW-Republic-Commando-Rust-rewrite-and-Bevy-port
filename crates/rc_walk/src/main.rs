@@ -194,6 +194,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut bump_materials: ResMut<Assets<rc_level_viewer::bump::BumpLitMaterial>>,
     mut prop_materials: ResMut<Assets<prop_light::PropMaterial>>,
     mut images: ResMut<Assets<Image>>,
     world: Res<TestWorld>,
@@ -232,6 +233,7 @@ fn setup(
                         &mut meshes,
                         &mut images,
                         &mut materials,
+                        Some(&mut bump_materials),
                         &mut prop_materials,
                         &sc,
                         &settings,
@@ -972,7 +974,7 @@ fn main() -> AppExit {
     .init_resource::<FrameCount>()
     .init_resource::<PlayerIntent>()
     .configure_sets(Update, (Stage::Input, Stage::Move, Stage::View, Stage::Report).chain())
-    .add_plugins(sky::SkyPlugin)
+    .add_plugins((sky::SkyPlugin, rc_level_viewer::bump::BumpMapPlugin))
     .add_plugins(prop_light::PropLightPlugin)
     .add_systems(Startup, setup)
     .add_systems(Update, move_body.in_set(Stage::Move))

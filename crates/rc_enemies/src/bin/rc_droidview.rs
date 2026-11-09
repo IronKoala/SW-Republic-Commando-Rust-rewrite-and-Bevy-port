@@ -194,6 +194,7 @@ fn load_level(world: &mut World) {
                                 &mut meshes,
                                 &mut images,
                                 &mut mats,
+                                None,
                                 &mut props,
                                 &sc,
                                 &settings,

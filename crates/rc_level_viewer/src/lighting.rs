@@ -58,6 +58,13 @@ pub struct LightingSettings {
     /// Zone ambient brightness 255 becomes this ambient brightness (cd/m²).
     pub ambient_at_255: f32,
     pub shadows: bool,
+    /// Draw the game's bump maps on props that have them (see `bump.rs`).
+    /// `false` draws those props flat, as before, which is slightly cheaper.
+    pub bump_maps: bool,
+    /// How strongly the bump maps tilt the surface: 1 as stored, 0 flat
+    /// (drawn by the bump shader, for checking it against flat props),
+    /// up to 2 for stronger.
+    pub bump_strength: f32,
     /// How strongly real-time lights show on props and terrain, compared
     /// with walls (1 = the same; 0 = props keep only their baked light,
     /// the cheapest choice for slow phones).
@@ -76,6 +83,8 @@ impl Default for LightingSettings {
             sun_lux_at_255: 10_000.0,
             ambient_at_255: 2000.0,
             shadows: false,
+            bump_maps: true,
+            bump_strength: 1.0,
             live_light_on_props: 1.0,
         }
     }
@@ -113,6 +122,10 @@ impl LightingSettings {
                 ("ambient_at_255", Ok(v)) => s.ambient_at_255 = v,
                 ("shadows", _) => s.shadows = value == "true",
                 ("live_light_on_props", Ok(v)) if v >= 0.0 => s.live_light_on_props = v,
+                ("bump_strength", Ok(v)) if (0.0..=2.0).contains(&v) => s.bump_strength = v,
+                ("bump_maps", _) if value == "true" || value == "false" => {
+                    s.bump_maps = value == "true"
+                }
                 ("live_lights", _) => match value {
                     "all" => s.live_lights = LiveLights::All,
                     "dynamic" => s.live_lights = LiveLights::DynamicOnly,
