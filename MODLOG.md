@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Save and load screens: notes brought up to date (README, docs/ORIGINAL_MENUS.md)
+
+- **Changed:** Removed two stale lines from README's "what doesn't work" list ("the campaign, load and save pages are still placeholders" and "there's no Load Game screen yet") and the stale "not done yet" list in `docs/ORIGINAL_MENUS.md`.
+- **Why:** The original LOAD GAME and SAVE GAME pages and the pause menu's save buttons were finished in PR #49 (merged 2026-11-01), but the notes still said they were missing, so they were listed again as remaining work.
+- **Tested how:** Docs only; no code changed.
+- **Result:** The notes match the code in `crates/rc_game/src/original_saves.rs`.
+- **Still broken / not tested:** The save and load pages have still only been tested in the cloud sandbox, not on Windows.
+- **Next:** The user tries LOAD GAME, SAVE GAME, QUICK SAVE, QUICK LOAD and LOAD LAST SAVE on the PC.
+
 ## 2026-11-01: Squad mates use their specialities on their own (rc_squad, rc_squad_plugin)
 
 - **Changed:** `rc_squad`: each `[member.*]` has a `speciality` (a `[job.*]` key) and each job an `auto` rule (`far`, `armoured`, `group`, `no`) with `auto_range`, `auto_interval`, `auto_min_enemies`, `auto_clearance`; `[fight]` gained `use_specialities`, `armoured_below`, `switch_time`. `fight.rs`: on every think Sev and Scorch pick their gun for the target (Sev's sniper sees 8000 uu; Scorch prefers armoured targets and never fires anti-armour with a friend near the target); Fixer throws a grenade on his own at bunched enemies (`throw_on_own`). `Threat` gained `blaster_share`, which the plugin works out from each enemy's damage table. New `Speciality` event; `Throw` gained `own`. The `fight:` log line counts speciality shots and grenades.

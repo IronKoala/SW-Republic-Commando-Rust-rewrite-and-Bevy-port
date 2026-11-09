@@ -580,14 +580,14 @@ copy of the game.
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
 - Original menus: the main menu's moving background video isn't played
   (it uses a video format with no Rust decoder yet), and the sides of
-  screens wider than 4:3 stay black. The campaign, load and save
-  pages are still placeholders. On the options pages, rows the port can't
+  screens wider than 4:3 stay black. On the options pages, rows the port can't
   do yet are greyed out, and the original's "keep these settings?" timer
   after changing screen size isn't there (changes apply at once). Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
-  being built to plug into it). No briefings or cut scenes. Saving: there's no Load Game screen yet (the
-  menu's LOAD GAME stays greyed out). Not tested on Windows,
+  being built to plug into it). No briefings or cut scenes. The original LOAD GAME and SAVE
+  GAME pages and the pause menu's save buttons have not been tried on
+  Windows yet. Not tested on Windows,
   with a real controller, or with a touch screen.
 - Controllers: no button pictures yet (words only), no rebinding screen
   yet, no rumble or aim assist. Gyro on phones isn't started. Building with
