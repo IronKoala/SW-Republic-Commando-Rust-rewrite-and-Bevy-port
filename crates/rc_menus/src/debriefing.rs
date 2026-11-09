@@ -102,3 +102,42 @@ pub fn is_debriefing(family: &[String]) -> bool {
         .iter()
         .any(|c| c.eq_ignore_ascii_case(DEBRIEFING_MENU))
 }
+
+/// Widen CONTINUE's bar (both looks) to fit its word: this port's font is
+/// a little wider than the original's, so the word ran past the bar's
+/// ends. Returns whether it widened.
+pub fn fit_continue(layout: &mut MenuLayout, sizes: &mut dyn crate::quads::Sizes) -> bool {
+    crate::screens::fit_button_to_text(layout, "AButton", sizes)
+}
+
+/// Keep the level's text inside its frame (`InfoTextBorder`). The three
+/// campaign endings' texts, wrapped at the class's width in the game's own
+/// font, run one or two lines past the frame's bottom here (the original
+/// may pick a smaller font at some screen sizes; not known). There is no
+/// room to move things apart (the picture sits right under the frame), so
+/// the text is made smaller, in small steps, until its last line is inside
+/// the frame. Returns the size it ended at (1.0 = unchanged).
+pub fn fit_text(layout: &mut MenuLayout, sizes: &mut dyn crate::quads::Sizes) -> f32 {
+    use crate::quads::{sprite_box, text_box};
+    /// Room left under the last line, as a fraction of the menu height.
+    const ROOM: f32 = 0.015;
+    /// Never smaller than this, so it stays readable.
+    const SMALLEST: f32 = 0.6;
+    let bottom = match layout.widget("InfoTextBorder").map(|w| &w.kind) {
+        Some(Kind::Sprite(s)) => match sprite_box(s, sizes) {
+            Some(b) => b[3] - ROOM,
+            None => return 1.0,
+        },
+        _ => return 1.0,
+    };
+    let Some(Kind::Text(t)) = layout.widget_mut("InfoText").map(|w| &mut w.kind) else {
+        return 1.0;
+    };
+    let start = t.scale;
+    let mut by = 1.0f32;
+    while text_box(t, sizes).is_some_and(|b| b[3] > bottom) && by > SMALLEST {
+        by = (by - 0.05).max(SMALLEST);
+        t.scale = [start[0] * by, start[1] * by];
+    }
+    by
+}

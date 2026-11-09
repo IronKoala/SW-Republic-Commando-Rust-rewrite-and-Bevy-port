@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Debriefing screen: CONTINUE and the level's text stay inside their frames
+
+- **Changed:** `rc_menus::debriefing`: `fit_continue` widens CONTINUE's bar to fit the word; `fit_text` makes the level's text smaller in 5% steps (not below 60%) until its last line is inside its frame. `rc_game` (`original_menu.rs`) and `rc_probe --menu` use both.
+- **Why:** The user saw CONTINUE running past its bar in the screenshot. Checking the three real campaign texts showed they also ran one or two lines past the bottom of their frame.
+- **Tested how:** `rc_probe --menu` with each of the three real texts (put in only on the cloud copy, not committed), then the full `rc_game --script` again.
+- **Result:** CONTINUE's bar now spans 0.587-0.826 of the width (was 0.611-0.801). The texts fit at 85% (Prosecutor) and 90% (Geonosis, Kashyyyk) of their size, with the last line above the frame's edge.
+- **Still broken / not tested:** Why the original fits these texts at full size isn't known (it may pick a smaller font at some screen sizes). The texts are a little smaller than the class asks for. Not tested on Windows.
+- **Next:** As before.
+
 ## 2026-11-09: The original debriefing screen at the end of each campaign (rc_game, rc_menus, rc_scripts)
 
 - **Changed:** `rc_scripts`: `Effect::ChangeLevel` carries a `debriefing` (menu class, title, text, picture) when `ACTION_ShowDebriefingScreen` sent it. `rc_game_core`: new `ShowDebriefing` message holding the `ChangeLevel`. `rc_scripts_plugin` sends it instead of the `ChangeLevel` for the debriefing. `rc_menus`: new `debriefing.rs` fills the original `CTDebriefingInfo` page in (title, text, picture, CONTINUE on a PC); `Library::resolve_loose` finds a picture named without its group. `rc_game`: new `debriefing.rs` pauses play, opens the new `debriefing` page (`[pages.debriefing]` in `data/ui/original_menus.toml`) and sends the held `ChangeLevel` at CONTINUE; back does nothing there; a marked placeholder page if the original can't be drawn. `rc_probe --menu`/`--pages` fill the page with sample words. `rc_game --script`: 5 new checks.

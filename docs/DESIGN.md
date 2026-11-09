@@ -2910,7 +2910,11 @@ without its group (`GUIContent.GEO_Debrief` is really
 finds a picture by package and name when the full path doesn't match.
 CONTINUE (`act:continue`) sets `Menu::go_on`; `debriefing.rs` then sends
 the held `ChangeLevel` and the save part travels as for any exit. Back
-does nothing on this page (`back = "unavailable"`), as in the original. If
+does nothing on this page (`back = "unavailable"`), as in the original. Our wrapped text came out
+longer than the frame, and CONTINUE wider than its bar, so
+`debriefing::fit_continue` widens the bar and `debriefing::fit_text`
+makes the text smaller in steps (not below 60%) until it fits. The real
+texts end up at 85-90% of their size. If
 the original page can't be drawn, a placeholder page marked as one shows
 the title and text with Continue. Not done: the GEO/RAS/YYY classes differ
 only in the music they play (`musGEO_cadence_lp` and so on); that music

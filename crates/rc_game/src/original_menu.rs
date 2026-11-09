@@ -398,6 +398,24 @@ impl OriginalMenus {
             text,
             picture,
         );
+        // The text's own size again (an earlier debriefing may have made
+        // it smaller), then made to fit.
+        if let Ok(c) = assets.library.class(&page.plan.class) {
+            let fresh = rc_menus::build(&c);
+            if let (Some(Kind::Text(a)), Some(Kind::Text(b))) = (
+                fresh.widget("InfoText").map(|w| &w.kind),
+                page.screen.layout.widget_mut("InfoText").map(|w| &mut w.kind),
+            ) {
+                b.scale = a.scale;
+            }
+        }
+        let size = rc_menus::debriefing::fit_text(&mut page.screen.layout, assets);
+        if size < 1.0 {
+            lines.push(format!(
+                "text made {:.0}% of its size to stay inside its frame",
+                size * 100.0
+            ));
+        }
         if let Some(p) = &filled.picture {
             lines.push(format!("picture {p}"));
             if assets.texture(p).is_none() {
@@ -534,6 +552,14 @@ fn load(
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {
                 check_names(&mut layout, &mut buttons, &plan.page, &log);
+                if rc_menus::debriefing::is_debriefing(&class.family)
+                    && rc_menus::debriefing::fit_continue(&mut layout, &mut assets)
+                {
+                    log.line(format!(
+                        "original menus: page {}: CONTINUE widened to fit its text",
+                        plan.page
+                    ));
+                }
                 for e in &plan.extra_buttons {
                     if screens::fit_button_to_text(&mut layout, &e.name, &mut assets) {
                         log.line(format!(

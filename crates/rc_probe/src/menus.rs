@@ -63,8 +63,10 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
              picture or the CONTINUE button below it.",
             "GUIContent.GEO_Debrief",
         );
+        let widened = rc_menus::debriefing::fit_continue(&mut layout, &mut assets);
+        let size = rc_menus::debriefing::fit_text(&mut layout, &mut assets);
         log.line(format!(
-            "debriefing filled in: picture {:?}, problems {:?}",
+            "debriefing filled in: picture {:?}, problems {:?}, CONTINUE widened: {widened}, text size {size:.2}",
             filled.picture, filled.problems
         ));
     }
