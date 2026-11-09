@@ -598,12 +598,30 @@ are cut into steps of at most 0.05 s. Each step:
      this is Unreal Engine 2's documented behaviour. The game also stores a
      DecelRate of 600 whose use we don't know, so it is not used.
    - Moving into something: on floor-like slopes (normal Z ≥ 0.7) the player
-     follows the slope at the same speed across the ground. On a wall it tries
-     to step up: go up 35, forward, back down onto floor. If that fails it
-     slides along the wall.
+     follows the slope keeping the same direction and speed across the
+     ground, only rising with it. On a wall it tries to step up: go up 35,
+     forward (at least 8 uu, see below), back down onto floor. If that fails
+     it slides along the wall.
    - After moving, it looks for floor up to 35 below and snaps onto it (so
-     stairs and slopes going down keep the feet on the ground). No floor means
+     stairs and slopes going down keep the feet on the ground), always 0.1
+     above it; a box that has crept closer is lifted back. No floor means
      falling.
+   - Every move stops 0.1 uu short of what it hits, measured straight out
+     from the surface, and the rest of the move carries on from there.
+
+   **Same at any frame rate (2026-11-09).** The player used to slow to a stop
+   on some ramps and lips at high frame rates (the user's PC runs 240 fps),
+   because a frame's move there is only a unit or two, and four things lost a
+   fixed amount per frame or per hit: the 0.1 gap was taken off the move and
+   never given back; that gap was measured along the move, so a move that
+   grazed a slope ended up touching it and the next move "hit" it at once;
+   following a slope slid along its surface, which turned each move a little
+   downhill; and a step up only went forward as far as that frame's move,
+   which at 240 fps ended on the sloped front of a low lip, too steep to
+   stand on. `rc_walkcheck` (below) and the `high_frame_rates_*`,
+   `slope_at_an_angle_keeps_speed_at_240` and
+   `low_lip_with_sloped_front_at_240` tests check it. The 8 uu step-up
+   minimum is our own number (about one 60 fps frame of running).
    - The speed afterwards is the distance really moved, so running into a wall
      stops you, like in the engine.
 5. **Falling physics:** gravity -1100 and 35% steering, which can't push you
@@ -613,6 +631,20 @@ are cut into steps of at most 0.05 s. Each step:
    reports the game's falling damage (not applied to health yet).
 6. **Eye height** eases toward 60 (44.8 crouched) at the game's rate and
    absorbs steps and crouching so the camera doesn't jump.
+
+### Checking a level for places the player gets stuck (`rc_walkcheck`)
+
+`rc_walkcheck MAP [--fps N] [--near X,Y,Z RADIUS] [--link FROM TO]` (in
+`rc_nav`, no window) loads a map's collision and its AI path network. The
+level designers linked path points that an AI can walk straight between, so
+the player should manage it too. For every walking link (not jumps, doors or
+links blocked until a script opens them) a player starts on one end and runs
+at the other, steering at it every frame, for twice the time it should take.
+It writes `logs/rc_walkcheck.log`: `FAIL` for runs that never arrive, `SLOW`
+for runs that took over 1.5 times the straight run or started inside the
+level, with where the player was slowest. Some failures are real: paths made
+for smaller characters (a commando is 168 uu tall) under low pipes and
+through crawl spaces.
 
 ### Collision
 
@@ -1939,7 +1971,11 @@ state and distances, and every 5 s a fight line with each member's shots,
 hits, kills and revives. For the fight it puts stand-in droids (real
 combat targets with the game's droid size and health that stand still and
 don't shoot back) in sight of the squad. The checks are listed in
-`README.md`.
+`README.md`. `rc_squad_sim MAP --jobs` is a second run, a marker-job tour:
+for each job kind the map has it puts the player near the open marker of
+that kind nearest the squad, orders it, and checks after 45 s that the job
+was done (or the post taken), that the player asked for it once and that a
+squad mate answered.
 
 ### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
 
@@ -1959,6 +1995,12 @@ quiet moment). One squad line at a time; a line keeps the squad quiet for
 its WAV length plus `gap`. The player's order lines are urgent and answers
 wait for them; a new order drops answers to older ones. If the chosen
 squad mate has no recording of a line, another standing one says it.
+A rule marked `optional` may find no recording at all (Sev has no
+GrenadeReady in the game); that is not counted as a missing line. Squad
+events name jobs as the squad panel does ("Breach door"); `Chatter` turns
+that into the job's key ("breach") for `job_assigned:breach` and the like.
+A player (`leader`) rule speaks at most once per frame, because a breach
+gives every squad mate a spot at once.
 `rc_squad_plugin::voice` gathers events in `SquadHeard`, plays lines as
 `Voice` sounds and logs every line said or skipped (`squad: ... voice:`).
 

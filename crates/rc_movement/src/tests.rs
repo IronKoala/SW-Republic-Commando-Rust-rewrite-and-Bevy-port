@@ -229,3 +229,90 @@ fn full_jump_while_pushing_into_a_wall() {
     }
     assert!((peak - z0 - 102.6).abs() < 1.0, "peak {}", peak - z0);
 }
+
+/// Run forward for `secs` at `fps` frames a second.
+fn run_at(p: &mut Pawn, w: &dyn World, input: MoveInput, secs: f32, fps: f32) {
+    for _ in 0..(secs * fps).round() as usize {
+        p.step(1.0 / fps, &input, w);
+    }
+}
+
+/// Fast PCs run 240 frames a second or more, where each frame's move is a
+/// unit or two. Ramps, stairs and steps must work the same as at 60:
+/// before, the player slowed to a stop on ramps at 240.
+#[test]
+fn high_frame_rates_climb_like_60() {
+    let w = test_room();
+    for fps in [144.0, 240.0, 500.0, 1000.0] {
+        let mut p = player_at(Vec3::new(700.0, LANE_RAMP_30, 0.0));
+        run_at(&mut p, &w, forward(), 1.6, fps);
+        assert!((p.feet().z - 200.0).abs() < 0.5, "{fps} fps, 30° ramp: feet {}", p.feet().z);
+
+        let mut p = player_at(Vec3::new(700.0, LANE_STAIRS, 0.0));
+        run_at(&mut p, &w, forward(), 2.0, fps);
+        assert!((p.feet().z - 128.0).abs() < 0.5, "{fps} fps, stairs: feet {}", p.feet().z);
+
+        let mut p = player_at(Vec3::new(700.0, LANE_STEP_30, 0.0));
+        run_at(&mut p, &w, forward(), 1.5, fps);
+        assert!((p.feet().z - 30.0).abs() < 0.5, "{fps} fps, step: feet {}", p.feet().z);
+    }
+}
+
+/// A gentle slope in a level far from the middle of the map, run across at
+/// an angle, like the first ramp in geo_01a: at 240 frames a second the
+/// player kept full speed. Before, rounding left the box touching the slope
+/// and it slowed to a crawl, or the slide along the slope turned it
+/// downhill.
+#[test]
+fn slope_at_an_angle_keeps_speed_at_240() {
+    // 16 degrees, rising along +X, at x = 4000, y = -8000.
+    let (x0, y0) = (4000.0, -8000.0);
+    let rise = 400.0;
+    let run = rise / 16f32.to_radians().tan();
+    let a = Vec3::new(x0, y0 - 2000.0, -2000.0);
+    let b = Vec3::new(x0 + run, y0 - 2000.0, -2000.0 + rise);
+    let c = Vec3::new(x0 + run, y0 + 2000.0, -2000.0 + rise);
+    let d = Vec3::new(x0, y0 + 2000.0, -2000.0);
+    let floor_lo = Vec3::new(x0 - 3000.0, y0 - 2000.0, -2000.0);
+    let floor_hi = Vec3::new(x0 - 3000.0, y0 + 2000.0, -2000.0);
+    let w = TriangleWorld::new(vec![[a, b, c], [a, c, d], [floor_lo, a, d], [floor_lo, d, floor_hi]]);
+    let start = Vec3::new(x0 - 200.0, y0, -2000.0);
+    // 30 degrees off straight up the slope.
+    let input = MoveInput { forward: 1.0, yaw: 30f32.to_radians(), ..Default::default() };
+    let mut p = Pawn::new(MoveParams::player_commando(), start);
+    run_at(&mut p, &w, MoveInput::default(), 0.2, 240.0);
+    run_at(&mut p, &w, input, 1.5, 240.0);
+    let moved = (p.location - Vec3::new(start.x, start.y, p.location.z)).length_2d();
+    // Full speed is 450 uu/s, reached in under half a second.
+    assert!(moved > 550.0, "moved only {moved} in 1.5 s");
+    let heading = (p.location.y - start.y).atan2(p.location.x - start.x).to_degrees();
+    assert!((heading - 30.0).abs() < 3.0, "drifted to {heading} degrees");
+    assert_eq!(p.mode, Mode::Walking);
+}
+
+/// A low lip (3 high) with a sloped front, too steep to stand on: at 240
+/// frames a second each frame's move ended on the sloped front, so the
+/// step up failed every frame and the player stopped dead.
+#[test]
+fn low_lip_with_sloped_front_at_240() {
+    let mut tris = vec![];
+    let quad = |t: &mut Vec<[Vec3; 3]>, p: [Vec3; 4]| {
+        t.push([p[0], p[1], p[2]]);
+        t.push([p[0], p[2], p[3]]);
+    };
+    let v = Vec3::new;
+    // Floor to x = 100, a front sloping up to 3 high by x = 101, a top on.
+    quad(&mut tris, [v(-1000.0, -500.0, 0.0), v(100.0, -500.0, 0.0), v(100.0, 500.0, 0.0), v(-1000.0, 500.0, 0.0)]);
+    quad(&mut tris, [v(100.0, -500.0, 0.0), v(101.0, -500.0, 3.0), v(101.0, 500.0, 3.0), v(100.0, 500.0, 0.0)]);
+    quad(&mut tris, [v(101.0, -500.0, 3.0), v(1000.0, -500.0, 3.0), v(1000.0, 500.0, 3.0), v(101.0, 500.0, 3.0)]);
+    let w = TriangleWorld::new(tris);
+    for fps in [60.0, 240.0, 1000.0] {
+        let mut p = Pawn::new(MoveParams::player_commando(), v(0.0, 0.0, 0.0));
+        run_at(&mut p, &w, MoveInput::default(), 0.2, fps);
+        // Walk (not run) up to it, so each frame's move is short.
+        let walk = MoveInput { forward: 1.0, walk: true, ..Default::default() };
+        run_at(&mut p, &w, walk, 1.5, fps);
+        assert!(p.location.x > 250.0, "{fps} fps: stopped at x = {}", p.location.x);
+        assert!((p.feet().z - 3.0).abs() < 0.5, "{fps} fps: feet {}", p.feet().z);
+    }
+}
