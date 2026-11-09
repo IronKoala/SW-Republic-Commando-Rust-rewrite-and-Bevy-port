@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Save and load screens: notes brought up to date (README, docs/ORIGINAL_MENUS.md)
+
+- **Changed:** Removed two stale lines from README's "what doesn't work" list ("the campaign, load and save pages are still placeholders" and "there's no Load Game screen yet") and the stale "not done yet" list in `docs/ORIGINAL_MENUS.md`.
+- **Why:** The original LOAD GAME and SAVE GAME pages and the pause menu's save buttons were finished in PR #49 (merged 2026-11-01), but the notes still said they were missing, so they were listed again as remaining work.
+- **Tested how:** Docs only; no code changed.
+- **Result:** The notes match the code in `crates/rc_game/src/original_saves.rs`.
+- **Still broken / not tested:** Nothing known. The user tested LOAD GAME, SAVE GAME, QUICK SAVE and QUICK LOAD on Windows on 2026-11-09 and said they all work.
+- **Next:** Nothing for these pages.
+
 ## 2026-11-09: Walking no longer gets stuck at high frame rates (rc_movement, rc_walkcheck)
 
 - **Changed:** `crates/rc_movement/src/lib.rs`: (1) after a hit, the rest of the move counts from where the box really stopped, so the 0.1 uu gap isn't lost from it; (2) that gap is measured straight out from the surface, not along the move; (3) walking up a floor-like slope keeps the move's direction across the ground and only adds the rise (it used to slide along the surface, which turned each move a little downhill); (4) the floor check looks from 0.1 above, so a box that crept closer than 0.1 to the floor is lifted back; (5) a step up goes forward at least 8 uu (`MIN_STEP_FORWARD`). New tool `crates/rc_nav/src/bin/rc_walkcheck.rs`. Three new tests in `crates/rc_movement/src/tests.rs`.
