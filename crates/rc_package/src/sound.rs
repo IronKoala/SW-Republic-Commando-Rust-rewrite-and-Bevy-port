@@ -7,6 +7,14 @@
 //!   disk while the game runs (music, and some ambient loops).
 //! - `SoundMultiple`: a list of other sounds the game picks from.
 //!
+//! A `Sound` (and some groups) names its `Params`: an `AudioParams` object
+//! in `Params_VOX.uax` (speech) or `Params_SFX.uax` (effects) that says how
+//! the game plays it: heard from nowhere in particular (`NonPositional`,
+//! radio chatter, briefings) or from its place in the level, how far it
+//! carries (`Radius`), and whether it gets quieter with distance at all
+//! (`bDisable3DFalloff`). Those property names and values were read from
+//! the user's own game files; see [`AudioParams`].
+//!
 //! The `Sound` layout is UE2's `USound` (UE Viewer, github.com/gildor2/UEViewer,
 //! MIT, Konstantin Nosov, `Unreal/UnrealSound/UnSound.cpp`): properties, the
 //! file type as a name ("WAV"), then a lazy array with the file's bytes.
@@ -108,6 +116,88 @@ pub fn read_streamed(pkg: &Package, data: &[u8], export: &Export) -> Result<Soun
         file_name,
         leftover: r.len() - r.pos(),
     })
+}
+
+/// What an `AudioParams` object says about playing the sounds that name
+/// it. Only the PC values are kept; the game also stores Xbox ones
+/// (`RadiusXBox`, ...), which are left out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioParams {
+    /// `Radius`, Unreal units: how far the sound carries before it starts
+    /// getting quieter (see `rc_scripts_plugin`'s sounds for how we use
+    /// it). `None` when the object gives none.
+    pub radius: Option<f32>,
+    /// `NonPositional`: heard the same wherever the listener is (radio,
+    /// briefings, the player's own lines).
+    pub non_positional: bool,
+    /// `bDisable3DFalloff`: from its side, but no quieter with distance
+    /// (big explosions).
+    pub no_falloff: bool,
+}
+
+/// Read an `AudioParams` export (properties only).
+pub fn read_audio_params(pkg: &Package, data: &[u8], export: &Export) -> Result<AudioParams> {
+    let mut r = Reader::new(object_bytes(data, export)?);
+    let props = properties::read_properties(pkg, &mut r)?;
+    Ok(audio_params_from(pkg, &props))
+}
+
+fn audio_params_from(pkg: &Package, props: &[Property]) -> AudioParams {
+    use properties::Value;
+    let flag = |n: &str| {
+        matches!(
+            properties::find(pkg, props, n).map(|p| &p.value),
+            Some(Value::Bool(true))
+        )
+    };
+    AudioParams {
+        radius: match properties::find(pkg, props, "Radius").map(|p| &p.value) {
+            Some(Value::Float(f)) => Some(*f),
+            _ => None,
+        },
+        non_positional: flag("NonPositional"),
+        no_falloff: flag("bDisable3DFalloff"),
+    }
+}
+
+/// Every `AudioParams` in a package (`Params_VOX.uax`, `Params_SFX.uax`),
+/// by name as stored. Objects that don't read are left out.
+pub fn read_all_audio_params(pkg: &Package, data: &[u8]) -> Vec<(String, AudioParams)> {
+    pkg.exports
+        .iter()
+        .filter(|e| pkg.export_class_name(e) == "AudioParams")
+        .filter_map(|e| {
+            read_audio_params(pkg, data, e)
+                .ok()
+                .map(|p| (pkg.name(e.object_name).to_string(), p))
+        })
+        .collect()
+}
+
+/// The `Params` a sound (or group) names, as `package.name` in lower case
+/// (`params_vox.voice_ca1_2d`), or `None` when it names none. `package` is
+/// the outermost package of an imported object, or `this` for one in the
+/// same package.
+pub fn params_of(pkg: &Package, props: &[Property], this: &str) -> Option<String> {
+    let r = match properties::find(pkg, props, "Params").map(|p| &p.value) {
+        Some(properties::Value::Object(o)) if *o != 0 => *o,
+        _ => return None,
+    };
+    let name = pkg.object_name(r);
+    let mut package = this.to_string();
+    if let crate::ObjectRef::Import(i) = crate::ObjectRef::from_index(r) {
+        let mut outer = pkg.imports.get(i)?.package_index;
+        for _ in 0..16 {
+            match crate::ObjectRef::from_index(outer) {
+                crate::ObjectRef::Import(j) if j < pkg.imports.len() => {
+                    package = pkg.name(pkg.imports[j].object_name).to_string();
+                    outer = pkg.imports[j].package_index;
+                }
+                _ => break,
+            }
+        }
+    }
+    Some(format!("{package}.{name}").to_ascii_lowercase())
 }
 
 /// A `SoundMultiple` export: a group of sounds.

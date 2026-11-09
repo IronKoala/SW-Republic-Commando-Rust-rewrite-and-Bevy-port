@@ -744,7 +744,7 @@ fn steps() -> Vec<Step> {
             60.0,
         ),
         Check(
-            "the scripts play the game's own lines, as long as each one lasts",
+            "the scripts play the game's own lines, as long as each one lasts, some from their place in the level",
             level_script_lines,
         ),
         Check("the start barricade blocks the way", |w| {
@@ -2181,8 +2181,10 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
         .cloned()
         .unwrap_or_default();
     let got = format!(
-        "{read} sounds read from {packages}, {measured} measured, {missing} missing; played {:?}, {} started on the sound card, {} not loaded; first line of speech {line} lasts {:.1} s",
+        "{read} sounds read from {packages}, {measured} measured, {missing} missing; played {:?}, {} from a place ({:?}), {} started on the sound card, {} not loaded; first line of speech {line} lasts {:.1} s",
         st.sounds_played,
+        st.sounds_placed.len(),
+        st.sounds_placed,
         st.sounds_started,
         st.sounds_missing.len(),
         s.director.sound_length(&line),
@@ -2193,6 +2195,7 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
         && st.sounds_played.len() >= 2
         && st.sounds_started >= 2
         && st.sounds_missing.is_empty()
+        && !st.sounds_placed.is_empty()
     {
         Ok(got)
     } else {

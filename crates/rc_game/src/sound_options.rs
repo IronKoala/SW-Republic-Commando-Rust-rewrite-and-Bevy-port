@@ -10,7 +10,7 @@
 
 use crate::music::Track;
 use crate::settings::Settings;
-use bevy::audio::{PlaybackSettings, SpatialListener, Volume};
+use bevy::audio::{PlaybackSettings, SpatialListener, SpatialScale, Volume};
 use bevy::prelude::*;
 use rc_game_core::{GameLog, PlayerCamera, SoundAt, Voice};
 use std::collections::VecDeque;
@@ -31,6 +31,16 @@ impl Plugin for SoundOptionsPlugin {
 /// The distance between the listener's ears, in Bevy units (a head is
 /// about 0.2 m; a Bevy unit is 50 Unreal units, about a metre).
 const EAR_GAP: f32 = 0.2;
+
+/// Bevy's 3D sound (rodio's) also makes a sound quieter with distance, by
+/// one over the distance squared in Bevy units: a droid 10 m away would
+/// play at 1/100 of its loudness. The parts that place sounds already
+/// work out their own loudness with distance (from the game's numbers),
+/// so placed sounds are shrunk by this much before Bevy sees them: its own
+/// fading then only starts beyond 1000 units (50,000 uu, a kilometre).
+/// Which ear a sound is nearer doesn't change with the shrinking, so the
+/// left/right of 3D SOUND stays as it was.
+const SPATIAL_SHRINK: f32 = 1e-3;
 
 /// How loud a new sound plays: its own loudness times the master volume
 /// and the VOICES or SOUND FX volume.
@@ -59,6 +69,7 @@ fn adjust_new_sounds(
         }
         if placed && settings.audio.sound_3d {
             p.spatial = true;
+            p.spatial_scale = Some(SpatialScale::new(SPATIAL_SHRINK));
         }
     }
 }
@@ -179,7 +190,12 @@ mod tests {
             .spawn((PlaybackSettings::ONCE, SoundAt::place(Vec3::X)))
             .id();
         app.update();
-        assert!(app.world().get::<PlaybackSettings>(e).unwrap().spatial);
+        let p = app.world().get::<PlaybackSettings>(e).unwrap();
+        assert!(p.spatial);
+        assert_eq!(
+            p.spatial_scale.map(|s| s.0),
+            Some(Vec3::splat(SPATIAL_SHRINK))
+        );
         app.world_mut().resource_mut::<Settings>().audio.sound_3d = false;
         let e = app
             .world_mut()
