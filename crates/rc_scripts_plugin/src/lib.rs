@@ -46,6 +46,7 @@
 //! (droid factories, the squad, sounds) can hook in by name.
 
 pub mod characters;
+pub mod cutscene;
 pub mod save;
 pub mod sounds;
 
@@ -94,14 +95,25 @@ impl Plugin for ScriptsPlugin {
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
                 Update,
-                (bacta, run, characters::cast, sounds::play, hide_parts)
+                (
+                    bacta,
+                    run,
+                    characters::cast,
+                    sounds::play,
+                    hide_parts,
+                    cutscene::apply,
+                )
                     .chain()
                     .in_set(ScriptSystems)
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
             )
             .add_systems(Update, (sounds::started, sounds::pause))
-            .add_systems(OnExit(GameState::InGame), (forget, sounds::forget));
+            .add_systems(OnEnter(GameState::Loading), cutscene::forget)
+            .add_systems(
+                OnExit(GameState::InGame),
+                (forget, sounds::forget, cutscene::forget),
+            );
     }
 }
 
@@ -170,6 +182,8 @@ pub struct LevelScript {
     /// Sounds the scripts asked for this frame.
     sounds: Vec<sounds::SoundRequest>,
     started: bool,
+    /// What the cutscene asks of the player and the screen.
+    pub scene: cutscene::Scene,
     /// Counts for the self-tests.
     pub stats: PlayStats,
 }
@@ -410,6 +424,7 @@ fn build(
         places,
         sounds: Vec::new(),
         started: false,
+        scene: cutscene::Scene::default(),
         stats: PlayStats::default(),
     });
     commands.insert_resource(Objectives::default());
@@ -668,6 +683,27 @@ fn run(
                     waits,
                     deadline: now + script.director.settings.character_grace_seconds,
                 };
+                // Cutscenes: holding the player, fades, the player's
+                // teleports.
+                if cutscene::KINDS.contains(&call.kind.as_str()) || call.kind == "teleporttopoint"
+                {
+                    let at = format!(
+                        "{PART}: t={now:.2} {} #{} {}",
+                        call.script, call.index, call.kind
+                    );
+                    let settings = &script.director.settings;
+                    let places = &script.places;
+                    if script.scene.take(
+                        &call.action,
+                        now,
+                        |t| settings.is_player(t),
+                        |d| places.find(d).map(|p| (p.location, p.yaw)),
+                        &at,
+                        &log,
+                    ) {
+                        continue;
+                    }
+                }
                 if characters::KINDS.contains(&call.kind.as_str()) {
                     script.calls.push(call);
                     continue;
