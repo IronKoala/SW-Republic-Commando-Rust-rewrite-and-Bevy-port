@@ -46,6 +46,7 @@
 //! (droid factories, the squad, sounds) can hook in by name.
 
 pub mod characters;
+pub mod markers;
 pub mod save;
 pub mod sounds;
 
@@ -89,12 +90,13 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<ChangeLevel>()
+            .add_message::<rc_game_core::MarkerJob>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
                 Update,
-                (bacta, run, characters::cast, sounds::play, hide_parts)
+                (bacta, markers::run, run, characters::cast, sounds::play, hide_parts)
                     .chain()
                     .in_set(ScriptSystems)
                     .in_set(GameSet::Simulate)
@@ -169,6 +171,9 @@ pub struct LevelScript {
     pub places: characters::Places,
     /// Sounds the scripts asked for this frame.
     sounds: Vec<sounds::SoundRequest>,
+    /// Squad marker anchors (charges, consoles, door locks) and what they
+    /// set off (see `markers.rs`).
+    pub anchors: Vec<markers::Anchor>,
     started: bool,
     /// Counts for the self-tests.
     pub stats: PlayStats,
@@ -207,6 +212,10 @@ pub struct PlayStats {
     pub squad_orders: Vec<String>,
     /// Characters an action named that weren't found.
     pub no_character: Vec<String>,
+    /// Squad marker job steps carried out: `ANCHOR Step`.
+    pub marker_steps: Vec<String>,
+    /// Locked doors opened by a breach or a slice (mover names).
+    pub doors_unlocked: Vec<String>,
 }
 
 impl LevelScript {
@@ -401,6 +410,26 @@ fn build(
         "{PART}: {} places characters can be sent to",
         places.len()
     ));
+    let anchors = markers::read_anchors(map);
+    for a in &anchors {
+        log.line(format!(
+            "{PART}:   marker anchor {} ({}): started {:?}, armed {:?}, done {:?}{}{}",
+            a.name,
+            a.class,
+            a.started,
+            a.armed,
+            a.done,
+            a.destroys
+                .as_ref()
+                .map(|(p, _)| format!(", blows away {p}"))
+                .unwrap_or_default(),
+            if a.doors.is_empty() {
+                String::new()
+            } else {
+                format!(", opens doors {:?}", a.doors)
+            }
+        ));
+    }
     commands.insert_resource(LevelScript {
         director,
         dispensers,
@@ -409,6 +438,7 @@ fn build(
         calls: Vec::new(),
         places,
         sounds: Vec::new(),
+        anchors,
         started: false,
         stats: PlayStats::default(),
     });

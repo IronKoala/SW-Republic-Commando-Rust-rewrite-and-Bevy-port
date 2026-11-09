@@ -1433,6 +1433,50 @@ the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
 clone troopers and the like are logged and skipped), one sequence run
 separately per character, and `ScriptPriority`.
 
+### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
+
+Every squad marker in a map (`MarkerDemolition`, `MarkerHackTerminal`,
+`MarkerHackDoor`, `MarkerDoorBreach`, `MarkerSnipe`, ...) names an
+**anchor** (`Anchor`): the map actor the job is for. The anchor holds the
+level's side of the job as map settings, and the level's scripts wait for
+the events it sends:
+
+| Anchor class | Started | Armed | Done | Also |
+|---|---|---|---|---|
+| `DemolitionCharge` | `EventUnderway` | `ChargeArmed.Event` | `ChargeExplode.Event` | blows away `PropToDestroy` |
+| `HackTerminal*` (console) | `EventUnderway`, `ActiveState.Event` | | `HackedState.Event` | |
+| `HackDoor*` (lock, sliced) | `EventUnderway` | | `DoorUnlockedState.Event` | opens its door |
+| `BreachDoor*` (lock, blown) | `EventUnderway` | | `DoorDamagedState.Event`, `DoorUnlockedState.Event` | opens `DoorLeft`, `DoorRight` |
+| anything else (a sniper post's anchor) | `EventUnderway` | | | |
+
+The order marker can have its own `EventUnderway` too (geo_01a's
+`MarkerDemolition2` sends `SpawnDemoDroids`), sent with the anchor's.
+A door can have both a slice lock and a breach lock; they name each other
+(`MatchingComponent`) and either one opens the door. The doors are the
+`MoverDB_*` double doors, whose class default state is `Locked`: they
+never open on their own, so the movers part treats them as still until
+`LevelMovers::open_named` opens them. They then stay open (the original
+lets a sliced door work as an automatic door again; not done).
+
+How it flows: the squad part (`rc_squad_plugin`) sends
+`rc_game_core::MarkerJob { anchor, step }` when a squad mate starts a job
+or takes up a post (`Started`), lights a fuse (`Armed`) and finishes
+(`Done`, with the job's result). `markers::run` in the scripts part sends
+the anchor's events into the director, once per step per anchor (a
+`Done` with no `Started` before it sends both), blows away the prop
+(`Director::destroy_prop_named`, which also sends that prop's own
+destroyed event) and opens the doors. Another part can send `MarkerJob`
+too (the player doing a job himself, later).
+
+`rc_script_check` lists every map's anchors and checks that each door they
+open is a door the movers part moves. On the 13 Geonosis maps: 57 anchors,
+61 of their events are ones scripts wait for, and 38 of 38 doors found.
+
+Not done: the anchor's own look changing (a lit charge, a console's
+screen, the blown lock's mesh), its sounds, the player doing a job with
+Use, and saving which steps were sent (after a load a step can be sent
+again if the squad repeats it).
+
 ### geo_01a, worked through
 
 From the map: `levelstart` starts the gunship intro (`ScriptedTrigger52`),

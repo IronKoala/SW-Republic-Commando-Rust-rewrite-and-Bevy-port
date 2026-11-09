@@ -151,8 +151,14 @@ copy of the game.
   anti-armour positions are held until you press F4, the sniper firing
   single long-range shots, the grenadier throwing a grenade every few
   seconds. Every job is a `[job.*]` part of `data/squad/squad.toml`, so
-  mods can change them or add new ones. Doors don't open yet: the squad
-  reports the job done, and the level scripts part will act on it. The
+  mods can change them or add new ones. When a job is
+  done the level hears about it (tested in the cloud sandbox with the
+  game's files, not yet on Windows or by playing): a demolition charge
+  sends its map events and blows away the bunker door or barricade it is
+  on, a sliced console sends its events, and a sliced or breached door
+  lock opens its locked double door, so the level's scripts carry on.
+  The charge, console and lock don't change their look yet, and you can't
+  do these jobs yourself yet (only the squad). The
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
   are the game's; how long the work takes is our guess. Traps, mines and

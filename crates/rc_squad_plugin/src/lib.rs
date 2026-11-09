@@ -45,7 +45,8 @@ use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
-    LevelCollision, Player, PlayerCamera, SquadMember, SquadReadout, SquadStatus,
+    LevelCollision, MarkerJob, MarkerJobStep, Player, PlayerCamera, SquadMember, SquadReadout,
+    SquadStatus,
 };
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
@@ -325,6 +326,7 @@ impl Plugin for SquadPlugin {
         app.add_message::<SquadOrder>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<SquadJobDone>()
+            .add_message::<MarkerJob>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadOptions>()
@@ -800,6 +802,7 @@ fn run_squad(
     mut fire: MessageWriter<FireShot>,
     mut jobs: ResMut<SquadJobQueue>,
     library: Option<Res<WeaponLibrary>>,
+    mut marker_jobs: MessageWriter<MarkerJob>,
     mut commands: Commands,
     log: Option<Res<GameLog>>,
 ) {
@@ -879,6 +882,26 @@ fn run_squad(
                 }
             }
             SquadEvent::HeldFire { .. } => log_line(&log, format!("t={:.2} {e}", squad.time)),
+            // Tell the level how a marker job is going (its anchor's
+            // "underway" and "armed" events). Done comes with the result.
+            SquadEvent::MarkerStarted { member, marker }
+            | SquadEvent::Posted { member, marker, .. }
+            | SquadEvent::FuseLit { member, marker, .. } => {
+                let step = if matches!(e, SquadEvent::FuseLit { .. }) {
+                    MarkerJobStep::Armed
+                } else {
+                    MarkerJobStep::Started
+                };
+                if let Some((spot, _)) = squad.markers.iter().find(|(s, _)| &s.name == marker) {
+                    if !spot.anchor.is_empty() {
+                        marker_jobs.write(MarkerJob {
+                            anchor: spot.anchor.clone(),
+                            step,
+                            by: member.clone(),
+                        });
+                    }
+                }
+            }
             SquadEvent::JobResult { .. } | SquadEvent::Blast { .. } => {
                 log_line(&log, format!("t={:.2} {e}", squad.time));
                 jobs.0.push(e.clone());
@@ -966,6 +989,7 @@ fn carry_out_jobs(
     bodies: Query<(Entity, &Transform, &Hittable), Without<Dead>>,
     mut damage: MessageWriter<Damage>,
     mut done: MessageWriter<SquadJobDone>,
+    mut marker_jobs: MessageWriter<MarkerJob>,
     log: Option<Res<GameLog>>,
 ) {
     for e in jobs.0.drain(..) {
@@ -996,6 +1020,11 @@ fn carry_out_jobs(
                         &log,
                         format!("{job} done: sets off {anchor_class} {anchor} (SquadJobDone)"),
                     );
+                    marker_jobs.write(MarkerJob {
+                        anchor: anchor.clone(),
+                        step: MarkerJobStep::Done,
+                        by: member.clone(),
+                    });
                     done.write(SquadJobDone {
                         job,
                         marker,

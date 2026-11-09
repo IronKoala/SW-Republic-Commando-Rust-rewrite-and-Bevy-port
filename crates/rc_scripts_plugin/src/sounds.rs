@@ -410,6 +410,7 @@ mod tests {
             calls: vec![],
             places: Default::default(),
             sounds: vec![],
+            anchors: vec![],
             started: true,
             stats: Default::default(),
         });

@@ -48,7 +48,8 @@ pub mod units;
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
-    LevelScriptsRun, RaiseEvent, ScriptEvent, ScriptTags, SquadStanceOrder,
+    LevelScriptsRun, MarkerJob, MarkerJobStep, RaiseEvent, ScriptEvent, ScriptTags,
+    SquadStanceOrder,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
@@ -88,6 +89,7 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
+            .add_message::<MarkerJob>()
             .add_message::<ChangeLevel>()
             .init_resource::<save::SaveList>()
             .add_message::<save::SaveGame>()

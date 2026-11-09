@@ -965,6 +965,23 @@ impl MoverSet {
         events
     }
 
+    /// Open the mover with this actor name (`MoverDB_GEO3`) whatever its
+    /// state, even a `Locked` door: a breached or sliced door's leaves.
+    /// It stays open. Returns whether there is such a mover.
+    pub fn open_named(&mut self, name: &str, events: &mut Vec<MoverEvent>) -> bool {
+        let Some(i) = self
+            .movers
+            .iter()
+            .position(|m| m.info.place.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        let now = self.time;
+        self.movers[i].start_opening(i, now, events);
+        self.send_queued(events);
+        true
+    }
+
     /// Start mover `i` closing. For tests and the check tool.
     pub fn close(&mut self, i: usize) -> Vec<MoverEvent> {
         let mut events = Vec::new();

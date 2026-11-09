@@ -1028,6 +1028,20 @@ fn steps() -> Vec<Step> {
             }
             Ok(notes.join(", "))
         }),
+        // Squad marker jobs reach the level: geo_01a's bunker door charge
+        // (DemolitionCharge2) going off sends its map events, the script
+        // waiting for BunkerDoorDestroyed carries on, and the door prop
+        // (Prop12) is blown away.
+        Note(|w| marker_job(w, DEMO_ANCHOR)),
+        Until(
+            "the bunker door charge's events reach the scripts",
+            |w| marker_heard(w, DEMO_DONE_EVENT),
+            5.0,
+        ),
+        Check(
+            "the charge blew the bunker door away and the waiting script went on",
+            marker_demo_summary,
+        ),
         // The level exit: geo_01a's arrows lead to geo_01b.
         Check(
             "the level has an open exit to the next map",
@@ -1055,6 +1069,20 @@ fn steps() -> Vec<Step> {
         Check(
             "the next map's start is saved as a checkpoint, with the health",
             level_exit_checkpoint,
+        ),
+        // geo_01b's hangar door: slicing its lock (HackDoorGeo6) sends
+        // HangarDoorHacked and opens the locked double door.
+        Check("the hangar door starts locked shut", |w| {
+            match door_closed(w, HANGAR_DOOR) {
+                Some(true) => Ok(format!("{HANGAR_DOOR} closed")),
+                other => Err(format!("{HANGAR_DOOR}: {other:?}")),
+            }
+        }),
+        Note(|w| marker_job(w, HANGAR_LOCK)),
+        Until(
+            "slicing the lock opens the hangar door",
+            |w| marker_heard(w, HANGAR_EVENT) && door_closed(w, HANGAR_DOOR) == Some(false),
+            5.0,
         ),
         Press(Action::Pause),
         Wait(0.2),
@@ -2486,6 +2514,73 @@ const SPAWN_DEATH_EVENT: &str = "DeadGunnerDroid";
 
 /// The bunker spawners, and the living droids they made: (id, feet,
 /// spawner location).
+const DEMO_ANCHOR: &str = "DemolitionCharge2";
+const DEMO_DONE_EVENT: &str = "BunkerDoorDestroyed";
+const HANGAR_LOCK: &str = "HackDoorGeo6";
+const HANGAR_EVENT: &str = "HangarDoorHacked";
+const HANGAR_DOOR: &str = "MoverDB_GEO6";
+
+/// Report a squad marker job done, as the squad part does when a squad
+/// mate finishes it.
+fn marker_job(w: &mut World, anchor: &str) {
+    w.write_message(rc_game_core::MarkerJob {
+        anchor: anchor.into(),
+        step: rc_game_core::MarkerJobStep::Done,
+        by: "self-test".into(),
+    });
+}
+
+/// Whether the level's scripts have had this event.
+fn marker_heard(w: &mut World, event: &str) -> bool {
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| s.director.history.iter().any(|(_, e)| e.eq_ignore_ascii_case(event)))
+}
+
+/// Whether the door with this actor name is shut (`None`: no such door).
+fn door_closed(w: &mut World, name: &str) -> Option<bool> {
+    let m = w.get_resource::<rc_movers_plugin::LevelMovers>()?;
+    let set = m.read();
+    set.movers
+        .iter()
+        .find(|d| d.info.place.name.eq_ignore_ascii_case(name))
+        .map(|d| d.is_closed())
+}
+
+fn marker_demo_summary(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no level scripts".into());
+    };
+    let sent: Vec<&str> = s
+        .director
+        .history
+        .iter()
+        .map(|(_, e)| e.as_str())
+        .filter(|e| {
+            ["DemoUnderway", "SpawnDemoDroids", "DemoChargeArmed", DEMO_DONE_EVENT]
+                .iter()
+                .any(|x| x.eq_ignore_ascii_case(e))
+        })
+        .collect();
+    // ScriptedTrigger4 waits for BunkerDoorDestroyed at its action 1.
+    let waiting = s
+        .director
+        .script_states()
+        .into_iter()
+        .find(|(n, ..)| n.eq_ignore_ascii_case("ScriptedTrigger4"))
+        .map(|(_, next, what)| format!("{next} {what}"))
+        .unwrap_or_default();
+    let got = format!(
+        "sent {sent:?}; steps {:?}; props destroyed {:?}; ScriptedTrigger4 at {waiting}",
+        s.stats.marker_steps, s.stats.props_destroyed
+    );
+    let gone = !s.stats.props_destroyed.is_empty();
+    if sent.len() == 4 && gone && !waiting.contains("bunkerdoordestroyed") {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 const CAST_SPAWN: &str = "SpawnTrench02";
 const CAST_GO: &str = "LoneRangerJump";
 const CAST_TAG: &str = "LoneRanger";
