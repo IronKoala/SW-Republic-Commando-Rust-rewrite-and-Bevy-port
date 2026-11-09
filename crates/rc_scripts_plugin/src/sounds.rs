@@ -411,6 +411,7 @@ mod tests {
             places: Default::default(),
             sounds: vec![],
             started: true,
+            scene: crate::cutscene::Scene::default(),
             stats: Default::default(),
         });
         w

@@ -152,6 +152,10 @@ pub struct SquadMapData {
     pub nav: Option<NavGraph>,
     /// One line per thing found, for the log.
     pub notes: Vec<String>,
+    /// The map was read and has no squad (no `CTSquad` actor, markers or
+    /// squad-mate spawners): the prologue, briefings and epilogue. No
+    /// squad mates are brought in.
+    pub squadless: bool,
 }
 
 impl SquadMapData {
@@ -183,6 +187,13 @@ impl SquadMapData {
                     info.markers.len(),
                     info.factories.len()
                 ));
+                if !info.wants_squad() {
+                    out.notes.push(
+                        "no CTSquad actor in the map: this map has no squad (a cutscene map)"
+                            .into(),
+                    );
+                    out.squadless = true;
+                }
                 for m in &info.markers {
                     out.notes.push(format!(
                         "  marker {} ({}, anchor {} {}) stand at ({:.0}, {:.0}, {:.0})",
@@ -495,8 +506,16 @@ fn spawn_squad(
     for line in settings.summary() {
         log_line(&log, line);
     }
-    if settings.spawn == rc_squad::Spawn::None {
-        log_line(&log, "spawn = none: no squad this time");
+    let squadless = map.as_ref().is_some_and(|m| m.squadless);
+    if settings.spawn == rc_squad::Spawn::None || squadless {
+        log_line(
+            &log,
+            if squadless {
+                "this map has no squad (no CTSquad actor): no squad mates"
+            } else {
+                "spawn = none: no squad this time"
+            },
+        );
         state.squad = Some(
             Squad::new(
                 SquadSettings {

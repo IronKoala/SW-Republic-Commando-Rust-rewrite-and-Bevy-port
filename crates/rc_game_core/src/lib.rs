@@ -36,6 +36,7 @@
 //! tests run anywhere.
 
 mod actions;
+pub mod cutscene;
 pub mod events;
 mod hud;
 mod log;
@@ -46,6 +47,7 @@ mod state;
 pub mod units;
 
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
+pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
     LevelScriptsRun, RaiseEvent, ScriptEvent, ScriptTags, SquadStanceOrder,
@@ -89,6 +91,8 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
             .add_message::<ChangeLevel>()
+            .init_resource::<Cutscene>()
+            .add_message::<TeleportPlayer>()
             .init_resource::<save::SaveList>()
             .add_message::<save::SaveGame>()
             .add_message::<save::LoadGame>()
