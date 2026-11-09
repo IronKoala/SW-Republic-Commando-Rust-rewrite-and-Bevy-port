@@ -117,10 +117,24 @@ fn ears(
 ) {
     for (e, has) in &cameras {
         if settings.audio.sound_3d && !has {
-            commands.entity(e).insert(SpatialListener::new(EAR_GAP));
+            commands.entity(e).insert(ears_swapped());
         } else if !settings.audio.sound_3d && has {
             commands.entity(e).remove::<SpatialListener>();
         }
+    }
+}
+
+/// The listener's ears, swapped on purpose. Bevy's 3D sound (rodio 0.22's
+/// `Spatial`) makes the ear *further* from a sound the louder one: a
+/// sound on the left plays at 0.5 in the left speaker and 1.0 in the
+/// right (measured in the cloud with rodio's own `Spatial` on a test tone,
+/// 2026-11-09). Telling it the left ear is on the right puts every sound
+/// back on its own side.
+fn ears_swapped() -> SpatialListener {
+    let plain = SpatialListener::new(EAR_GAP);
+    SpatialListener {
+        left_ear_offset: plain.right_ear_offset,
+        right_ear_offset: plain.left_ear_offset,
     }
 }
 
@@ -180,6 +194,14 @@ mod tests {
         assert!(w.get_entity(line).is_ok(), "speech is never stopped");
         assert!(w.get_entity(first).is_err(), "the oldest effect stops");
         assert!(w.get_entity(second).is_ok() && w.get_entity(third).is_ok());
+    }
+
+    /// The left ear is on the camera's right (+X), to undo rodio's swap.
+    #[test]
+    fn ears_are_swapped_for_rodio() {
+        let l = ears_swapped();
+        assert!(l.left_ear_offset.x > 0.0 && l.right_ear_offset.x < 0.0);
+        assert!((l.left_ear_offset.x - l.right_ear_offset.x - EAR_GAP).abs() < 1e-6);
     }
 
     #[test]

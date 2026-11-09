@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: 3D SOUND played sounds in the wrong ear (rc_game sound_options)
+
+- **Changed:** `crates/rc_game/src/sound_options.rs`: the listener's ears are given to Bevy swapped (`ears_swapped`), with a test.
+- **Why:** The user couldn't hear geo_01a's opening explosion. Looking into it showed that Bevy's 3D sound (rodio 0.22 `Spatial`) makes the ear further from a sound the louder one. This affected every placed sound with 3D SOUND on (enemies too), not only script sounds.
+- **Tested how:** In the cloud, recording Bevy's sound output to a file (ALSA file device) with a scratch program that plays the game's `exp_GEN_tanker_01` through the same 3D path, and rodio's `Spatial` alone on a test tone. The user's `logs/rc_game.log` (read from the PC) was checked too.
+- **Result:** Sound 20 m to the right, before: left 0.98, right 0.49; after: left 0.49, right 0.98. The opening explosion at the user's geometry came out at peak 0.73/0.74 (flat: 0.98), so it is not silent in the cloud. The user's log shows it started on the sound card at loudness 1.00, 8,341 uu away.
+- **Still broken / not tested:** Why the user heard nothing is **not found**. The cloud recording plays it. Not listened to on Windows.
+- **Next:** The user listens again; if still silent, record a run with 3D SOUND off to compare.
+
 ## 2026-11-09: Level script sounds come from their place in the world (rc_scripts_plugin, rc_package, rc_combat, rc_game)
 
 - **Changed:** `rc_package::sound`: `AudioParams` (Radius, NonPositional, bDisable3DFalloff), `read_all_audio_params`, `params_of`. `rc_combat`: `GameSound.params`, `read_audio_params`. `rc_scripts_plugin/src/sounds.rs`: each played sound is heard everywhere or placed at its character (followed), tagged actor or script spot, with loudness by distance updated every frame (`Placed`, `follow`); the log line says where from, how far, and how loud. `rc_scripts` settings: `[sound] default_radius = 2000`. `rc_game/src/sound_options.rs`: placed sounds get a `SpatialScale` of 1/1000 so Bevy's own distance fading no longer applies. `rc_script_check` counts where every script sound would be heard from. `rc_game --script`: the script-lines check also wants a placed sound.
