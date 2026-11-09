@@ -350,7 +350,7 @@ copy of the game.
   original's** (tested in the cloud sandbox with the install, not yet on
   Windows): its eleven buttons; only ENABLE HINTS is greyed out until built.
   **LOAD GAME and SAVE GAME are the original's pages** (tested in the
-  cloud sandbox with the install, not yet on Windows): the saves in a list
+  cloud sandbox with the install, and by the user on Windows on 2026-11-09): the saves in a list
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
   OVERWRITE and DELETE, with the original's questions. LOAD GAME is on the
   main menu and the pause menu; the pause menu's QUICK SAVE, QUICK LOAD and
@@ -585,9 +585,7 @@ copy of the game.
   after changing screen size isn't there (changes apply at once). Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
-  being built to plug into it). No briefings or cut scenes. The original LOAD GAME and SAVE
-  GAME pages and the pause menu's save buttons have not been tried on
-  Windows yet. Not tested on Windows,
+  being built to plug into it). No briefings or cut scenes. Not tested on Windows,
   with a real controller, or with a touch screen.
 - Controllers: no button pictures yet (words only), no rebinding screen
   yet, no rumble or aim assist. Gyro on phones isn't started. Building with

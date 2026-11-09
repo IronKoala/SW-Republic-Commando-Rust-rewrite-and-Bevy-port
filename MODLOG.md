@@ -9,8 +9,8 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Why:** The original LOAD GAME and SAVE GAME pages and the pause menu's save buttons were finished in PR #49 (merged 2026-11-01), but the notes still said they were missing, so they were listed again as remaining work.
 - **Tested how:** Docs only; no code changed.
 - **Result:** The notes match the code in `crates/rc_game/src/original_saves.rs`.
-- **Still broken / not tested:** The save and load pages have still only been tested in the cloud sandbox, not on Windows.
-- **Next:** The user tries LOAD GAME, SAVE GAME, QUICK SAVE, QUICK LOAD and LOAD LAST SAVE on the PC.
+- **Still broken / not tested:** Nothing known. The user tested LOAD GAME, SAVE GAME, QUICK SAVE and QUICK LOAD on Windows on 2026-11-09 and said they all work.
+- **Next:** Nothing for these pages.
 
 ## 2026-11-01: Squad mates use their specialities on their own (rc_squad, rc_squad_plugin)
 
