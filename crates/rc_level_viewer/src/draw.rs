@@ -2,17 +2,19 @@
 //! the level viewer and the first-person walker (`rc_walk`), so a level
 //! looks the same in both.
 
+use crate::bump::{self, BumpLitMaterial};
 use crate::lighting::{self, LightingSettings, SpawnReport};
 use crate::materials;
 use crate::scene::Scene;
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::Exposure;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
-use bevy::camera::visibility::RenderLayers;
 use bevy::pbr::Lightmap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use std::collections::HashMap;
 
 /// Sky-blue-grey background, as 0-255 sRGB values.
 pub const BACKGROUND: [u8; 3] = [64, 72, 89];
@@ -31,6 +33,8 @@ pub struct DrawReport {
     pub textured: usize,
     pub lightmapped: usize,
     pub coloured: usize,
+    /// Of the coloured batches, those drawn with their bump map.
+    pub bump_lit: usize,
     pub full_bright: usize,
     pub lights: SpawnReport,
     /// Batches drawn in the sky (seen only by the sky camera).
@@ -41,17 +45,7 @@ pub struct DrawReport {
 }
 
 pub fn to_image(p: &materials::Picture) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: p.image.width as u32,
-            height: p.image.height as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        p.image.pixels.clone(),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
+    let mut image = to_image_with(&p.image, TextureFormat::Rgba8UnormSrgb);
     // Level textures repeat across big surfaces.
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
@@ -59,6 +53,21 @@ pub fn to_image(p: &materials::Picture) -> Image {
         ..ImageSamplerDescriptor::linear()
     });
     image
+}
+
+/// Decoded pixels as a Bevy image in the given format (no sampler set).
+pub fn to_image_with(p: &rc_image::Rgba, format: TextureFormat) -> Image {
+    Image::new(
+        Extent3d {
+            width: p.width as u32,
+            height: p.height as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        p.pixels.clone(),
+        format,
+        RenderAssetUsages::RENDER_WORLD,
+    )
 }
 
 /// A lightmap page as a Bevy image. Lightmaps are stored on the same
@@ -92,11 +101,16 @@ fn colour_to_linear(c: [u8; 4], gain: f32, keep_alpha: bool) -> [f32; 4] {
 /// Spawn every draw batch of `scene` and its real-time lights. The camera
 /// that looks at it should use `Exposure::default()` and no tonemapping, as
 /// the baked light is matched to that.
+///
+/// `bump_materials` draws props with the game's bump maps (the app needs
+/// `bump::BumpMapPlugin`); `None` draws them flat. `settings.bump_maps`
+/// can also turn them off.
 pub fn spawn_level(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     images: &mut Assets<Image>,
     materials: &mut Assets<StandardMaterial>,
+    mut bump_materials: Option<&mut Assets<BumpLitMaterial>>,
     scene: &Scene,
     settings: &LightingSettings,
 ) -> DrawReport {
@@ -114,7 +128,9 @@ pub fn spawn_level(
         .collect();
     let mut triangles = 0;
     let mut textured = 0;
-    let (mut lightmapped, mut coloured, mut full_bright) = (0, 0, 0);
+    let (mut lightmapped, mut coloured, mut full_bright, mut bump_lit) = (0, 0, 0, 0);
+    // One image per bump map, shared by every batch that uses it.
+    let mut bump_images: HashMap<*const materials::Bump, Handle<Image>> = HashMap::new();
     let mut sky_batches = 0;
     let mut entities = Vec::new();
     for b in &scene.batches {
@@ -136,6 +152,78 @@ pub fn spawn_level(
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, b.lightmap_uvs.clone());
         }
         let with_colours = baked && !b.colours.is_empty();
+        // Bump-lit props: opaque, one-sided, with a picture, a bump map and
+        // a light direction per corner.
+        let bump = b.picture.as_ref().and_then(|p| p.bump.clone()).filter(|_| {
+            settings.bump_maps
+                && with_colours
+                && b.bump_lit
+                && !b.two_sided
+                && !b.translucent
+                && b.terrain_layer.is_none()
+                && b.light_dirs.len() == b.positions.len()
+                && b.picture
+                    .as_ref()
+                    .is_some_and(|p| !p.has_alpha && !p.additive)
+        });
+        if let (Some(bump), Some(bump_mats)) = (bump, bump_materials.as_deref_mut()) {
+            // The stored light goes in on the game's curve (0..1); the
+            // shader turns it into linear light per corner, like
+            // `colour_to_linear`, and adds the bump map's shading.
+            let c: Vec<[f32; 4]> = b
+                .colours
+                .iter()
+                .map(|c| {
+                    [
+                        c[0] as f32 / 255.0,
+                        c[1] as f32 / 255.0,
+                        c[2] as f32 / 255.0,
+                        1.0,
+                    ]
+                })
+                .collect();
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, c);
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_TANGENT,
+                bump::surface_tangents(&b.positions, &b.normals, &b.uvs, &b.indices),
+            );
+            mesh.insert_attribute(bump::ATTRIBUTE_LIGHT_DIR, b.light_dirs.clone());
+            mesh.insert_attribute(bump::ATTRIBUTE_LIGHT_COLOUR, b.light_colours.clone());
+            mesh.insert_indices(Indices::U32(b.indices.clone()));
+            triangles += b.indices.len() / 3;
+            textured += 1;
+            let picture = b.picture.as_ref().expect("bump-lit batches have a picture");
+            let bump_image = bump_images
+                .entry(std::sync::Arc::as_ptr(&bump))
+                .or_insert_with(|| images.add(bump::bump_image(&bump)))
+                .clone();
+            let material = BumpLitMaterial {
+                params: bump::BumpParams {
+                    gain: colour_gain,
+                    bump_uv_scale: bump.uv_scale,
+                    strength: settings.bump_strength,
+                    unused: 0.0,
+                },
+                diffuse: images.add(to_image(picture)),
+                bump: bump_image,
+            };
+            let mut entity = commands.spawn((
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(bump_mats.add(material)),
+                Transform::default(),
+            ));
+            if let Some(m) = b.mover {
+                entity.insert(MoverPart(m));
+            }
+            if b.sky {
+                entity.insert(RenderLayers::layer(crate::sky::SKY_LAYER));
+                sky_batches += 1;
+            }
+            entities.push(entity.id());
+            coloured += 1;
+            bump_lit += 1;
+            continue;
+        }
         if with_colours {
             let c: Vec<[f32; 4]> = b
                 .colours
@@ -221,6 +309,7 @@ pub fn spawn_level(
         textured,
         lightmapped,
         coloured,
+        bump_lit,
         full_bright,
         lights: report,
         sky_batches,

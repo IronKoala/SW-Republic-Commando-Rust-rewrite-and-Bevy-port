@@ -223,6 +223,15 @@ copy of the game.
   (see `docs/DESIGN.md`, "Bump maps"). Their own half-size copies match with
   a median difference of 1.8 of 255.
 
+- **Bump maps on level props (tested in the cloud by numbers, not on
+  Windows, not compared with the original side by side).** Props with
+  bump-mapped materials are drawn with their bump maps, lit from the light
+  direction the map stores for each corner, so walls show rivets, panels
+  and grooves. Which way the bump maps point was measured (see
+  `docs/DESIGN.md`, "Drawing bump maps"). Turn off with `bump_maps = false`
+  in `lighting.cfg`. Check: `rc_level_viewer MAP --view-bump --capture
+  X.bmp` with bump maps on and off, then `rc_capture_compare`.
+
 - **Reading a map's lights (tested in the cloud on 4 maps, not on Windows).**
   `rc_package::light` turns light and zone actors into position, colour,
   brightness and reach. Read 600 lights and zones from `geo_01a`, `pro`,
@@ -528,8 +537,9 @@ copy of the game.
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
   colour there. The level viewer's camera flies through walls (`rc_walk`
   has collision).
-- Models are drawn without bump maps. Only a material's main colour
-  texture is used. See-through parts (leaves, grates) follow the
+- Characters, weapons and the level's BSP walls are drawn without bump
+  maps (props have them since 2026-11-09). Shine (specular) isn't drawn.
+  Otherwise only a material's main colour texture is used. See-through parts (leaves, grates) follow the
   material's own settings (since 2026-11-01; before, floors and walls
   with a shine mask were cut full of holes). Not tested on Windows.
 - Outdoor ground (Unreal "terrain") is drawn and solid since 2026-11-01
@@ -597,8 +607,8 @@ copy of the game.
   (baked light drawn at double strength) and hasn't been compared with the
   real game side by side. Real-time lights use placeholder strengths and
   don't light props yet. Shadows from moving lights aren't drawn. Bump maps
-  aren't used for lighting yet, and which way their "up" points isn't
-  checked.
+  are drawn on props only, with our own rule for how the stored light
+  direction lights them (see `docs/DESIGN.md`).
 - 17 textures have small copies (mipmaps) that differ from the full picture.
   This is in the game's own files, not a decoding fault (see `docs/DESIGN.md`).
 
