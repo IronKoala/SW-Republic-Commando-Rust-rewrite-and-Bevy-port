@@ -1510,11 +1510,48 @@ ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
 reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
 script) says one line of speech (a `*_voice` package) at a time, so a new
 line stops its last one unless `bDontOverrideOtherSounds`; effects never
-stop each other; nothing is placed in the world yet (every sound plays at
-full loudness); a group waits for its longest take. Lines pause with the
+stop each other; a group waits for its longest take. Lines pause with the
 game and stop when the level ends. Not done: subtitles (the game's
-`System/subtitles_*.int` files hold them, by sound name), sounds stored
-inside a map, and placing sounds at the speaker.
+`System/subtitles_*.int` files hold them, by sound name) and sounds stored
+inside a map.
+
+**Where a script sound comes from.** Every `Sound` in the game's packages
+names its `Params`: an `AudioParams` object in `Sounds/params_vox.uax`
+(speech) or `params_sfx.uax` (effects). Its PC values that matter here are
+`NonPositional` (heard the same everywhere: the Clone Advisor, most squad
+radio, briefings), `Radius` (Unreal units) and `bDisable3DFalloff` (big
+explosions: from their side, never quieter). The class default `Radius` is
+2000 (engine.u, `rc_probe --class AudioParams`), which is also
+`[sound] default_radius`. `rc_package::sound` reads them,
+`rc_combat::read_sounds` now records each sound's `params` (a group's own,
+else its first take's) and `rc_combat::read_audio_params` reads the
+params packages. At play time `sounds.rs` decides:
+- heard everywhere: `ACTION_PlayLocalSound`, `NonPositional` sounds,
+  `SoundSourceTag=PlayerCommando`, and a tag nothing in the level has;
+- else at the character whose `ScriptTags.tag` is the `SoundSourceTag`
+  (followed as it moves), or the map actor with that tag or name (fixed);
+- with no tag: the character running the `ScriptedSequence`, else the
+  script actor's own spot in the map (UE2 plays a script's sound from the
+  script when it has no pawn).
+
+A placed sound gets `rc_game_core::SoundAt` (3D SOUND makes it heard from
+its side) and a `Placed` component; `sounds::follow` moves it with its
+character and sets its loudness every frame: full out to `Radius`, then
+`Radius / distance` (our reading: OpenAL's reference distance; some radii
+are tiny, enemy footsteps 20 uu, so `Radius` can't be where a sound
+stops). An action `Volume` above 1 (2 to 10000 in a few maps) makes the
+sound carry that many times further. Over the 56 campaign maps
+(`rc_script_check`) the scripts' 1,946 enabled sound actions split as:
+1,404 radio, 58 aimed at the player, 23 local, 391 at the script's spot
+(mostly explosions), 48 at a sequence's character, 9 at a tagged map
+actor, 13 at a tagged character if one is there.
+
+Bevy's own 3D sound (rodio) also divides a placed sound's loudness by the
+distance squared in Bevy units (metres): a droid 10 m away played at 1/100.
+`rc_game/src/sound_options.rs` now shrinks placed sounds' positions by
+1000 (`SpatialScale`) before Bevy sees them, which leaves left and right
+alone and pushes that fading out past a kilometre, so only each part's
+own distance rule applies.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).
