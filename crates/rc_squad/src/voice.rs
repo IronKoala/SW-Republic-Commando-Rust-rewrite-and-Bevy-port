@@ -531,11 +531,18 @@ impl Chatter {
             let heard = self.decide(squad, r, about, doer, false);
             if let Heard::Say(s) = &heard {
                 self.last[r] = Some(squad.time);
-                busy = busy || !s.urgent;
+                busy = true;
             }
             out.push(heard);
         }
         for (t, about, doer) in happened {
+            // A new order makes answers to older orders pointless: drop
+            // them, so only the latest order is answered.
+            if matches!(t, Trigger::Order(_)) {
+                let lines = &self.settings.lines;
+                self.waiting
+                    .retain(|w| !matches!(lines[w.0].on, Trigger::Order(_)));
+            }
             // Every rule that fits has its say (the player's order, then a
             // squad mate's answer).
             for r in 0..self.settings.lines.len() {
@@ -557,7 +564,7 @@ impl Chatter {
                 let heard = self.decide(squad, r, about, doer, busy);
                 if let Heard::Say(s) = &heard {
                     self.last[r] = Some(squad.time);
-                    busy = busy || !s.urgent;
+                    busy = true;
                 }
                 out.push(heard);
             }
@@ -768,7 +775,7 @@ mod tests {
     fn the_player_orders_then_a_mate_answers_after_the_line() {
         let mut sq = squad();
         let mut c = rules(
-            "[line.boss]\non = \"order:form_up\"\nevent = \"FormUp\"\nwho = \"leader\"\n\
+            "[line.boss]\non = \"order:form_up\"\nevent = \"FormUp\"\nwho = \"leader\"\nurgent = \"yes\"\n\
              [line.answer]\non = \"order\"\nevent = \"AcknowledgeOrder\"\nwho = \"any\"\nwait = 3\n",
         );
         let order = SquadEvent::OrderGiven {
@@ -794,6 +801,25 @@ mod tests {
         };
         let h = c.hear(&sq, &[order], false);
         assert_eq!(says(&h), vec![(Some(1), "AcknowledgeOrder".to_string())]);
+        // Orders given quickly one after another: only the latest one is
+        // answered, after the player stops talking.
+        let form_up = SquadEvent::OrderGiven {
+            order: "form up".into(),
+            stance: "Form up".into(),
+        };
+        sq.time += 5.0;
+        c.hear(&sq, std::slice::from_ref(&form_up), false);
+        c.speaking(sq.time, 1.0);
+        sq.time += 0.5;
+        let h = c.hear(&sq, std::slice::from_ref(&form_up), false);
+        assert_eq!(says(&h), vec![(None, "FormUp".to_string())]);
+        c.speaking(sq.time, 1.0);
+        let mut answers = 0;
+        for _ in 0..40 {
+            sq.time += 0.1;
+            answers += says(&c.hear(&sq, &[], false)).len();
+        }
+        assert_eq!(answers, 1);
     }
 
     #[test]
