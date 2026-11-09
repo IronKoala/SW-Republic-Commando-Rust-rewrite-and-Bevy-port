@@ -66,6 +66,8 @@
 #   urgent  "yes": said even while someone is talking
 #   wait    while someone talks, wait up to this many seconds instead of
 #           staying quiet
+#   optional  "yes": fine if the speaker has no recording of it in the
+#           game (they just stay quiet; not logged as a missing line)
 
 [voice]
 enabled = "yes"
@@ -144,6 +146,7 @@ wait = 3
 [line.snipe_ready]
 on = "posted:sniper"
 event = "SnipeReady"
+optional = "yes"
 
 [line.boss_grenade]
 on = "job_assigned:grenade"
@@ -157,6 +160,7 @@ wait = 3
 [line.grenade_ready]
 on = "posted:grenade"
 event = "GrenadeReady"
+optional = "yes"   # Sev has no GrenadeReady in the game
 
 [line.boss_anti_armour]
 on = "job_assigned:anti_armour"
@@ -170,6 +174,7 @@ wait = 3
 [line.anti_armour_ready]
 on = "posted:anti_armour"
 event = "AntiArmorReady"
+optional = "yes"   # Sev has no AntiArmorReady in the game
 
 [line.boss_breach]
 on = "job_assigned:breach"
@@ -231,6 +236,7 @@ urgent = "yes"   # the player always speaks, even over a squad mate
 on = "job_assigned:bacta"
 event = "AcknowledgeOrder"
 wait = 3
+optional = "yes"   # nobody has a BactaConfirm; Fixer and Scorch no AcknowledgeOrder
 [line.bacta_start]
 on = "job_started:bacta"
 event = "BactaJackIn"

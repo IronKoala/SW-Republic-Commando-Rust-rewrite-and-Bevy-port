@@ -68,7 +68,11 @@ copy of the game.
   `data/movement/player_commando.toml`, which mods can edit. `rc_walk
   --script` drives itself through 21 checks and passed all of them.
   `rc_walk --map geo_01a` puts you in the first Geonosis level instead, with
-  collision against its walls, floors and props.
+  collision against its walls, floors and props. Ramps, steps and slopes
+  work the same at 240 frames a second as at 60 (they used to stop you on
+  fast PCs; checked by numbers in the cloud, not yet by playing).
+  `rc_walkcheck MAP` runs a player along every walking link of a level's AI
+  path network and lists where it gets stuck.
 
 - **Delta Squad (tested in the cloud sandbox by numbers, not yet on Windows
   or with eyes).** Sev, Fixer and Scorch follow you and obey the original's
@@ -139,7 +143,11 @@ copy of the game.
   (read at run time from the install). When each line is said is our own
   rule, in `data/squad/voice.toml`. Squad mates are heard at full volume
   like a helmet radio (`positional = "yes"` places them instead). Marked
-  jobs' lines (breach, bacta...) are not tried in a game yet.
+  jobs' lines (you ask for a breach, slice, demolition, bacta, sniper,
+  grenade or anti-armour job; the squad mate confirms, then says when
+  they're in place, working or done) were silent until 2026-11-09 and are
+  now tested in the cloud sandbox only (`rc_squad_sim yyy_05d --jobs`),
+  not yet in a game.
 
 - **The squad uses their specialities (tested in the cloud sandbox by
   numbers, not yet on Windows or with eyes).** Without being told, Sev
@@ -222,6 +230,15 @@ copy of the game.
   two layouts were found by measurement, since no documentation names them
   (see `docs/DESIGN.md`, "Bump maps"). Their own half-size copies match with
   a median difference of 1.8 of 255.
+
+- **Bump maps on level props (tested in the cloud by numbers, not on
+  Windows, not compared with the original side by side).** Props with
+  bump-mapped materials are drawn with their bump maps, lit from the light
+  direction the map stores for each corner, so walls show rivets, panels
+  and grooves. Which way the bump maps point was measured (see
+  `docs/DESIGN.md`, "Drawing bump maps"). Turn off with `bump_maps = false`
+  in `lighting.cfg`. Check: `rc_level_viewer MAP --view-bump --capture
+  X.bmp` with bump maps on and off, then `rc_capture_compare`.
 
 - **Reading a map's lights (tested in the cloud on 4 maps, not on Windows).**
   `rc_package::light` turns light and zone actors into position, colour,
@@ -350,7 +367,7 @@ copy of the game.
   original's** (tested in the cloud sandbox with the install, not yet on
   Windows): its eleven buttons; only ENABLE HINTS is greyed out until built.
   **LOAD GAME and SAVE GAME are the original's pages** (tested in the
-  cloud sandbox with the install, not yet on Windows): the saves in a list
+  cloud sandbox with the install, and by the user on Windows on 2026-11-09): the saves in a list
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
   OVERWRITE and DELETE, with the original's questions. LOAD GAME is on the
   main menu and the pause menu; the pause menu's QUICK SAVE, QUICK LOAD and
@@ -536,8 +553,9 @@ copy of the game.
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
   colour there. The level viewer's camera flies through walls (`rc_walk`
   has collision).
-- Models are drawn without bump maps. Only a material's main colour
-  texture is used. See-through parts (leaves, grates) follow the
+- Characters, weapons and the level's BSP walls are drawn without bump
+  maps (props have them since 2026-11-09). Shine (specular) isn't drawn.
+  Otherwise only a material's main colour texture is used. See-through parts (leaves, grates) follow the
   material's own settings (since 2026-11-01; before, floors and walls
   with a shine mask were cut full of holes). Not tested on Windows.
 - Outdoor ground (Unreal "terrain") is drawn and solid since 2026-11-01
@@ -588,14 +606,12 @@ copy of the game.
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
 - Original menus: the main menu's moving background video isn't played
   (it uses a video format with no Rust decoder yet), and the sides of
-  screens wider than 4:3 stay black. The campaign, load and save
-  pages are still placeholders. On the options pages, rows the port can't
+  screens wider than 4:3 stay black. On the options pages, rows the port can't
   do yet are greyed out, and the original's "keep these settings?" timer
   after changing screen size isn't there (changes apply at once). Mouse use wasn't tested by the
   script.
 - The game (`rc_game`): no weapons, enemies or squad yet (other parts are
-  being built to plug into it). No briefings or cut scenes. Saving: there's no Load Game screen yet (the
-  menu's LOAD GAME stays greyed out). Not tested on Windows,
+  being built to plug into it). No briefings or cut scenes. Not tested on Windows,
   with a real controller, or with a touch screen.
 - Controllers: no button pictures yet (words only), no rebinding screen
   yet, no rumble or aim assist. Gyro on phones isn't started. Building with
@@ -605,8 +621,8 @@ copy of the game.
   (baked light drawn at double strength) and hasn't been compared with the
   real game side by side. Real-time lights use placeholder strengths and
   don't light props yet. Shadows from moving lights aren't drawn. Bump maps
-  aren't used for lighting yet, and which way their "up" points isn't
-  checked.
+  are drawn on props only, with our own rule for how the stored light
+  direction lights them (see `docs/DESIGN.md`).
 - 17 textures have small copies (mipmaps) that differ from the full picture.
   This is in the game's own files, not a decoding fault (see `docs/DESIGN.md`).
 

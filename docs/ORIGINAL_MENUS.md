@@ -53,11 +53,11 @@ How it works:
   own copy of the picture and adjusts transparency so the result matches
   the original over a black background.
 
-Not done yet: the background video (`Movies/menu_bg.avi`, an MPEG-4 v2
-video with no Rust decoder), LOAD GAME, PROFILES and EXTRAS (greyed out
-until built), MULTIPLAYER (greyed out for good: offline only), the
-campaign, options and pause menus, button prompt pictures, and filling the
-sides of wide screens. Mouse use was not tested by the script.
+Not done yet (the campaign, load, save, options and pause menus have
+since been done; see below): the background video (`Movies/menu_bg.avi`,
+an MPEG-4 v2 video with no Rust decoder), PROFILES and EXTRAS (greyed out
+until built), MULTIPLAYER (greyed out for good: offline only) and button
+prompt pictures. Mouse use was not tested by the script.
 
 How to look at a menu without the game: `rc_probe --menu` (main menu) or
 `rc_probe --menu XInterface.MenuQuestionYesNo` paints it to
