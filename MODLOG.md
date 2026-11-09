@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Level prompts name the real Use key (rc_scripts_plugin)
+
+- **Changed:** `crates/rc_scripts_plugin/src/lib.rs`: a script prompt's `@` (the Use button) is now replaced with the button's name on the device used last (`InputPrompts`), not the word "USE".
+- **Why:** The user couldn't use geo_01a's bacta dispenser: the prompt said "Hold USE to use Bacta Dispenser", but Use is F on the keyboard (E does nothing), so the barricade never came down.
+- **Tested how:** `rc_game --script` in the cloud with the game's files.
+- **Result:** The log shows `ShowPrompt: shows "Hold F to use Bacta Dispenser"` at t=47 s, about 16 s after the shell hits the player. 107 checks passed, 2 failed (the same two level-sound checks as before, sound packages not copied).
+- **Still broken / not tested:** Not tested on Windows. Gamepad names come from `button_names.toml` and weren't checked here.
+- **Next:** The user tries the dispenser again with F.
+
 ## 2026-11-09: Charges, slicing and breaching set off the level (rc_scripts, rc_scripts_plugin, rc_squad_plugin, rc_movers)
 
 - **Changed:** New shared message `rc_game_core::MarkerJob` (anchor, step Started/Armed/Done). `rc_squad_plugin` sends it when a squad mate starts a marker job or takes a post, lights a fuse, and finishes. New `rc_scripts::markers` reads every squad marker's anchor (DemolitionCharge, HackTerminal*, HackDoor*, BreachDoor*) and the map events it sends; new `rc_scripts_plugin/src/markers.rs` sends them to the level scripts, blows away a charge's `PropToDestroy` (`Director::destroy_prop_named`) and opens the locked double doors (`MoverSet::open_named`, `LevelMovers::open_named`). `rc_script_check` lists each map's anchors. `rc_game --script` has 4 new checks (geo_01a's bunker charge, geo_01b's hangar door).

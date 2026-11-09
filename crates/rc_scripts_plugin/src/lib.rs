@@ -55,7 +55,7 @@ use rc_combat::{Damage, DamageKind, Health};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
     playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
-    GamePaths, GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player,
+    GamePaths, GameSet, GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player,
     PlayerVitals, RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
@@ -559,10 +559,16 @@ fn run(
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
-    restoring: Option<Res<RestoringSave>>,
+    (restoring, prompts): (Option<Res<RestoringSave>>, Option<Res<InputPrompts>>),
     log: Res<GameLog>,
 ) {
     let Some(mut script) = script else { return };
+    // The Use button's name on the device used last, for prompts' `@`.
+    let use_key = prompts
+        .as_ref()
+        .and_then(|p| p.label(Action::Use))
+        .unwrap_or("USE")
+        .to_string();
     // A save is being put back: its [scripts] section says where the
     // scripts are, so nothing starts or runs until it has.
     if restoring.is_some() {
@@ -712,6 +718,7 @@ fn run(
                     &mut hud,
                     &mut damage,
                     &mut factories,
+                    &use_key,
                     &log,
                 );
             }
@@ -740,6 +747,7 @@ fn carry_out(
     hud: &mut MessageWriter<HudMessage>,
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
+    use_key: &str,
     log: &GameLog,
 ) {
     let a = &call.action;
@@ -861,8 +869,9 @@ fn carry_out(
         "showprompt" => {
             let text = a.text("PromptText").unwrap_or("").to_string();
             if a.flag("bShowOnPC", true) {
-                // `@` stands for the button; the original fills in its name.
-                let shown = text.replace('@', "USE");
+                // `@` stands for the Use button; the original fills in its
+                // name, as we do (F on the keyboard, X on an Xbox pad, ...).
+                let shown = text.replace('@', use_key);
                 hud.write(HudMessage {
                     text: shown.clone(),
                     seconds: a.float("PromptTime").unwrap_or(5.0),
