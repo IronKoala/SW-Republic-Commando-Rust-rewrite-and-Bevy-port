@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: The cutscene characters appear (rc_cast, rc_model, rc_game)
+
+- **Changed:** New crate `rc_cast` (`CastPlugin`, `read::find_cast`) and data file `data/cast/cast.toml`. `rc_model::ModelSpec::keep_sets`, `Model::sets`, `Model::named_clip`, `Model::local_clip`. `rc_game` adds `CastPlugin`. `docs/DESIGN.md`: new "The cast" section and crate table row.
+- **Why:** User playtest of the prologue: "no other NPC's of any kind". Characters placed in maps that weren't droids or Delta were never spawned (158 "no character" lines in the prologue's log).
+- **Tested how:** `cargo test -p rc_cast -p rc_model`; `rc_game --map pro` in the cloud with screenshots, run on through geo_01briefing to geo_01a; `rc_game --script`.
+- **Result:** pro: 54 cast members, all drawn with their models: Taun We and the second Kaminoan talking in the nursery, the young clones sitting at their desks and looking about on cue, the holograms hidden and shown on cue, troopers in the helmet room, and Sev, Fixer and Scorch in their own colours at the end. geo_01briefing: 15 (troopers, the gunship, walkers, spider droids); geo_01a: 14 (the gunship troopers, the rope, walkers). "no character" lines in a full prologue-to-geo_01a run: 38, from 192.
+- **Still broken / not tested:** Not tested on Windows. Characters brought in by `PawnFactory`s aren't spawned (the prologue's walking young clones). Hologram materials are plain grey. The cast doesn't collide, fall, fight or get hurt. Lit with a steady ambient share, not the zone's light.
+- **Next:** Characters made by `PawnFactory`s in cutscenes; the player riding the gunship in the briefings.
+
 ## 2026-11-09: No squad and no grown arms in the prologue (rc_squad, rc_squad_plugin, rc_game_core, rc_scripts_plugin, rc_combat, rc_game)
 
 - **Changed:** `rc_squad::map::MapSquadInfo` gets `has_squad_actor` and `wants_squad()`; `rc_squad_plugin::SquadMapData::squadless` stops squad mates coming in on maps without a `CTSquad` actor, squad markers or squad-mate spawners. `rc_game_core::Cutscene::briefing_weapon` is set from `ACTION_Briefing`'s `BriefingWeapon` (`bSetBriefingWeapon`) and cleared by `bEndBriefing`; while set, `rc_combat` hides the first-person arms and the plain gun model. `rc_game/src/cutscene.rs` logs it.
