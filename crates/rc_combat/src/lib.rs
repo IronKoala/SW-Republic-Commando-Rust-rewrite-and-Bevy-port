@@ -51,7 +51,7 @@ pub use health::{
 pub use library::{read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary};
 pub use melee::{MeleeAttack, MeleeSwing};
 pub use pickup::{spawn_pickup, WeaponPickup};
-pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
+pub use throw::{Blast, Body, Explode, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{ArmsParams, WeaponParams, WeaponState};
 
 use bevy::prelude::*;
@@ -102,6 +102,11 @@ pub struct ShotLanded {
     pub on_level: bool,
     /// Unreal units from where the shot started.
     pub distance: f32,
+    /// The shot's damage before any damage table, and its damage type
+    /// (`CTDamageEnergyDC17`): for what it hit on the level (props that
+    /// can break, `rc_level::breakables`).
+    pub damage: f32,
+    pub damage_type: String,
 }
 
 /// The view kick from one shot is the shared `rc_game_core::ViewKick`
@@ -184,6 +189,7 @@ impl Plugin for WeaponsPlugin {
             .add_message::<MeleeAttack>()
             .add_message::<MeleeSwing>()
             .add_message::<Blast>()
+            .add_message::<Explode>()
             .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
                 Update,
@@ -220,6 +226,7 @@ impl Plugin for WeaponsPlugin {
                     fire::fly_bolts,
                     throw::fly_grenades,
                     throw::wear_off_stuns,
+                    throw::explosions,
                     pickup::collect_pickups,
                 )
                     .in_set(CombatSet::Flight)

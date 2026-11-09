@@ -944,3 +944,116 @@ fn dispatcher_sends_its_list_in_time() {
     run(&mut d, 0.1);
     assert_eq!(sent(&d).iter().filter(|e| *e == "First").count(), 2);
 }
+
+fn breakable(export: usize, name: &str, tag: &str, health: f32) -> Breakable {
+    Breakable {
+        export,
+        name: name.into(),
+        class: "ExplosiveBarrelGEO".into(),
+        tag: tag.into(),
+        location: [0.0; 3],
+        health,
+        damaged_ratio: 0.0,
+        event: None,
+        damaged: rc_level::breakables::Transition::default(),
+        destroyed: rc_level::breakables::Transition::default(),
+        explosion: None,
+        damage_table: None,
+        hidden: false,
+        anim_prop: false,
+    }
+}
+
+/// geo_05b's clamps: shooting one breaks it at no health, its event
+/// reaches the script waiting for it, and more damage does nothing.
+#[test]
+fn shot_props_break_and_tell_the_scripts() {
+    let map = MapScripts {
+        actors: vec![script(
+            "WaitClamp",
+            vec![
+                act("WaitForEvent", &[("ExternalEvent", t("Clamp00"))]),
+                act("TriggerEvent", &[("Event", t("ClampGone"))]),
+            ],
+        )],
+        failures: vec![],
+        sounds: Default::default(),
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    let mut clamp = breakable(40, "KarmaProp2", "Attachment00", 50.0);
+    clamp.event = Some("Clamp00".into());
+    d.add_breakables(&[clamp]);
+    assert_eq!(d.stats.breakables, 1);
+    run(&mut d, 0.1);
+    assert_eq!(d.hurt_prop(40, 20.0), PropHurt::Hurt(30.0));
+    assert_eq!(d.hurt_prop(99, 20.0), PropHurt::NotBreakable);
+    assert_eq!(d.hurt_prop(40, 30.0), PropHurt::Broken);
+    assert_eq!(d.hurt_prop(40, 30.0), PropHurt::AlreadyBroken);
+    let fx = run(&mut d, 0.1);
+    assert!(fx
+        .iter()
+        .any(|e| matches!(e, Effect::PropDestroyed { export: 40, .. })));
+    let s = sent(&d);
+    assert!(s.contains(&"Clamp00".to_string()), "{s:?}");
+    assert!(s.contains(&"ClampGone".to_string()), "{s:?}");
+    assert_eq!(d.props_standing("Attachment00"), 0);
+    assert_eq!(d.destroyed_props(), vec![(40, "Attachment00".to_string())]);
+}
+
+/// A prop with a damaged step: at ratio x its health it goes there
+/// (sending the damaged event); with no damaged look it is simply gone
+/// and sends no broken event (rock cover); with a look and a time limit
+/// it breaks by itself when the time runs out.
+#[test]
+fn damaged_step_rules() {
+    let map = MapScripts::default();
+    let mut d = Director::new(&map, &[], Settings::default());
+    let mut rock = breakable(1, "GEO4_RockCover4", "GEO4_RockCover00", 2000.0);
+    rock.damaged_ratio = 0.01;
+    rock.event = Some("RockProp03".into());
+    let mut panel = breakable(2, "Panel", "Panel", 100.0);
+    panel.damaged_ratio = 0.5;
+    panel.damaged.mesh = Some("FlyingGrate".into());
+    panel.damaged.event = Some("PanelHit".into());
+    panel.damaged.life_span = 2.0;
+    panel.event = Some("PanelGone".into());
+    d.add_breakables(&[rock, panel]);
+    assert_eq!(d.hurt_prop(1, 1500.0), PropHurt::Hurt(500.0));
+    assert_eq!(d.hurt_prop(1, 5000.0), PropHurt::Damaged);
+    assert_eq!(d.hurt_prop(1, 5.0), PropHurt::AlreadyBroken);
+    let fx = run(&mut d, 0.1);
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::PropDamaged {
+            export: 1,
+            removed: true,
+            ..
+        }
+    )));
+    assert!(!sent(&d).contains(&"RockProp03".to_string()));
+
+    assert_eq!(d.hurt_prop(2, 60.0), PropHurt::Damaged);
+    assert_eq!(d.hurt_prop(2, 10.0), PropHurt::Hurt(30.0));
+    run(&mut d, 1.0);
+    assert!(sent(&d).contains(&"PanelHit".to_string()));
+    assert!(!sent(&d).contains(&"PanelGone".to_string()));
+    run(&mut d, 1.5);
+    assert!(sent(&d).contains(&"PanelGone".to_string()), "{:?}", sent(&d));
+    assert_eq!(d.prop_health(2), Some(0.0));
+}
+
+/// A broken prop stays broken after a save and a load.
+#[test]
+fn broken_props_are_saved() {
+    let map = MapScripts::default();
+    let mut d = Director::new(&map, &[], Settings::default());
+    d.add_breakables(&[breakable(7, "Barrel", "B", 60.0)]);
+    d.hurt_prop(7, 100.0);
+    run(&mut d, 0.1);
+    let snap = d.snapshot();
+    let mut e = Director::new(&map, &[], Settings::default());
+    e.add_breakables(&[breakable(7, "Barrel", "B", 60.0)]);
+    e.restore(&snap);
+    assert_eq!(e.hurt_prop(7, 1.0), PropHurt::AlreadyBroken);
+    assert_eq!(e.destroyed_props(), vec![(7, "B".to_string())]);
+}

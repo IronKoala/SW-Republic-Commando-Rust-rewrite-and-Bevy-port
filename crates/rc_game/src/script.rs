@@ -823,6 +823,17 @@ fn steps() -> Vec<Step> {
             10.0,
         ),
         Check("spawners and scripts agree", level_spawn_summary),
+        // Props weapons can break (`rc_scripts_plugin::breakables`):
+        // shoot one of geo_01a's explosive barrels from just above it,
+        // with a stand-in character above that; three DC-17m shots (20
+        // each) take its 60 health, it explodes a moment later, and the
+        // explosion reaches the stand-in.
+        Check("the level's breakable props are read", props_read),
+        Note(props_shoot_barrel),
+        Until("shots break an explosive barrel", props_barrel_broken, 5.0),
+        Until("the barrel explodes a moment later", props_barrel_exploded, 3.0),
+        Wait(0.2),
+        Check("its explosion hurts what stands near it", props_blast_hurt),
         // Script actions on characters: geo_01a's "LoneRanger", a
         // Geonosian warrior whose spawner gives him the sequence
         // LoneRangerAI. On LoneRangerJump he walks to a point, turns to
@@ -2758,6 +2769,142 @@ fn level_spawn_destroy(w: &mut World) {
             point: Vec3::ZERO,
             direction: Vec3::NEG_Y,
         });
+    }
+}
+
+/// The barrel the props checks shoot, and the stand-in above it.
+#[derive(Resource)]
+struct BarrelTest {
+    export: usize,
+    name: String,
+    dummy: Entity,
+}
+
+const BARREL_DUMMY_HEALTH: f32 = 5000.0;
+
+fn props_read(w: &mut World) -> Result<String, String> {
+    let s = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .ok_or("no level scripts")?;
+    let all: Vec<_> = s.breaking.iter().collect();
+    let barrels = all.iter().filter(|b| b.explosion.is_some()).count();
+    let msg = format!(
+        "{} breakable props, {} that explode, director knows {}",
+        all.len(),
+        barrels,
+        s.director.stats.breakables
+    );
+    if barrels >= 2 && s.director.stats.breakables == all.len() {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+fn props_shoot_barrel(w: &mut World) {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return;
+    };
+    let mut barrels: Vec<_> = s
+        .breaking
+        .iter()
+        .filter(|b| b.explosion.is_some() && !b.hidden)
+        .map(|b| (b.export, b.name.clone()))
+        .collect();
+    barrels.sort();
+    let Some((export, name)) = barrels.first().cloned() else {
+        return;
+    };
+    let Some((lo, hi)) = w
+        .get_resource::<rc_level_plugin::LevelParts>()
+        .and_then(|p| p.bounds_of(export))
+    else {
+        return;
+    };
+    let centre = rc_movement::Vec3::new(
+        (lo.x + hi.x) * 0.5,
+        (lo.y + hi.y) * 0.5,
+        (lo.z + hi.z) * 0.5,
+    );
+    let top = hi.z;
+    // The stand-in's feet 120 uu over the barrel's top: its middle is
+    // about 250 uu from the barrel's middle.
+    let feet = rc_movement::Vec3::new(centre.x, centre.y, top + 120.0);
+    let dummy = w
+        .spawn((
+            Transform::from_translation(rc_game_core::units::to_bevy(feet)),
+            rc_combat::Hittable::COMMANDO,
+            rc_combat::Health::new(BARREL_DUMMY_HEALTH),
+            DespawnOnExit(GameState::InGame),
+        ))
+        .id();
+    let shooter = {
+        let mut q = w.query_filtered::<Entity, With<Player>>();
+        q.iter(w).next()
+    };
+    let Some(shooter) = shooter else { return };
+    let origin = rc_game_core::units::to_bevy(rc_movement::Vec3::new(
+        centre.x,
+        centre.y,
+        top + 30.0,
+    ));
+    for _ in 0..3 {
+        w.write_message(rc_combat::FireShot {
+            shooter,
+            origin,
+            direction: Vec3::NEG_Y,
+            weapon: "dc17m_blaster".into(),
+        });
+    }
+    w.resource::<GameLog>().line(format!(
+        "script: shooting {name} (export {export}) three times from 30 uu above it; stand-in {dummy:?} above it"
+    ));
+    w.insert_resource(BarrelTest {
+        export,
+        name,
+        dummy,
+    });
+}
+
+fn props_barrel_broken(w: &mut World) -> bool {
+    let Some(t) = w.get_resource::<BarrelTest>() else {
+        return false;
+    };
+    let (name, export) = (t.name.clone(), t.export);
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| s.props.broken.contains(&name) && s.director.prop_health(export).is_some_and(|h| h <= 0.0))
+}
+
+fn props_barrel_exploded(w: &mut World) -> bool {
+    let Some(t) = w.get_resource::<BarrelTest>() else {
+        return false;
+    };
+    let name = t.name.clone();
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| s.props.exploded.contains(&name))
+}
+
+fn props_blast_hurt(w: &mut World) -> Result<String, String> {
+    let t = w.get_resource::<BarrelTest>().ok_or("no barrel test")?;
+    let (export, dummy) = (t.export, t.dummy);
+    let health = w
+        .get::<rc_combat::Health>(dummy)
+        .map(|h| h.current)
+        .ok_or("the stand-in is gone")?;
+    let solid = w
+        .get_resource::<rc_level_plugin::LevelParts>()
+        .and_then(|p| p.list().into_iter().find(|x| x.0 == export))
+        .map(|x| x.3);
+    let hits = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .map_or(0, |s| s.props.hits);
+    let msg = format!(
+        "stand-in health {health:.0} of {BARREL_DUMMY_HEALTH}; barrel solid now {solid:?}; {hits} hits on props"
+    );
+    if health < BARREL_DUMMY_HEALTH && solid == Some(false) {
+        Ok(msg)
+    } else {
+        Err(msg)
     }
 }
 

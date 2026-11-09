@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Breakable props: barrels, clamps, holo machines, rock cover (rc_level, rc_scripts, rc_scripts_plugin, rc_combat, rc_level_plugin, rc_level_viewer, rc_game)
+
+- **Changed:** New `rc_level::breakables` reads every prop's health, damaged and destroyed steps, explosion and events (map first, then class defaults). `map_collision` and the level viewer keep them as separate parts. `rc_scripts::Director::add_breakables` / `hurt_prop` run the game's break rules and send the props' events (and a prop's own `Event` now comes before `DestroyedState.Event`); damaged state is saved. New `rc_scripts_plugin/src/breakables.rs`: shots (`ShotLanded`, which now carries damage and damage type) and grenade blasts hurt props; props with an explosion go off 0.1-0.2 s after breaking. New `rc_combat::Explode` (radius damage for anything that isn't a grenade). `rc_game --script`: 4 new checks (shoot a geo_01a barrel). `docs/DESIGN.md`: "Breakable props".
+- **Why:** Blocker 3 of the level audit: barrels, geo_05b's clamps and dispensers, holo machines and rock cover took no damage, and about 25 script steps wait for one to break.
+- **Tested how:** `cargo test -p rc_scripts -p rc_scripts_plugin -p rc_level` (new: shot props break and tell the scripts; damaged step rules; broken props saved; three shots break a barrel and it sets off the next). Read all 13 Geonosis maps with the game files copied read only from the PC.
+- **Result:** Geonosis: 838 breakable props, 53 of them send an event the scripts use (geo_05b: 5 clamps `Clamp00`-`Clamp40`, 5 dispensers `DispenserDead..`; geo_04c: 2 holo machines; geo_04d: 9 rock covers; geo_01b/03a/03c/03d: barrels). Unit tests pass.
+- **Still broken / not tested:** `rc_game --script` with the new checks not run yet (needs more game files copied; the PC went offline). Not tested on Windows or by playing. Broken and damaged models, effects and sounds not shown (props disappear), after-effects (fire, electricity) not done, loose props not pushed. Prop damage tables (`MyDamageVariance`) aren't found in the class defaults, so all damage counts in full. Rock cover follows the game's rule of vanishing in its damaged step without sending its event.
+- **Next:** Run the full self-test, then the user shoots a barrel on Windows.
+
 ## 2026-11-09: No squad and no grown arms in the prologue (rc_squad, rc_squad_plugin, rc_game_core, rc_scripts_plugin, rc_combat, rc_game)
 
 - **Changed:** `rc_squad::map::MapSquadInfo` gets `has_squad_actor` and `wants_squad()`; `rc_squad_plugin::SquadMapData::squadless` stops squad mates coming in on maps without a `CTSquad` actor, squad markers or squad-mate spawners. `rc_game_core::Cutscene::briefing_weapon` is set from `ACTION_Briefing`'s `BriefingWeapon` (`bSetBriefingWeapon`) and cleared by `bEndBriefing`; while set, `rc_combat` hides the first-person arms and the plain gun model. `rc_game/src/cutscene.rs` logs it.

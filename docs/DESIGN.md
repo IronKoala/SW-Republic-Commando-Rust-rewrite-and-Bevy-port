@@ -1506,6 +1506,48 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
 
+### Breakable props (`rc_level::breakables`, `rc_scripts_plugin/src/breakables.rs`)
+
+Explosive barrels, geo_05b's fuel dispensers and their clamps, holo
+machines, consoles, rock cover, drone eggs and wall panels are all `Prop`s
+(or `KarmaProp`, `StaticProp`, `ExplosiveBarrel` ...) with health. The
+values live in the map, or as the class's defaults in the script packages
+(`Properties/StaticPropProperties.u`, `Properties/MarkerProperties.u`,
+`CTMarkers.u`); `rc_level::breakables::read` takes the map's value first
+and then walks the class and its parents (`class_look`). The Geonosis maps
+have 838 of them; 53 send an event the level scripts wait for.
+
+How a prop breaks (our reading of the game, in our words):
+
+- It starts with `Health`. With none (0 or less) nothing can hurt it; only
+  a script can remove it.
+- Damage counts after the prop's damage table, as for characters.
+- `DamagedRatio` above 0: when health falls to that share of the start,
+  it goes to its damaged step (`DamagedState`): sends that step's event,
+  and if the step has no model of its own it simply disappears, *without*
+  its broken event (geo_04d's rock cover works this way). A damaged step
+  with a time limit (`StateLifeSpan`) breaks by itself when it runs out.
+- At no health it breaks (`DestroyedState`): it sends its own `Event`, or
+  if it has none `DestroyedState.Event`. Broken props take no more damage.
+- If it has an explosion (`ExplosionDamage` and `ExplosionRadius`) it goes
+  off 0.1 to 0.2 s later, hurting everything it can see within the radius,
+  falling off with distance (the same rule as grenades).
+
+Who does what: `rc_level::map_collision` keeps every breakable prop's
+triangles apart (as a `LevelParts` part), and the level viewer draws each
+as its own `MoverPart`, so it can go when it breaks. `rc_scripts::Director`
+keeps health and steps (`add_breakables`, `hurt_prop`) and sends the
+events, so a script waiting for `Clamp00` carries on. `rc_scripts_plugin`
+turns weapons into damage: a `ShotLanded` on the level hurts the prop whose
+box it landed on (`ShotLanded` now carries the shot's damage and type), a
+grenade `Blast` hurts the props around it, and a prop's own explosion sends
+`rc_combat::Explode` (characters) and hurts the props around it (so barrels
+set each other off). Broken and damaged state are saved with the scripts.
+
+Not done yet: the broken or damaged model (props just disappear), the
+effect and sound, the burning or electric after-effect some barrels leave,
+the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`.
+
 ### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
 
 A `ScriptedSequence` belongs to the characters that run it: a placed pawn

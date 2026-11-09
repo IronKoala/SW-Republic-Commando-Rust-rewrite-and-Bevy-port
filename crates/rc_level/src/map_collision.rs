@@ -51,6 +51,9 @@ pub struct MapCollision {
     /// (class, tag). See `crate::scripts::tagged_actors`.
     pub part_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
     pub parts: HashMap<usize, (String, String)>,
+    /// Props weapons can break (`crate::breakables`). They are parts too,
+    /// so their triangles can go when they break.
+    pub breakables: Vec<crate::breakables::Breakable>,
     /// Places to arrive at from another map: each `Teleporter`'s `Tag`,
     /// feet position and facing, as for `start`. A level address like
     /// `RAS_03B.ctm#FromA` names one by its tag.
@@ -274,6 +277,10 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut mover_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // And the parts scripts can switch off.
     let mut parts = crate::scripts::tagged_actors(&map.0, &map.1, &level);
+    let breakables = crate::breakables::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
+    for b in &breakables {
+        parts.entry(b.export).or_insert_with(|| (b.class.clone(), b.tag.clone()));
+    }
     parts.retain(|a, _| !is_mover.contains(a));
     let mut part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     let mut triangles = Vec::with_capacity(mesh.triangles.len());
@@ -292,6 +299,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         mover_triangles,
         part_triangles,
         parts,
+        breakables,
         start,
         arrivals,
         bsp_nodes: bsp.nodes.len(),

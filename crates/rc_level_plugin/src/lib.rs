@@ -101,6 +101,12 @@ pub struct LevelMoverData {
     pub triangles: std::collections::HashMap<usize, Vec<[[f32; 3]; 3]>>,
 }
 
+/// Props weapons can break (`rc_level::breakables`): barrels, consoles,
+/// rock cover, clamps. Each is also a part in `LevelParts`, by its export
+/// index. Present from the end of loading until the game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
+
 /// One part of the level a script can switch off (see `LevelParts`).
 pub struct Part {
     pub export: usize,
@@ -188,6 +194,16 @@ impl LevelParts {
             .collect()
     }
 
+    /// The box around one part (by export index), if it has collision
+    /// (lowest corner, highest corner), Unreal units.
+    pub fn bounds_of(&self, export: usize) -> Option<(Vec3, Vec3)> {
+        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
+        parts
+            .iter()
+            .find(|p| p.export == export)
+            .and_then(|p| p.world.as_ref().map(|w| w.bounds()))
+    }
+
     /// The level plus the parts that are solid now.
     pub fn world(&self) -> Arc<dyn MoveWorld + Send + Sync> {
         Arc::new(WithParts(self.0.clone()))
@@ -226,6 +242,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelInfo>();
     commands.remove_resource::<LevelMoverData>();
     commands.remove_resource::<LevelParts>();
+    commands.remove_resource::<LevelBreakables>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -254,7 +271,7 @@ fn load(world: &mut World) {
     // stands at the PlayerStart, so the feet are one collision height lower.
     let height = MoveParams::player_commando().collision_height;
     let t = Instant::now();
-    let lvl = match rc_level::map_collision::load(&path, &game_data, height) {
+    let mut lvl = match rc_level::map_collision::load(&path, &game_data, height) {
         Ok(l) => l,
         Err(e) => {
             log.line(format!("{PART}: ERROR loading {}: {e}", path.display()));
@@ -340,6 +357,13 @@ fn load(world: &mut World) {
         lvl.parts.len(),
         parts.list().iter().filter(|p| p.4).count()
     ));
+    log.line(format!(
+        "{PART}: {} props weapons can break ({} explode, {} tell the level scripts when they break)",
+        lvl.breakables.len(),
+        lvl.breakables.iter().filter(|b| b.explosion.is_some()).count(),
+        lvl.breakables.iter().filter(|b| b.broken_event().is_some()).count()
+    ));
+    world.insert_resource(LevelBreakables(std::mem::take(&mut lvl.breakables)));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(parts);
 
