@@ -139,7 +139,11 @@ copy of the game.
   (read at run time from the install). When each line is said is our own
   rule, in `data/squad/voice.toml`. Squad mates are heard at full volume
   like a helmet radio (`positional = "yes"` places them instead). Marked
-  jobs' lines (breach, bacta...) are not tried in a game yet.
+  jobs' lines (you ask for a breach, slice, demolition, bacta, sniper,
+  grenade or anti-armour job; the squad mate confirms, then says when
+  they're in place, working or done) were silent until 2026-11-09 and are
+  now tested in the cloud sandbox only (`rc_squad_sim yyy_05d --jobs`),
+  not yet in a game.
 
 - **The squad uses their specialities (tested in the cloud sandbox by
   numbers, not yet on Windows or with eyes).** Without being told, Sev

@@ -1939,7 +1939,11 @@ state and distances, and every 5 s a fight line with each member's shots,
 hits, kills and revives. For the fight it puts stand-in droids (real
 combat targets with the game's droid size and health that stand still and
 don't shoot back) in sight of the squad. The checks are listed in
-`README.md`.
+`README.md`. `rc_squad_sim MAP --jobs` is a second run, a marker-job tour:
+for each job kind the map has it puts the player near the open marker of
+that kind nearest the squad, orders it, and checks after 45 s that the job
+was done (or the post taken), that the player asked for it once and that a
+squad mate answered.
 
 ### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
 
@@ -1959,6 +1963,12 @@ quiet moment). One squad line at a time; a line keeps the squad quiet for
 its WAV length plus `gap`. The player's order lines are urgent and answers
 wait for them; a new order drops answers to older ones. If the chosen
 squad mate has no recording of a line, another standing one says it.
+A rule marked `optional` may find no recording at all (Sev has no
+GrenadeReady in the game); that is not counted as a missing line. Squad
+events name jobs as the squad panel does ("Breach door"); `Chatter` turns
+that into the job's key ("breach") for `job_assigned:breach` and the like.
+A player (`leader`) rule speaks at most once per frame, because a breach
+gives every squad mate a spot at once.
 `rc_squad_plugin::voice` gathers events in `SquadHeard`, plays lines as
 `Voice` sounds and logs every line said or skipped (`squad: ... voice:`).
 
