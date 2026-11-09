@@ -830,14 +830,38 @@ fn scripts_change_level_and_skip_disabled_actions() {
             "End",
             vec![act(
                 "ShowDebriefingScreen",
-                &[("NewLevel", t("YYY_01Briefing.ctm"))],
+                &[
+                    ("NewLevel", t("YYY_01Briefing.ctm")),
+                    ("MenuClass", t("XInterfaceCTMenus.CTDebriefingInfoRAS")),
+                    ("Title", t("CRITICAL DISCOVERIES")),
+                    ("Text", t("Well done.")),
+                    ("PicName", t("GUIContent.RAS_Debrief")),
+                ],
             )],
         )],
         failures: vec![],
         sounds: Default::default(),
     };
     let mut d = Director::new(&map, &[], Settings::default());
-    assert_eq!(changes(&run(&mut d, 0.1)), ["YYY_01Briefing.ctm"]);
+    let out = run(&mut d, 0.1);
+    assert_eq!(changes(&out), ["YYY_01Briefing.ctm"]);
+    // It carries what the screen shows, so the game can show it first.
+    let shown: Vec<&Debriefing> = out
+        .iter()
+        .filter_map(|e| match e {
+            Effect::ChangeLevel { debriefing, .. } => debriefing.as_ref(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [&Debriefing {
+            menu_class: "XInterfaceCTMenus.CTDebriefingInfoRAS".into(),
+            title: "CRITICAL DISCOVERIES".into(),
+            text: "Well done.".into(),
+            picture: "GUIContent.RAS_Debrief".into(),
+        }]
+    );
     // A hint screen (same action, no NewLevel) doesn't leave.
     let map = MapScripts {
         actors: vec![script(

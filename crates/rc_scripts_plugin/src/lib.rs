@@ -21,9 +21,11 @@
 //!   `save.rs`). After a load the scripts carry on from there, and the
 //!   level-start events aren't sent again.
 //! - level exits: walking into an open exit (a `Teleporter` with a `URL`),
-//!   `ACTION_ChangeLevel`, or the end-of-campaign debriefing's `NewLevel`
-//!   sends a [`ChangeLevel`]; the save part loads that map and carries the
-//!   player over;
+//!   or `ACTION_ChangeLevel` sends a [`ChangeLevel`]; the save part loads
+//!   that map and carries the player over. The end-of-campaign debriefing
+//!   (`ACTION_ShowDebriefingScreen` with a `NewLevel`) sends a
+//!   [`rc_game_core::ShowDebriefing`] instead, holding that `ChangeLevel`
+//!   for the game to send after the screen;
 //! - enemy spawners (`rc_enemies`) hear every event and switch on by tag;
 //!   `ACTION_StopFactorySpawning` and `ACTION_ResetFactory` become
 //!   [`FactoryOrder`]s for them, and what they send back (a droid's death
@@ -89,6 +91,7 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<ChangeLevel>()
+            .add_message::<rc_game_core::ShowDebriefing>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
@@ -523,9 +526,10 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change): (
+    (mut checkpoints, mut change, mut debrief): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
+        MessageWriter<rc_game_core::ShowDebriefing>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -632,7 +636,11 @@ fn run(
             Effect::Checkpoint { name } => {
                 script.held.push(name);
             }
-            Effect::ChangeLevel { url, by } => match rc_scripts::level_url(&url) {
+            Effect::ChangeLevel {
+                url,
+                by,
+                debriefing,
+            } => match rc_scripts::level_url(&url) {
                 Some((map, portal)) => {
                     log.line(format!(
                         "{PART}: t={now:.2} {by}: the level is over; on to {map}{}",
@@ -642,7 +650,27 @@ fn run(
                             .unwrap_or_default()
                     ));
                     script.stats.left_for = Some(url);
-                    change.write(ChangeLevel { map, portal, by });
+                    let then = ChangeLevel { map, portal, by };
+                    match debriefing {
+                        // The campaign's end: the game shows the
+                        // debriefing first and goes on at CONTINUE.
+                        Some(d) => {
+                            log.line(format!(
+                                "{PART}: t={now:.2} debriefing {:?} ({}, picture {}) before going on",
+                                d.title, d.menu_class, d.picture
+                            ));
+                            debrief.write(rc_game_core::ShowDebriefing {
+                                menu_class: d.menu_class,
+                                title: d.title,
+                                text: d.text,
+                                picture: d.picture,
+                                then,
+                            });
+                        }
+                        None => {
+                            change.write(then);
+                        }
+                    }
                 }
                 None => log.line(format!(
                     "{PART}: t={now:.2} {by}: ERROR can't read the level address {url:?}; staying"
@@ -884,9 +912,8 @@ fn carry_out(
             ));
         }
         "showdebriefingscreen" if a.text("NewLevel").is_some() => {
-            script.stats.not_done += 1;
             log.line(format!(
-                "{at}: the debriefing \"{}\" (not shown yet), then on to {}",
+                "{at}: the debriefing \"{}\", then on to {}",
                 a.text("Title").unwrap_or(""),
                 a.text("NewLevel").unwrap_or("")
             ));

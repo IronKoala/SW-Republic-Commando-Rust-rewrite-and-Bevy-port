@@ -1056,6 +1056,49 @@ fn steps() -> Vec<Step> {
             "the next map's start is saved as a checkpoint, with the health",
             level_exit_checkpoint,
         ),
+        // The end-of-campaign debriefing, asked for the way geo_05c's
+        // last script asks (sent here directly; the real one waits for
+        // the end of that level). CONTINUE loads geo_01b again.
+        Note(debriefing_ask),
+        Wait(0.5),
+        Check(
+            "the debriefing pauses play and shows the original screen with the level's words and picture",
+            debriefing_shown,
+        ),
+        Shot("debriefing"),
+        Check("the debriefing matches the original's pictures", |w| {
+            compare(w, "debriefing", 0.05)
+        }),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("back does nothing on the debriefing", |w| {
+            match (shown_page(w), page(w)) {
+                (Some(k), _) if k == "debriefing" => Ok("still showing".into()),
+                (None, Page::Debriefing) => Ok("placeholder still showing".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuAccept), // CONTINUE
+        Until(
+            "CONTINUE goes on to the next map",
+            |w| {
+                in_state(w, GameState::Loading)
+                    || (in_state(w, GameState::InGame)
+                        && w.resource::<crate::debriefing::Debriefing>().showing.is_none()
+                        && w.get_resource::<State<Play>>().map(|p| *p.get()) == Some(Play::Running))
+            },
+            10.0,
+        ),
+        Until(
+            "the next map loads after the debriefing",
+            |w| {
+                in_state(w, GameState::InGame)
+                    && w.resource::<CurrentLevel>().map.as_deref() == Some("geo_01b")
+                    && count::<Player>(w) == 1
+            },
+            LOAD_TIMEOUT,
+        ),
+        Wait(1.0),
         Press(Action::Pause),
         Wait(0.2),
         Check(
@@ -2794,6 +2837,66 @@ fn level_exit_found(w: &mut World) -> Result<String, String> {
 
 /// Note the health and magazine, take a little health off (so carrying it
 /// over shows), and put the player in the exit.
+/// Words for the debriefing check: this script's own, not the game's.
+const DEBRIEF_TITLE: &str = "SCRIPT DEBRIEFING";
+const DEBRIEF_TEXT: &str = "A test of the debriefing screen: this text is the self-test's own, and long enough to wrap onto a second line.";
+
+fn debriefing_ask(w: &mut World) {
+    w.write_message(rc_game_core::ShowDebriefing {
+        menu_class: "XInterfaceCTMenus.CTDebriefingInfoGEO".into(),
+        title: DEBRIEF_TITLE.into(),
+        text: DEBRIEF_TEXT.into(),
+        // Named without its group, as geo_05c names it.
+        picture: "GUIContent.GEO_Debrief".into(),
+        then: rc_game_core::ChangeLevel {
+            map: "geo_01b".into(),
+            portal: None,
+            by: "the self-test".into(),
+        },
+    });
+    w.resource::<GameLog>()
+        .line("script: asked for the debriefing, then on to geo_01b");
+}
+
+fn debriefing_shown(w: &mut World) -> Result<String, String> {
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    if play != Some(Play::Paused) {
+        return Err(format!("play is {play:?}, not paused"));
+    }
+    if page(w) != Page::Debriefing {
+        return Err(format!("page {:?}", page(w)));
+    }
+    if !w.resource::<OriginalMenus>().active() {
+        return Ok("no original menus: placeholder page".into());
+    }
+    let k = shown_page(w).ok_or("placeholder page, see the log for why")?;
+    let m = w.resource::<OriginalMenus>();
+    let screen = &m.pages[&k].screen;
+    let text = |name: &str| match screen.layout.widget(name).map(|w| &w.kind) {
+        Some(rc_menus::layout::Kind::Text(t)) => t.text.clone(),
+        _ => String::new(),
+    };
+    let picture = match screen.layout.widget("InfoPic").map(|w| &w.kind) {
+        Some(rc_menus::layout::Kind::Sprite(s)) => s.texture.clone().unwrap_or_default(),
+        _ => String::new(),
+    };
+    let got = format!(
+        "title {:?}, picture {picture}, focus on {:?}, buttons {:?}",
+        text("InfoTitle"),
+        screen.focused_name(),
+        screen.reachable_names()
+    );
+    if text("InfoTitle") == DEBRIEF_TITLE
+        && text("InfoText") == DEBRIEF_TEXT
+        && picture.eq_ignore_ascii_case("GUIContent.LoadInfoScreens.GEO_Debrief")
+        && screen.focused_name() == Some("AButton")
+    {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 fn level_exit_walk_in(w: &mut World) {
     let Some((name, _, at)) = level_exit(w) else {
         return;

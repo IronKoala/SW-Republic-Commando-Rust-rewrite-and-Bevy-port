@@ -510,9 +510,11 @@ copy of the game.
   sound files; a script waiting for a line waits for its real length). No
   subtitles yet, and every scripted sound plays at full loudness wherever
   its speaker is. Music cues, characters walking or animating, the squad
-  joining and leaving and camera moves are logged as "not done yet". The
-  end-of-campaign debriefing screen isn't shown: the game goes straight
-  on. Briefings and cutscene maps may wait for events nothing sends yet,
+  joining and leaving and camera moves are logged as "not done yet". At the
+  end of each campaign the original debriefing screen shows (its own
+  picture, frame and texts, with the level's title, words and picture);
+  CONTINUE goes on to the next campaign. Its campaign music isn't played
+  yet. Not tested by playing a campaign to its end. Briefings and cutscene maps may wait for events nothing sends yet,
   so you may get stuck in one. Not tested on Windows.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't

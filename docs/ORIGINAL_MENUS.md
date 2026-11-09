@@ -179,6 +179,18 @@ the first button of its row, keeping its left edge and middle line. The
 log names the labels it shrank ("labels shrunk to fit before their
 arrows") and any text still running into a button ("STILL OVERLAPPING").
 
+## The debriefing screen (2026-11-09)
+
+The end of each campaign (geo_05c, ras_04d, yyy_06d) shows the original
+`CTDebriefingInfo` screen: its own background, the two display-box
+frames, "YOU HAVE UNLOCKED / EXTRAS CONTENT" and the CONTINUE button, with
+the level script's title, text and picture filled in
+(`rc_menus/src/debriefing.rs`, page `debriefing` in
+`data/ui/original_menus.toml`). `rc_probe --menu
+XInterfaceCTMenus.CTDebriefingInfo` paints it with sample words of its own;
+`rc_probe --pages` says it uses the original. How it fits into play is in
+`docs/DESIGN.md` ("The debriefing screen").
+
 ## Wide screens: moving apart, not shrinking
 
 The user asked (2026-10-30) for the menus to fit every screen shape we
