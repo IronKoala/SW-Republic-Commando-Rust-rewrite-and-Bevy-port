@@ -2992,6 +2992,20 @@ the actions:
   `OutTime`. This is a stand-in: the original adds and multiplies, we lay
   a colour over. Bloom is logged as not done.
 - `ACTION_ShowVisor` hides or shows the helmet frame (`bVisor`).
+- `ACTION_Briefing` with `bSetBriefingWeapon` gives the player other
+  hands (`BriefingWeapon`: the prologue's `CTInventory.Baby` and
+  `CTInventory.Boy`). Those hands aren't drawn yet, so the grown
+  commando's arms and gun are hidden while it is set
+  (`Cutscene::briefing_weapon`, read by `rc_combat`'s `arms_view` and
+  `view`); `bEndBriefing` gives them back.
+
+**No squad in cutscene maps.** The playable missions each have a `CTSquad`
+actor; the prologue, the briefings and the epilogue don't. Our squad used
+to come along everywhere (the user saw Delta standing behind a tank in the
+prologue). `rc_squad::map::MapSquadInfo::wants_squad` is true when the map
+has a `CTSquad` actor, a squad marker or a squad-mate spawner; when the
+map was read and none is there, `rc_squad_plugin` brings in no squad mates
+and logs "this map has no squad".
 
 `rc_game/src/cutscene.rs` carries them out: it holds the actions between
 `GameSet::Input` and `GameSet::Simulate`, hides every `HudRoot` (the
@@ -3007,8 +3021,8 @@ its name, its values in the maps and its class defaults; the classes
 themselves are compiled code we don't read. Not done yet: the player
 riding the gunship (`ACTION_AttachToGunship` to a bone of the
 `BriefingGunship`, whose `GEO01fly` animation carries the camera through
-the sky), what the player holds (`BriefingWeapon`: the baby's and boy's
-hands, the briefing helmet), placed characters that the game doesn't
+the sky), drawing what the player holds (`BriefingWeapon`: the baby's and
+boy's hands, the briefing helmet; for now nothing is drawn), placed characters that the game doesn't
 spawn yet (Kaminoans, clone troopers, the hologram advisor), hiding and
 showing actors that aren't level parts (the hologram text), view shakes,
 the title card, the credits, and the cutscene state in save files (the

@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: No squad and no grown arms in the prologue (rc_squad, rc_squad_plugin, rc_game_core, rc_scripts_plugin, rc_combat, rc_game)
+
+- **Changed:** `rc_squad::map::MapSquadInfo` gets `has_squad_actor` and `wants_squad()`; `rc_squad_plugin::SquadMapData::squadless` stops squad mates coming in on maps without a `CTSquad` actor, squad markers or squad-mate spawners. `rc_game_core::Cutscene::briefing_weapon` is set from `ACTION_Briefing`'s `BriefingWeapon` (`bSetBriefingWeapon`) and cleared by `bEndBriefing`; while set, `rc_combat` hides the first-person arms and the plain gun model. `rc_game/src/cutscene.rs` logs it.
+- **Why:** User playtest of the prologue on Windows: "i started as the full grown clone and i could see the squad behind the tank".
+- **Tested how:** `cargo test -p rc_squad -p rc_squad_plugin -p rc_scripts_plugin -p rc_game_core -p rc_combat`; `rc_game --map pro` in the cloud with the game files copied read only from the PC, run on through geo_01briefing to geo_01a.
+- **Result:** pro and geo_01briefing: "no CTSquad actor in the map: this map has no squad", the HUD's squad list is empty; pro logs "arms hidden (other hands)" from the nursery (CTInventory.Baby) through the school (CTInventory.Boy) until the briefing ends at the grown-up part, where the arms come back. geo_01a: "3 squad mates with the player", arms shown, as before.
+- **Still broken / not tested:** Not tested on Windows. The baby's and boy's hands themselves aren't drawn: the view has no hands at all there. Placed cutscene characters (Kaminoans, young clones, troopers) still don't appear.
+- **Next:** Spawning the characters placed in cutscene maps.
+
 ## 2026-11-09: Cutscene maps play to the end (rc_level, rc_scripts, rc_scripts_plugin, rc_game_core, rc_game)
 
 - **Changed:** `rc_level::scripts` reads arrays of named-value structs (`Val::Structs`). `rc_scripts` runs `Dispatcher` actors as scripts of our own making (`dispatcher_actions`, `Stats::dispatchers`). New `rc_game_core::cutscene` (`Cutscene`, `HeldView`, `TeleportPlayer`) and `ActionState::hold_still`. New `rc_scripts_plugin/src/cutscene.rs`: `ACTION_Briefing` (hold, look limits, HUD), `ACTION_TeleportToPoint` and `ACTION_SetPhysics` on the player, `ACTION_ScreenFade`, `ACTION_AnimateVisorFX`, `ACTION_ShowVisor`. New `rc_game/src/cutscene.rs` (holding, HUD hiding, full-screen fade layer); `player.rs` (teleports, look limits, frozen body), `helmet.rs` (frame hidden), `hud.rs` and `original_hud.rs` (`HudRoot`). `docs/DESIGN.md`: new "Cutscenes" section.

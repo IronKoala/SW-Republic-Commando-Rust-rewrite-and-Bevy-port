@@ -97,22 +97,28 @@ fn hide_hud(cut: Res<Cutscene>, mut roots: Query<&mut Visibility, With<HudRoot>>
 fn log_changes(
     cut: Res<Cutscene>,
     log: Res<GameLog>,
-    mut last: Local<Option<(bool, bool, bool, bool)>>,
+    mut last: Local<Option<(bool, bool, bool, bool, bool)>>,
 ) {
     let now = (
         cut.held.is_some(),
         cut.hide_hud,
         cut.tint[3] >= 0.99,
         cut.frozen,
+        cut.briefing_weapon.is_some(),
     );
     if *last != Some(now) {
-        if last.is_some() || now != (false, false, false, false) {
+        if last.is_some() || now != (false, false, false, false, false) {
             log.line(format!(
-                "cutscene: player {}, HUD {}, screen {}, body {}",
+                "cutscene: player {}, HUD {}, screen {}, body {}, arms {}",
                 if now.0 { "held" } else { "free" },
                 if now.1 { "hidden" } else { "shown" },
                 if now.2 { "covered" } else { "visible" },
-                if now.3 { "frozen" } else { "moves" }
+                if now.3 { "frozen" } else { "moves" },
+                if now.4 {
+                    "hidden (other hands)"
+                } else {
+                    "shown"
+                }
             ));
         }
         *last = Some(now);

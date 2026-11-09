@@ -80,10 +80,9 @@ fn app() -> App {
                     UVec3::new(1000.0, 0.0, 0.0),
                 ),
             ],
-            factories: vec![],
+            ..Default::default()
         },
-        nav: None,
-        notes: vec![],
+        ..Default::default()
     })
     .init_resource::<Done>()
     .add_systems(Update, collect);

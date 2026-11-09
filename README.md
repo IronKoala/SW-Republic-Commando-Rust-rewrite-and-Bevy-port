@@ -517,8 +517,10 @@ copy of the game.
   to their end and go on to the next map. The player is held still with
   the original's look limits, moved between rooms, and the screen fades
   and flashes as the scripts ask; the HUD and helmet frame hide when they
-  say. Not done yet: riding the gunship in briefings, the baby's and
-  boy's hands, many cutscene characters, hologram text, the title card,
+  say. The squad only comes along in maps that have one (not the
+  prologue, briefings or epilogue), and the grown commando's arms are
+  hidden while the prologue gives you a child's hands. Not done yet:
+  riding the gunship in briefings, drawing the baby's and boy's hands, many cutscene characters, hologram text, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't

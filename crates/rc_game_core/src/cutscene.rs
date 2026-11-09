@@ -31,6 +31,11 @@ pub struct Cutscene {
     /// The helmet frame is hidden (`ACTION_ShowVisor` off: the prologue's
     /// clone has no helmet yet).
     pub hide_visor: bool,
+    /// What the player holds instead of their own arms and gun
+    /// (`BriefingWeapon`, like the prologue's `CTInventory.Baby` and
+    /// `CTInventory.Boy`). Those hands aren't drawn yet (placeholder: no
+    /// arms or gun at all), so the grown commando's arms stay away.
+    pub briefing_weapon: Option<String>,
 }
 
 /// Where a held player may look. Angles are radians, Unreal's way round

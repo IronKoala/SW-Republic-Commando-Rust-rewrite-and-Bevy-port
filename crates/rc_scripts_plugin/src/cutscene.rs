@@ -150,6 +150,7 @@ pub struct Scene {
     held: Option<HeldView>,
     hide_hud: bool,
     hide_visor: bool,
+    briefing_weapon: Option<String>,
     frozen: bool,
     fade: Option<Fade>,
     flashes: Vec<Flash>,
@@ -199,6 +200,7 @@ impl Scene {
                 if a.flag("bEndBriefing", false) {
                     self.held = None;
                     self.hide_hud = false;
+                    self.briefing_weapon = None;
                     log.line(format!("{at}: the briefing is over; the player can move"));
                     self.done.push("briefing end".into());
                 } else {
@@ -234,7 +236,10 @@ impl Scene {
                     ));
                     if let Some(w) = a.text("BriefingWeapon") {
                         if a.flag("bSetBriefingWeapon", false) {
-                            log.line(format!("{at}: the player holds {w} (not done yet)"));
+                            log.line(format!(
+                                "{at}: the player holds {w} (those hands aren't drawn yet: arms and gun hidden)"
+                            ));
+                            self.briefing_weapon = Some(w.to_string());
                         }
                     }
                     self.done.push("briefing".into());
@@ -427,6 +432,7 @@ pub(crate) fn apply(
         tint: scene.tint(now),
         hide_hud: scene.hide_hud,
         hide_visor: scene.hide_visor,
+        briefing_weapon: scene.briefing_weapon.clone(),
     };
     if *cut != want {
         *cut = want;
