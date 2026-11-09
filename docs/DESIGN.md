@@ -1941,6 +1941,27 @@ combat targets with the game's droid size and health that stand still and
 don't shoot back) in sight of the squad. The checks are listed in
 `README.md`.
 
+### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
+
+The lines are the game's: each member's `audio_table` (squad.toml, like
+`Delta07Audio`) and the player's `leader_table` (`Delta38Audio`) are
+classes in `System/CTAudio.u`. Their `Table` holds one sound group per
+event of `EPawnAudioEvent` (`System/Engine.u`), entry *i* = event *i*.
+`rc_combat::audio_table` reads both at run time and `read_sounds` loads the
+groups from `character_voice.uax`.
+
+When to speak is compiled code in the original, so it is ours:
+`rc_squad::Chatter` turns `SquadEvent`s (orders, first sight of an enemy,
+cover, held fire, down, revive, jobs) into lines by the `[line.*]` rules in
+voice.toml: who says it (`self`, `other`, `any`, `leader`), chance,
+cooldown, `urgent` (said even while someone talks) and `wait` (wait for a
+quiet moment). One squad line at a time; a line keeps the squad quiet for
+its WAV length plus `gap`. The player's order lines are urgent and answers
+wait for them; a new order drops answers to older ones. If the chosen
+squad mate has no recording of a line, another standing one says it.
+`rc_squad_plugin::voice` gathers events in `SquadHeard`, plays lines as
+`Voice` sounds and logs every line said or skipped (`squad: ... voice:`).
+
 ## The game program (`rc_game`)
 
 `rc_game` is built from Bevy plugins. Parts don't call each other; they
