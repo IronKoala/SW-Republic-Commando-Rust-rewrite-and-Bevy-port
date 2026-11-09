@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Low light mode gets the original's night-vision look (rc_visor)
+
+- **Changed:** New `crates/rc_visor/src/night_original.rs` (reads the original's low light vision mode `FrameFX.VisionModes.VisionNight`, its shader's window and grain pictures and numbers from the install), `night_vision.rs` and `night_vision.wesl` (one full-screen pass on the player's camera: black and white from the sum of squared colours, the original's visor window, its film grain, fade in from black), `lib.rs` (the pass, the mode's black distance fog, log lines), `rules.rs` (`night_brightness`, `window_u` and their tests), `[low_light]` in `data/visor/tactical.toml`, `visor_check` (black and white, dark corners outside the window, picture back to normal after), the `rc_game --script` visor checks (night vision and fog on in low light, off after). rc_visor now uses rc_menus and rc_image.
+- **Why:** Low light mode was only a weak helmet lamp (a placeholder). The original also changes the whole picture.
+- **Tested how:** In the cloud with the game files copied read only from the PC. `RC_GAME_DIR=... cargo test -p rc_visor`; `visor_check` with and without the game folder; `rc_game --script` on geo_01a.
+- **Result:** Read from the install: window HUD_GlassNight 512x512, grain FilmGrain 128x128, grain strength 0.118, grain repeats 9.22 x 6.54, keeps 0.2 of the last picture, fog 555 to 4500. rc_visor 13 tests pass. visor_check: 20 passed, 0 failed with and without the game folder (low light: colour spread 5.0 against 17.6 in tactical, top left corner 0.9 of 255 behind the window).
+- **Still broken / not tested:** Not tested on Windows or by playing. Not compared with the real game (it doesn't run on the user's PC right now). The original's 20% trail of the last picture and the fade out are not done. The black-and-white sum darkens dim places, as the original's does; whether ours matches its brightness is not checked.
+- **Next:** The user tries low light in a dark place (X twice from the start of a level) and says whether it is too dark; `boost` in the data file brightens it.
+
 ## 2026-11-09: Walking no longer gets stuck at high frame rates (rc_movement, rc_walkcheck)
 
 - **Changed:** `crates/rc_movement/src/lib.rs`: (1) after a hit, the rest of the move counts from where the box really stopped, so the 0.1 uu gap isn't lost from it; (2) that gap is measured straight out from the surface, not along the move; (3) walking up a floor-like slope keeps the move's direction across the ground and only adds the rise (it used to slide along the surface, which turned each move a little downhill); (4) the floor check looks from 0.1 above, so a box that crept closer than 0.1 to the floor is lifted back; (5) a step up goes forward at least 8 uu (`MIN_STEP_FORWARD`). New tool `crates/rc_nav/src/bin/rc_walkcheck.rs`. Three new tests in `crates/rc_movement/src/tests.rs`.

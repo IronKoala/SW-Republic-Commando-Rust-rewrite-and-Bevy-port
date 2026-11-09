@@ -3009,9 +3009,60 @@ compiled renderer (`UFrameFX::GetTacticalSkelMeshShader`), which we can't
 read, so the glow's shape (`[glow]` in the data file: strength scale, edge
 sharpness, fill) is ours, to be compared with the real game. Also not done:
 the faint film grain the original's tactical mode adds over the whole
-picture (`VisionShaderEnhance`), its `EnhancedVisionFade` flag on clones
-(meaning unknown), and the low light mode's night-vision picture
-(`VisionNight`); low light is only the lamp for now (a placeholder).
+picture (`VisionShaderEnhance`) and its `EnhancedVisionFade` flag on clones
+(meaning unknown).
+
+**Low light mode (night vision).** The original's low light view is the
+vision mode object `FrameFX.VisionModes.VisionNight` (class
+`VisionModeSniper`, in `Textures/FrameFX.utx`). Its settings, read at run
+time by `night_original.rs`: `VisionShader` = `VisionShaderNight` (a
+"hardware shader": old Direct3D shader text plus constants and pictures),
+`Noise` 30 (grain strength 30/255), `MotionBlur` 51 (keep 51/255 of the last
+picture), `OverideFog` with `DistanceFogStart` 555 and `DistanceFogEnd` 4500
+(Unreal units, black fog), `BlurPasses` 1. The `VisionMode` class default
+`FlashlightOn` is true, so the lamp stays on. The shader's settings say what
+it does: it reads a blurred copy of the picture, takes red, green and blue
+squared and added up as one brightness (so black and white, darks darker,
+lights brighter), fades in from black, multiplies by the transparency of
+its overlay picture `HUDTextures.Helmet.HUD_GlassNight` (512x512, a
+visor-shaped window: open in the middle, black outside, with notches at the
+middle of each edge) and adds the overlay's colour (a very faint blue,
+10/255), then adds film grain from `FrameFX.FBFX.FilmGrain` (128x128, grey),
+repeated 9.2 times across and 6.5 down a 4:3 screen (its vertex constant 1)
+and moved every frame. We read those pictures and numbers; the shader
+(`night_vision.wesl`) is our own, written from that description, not a copy.
+
+How ours is drawn: in low light mode a `NightVisionView` goes on the
+player's camera, and one full-screen pass runs after tone mapping (the
+original worked on the shown colours, so ours turns the colours back into
+screen values first). The plumbing follows Bevy's `FullscreenMaterial` with
+two pictures added (`night_vision.rs`). The HUD, arms and helmet frame are
+drawn by other cameras afterwards and stay sharp. A `DistanceFog` (marked
+`NightFog`) is added with the mode's fog and taken off again after. Cost:
+six texture reads per pixel, one pass, no extra pictures kept, fine for
+phones.
+
+Wide screens: the window picture is made for 4:3. Stretched across 21:9 or
+32:9 its curved edges and notches would be pulled wide. Instead
+(`rules::window_u`, the same sum in the shader) the middle 0.25 screen
+heights each side of the centre and the outer parts keep their shape, and
+the plain part between them is drawn longer. Narrower than 4:3 it is
+squeezed. The film grain gets more repeats across on wider screens so its
+specks stay square.
+
+`[low_light]` in `data/visor/tactical.toml`: `picture` (off: lamp only),
+`mode` (which vision mode object to read), `boost`, `tint` (white is the
+original), `window` (off for a full-screen picture, which VR will want),
+`window_middle`, `grain_scale`, `fog`, `fade_seconds`, and stand-in values
+used when the install can't be read (then the window is fully open and the
+grain flat).
+
+Not done: the trail (the original blends 80% of the new picture over 20%
+of the last one, `MotionBlur` 51); that needs the last picture kept, a
+second texture per camera. The original's `BloomOverideValue` 100 isn't
+used (its `BloomOveride` switch isn't set). The fade out when leaving the
+mode (`FadeOutTime` 0.2) isn't done; the picture goes off at once. Not
+compared with the real game, which doesn't run on the user's PC right now.
 
 **Plugging in.** `rc_game/src/visor.rs` copies the settings into
 `VisorSettings` and puts `TacticalGlow` on squad mates (by name) and weapon

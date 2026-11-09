@@ -41,10 +41,45 @@ pickup = "CTPickupDefaults"
 [colour_overrides]
 # sev = [255, 40, 40]
 
-# The helmet lamp in low light mode. PLACEHOLDER: the original's low light
-# mode also changes the whole picture (a night-vision shader), which isn't
-# done yet; for now it is only this lamp.
+# The helmet lamp in low light mode (on together with the picture below).
 [headlamp]
 lumens = 400000.0
 range = 1500.0
 angle = 50.0
+
+# The low light mode's night-vision picture. The look is the original's:
+# its numbers and pictures are read at run time from the vision mode named
+# below (its film grain strength, its distance fog, the shader's visor-shaped
+# window and film grain pictures). The picture turns black and white (each
+# pixel's red, green and blue squared and added up), is seen through the
+# visor window, and gets the grain. The lines below change it or stand in
+# when the game folder can't be read. Every line can be left out.
+[low_light]
+# false: low light mode is only the helmet lamp.
+picture = true
+# The original's vision mode object the look is read from.
+mode = "FrameFX.VisionModes.VisionNight"
+# Brightness boost on top of the original's (1 is the original).
+boost = 1.0
+# Colour the black and white picture is tinted to: red, green, blue from 0
+# to 255. White is the original; for example [150, 255, 170] for green.
+tint = [255, 255, 255]
+# See through the original's visor-shaped window (outside it is black).
+# Switch off for a full-screen picture (VR headsets will want this).
+window = true
+# On screens wider than 4:3 the window is widened, not stretched: this much
+# of its middle (in screen heights each side of the centre) and its outer
+# parts keep their shape, and the plain part between them is drawn longer.
+window_middle = 0.25
+# Times the original's film grain strength (0 for none).
+grain_scale = 1.0
+# Use the mode's own distance fog: far things fade into the dark.
+fog = true
+# Seconds the picture takes to fade in from black.
+fade_seconds = 0.2
+# Used only when the game folder can't be read: grain strength (0 to 1),
+# grain repeats across and down a 4:3 screen, fog start and end (Unreal
+# units). Our guesses close to the original's.
+fallback_grain = 0.12
+fallback_grain_tiles = [9.0, 6.5]
+fallback_fog = [555.0, 4500.0]

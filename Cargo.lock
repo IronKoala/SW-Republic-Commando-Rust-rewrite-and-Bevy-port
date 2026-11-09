@@ -4717,6 +4717,7 @@ dependencies = [
  "bevy",
  "rc_game_core",
  "rc_image",
+ "rc_menus",
  "rc_package",
  "serde",
  "toml 0.8.23",
