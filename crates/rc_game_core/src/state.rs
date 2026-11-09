@@ -131,9 +131,9 @@ pub struct PlayerStart {
     pub yaw: f32,
 }
 
-/// The mood of the music. The game shell plays calm music while this is
-/// `Calm` and battle music while it is `Battle`. Whatever knows a fight has
-/// started (enemies spotting the player) sets it.
+/// Whether the enemies are fighting (`Battle`) or not (`Calm`). The enemies
+/// part sets it. The music no longer reads it: it follows the original's own
+/// battle rules from [`crate::MusicThreats`] (where the enemies are).
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MusicMood {
     #[default]

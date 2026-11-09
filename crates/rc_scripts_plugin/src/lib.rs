@@ -46,6 +46,7 @@
 //! (droid factories, the squad, sounds) can hook in by name.
 
 pub mod characters;
+pub mod music;
 pub mod save;
 pub mod sounds;
 
@@ -53,9 +54,8 @@ use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind, Health};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
-    GamePaths, GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player,
-    PlayerVitals, RaiseEvent,
+    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog, GamePaths,
+    GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player, PlayerVitals, RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelMoverData, LevelParts};
@@ -195,6 +195,8 @@ pub struct PlayStats {
     pub sounds_started: usize,
     /// Sounds asked for that weren't loaded.
     pub sounds_missing: Vec<String>,
+    /// Music actions passed on to the music.
+    pub music_cues: usize,
     pub not_done: usize,
     /// Orders sent to characters: `KIND WHO`.
     pub character_orders: Vec<String>,
@@ -359,7 +361,11 @@ fn build(
             at[0],
             at[1],
             at[2],
-            if open { "" } else { " (closed until the scripts open it)" }
+            if open {
+                ""
+            } else {
+                " (closed until the scripts open it)"
+            }
         ));
     }
     let dispensers: Vec<Dispenser> = map
@@ -523,11 +529,11 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change): (
-        MessageWriter<CheckpointReached>,
-        MessageWriter<ChangeLevel>,
+    (mut checkpoints, mut change): (MessageWriter<CheckpointReached>, MessageWriter<ChangeLevel>),
+    (mut hud, mut music): (
+        MessageWriter<HudMessage>,
+        MessageWriter<rc_game_core::MusicCue>,
     ),
-    mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
     restoring: Option<Res<RestoringSave>>,
     log: Res<GameLog>,
@@ -670,6 +676,15 @@ fn run(
                 };
                 if characters::KINDS.contains(&call.kind.as_str()) {
                     script.calls.push(call);
+                    continue;
+                }
+                if let Some(cue) = music::cue(&call.action) {
+                    log.line(format!(
+                        "{PART}: t={now:.2} {} #{} {}: music {cue:?}",
+                        call.script, call.index, call.kind
+                    ));
+                    script.stats.music_cues += 1;
+                    music.write(cue);
                     continue;
                 }
                 carry_out(

@@ -309,8 +309,9 @@ copy of the game.
   Hive`, ...), shows a loading screen with the mission text, and drops you
   into the level with an on-screen display (shield, health, crosshair, ammo,
   squad, messages). Escape pauses; the pause menu resumes, opens options or
-  quits to the main menu. It plays the game's own music (the main menu
-  theme, then each campaign's calm tracks). It reads a settings file
+  quits to the main menu. It plays the game's own music by the
+  original's rules (the main menu theme, then each room's music, battle
+  music when enemies come close, a victory flourish when the fight ends). It reads a settings file
   (`settings.toml`: game folder, mods, screen, volumes, mouse) and a controls
   file (`data/input/bindings.toml`: the original PC keys, plus gamepad and
   touch). `rc_game --script` drives itself through the menus and a level and
@@ -509,13 +510,17 @@ copy of the game.
   changes, and lines of dialogue and sounds (the game's own, read from its
   sound files; a script waiting for a line waits for its real length). No
   subtitles yet, and every scripted sound plays at full loudness wherever
-  its speaker is. Music cues, characters walking or animating, the squad
+  its speaker is. Music actions are carried out. Characters walking or animating, the squad
   joining and leaving and camera moves are logged as "not done yet". The
   end-of-campaign debriefing screen isn't shown: the game goes straight
   on. Briefings and cutscene maps may wait for events nothing sends yet,
   so you may get stuck in one. Not tested on Windows.
-- Music: the menu and level tracks play, but the switch to battle music
-  waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
+- Music: follows the original's rules, read from the game's files
+  (`cargo run --release -p rc_music --bin rc_music_check` checks every
+  level's music against your install). Our guesses: exactly when a fight
+  starts and ends, and the fade curves. Not done: battle volumes, the death
+  stinger, debriefing, credits and title-card music, music in save games.
+  Not tested in a level or on Windows. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
   picks from) are played for weapons, grenades and enemy voices. No 3D
   (positional) sound yet: enemy sounds just get quieter with distance.

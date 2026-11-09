@@ -21,8 +21,9 @@
 //! - [`LevelCollision`], [`PlayerStart`], [`Player`], [`PlayerCamera`]: the
 //!   level's solid surfaces, where the player starts, the player's body and
 //!   the player's eyes.
-//! - [`MusicMood`]: calm or battle music; whoever knows a fight started
-//!   sets it.
+//! - [`MusicMood`]: whether the enemies are fighting. [`music`]: the level
+//!   scripts' music actions ([`MusicCue`]) and the enemies the music watches
+//!   ([`MusicThreats`]).
 //! - [`Voice`] and [`SoundAt`]: tags for a sound a part plays (speech;
 //!   where it comes from), for the VOICES volume and 3D SOUND options.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
@@ -39,6 +40,7 @@ mod actions;
 pub mod events;
 mod hud;
 mod log;
+pub mod music;
 pub mod paths;
 pub mod save;
 pub mod sound;
@@ -54,8 +56,9 @@ pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
 pub use log::GameLog;
-pub use sound::{SoundAt, Voice};
+pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
+pub use sound::{SoundAt, Voice};
 pub use state::{
     playing, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate, MusicMood, Play,
     Player, PlayerCamera, PlayerStart,
@@ -80,6 +83,8 @@ impl Plugin for CorePlugin {
             .init_resource::<WeaponReadout>()
             .init_resource::<SquadReadout>()
             .init_resource::<MusicMood>()
+            .init_resource::<MusicThreats>()
+            .add_message::<MusicCue>()
             .add_message::<HudMessage>()
             .add_message::<ViewKick>()
             .add_message::<ScriptEvent>()

@@ -2020,11 +2020,47 @@ target, shield and health bars, the ammo counter, a squad list and short
 messages. It reads only the readout resources, and logs its numbers every
 two seconds.
 
-**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
-`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
-track and, per map name prefix, a calm and a battle list; `MusicMood`
-chooses between them. Each track is despawned when it ends and the next one
-starts.
+**Music.** The original's music system ("iMuse") is rebuilt from what the
+game's own files say, with nothing hard-coded per level:
+
+- `rc_music::library` reads every piece of music from the `*_music.uax`
+  packages (`SoundStreamed`: file, looping, fade-in and fade-out time and
+  shape, loudness from `params_mus.uax`, likelihood) and every group
+  (`SoundMultiple`: members picked at random by likelihood, an optional
+  first piece, and for battle groups the "won" flourish and the "lost"
+  music). Room music comes from the `AudioEnvironment` classes in
+  `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
+  delay and spacing, once only).
+- `rc_level::music` reads what a map says: the `LevelInfo` battle settings
+  (battle music, how many enemies, inner and outer radius, criteria) and
+  every volume with an `AudioClass`.
+- `rc_music::imuse` is the director, without Bevy. Inputs: script music
+  actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
+  `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
+  `ForceVictoryFlourish`), rooms entered, where the enemies are and whether
+  they are fighting, and whether the player is down. Output: play and stop
+  commands for three layers (main, overlay, episode).
+- `rc_game`'s `music.rs` carries the commands out with Bevy's audio and
+  fades. Menus play what their menu class says (`BackgroundMusic`: the main
+  menu's sung theme; the loading and pause menus have none, so the level's
+  music pauses).
+- Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
+  part lists its enemies in `MusicThreats`.
+- `data/music/music.toml` holds only our own timings (how often the battle
+  check runs, how long after the last enemy the fight ends, the
+  player-down music) and an optional menu override.
+
+Our reading of the battle rules (the original does this in compiled code,
+so these are guesses checked against the settings' names and defaults): a
+fight starts when the number of counted enemies inside the inner radius
+reaches the threshold; it ends when no counted enemy has been inside the
+outer radius for 3 seconds, then the "won" flourish plays and the room's
+music comes back. "Proximity" counts any living enemy, "Attack" counts
+fighting enemies anywhere, "Attack and proximity" counts fighting enemies
+in range. A state set by a script during a fight waits until the fight
+ends. The fade curves (linear, sine, log, inverse log) are our guess at
+the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
+credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each
@@ -2170,7 +2206,9 @@ squad:
      `Died` (the droid stops and plays its death animation, and its body
      stays), and hears the player's `FireShot`s.
    - `MusicMood::Battle` while any droid is alerted or attacking, `Calm`
-     otherwise and on leaving the level.
+     otherwise and on leaving the level. Every living droid and whether it
+     is fighting goes into `MusicThreats`, which the music's battle rules
+     read.
    - Looks: the `[look]` section names the mesh (`BattleDroid` in
      `droid.ukx`) and which animation plays for idle, walk, run, back,
      sidesteps, fire, crouch, crouched fire and death. Every droid's points
@@ -2676,11 +2714,47 @@ target, shield and health bars, the ammo counter, a squad list and short
 messages. It reads only the readout resources, and logs its numbers every
 two seconds.
 
-**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
-`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
-track and, per map name prefix, a calm and a battle list; `MusicMood`
-chooses between them. Each track is despawned when it ends and the next one
-starts.
+**Music.** The original's music system ("iMuse") is rebuilt from what the
+game's own files say, with nothing hard-coded per level:
+
+- `rc_music::library` reads every piece of music from the `*_music.uax`
+  packages (`SoundStreamed`: file, looping, fade-in and fade-out time and
+  shape, loudness from `params_mus.uax`, likelihood) and every group
+  (`SoundMultiple`: members picked at random by likelihood, an optional
+  first piece, and for battle groups the "won" flourish and the "lost"
+  music). Room music comes from the `AudioEnvironment` classes in
+  `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
+  delay and spacing, once only).
+- `rc_level::music` reads what a map says: the `LevelInfo` battle settings
+  (battle music, how many enemies, inner and outer radius, criteria) and
+  every volume with an `AudioClass`.
+- `rc_music::imuse` is the director, without Bevy. Inputs: script music
+  actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
+  `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
+  `ForceVictoryFlourish`), rooms entered, where the enemies are and whether
+  they are fighting, and whether the player is down. Output: play and stop
+  commands for three layers (main, overlay, episode).
+- `rc_game`'s `music.rs` carries the commands out with Bevy's audio and
+  fades. Menus play what their menu class says (`BackgroundMusic`: the main
+  menu's sung theme; the loading and pause menus have none, so the level's
+  music pauses).
+- Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
+  part lists its enemies in `MusicThreats`.
+- `data/music/music.toml` holds only our own timings (how often the battle
+  check runs, how long after the last enemy the fight ends, the
+  player-down music) and an optional menu override.
+
+Our reading of the battle rules (the original does this in compiled code,
+so these are guesses checked against the settings' names and defaults): a
+fight starts when the number of counted enemies inside the inner radius
+reaches the threshold; it ends when no counted enemy has been inside the
+outer radius for 3 seconds, then the "won" flourish plays and the room's
+music comes back. "Proximity" counts any living enemy, "Attack" counts
+fighting enemies anywhere, "Attack and proximity" counts fighting enemies
+in range. A state set by a script during a fight waits until the fight
+ends. The fade curves (linear, sine, log, inverse log) are our guess at
+the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
+credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each

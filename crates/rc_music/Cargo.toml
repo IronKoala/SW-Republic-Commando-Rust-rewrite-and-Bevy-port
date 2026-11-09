@@ -1,0 +1,9 @@
+[package]
+name = "rc_music"
+version = "0.1.0"
+edition.workspace = true
+description = "The game's music rules (its iMuse system): reads the music packages and room music from the install, and decides what plays when. Plain Rust, no Bevy."
+
+[dependencies]
+rc_package = { path = "../rc_package" }
+rc_level = { path = "../rc_level" }
