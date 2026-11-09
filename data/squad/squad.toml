@@ -147,6 +147,19 @@ max_aim_yaw = 60
 # the shot can stray. Our own. It used to be measured from the body's
 # middle only, which let shots pass over shoulders into friends.
 friendly_clearance = 20
+# Specialities: each squad mate's `speciality` (a [job.*] key, in the
+# [member.*] blocks) is used on their own in fights, with no marker, by the
+# job's `auto` rule. The original does this too (Sev snipes, Fixer throws
+# grenades, Scorch fires anti-armour rounds), but decides when in compiled
+# code we don't read, so the rules and these numbers are our own.
+use_specialities = "yes"
+# An enemy counts as armoured when the usual gun does no more than this
+# share of its damage to it, by its damage table
+# (data/combat/damage_types.toml): super battle droids take 0.15 from the
+# DC-17m, battle droids 1. Our own.
+armoured_below = 0.5
+# Seconds to change to or from a speciality gun before firing. Our own.
+switch_time = 0.5
 
 # Taking cover in a fight. Squad mates use the map's cover points (the
 # level designers' CoverPoint actors, the same ones the droids use): once
@@ -230,6 +243,15 @@ revive_player = "yes"
 #   MANEUVER").
 # preferred: the squad mate (their `class` or key) who takes the job when
 #   free; otherwise the nearest free one goes.
+# auto: how a squad mate whose `speciality` is this job uses it on their
+#   own in a fight (all our own rules): "far" = the job's gun at enemies at
+#   least `auto_range` away; "armoured" = the job's gun at armoured enemies
+#   (see [fight] armoured_below) at least `auto_range` away, with no friend
+#   within `auto_clearance` of them; "group" = the job's throw at their
+#   target when at least `auto_min_enemies` enemies are within
+#   `throw_radius` of it, it's `auto_range` to `throw_range` away, no
+#   friend is within `auto_clearance` of it, at most every
+#   `auto_interval` seconds; "no" = only from a marked post.
 
 [job.bacta]
 name = "Bacta"
@@ -281,6 +303,8 @@ burst_count = 1
 shot_interval = 0.1
 burst_pause_min = 1.5     # guess
 burst_pause_max = 2.5     # guess
+auto = "far"              # Sev (the original's Commando07: auto-snipes)
+auto_range = 1500         # our own: farther than this counts as far
 
 [job.grenade]
 name = "Grenade position"
@@ -293,6 +317,11 @@ throw_fuse = 2            # game: ThermalDetonatorProj FuseTime
 throw_damage = 400        # game: CTProjExplosive Damage
 throw_radius = 512        # game: CTProjExplosive DamageRadius
 target_radius = 512       # game: MarkerWeapon WeaponTargetRadius
+auto = "group"            # Fixer (the original's Commando40: auto-grenades)
+auto_range = 600          # our own: not at his own feet
+auto_interval = 10        # our own
+auto_min_enemies = 2      # our own
+auto_clearance = 512      # our own: the blast's reach (throw_radius)
 
 [job.anti_armour]
 name = "Anti-armour position"
@@ -305,6 +334,9 @@ burst_count = 1
 shot_interval = 0.1
 burst_pause_min = 2       # guess
 burst_pause_max = 3       # guess
+auto = "armoured"         # Scorch (the original's Commando62: auto anti-armour)
+auto_range = 600          # our own: out of the blast
+auto_clearance = 400      # our own: the round's 800 uu blast falls off; keep friends out of its harder half
 
 # The squad. `class` is the original's character class (CTCharacters),
 # `number` and `name` are what its HUD shows, `hud_slot` its place on the
@@ -314,9 +346,10 @@ burst_pause_max = 3       # guess
 # models are drawn. Health and shields are the same classes' MaxHealth,
 # MaxShields, ShieldRechargeRate (per second) and ShieldRechargeDelay
 # (seconds before recharging starts). Squad mates can't die
-# (bCannotDie): at 0 health they go down until revived. `audio_table` is
-# their voice: the class's AudioTable in the game's System/CTAudio.u (when
-# they speak is in data/squad/voice.toml).
+# (bCannotDie): at 0 health they go down until revived. `speciality` is the
+# [job.*] they use on their own in fights (see `auto` above); "" for none.
+# `audio_table` is their voice: the class's AudioTable in the game's
+# System/CTAudio.u (when they speak is in data/squad/voice.toml).
 [member.sev]
 class = "Commando07Delta"
 name = "Sev"
@@ -329,6 +362,7 @@ max_health = 400
 max_shields = 50
 shield_recharge_rate = 15
 shield_recharge_delay = 4
+speciality = "sniper"
 
 [member.fixer]
 class = "Commando40Delta"
@@ -342,6 +376,7 @@ max_health = 400
 max_shields = 50
 shield_recharge_rate = 15
 shield_recharge_delay = 4
+speciality = "grenade"
 
 [member.scorch]
 class = "Commando62Delta"
@@ -355,3 +390,4 @@ max_health = 400
 max_shields = 50
 shield_recharge_rate = 15
 shield_recharge_delay = 4
+speciality = "anti_armour"

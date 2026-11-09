@@ -767,17 +767,32 @@ fn take_orders(
 }
 
 /// Every living enemy with a body, for the squad to fight.
+#[allow(clippy::type_complexity)]
 fn gather_threats(
     mut threats: ResMut<SquadThreats>,
-    enemies: Query<(Entity, &Transform, &Team, &Hittable), Without<Dead>>,
+    enemies: Query<(Entity, &Transform, &Team, &Hittable, Option<&DamageTable>), Without<Dead>>,
+    state: Res<SquadState>,
+    library: Option<Res<WeaponLibrary>>,
 ) {
     threats.0.clear();
-    for (e, t, team, hit) in &enemies {
+    // The damage type of the squad's usual gun, to see who it barely hurts.
+    let usual = state.squad.as_ref().and_then(|s| {
+        library
+            .as_ref()?
+            .weapons
+            .get(&s.settings.fight.weapon)
+            .map(|w| w.damage_type.clone())
+    });
+    for (e, t, team, hit, table) in &enemies {
         if *team != Team::Separatist {
             continue;
         }
         let feet = to_unreal(t.translation);
         let centre = feet + UVec3::new(0.0, 0.0, hit.center_up);
+        let blaster_share = match (&usual, &library) {
+            (Some(ty), Some(lib)) => lib.damage_types.multiplier(table.map(|t| t.0.as_str()), ty),
+            _ => 1.0,
+        };
         threats.0.push(Threat {
             id: e.to_bits(),
             feet,
@@ -785,6 +800,7 @@ fn gather_threats(
             // Eyes near the top of the body (a battle droid's are 60 uu
             // above its middle, a commando's 64).
             eye: centre + UVec3::new(0.0, 0.0, hit.half_height * 0.75),
+            blaster_share,
         });
     }
 }
@@ -1122,9 +1138,11 @@ pub fn fight_line(squad: &Squad, stats: &SquadFightStats) -> String {
     let mut s = format!("t={:.2} fight:", squad.time);
     for (i, m) in squad.members.iter().enumerate() {
         s.push_str(&format!(
-            " {} {} shots, {} hits, {} kills, {} revives, held fire {} times, took cover {} times;",
+            " {} {} shots ({} speciality), {} grenades of their own, {} hits, {} kills, {} revives, held fire {} times, took cover {} times;",
             m.settings.name,
             stats.shots.get(i).copied().unwrap_or(0),
+            m.fight.special_shots,
+            m.fight.throws,
             stats.hits.get(i).copied().unwrap_or(0),
             stats.kills.get(i).copied().unwrap_or(0),
             stats.revives.get(i).copied().unwrap_or(0),

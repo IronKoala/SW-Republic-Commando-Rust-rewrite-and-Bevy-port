@@ -1892,6 +1892,43 @@ one. Each take and leave is logged (`takes cover at ...`, `leaves cover:
 why`), the map's cover point count is in the `path network:` line, and the
 5-second `fight:` line counts covers taken.
 
+### Specialities (`[member.*] speciality`, `auto` in `[job.*]`)
+
+In the original each squad mate uses their own speciality without being
+told: Sev (Commando07) snipes, Fixer (Commando40) throws grenades and
+Scorch (Commando62) fires the anti-armour attachment. When and at what is
+compiled code, so the rules are **our own**. They reuse the gun, sight and
+throw numbers of the matching marked post (`[job.sniper]`,
+`[job.grenade]`, `[job.anti_armour]`), so a mod changes a speciality the
+same way it changes the post.
+
+*Who.* Each `[member.*]` has `speciality`, the key of a `[job.*]`. The job's
+`auto` says how it's used on their own: `far`, `armoured`, `group` or
+`no` (only from a marked post). `[fight] use_specialities = "no"` turns
+them all off. A member on a marked job or a revive doesn't use it.
+
+| Rule | Who | When | Numbers |
+|---|---|---|---|
+| `far` | Sev | target at least `auto_range` away (1500 uu); sees out to the job's `sight_radius` (8000) instead of 5000 | sniper post's gun, accuracy 1, one shot every 1.5-2.5 s |
+| `armoured` | Scorch | target armoured, at least `auto_range` (600 uu) away, no friend within `auto_clearance` (400 uu) of it; he picks the nearest armoured enemy before nearer unarmoured ones | anti-armour post's gun, one round every 2-3 s |
+| `group` | Fixer | his target 600 to 1500 uu away, at least 2 enemies within the blast's 512 uu, no friend within 512 uu of it, at most every 10 s | grenade post's throw: 400 damage, 2 s fuse |
+
+*Armoured.* An enemy counts as armoured when the squad's usual gun does
+no more than `[fight] armoured_below` (0.5) of its damage to it, read
+from its damage table (`data/combat/damage_types.toml`): a super battle
+droid takes 0.15 from the DC-17m, a battle droid 1. The plugin works this
+out for each enemy (`Threat::blaster_share`), so a new enemy only needs
+its damage table to be treated right.
+
+*Changing guns.* Sev and Scorch decide on every think which gun suits
+their target. Changing either way logs `uses their speciality (...)` or
+`puts away the ...` with the reason, and waits `switch_time` (0.5 s)
+before the next shot. The gun's `Fire` goes to the combat code like any
+squad shot, so the anti-armour round flies and explodes like the
+player's. Fixer's grenade is a `Throw` event (`throws a grenade on their
+own ...`) and a blast after the fuse, the same as a grenade post's. The
+5-second `fight:` line counts speciality shots and grenades.
+
 ### How we check it without looking
 
 `rc_squad_sim` runs the real squad and combat plugins on a real map with no
@@ -1903,6 +1940,27 @@ hits, kills and revives. For the fight it puts stand-in droids (real
 combat targets with the game's droid size and health that stand still and
 don't shoot back) in sight of the squad. The checks are listed in
 `README.md`.
+
+### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
+
+The lines are the game's: each member's `audio_table` (squad.toml, like
+`Delta07Audio`) and the player's `leader_table` (`Delta38Audio`) are
+classes in `System/CTAudio.u`. Their `Table` holds one sound group per
+event of `EPawnAudioEvent` (`System/Engine.u`), entry *i* = event *i*.
+`rc_combat::audio_table` reads both at run time and `read_sounds` loads the
+groups from `character_voice.uax`.
+
+When to speak is compiled code in the original, so it is ours:
+`rc_squad::Chatter` turns `SquadEvent`s (orders, first sight of an enemy,
+cover, held fire, down, revive, jobs) into lines by the `[line.*]` rules in
+voice.toml: who says it (`self`, `other`, `any`, `leader`), chance,
+cooldown, `urgent` (said even while someone talks) and `wait` (wait for a
+quiet moment). One squad line at a time; a line keeps the squad quiet for
+its WAV length plus `gap`. The player's order lines are urgent and answers
+wait for them; a new order drops answers to older ones. If the chosen
+squad mate has no recording of a line, another standing one says it.
+`rc_squad_plugin::voice` gathers events in `SquadHeard`, plays lines as
+`Voice` sounds and logs every line said or skipped (`squad: ... voice:`).
 
 ## The game program (`rc_game`)
 

@@ -26,7 +26,7 @@ pub mod voice;
 
 pub use cover::TakenCover;
 pub use fight::{FightState, Patient, Threat};
-pub use jobs::{JobKind, JobResult, JobSettings};
+pub use jobs::{AutoUse, JobKind, JobResult, JobSettings};
 pub use map::{MapSquadInfo, MarkerSpot, SquadFactory};
 pub use nav::{CoverSpot, Navigator, StraightLine, StraightWithCover};
 pub use settings::{
