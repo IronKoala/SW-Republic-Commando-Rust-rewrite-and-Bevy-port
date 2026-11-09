@@ -68,7 +68,11 @@ copy of the game.
   `data/movement/player_commando.toml`, which mods can edit. `rc_walk
   --script` drives itself through 21 checks and passed all of them.
   `rc_walk --map geo_01a` puts you in the first Geonosis level instead, with
-  collision against its walls, floors and props.
+  collision against its walls, floors and props. Ramps, steps and slopes
+  work the same at 240 frames a second as at 60 (they used to stop you on
+  fast PCs; checked by numbers in the cloud, not yet by playing).
+  `rc_walkcheck MAP` runs a player along every walking link of a level's AI
+  path network and lists where it gets stuck.
 
 - **Delta Squad (tested in the cloud sandbox by numbers, not yet on Windows
   or with eyes).** Sev, Fixer and Scorch follow you and obey the original's
