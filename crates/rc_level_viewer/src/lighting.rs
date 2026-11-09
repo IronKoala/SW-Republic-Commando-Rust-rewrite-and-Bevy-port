@@ -65,6 +65,10 @@ pub struct LightingSettings {
     /// (drawn by the bump shader, for checking it against flat props),
     /// up to 2 for stronger.
     pub bump_strength: f32,
+    /// How strongly real-time lights show on props and terrain, compared
+    /// with walls (1 = the same; 0 = props keep only their baked light,
+    /// the cheapest choice for slow phones).
+    pub live_light_on_props: f32,
 }
 
 impl Default for LightingSettings {
@@ -81,6 +85,7 @@ impl Default for LightingSettings {
             shadows: false,
             bump_maps: true,
             bump_strength: 1.0,
+            live_light_on_props: 1.0,
         }
     }
 }
@@ -116,6 +121,7 @@ impl LightingSettings {
                 ("sun_lux_at_255", Ok(v)) => s.sun_lux_at_255 = v,
                 ("ambient_at_255", Ok(v)) => s.ambient_at_255 = v,
                 ("shadows", _) => s.shadows = value == "true",
+                ("live_light_on_props", Ok(v)) if v >= 0.0 => s.live_light_on_props = v,
                 ("bump_strength", Ok(v)) if (0.0..=2.0).contains(&v) => s.bump_strength = v,
                 ("bump_maps", _) if value == "true" || value == "false" => {
                     s.bump_maps = value == "true"
@@ -302,11 +308,13 @@ mod tests {
         .unwrap();
         let (s, notes) = LightingSettings::load(&path);
         assert_eq!(s.live_lights, LiveLights::DynamicOnly);
+        assert_eq!(s.live_light_on_props, 1.0);
         assert_eq!(s.sun_lux_at_255, 5.0);
         assert_eq!(notes.len(), 1);
-        std::fs::write(&path, "baked_light = false\nlightmap_gain = 1.5\n").unwrap();
+        std::fs::write(&path, "baked_light = false\nlightmap_gain = 1.5\nlive_light_on_props = 0.5\n").unwrap();
         let (s, notes) = LightingSettings::load(&path);
         assert!(!s.baked_light);
+        assert_eq!(s.live_light_on_props, 0.5);
         assert_eq!(s.lightmap_gain, 1.5);
         assert!(notes.is_empty());
         assert!((LightingSettings::linear_gain(2.0) - 4.595).abs() < 0.01);

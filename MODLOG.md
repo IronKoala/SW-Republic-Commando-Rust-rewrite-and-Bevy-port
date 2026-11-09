@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Moving and changing lights now light props (rc_level_viewer)
+
+- **Changed:** New `crates/rc_level_viewer/src/prop_light.rs` and `prop_light.wesl`: `PropMaterial` (Bevy's standard material plus our shader) draws props and terrain as `texture x baked corner colour + texture x real-time lights`. `draw.rs` uses it for every prop and terrain batch outside the sky; `DrawReport` counts them (`coloured_live`). New `live_light_on_props` setting in `lighting.cfg` (1 = like walls, 0 = off, the old look). `PropLightPlugin` added in `LevelPlugin`, `rc_level_viewer`, `rc_walk` and `rc_droidview`. After the bump maps (#68) reached main: bump-lit props get real-time lights too (`bump_lit.wesl` adds Bevy's lighting on the bump-tilted surface; `BumpParams::live_light`). New check program `cargo run -p rc_level_viewer --example prop_light_check`.
+- **Why:** Props were drawn with an "unlit" material, so real-time lights (the map's bDynamicLight lights, the low-light helmet lamp, later muzzle flashes) lit the walls but not the crates, pillars and terrain next to them.
+- **Tested how:** In the cloud: `prop_light_check` (two identical props, one with real-time light on props and one without, a map light switched off, on, moved away and moved over). `rc_level_viewer geo_01a` and `yyy_06a` captured with `live_light_on_props = 1` and `= 0` and compared pixel by pixel (game files copied read only from the PC). `rc_game --map geo_01a --frames 400`. `cargo test -p rc_level_viewer`.
+- **Result:** After merging main with bump maps: `PROP LIGHT CHECK: 9 passed, 0 failed` (bump-mapped test prop 97.0 -> 160.7 with the light on, back to 97.0 when it moves away); yyy_06a start view with its 11 bump-mapped batches identical to the pixel with real-time light on props on or off. Before that: `PROP LIGHT CHECK: 7 passed, 0 failed`: light off, both props 66.0 (same as the old way); light on, lit prop 97.9, the other 66.0; light far away 66.0; light moved to the other side 72.4. geo_01a and yyy_06a start views: mean difference 0.000, no pixel changed (no real-time light in view there), so baked light, holes, terrain layers and see-through surfaces look as before. The game log says `76 props/terrain lit by real-time lights too (strength 1)` on geo_01a; no errors.
+- **Still broken / not tested:** Not tested on Windows or by playing. Not looked at in the game near one of geo_01a's 2 real-time lights or with the low-light helmet lamp. Light strengths are still the placeholders walls use. Whether the original lit props per corner or per pixel is not known. Shadows from moving lights are still off.
+- **Next:** The user turns on low-light mode (X) in a dark corner and checks that crates and pillars light up like the walls.
+
 ## 2026-11-09: 3D SOUND played sounds in the wrong ear (rc_game sound_options)
 
 - **Changed:** `crates/rc_game/src/sound_options.rs`: the listener's ears are given to Bevy swapped (`ears_swapped`), with a test.
