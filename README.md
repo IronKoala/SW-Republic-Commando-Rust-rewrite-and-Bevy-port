@@ -524,9 +524,12 @@ copy of the game.
   doors, barricades, damage to the player, bacta dispensers, prompts,
   objectives (kept, not shown), checkpoints, enemy spawners, level
   changes, and lines of dialogue and sounds (the game's own, read from its
-  sound files; a script waiting for a line waits for its real length). No
-  subtitles yet, and every scripted sound plays at full loudness wherever
-  its speaker is. Music cues, characters walking or animating, the squad
+  sound files; a script waiting for a line waits for its real length).
+  Since 2026-11-09 a scripted sound comes from its place in the level
+  (the droid, gunship or spot it belongs to) and gets quieter with
+  distance, unless the game's own settings for that sound say it is radio
+  (most dialogue is). Tested in the cloud on a silent sound card, not yet
+  listened to or run on Windows. No subtitles yet. Music cues, characters walking or animating, the squad
   joining and leaving and camera moves are logged as "not done yet". The
   end-of-campaign debriefing screen isn't shown: the game goes straight
   on. Not tested on Windows.
@@ -542,8 +545,11 @@ copy of the game.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
-  picks from) are played for weapons, grenades and enemy voices. No 3D
-  (positional) sound yet: enemy sounds just get quieter with distance.
+  picks from) are played for weapons, grenades and enemy voices. With 3D
+  SOUND on, enemy and scripted sounds are heard from their side. Before
+  2026-11-09 the 3D sound also made placed sounds far too quiet (one over
+  the distance squared, in metres); that is switched off now, so enemy
+  sounds a few metres away are louder than before (not yet listened to).
 - Collision follows each prop's "can be walked through" settings and
   each mesh part's collision switch (since 2026-10-30; before, every prop
   was solid). Simplified collision shapes aren't read, so solid props
