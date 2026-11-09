@@ -156,6 +156,7 @@ fn every_weapon_file_reads() {
             "e5_blaster",
             "e5_blaster_pickup",
             "e5_blaster_tm",
+            "elite_beam_enemy",
             "sbd_blaster",
             "trandoshan_smg"
         ]
