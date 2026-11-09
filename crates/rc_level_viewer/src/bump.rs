@@ -21,8 +21,14 @@
 //! so on average the surface is as bright as before, and the brightness
 //! measured against the original game (see docs/DESIGN.md) still holds.
 //!
-//! **Cost.** One extra texture read and about twenty sums per pixel, no
-//! loops and no real-time lights, so phones and VR headsets can draw it.
+//! Real-time lights (moving or switched lights, the helmet lamp) are added
+//! on top with Bevy's own lighting, using the bump-tilted surface, so a
+//! lamp shows the bumps too (`live_light`, from `live_light_on_props`; see
+//! `prop_light.rs` for flat props).
+//!
+//! **Cost.** One extra texture read and about twenty sums per pixel, plus
+//! Bevy's normal per-pixel work for the few real-time lights near, so
+//! phones and VR headsets can draw it.
 //! `bump_maps = false` in `lighting.cfg` turns it off.
 
 use bevy::asset::embedded_asset;
@@ -71,7 +77,9 @@ pub struct BumpParams {
     pub bump_uv_scale: f32,
     /// 0 draws the surface flat (for comparing); 1 draws the bump map.
     pub strength: f32,
-    pub unused: f32,
+    /// How strongly real-time lights show (`live_light_on_props`; 0 = not
+    /// at all, as in the sky).
+    pub live_light: f32,
 }
 
 /// A prop surface drawn with its picture, its stored light and its bump map.
