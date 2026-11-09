@@ -11,6 +11,7 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** The notes match the code in `crates/rc_game/src/original_saves.rs`.
 - **Still broken / not tested:** Nothing known. The user tested LOAD GAME, SAVE GAME, QUICK SAVE and QUICK LOAD on Windows on 2026-11-09 and said they all work.
 - **Next:** Nothing for these pages.
+
 ## 2026-11-09: Walking no longer gets stuck at high frame rates (rc_movement, rc_walkcheck)
 
 - **Changed:** `crates/rc_movement/src/lib.rs`: (1) after a hit, the rest of the move counts from where the box really stopped, so the 0.1 uu gap isn't lost from it; (2) that gap is measured straight out from the surface, not along the move; (3) walking up a floor-like slope keeps the move's direction across the ground and only adds the rise (it used to slide along the surface, which turned each move a little downhill); (4) the floor check looks from 0.1 above, so a box that crept closer than 0.1 to the floor is lifted back; (5) a step up goes forward at least 8 uu (`MIN_STEP_FORWARD`). New tool `crates/rc_nav/src/bin/rc_walkcheck.rs`. Three new tests in `crates/rc_movement/src/tests.rs`.
