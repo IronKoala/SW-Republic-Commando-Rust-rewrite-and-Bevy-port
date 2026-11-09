@@ -4,6 +4,7 @@
 //! Usage:
 //!   rc_level_viewer [map name or .ctm path] [--frames N] [--lighting FILE]
 //!                   [--capture FILE.bmp] [--pitch DEG] [--no-sky]
+//!                   [--view-bump]
 //!
 //! Defaults to `geo_01a` (the first Geonosis level) from `GameData/Maps` in
 //! the game folder (RC_GAME_DIR or the default Steam path). `--frames N`
@@ -13,7 +14,9 @@
 //! `--capture FILE.bmp` saves the frame used for the on-screen check as a
 //! picture, for comparing looks without watching the window. `--pitch DEG`
 //! starts the camera looking up (positive) or down. `--no-sky` leaves the
-//! sky out (the background colour shows instead).
+//! sky out (the background colour shows instead). `--view-bump` starts the
+//! camera in front of the biggest bump-mapped surface instead of at the
+//! player start, for checking bump maps (`rc_capture_compare`).
 //!
 //! Everything is logged to `logs/rc_level_viewer.log`: what was read, what
 //! couldn't be shown and why, frame rates, camera position, and an on-screen
@@ -74,10 +77,11 @@ struct ExitAfter(Option<u32>);
 #[derive(Resource)]
 struct CapturePath(Option<PathBuf>);
 
-/// `--pitch DEG` (start looking up or down) and `--no-sky`.
+/// `--pitch DEG` (start looking up or down), `--no-sky` and `--view-bump`.
 #[derive(Resource)]
 struct ViewOptions {
     pitch_degrees: f32,
+    bump_view: bool,
     sky: bool,
 }
 
@@ -133,6 +137,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut bump_materials: ResMut<Assets<rc_level_viewer::bump::BumpLitMaterial>>,
     loaded: Res<LoadedScene>,
     settings: Res<LightingSettings>,
     log: Res<RunLog>,
@@ -147,6 +152,7 @@ fn setup(
         &mut meshes,
         &mut images,
         &mut materials,
+        Some(&mut bump_materials),
         &scene,
         &settings,
     );
@@ -185,8 +191,9 @@ fn setup(
         }
     };
     log.line(format!(
-        "lighting: baked light {}; draw batches: {lightmapped} with a lightmap, {coloured} with baked corner colours, {full_bright} at full brightness; lightmap gain {} (x{:.2} in linear light), corner colour gain {}; real-time lights: {} point, {} spot, {} sun, {} left to the baked light",
+        "lighting: baked light {}; draw batches: {lightmapped} with a lightmap, {coloured} with baked corner colours ({} of them with bump maps), {full_bright} at full brightness; lightmap gain {} (x{:.2} in linear light), corner colour gain {}; real-time lights: {} point, {} spot, {} sun, {} left to the baked light",
         if baked { "on" } else { "off" },
+        r.bump_lit,
         settings.lightmap_gain,
         LightingSettings::linear_gain(settings.lightmap_gain),
         settings.vertex_colour_gain,
@@ -196,10 +203,28 @@ fn setup(
         report.skipped
     ));
     let s = &scene.spawn;
-    let yaw = yaw_from_unreal(s.yaw);
+    let mut position = Vec3::from(s.position);
+    let mut from = s.from.to_string();
+    let mut yaw = yaw_from_unreal(s.yaw);
+    let mut pitch = view.pitch_degrees.to_radians();
+    if view.bump_view {
+        match biggest_bump_surface(&scene) {
+            Some((at, normal)) => {
+                // Four Bevy units (200 Unreal units) out, looking back at it.
+                position = at + normal * 4.0;
+                let d = -normal;
+                yaw = (-d.x).atan2(-d.z);
+                pitch = d.y.clamp(-1.0, 1.0).asin();
+                from = "--view-bump (biggest bump-mapped surface)".to_string();
+            }
+            None => {
+                log.line("--view-bump: no bump-mapped surface in this map; camera at the start")
+            }
+        }
+    }
     let cam = FlyCamera {
         yaw,
-        pitch: view.pitch_degrees.to_radians(),
+        pitch,
         speed: 10.0,
     };
     let rotation = cam.rotation();
@@ -219,17 +244,47 @@ fn setup(
             far: 5000.0,
             ..default()
         }),
-        Transform::from_translation(Vec3::from(s.position)).with_rotation(rotation),
+        Transform::from_translation(position).with_rotation(rotation),
         cam,
     ));
     log.line(format!(
         "scene set up: {} draw batches ({} with a texture), {triangles} triangles; camera at {:?} (Bevy units) from {}, facing yaw {:.1} degrees",
         scene.batches.len(),
         textured,
-        s.position,
-        s.from,
+        position.to_array(),
+        from,
         yaw.to_degrees()
     ));
+}
+
+/// The middle and facing direction of the bump-mapped triangle where the
+/// bump map shows most: the biggest one, weighted by how strong its
+/// stored light is (a surface no light reaches looks flat either way).
+/// For `--view-bump`.
+fn biggest_bump_surface(scene: &scene::Scene) -> Option<(Vec3, Vec3)> {
+    let mut best: Option<(f32, Vec3, Vec3)> = None;
+    for b in scene.batches.iter().filter(|b| b.bump_lit && !b.sky) {
+        for t in b.indices.as_chunks::<3>().0 {
+            let [p0, p1, p2] = t.map(|i| Vec3::from(b.positions[i as usize]));
+            let area = (p1 - p0).cross(p2 - p0).length() * 0.5;
+            let light: f32 = t
+                .iter()
+                .map(|&i| {
+                    b.light_colours[i as usize]
+                        .iter()
+                        .copied()
+                        .fold(0.0, f32::max)
+                })
+                .sum::<f32>()
+                / 3.0;
+            let score = area * light;
+            let n = Vec3::from(b.normals[t[0] as usize]).normalize_or_zero();
+            if n.length_squared() > 0.5 && best.is_none_or(|(s, _, _)| score > s) {
+                best = Some((score, (p0 + p1 + p2) / 3.0, n));
+            }
+        }
+    }
+    best.filter(|(s, _, _)| *s > 0.0).map(|(_, at, n)| (at, n))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -446,6 +501,13 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         s.zones_with_ambient, s.props_with_ambient, s.props_zone_from_corners, s.props_bump_lit
     ));
     log.line(format!(
+        "bump maps: {} of {} bump-lit props drawn with one ({} parts have no bump map and are drawn flat); {} bump maps ({} in the game's two-byte bump formats, the rest colour normal maps); {} BSP polygons have a bump map but no stored light direction (drawn flat)",
+        s.props_bump_drawn, s.props_bump_lit, s.bump_parts_without_map, s.bump_maps, s.bump_maps_two_byte, s.bsp_polygons_bump_flat
+    ));
+    for (e, n) in &s.bump_failures {
+        log.line(format!("  bump map not read ({n}x): {e}"));
+    }
+    log.line(format!(
         "physics props that fall at the start moved down onto the ground: {}, furthest {:.0} units",
         s.props_settled, s.settle_drop_max
     ));
@@ -493,6 +555,7 @@ fn main() -> AppExit {
     let mut capture = None;
     let mut view = ViewOptions {
         pitch_degrees: 0.0,
+        bump_view: false,
         sky: true,
     };
     let mut args = std::env::args().skip(1);
@@ -503,6 +566,8 @@ fn main() -> AppExit {
             view.pitch_degrees = args.next().and_then(|n| n.parse().ok()).unwrap_or(0.0);
         } else if arg == "--no-sky" {
             view.sky = false;
+        } else if arg == "--view-bump" {
+            view.bump_view = true;
         } else if arg == "--capture" {
             capture = args.next().map(PathBuf::from);
         } else if arg == "--lighting" {
@@ -615,7 +680,7 @@ fn main() -> AppExit {
         .insert_resource(FrameStats::default())
         .insert_resource(ScreenCheck::default())
         .insert_resource(log)
-        .add_plugins(sky::SkyPlugin)
+        .add_plugins((sky::SkyPlugin, rc_level_viewer::bump::BumpMapPlugin))
         .add_systems(Startup, setup)
         .add_systems(Update, (fly, count_frames))
         .run()

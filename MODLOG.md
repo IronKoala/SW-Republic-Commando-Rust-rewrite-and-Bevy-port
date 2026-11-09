@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: Bump maps drawn on level props (rc_level_viewer)
+
+- **Changed:** `materials.rs` finds each material's bump map (`NormalMap` on `HsBump...`, `Bumpmap` on `Shader`, with `BumpUVScale`) and decodes it next to the picture. `scene.rs` turns the light directions the map stores for bump-mapped props into per-corner light direction and colour (`bump_corners`). New `bump.rs` + `bump_lit.wesl`: our own small shader that lights each pixel by how its bump-map tilt faces that light. `draw::spawn_level` takes the bump materials (the game, `rc_walk` and the viewer pass them; `rc_droidview` passes `None`). `lighting.cfg` gained `bump_maps` and `bump_strength`. Viewer: `--view-bump`. New tool `rc_capture_compare` (compares two captures by colour per grid square and by detail). `rc_level_check` logs bump counts.
+- **Why:** Bump maps were decoded but not drawn, so walls looked flat.
+- **Tested how:** In the cloud with game files copied read only from the PC: measured which way the bump maps point (slope fit on every bump map, main-picture darkness for bumps vs dents; numbers in `docs/DESIGN.md` "Drawing bump maps"). `rc_level_check` on yyy_06a, geo_01a, ras_01a, geo_04a. `rc_level_viewer MAP --view-bump --capture` with `bump_maps = false`, `bump_strength = 0` and `bump_strength = 1` on yyy_06a, geo_01a and ras_01a, compared with `rc_capture_compare`. 4 new unit tests.
+- **Result:** Bump-lit props drawn with a bump map: yyy_06a 193 of 193, geo_01a 59 of 59, ras_01a 61 of 61 (geo_04a has none). Strength 0 vs flat: identical on all three (biggest square difference 0.0, 100% of pixels within 3). Bumps on vs flat: square colours within 0.9-3.8 of 255, detail +20.5% (ras_01a), +178% (geo_01a rock wall), +38.6% (yyy_06a); all PASS. yyy_06a from the player start: colours within 1.6, detail +5.8%. Pictures: project files `bump-maps/`.
+- **Still broken / not tested:** On the user's Windows PC (yyy_06a `--view-bump`): 193 of 193 drawn, 144 fps, on-screen check PASS, and the user said it looked good. Not tested on a phone, and not compared side by side with the original game. How the original's shader mixes the stored light is compiled code; our rule fits the stored numbers but is our own. BSP walls with bump materials (1-50 polygons per map) stay flat (no stored direction). Shine (specular) not drawn. Characters and weapons have no bump maps yet. The V8U8 bump format's orientation is mixed in the data.
+- **Next:** The user compares a bump-lit wall with the original game; then shine (specular).
+
 ## 2026-11-09: Save and load screens: notes brought up to date (README, docs/ORIGINAL_MENUS.md)
 
 - **Changed:** Removed two stale lines from README's "what doesn't work" list ("the campaign, load and save pages are still placeholders" and "there's no Load Game screen yet") and the stale "not done yet" list in `docs/ORIGINAL_MENUS.md`.
