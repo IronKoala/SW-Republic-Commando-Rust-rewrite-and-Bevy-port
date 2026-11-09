@@ -708,6 +708,7 @@ mod tests {
             }]),
             sounds: vec![],
             started: true,
+            scene: crate::cutscene::Scene::default(),
             stats: Default::default(),
         });
         w

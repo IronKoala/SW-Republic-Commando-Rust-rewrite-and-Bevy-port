@@ -11,8 +11,8 @@ use bevy::render::view::Tonemapping;
 use rc_game_core::save::{SaveAppExt, SavePart};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
-    playing, Action, ActionState, GameLog, GamePaths, GameSet, GameState, LevelCollision, Player,
-    PlayerCamera, PlayerStart, ViewKick,
+    playing, Action, ActionState, Cutscene, GameLog, GamePaths, GameSet, GameState, LevelCollision,
+    Player, PlayerCamera, PlayerStart, TeleportPlayer, ViewKick,
 };
 use rc_movement::{Mode, MoveInput, MoveParams, Pawn, Vec3 as UVec3, World};
 use serde::{Deserialize, Serialize};
@@ -265,6 +265,7 @@ fn move_body(
     collision: Res<LevelCollision>,
     movers: Option<Res<rc_movers_plugin::LevelMovers>>,
     mut kicks: MessageReader<ViewKick>,
+    (cut, mut teleports): (Res<Cutscene>, MessageReader<TeleportPlayer>),
     mut body: Query<(&mut Body, &mut Transform, Has<rc_combat::Dead>), With<Player>>,
     log: Res<GameLog>,
 ) {
@@ -272,6 +273,21 @@ fn move_body(
         return;
     };
     let dt = time.delta_secs().min(0.25);
+    // A cutscene moves the player to another room, facing the way the
+    // arrival point faces.
+    for tp in teleports.read() {
+        let [x, y, z] = tp.location;
+        body.pawn.location = UVec3::new(x, y, z);
+        body.pawn.velocity = UVec3::ZERO;
+        body.yaw = tp.yaw.rem_euclid(std::f32::consts::TAU);
+        body.pitch = 0.0;
+        log.line(format!(
+            "player: t={:.2} moved by the cutscene to ({x:.1}, {y:.1}, {z:.1}) facing {:.0} deg ({})",
+            body.time,
+            body.yaw.to_degrees(),
+            tp.by
+        ));
+    }
     // Recoil adds to the look. (The original springs back afterwards; not
     // done yet.)
     let kick = kicks
@@ -279,6 +295,21 @@ fn move_body(
         .fold(Vec2::ZERO, |k, v| k + Vec2::new(v.yaw, v.pitch));
     body.yaw = (body.yaw + actions.look.x + kick.x).rem_euclid(std::f32::consts::TAU);
     body.pitch = (body.pitch + actions.look.y + kick.y).clamp(-1.5, 1.5);
+    // Held by a cutscene: looking stays inside its limits.
+    if let Some(held) = &cut.held {
+        let (yaw, pitch) = held.limit(body.yaw, body.pitch);
+        body.yaw = yaw;
+        body.pitch = pitch.clamp(-1.5, 1.5);
+    }
+    // The cutscene stopped the body's physics: it stays exactly where it
+    // is (the prologue's newborn clone doesn't fall).
+    if cut.frozen {
+        body.pawn.velocity = UVec3::ZERO;
+        body.time += dt;
+        t.translation = to_bevy(body.pawn.feet());
+        t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
+        return;
+    }
     // Down (health at 0, waiting for a squad mate to revive): can look
     // around but not move.
     let input = if down {

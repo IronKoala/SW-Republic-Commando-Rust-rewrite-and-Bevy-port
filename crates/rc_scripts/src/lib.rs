@@ -28,7 +28,7 @@ pub mod save;
 pub mod settings;
 
 use rc_level::movers::TriggerInfo;
-use rc_level::scripts::{MapScripts, ScriptObject, Val};
+use rc_level::scripts::{MapScripts, ScriptObject, Val, Vals};
 pub use settings::Settings;
 use std::collections::{HashMap, VecDeque};
 
@@ -181,6 +181,8 @@ pub struct Stats {
     pub conditions: usize,
     pub checkpoints: usize,
     pub props: usize,
+    /// `Dispatcher`s: actors that send a timed list of events.
+    pub dispatchers: usize,
     /// Teleporters with a `URL`: the level's exits.
     pub exits: usize,
     /// Events sent so far, and actions run so far.
@@ -322,6 +324,27 @@ impl Director {
                     pc: 0,
                     wait: Wait::Nothing,
                     running,
+                    finished: false,
+                });
+                continue;
+            }
+            if class.eq_ignore_ascii_case("Dispatcher") {
+                // A Dispatcher sends a list of events one after another,
+                // each after its own delay, when its tag is sent. Cutscene
+                // maps (the prologue, briefings) are timed with them. Run
+                // as a small script of our own making, so its waits are
+                // saved like any script's.
+                let actions = dispatcher_actions(o);
+                d.stats.dispatchers += 1;
+                d.stats.actions += actions.len();
+                d.scripts.push(Script {
+                    name: o.name.clone(),
+                    class: o.class.clone(),
+                    tag: o.tag().to_string(),
+                    actions,
+                    pc: 0,
+                    wait: Wait::Nothing,
+                    running: true,
                     finished: false,
                 });
                 continue;
@@ -1101,6 +1124,95 @@ impl Director {
             )
         })
     }
+}
+
+/// Make an action the director runs, for a script of our own making.
+fn made_action(owner: &ScriptObject, kind: &str, n: usize, values: Vals) -> ScriptObject {
+    ScriptObject {
+        export: owner.export,
+        class: format!("ACTION_{kind}"),
+        name: format!("{}.{kind}{n}", owner.name),
+        values,
+    }
+}
+
+/// A `Dispatcher` as a script: wait for its tag; then, for each entry of
+/// its `Events` list in turn, wait its `Delay` (a random time up to
+/// `DelayMax` when that is longer), play its `Sound` if it has one
+/// (waiting for the sound to end with `bWaitForSound`) and send its
+/// `Event`; then wait for the tag again. While it runs, its tag is not
+/// heard, as UE2's Dispatcher ignores triggers while dispatching. Our
+/// reading of the class's public description and of what the maps store.
+pub fn dispatcher_actions(o: &ScriptObject) -> Vec<ScriptObject> {
+    let text = |v: &Vals, k: &str| match v.get(k) {
+        Some(Val::Text(t)) if !t.eq_ignore_ascii_case("None") && !t.is_empty() => Some(t.clone()),
+        _ => None,
+    };
+    let float = |v: &Vals, k: &str| match v.get(k) {
+        Some(Val::Float(f)) => *f,
+        _ => 0.0,
+    };
+    let flag = |v: &Vals, k: &str| matches!(v.get(k), Some(Val::Bool(true)));
+    let mut out = Vec::new();
+    let mut n = 0;
+    let mut add = |out: &mut Vec<ScriptObject>, kind: &str, values: Vals| {
+        n += 1;
+        out.push(made_action(o, kind, n, values));
+    };
+    add(
+        &mut out,
+        "WaitForEvent",
+        Vals::from([("ExternalEvent".to_string(), Val::Text(o.tag().to_string()))]),
+    );
+    let entries = match o.get("Events") {
+        Some(Val::Structs(list)) => list.clone(),
+        // One entry is stored as a plain struct.
+        Some(Val::Struct(one)) => vec![one.clone()],
+        _ => Vec::new(),
+    };
+    for e in &entries {
+        let (lo, hi) = (float(e, "Delay"), float(e, "DelayMax"));
+        if hi > lo {
+            let range = Vals::from([
+                ("Min".to_string(), Val::Float(lo)),
+                ("Max".to_string(), Val::Float(hi)),
+            ]);
+            add(
+                &mut out,
+                "WaitForRandomTimer",
+                Vals::from([("PauseTime".to_string(), Val::Struct(range))]),
+            );
+        } else if lo > 0.0 {
+            add(
+                &mut out,
+                "WaitForTimer",
+                Vals::from([("PauseTime".to_string(), Val::Float(lo))]),
+            );
+        }
+        if let Some(sound) = text(e, "Sound") {
+            let mut v = Vals::from([
+                ("Sound".to_string(), Val::Text(sound)),
+                ("bWaitForFinish".to_string(), Val::Bool(flag(e, "bWaitForSound"))),
+            ]);
+            if let Some(src) = text(e, "SoundSource") {
+                v.insert("SoundSourceTag".to_string(), Val::Text(src));
+            }
+            add(&mut out, "PlaySound", v);
+        }
+        if let Some(ev) = text(e, "Event") {
+            add(
+                &mut out,
+                "TriggerEvent",
+                Vals::from([("Event".to_string(), Val::Text(ev))]),
+            );
+        }
+    }
+    add(
+        &mut out,
+        "GotoAction",
+        Vals::from([("ActionNumber".to_string(), Val::Int(0))]),
+    );
+    out
 }
 
 /// Character actions that take time: (seconds with no game, time-out when

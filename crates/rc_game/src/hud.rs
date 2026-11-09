@@ -183,6 +183,7 @@ fn spawn_hud(
             },
             DespawnOnExit(GameState::InGame),
             GlobalZIndex(1),
+            crate::cutscene::HudRoot,
         ))
         .with_children(|root| {
             for (top, left) in [(true, true), (true, false), (false, true), (false, false)] {
