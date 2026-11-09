@@ -55,6 +55,12 @@ pub struct MapCollision {
     /// feet position and facing, as for `start`. A level address like
     /// `RAS_03B.ctm#FromA` names one by its tag.
     pub arrivals: Vec<(String, Vec3, f32)>,
+    /// Ammo and grenade boxes (`crate::pickups`), resting on the ground
+    /// under them as the game drops them at the start. Pickups are left
+    /// out of `triangles`: the player walks into them to take them.
+    pub ammo_boxes: Vec<crate::pickups::AmmoBox>,
+    /// Pickups of every kind left out of collision.
+    pub pickups_not_solid: usize,
 }
 
 impl MapCollision {
@@ -187,6 +193,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut mesh_failures = 0;
     let mut class_mesh_actors = 0;
     let mut not_solid = 0;
+    let mut pickups_not_solid = 0;
     // Physics props that fall as the level starts, moved down onto the
     // ground below (`crate::settle`).
     let mut karma = std::collections::HashSet::new();
@@ -220,6 +227,11 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         }
         // Hidden props are left out, as in the level viewer.
         if p.hidden {
+            continue;
+        }
+        // Pickups don't block: touching one is how you take it.
+        if crate::pickups::is_pickup(&mut looks, &map.0, a, &mut |n| pkgs.get(n)) {
+            pickups_not_solid += 1;
             continue;
         }
         // So are props the game lets you walk through.
@@ -276,6 +288,20 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut parts = crate::scripts::tagged_actors(&map.0, &map.1, &level);
     parts.retain(|a, _| !is_mover.contains(a));
     let mut part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
+    // Ammo boxes, dropped onto what is below them.
+    let mut ammo_boxes = crate::pickups::read_boxes(
+        &mut looks,
+        &map.0,
+        &map.1,
+        level.actors.iter().flatten().copied(),
+        &mut |n| pkgs.get(n),
+    );
+    {
+        let ground = crate::settle::Ground::new(&mesh.triangles);
+        for b in &mut ammo_boxes {
+            crate::pickups::rest_on_ground(b, |p| ground.below(p));
+        }
+    }
     let mut triangles = Vec::with_capacity(mesh.triangles.len());
     for (t, src) in mesh.triangles.into_iter().zip(mesh.sources) {
         match src {
@@ -294,6 +320,8 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         parts,
         start,
         arrivals,
+        ammo_boxes,
+        pickups_not_solid,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
         mesh_failures,

@@ -226,6 +226,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelInfo>();
     commands.remove_resource::<LevelMoverData>();
     commands.remove_resource::<LevelParts>();
+    commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -342,6 +343,31 @@ fn load(world: &mut World) {
     ));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(parts);
+    // Ammo and grenade boxes, for the combat part to hand out.
+    let boxes: Vec<_> = lvl
+        .ammo_boxes
+        .iter()
+        .map(|b| rc_game_core::pickups::PlacedAmmoBox {
+            export: b.export,
+            name: b.name.clone(),
+            class: b.class.clone(),
+            at: bevy::math::Vec3::new(b.location[0], b.location[2], b.location[1])
+                / rc_game_core::units::UU_PER_UNIT,
+            ammo: b.ammo.clone(),
+            amount: b.amount,
+            respawn: b.respawn,
+            radius: b.radius,
+            height: b.height,
+        })
+        .collect();
+    log.line(format!(
+        "{PART}: {} ammo and grenade boxes ({} moved down onto the ground, the furthest {:.0} uu); {} pickups of all kinds left out of collision",
+        boxes.len(),
+        lvl.ammo_boxes.iter().filter(|b| b.dropped > 0.0).count(),
+        lvl.ammo_boxes.iter().map(|b| b.dropped).fold(0.0f32, f32::max),
+        lvl.pickups_not_solid
+    ));
+    world.insert_resource(rc_game_core::pickups::LevelAmmoBoxes(boxes));
 
     // The look. If it can't be built the level is still solid, just
     // invisible, so the game goes on and says so in the log.
