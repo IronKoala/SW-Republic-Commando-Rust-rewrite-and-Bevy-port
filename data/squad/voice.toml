@@ -1,0 +1,277 @@
+# When Delta Squad talks. The lines are the game's own, read at run time:
+# each member's `audio_table` in squad.toml (Sev: Delta07Audio) and the
+# player's `leader_table` below are classes in the game's System/CTAudio.u.
+# Each has one sound group (in Sounds/character_voice.uax) for each event of
+# the engine's EPawnAudioEvent list (System/Engine.u), like AcknowledgeOrder
+# or SpottedEnemy. Write event names without the game's "PAE_".
+#
+# WHEN they speak is decided in the original's compiled code, which we don't
+# read, so every rule below is OUR OWN choice. Change them freely.
+#
+# Which event names exist, and who has a line for each, was checked against
+# the game's files on 2026-11-01 (list them yourself with
+#   cargo run -p rc_combat --example rc_audio_tables -- <game folder> Delta38Audio Delta07Audio
+# ). What the tables show about who says what:
+#   - The player (Delta38) gives orders: FormUp, EngageTarget, SecurePosition,
+#     SearchAndDestroy, Recall; and asks for jobs: SnipeInitiate,
+#     GrenadeInitiate, BreachInitiate, HackDoorInitiate, DemolitionInitiate,
+#     AntiArmorInitiate, BactaInitiate, ... (and <Job>Cancel to call one off).
+#   - Sev, Fixer and Scorch answer: AcknowledgeOrder, FormUp, SecurePosition,
+#     SearchAndDestroy, StanceHold (no Recall), and for jobs <Job>Confirm,
+#     then <Job>Ready / <Job>Progress / <Job>Complete, BreachSetCharge,
+#     BreachGo, BreachClear, BactaJackIn. Nobody has a BactaConfirm,
+#     BactaComplete, BreachComplete, SnipeInitiate (mates) or SecureArea.
+#   - The player down is SquadLeaderDown; reviving the player is
+#     AssistingLeader; a mate is Delta07Down/Delta40Down/Delta62Down and
+#     Assisting07/40/62 (nobody has a line about themselves).
+#   - Some groups are in the tables but EMPTY in character_voice.uax, so
+#     that member never says them: Fixer and Scorch have no AcknowledgeOrder,
+#     RefuseOrder, StanceHold or AssistingAlly; Scorch no AllyDown; the player
+#     no TakingCoverHealthy. That's why some rules list a second event.
+#
+# [voice]
+#   enabled             "yes" or "no"
+#   package             sound package the tables point into
+#   leader_table        the player's own table, for who = "leader" (Boss is 38)
+#   gap                 seconds of quiet after any squad line before the next
+#   positional          "no": squad mates are heard at full volume wherever
+#                       they are, like a helmet radio. "yes": heard from where
+#                       they stand (with 3D SOUND) and quieter further away
+#   full_volume_within  with positional = "yes": further than this (uu) is
+#                       quieter
+#
+# [line.<any name>]  one rule; every rule that fits a happening is tried
+#   on      what happened:
+#           order               any order the player gives, or narrowed:
+#           order:form_up, order:secure_position, order:search_and_destroy,
+#           order:hold, order:cancel, order:marker
+#           order_ignored       an order the squad couldn't follow
+#           spotted             a member sees an enemy (first one in a while)
+#           player_in_line_of_fire, mate_in_line_of_fire   held fire
+#           down                a member goes down ({about} = them)
+#           leader_down         the player goes down
+#           revive_set_off      a member runs to revive someone ({about})
+#           revived             a member is back up
+#           cover_taken         a member heads for cover
+#           job_assigned, job_started, job_done, job_cancelled, posted
+#                               a marked job; add :<job> for one [job.*] of
+#                               squad.toml, like job_started:sniper
+#           fuse_lit            a charge is set
+#   event   event name(s), tried in order until the speaker has a line;
+#           {about} = number of the member it's about ("07"), {me} = own
+#   who     "self" (the one it's about or who does it), "other" (anyone but
+#           them), "any", or "leader" (the player)
+#   chance  0 to 1
+#   cooldown  seconds before this rule speaks again
+#   urgent  "yes": said even while someone is talking
+#   wait    while someone talks, wait up to this many seconds instead of
+#           staying quiet
+
+[voice]
+enabled = "yes"
+package = "character_voice"
+leader_table = "Delta38Audio"
+gap = 0.5
+positional = "no"
+full_volume_within = 512
+
+# --- Orders: the player calls it, then one squad mate answers. ---
+[line.boss_form_up]
+on = "order:form_up"
+event = "FormUp"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+
+[line.boss_secure]
+on = "order:secure_position"
+event = "SecurePosition"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+
+[line.boss_search]
+on = "order:search_and_destroy"
+event = "SearchAndDestroy"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+
+[line.boss_recall]
+on = "order:cancel"
+event = "Recall"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+
+[line.answer_form_up]
+on = "order:form_up"
+event = "FormUp AcknowledgeOrder"
+who = "any"
+wait = 3
+
+[line.answer_secure]
+on = "order:secure_position"
+event = "SecurePosition AcknowledgeOrder"
+who = "any"
+wait = 3
+
+[line.answer_search]
+on = "order:search_and_destroy"
+event = "SearchAndDestroy AcknowledgeOrder"
+who = "any"
+wait = 3
+
+[line.answer_recall]
+on = "order:cancel"
+event = "AcknowledgeOrder FormUp"
+who = "any"
+wait = 3
+
+[line.cant_do_that]
+on = "order_ignored"
+event = "RefuseOrder RefuseCantGoThere"
+who = "any"
+cooldown = 3
+
+# --- Marked jobs: the player asks, the mate confirms, then a line when
+# --- in place or working, and one when done.
+[line.boss_snipe]
+on = "job_assigned:sniper"
+event = "SnipeInitiate"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+[line.snipe_confirm]
+on = "job_assigned:sniper"
+event = "SnipeConfirm AcknowledgeOrder"
+wait = 3
+[line.snipe_ready]
+on = "posted:sniper"
+event = "SnipeReady"
+
+[line.boss_grenade]
+on = "job_assigned:grenade"
+event = "GrenadeInitiate"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+[line.grenade_confirm]
+on = "job_assigned:grenade"
+event = "GrenadeConfirm AcknowledgeOrder"
+wait = 3
+[line.grenade_ready]
+on = "posted:grenade"
+event = "GrenadeReady"
+
+[line.boss_anti_armour]
+on = "job_assigned:anti_armour"
+event = "AntiArmorInitiate"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+[line.anti_armour_confirm]
+on = "job_assigned:anti_armour"
+event = "AntiArmorConfirm AcknowledgeOrder"
+wait = 3
+[line.anti_armour_ready]
+on = "posted:anti_armour"
+event = "AntiArmorReady"
+
+[line.boss_breach]
+on = "job_assigned:breach"
+event = "BreachInitiate"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+[line.breach_confirm]
+on = "job_assigned:breach"
+event = "BreachConfirm AcknowledgeOrder"
+wait = 3
+[line.breach_start]
+on = "job_started:breach"
+event = "BreachSetCharge"
+[line.breach_done]
+on = "job_done:breach"
+event = "BreachGo"
+wait = 2
+
+[line.boss_slice]
+on = "job_assigned:slice"
+event = "HackDoorInitiate"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+[line.slice_confirm]
+on = "job_assigned:slice"
+event = "HackDoorConfirm AcknowledgeOrder"
+wait = 3
+[line.slice_start]
+on = "job_started:slice"
+event = "HackDoorProgress"
+[line.slice_done]
+on = "job_done:slice"
+event = "HackDoorComplete"
+wait = 2
+
+[line.boss_demolition]
+on = "job_assigned:demolition"
+event = "DemolitionInitiate"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+[line.demolition_confirm]
+on = "job_assigned:demolition"
+event = "DemolitionConfirm AcknowledgeOrder"
+wait = 3
+[line.demolition_start]
+on = "job_started:demolition"
+event = "DemolitionProgress"
+[line.demolition_done]
+on = "job_done:demolition"
+event = "DemolitionComplete"
+wait = 2
+
+[line.boss_bacta]
+on = "job_assigned:bacta"
+event = "BactaInitiate"
+who = "leader"
+urgent = "yes"   # the player always speaks, even over a squad mate
+[line.bacta_confirm]
+on = "job_assigned:bacta"
+event = "AcknowledgeOrder"
+wait = 3
+[line.bacta_start]
+on = "job_started:bacta"
+event = "BactaJackIn"
+
+# --- Fighting. ---
+[line.spotted]
+on = "spotted"
+event = "SpottedDroid SpottedEnemy"
+chance = 0.7
+cooldown = 10
+
+[line.player_in_the_way]
+on = "player_in_line_of_fire"
+event = "PlayerInLineOfFire"
+cooldown = 8
+
+[line.taking_cover]
+on = "cover_taken"
+event = "TakingCoverHealthy"
+chance = 0.5
+cooldown = 12
+
+# --- Going down and getting back up. ---
+[line.ally_down]
+on = "down"
+event = "Delta{about}Down AllyDown"
+who = "other"
+urgent = "yes"
+
+[line.boss_down]
+on = "leader_down"
+event = "SquadLeaderDown AllyDown"
+who = "any"
+urgent = "yes"
+
+[line.assisting]
+on = "revive_set_off"
+event = "Assisting{about} AssistingLeader"
+wait = 2
+
+[line.back_up]
+on = "revived"
+event = "Revived"
+wait = 2

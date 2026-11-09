@@ -132,6 +132,15 @@ copy of the game.
   `data/squad/squad.toml` has every number (`use_cover = "no"` turns it
   off).
 
+- **The squad talks (tested by playing on Windows, 2026-11-09).** You call
+  out your orders and Sev, Fixer or Scorch answers; they call out spotted
+  droids, taking cover, you being in their line of fire, who is down, who
+  they are helping and being back up, all with the game's own recordings
+  (read at run time from the install). When each line is said is our own
+  rule, in `data/squad/voice.toml`. Squad mates are heard at full volume
+  like a helmet radio (`positional = "yes"` places them instead). Marked
+  jobs' lines (breach, bacta...) are not tried in a game yet.
+
 - **The squad uses their specialities (tested in the cloud sandbox by
   numbers, not yet on Windows or with eyes).** Without being told, Sev
   switches to the sniper attachment for enemies 1500 units or more away,
