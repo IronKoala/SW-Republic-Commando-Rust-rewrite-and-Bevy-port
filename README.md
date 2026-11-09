@@ -512,8 +512,14 @@ copy of the game.
   its speaker is. Music cues, characters walking or animating, the squad
   joining and leaving and camera moves are logged as "not done yet". The
   end-of-campaign debriefing screen isn't shown: the game goes straight
-  on. Briefings and cutscene maps may wait for events nothing sends yet,
-  so you may get stuck in one. Not tested on Windows.
+  on. Not tested on Windows.
+- Cutscenes (since 2026-11-09): the prologue, briefings and epilogue run
+  to their end and go on to the next map. The player is held still with
+  the original's look limits, moved between rooms, and the screen fades
+  and flashes as the scripts ask; the HUD and helmet frame hide when they
+  say. Not done yet: riding the gunship in briefings, the baby's and
+  boy's hands, many cutscene characters, hologram text, the title card,
+  the credits, and the logo videos. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game

@@ -279,6 +279,7 @@ mod tests {
             places: Default::default(),
             sounds: vec![],
             started: false,
+            scene: crate::cutscene::Scene::default(),
             stats: PlayStats::default(),
         });
         w.insert_resource(Objectives::default());

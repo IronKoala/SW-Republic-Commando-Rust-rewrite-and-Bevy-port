@@ -2934,6 +2934,87 @@ which puts the player into geo_01a's exit with 13 health taken off and
 checks that geo_01b loads with the same health and magazine, the player at
 its start, and its start saved as a checkpoint with that health.
 
+## Cutscenes (`rc_scripts` Dispatchers, `rc_scripts_plugin/src/cutscene.rs`, `rc_game/src/cutscene.rs`)
+
+**What the original's cutscenes are.** Republic Commando has almost no
+films. Its story scenes are the game's own world seen through the player's
+eyes, run by the same level scripts as the missions: the prologue (`pro`,
+the clone growing up on Kamino), the briefings on the gunship
+(`geo_01briefing`, `ras_01briefing`, `yyy_01briefing`, `yyy07briefing`),
+the `epilogue`, and short moments inside missions (geo_01a opens with the
+player held in the gunship while the squad rappels down). The only video
+files are the start-up logos (`Movies/lecintro.avi`, `nvidiaintro.avi`),
+the main menu's background (`menu_bg.avi`) and the EXTRAS menu's
+making-of films (`extras*.mpg`). The `.avi` files are MPEG-4 part 2
+(`MP42`, `MPG4` four-character codes), which no Rust library decodes yet.
+
+**Dispatchers.** Cutscene maps are timed by `Dispatcher` actors: when an
+event with the dispatcher's tag is sent, it sends a list of events one
+after another, each after its own `Delay` (a random time up to `DelayMax`
+when that is longer), optionally playing a `Sound` first (and waiting for
+it with `bWaitForSound`). Its `Events` list is an array of structs written
+as named values; `rc_level::scripts` now reads such arrays into
+`Val::Structs`. Before this, nothing ran them, so the prologue and the
+briefings stopped at their first dispatcher and the player was stuck.
+`rc_scripts::dispatcher_actions` turns each dispatcher into a small script
+of our own making (wait for the tag; for each entry wait, play, send; go
+back to waiting), so its waits are saved like any script's and its tag is
+not heard while it runs, as UE2's Dispatcher ignores triggers while
+dispatching. `rc_script_check pro geo_01briefing epilogue --secs 400`
+shows each map now runs to its end: the prologue leaves for
+geo_01briefing at 166 s, the briefing for geo_01a at 53 s, the epilogue
+reaches its credits (`ShowMenuScreen CTCreditsMenu`) at 75 s.
+
+**What the scripts ask of the player and the screen.** Shared in
+`rc_game_core::cutscene`: the `Cutscene` resource (held view, frozen body,
+screen tint, HUD and helmet frame hidden) and the `TeleportPlayer`
+message. `rc_scripts_plugin/src/cutscene.rs` (`Scene`) fills them in from
+the actions:
+
+- `ACTION_Briefing` holds the player: no walking, jumping, crouching,
+  fighting, using or orders (`ActionState::hold_still`); looking stays,
+  within `MinYaw`..`MaxYaw` and `MinPitch`..`MaxPitch`. The limits are
+  the world's own angles, not angles from where the player faced: in the
+  prologue each room's range is centred on the way that room's arrival
+  point faces (GymTeleporter faces 32640, its range is 28500..38000).
+  Class defaults (read with `rc_probe --class ACTION_Briefing`): the whole
+  circle both ways, `bDrawHUD` on. `bDrawHUD` off hides the HUD;
+  `bEndBriefing` lets go; `bOkToChangeWeapon` keeps weapon changes.
+- `ACTION_TeleportToPoint` on the player moves the middle of the body to
+  the named point, facing the way it faces, with no speed.
+- `ACTION_SetPhysics` on the player: mode 0 (none) freezes the body where
+  it is (the newborn clone doesn't fall); any other mode lets it move.
+- `ACTION_ScreenFade`: a positive `FadeTime` fades to `FadeColor` (default
+  black, 3 s), 0 goes there at once, a negative one fades back from it.
+- `ACTION_AnimateVisorFX`: `AddColor` shown as that colour over the
+  screen, `MultiplyColor` as black over it as strong as the colour is
+  dark, rising over `InTime`, holding `SustainTime`, falling over
+  `OutTime`. This is a stand-in: the original adds and multiplies, we lay
+  a colour over. Bloom is logged as not done.
+- `ACTION_ShowVisor` hides or shows the helmet frame (`bVisor`).
+
+`rc_game/src/cutscene.rs` carries them out: it holds the actions between
+`GameSet::Input` and `GameSet::Simulate`, hides every `HudRoot` (the
+placeholder HUD and the original HUD pictures), and draws a full-screen
+colour layer over the HUD and under the menus (`GlobalZIndex(9)`).
+`player.rs` applies teleports, the look limits and the frozen body;
+`helmet.rs` hides the frame. Everything is cleared when a level loads or
+the game is left. A VR mod reads the same `Cutscene` and shows the tint
+and limits its own way; nothing here assumes a flat screen.
+
+**Our reading, not the game's code.** What each action does comes from
+its name, its values in the maps and its class defaults; the classes
+themselves are compiled code we don't read. Not done yet: the player
+riding the gunship (`ACTION_AttachToGunship` to a bone of the
+`BriefingGunship`, whose `GEO01fly` animation carries the camera through
+the sky), what the player holds (`BriefingWeapon`: the baby's and boy's
+hands, the briefing helmet), placed characters that the game doesn't
+spawn yet (Kaminoans, clone troopers, the hologram advisor), hiding and
+showing actors that aren't level parts (the hologram text), view shakes,
+the title card, the credits, and the cutscene state in save files (the
+cutscene maps have no checkpoints, so only a quick save mid-scene would
+lose the hold).
+
 ## The visor: tactical and low light modes (`rc_visor`)
 
 The commando's visor has three modes, stepped through with CYCLE VISOR

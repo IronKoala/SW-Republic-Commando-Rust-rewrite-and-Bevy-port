@@ -14,6 +14,7 @@
 //! numbers to the log, to check a controller.
 //! Everything is logged to `logs/rc_game.log`.
 
+mod cutscene;
 mod display;
 mod graphics;
 mod helmet;
@@ -493,6 +494,7 @@ fn main() -> AppExit {
     app.add_plugins(rc_squad_plugin::SquadPlugin);
     app.add_plugins(rc_save::SavePlugin);
     app.add_plugins(visor::GameVisorPlugin);
+    app.add_plugins(cutscene::CutscenePlugin);
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),

@@ -224,6 +224,46 @@ impl ActionState {
         self.movement = movement.clamp_length_max(1.0);
         self.look = look;
     }
+
+    /// Hold the player still for a cutscene: no moving, jumping,
+    /// crouching, fighting, using or squad orders this frame. Looking
+    /// around, menus, saving, screenshots and the gyro stay. With
+    /// `weapon_change`, changing weapons stays too.
+    pub fn hold_still(&mut self, weapon_change: bool) {
+        use Action::*;
+        let keep = |a: &Action| {
+            matches!(
+                a,
+                TurnLeft
+                    | TurnRight
+                    | QuickSave
+                    | QuickLoad
+                    | Pause
+                    | MenuUp
+                    | MenuDown
+                    | MenuLeft
+                    | MenuRight
+                    | MenuAccept
+                    | MenuBack
+                    | Screenshot
+                    | GyroRatchet
+                    | GyroToggle
+            ) || (weapon_change
+                && matches!(
+                    a,
+                    NextWeapon
+                        | PrevWeapon
+                        | WeaponPistol
+                        | WeaponBlaster
+                        | WeaponSniper
+                        | WeaponAntiArmor
+                ))
+        };
+        self.pressed.retain(keep);
+        self.just_pressed.retain(keep);
+        self.just_released.retain(keep);
+        self.movement = Vec2::ZERO;
+    }
 }
 
 /// What to show on screen for each action's button right now: "F" or
