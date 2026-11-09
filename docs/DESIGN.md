@@ -324,6 +324,7 @@ lumens_per_range_squared = 2000 # point and spot light power
 sun_lux_at_255 = 10000          # Sunlight brightness
 ambient_at_255 = 2000           # zone ambient brightness
 shadows = false
+live_light_on_props = 1         # real-time light on props and terrain (0 = off)
 ```
 
 - Positions: Bevy (x, y, z) = Unreal (x, z, y) / 50. Swapping Y and Z also
@@ -343,9 +344,18 @@ shadows = false
   its page (`ATTRIBUTE_UV_1`) and a `Lightmap` component. The material is
   lit, so real-time lights add on top. The scene-wide ambient light is off,
   because the baked light already contains each zone's ambient.
-- Props use their per-corner colours as Bevy vertex colours on an unlit
-  material, which multiplies texture and colour directly. Real-time lights
-  don't reach them yet (see below). The colours are stored red, green,
+- Props (and terrain) use their per-corner colours as Bevy vertex colours on
+  our `PropMaterial` (`prop_light.rs` and `prop_light.wesl`): Bevy's
+  standard material with a small shader of ours that draws
+  `texture x corner colour + texture x real-time lights x live_light_on_props`.
+  Bevy's own material would treat vertex colours as paint, so a lamp's light
+  would be multiplied by the dark baked colour; the shader keeps the two
+  apart. With no real-time light near, a prop is drawn exactly as the old
+  unlit material drew it (geo_01a and yyy_06a pictures identical to the
+  pixel). Sky props and `live_light_on_props = 0` still use the plain unlit
+  material. Cost: the same as any lit surface, one pass, no extra textures,
+  so fine for phones and VR. Every app that draws a level adds
+  `PropLightPlugin` (the game's `LevelPlugin` does). The colours are stored red, green,
   blue, alpha (checked against the colour of the lights each prop lists;
   they were read as blue, green, red until 2026-11-01, which drew geo_04a's
   orange canyon blue-grey).
@@ -406,8 +416,9 @@ of real-time lights remain (2 in `geo_01a`, 19 in `pro`). That suits a later
 VR version, which has to draw everything twice (once per eye) at 90 frames
 per second or more.
 
-**Known gaps.** Real-time lights don't light props yet (their baked colours
-are on an unlit material). Shadow bitmaps for the dynamic lights are read
+**Known gaps.** Real-time light on props uses the same placeholder strength
+as on walls, and whether the original lit props per corner or per pixel is
+not known (we light per pixel, which looks smoother). Shadow bitmaps for the dynamic lights are read
 past but not used. What the lightmap pages' alpha channel holds is unknown
 (it is ignored). Lightmaps are sampled with plain linear filtering.
 

@@ -35,7 +35,7 @@ use rc_game_core::{
     Play, Player, PlayerCamera,
 };
 use rc_level_viewer::lighting::LightingSettings;
-use rc_level_viewer::{draw, materials, scene};
+use rc_level_viewer::{draw, materials, prop_light, scene};
 use rc_movement::{MoveParams, Pawn, TriangleWorld, Vec3 as UVec3};
 use rc_nav::PathFollower;
 use rc_package::Package;
@@ -113,6 +113,7 @@ fn main() -> AppExit {
             ..default()
         }))
         .add_plugins((CorePlugin, rc_combat::CombatPlugin, EnemiesPlugin))
+        .add_plugins(prop_light::PropLightPlugin)
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(log)
         .insert_resource(GamePaths::new(game, vec![PathBuf::from("data")]))
@@ -186,15 +187,18 @@ fn load_level(world: &mut World) {
             world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
                     world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
-                        let mut commands = world.commands();
-                        draw::spawn_level(
-                            &mut commands,
-                            &mut meshes,
-                            &mut images,
-                            &mut mats,
-                            &sc,
-                            &settings,
-                        );
+                        world.resource_scope(|world, mut props: Mut<Assets<prop_light::PropMaterial>>| {
+                            let mut commands = world.commands();
+                            draw::spawn_level(
+                                &mut commands,
+                                &mut meshes,
+                                &mut images,
+                                &mut mats,
+                                &mut props,
+                                &sc,
+                                &settings,
+                            );
+                        })
                     })
                 })
             });

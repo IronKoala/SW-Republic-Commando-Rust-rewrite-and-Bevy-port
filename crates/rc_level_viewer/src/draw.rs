@@ -4,6 +4,7 @@
 
 use crate::lighting::{self, LightingSettings, SpawnReport};
 use crate::materials;
+use crate::prop_light::{PropLight, PropMaterial};
 use crate::scene::Scene;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::Exposure;
@@ -31,6 +32,9 @@ pub struct DrawReport {
     pub textured: usize,
     pub lightmapped: usize,
     pub coloured: usize,
+    /// Of `coloured`: batches that real-time lights reach too (all but the
+    /// sky's, and none when `live_light_on_props` is 0).
+    pub coloured_live: usize,
     pub full_bright: usize,
     pub lights: SpawnReport,
     /// Batches drawn in the sky (seen only by the sky camera).
@@ -97,6 +101,7 @@ pub fn spawn_level(
     meshes: &mut Assets<Mesh>,
     images: &mut Assets<Image>,
     materials: &mut Assets<StandardMaterial>,
+    prop_materials: &mut Assets<PropMaterial>,
     scene: &Scene,
     settings: &LightingSettings,
 ) -> DrawReport {
@@ -115,6 +120,8 @@ pub fn spawn_level(
     let mut triangles = 0;
     let mut textured = 0;
     let (mut lightmapped, mut coloured, mut full_bright) = (0, 0, 0);
+    let mut coloured_live = 0;
+    let props_live = settings.live_light_on_props > 0.0;
     let mut sky_batches = 0;
     let mut entities = Vec::new();
     for b in &scene.batches {
@@ -159,12 +166,16 @@ pub fn spawn_level(
         } else {
             AlphaMode::Opaque
         };
+        // Props and terrain carry their baked light as vertex colours. Out of
+        // the sky they get `PropMaterial`, which adds real-time lights on
+        // top (see prop_light.rs); in the sky, or with real-time light on
+        // props switched off, a plain unlit material shows just the colours.
+        let prop_live = with_colours && page.is_none() && !b.sky && props_live;
         let material = StandardMaterial {
             // Lightmapped surfaces go through Bevy's lighting (so real-time
-            // lights add to them). Props carry their baked light as vertex
-            // colours, which an unlit material multiplies in directly.
-            // Anything without baked light is drawn at full brightness.
-            unlit: page.is_none(),
+            // lights add to them). Anything without baked light is drawn at
+            // full brightness.
+            unlit: page.is_none() && !prop_live,
             lightmap_exposure,
             perceptual_roughness: 1.0,
             reflectance: 0.0,
@@ -190,11 +201,16 @@ pub fn spawn_level(
             },
             ..default()
         };
-        let mut entity = commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(materials.add(material)),
-            Transform::default(),
-        ));
+        let mut entity = commands.spawn((Mesh3d(meshes.add(mesh)), Transform::default()));
+        if prop_live {
+            entity.insert(MeshMaterial3d(prop_materials.add(PropMaterial {
+                base: material,
+                extension: PropLight::new(settings.live_light_on_props),
+            })));
+            coloured_live += 1;
+        } else {
+            entity.insert(MeshMaterial3d(materials.add(material)));
+        }
         if let Some(m) = b.mover {
             entity.insert(MoverPart(m));
         }
@@ -221,6 +237,7 @@ pub fn spawn_level(
         textured,
         lightmapped,
         coloured,
+        coloured_live,
         full_bright,
         lights: report,
         sky_batches,

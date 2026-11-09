@@ -595,8 +595,9 @@ copy of the game.
   without SDL and without gyro).
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the
-  real game side by side. Real-time lights use placeholder strengths and
-  don't light props yet. Shadows from moving lights aren't drawn. Bump maps
+  real game side by side. Real-time lights use placeholder strengths. They
+  now light props and terrain as well as walls (tested in the cloud, not
+  yet looked at on the PC). Shadows from moving lights aren't drawn. Bump maps
   aren't used for lighting yet, and which way their "up" points isn't
   checked.
 - 17 textures have small copies (mipmaps) that differ from the full picture.
