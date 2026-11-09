@@ -31,10 +31,11 @@ use rc_game_core::{
     ArrivalPortal, CurrentLevel, GameLog, GamePaths, GameState, LevelCollision, LoadingGate, PlayerCamera,
     PlayerStart,
 };
+use rc_level_viewer::bump::{BumpLitMaterial, BumpMapPlugin};
 use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
 use rc_level_viewer::sky::{self, SkyViewer};
-use rc_level_viewer::{materials, scene};
+use rc_level_viewer::{materials, prop_light, scene};
 use rc_movement::{Hit, MoveParams, TriangleWorld, Vec3, World as MoveWorld};
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -59,7 +60,7 @@ pub struct LevelPlugin;
 
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(sky::SkyPlugin)
+        app.add_plugins((sky::SkyPlugin, BumpMapPlugin, prop_light::PropLightPlugin))
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
             .add_systems(
@@ -353,8 +354,21 @@ fn load(world: &mut World) {
             let report = world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
                     world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
-                        let mut commands = world.commands();
-                        draw::spawn_level(&mut commands, &mut meshes, &mut images, &mut mats, &sc, &settings)
+                        world.resource_scope(|world, mut bumps: Mut<Assets<BumpLitMaterial>>| {
+                          world.resource_scope(|world, mut props: Mut<Assets<prop_light::PropMaterial>>| {
+                            let mut commands = world.commands();
+                            draw::spawn_level(
+                                &mut commands,
+                                &mut meshes,
+                                &mut images,
+                                &mut mats,
+                                Some(&mut bumps),
+                                &mut props,
+                                &sc,
+                                &settings,
+                            )
+                          })
+                        })
                     })
                 })
             });
@@ -388,11 +402,13 @@ fn load(world: &mut World) {
             info.drawn_triangles = report.triangles;
             info.draw_ms = t.elapsed().as_secs_f64() * 1000.0;
             log.line(format!(
-                "{PART}: drawn in {:.0} ms: {} triangles, {} textured batches, {} lightmapped, {} lights",
+                "{PART}: drawn in {:.0} ms: {} triangles, {} textured batches, {} lightmapped, {} props/terrain lit by real-time lights too (strength {}), {} lights",
                 info.draw_ms,
                 report.triangles,
                 report.textured,
                 report.lightmapped,
+                report.coloured_live,
+                settings.live_light_on_props,
                 report.lights.point + report.lights.spot + report.lights.directional
             ));
         }

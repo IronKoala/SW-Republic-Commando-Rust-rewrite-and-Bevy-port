@@ -886,3 +886,61 @@ fn level_addresses_read_as_map_and_portal() {
     assert_eq!(r("#FromA"), None);
     assert_eq!(r("../../x.ctm"), None);
 }
+
+/// A Dispatcher (the prologue's and briefings' timing) sends its list in
+/// order, each after its own delay, when its tag is sent; it ignores its
+/// tag while it runs, and can run again afterwards.
+#[test]
+fn dispatcher_sends_its_list_in_time() {
+    let entry = |event: &str, delay: f32| {
+        let mut v = Vals::new();
+        v.insert("Event".into(), t(event));
+        v.insert("Delay".into(), Val::Float(delay));
+        v.insert("DelayMax".into(), Val::Float(0.0));
+        v.insert("Sound".into(), t("None"));
+        v.insert("bWaitForSound".into(), Val::Bool(false));
+        v
+    };
+    let map = MapScripts {
+        actors: vec![
+            actor(
+                obj(2, "PlayerStart", "PlayerStart0", &[("Event", t("Go"))]),
+                vec![],
+            ),
+            actor(
+                obj(
+                    3,
+                    "Dispatcher",
+                    "Dispatcher1",
+                    &[
+                        ("Tag", t("Go")),
+                        (
+                            "Events",
+                            Val::Structs(vec![entry("First", 0.0), entry("Second", 2.0), entry("Third", 1.0)]),
+                        ),
+                    ],
+                ),
+                vec![],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    assert_eq!(d.stats.dispatchers, 1);
+    d.start();
+    run(&mut d, 0.1);
+    assert_eq!(sent(&d), ["Go", "First"]);
+    // Sent again while it runs: not heard.
+    d.fire("Go", "test");
+    run(&mut d, 2.0);
+    assert_eq!(sent(&d), ["Go", "First", "Go", "Second"]);
+    run(&mut d, 1.2);
+    assert_eq!(sent(&d), ["Go", "First", "Go", "Second", "Third"]);
+    let at = |e: &str| d.history.iter().find(|(_, n)| n == e).unwrap().0;
+    assert!((at("Second") - at("First") - 2.0).abs() < 0.11);
+    assert!((at("Third") - at("Second") - 1.0).abs() < 0.11);
+    // Done: it runs again on its tag.
+    d.fire("Go", "test");
+    run(&mut d, 0.1);
+    assert_eq!(sent(&d).iter().filter(|e| *e == "First").count(), 2);
+}

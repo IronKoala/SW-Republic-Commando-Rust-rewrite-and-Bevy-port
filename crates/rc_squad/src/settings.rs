@@ -89,6 +89,9 @@ pub struct MemberSettings {
     pub shield_recharge_rate: f32,
     /// Seconds after a hit before the shield recharges.
     pub shield_recharge_delay: f32,
+    /// Their voice: an audio table class in the game's System/CTAudio.u
+    /// (see data/squad/voice.toml). Empty: they don't talk.
+    pub audio_table: String,
     /// The `[job.*]` key of what they use on their own in a fight
     /// (`sniper`, `grenade`, `anti_armour`); "" for nothing.
     pub speciality: String,
@@ -255,6 +258,12 @@ fn member(
         max_shields: 50.0,
         shield_recharge_rate: 15.0,
         shield_recharge_delay: 4.0,
+        // Commando07Delta's AudioTable is Delta07Audio, and so on.
+        audio_table: if number.is_empty() {
+            String::new()
+        } else {
+            format!("Delta{number}Audio")
+        },
         speciality: String::new(),
     }
 }
@@ -344,12 +353,12 @@ impl Default for SquadSettings {
 }
 
 /// One value from the file.
-enum Value {
+pub(crate) enum Value {
     Numbers(Vec<f32>),
     Text(String),
 }
 
-fn parse_value(s: &str) -> Option<Value> {
+pub(crate) fn parse_value(s: &str) -> Option<Value> {
     let s = s.trim();
     if let Some(inner) = s.strip_prefix('"') {
         return inner.strip_suffix('"').map(|t| Value::Text(t.to_string()));
@@ -619,7 +628,7 @@ impl SquadSettings {
     }
 }
 
-fn strip_comment(line: &str) -> &str {
+pub(crate) fn strip_comment(line: &str) -> &str {
     // A `#` inside quotes is text, not a comment.
     let mut quoted = false;
     for (i, c) in line.char_indices() {
@@ -632,7 +641,7 @@ fn strip_comment(line: &str) -> &str {
     line
 }
 
-fn one(value: Value) -> Result<f32, String> {
+pub(crate) fn one(value: Value) -> Result<f32, String> {
     match value {
         Value::Numbers(v) if v.len() == 1 => Ok(v[0]),
         _ => Err("expected one number".into()),
@@ -698,6 +707,7 @@ fn set_member(m: &mut MemberSettings, key: &str, value: Value) -> Result<(), Str
         "max_shields" => m.max_shields = one(value)?,
         "shield_recharge_rate" => m.shield_recharge_rate = one(value)?,
         "shield_recharge_delay" => m.shield_recharge_delay = one(value)?,
+        "audio_table" => m.audio_table = text(value)?,
         "speciality" => m.speciality = text(value)?,
         _ => return Err(format!("unknown setting `{key}` for a squad member")),
     }
@@ -735,7 +745,7 @@ fn set_fight(f: &mut FightSettings, key: &str, value: Value) -> Result<(), Strin
     Ok(())
 }
 
-fn yes_no(key: &str, value: Value) -> Result<bool, String> {
+pub(crate) fn yes_no(key: &str, value: Value) -> Result<bool, String> {
     match value {
         Value::Text(t) if t == "yes" => Ok(true),
         Value::Text(t) if t == "no" => Ok(false),

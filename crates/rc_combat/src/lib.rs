@@ -23,8 +23,9 @@
 // Bevy queries read best written out in place.
 #![allow(clippy::type_complexity)]
 
-mod arms_view;
 pub mod arms;
+mod arms_view;
+pub mod audio_table;
 pub mod counter;
 mod damage;
 pub mod damage_types;
@@ -47,9 +48,12 @@ pub use grenade::{GrenadeParams, Grenades};
 pub use health::{
     CannotDie, Damage, DamageKind, Dead, Died, Difficulty, Health, Invulnerable, Shield, Team,
 };
-pub use library::{read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary};
+pub use library::{
+    read_audio_params, read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary,
+};
 pub use melee::{MeleeAttack, MeleeSwing};
 pub use pickup::{spawn_pickup, WeaponPickup};
+pub use rc_package::sound::AudioParams;
 pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{ArmsParams, WeaponParams, WeaponState};
 

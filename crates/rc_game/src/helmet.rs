@@ -262,6 +262,7 @@ fn fit_and_show(
     helmet: Res<Helmet>,
     settings: Res<Settings>,
     state: Option<Res<State<GameState>>>,
+    cutscene: Option<Res<rc_game_core::Cutscene>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<(&mut Visibility, &Camera), With<HelmetCamera>>,
     pieces: Query<(&HelmetPiece, &Mesh3d)>,
@@ -274,7 +275,11 @@ fn fit_and_show(
         return;
     };
     let in_game = state.is_some_and(|s| *s.get() == GameState::InGame);
-    let show = in_game && helmet.plan.enabled && settings.game.helmet;
+    // A cutscene can take the helmet off (the prologue's young clone).
+    let show = in_game
+        && helmet.plan.enabled
+        && settings.game.helmet
+        && !cutscene.is_some_and(|c| c.hide_visor);
     let mut any = false;
     // The box the helmet is drawn in: the camera's own (smaller than the
     // window when full screen adds black bars), else the window.

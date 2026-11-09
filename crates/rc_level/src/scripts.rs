@@ -34,6 +34,9 @@ pub enum Val {
     Struct(Vals),
     /// A struct written as three floats (`Vector`).
     Vector([f32; 3]),
+    /// A list of structs, each written as named values (a `Dispatcher`'s
+    /// `Events`: event name, delay, ...).
+    Structs(Vec<Vals>),
     /// Anything else, as stored.
     Raw(Vec<u8>),
 }
@@ -238,7 +241,20 @@ fn to_val(pkg: &Package, p: &Property) -> Val {
                     }
                 }
                 if r.pos() == b.len() {
-                    Val::List(out)
+                    return Val::List(out);
+                }
+                // Or a list of structs written as named values.
+                let mut r = Reader::new(b);
+                let n = r.compact_index().unwrap_or(0).max(0);
+                let mut out = Vec::new();
+                for _ in 0..n {
+                    match read_properties(pkg, &mut r) {
+                        Ok(ps) => out.push(to_vals(pkg, &ps)),
+                        Err(_) => return Val::Raw(b.clone()),
+                    }
+                }
+                if n > 0 && r.pos() == b.len() {
+                    Val::Structs(out)
                 } else {
                     Val::Raw(b.clone())
                 }

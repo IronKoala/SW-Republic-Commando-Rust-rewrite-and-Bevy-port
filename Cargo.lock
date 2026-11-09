@@ -4688,6 +4688,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "rc_anim",
+ "rc_audio",
  "rc_combat",
  "rc_game_core",
  "rc_level",

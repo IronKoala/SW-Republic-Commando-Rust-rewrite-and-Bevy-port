@@ -35,6 +35,7 @@
 
 pub mod look;
 pub mod save;
+pub mod voice;
 
 use bevy::prelude::*;
 use rc_combat::{
@@ -152,6 +153,10 @@ pub struct SquadMapData {
     pub nav: Option<NavGraph>,
     /// One line per thing found, for the log.
     pub notes: Vec<String>,
+    /// The map was read and has no squad (no `CTSquad` actor, markers or
+    /// squad-mate spawners): the prologue, briefings and epilogue. No
+    /// squad mates are brought in.
+    pub squadless: bool,
 }
 
 impl SquadMapData {
@@ -183,6 +188,13 @@ impl SquadMapData {
                     info.markers.len(),
                     info.factories.len()
                 ));
+                if !info.wants_squad() {
+                    out.notes.push(
+                        "no CTSquad actor in the map: this map has no squad (a cutscene map)"
+                            .into(),
+                    );
+                    out.squadless = true;
+                }
                 for m in &info.markers {
                     out.notes.push(format!(
                         "  marker {} ({}, anchor {} {}) stand at ({:.0}, {:.0}, {:.0})",
@@ -333,6 +345,9 @@ impl Plugin for SquadPlugin {
             .init_resource::<SquadThreats>()
             .init_resource::<SquadFightStats>()
             .init_resource::<SquadLooks>()
+            .init_resource::<voice::SquadHeard>()
+            .init_resource::<voice::SquadVoices>()
+            .init_resource::<voice::SquadVoiceStats>()
             .add_save_part::<save::SquadSave>()
             .add_systems(OnEnter(GameState::Loading), load_map_data)
             .add_systems(
@@ -354,6 +369,8 @@ impl Plugin for SquadPlugin {
                     gather_threats,
                     run_squad,
                     carry_out_jobs,
+                    voice::load_voices,
+                    voice::speak,
                     write_readout,
                 )
                     .chain()
@@ -412,8 +429,12 @@ fn load_map_data(
 fn clear_squad(
     mut state: ResMut<SquadState>,
     stats: Res<SquadFightStats>,
+    mut voices: ResMut<voice::SquadVoices>,
     log: Option<Res<GameLog>>,
 ) {
+    if let Some(c) = voices.chatter.as_mut() {
+        c.reset();
+    }
     if let Some(squad) = &state.squad {
         log_line(&log, fight_line(squad, &stats));
     }
@@ -487,8 +508,16 @@ fn spawn_squad(
     for line in settings.summary() {
         log_line(&log, line);
     }
-    if settings.spawn == rc_squad::Spawn::None {
-        log_line(&log, "spawn = none: no squad this time");
+    let squadless = map.as_ref().is_some_and(|m| m.squadless);
+    if settings.spawn == rc_squad::Spawn::None || squadless {
+        log_line(
+            &log,
+            if squadless {
+                "this map has no squad (no CTSquad actor): no squad mates"
+            } else {
+                "spawn = none: no squad this time"
+            },
+        );
         state.squad = Some(
             Squad::new(
                 SquadSettings {
@@ -667,6 +696,7 @@ fn take_orders(
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     collision: Option<Res<LevelCollision>>,
     options: Option<Res<SquadOptions>>,
+    mut heard: ResMut<voice::SquadHeard>,
     log: Option<Res<GameLog>>,
 ) {
     let (Some(squad), Ok(pt)) = (state.squad.as_mut(), player.single()) else {
@@ -687,7 +717,9 @@ fn take_orders(
     }
     let leader = leader_from(pt);
     let mut wanted: Vec<Order> = orders.read().map(|o| o.0).collect();
-    // The level's scripts give squad orders too.
+    // The level's scripts give squad orders too (said by nobody: the
+    // script plays its own lines).
+    let mut scripted: Vec<Order> = Vec::new();
     for o in from_scripts.read() {
         use rc_game_core::SquadStanceOrder as S;
         let order = match *o {
@@ -696,7 +728,7 @@ fn take_orders(
             S::SecurePosition(p) => Order::SecurePosition(UVec3::new(p[0], p[1], p[2])),
         };
         log_line(&log, format!("the level's script orders: {order}"));
-        wanted.push(order);
+        scripted.push(order);
     }
     if let Some(a) = actions {
         let aimed = || -> Option<(UVec3, UVec3)> { aim(&camera) };
@@ -742,9 +774,15 @@ fn take_orders(
     let Some(collision) = collision else {
         return;
     };
+    for o in scripted {
+        for e in squad.command(o, leader, &*collision.0) {
+            log_line(&log, format!("t={:.2} {e}", squad.time));
+        }
+    }
     for o in wanted {
         for e in squad.command(o, leader, &*collision.0) {
             log_line(&log, format!("t={:.2} {e}", squad.time));
+            heard.0.push(e);
         }
     }
 }
@@ -804,6 +842,7 @@ fn run_squad(
     library: Option<Res<WeaponLibrary>>,
     mut marker_jobs: MessageWriter<MarkerJob>,
     mut commands: Commands,
+    mut heard: ResMut<voice::SquadHeard>,
     log: Option<Res<GameLog>>,
 ) {
     let (Ok((player_e, pt, mut player_health, player_dead)), Some(collision)) =
@@ -967,6 +1006,7 @@ fn run_squad(
             _ => log_line(&log, format!("t={:.2} {e}", squad.time)),
         }
     }
+    heard.0.extend(events);
     state.since_log += dt;
     if state.since_log >= LOG_EVERY {
         state.since_log = 0.0;
@@ -1218,6 +1258,7 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
 fn check_down(
     mut state: ResMut<SquadState>,
     mates: Query<(&SquadMate, &Health, Has<Dead>)>,
+    mut heard: ResMut<voice::SquadHeard>,
     log: Option<Res<GameLog>>,
 ) {
     let Some(squad) = state.squad.as_mut() else {
@@ -1227,6 +1268,7 @@ fn check_down(
         let down = dead || health.is_dead();
         if let Some(e) = squad.set_down(mate.index, down) {
             log_line(&log, format!("t={:.2} {e}", squad.time));
+            heard.0.push(e);
         }
     }
 }

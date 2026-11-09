@@ -433,6 +433,39 @@ fn steps() -> Vec<Step> {
                 Err(format!("{p} players, {c} cameras, collision {l}"))
             }
         }),
+        // geo_01a opens with a short scene: the player is held in the
+        // gunship, looking out, while the squad rappels down (the map's
+        // ACTION_Briefing), then let go.
+        Until(
+            "the opening scene holds the player",
+            |w| w.resource::<rc_game_core::Cutscene>().held.is_some(),
+            20.0,
+        ),
+        Note(|w| {
+            let f = feet(w);
+            w.resource_mut::<Noted>().feet = f;
+        }),
+        Hold(Action::MoveForward, 1.0),
+        Check("the opening scene holds the player still", |w| {
+            let (Some(a), Some(b)) = (w.resource::<Noted>().feet, feet(w)) else {
+                return Err("no player".into());
+            };
+            let held = w.resource::<rc_game_core::Cutscene>().held;
+            let d = (b - a).length_2d();
+            match held {
+                Some(h) if d < 5.0 && h.yaw.is_some() => Ok(format!(
+                    "moved {d:.0} uu while walking; looks {:.0} to {:.0} deg",
+                    h.yaw.unwrap().0.to_degrees(),
+                    h.yaw.unwrap().1.to_degrees()
+                )),
+                _ => Err(format!("moved {d:.0} uu; held {held:?}")),
+            }
+        }),
+        Until(
+            "the opening scene lets the player go",
+            |w| w.resource::<rc_game_core::Cutscene>().held.is_none(),
+            40.0,
+        ),
         Shot("in_game"),
         Check("level drawn with the crosshair at the centre", |w| {
             let s = shot(w, "in_game")?;
@@ -744,7 +777,7 @@ fn steps() -> Vec<Step> {
             60.0,
         ),
         Check(
-            "the scripts play the game's own lines, as long as each one lasts",
+            "the scripts play the game's own lines, as long as each one lasts, some from their place in the level",
             level_script_lines,
         ),
         Check("the start barricade blocks the way", |w| {
@@ -2209,8 +2242,10 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
         .cloned()
         .unwrap_or_default();
     let got = format!(
-        "{read} sounds read from {packages}, {measured} measured, {missing} missing; played {:?}, {} started on the sound card, {} not loaded; first line of speech {line} lasts {:.1} s",
+        "{read} sounds read from {packages}, {measured} measured, {missing} missing; played {:?}, {} from a place ({:?}), {} started on the sound card, {} not loaded; first line of speech {line} lasts {:.1} s",
         st.sounds_played,
+        st.sounds_placed.len(),
+        st.sounds_placed,
         st.sounds_started,
         st.sounds_missing.len(),
         s.director.sound_length(&line),
@@ -2221,6 +2256,7 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
         && st.sounds_played.len() >= 2
         && st.sounds_started >= 2
         && st.sounds_missing.is_empty()
+        && !st.sounds_placed.is_empty()
     {
         Ok(got)
     } else {

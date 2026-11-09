@@ -15,6 +15,14 @@
 //! squad's numbers, logs everything to `logs/rc_squad_sim.log`, and ends
 //! with `SIM DONE: N checks passed, M failed` (exit code 1 if any failed).
 //! Time runs in fixed 1/60 s steps, so every run gives the same numbers.
+//!
+//! With `--jobs` after the map name it runs a marker-job tour instead: for
+//! every job kind the map has (bacta, slice, breach, demolition, sniper,
+//! grenade, anti-armour), it stands near the marker of that kind nearest
+//! the squad,
+//! orders it, and checks that the job gets done (or the post taken), that
+//! the player asked for it out loud and that a squad mate answered.
+//! Example: `rc_squad_sim yyy_05d --jobs`.
 
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
@@ -27,6 +35,7 @@ use rc_game_core::{
 };
 use rc_movement::{MoveInput, MoveParams, Pawn, TriangleWorld, Vec3 as UVec3};
 use rc_squad::{MarkerState, MemberState};
+use rc_squad_plugin::voice::SquadVoiceStats;
 use rc_squad_plugin::{
     yaw_rotation, SquadFightStats, SquadMapData, SquadMate, SquadPlugin, SquadSet, SquadState,
 };
@@ -52,6 +61,13 @@ enum Step {
     /// Stand near the squad marker nearest the player, then aim at it and
     /// press.
     AimAtNearestMarker,
+    /// Like `AimAtNearestMarker`, for the open marker of this job nearest
+    /// the squad
+    /// (a `[job.*]` key of squad.toml). Skipped if the map has none.
+    AimAtJob(&'static str),
+    /// Did the job ordered last get done (or its post taken), with the
+    /// player's line and a squad mate's answer? Skipped if the map has none.
+    CheckJob(&'static str),
     /// Aim at the marker picked by `AimAtMarker` from where the player is.
     FaceMarker,
     /// Take all of this squad mate's health (as a hit would).
@@ -96,14 +112,21 @@ struct Sim {
     members: Vec<(String, UVec3, MemberState, f32)>,
     stance: String,
     secure_spot: Option<UVec3>,
-    markers: Vec<(String, UVec3, UVec3, MarkerState)>,
+    /// Name, stand spot, aim spot, state, job.
+    markers: Vec<(String, UVec3, UVec3, MarkerState, String)>,
     marker_target: Option<usize>,
+    /// Lines said before the last job order (`AimAtJob`), and whether
+    /// that job was found on the map.
+    said_before_job: usize,
+    job_found: bool,
     /// Where the hurt squad mate was when hurt.
     hurt_at: Option<(usize, UVec3)>,
     /// The squad panel: health fraction and whether shown as down.
     readout: Vec<(f32, bool)>,
     /// The squad's fight numbers.
     fight: SquadFightStats,
+    /// What the squad has said.
+    voice: SquadVoiceStats,
     /// Stand-in droids spawned, and how many are still standing.
     droids: Vec<Entity>,
     droids_alive: usize,
@@ -428,7 +451,59 @@ fn steps() -> Vec<Step> {
             -1e9,
             1e9,
         ),
+        // Voices: the game's own lines, said by the voice rules
+        // (data/squad/voice.toml) through the whole run.
+        Check(
+            "voices: squad lines said",
+            |s| s.voice.said.iter().filter(|l| l.0 != "the player").count() as f32,
+            3.0,
+            f32::INFINITY,
+        ),
+        Check(
+            "voices: the player's order lines said",
+            |s| s.voice.said.iter().filter(|l| l.0 == "the player").count() as f32,
+            1.0,
+            f32::INFINITY,
+        ),
+        Check(
+            "voices: lines a rule wanted but nobody had",
+            |s| s.voice.missing as f32,
+            0.0,
+            0.0,
+        ),
     ]
+}
+
+/// The marker-job tour (`--jobs`): every job kind in turn, then F4 so
+/// posted squad mates come back before the next one.
+fn job_steps() -> Vec<Step> {
+    use Step::*;
+    let idle = MoveInput::default();
+    let mut v = vec![Hold(4.0, idle), Press(Action::SquadFormUp), Hold(4.0, idle)];
+    for job in [
+        "bacta",
+        "slice",
+        "breach",
+        "demolition",
+        "sniper",
+        "grenade",
+        "anti_armour",
+    ] {
+        v.extend([
+            AimAtJob(job),
+            Hold(45.0, idle),
+            CheckJob(job),
+            Press(Action::SquadCancel),
+            Hold(8.0, idle),
+        ]);
+    }
+    v.push(Check(
+        "voices: lines a rule wanted but nobody had",
+        |s| s.voice.missing as f32,
+        0.0,
+        0.0,
+    ));
+    v
 }
 
 /// Up to `n` spots a droid can stand in sight of the player, 600 to 1400
@@ -500,6 +575,7 @@ fn drive_player(
         ),
     >,
     stats: Res<SquadFightStats>,
+    voice: Res<SquadVoiceStats>,
     mut damage: MessageWriter<Damage>,
     mut commands: Commands,
     log: Res<GameLog>,
@@ -507,6 +583,7 @@ fn drive_player(
 ) {
     let s = &mut *sim;
     s.fight = stats.clone();
+    s.voice = voice.clone();
     s.droids_alive = s.droids.iter().filter(|e| droids.contains(**e)).count();
     let player_entity = players.single().ok().map(|p| p.0);
     if let Ok((_, h, dead)) = players.single() {
@@ -547,7 +624,17 @@ fn drive_player(
         s.markers = sq
             .markers
             .iter()
-            .map(|(m, st)| (m.name.clone(), m.stand, m.aim, *st))
+            .map(|(m, st)| {
+                // The squad names markers after their job's name; keep
+                // the job's key (`[job.*]` in squad.toml).
+                let key = sq
+                    .settings
+                    .jobs
+                    .iter()
+                    .find(|j| j.name == m.job)
+                    .map_or_else(|| m.job.clone(), |j| j.key.clone());
+                (m.name.clone(), m.stand, m.aim, *st, key)
+            })
             .collect();
     }
     let mut pressed = HashSet::new();
@@ -592,19 +679,45 @@ fn drive_player(
                 log.line(format!("sim: press {}", a.name()));
                 s.hold_left = DT;
             }
-            Step::AimAtNearestMarker => {
+            Step::AimAtNearestMarker | Step::AimAtJob(_) => {
                 let here = s.pawn.feet();
-                let nearest = (0..s.markers.len()).min_by(|&a, &b| {
-                    (s.markers[a].1 - here)
-                        .length()
-                        .total_cmp(&(s.markers[b].1 - here).length())
-                });
-                let Some(k) = nearest else {
+                let picked = if let Step::AimAtJob(job) = step {
+                    s.said_before_job = s.voice.said.len();
+                    // The one nearest the squad, so they don't have to
+                    // cross the whole map.
+                    let squad_at = s.members.iter().fold(UVec3::ZERO, |a, m| a + m.1)
+                        * (1.0 / s.members.len().max(1) as f32);
+                    let k = (0..s.markers.len())
+                        .filter(|&k| s.markers[k].4 == job && s.markers[k].3 == MarkerState::Open)
+                        .min_by(|&a, &b| {
+                            (s.markers[a].1 - squad_at)
+                                .length()
+                                .total_cmp(&(s.markers[b].1 - squad_at).length())
+                        });
+                    s.job_found = k.is_some();
+                    if k.is_none() {
+                        log.line(format!("sim: no {job} marker on this map, skipped"));
+                        // Skip the wait that follows.
+                        if let Some(Step::Hold(..)) = s.steps.get(s.next) {
+                            s.next += 1;
+                        }
+                        continue;
+                    }
+                    k
+                } else {
+                    (0..s.markers.len()).min_by(|&a, &b| {
+                        (s.markers[a].1 - here)
+                            .length()
+                            .total_cmp(&(s.markers[b].1 - here).length())
+                    })
+                };
+                let Some(k) = picked else {
                     log.line("sim: no marker to aim at");
                     s.failed += 1;
                     continue;
                 };
-                let (name, stand, aim, _) = s.markers[k].clone();
+                let (name, stand, aim, _, job) = s.markers[k].clone();
+                log.line(format!("sim: ordering marker {name} ({job})"));
                 s.marker_target = Some(k);
                 // Stand 500 uu from the marker's anchor, on the side of
                 // its stand spot, and face it.
@@ -775,6 +888,52 @@ fn drive_player(
                     s.hurt_at = Some((i, m.1));
                 }
             }
+            Step::CheckJob(job) => {
+                if !s.job_found {
+                    continue;
+                }
+                let Some(k) = s.marker_target else { continue };
+                let done = s.markers[k].3 == MarkerState::Done;
+                let posted = s.members.iter().any(|m| m.2 == MemberState::Posted);
+                let said = &s.voice.said[s.said_before_job.min(s.voice.said.len())..];
+                let player = said
+                    .iter()
+                    .filter(|l| l.0 == "the player")
+                    .map(|l| l.1.clone())
+                    .collect::<Vec<_>>();
+                let mates = said
+                    .iter()
+                    .filter(|l| l.0 != "the player")
+                    .map(|l| format!("{} {}", l.0, l.1))
+                    .collect::<Vec<_>>();
+                for (what, ok, detail) in [
+                    (
+                        "done or posted",
+                        done || posted,
+                        format!("marker {:?}, posted {posted}", s.markers[k].3),
+                    ),
+                    (
+                        "the player asked once",
+                        player.len() == 1,
+                        format!("{player:?}"),
+                    ),
+                    (
+                        "a squad mate answered",
+                        !mates.is_empty(),
+                        format!("{mates:?}"),
+                    ),
+                ] {
+                    if ok {
+                        s.passed += 1;
+                    } else {
+                        s.failed += 1;
+                    }
+                    log.line(format!(
+                        "CHECK {job}: {what}: {detail} -> {}",
+                        if ok { "PASS" } else { "FAIL" }
+                    ));
+                }
+            }
             Step::Check(name, f, lo, hi) => {
                 let got = f(s);
                 let ok = got >= lo && got <= hi;
@@ -878,6 +1037,9 @@ fn main() -> AppExit {
         rc_combat::CombatPlugin,
         SquadPlugin,
     ))
+    // Sounds are read (for the squad's voices) but not played.
+    .add_plugins(bevy::asset::AssetPlugin::default())
+    .init_asset::<AudioSource>()
     .insert_resource(GamePaths::new(game.clone(), vec![PathBuf::from("data")]))
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
         DT,
@@ -889,7 +1051,11 @@ fn main() -> AppExit {
         pawn: Pawn::new(params, feet),
         yaw,
         pitch: 0.0,
-        steps: steps(),
+        steps: if std::env::args().any(|a| a == "--jobs") {
+            job_steps()
+        } else {
+            steps()
+        },
         next: 0,
         hold_left: 0.0,
         input: MoveInput::default(),
@@ -902,9 +1068,12 @@ fn main() -> AppExit {
         secure_spot: None,
         markers: vec![],
         marker_target: None,
+        said_before_job: 0,
+        job_found: false,
         hurt_at: None,
         readout: vec![],
         fight: SquadFightStats::default(),
+        voice: SquadVoiceStats::default(),
         droids: vec![],
         droids_alive: 0,
         crouched_seen: 0,
