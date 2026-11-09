@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: The squad keeps their health and order on the next map (rc_squad_plugin, rc_save)
+
+- **Changed:** New `crates/rc_squad_plugin/src/carry.rs`: a `[squad_carry]` save section with each squad mate's health and the squad's order, carried to the next map and put back once the squad appears there. `data/levels/travel.toml` (and `rc_save`'s default) now carries `["combat", "squad_carry"]`. `rc_game_core::save::CarryingOver` exists while `rc_save` writes the carried sections, so the squad's section stays out of ordinary save files. New test `crates/rc_squad_plugin/tests/carry_over.rs`.
+- **Why:** Squad carry-over was an open gap: the squad arrived on every new map at full health. The original keeps it. Read from the game's own CTCharacters.u (`SaveSquadTravelInfo`, `TravelPostAccept`, not copied): each mate's health is kept; a mate who is down gets a quarter of full health; the last order is kept unless it was "secure position".
+- **Tested how:** `cargo test -p rc_squad_plugin -p rc_save` in the cloud. The new test runs the real squad, combat and save plugins: Fixer hurt to 123, Scorch down, order "search and destroy", then a level exit.
+- **Result:** All pass. On the next map Sev 400/400, Fixer 123/400, Scorch 100/400 (up), shields full, still "search and destroy"; the new map's start checkpoint has Fixer's 123; a quicksave there has no `[squad_carry]`. A second exit with "secure position" arrives in "form up".
+- **Still broken / not tested:** Not tested on Windows, by playing, or with `rc_game --script` (no game files staged here). The original's health-level look (`SetHealthLevel`) isn't shown. A mate carried but not on the next map is dropped; the original keeps them for a later map.
+- **Next:** The user plays from geo_01a into geo_01b with a hurt squad.
+
 ## 2026-11-01: Squad mates use their specialities on their own (rc_squad, rc_squad_plugin)
 
 - **Changed:** `rc_squad`: each `[member.*]` has a `speciality` (a `[job.*]` key) and each job an `auto` rule (`far`, `armoured`, `group`, `no`) with `auto_range`, `auto_interval`, `auto_min_enemies`, `auto_clearance`; `[fight]` gained `use_specialities`, `armoured_below`, `switch_time`. `fight.rs`: on every think Sev and Scorch pick their gun for the target (Sev's sniper sees 8000 uu; Scorch prefers armoured targets and never fires anti-armour with a friend near the target); Fixer throws a grenade on his own at bunched enemies (`throw_on_own`). `Threat` gained `blaster_share`, which the plugin works out from each enemy's damage table. New `Speciality` event; `Throw` gained `own`. The `fight:` log line counts speciality shots and grenades.
