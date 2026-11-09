@@ -68,7 +68,11 @@ copy of the game.
   `data/movement/player_commando.toml`, which mods can edit. `rc_walk
   --script` drives itself through 21 checks and passed all of them.
   `rc_walk --map geo_01a` puts you in the first Geonosis level instead, with
-  collision against its walls, floors and props.
+  collision against its walls, floors and props. Ramps, steps and slopes
+  work the same at 240 frames a second as at 60 (they used to stop you on
+  fast PCs; checked by numbers in the cloud, not yet by playing).
+  `rc_walkcheck MAP` runs a player along every walking link of a level's AI
+  path network and lists where it gets stuck.
 
 - **Delta Squad (tested in the cloud sandbox by numbers, not yet on Windows
   or with eyes).** Sev, Fixer and Scorch follow you and obey the original's
@@ -139,7 +143,11 @@ copy of the game.
   (read at run time from the install). When each line is said is our own
   rule, in `data/squad/voice.toml`. Squad mates are heard at full volume
   like a helmet radio (`positional = "yes"` places them instead). Marked
-  jobs' lines (breach, bacta...) are not tried in a game yet.
+  jobs' lines (you ask for a breach, slice, demolition, bacta, sniper,
+  grenade or anti-armour job; the squad mate confirms, then says when
+  they're in place, working or done) were silent until 2026-11-09 and are
+  now tested in the cloud sandbox only (`rc_squad_sim yyy_05d --jobs`),
+  not yet in a game.
 
 - **The squad uses their specialities (tested in the cloud sandbox by
   numbers, not yet on Windows or with eyes).** Without being told, Sev

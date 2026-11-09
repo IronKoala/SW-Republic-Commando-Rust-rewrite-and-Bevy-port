@@ -27,6 +27,9 @@ pub use world::{Brush, BrushWorld, Hit, Plane, World};
 const SKIN: f32 = 0.1;
 /// Longest physics step, s. Longer frames are cut into steps this long.
 const MAX_STEP: f32 = 0.05;
+/// Shortest forward move when stepping up onto something, uu (about one
+/// frame's run at 60 frames a second). See `try_step_up`.
+const MIN_STEP_FORWARD: f32 = 8.0;
 /// How many times one move may hit something and slide on.
 const MAX_SLIDES: usize = 4;
 
@@ -259,21 +262,25 @@ impl Pawn {
             if delta.length() < 1e-4 {
                 return;
             }
-            let Some(hit) = self.sweep_and_move(world, delta) else {
+            let Some((hit, moved)) = self.sweep_and_move(world, delta) else {
                 return;
             };
-            let remaining = delta * (1.0 - hit.time);
+            // What's left of the move, counted from where the box really
+            // stopped (a hair short of the hit), so the gap kept from the
+            // surface isn't lost from the move. Losing it every frame slowed
+            // the player to a stop on ramps at high frame rates, where each
+            // frame's move is only a couple of units long.
+            let remaining = delta * (1.0 - moved);
             if hit.normal.z >= self.params.min_floor_z {
                 // Walking up a slope that counts as floor: follow it, keeping
-                // the same speed across the ground, so slopes don't slow
-                // the player down.
-                let along = remaining.slide_along(hit.normal);
-                let flat_len = along.length_2d();
-                delta = if flat_len > 1e-6 {
-                    along * (remaining.length_2d() / flat_len)
-                } else {
-                    along
-                };
+                // the same direction and speed across the ground and only
+                // rising with the slope, so slopes don't slow or turn the
+                // player. (Sliding along the slope's surface instead turned
+                // every move a little sideways, downhill; that added up to
+                // a drift and a crawl at high frame rates.)
+                let flat = remaining.flat();
+                let rise = -(hit.normal.x * flat.x + hit.normal.y * flat.y) / hit.normal.z;
+                delta = Vec3::new(flat.x, flat.y, rise);
                 continue;
             }
             if hit.normal.z.abs() < self.params.min_floor_z && self.try_step_up(remaining, world, events) {
@@ -299,7 +306,19 @@ impl Pawn {
             Some(h) => (step * h.time - SKIN).max(0.0),
         };
         let p1 = start + Vec3::new(0.0, 0.0, up);
-        let fwd = delta.flat();
+        // Go forward at least MIN_STEP_FORWARD, even when this frame's move
+        // is shorter. At high frame rates a frame's move is a unit or two,
+        // too short to get past the sloped front edge of a low lip: coming
+        // back down landed on that edge, which is too steep to stand on, so
+        // the step failed every frame and the player stopped at the lip.
+        let mut fwd = delta.flat();
+        let len = fwd.length();
+        if len < 1e-4 {
+            return false;
+        }
+        if len < MIN_STEP_FORWARD {
+            fwd = fwd * (MIN_STEP_FORWARD / len);
+        }
         let p2 = match world.sweep(e, p1, p1 + fwd) {
             None => p1 + fwd,
             Some(h) => {
@@ -340,10 +359,20 @@ impl Pawn {
         let e = self.extent();
         let reach = self.params.max_step_height + 2.0 * SKIN;
         let down = self.location - Vec3::new(0.0, 0.0, reach);
-        match world.sweep(e, self.location, down) {
+        // Look from a little above, so a box that has crept closer than
+        // SKIN to the floor (rounding while sliding along a slope adds up)
+        // is lifted back to SKIN above it. Left touching, every later move
+        // along the floor would "hit" it at once and get nowhere, which
+        // stopped the player dead on some slopes at high frame rates.
+        let lifted = self.location + Vec3::new(0.0, 0.0, SKIN);
+        let (from, hit) = match world.sweep(e, lifted, down) {
+            Some(h) if h.start_solid => (self.location, world.sweep(e, self.location, down)),
+            h => (lifted, h),
+        };
+        match hit {
             Some(h) if !h.start_solid && h.normal.z >= self.params.min_floor_z => {
-                let drop = (reach * h.time - SKIN).max(0.0);
-                self.location.z -= drop;
+                let floor = from.z - (from.z - down.z) * h.time;
+                self.location.z = floor + SKIN;
                 self.floor_normal = h.normal;
             }
             _ => {
@@ -371,7 +400,7 @@ impl Pawn {
             if delta.length() < 1e-4 {
                 return;
             }
-            let Some(hit) = self.sweep_and_move(world, delta) else {
+            let Some((hit, moved)) = self.sweep_and_move(world, delta) else {
                 return;
             };
             if hit.normal.z >= p.min_floor_z && self.velocity.z <= 0.0 {
@@ -397,7 +426,7 @@ impl Pawn {
                 });
                 return;
             }
-            let remaining = delta * (1.0 - hit.time);
+            let remaining = delta * (1.0 - moved);
             delta = remaining.slide_along(hit.normal);
             if self.velocity.dot(hit.normal) < 0.0 {
                 self.velocity = self.velocity.slide_along(hit.normal);
@@ -406,8 +435,9 @@ impl Pawn {
     }
 
     /// Sweep the box by `delta` and move it up to just short of whatever it
-    /// hits. Returns the hit, if any.
-    fn sweep_and_move(&mut self, world: &dyn World, delta: Vec3) -> Option<Hit> {
+    /// hits. Returns the hit, if any, and the fraction of `delta` really
+    /// moved (0 to 1).
+    fn sweep_and_move(&mut self, world: &dyn World, delta: Vec3) -> Option<(Hit, f32)> {
         let e = self.extent();
         match world.sweep(e, self.location, self.location + delta) {
             None => {
@@ -415,15 +445,22 @@ impl Pawn {
                 None
             }
             Some(h) => {
+                let mut t = 0.0;
                 if !h.start_solid {
-                    let len = delta.length();
-                    let t = (h.time - SKIN / len).max(0.0);
-                    self.location += delta * t;
+                    // Stop SKIN short of the surface, measured straight out
+                    // from it (not along the move): a move that only grazes
+                    // a surface would otherwise end up touching it, and the
+                    // next move along it would hit it again straight away.
+                    let approach = -delta.dot(h.normal);
+                    if approach > 1e-6 {
+                        t = (h.time - SKIN / approach).max(0.0);
+                        self.location += delta * t;
+                    }
                 } else {
                     // Stuck inside something: nudge out along its surface.
                     self.location += h.normal * SKIN;
                 }
-                Some(h)
+                Some((h, t))
             }
         }
     }
