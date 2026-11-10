@@ -322,7 +322,9 @@ copy of the game.
   Windows).** The game reads each map's own scripting (79 of 79 maps, 2,842
   scripts, 19,041 actions, nothing unreadable) and runs it: scripts wait
   for events and timers, touch triggers, counters and conditions send
-  events on, doors open by event, checkpoints ask for a save, and
+  events on, line-of-sight triggers go off when you look at what they
+  watch (45 in 25 maps, such as seeing Grievous on yyy_01e; since
+  2026-11-10, not tested by playing), doors open by event, checkpoints ask for a save, and
   barricades come down. On geo_01a the landing zone now plays like the
   original: after the intro you are hit by a shell, the advisor tells you
   to heal, the bacta dispenser switches on, and holding Use at it heals you
@@ -538,6 +540,14 @@ copy of the game.
   model, skin, animations, voice lines, 1000 health and damage table. They
   burn you with the Elite Beam in one-second bursts. Settings:
   `data/enemies/geonosian_elite.toml` and `data/weapons/elite_beam_enemy.toml`.
+- **Every Trandoshan (tested in the cloud sandbox on ras_02c and yyy_04b,
+  not yet in the real game on Windows).** Slavers with shotguns and blades,
+  berserkers who charge with blades, slaver grenadiers, mercenary
+  grenadiers, the huge heavies with their heavy repeater, scavenger droids,
+  and the Kashyyyk mercenaries with their energy shields now appear
+  wherever the original puts them (685 more spawners on the Prosecutor and
+  Kashyyyk levels), with the game's own models, skins, animations, voice
+  lines, health and damage tables. Settings: `data/enemies/trandoshan_*.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -671,7 +681,10 @@ copy of the game.
   how fast the beam does its damage is our own guess, and the player can't
   pick up their beam yet. Droidekas, dwarf spider droids, Phidna, drones,
   seeker droids and placed clone troopers still don't appear
-  (`rc_enemy_spawners` lists them). Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
+  (`rc_enemy_spawners` lists them). Trandoshan scavenger droids move along the
+  ground instead of flying, and don't blow up; slavers don't go berserk;
+  the player can't pick up the shotgun or heavy repeater; the Prosecutor's
+  concussion-rifle mercenaries carry the ordinary repeater.
 - Enemy voices: battle droids, super battle droids, Trandoshans and
   Geonosian warriors say the game's own lines when they spot you, get hurt
   and die, with the hurt and death lines matched to explosions, EMP and

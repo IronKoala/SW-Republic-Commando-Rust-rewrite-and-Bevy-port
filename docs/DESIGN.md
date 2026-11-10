@@ -1495,6 +1495,49 @@ without waiting stops after 64 actions in a frame and carries on the next
 The level starts by sending the first `PlayerStart`'s `Event` (`levelstart`
 in most campaign maps; `Startup`, `SetupLevel` and others in some).
 
+### Line-of-sight triggers (`LineOfSightTrigger`)
+
+Some scripted moments wait for the player to *see* something: Grievous on
+the tower (yyy_01e `GreivousVerified`), the Trandoshan dragging a clone
+away (ras_03c), the Wookiee about to be killed (yyy_01e `Wookie_Die`), a
+hack terminal ("we need to slice that"). The map places a
+`LineOfSightTrigger` with an `Event`, and usually a `SeenActorTag` naming
+what to look at; with none (or no actor with that tag) it watches its own
+spot. 45 of them in 25 campaign maps
+(`cargo run -p rc_scripts --example sight_triggers` lists them all, what
+each watches, what waits for its event, and whether the line to it is clear
+through the real walls).
+
+The rule, from Unreal Engine 2's public description of the class and the
+values the game's engine.u stores (`rc_probe --class LineOfSightTrigger`:
+`MaxViewDist` 3000, `MaxViewAngle` 15, `bEnabled` true): while switched on
+and not used yet, if the watched thing is within `MaxViewDist` of the
+player's eye, within `MaxViewAngle` degrees of where the player looks, and
+no level geometry is in between, the trigger sends its event, once. An
+event with the trigger's tag switches it on (`bEnabled=False` ones wait for
+that: ras_01a, ras_01b, yyy_05f).
+
+- `rc_scripts::Director::sight_candidates_live` does the distance and
+  angle test; `seen` sends the event; `look` does both with a line check
+  passed in. Switched on and used are kept in saves (`[scripts] sight`).
+- `rc_scripts::sight::clear_line` checks the line through the level's
+  collision (walls, solid props, closed doors), stopping 32 uu short of
+  the watched thing so its own solid shape doesn't hide it.
+- `rc_scripts_plugin::sight::look` runs each frame before the scripts: eye
+  and view from the `PlayerCamera` (so a VR camera works the same), the
+  line through `LevelCollision`. Many triggers watch a character (a
+  Trandoshan, a Wookiee, a Delta mate): where a character with a matching
+  `ScriptTags` tag is now is used (its middle: feet plus `Hittable`'s
+  `center_up`, or 84 uu), else where the map placed it. A dead player sees
+  nothing. Log line: `scripts: ... the player sees what LineOfSightTrigger0
+  watches for`.
+- Data: `[sight]` in `data/scripts/scripts.toml` holds the class defaults
+  for a trigger that gives none.
+
+Not the same as the original: its engine also checks the watched thing was
+drawn recently; ours uses the line check instead. A watched thing hidden
+inside a big solid prop may be missed (the 32 uu allowance is a guess).
+
 ### In the game (`rc_scripts_plugin`)
 
 While loading, the plugin reads the map's scripts and builds the director
@@ -2578,6 +2621,33 @@ close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
 with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
 beam weapon is an `instant` shot fired as a burst of quick hits.
 
+When a class could match two files, the first file in name order wins, so
+give each file exact class names where they overlap (the Trandoshan
+files list `TrandoshanMercenary`, `TrandoshanMercenaryGrenadier` and so on
+one by one; a test checks each class has exactly one file).
+
+**Shields.** `combat.shields` gives an enemy an energy shield on top of its
+health (the Kashyyyk Trandoshan mercenaries: 100, regaining 10 a second).
+Damage goes to the shield first, as for the player (`rc_combat::Shield`).
+
+**Shotguns.** A weapon's `shot.pellets` fires that many instant hits at
+once, each up to `shot.spread` rotation units off the aim (the slavers'
+shotgun: 8 pellets, 1700, the game's `ProjPerFire` and `Spread`). How the
+original scatters them is our reading.
+
+**The Trandoshans.** Classes that the game builds in
+`Properties/properties.u` straight from a class in `ctcharacters.u` (like
+`TrandoshanMercYYYUp` from `TrandoshanMercenary`) keep that class's own
+values, not its "...Defaults" class's, so the Kashyyyk mercenaries have
+100 health and a shield while the Prosecutor's have 220 and none. The
+evidence: those classes restate every value the Defaults class changes
+that they want (the grenadier repeats Health 220, Shields 0, its damage
+table and sight). The files: `trandoshan` (Prosecutor mercenaries),
+`trandoshan_kashyyyk`, `trandoshan_grenadier`, `trandoshan_slaver`,
+`trandoshan_slaver_berserker`, `trandoshan_slaver_grenadier`,
+`trandoshan_heavy` and `trandoshan_scavenger`, with weapons
+`trandoshan_shotgun`, `trandoshan_rifle` and `scav_beam`.
+
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
 `thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
@@ -2753,9 +2823,8 @@ display. The player's kinds and their order are `grenades` in
   block it.
 - Pickups (`pickup.rs`): see "Weapons lying in the levels" below. Enemies
   drop the weapon file named by `combat.drops` in their settings file.
-- `shot.pellets` and `shot.spread` (instant shots): several traces per
-  pull, each turned up to half of `spread` (rotation units) off the aim.
-  The ACP array gun sends 8.
+- The ACP array gun uses `shot.pellets` (8) like the Trandoshan shotgun:
+  see "Shotguns" above.
 
 ### Ammo and grenade boxes (`rc_level::pickups`, `rc_combat/src/ammo_box.rs`)
 

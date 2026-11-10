@@ -27,6 +27,7 @@
 pub mod markers;
 pub mod save;
 pub mod settings;
+pub mod sight;
 
 use rc_level::breakables::Breakable;
 use rc_level::movers::TriggerInfo;
@@ -169,6 +170,31 @@ struct Trigger {
     cooldown: f32,
 }
 
+/// A `LineOfSightTrigger`: sends its event the first time the player
+/// looks at it (or at the actor named by its `SeenActorTag`) from near
+/// enough, roughly straight on, with nothing in the way. An event with its
+/// tag switches it on (UE2: "triggering it enables it"). See
+/// [`Director::look`].
+struct SightTrigger {
+    name: String,
+    /// Lower-case tag.
+    tag: String,
+    event: Option<String>,
+    /// Where the player must look: the seen actor, or the trigger itself.
+    target: [f32; 3],
+    /// What `target` is, for the log.
+    target_name: String,
+    /// The `SeenActorTag`, lower case, when it names an actor in the map.
+    /// A character with that tag may have moved: the game passes where it
+    /// is now to [`Director::sight_candidates_live`].
+    seen_tag: Option<String>,
+    max_dist: f32,
+    /// Cosine of the widest angle (from straight ahead) that counts.
+    min_cos: f32,
+    enabled: bool,
+    triggered: bool,
+}
+
 /// A `Teleporter`. With a `URL` it is a level exit: walking into it
 /// leaves for that map. Without one it is a place to arrive at (the game
 /// reads those itself when a map loads).
@@ -259,6 +285,8 @@ pub struct Stats {
     pub sequences: usize,
     pub actions: usize,
     pub triggers: usize,
+    /// `LineOfSightTrigger`s: set off by the player looking at something.
+    pub sight_triggers: usize,
     pub counters: usize,
     pub conditions: usize,
     pub checkpoints: usize,
@@ -289,6 +317,7 @@ pub struct Director {
     pub settings: Settings,
     scripts: Vec<Script>,
     triggers: Vec<Trigger>,
+    sight: Vec<SightTrigger>,
     teleporters: Vec<Teleporter>,
     /// Set once the level is being left; nothing more is sent after it.
     leaving: bool,
@@ -361,6 +390,7 @@ impl Director {
             settings,
             scripts: Vec::new(),
             triggers: Vec::new(),
+            sight: Vec::new(),
             teleporters: Vec::new(),
             leaving: false,
             counters: HashMap::new(),
@@ -483,6 +513,35 @@ impl Director {
                     enabled: o.flag("bEnabled", true),
                     collide: o.flag("bCollideActors", true),
                     used: false,
+                });
+            } else if class.eq_ignore_ascii_case("LineOfSightTrigger") {
+                d.stats.sight_triggers += 1;
+                // The actor to look at, by tag; the trigger itself if it
+                // names none (or none with that tag is in the map).
+                let seen = o
+                    .text("SeenActorTag")
+                    .filter(|t| !t.eq_ignore_ascii_case("None") && !t.is_empty())
+                    .and_then(|t| {
+                        map.actors.iter().find(|b| {
+                            b.obj.export != o.export && b.obj.tag().eq_ignore_ascii_case(t)
+                        })
+                    });
+                let s = &d.settings;
+                let angle = o
+                    .int("MaxViewAngle")
+                    .map(|a| a as f32)
+                    .unwrap_or(s.sight_max_view_angle);
+                d.sight.push(SightTrigger {
+                    name: o.name.clone(),
+                    tag: low(o.tag()),
+                    event: o.event().map(str::to_string),
+                    target: seen.map_or(a.location, |b| b.location),
+                    target_name: seen.map_or(o.name.clone(), |b| b.obj.name.clone()),
+                    seen_tag: seen.map(|b| low(b.obj.tag())),
+                    max_dist: o.float("MaxViewDist").unwrap_or(s.sight_max_view_dist),
+                    min_cos: angle.to_radians().cos(),
+                    enabled: o.flag("bEnabled", true),
+                    triggered: false,
                 });
             } else if class.eq_ignore_ascii_case("PlayerStart") {
                 // The player starts at the first one (as the level part
@@ -853,6 +912,92 @@ impl Director {
         (x >> 40) as f32 / (1u64 << 24) as f32
     }
 
+    /// Line-of-sight triggers the player could be looking at now: switched
+    /// on, not used yet, near enough and inside their view angle from
+    /// `eye` looking along `forward` (Unreal units, `forward` of length
+    /// 1). Returns each one's index and the point to check is in view.
+    /// The game checks nothing is in the way (a line through the level's
+    /// walls) and calls [`Self::seen`] for those that are clear.
+    pub fn sight_candidates(&self, eye: [f32; 3], forward: [f32; 3]) -> Vec<(usize, [f32; 3])> {
+        self.sight_candidates_live(eye, forward, &|_| None)
+    }
+
+    /// [`Self::sight_candidates`], with `live(tag)` giving where a
+    /// character the game moves is now (the middle of its body, Unreal
+    /// units), by its lower-case tag. `None` uses where the map placed it.
+    pub fn sight_candidates_live(
+        &self,
+        eye: [f32; 3],
+        forward: [f32; 3],
+        live: &dyn Fn(&str) -> Option<[f32; 3]>,
+    ) -> Vec<(usize, [f32; 3])> {
+        self.sight
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.enabled && !t.triggered)
+            .filter_map(|(i, t)| {
+                let target = t.seen_tag.as_deref().and_then(live).unwrap_or(t.target);
+                let d = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
+                let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                if len > t.max_dist {
+                    return None;
+                }
+                if len < 1.0 {
+                    return Some((i, target));
+                }
+                let dot = (d[0] * forward[0] + d[1] * forward[1] + d[2] * forward[2]) / len;
+                (dot >= t.min_cos).then_some((i, target))
+            })
+            .collect()
+    }
+
+    /// The player saw line-of-sight trigger `index` (from
+    /// [`Self::sight_candidates`], with a clear line to it): it sends its
+    /// event, once.
+    pub fn seen(&mut self, index: usize) {
+        let Some(t) = self.sight.get_mut(index) else {
+            return;
+        };
+        if !t.enabled || t.triggered {
+            return;
+        }
+        t.triggered = true;
+        let (name, target, event) = (t.name.clone(), t.target_name.clone(), t.event.clone());
+        self.out.push(Effect::Note(format!(
+            "{name}: the player looked at {target}"
+        )));
+        if let Some(e) = event {
+            self.fire(&e, &name);
+        }
+    }
+
+    /// Check every line-of-sight trigger against where the player looks,
+    /// with `clear(from, to)` saying whether nothing blocks the line. Same
+    /// as [`Self::sight_candidates`] then [`Self::seen`].
+    pub fn look(
+        &mut self,
+        eye: [f32; 3],
+        forward: [f32; 3],
+        clear: &mut dyn FnMut([f32; 3], [f32; 3]) -> bool,
+    ) -> usize {
+        let mut n = 0;
+        for (i, at) in self.sight_candidates(eye, forward) {
+            if clear(eye, at) {
+                self.seen(i);
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Line-of-sight triggers: (name, switched on, used).
+    pub fn sight_triggers(&self) -> Vec<(String, bool, bool)> {
+        self.sight
+            .iter()
+            .map(|t| (t.name.clone(), t.enabled, t.triggered))
+            .collect()
+    }
+
     /// Advance by `dt` seconds. `player` is where the player is, if there is
     /// one (touch triggers need it). Returns what the game should do.
     pub fn step(&mut self, dt: f32, player: Option<PlayerBody>) -> Vec<Effect> {
@@ -1003,6 +1148,14 @@ impl Director {
                             "switched off"
                         }
                     ));
+                }
+            }
+            // Line-of-sight triggers: an event with their tag switches
+            // them on (UE2's LineOfSightTrigger.Trigger).
+            for t in &mut self.sight {
+                if t.tag == key && !t.enabled {
+                    t.enabled = true;
+                    heard.push(format!("{} switched on", t.name));
                 }
             }
             // Teleporters (UE2): an event with their tag switches them on

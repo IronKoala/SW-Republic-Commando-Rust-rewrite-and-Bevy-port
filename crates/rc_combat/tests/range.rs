@@ -167,6 +167,9 @@ fn every_weapon_file_reads() {
             "heavy_repeater_mp",
             "rocket_launcher",
             "sbd_blaster",
+            "scav_beam",
+            "trandoshan_rifle",
+            "trandoshan_shotgun",
             "trandoshan_smg"
         ]
     );

@@ -23,7 +23,7 @@ kind = "instant"          # game: ShotgunAmmo bInstantHit
 range = 3500              # game: ShotgunAmmoDefaults Range
 damage = 28               # game: ShotgunAmmoDefaults Damage (each pellet)
 pellets = 8               # game: ShotgunAmmo ProjPerFire
-spread = 1700             # game: ShotgunAmmoDefaults Spread (rotation units; our reading: each pellet up to half this off the aim)
+spread = 1700             # game: ShotgunAmmoDefaults Spread (rotation units; how the game scatters them is our reading)
 damage_kind = "blaster"
 damage_type = "CTDamageBallisticShotgun" # game: ShotgunAmmoDefaults MyDamageType
 

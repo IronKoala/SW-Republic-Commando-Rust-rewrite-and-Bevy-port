@@ -70,17 +70,30 @@ pub fn add_aim_error(start: Vec3, target: Vec3, aim_error: f32, rng: &mut Rng) -
     t
 }
 
-/// One pellet's direction: `dir` turned by up to half of `spread`
-/// (rotation units, 65536 a full turn) either way, sideways and up or
-/// down. Our reading of the game's `Spread`.
-pub fn stray(dir: Vec3, spread: f32, rng: &mut Rng) -> Vec3 {
-    if spread <= 0.0 {
-        return dir;
+/// The directions of the `pellets` shots one trigger pull fires along
+/// `dir` (length 1). One pellet goes straight along it. More each go up to
+/// `spread` rotation units (65536 = one full turn) off it, spread evenly
+/// over a round cone. **Our reading** of the game's `Spread`: how the
+/// original scatters its pellets is in its compiled code.
+pub fn pellet_directions(dir: Vec3, pellets: u32, spread: f32, rng: &mut Rng) -> Vec<Vec3> {
+    if pellets <= 1 || spread <= 0.0 {
+        return vec![dir; pellets.max(1) as usize];
     }
-    let to_rad = std::f32::consts::TAU / 65536.0;
-    let yaw = dir.y.atan2(dir.x) + (rng.next_f32() - 0.5) * spread * to_rad;
-    let pitch = dir.z.clamp(-1.0, 1.0).asin() + (rng.next_f32() - 0.5) * spread * to_rad;
-    view_axes(yaw, pitch).0
+    let max_angle = spread / 65536.0 * std::f32::consts::TAU;
+    // Two directions square to `dir` and to each other.
+    let helper = if dir.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
+    let side = dir.cross(helper).normalize_or_zero();
+    let up = side.cross(dir).normalize_or_zero();
+    (0..pellets)
+        .map(|_| {
+            // sqrt spreads them evenly over the cone's face rather than
+            // bunching them in the middle.
+            let off = max_angle * rng.next_f32().sqrt();
+            let around = std::f32::consts::TAU * rng.next_f32();
+            let (s, c) = off.sin_cos();
+            (dir * c + (side * around.cos() + up * around.sin()) * s).normalize_or_zero()
+        })
+        .collect()
 }
 
 /// A laser bolt in flight. The game starts laser bolts at rest and speeds
@@ -177,6 +190,24 @@ pub fn line_hits_cylinder(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pellets_stay_inside_the_spread() {
+        let mut rng = Rng::new(3);
+        let dir = Vec3::new(1.0, 2.0, 0.5).normalize();
+        assert_eq!(pellet_directions(dir, 1, 1700.0, &mut rng), vec![dir]);
+        let dirs = pellet_directions(dir, 8, 1700.0, &mut rng);
+        assert_eq!(dirs.len(), 8);
+        let max = 1700.0 / 65536.0 * std::f32::consts::TAU;
+        let mut widest: f32 = 0.0;
+        for d in &dirs {
+            assert!((d.length() - 1.0).abs() < 1e-4);
+            let a = d.dot(dir).clamp(-1.0, 1.0).acos();
+            assert!(a <= max + 1e-3, "pellet {a} rad off, spread {max}");
+            widest = widest.max(a);
+        }
+        assert!(widest > 0.2 * max, "the pellets should spread out");
+    }
 
     #[test]
     fn random_numbers_are_even_and_repeatable() {

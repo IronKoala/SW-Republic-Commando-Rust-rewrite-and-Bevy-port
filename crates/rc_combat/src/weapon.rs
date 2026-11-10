@@ -64,12 +64,11 @@ pub struct WeaponParams {
     /// Seconds a reload takes (the first-person `Reload` animation).
     pub reload_time: f32,
     pub shot: ShotKind,
-    /// Instant shots: how many go out per pull of the trigger, each doing
-    /// `damage` (`ProjPerFire`, 8 for the ACP array gun). 1 for most.
+    /// Shots fired at once by one pull of the trigger (`ProjPerFire`): 8
+    /// for the Trandoshan shotgun, 1 for everything else.
     pub pellets: u32,
-    /// Instant shots with pellets: how far each may stray from the aim, in
-    /// rotation units (`Spread`). Our reading: up to half this either way,
-    /// sideways and up or down.
+    /// With more than one pellet: each flies up to this far off the aim,
+    /// in rotation units (65536 = one full turn) (`Spread`).
     pub spread: f32,
     /// For `Lobbed` shots: the grenade file it fires.
     pub grenade: Option<String>,
@@ -195,7 +194,7 @@ impl WeaponParams {
             reload_time: t.number("ammo.reload_time")?.unwrap_or(0.0),
             shot,
             pellets: t.number("shot.pellets")?.unwrap_or(1.0).max(1.0) as u32,
-            spread: t.number("shot.spread")?.unwrap_or(0.0).max(0.0),
+            spread: t.number("shot.spread")?.unwrap_or(0.0),
             grenade: t.text("shot.grenade")?,
             zoom_fovs: t.numbers("fire.zoom_fovs")?.unwrap_or_default(),
             zoom_damage: t.number("fire.zoom_damage")?.unwrap_or(1.0),
