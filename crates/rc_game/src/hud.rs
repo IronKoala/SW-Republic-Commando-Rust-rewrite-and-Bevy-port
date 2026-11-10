@@ -183,6 +183,7 @@ fn spawn_hud(
             },
             DespawnOnExit(GameState::InGame),
             GlobalZIndex(1),
+            crate::cutscene::HudRoot,
         ))
         .with_children(|root| {
             for (top, left) in [(true, true), (true, false), (false, true), (false, false)] {
@@ -448,9 +449,11 @@ fn update_squad(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_messages(
     mut commands: Commands,
     mut incoming: MessageReader<HudMessage>,
+    mut picked: MessageReader<rc_game_core::pickups::PickedUp>,
     time: Res<Time>,
     theme: Res<Theme>,
     list: Query<Entity, With<MessageList>>,
@@ -466,10 +469,23 @@ fn update_messages(
             commands.entity(e).despawn();
         }
     }
+    // What was just picked up. The original HUD shows it above the middle
+    // (original_hud.rs); this placeholder adds it to its message list.
+    let pickups: Vec<HudMessage> = picked
+        .read()
+        .filter(|p| !p.text.is_empty())
+        .map(|p| {
+            log.line(format!("hud: picked up \"{}\"", p.text));
+            HudMessage {
+                text: p.text.clone(),
+                seconds: 3.0,
+            }
+        })
+        .collect();
     let Ok(list) = list.single() else {
         return;
     };
-    for msg in incoming.read() {
+    for msg in incoming.read().chain(pickups.iter()) {
         // PROMPT TEXT off: the level scripts' hints (ACTION_ShowPrompt,
         // which the scripts note in their stats) aren't shown. Other
         // messages (saved, picked up) still are.
@@ -477,7 +493,10 @@ fn update_messages(
             .as_ref()
             .is_some_and(|s| s.stats.prompts.contains(&msg.text));
         if prompt && !settings.game.prompt_text {
-            log.line(format!("hud: prompt \"{}\" not shown (PROMPT TEXT off)", msg.text));
+            log.line(format!(
+                "hud: prompt \"{}\" not shown (PROMPT TEXT off)",
+                msg.text
+            ));
             continue;
         }
         log.line(format!(

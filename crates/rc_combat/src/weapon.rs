@@ -64,6 +64,12 @@ pub struct WeaponParams {
     /// Seconds a reload takes (the first-person `Reload` animation).
     pub reload_time: f32,
     pub shot: ShotKind,
+    /// Shots fired at once by one pull of the trigger (`ProjPerFire`): 8
+    /// for the Trandoshan shotgun, 1 for everything else.
+    pub pellets: u32,
+    /// With more than one pellet: each flies up to this far off the aim,
+    /// in rotation units (65536 = one full turn) (`Spread`).
+    pub spread: f32,
     /// For `Lobbed` shots: the grenade file it fires.
     pub grenade: Option<String>,
     /// The zoom steps, fields of view in degrees across a 4:3 screen like
@@ -83,6 +89,10 @@ pub struct WeaponParams {
     pub melee: Option<(f32, f32)>,
     /// Where shots start, from the eye: forward, right, up (`FPFireOffset`).
     pub fire_offset: [f32; 3],
+    /// Twin barrels: every shot also fires from the mirror of
+    /// `fire_offset` (left for right), at the same time (`fire.mirror`;
+    /// the Wookiee heavy turret's `muzzle_l` and `muzzle_r`).
+    pub mirror_fire: bool,
     /// The camera kick per shot, in rotation units: up, sideways
     /// (`WeaponKick`). Sideways is random between minus and plus this.
     pub kick: [f32; 2],
@@ -191,6 +201,8 @@ impl WeaponParams {
             recharge_rate: t.number("ammo.recharge_rate")?.unwrap_or(0.0),
             reload_time: t.number("ammo.reload_time")?.unwrap_or(0.0),
             shot,
+            pellets: t.number("shot.pellets")?.unwrap_or(1.0).max(1.0) as u32,
+            spread: t.number("shot.spread")?.unwrap_or(0.0),
             grenade: t.text("shot.grenade")?,
             zoom_fovs: t.numbers("fire.zoom_fovs")?.unwrap_or_default(),
             zoom_damage: t.number("fire.zoom_damage")?.unwrap_or(1.0),
@@ -210,6 +222,7 @@ impl WeaponParams {
             },
             damage_kind,
             fire_offset: t.vec3("fire.offset")?.unwrap_or([0.0; 3]),
+            mirror_fire: t.boolean("fire.mirror")?.unwrap_or(false),
             kick: [kick[0], kick[1]],
             recoil_spring: t.number("recoil.spring")?.unwrap_or(0.0),
             recoil_damping: t.number("recoil.damping")?.unwrap_or(0.0),

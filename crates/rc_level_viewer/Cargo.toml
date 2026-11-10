@@ -3,8 +3,12 @@ name = "rc_level_viewer"
 version = "0.1.0"
 description = "Loads one Republic Commando map and lets you fly around it"
 edition.workspace = true
+# `cargo run -p rc_level_viewer` starts the viewer (the crate also has
+# rc_level_check and rc_capture_compare).
+default-run = "rc_level_viewer"
 
 [dependencies]
+rc_hologram = { path = "../rc_hologram" }
 rc_image = { path = "../rc_image" }
 rc_level = { path = "../rc_level" }
 rc_package = { path = "../rc_package" }

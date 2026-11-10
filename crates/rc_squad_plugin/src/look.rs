@@ -213,6 +213,7 @@ impl LooksFile {
                 .iter()
                 .map(|s| Some(s.clone()).filter(|s| !s.is_empty()))
                 .collect(),
+            ..Default::default()
         })
     }
 }

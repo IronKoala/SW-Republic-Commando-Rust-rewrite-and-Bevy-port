@@ -24,11 +24,14 @@
 //! sound lasts, the random seed) are in `data/scripts/scripts.toml`
 //! ([`Settings`]).
 
+pub mod markers;
 pub mod save;
 pub mod settings;
+pub mod sight;
 
+use rc_level::breakables::Breakable;
 use rc_level::movers::TriggerInfo;
-use rc_level::scripts::{MapScripts, ScriptObject, Val};
+use rc_level::scripts::{MapScripts, ScriptObject, Val, Vals};
 pub use settings::Settings;
 use std::collections::{HashMap, VecDeque};
 
@@ -69,15 +72,57 @@ pub enum Effect {
         mesh: Option<String>,
         effect: Option<String>,
     },
+    /// A breakable prop went to its damaged step (`DamagedState`). If
+    /// `removed`, it has no damaged look and is gone (the game's rule: no
+    /// broken event then).
+    PropDamaged {
+        export: usize,
+        name: String,
+        tag: String,
+        removed: bool,
+    },
     /// A checkpoint was reached: the game saves.
     Checkpoint { name: String },
     /// Leave for another map: the player walked into a level exit (a
     /// `Teleporter` with a `URL`), or a script said so
     /// (`ACTION_ChangeLevel`'s `URL`, the debriefing's `NewLevel`). `url`
-    /// is as the map wrote it, like `GEO_01B.ctm#playerstart`.
-    ChangeLevel { url: String, by: String },
+    /// is as the map wrote it, like `GEO_01B.ctm#playerstart`. When the
+    /// end-of-campaign debriefing sent it, `debriefing` is what that
+    /// screen shows; the game shows it first and goes on when the player
+    /// chooses CONTINUE.
+    ChangeLevel {
+        url: String,
+        by: String,
+        debriefing: Option<Debriefing>,
+    },
     /// Something the log should show (a script waiting, a counter, ...).
     Note(String),
+}
+
+/// What an `ACTION_ShowDebriefingScreen` asks the debriefing screen to
+/// show, as the map wrote it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Debriefing {
+    /// The menu class to draw it with (`MenuClass`, such as
+    /// `XInterfaceCTMenus.CTDebriefingInfoGEO`).
+    pub menu_class: String,
+    pub title: String,
+    pub text: String,
+    /// The picture (`PicName`, such as `GUIContent.RAS_Debrief`).
+    pub picture: String,
+}
+
+impl Debriefing {
+    /// Read from the action.
+    pub fn of(a: &ScriptObject) -> Debriefing {
+        let s = |k: &str| a.text(k).unwrap_or("").trim().to_string();
+        Debriefing {
+            menu_class: s("MenuClass"),
+            title: s("Title"),
+            text: s("Text"),
+            picture: s("PicName"),
+        }
+    }
 }
 
 /// Whether an action plays a sound by name (`ACTION_PlaySound`,
@@ -125,6 +170,31 @@ struct Trigger {
     cooldown: f32,
 }
 
+/// A `LineOfSightTrigger`: sends its event the first time the player
+/// looks at it (or at the actor named by its `SeenActorTag`) from near
+/// enough, roughly straight on, with nothing in the way. An event with its
+/// tag switches it on (UE2: "triggering it enables it"). See
+/// [`Director::look`].
+struct SightTrigger {
+    name: String,
+    /// Lower-case tag.
+    tag: String,
+    event: Option<String>,
+    /// Where the player must look: the seen actor, or the trigger itself.
+    target: [f32; 3],
+    /// What `target` is, for the log.
+    target_name: String,
+    /// The `SeenActorTag`, lower case, when it names an actor in the map.
+    /// A character with that tag may have moved: the game passes where it
+    /// is now to [`Director::sight_candidates_live`].
+    seen_tag: Option<String>,
+    max_dist: f32,
+    /// Cosine of the widest angle (from straight ahead) that counts.
+    min_cos: f32,
+    enabled: bool,
+    triggered: bool,
+}
+
 /// A `Teleporter`. With a `URL` it is a level exit: walking into it
 /// leaves for that map. Without one it is a place to arrive at (the game
 /// reads those itself when a map loads).
@@ -168,6 +238,44 @@ struct Prop {
     event: Option<String>,
     mesh: Option<String>,
     effect: Option<String>,
+    /// What the game's damage rules need (`rc_level::breakables`). `None`
+    /// for props only scripts hurt or remove.
+    breaks: Option<Breaks>,
+}
+
+/// A prop weapons can break: the steps of `rc_level::breakables`.
+#[derive(Debug, Clone, PartialEq)]
+struct Breaks {
+    initial: f32,
+    damaged_ratio: f32,
+    /// In its damaged step.
+    damaged: bool,
+    damaged_event: Option<String>,
+    /// The damaged step has a look of its own (else the prop disappears
+    /// on entering it, without its broken event).
+    damaged_look: bool,
+    /// Seconds the damaged step lasts before the prop breaks (0: until
+    /// hurt again), plus up to `damaged_extra` at random.
+    damaged_span: f32,
+    damaged_extra: f32,
+    /// When (director time) the damaged step runs out.
+    break_at: Option<f32>,
+}
+
+/// What [`Director::hurt_prop`] did.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PropHurt {
+    /// No prop has that export index, or it can't be hurt (it started with
+    /// no health: only a script can remove it).
+    NotBreakable,
+    /// Already broken: damage does nothing more.
+    AlreadyBroken,
+    /// Hurt; this much health is left.
+    Hurt(f32),
+    /// It went to its damaged step.
+    Damaged,
+    /// It broke.
+    Broken,
 }
 
 /// Counts for the log and the self-tests.
@@ -177,10 +285,16 @@ pub struct Stats {
     pub sequences: usize,
     pub actions: usize,
     pub triggers: usize,
+    /// `LineOfSightTrigger`s: set off by the player looking at something.
+    pub sight_triggers: usize,
     pub counters: usize,
     pub conditions: usize,
     pub checkpoints: usize,
     pub props: usize,
+    /// Props weapons can break (`Director::add_breakables`).
+    pub breakables: usize,
+    /// `Dispatcher`s: actors that send a timed list of events.
+    pub dispatchers: usize,
     /// Teleporters with a `URL`: the level's exits.
     pub exits: usize,
     /// Events sent so far, and actions run so far.
@@ -203,6 +317,7 @@ pub struct Director {
     pub settings: Settings,
     scripts: Vec<Script>,
     triggers: Vec<Trigger>,
+    sight: Vec<SightTrigger>,
     teleporters: Vec<Teleporter>,
     /// Set once the level is being left; nothing more is sent after it.
     leaving: bool,
@@ -275,6 +390,7 @@ impl Director {
             settings,
             scripts: Vec::new(),
             triggers: Vec::new(),
+            sight: Vec::new(),
             teleporters: Vec::new(),
             leaving: false,
             counters: HashMap::new(),
@@ -322,6 +438,27 @@ impl Director {
                     pc: 0,
                     wait: Wait::Nothing,
                     running,
+                    finished: false,
+                });
+                continue;
+            }
+            if class.eq_ignore_ascii_case("Dispatcher") {
+                // A Dispatcher sends a list of events one after another,
+                // each after its own delay, when its tag is sent. Cutscene
+                // maps (the prologue, briefings) are timed with them. Run
+                // as a small script of our own making, so its waits are
+                // saved like any script's.
+                let actions = dispatcher_actions(o);
+                d.stats.dispatchers += 1;
+                d.stats.actions += actions.len();
+                d.scripts.push(Script {
+                    name: o.name.clone(),
+                    class: o.class.clone(),
+                    tag: o.tag().to_string(),
+                    actions,
+                    pc: 0,
+                    wait: Wait::Nothing,
+                    running: true,
                     finished: false,
                 });
                 continue;
@@ -377,6 +514,35 @@ impl Director {
                     collide: o.flag("bCollideActors", true),
                     used: false,
                 });
+            } else if class.eq_ignore_ascii_case("LineOfSightTrigger") {
+                d.stats.sight_triggers += 1;
+                // The actor to look at, by tag; the trigger itself if it
+                // names none (or none with that tag is in the map).
+                let seen = o
+                    .text("SeenActorTag")
+                    .filter(|t| !t.eq_ignore_ascii_case("None") && !t.is_empty())
+                    .and_then(|t| {
+                        map.actors.iter().find(|b| {
+                            b.obj.export != o.export && b.obj.tag().eq_ignore_ascii_case(t)
+                        })
+                    });
+                let s = &d.settings;
+                let angle = o
+                    .int("MaxViewAngle")
+                    .map(|a| a as f32)
+                    .unwrap_or(s.sight_max_view_angle);
+                d.sight.push(SightTrigger {
+                    name: o.name.clone(),
+                    tag: low(o.tag()),
+                    event: o.event().map(str::to_string),
+                    target: seen.map_or(a.location, |b| b.location),
+                    target_name: seen.map_or(o.name.clone(), |b| b.obj.name.clone()),
+                    seen_tag: seen.map(|b| low(b.obj.tag())),
+                    max_dist: o.float("MaxViewDist").unwrap_or(s.sight_max_view_dist),
+                    min_cos: angle.to_radians().cos(),
+                    enabled: o.flag("bEnabled", true),
+                    triggered: false,
+                });
             } else if class.eq_ignore_ascii_case("PlayerStart") {
                 // The player starts at the first one (as the level part
                 // does), and only that one's event is sent.
@@ -403,9 +569,11 @@ impl Director {
                     tag: o.tag().to_string(),
                     health: o.float("Health").unwrap_or(d.settings.prop_health),
                     destroyed: false,
-                    event: text("Event"),
+                    // The prop's own event comes first, as in the game.
+                    event: o.event().map(str::to_string).or_else(|| text("Event")),
                     mesh: text("Mesh"),
                     effect: text("TransitionEffect"),
+                    breaks: None,
                 });
             }
         }
@@ -539,45 +707,199 @@ impl Director {
             .count()
     }
 
-    /// Hurt every prop with this tag. Destroyed props come out as
-    /// [`Effect::PropDestroyed`] on the next step. Returns how many props
-    /// have the tag.
+    /// Hurt every prop with this tag (`ACTION_HurtActor`). Destroyed props
+    /// come out as [`Effect::PropDestroyed`] on the next step. Returns how
+    /// many props have the tag.
     pub fn hurt_props(&mut self, tag: &str, amount: f32) -> usize {
-        let mut n = 0;
-        let mut events = Vec::new();
-        for p in self
-            .props
-            .iter_mut()
-            .filter(|p| p.tag.eq_ignore_ascii_case(tag))
-        {
-            n += 1;
-            if p.destroyed {
-                continue;
-            }
-            p.health -= amount;
-            if p.health <= 0.0 {
-                p.destroyed = true;
-                self.out.push(Effect::PropDestroyed {
-                    export: p.export,
-                    name: p.name.clone(),
-                    tag: p.tag.clone(),
-                    mesh: p.mesh.clone(),
-                    effect: p.effect.clone(),
-                });
-                if let Some(e) = &p.event {
-                    events.push((e.clone(), p.name.clone()));
+        let hit: Vec<usize> = (0..self.props.len())
+            .filter(|&i| self.props[i].tag.eq_ignore_ascii_case(tag))
+            .collect();
+        for &i in &hit {
+            self.hurt_index(i, amount);
+        }
+        hit.len()
+    }
+
+    /// Give the props weapons can break their full rules (read with
+    /// `rc_level::breakables`): starting health, damaged step, events. Props
+    /// the director already knows (by export index) are updated; the rest
+    /// are added. Call once, right after [`Director::new`] and before
+    /// restoring a save.
+    pub fn add_breakables(&mut self, list: &[Breakable]) {
+        for b in list {
+            let breaks = Breaks {
+                initial: b.health,
+                damaged_ratio: b.damaged_ratio,
+                damaged: false,
+                damaged_event: b.damaged.event.clone(),
+                damaged_look: b.damaged.keeps_a_look() || b.anim_prop,
+                damaged_span: b.damaged.life_span,
+                damaged_extra: b.damaged.life_span_max,
+                break_at: None,
+            };
+            let p = Prop {
+                export: b.export,
+                name: b.name.clone(),
+                tag: b.tag.clone(),
+                health: b.health,
+                destroyed: false,
+                event: b.broken_event().map(str::to_string),
+                mesh: b.destroyed.mesh.clone(),
+                effect: b.destroyed.effect.clone(),
+                breaks: Some(breaks),
+            };
+            match self.props.iter_mut().find(|x| x.export == b.export) {
+                Some(x) => *x = p,
+                None => {
+                    self.stats.props += 1;
+                    self.props.push(p);
                 }
             }
+            self.stats.breakables += 1;
         }
-        for (e, by) in events {
+    }
+
+    /// Damage one prop (a shot, a blast) by its export index, after its
+    /// damage table. See [`PropHurt`].
+    pub fn hurt_prop(&mut self, export: usize, amount: f32) -> PropHurt {
+        match self.props.iter().position(|p| p.export == export) {
+            Some(i) if self.props[i].breaks.is_some() => self.hurt_index(i, amount),
+            _ => PropHurt::NotBreakable,
+        }
+    }
+
+    /// Health left on a prop, by export index.
+    pub fn prop_health(&self, export: usize) -> Option<f32> {
+        self.props.iter().find(|p| p.export == export).map(|p| p.health)
+    }
+
+    fn hurt_index(&mut self, i: usize, amount: f32) -> PropHurt {
+        let now = self.time;
+        let p = &mut self.props[i];
+        if p.destroyed {
+            return PropHurt::AlreadyBroken;
+        }
+        p.health -= amount;
+        let Some(b) = p.breaks.as_mut() else {
+            // A prop only scripts deal with: it breaks at no health.
+            if p.health <= 0.0 {
+                self.break_prop(i);
+                return PropHurt::Broken;
+            }
+            return PropHurt::Hurt(p.health);
+        };
+        // The game's steps: with no damaged step (ratio 0), break at no
+        // health; otherwise go to the damaged step at ratio x the starting
+        // health, and from there break at no health.
+        if b.damaged || b.damaged_ratio == 0.0 {
+            if p.health <= 0.0 {
+                self.break_prop(i);
+                return PropHurt::Broken;
+            }
+            return PropHurt::Hurt(p.health);
+        }
+        if p.health > b.initial * b.damaged_ratio {
+            return PropHurt::Hurt(p.health);
+        }
+        b.damaged = true;
+        let removed = !b.damaged_look;
+        if b.damaged_span > 0.0 && !removed {
+            let extra = b.damaged_extra;
+            let span = b.damaged_span;
+            let r = self.random();
+            if let Some(b) = self.props[i].breaks.as_mut() {
+                b.break_at = Some(now + span + extra * r);
+            }
+        }
+        let p = &mut self.props[i];
+        if removed {
+            p.destroyed = true;
+        }
+        let ev = p.breaks.as_ref().and_then(|b| b.damaged_event.clone());
+        let by = p.name.clone();
+        self.out.push(Effect::PropDamaged {
+            export: p.export,
+            name: p.name.clone(),
+            tag: p.tag.clone(),
+            removed,
+        });
+        if let Some(e) = ev {
             self.fire(&e, &by);
         }
-        n
+        PropHurt::Damaged
+    }
+
+    /// A prop breaks: it says so, and sends its event.
+    fn break_prop(&mut self, i: usize) {
+        let p = &mut self.props[i];
+        p.destroyed = true;
+        if let Some(b) = p.breaks.as_mut() {
+            b.break_at = None;
+        }
+        self.out.push(Effect::PropDestroyed {
+            export: p.export,
+            name: p.name.clone(),
+            tag: p.tag.clone(),
+            mesh: p.mesh.clone(),
+            effect: p.effect.clone(),
+        });
+        if let Some(e) = p.event.clone() {
+            let by = p.name.clone();
+            self.fire(&e, &by);
+        }
+    }
+
+    /// Damaged props whose damaged step has run out break.
+    fn run_out_damaged(&mut self) {
+        let now = self.time;
+        let due: Vec<usize> = (0..self.props.len())
+            .filter(|&i| {
+                let p = &self.props[i];
+                !p.destroyed
+                    && p.breaks
+                        .as_ref()
+                        .and_then(|b| b.break_at)
+                        .is_some_and(|t| now >= t)
+            })
+            .collect();
+        for i in due {
+            self.props[i].health = 0.0;
+            self.break_prop(i);
+        }
     }
 
     /// Remove every prop with this tag at once (`ACTION_DestroyActor`).
     pub fn destroy_props(&mut self, tag: &str) -> usize {
         self.hurt_props(tag, f32::INFINITY)
+    }
+
+    /// Blow up the one prop with this actor name (`Prop12`), as a
+    /// demolition charge's `PropToDestroy` does: it comes out as
+    /// [`Effect::PropDestroyed`] on the next step and sends its own
+    /// destroyed event. Returns false if no prop has that name (or it is
+    /// already gone).
+    pub fn destroy_prop_named(&mut self, name: &str) -> bool {
+        let Some(p) = self
+            .props
+            .iter_mut()
+            .find(|p| !p.destroyed && p.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        p.destroyed = true;
+        p.health = 0.0;
+        self.out.push(Effect::PropDestroyed {
+            export: p.export,
+            name: p.name.clone(),
+            tag: p.tag.clone(),
+            mesh: p.mesh.clone(),
+            effect: p.effect.clone(),
+        });
+        if let Some(e) = p.event.clone() {
+            let by = p.name.clone();
+            self.fire(&e, &by);
+        }
+        true
     }
 
     fn random(&mut self) -> f32 {
@@ -588,6 +910,92 @@ impl Director {
         x ^= x << 17;
         self.rng = x;
         (x >> 40) as f32 / (1u64 << 24) as f32
+    }
+
+    /// Line-of-sight triggers the player could be looking at now: switched
+    /// on, not used yet, near enough and inside their view angle from
+    /// `eye` looking along `forward` (Unreal units, `forward` of length
+    /// 1). Returns each one's index and the point to check is in view.
+    /// The game checks nothing is in the way (a line through the level's
+    /// walls) and calls [`Self::seen`] for those that are clear.
+    pub fn sight_candidates(&self, eye: [f32; 3], forward: [f32; 3]) -> Vec<(usize, [f32; 3])> {
+        self.sight_candidates_live(eye, forward, &|_| None)
+    }
+
+    /// [`Self::sight_candidates`], with `live(tag)` giving where a
+    /// character the game moves is now (the middle of its body, Unreal
+    /// units), by its lower-case tag. `None` uses where the map placed it.
+    pub fn sight_candidates_live(
+        &self,
+        eye: [f32; 3],
+        forward: [f32; 3],
+        live: &dyn Fn(&str) -> Option<[f32; 3]>,
+    ) -> Vec<(usize, [f32; 3])> {
+        self.sight
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.enabled && !t.triggered)
+            .filter_map(|(i, t)| {
+                let target = t.seen_tag.as_deref().and_then(live).unwrap_or(t.target);
+                let d = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
+                let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                if len > t.max_dist {
+                    return None;
+                }
+                if len < 1.0 {
+                    return Some((i, target));
+                }
+                let dot = (d[0] * forward[0] + d[1] * forward[1] + d[2] * forward[2]) / len;
+                (dot >= t.min_cos).then_some((i, target))
+            })
+            .collect()
+    }
+
+    /// The player saw line-of-sight trigger `index` (from
+    /// [`Self::sight_candidates`], with a clear line to it): it sends its
+    /// event, once.
+    pub fn seen(&mut self, index: usize) {
+        let Some(t) = self.sight.get_mut(index) else {
+            return;
+        };
+        if !t.enabled || t.triggered {
+            return;
+        }
+        t.triggered = true;
+        let (name, target, event) = (t.name.clone(), t.target_name.clone(), t.event.clone());
+        self.out.push(Effect::Note(format!(
+            "{name}: the player looked at {target}"
+        )));
+        if let Some(e) = event {
+            self.fire(&e, &name);
+        }
+    }
+
+    /// Check every line-of-sight trigger against where the player looks,
+    /// with `clear(from, to)` saying whether nothing blocks the line. Same
+    /// as [`Self::sight_candidates`] then [`Self::seen`].
+    pub fn look(
+        &mut self,
+        eye: [f32; 3],
+        forward: [f32; 3],
+        clear: &mut dyn FnMut([f32; 3], [f32; 3]) -> bool,
+    ) -> usize {
+        let mut n = 0;
+        for (i, at) in self.sight_candidates(eye, forward) {
+            if clear(eye, at) {
+                self.seen(i);
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Line-of-sight triggers: (name, switched on, used).
+    pub fn sight_triggers(&self) -> Vec<(String, bool, bool)> {
+        self.sight
+            .iter()
+            .map(|t| (t.name.clone(), t.enabled, t.triggered))
+            .collect()
     }
 
     /// Advance by `dt` seconds. `player` is where the player is, if there is
@@ -601,6 +1009,7 @@ impl Director {
         if let Some(p) = player {
             self.touch(dt, p);
         }
+        self.run_out_damaged();
         // Events and scripts can set each other off; settle within the
         // frame, a few rounds at most.
         // Scripts run first, so ones that are about to wait for an event
@@ -666,6 +1075,7 @@ impl Director {
                 self.out.push(Effect::ChangeLevel {
                     url: url.clone(),
                     by: t.name.clone(),
+                    debriefing: None,
                 });
             }
         }
@@ -738,6 +1148,14 @@ impl Director {
                             "switched off"
                         }
                     ));
+                }
+            }
+            // Line-of-sight triggers: an event with their tag switches
+            // them on (UE2's LineOfSightTrigger.Trigger).
+            for t in &mut self.sight {
+                if t.tag == key && !t.enabled {
+                    t.enabled = true;
+                    heard.push(format!("{} switched on", t.name));
                 }
             }
             // Teleporters (UE2): an event with their tag switches them on
@@ -999,8 +1417,8 @@ impl Director {
                     _ => {}
                 }
                 // Leaving the level. The debriefing screen's `NewLevel` is
-                // where the campaign goes on after it (the screen itself
-                // isn't shown yet).
+                // where the campaign goes on after it; the game shows the
+                // screen first.
                 let leave = match kind.as_str() {
                     "changelevel" => a.text("URL"),
                     "showdebriefingscreen" => a.text("NewLevel"),
@@ -1017,9 +1435,12 @@ impl Director {
                         owner: None,
                         waits: false,
                     });
+                    let debriefing =
+                        (kind == "showdebriefingscreen").then(|| Debriefing::of(&a));
                     self.out.push(Effect::ChangeLevel {
                         url: url.to_string(),
                         by: name,
+                        debriefing,
                     });
                     self.scripts[i].pc = next;
                     return;
@@ -1101,6 +1522,95 @@ impl Director {
             )
         })
     }
+}
+
+/// Make an action the director runs, for a script of our own making.
+fn made_action(owner: &ScriptObject, kind: &str, n: usize, values: Vals) -> ScriptObject {
+    ScriptObject {
+        export: owner.export,
+        class: format!("ACTION_{kind}"),
+        name: format!("{}.{kind}{n}", owner.name),
+        values,
+    }
+}
+
+/// A `Dispatcher` as a script: wait for its tag; then, for each entry of
+/// its `Events` list in turn, wait its `Delay` (a random time up to
+/// `DelayMax` when that is longer), play its `Sound` if it has one
+/// (waiting for the sound to end with `bWaitForSound`) and send its
+/// `Event`; then wait for the tag again. While it runs, its tag is not
+/// heard, as UE2's Dispatcher ignores triggers while dispatching. Our
+/// reading of the class's public description and of what the maps store.
+pub fn dispatcher_actions(o: &ScriptObject) -> Vec<ScriptObject> {
+    let text = |v: &Vals, k: &str| match v.get(k) {
+        Some(Val::Text(t)) if !t.eq_ignore_ascii_case("None") && !t.is_empty() => Some(t.clone()),
+        _ => None,
+    };
+    let float = |v: &Vals, k: &str| match v.get(k) {
+        Some(Val::Float(f)) => *f,
+        _ => 0.0,
+    };
+    let flag = |v: &Vals, k: &str| matches!(v.get(k), Some(Val::Bool(true)));
+    let mut out = Vec::new();
+    let mut n = 0;
+    let mut add = |out: &mut Vec<ScriptObject>, kind: &str, values: Vals| {
+        n += 1;
+        out.push(made_action(o, kind, n, values));
+    };
+    add(
+        &mut out,
+        "WaitForEvent",
+        Vals::from([("ExternalEvent".to_string(), Val::Text(o.tag().to_string()))]),
+    );
+    let entries = match o.get("Events") {
+        Some(Val::Structs(list)) => list.clone(),
+        // One entry is stored as a plain struct.
+        Some(Val::Struct(one)) => vec![one.clone()],
+        _ => Vec::new(),
+    };
+    for e in &entries {
+        let (lo, hi) = (float(e, "Delay"), float(e, "DelayMax"));
+        if hi > lo {
+            let range = Vals::from([
+                ("Min".to_string(), Val::Float(lo)),
+                ("Max".to_string(), Val::Float(hi)),
+            ]);
+            add(
+                &mut out,
+                "WaitForRandomTimer",
+                Vals::from([("PauseTime".to_string(), Val::Struct(range))]),
+            );
+        } else if lo > 0.0 {
+            add(
+                &mut out,
+                "WaitForTimer",
+                Vals::from([("PauseTime".to_string(), Val::Float(lo))]),
+            );
+        }
+        if let Some(sound) = text(e, "Sound") {
+            let mut v = Vals::from([
+                ("Sound".to_string(), Val::Text(sound)),
+                ("bWaitForFinish".to_string(), Val::Bool(flag(e, "bWaitForSound"))),
+            ]);
+            if let Some(src) = text(e, "SoundSource") {
+                v.insert("SoundSourceTag".to_string(), Val::Text(src));
+            }
+            add(&mut out, "PlaySound", v);
+        }
+        if let Some(ev) = text(e, "Event") {
+            add(
+                &mut out,
+                "TriggerEvent",
+                Vals::from([("Event".to_string(), Val::Text(ev))]),
+            );
+        }
+    }
+    add(
+        &mut out,
+        "GotoAction",
+        Vals::from([("ActionNumber".to_string(), Val::Int(0))]),
+    );
+    out
 }
 
 /// Character actions that take time: (seconds with no game, time-out when

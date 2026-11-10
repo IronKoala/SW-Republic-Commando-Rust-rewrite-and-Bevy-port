@@ -149,6 +149,20 @@ pub enum Shown {
     Page(String),
 }
 
+/// The debriefing page's name in `original_menus.toml`.
+pub const DEBRIEFING_PAGE: &str = "debriefing";
+
+/// What the debriefing's CONTINUE button does (`act:continue`).
+const CONTINUE: &str = "continue";
+
+/// What [`OriginalMenus::show_debriefing`] did.
+pub struct DebriefingShown {
+    /// The original page will show (else the placeholder).
+    pub shown: bool,
+    /// For the log.
+    pub lines: Vec<String>,
+}
+
 /// The page's name in `original_menus.toml`.
 pub fn page_key(page: Page) -> Option<&'static str> {
     match page {
@@ -162,6 +176,7 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::MoreSettings => Some("more_settings"),
         Page::LoadGame => Some(original_saves::LOAD),
         Page::SaveGame => Some(original_saves::SAVE),
+        Page::Debriefing => Some(DEBRIEFING_PAGE),
         Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
@@ -175,6 +190,7 @@ fn page_from_key(key: &str) -> Option<Page> {
         "options_controls" => Some(Page::OptionsControls),
         "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
+        DEBRIEFING_PAGE => Some(Page::Debriefing),
         original_saves::LOAD => Some(Page::LoadGame),
         original_saves::SAVE => Some(Page::SaveGame),
         _ => None,
@@ -364,6 +380,55 @@ impl OriginalMenus {
         true
     }
 
+    /// Fill in the debriefing page with a level's title, text and picture
+    /// (`rc_menus::debriefing`), and load the picture.
+    pub fn show_debriefing(&mut self, title: &str, text: &str, picture: &str) -> DebriefingShown {
+        let mut lines = Vec::new();
+        let (Some(page), Some(assets)) = (self.pages.get_mut(DEBRIEFING_PAGE), self.assets.as_mut())
+        else {
+            return DebriefingShown {
+                shown: false,
+                lines,
+            };
+        };
+        let filled = rc_menus::debriefing::setup(
+            &mut page.screen.layout,
+            &mut assets.library,
+            title,
+            text,
+            picture,
+        );
+        // The text's own size again (an earlier debriefing may have made
+        // it smaller), then made to fit.
+        if let Ok(c) = assets.library.class(&page.plan.class) {
+            let fresh = rc_menus::build(&c);
+            if let (Some(Kind::Text(a)), Some(Kind::Text(b))) = (
+                fresh.widget("InfoText").map(|w| &w.kind),
+                page.screen.layout.widget_mut("InfoText").map(|w| &mut w.kind),
+            ) {
+                b.scale = a.scale;
+            }
+        }
+        let size = rc_menus::debriefing::fit_text(&mut page.screen.layout, assets);
+        if size < 1.0 {
+            lines.push(format!(
+                "text made {:.0}% of its size to stay inside its frame",
+                size * 100.0
+            ));
+        }
+        if let Some(p) = &filled.picture {
+            lines.push(format!("picture {p}"));
+            if assets.texture(p).is_none() {
+                lines.push(format!("picture {p} can't be read; the frame shows empty"));
+            }
+        }
+        for p in filled.problems {
+            lines.push(format!("PROBLEM {p}"));
+        }
+        self.dirty = true;
+        DebriefingShown { shown: true, lines }
+    }
+
     fn screen(&self, shown: &Shown) -> Option<&Screen> {
         match shown {
             Shown::Main => self.main.as_ref(),
@@ -470,6 +535,10 @@ fn load(
             }
         };
         let mut layout = rc_menus::build(&class);
+        if rc_menus::debriefing::is_debriefing(&class.family) {
+            // CONTINUE shows on a PC (the original's Init).
+            rc_menus::debriefing::show_continue(&mut layout);
+        }
         for w in &layout.widgets {
             if let Kind::Button(b) = &w.kind {
                 if w.shown_on_pc() {
@@ -483,6 +552,14 @@ fn load(
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {
                 check_names(&mut layout, &mut buttons, &plan.page, &log);
+                if rc_menus::debriefing::is_debriefing(&class.family)
+                    && rc_menus::debriefing::fit_continue(&mut layout, &mut assets)
+                {
+                    log.line(format!(
+                        "original menus: page {}: CONTINUE widened to fit its text",
+                        plan.page
+                    ));
+                }
                 for e in &plan.extra_buttons {
                     if screens::fit_button_to_text(&mut layout, &e.name, &mut assets) {
                         log.line(format!(
@@ -520,7 +597,11 @@ fn load(
             }
         }
     }
-    if let Some(plan) = menus.pages.get(original_lists::CAMPAIGNS).map(|p| p.plan.clone()) {
+    if let Some(plan) = menus
+        .pages
+        .get(original_lists::CAMPAIGNS)
+        .map(|p| p.plan.clone())
+    {
         let ok = assets
             .library
             .class(&plan.class)
@@ -537,7 +618,10 @@ fn load(
             .get(k)
             .and_then(|p| assets.library.class(&p.plan.class).ok())
     };
-    let (load_class, save_class) = (class_of(original_saves::LOAD), class_of(original_saves::SAVE));
+    let (load_class, save_class) = (
+        class_of(original_saves::LOAD),
+        class_of(original_saves::SAVE),
+    );
     menus.saves = original_saves::read(load_class.as_deref(), save_class.as_deref());
     let present: Vec<String> = menus.pages.keys().cloned().collect();
     for (k, p) in menus.pages.iter_mut() {
@@ -785,10 +869,11 @@ fn focus_new_page(
         // buttons above it work), so pause and Enter goes back to play.
         if k == "paused" {
             let buttons = screen.buttons();
-            if let Some(r) = buttons
-                .into_iter()
-                .find(|&i| screen.on_select(i).eq_ignore_ascii_case("ResumeGameSelected"))
-            {
+            if let Some(r) = buttons.into_iter().find(|&i| {
+                screen
+                    .on_select(i)
+                    .eq_ignore_ascii_case("ResumeGameSelected")
+            }) {
                 screen.focus = Some(r);
             }
         }
@@ -1243,7 +1328,12 @@ fn navigate(
             }
             let cmd = match chosen {
                 Some(i) => p.buttons.command(i).cloned(),
-                None if back => Some(p.plan.back.clone().unwrap_or(PageCmd::Back)),
+                // `back = "unavailable"`: back does nothing on this page
+                // (the debriefing).
+                None if back => match p.plan.back.clone() {
+                    Some(PageCmd::Unavailable) => None,
+                    b => Some(b.unwrap_or(PageCmd::Back)),
+                },
                 None => None,
             };
             let Some(cmd) = cmd else {
@@ -1259,6 +1349,12 @@ fn navigate(
     menus.used_input = true;
     let s = menus.select_sound.clone();
     play_sound(&mut commands, menus, &mut sources, s, &log);
+    // The debriefing's CONTINUE: `debriefing.rs` goes on to the next map.
+    if cmd == PageCmd::Act(CONTINUE.into()) {
+        log.line("original menus: debriefing CONTINUE");
+        menu.go_on = true;
+        return;
+    }
     // A list's own commands, and what only one page does.
     let cmd = match &shown {
         Shown::Page(k) => match original_lists::command(menus, k, chosen, by_key, cmd, &log)
@@ -1724,7 +1820,12 @@ fn draw(
         ));
     }
     // (on top?, pictures, mouse areas by widget index, scroll bar tracks)
-    type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>, Vec<(BarHit, [f32; 4])>);
+    type Drawn = (
+        bool,
+        Vec<Quad>,
+        Vec<(usize, [f32; 4])>,
+        Vec<(BarHit, [f32; 4])>,
+    );
     let mut list: Vec<Drawn> = Vec::new();
     let left = fit::left_edge(across);
     let to_area = |b: [f32; 4]| [(b[0] - left) / across, b[1], (b[2] - left) / across, b[3]];
@@ -1872,7 +1973,7 @@ fn draw(
                         ));
                     }
                     // Under the buttons, so the scroll arrows at the
-                        // track's ends still take their clicks.
+                    // track's ends still take their clicks.
                     for (hit, b) in bars {
                         area.spawn((
                             BarHit {
@@ -1938,7 +2039,9 @@ fn drag_bars(
             let n = rel.normalized?;
             let pressed = *i == Interaction::Pressed;
             match want {
-                Some(b) if hit.bar == b => Some((b, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
+                Some(b) if hit.bar == b => {
+                    Some((b, hit.top + (n.y + 0.5) * (hit.bottom - hit.top)))
+                }
                 None if pressed => Some((hit.bar, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
                 _ => None,
             }

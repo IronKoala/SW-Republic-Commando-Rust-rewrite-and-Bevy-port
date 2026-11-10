@@ -8,7 +8,9 @@
 //!   aiming at a squad marker), or from a `SquadOrder` message, so keys,
 //!   gamepads, touch and VR all work the same way;
 //! - the leader is the entity with `Player`, the aim is the `PlayerCamera`;
-//! - bodies collide with `LevelCollision`;
+//! - bodies collide with `LevelCollision`, and ride lifts and get pushed by
+//!   doors through `MovingFloors` (the doors and lifts part), as the
+//!   player does;
 //! - each squad mate is an `rc_combat` target (`Health`, `Shield`, `Team`,
 //!   `Hittable`) with the original's numbers from `data/squad/squad.toml`;
 //!   at 0 health they go down (squad mates can't die) and stop;
@@ -33,6 +35,7 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
+mod ammo;
 pub mod look;
 pub mod save;
 pub mod voice;
@@ -46,7 +49,8 @@ use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
-    LevelCollision, Player, PlayerCamera, SquadMember, SquadReadout, SquadStatus,
+    LevelCollision, MarkerJob, MarkerJobStep, MovingFloors, Player, PlayerCamera, SquadMember,
+    SquadReadout, SquadStatus,
 };
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
@@ -83,6 +87,9 @@ pub struct SquadState {
     since_log: f32,
     /// Post weapons not found, logged once each.
     missing_weapons: std::collections::BTreeSet<String>,
+    /// The lift or other mover each squad mate stands on (its name in the
+    /// map), by `Squad::members` index.
+    pub riding: Vec<Option<String>>,
 }
 
 /// Player options that change how the squad takes orders. The game sets
@@ -152,6 +159,10 @@ pub struct SquadMapData {
     pub nav: Option<NavGraph>,
     /// One line per thing found, for the log.
     pub notes: Vec<String>,
+    /// The map was read and has no squad (no `CTSquad` actor, markers or
+    /// squad-mate spawners): the prologue, briefings and epilogue. No
+    /// squad mates are brought in.
+    pub squadless: bool,
 }
 
 impl SquadMapData {
@@ -183,6 +194,13 @@ impl SquadMapData {
                     info.markers.len(),
                     info.factories.len()
                 ));
+                if !info.wants_squad() {
+                    out.notes.push(
+                        "no CTSquad actor in the map: this map has no squad (a cutscene map)"
+                            .into(),
+                    );
+                    out.squadless = true;
+                }
                 for m in &info.markers {
                     out.notes.push(format!(
                         "  marker {} ({}, anchor {} {}) stand at ({:.0}, {:.0}, {:.0})",
@@ -328,6 +346,7 @@ impl Plugin for SquadPlugin {
         app.add_message::<SquadOrder>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<SquadJobDone>()
+            .add_message::<MarkerJob>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadOptions>()
@@ -354,9 +373,12 @@ impl Plugin for SquadPlugin {
                 (
                     spawn_squad,
                     check_down,
+                    ride_movers,
                     take_orders,
                     gather_threats,
+                    ammo::gather_boxes,
                     run_squad,
+                    ammo::take_boxes,
                     carry_out_jobs,
                     voice::load_voices,
                     voice::speak,
@@ -428,6 +450,7 @@ fn clear_squad(
         log_line(&log, fight_line(squad, &stats));
     }
     state.squad = None;
+    state.riding.clear();
 }
 
 /// Read the settings file (a mod's copy first), or use the built-in values.
@@ -497,8 +520,16 @@ fn spawn_squad(
     for line in settings.summary() {
         log_line(&log, line);
     }
-    if settings.spawn == rc_squad::Spawn::None {
-        log_line(&log, "spawn = none: no squad this time");
+    let squadless = map.as_ref().is_some_and(|m| m.squadless);
+    if settings.spawn == rc_squad::Spawn::None || squadless {
+        log_line(
+            &log,
+            if squadless {
+                "this map has no squad (no CTSquad actor): no squad mates"
+            } else {
+                "spawn = none: no squad this time"
+            },
+        );
         state.squad = Some(
             Squad::new(
                 SquadSettings {
@@ -679,7 +710,7 @@ fn take_orders(
     collision: Option<Res<LevelCollision>>,
     options: Option<Res<SquadOptions>>,
     mut heard: ResMut<voice::SquadHeard>,
-    log: Option<Res<GameLog>>,
+    (log, use_claimed): (Option<Res<GameLog>>, Option<Res<rc_game_core::UseClaimed>>),
 ) {
     let (Some(squad), Ok(pt)) = (state.squad.as_mut(), player.single()) else {
         orders.clear();
@@ -730,9 +761,15 @@ fn take_orders(
         }
         // Aimed orders: a marker under the aim takes priority for the
         // context order (and for Use); otherwise the spot aimed at.
-        let context = a.just_pressed(Action::SquadCommand);
+        let mut context = a.just_pressed(Action::SquadCommand);
         let secure = a.just_pressed(Action::SquadSecurePosition);
-        let use_key = a.just_pressed(Action::Use);
+        let mut use_key = a.just_pressed(Action::Use);
+        // At a switched-on bacta dispenser the shared key uses it.
+        if (context || use_key) && use_claimed.is_some_and(|u| u.0) {
+            log_line(&log, "context order left alone: the player is using something");
+            context = false;
+            use_key = false;
+        }
         if context || secure || use_key {
             match aimed() {
                 None => log_line(&log, "aimed order ignored: no player camera"),
@@ -809,6 +846,43 @@ fn gather_threats(
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// Lifts carry squad mates, and doors push them, the way they do the
+/// player. Runs after the player's movement has moved the movers this
+/// frame, before the squad's own moves (`run_squad`).
+fn ride_movers(
+    floors: Option<Res<MovingFloors>>,
+    mut state: ResMut<SquadState>,
+    log: Option<Res<GameLog>>,
+) {
+    let Some(floors) = floors else { return };
+    let state = &mut *state;
+    let Some(squad) = state.squad.as_mut() else {
+        return;
+    };
+    state.riding.resize(squad.members.len(), None);
+    for (i, m) in squad.members.iter_mut().enumerate() {
+        let on = floors.0.carry(&mut m.pawn);
+        if on != state.riding[i] {
+            let name = &m.settings.name;
+            let feet = m.pawn.feet();
+            let what = match (&state.riding[i], &on) {
+                (_, Some(now)) => format!("{name} stands on {now}"),
+                (Some(was), None) => format!("{name} steps off {was}"),
+                (None, None) => unreachable!(),
+            };
+            log_line(
+                &log,
+                format!(
+                    "t={:.2} {what}, feet ({:.0}, {:.0}, {:.0})",
+                    squad.time, feet.x, feet.y, feet.z
+                ),
+            );
+            state.riding[i] = on;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_squad(
     time: Res<Time>,
     mut state: ResMut<SquadState>,
@@ -822,6 +896,7 @@ fn run_squad(
     mut fire: MessageWriter<FireShot>,
     mut jobs: ResMut<SquadJobQueue>,
     library: Option<Res<WeaponLibrary>>,
+    mut marker_jobs: MessageWriter<MarkerJob>,
     mut commands: Commands,
     mut heard: ResMut<voice::SquadHeard>,
     log: Option<Res<GameLog>>,
@@ -902,6 +977,26 @@ fn run_squad(
                 }
             }
             SquadEvent::HeldFire { .. } => log_line(&log, format!("t={:.2} {e}", squad.time)),
+            // Tell the level how a marker job is going (its anchor's
+            // "underway" and "armed" events). Done comes with the result.
+            SquadEvent::MarkerStarted { member, marker }
+            | SquadEvent::Posted { member, marker, .. }
+            | SquadEvent::FuseLit { member, marker, .. } => {
+                let step = if matches!(e, SquadEvent::FuseLit { .. }) {
+                    MarkerJobStep::Armed
+                } else {
+                    MarkerJobStep::Started
+                };
+                if let Some((spot, _)) = squad.markers.iter().find(|(s, _)| &s.name == marker) {
+                    if !spot.anchor.is_empty() {
+                        marker_jobs.write(MarkerJob {
+                            anchor: spot.anchor.clone(),
+                            step,
+                            by: member.clone(),
+                        });
+                    }
+                }
+            }
             SquadEvent::JobResult { .. } | SquadEvent::Blast { .. } => {
                 log_line(&log, format!("t={:.2} {e}", squad.time));
                 jobs.0.push(e.clone());
@@ -990,6 +1085,7 @@ fn carry_out_jobs(
     bodies: Query<(Entity, &Transform, &Hittable), Without<Dead>>,
     mut damage: MessageWriter<Damage>,
     mut done: MessageWriter<SquadJobDone>,
+    mut marker_jobs: MessageWriter<MarkerJob>,
     log: Option<Res<GameLog>>,
 ) {
     for e in jobs.0.drain(..) {
@@ -1020,6 +1116,11 @@ fn carry_out_jobs(
                         &log,
                         format!("{job} done: sets off {anchor_class} {anchor} (SquadJobDone)"),
                     );
+                    marker_jobs.write(MarkerJob {
+                        anchor: anchor.clone(),
+                        step: MarkerJobStep::Done,
+                        by: member.clone(),
+                    });
                     done.write(SquadJobDone {
                         job,
                         marker,

@@ -1,0 +1,55 @@
+# The Geonosian elite's Elite Beam (class EliteBeam), as the player carries
+# it after taking one (one lies in geo_03d). An instant-hit beam.
+#
+# Numbers marked "game:" are EliteBeam's class defaults (ctinventory.u,
+# with EliteBeamDefaults in Properties/properties.u on top) and its ammo
+# EliteBeamAmmo(+Defaults).
+#
+# Not sure: the game's beam fires every frame while held (ShotDelay 0.01)
+# and we don't know how it spreads Damage (80) over time. Our reading is 80
+# a second: one hit a tenth of a second at 8, as for the elites' copy
+# (elite_beam_enemy.toml).
+
+name = "Elite Beam"
+
+[fire]
+mode = "automatic"        # game: LaserWeapon FireMode 2
+shot_delay = 0.1          # our choice (the game's ShotDelay 0.01 is once a frame)
+aim_error = 0.1           # game: EliteBeamDefaults AimError
+offset = [127.4, 10, -7.56] # placeholder: the ACP repeater's FPFireOffset
+
+[ammo]
+clip_size = 450           # game: EliteBeamDefaults ReloadCount (no reload)
+max_ammo = 450            # game: EliteBeamAmmoDefaults MaxAmmo
+start_ammo = 450          # game: EliteBeamDefaults PickupAmmoCount
+
+[shot]
+kind = "instant"          # game: LaserWeaponAmmo bInstantHit
+range = 5000              # game: EliteBeamAmmoDefaults Range
+damage = 8                # our reading of Damage 80 (see above)
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyBeam" # game: EliteBeamAmmoDefaults MyDamageType
+
+[melee]
+range = 175               # game: EliteBeamDefaults MeleeRange
+damage = 220              # game: EliteBeamDefaults MeleeDamage
+
+[recoil]
+kick = [300, 200, 0]      # game: EliteBeamDefaults WeaponKick
+spring = 2                # game: EliteBeamDefaults RecoilConstant
+damping = 0.2             # game: EliteBeamDefaults RecoilDampening
+
+[sound]
+package = "geo_sound"     # guess: wep_GEO_ sounds are in geo_sound.uax
+fire = ["wep_GEO_eliteBeam_st_01"] # game: EliteBeam FireStartSound (its loop is wep_GEO_eliteBeam_lp_01)
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: shown only if the arms can't load
+offset = [40, 12, -14]
+bolt_colour = [0.4, 0.9, 1.0]
+
+[arms]
+mesh = "HudArmsEliteBeam" # game: EliteBeam's Mesh
+fov = 85                  # game: DisplayFOV
+brightness = 0.75         # our choice, as the other weapons

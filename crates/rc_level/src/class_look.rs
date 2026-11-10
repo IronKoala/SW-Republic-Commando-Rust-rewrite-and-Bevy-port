@@ -28,6 +28,10 @@ pub type Loaded = Rc<(Package, Vec<u8>)>;
 /// `DrawType` for a static mesh (UE2's `EDrawType::DT_StaticMesh`).
 pub const DT_STATIC_MESH: u8 = 8;
 
+/// `DrawType` for an animated mesh (UE2's `EDrawType::DT_Mesh`): bacta
+/// and ammo dispensers, consoles and other props that move.
+pub const DT_MESH: u8 = 2;
+
 #[derive(Clone)]
 pub struct ClassLook {
     /// Class first, then its parents.
@@ -229,7 +233,8 @@ impl ClassLooks {
             if look.draw_scale_3d.is_none() {
                 if let Some(Value::Raw(b)) = find("DrawScale3D").map(|p| &p.value) {
                     if b.len() == 12 {
-                        let f = |i: usize| f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+                        let f =
+                            |i: usize| f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
                         look.draw_scale_3d = Some([f(0), f(1), f(2)]);
                     }
                 }
@@ -267,7 +272,11 @@ pub fn apply_class_look(
     let look = looks.for_actor(map, place.export, open)?;
     let (owner, mesh) = look.static_mesh.clone()?;
     let props = crate::actors::read_actor_properties(map, map_data, place.export).ok()?;
-    let set = |n: &str| props.iter().any(|p| map.name(p.name).eq_ignore_ascii_case(n));
+    let set = |n: &str| {
+        props
+            .iter()
+            .any(|p| map.name(p.name).eq_ignore_ascii_case(n))
+    };
     let hidden = if set("bHidden") {
         place.hidden
     } else {
@@ -299,18 +308,108 @@ pub fn apply_class_look(
     Some(owner)
 }
 
-/// Whether an actor stops the player: `bCollideActors` and `bBlockPlayers`
-/// both on. Each comes from the map if the map sets it, otherwise from the
-/// actor's class defaults; if neither says, it counts as on (as before
-/// these flags were read). Props with either off, such as light shafts,
-/// fog cards or foliage, can be walked and shot through in the game.
-pub fn blocks_players(
+/// The animated model an actor is drawn with, when it has no static mesh
+/// and draws as `DT_Mesh` (bacta dispensers and the like): the package and
+/// the skeletal mesh's name, such as `("BactaDispensers",
+/// "BactaDispenserGEO")`. The map's own `Mesh`, `DrawType` and `bHidden`
+/// win over the class's. `None` for anything else, or a hidden actor.
+///
+/// Only things the player uses (`ActivateItem`: bacta and ammo
+/// dispensers). Other actors with an animated model are characters,
+/// vehicles and ropes the scripts bring in and move; drawn here they would
+/// stand frozen in the wrong place.
+///
+/// The third value is the actor's `CollisionHeight` (the map's, else the
+/// class's): the map places these actors by the middle of their collision
+/// cylinder, while the models have their origin at the base, so the model
+/// is drawn that much lower (geo_01a's five dispensers each stand 116 to
+/// 121 units above the floor under them; their class's height is 120).
+pub fn anim_mesh_of(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    place: &crate::actors::Placement,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> Option<(String, String, f32)> {
+    if place.static_mesh != 0 {
+        return None;
+    }
+    let look = looks.for_actor(map, place.export, open)?;
+    if !look.is_a("ActivateItem") {
+        return None;
+    }
+    let props = crate::actors::read_actor_properties(map, map_data, place.export).ok()?;
+    let own = |n: &str| props.iter().find(|p| map.name(p.name).eq_ignore_ascii_case(n));
+    let draw_type = own("DrawType")
+        .and_then(|p| match p.value {
+            Value::Byte(b) => Some(b),
+            _ => None,
+        })
+        .or(look.draw_type);
+    if draw_type != Some(DT_MESH) {
+        return None;
+    }
+    let hidden = if own("bHidden").is_some() {
+        place.hidden
+    } else {
+        look.hidden.unwrap_or(false)
+    };
+    if hidden {
+        return None;
+    }
+    let path = match own("Mesh").map(|p| &p.value) {
+        Some(Value::Object(o)) => object_path(map, *o),
+        _ => {
+            let (pkg, p) = look.find("Mesh", 0)?;
+            match p.value {
+                Value::Object(o) => object_path(&pkg.0, o),
+                _ => return None,
+            }
+        }
+    };
+    let float = |v: &Value| match v {
+        Value::Float(f) => Some(*f),
+        _ => None,
+    };
+    let height = own("CollisionHeight")
+        .and_then(|p| float(&p.value))
+        .or_else(|| look.find("CollisionHeight", 0).and_then(|(_, p)| float(&p.value)))
+        .unwrap_or(0.0);
+    // Package and mesh name; a group in between doesn't matter.
+    match path.as_slice() {
+        [package, .., mesh] if path.len() >= 2 => Some((package.clone(), mesh.clone(), height)),
+        _ => None,
+    }
+}
+
+/// What an actor stops: players walking, and shots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Blocks {
+    /// `bCollideActors` and `bBlockPlayers` both on.
+    pub players: bool,
+    /// `bCollideActors` and `bBlockZeroExtentTraces` on, and the actor is
+    /// a shot target: `bProjTarget` on, or it blocks both actors and
+    /// players (`bBlockActors`, `bBlockPlayers`). This is how UE2 decides
+    /// whether a line (a hitscan shot, a bolt, a look) stops at an actor
+    /// (`AActor::ShouldTrace` with projectile targets, in the public UE2
+    /// headers' terms). Every `Prop` is a shot target by default.
+    pub shots: bool,
+}
+
+/// What an actor stops (`Blocks`). Each flag comes from the map if the map
+/// sets it, otherwise from the actor's class defaults; if neither says, it
+/// counts as on (as before these flags were read). Props with
+/// `bCollideActors` off, such as light shafts, fog cards or foliage, stop
+/// nothing. Some stop shots but not people: the Geonosian shield wall
+/// pieces of geo_04c (`K_GEO04_WallComponent`) are walked through in the
+/// game but can be shot to pieces.
+pub fn blocks(
     looks: &mut ClassLooks,
     map: &Package,
     map_data: &[u8],
     actor: usize,
     open: &mut dyn FnMut(&str) -> Option<Loaded>,
-) -> bool {
+) -> Blocks {
     let props = crate::actors::read_actor_properties(map, map_data, actor).unwrap_or_default();
     let mut look = None;
     let mut flag = |name: &str| -> bool {
@@ -322,10 +421,31 @@ pub fn blocks_players(
             return *b;
         }
         let look = look.get_or_insert_with(|| looks.for_actor(map, actor, open));
-        match look.as_ref().and_then(|l| l.find(name, 0)).map(|(_, p)| &p.value) {
+        match look
+            .as_ref()
+            .and_then(|l| l.find(name, 0))
+            .map(|(_, p)| &p.value)
+        {
             Some(Value::Bool(b)) => *b,
             _ => true,
         }
     };
-    flag("bCollideActors") && flag("bBlockPlayers")
+    let collide = flag("bCollideActors");
+    let players = collide && flag("bBlockPlayers");
+    let target = flag("bProjTarget") || (players && flag("bBlockActors"));
+    Blocks {
+        players,
+        shots: collide && flag("bBlockZeroExtentTraces") && target,
+    }
+}
+
+/// Whether an actor stops the player (`Blocks::players`).
+pub fn blocks_players(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    actor: usize,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> bool {
+    blocks(looks, map, map_data, actor, open).players
 }

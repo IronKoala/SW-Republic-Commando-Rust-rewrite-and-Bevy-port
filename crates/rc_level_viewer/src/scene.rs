@@ -12,6 +12,7 @@ use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Unreal units per Bevy unit (agreed with the other threads). This is the
 /// one place the scale is set. Unreal's own rule of thumb is about 50 units
@@ -61,6 +62,91 @@ pub struct Batch {
     /// layers are drawn over it, showing as much as each corner's colour
     /// alpha says (from the layer's alpha map).
     pub terrain_layer: Option<usize>,
+    /// Props drawn with their bump map: the material has one and the props
+    /// store a light direction per corner. `light_dirs` and
+    /// `light_colours` then have one entry per corner (see `BumpCorner`),
+    /// directions in Bevy's axes.
+    pub bump_lit: bool,
+    pub light_dirs: Vec<[f32; 3]>,
+    pub light_colours: Vec<[f32; 3]>,
+}
+
+/// The light a bump-mapped prop's corner gets from its main light, read
+/// from what the map stores (`actors::read_baked_light`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BumpCorner {
+    /// Unit direction towards the light, in the mesh's own axes (zero when
+    /// the map stores no direction).
+    pub dir: [f32; 3],
+    /// The light's colour and strength on the game's 0..1 brightness scale,
+    /// as it would light a surface facing it squarely.
+    pub light: [f32; 3],
+}
+
+/// How bright the stored corner colours are, against the strength stored
+/// with each light direction: the colour's brightest channel is 0.75 x
+/// strength x how squarely the corner faces the light (middle half 0.69 to
+/// 0.77 over 62,507 corners of yyy_06a; see docs/DESIGN.md "Lights in
+/// maps").
+pub const BUMP_LIGHT_PER_STRENGTH: f32 = 0.75;
+
+/// Turn a prop's stored corner colours (before ambient is added) and light
+/// directions into `BumpCorner`s. `None` if the prop has no directions or
+/// the lists don't match.
+///
+/// The colour of the light comes from the corner's own colour where the
+/// corner is lit enough to tell (brightest channel 16 or more), from the
+/// prop's average lit colour elsewhere, and is white if no corner is lit.
+/// Its strength comes from the direction's alpha.
+pub fn bump_corners(colours: &[[u8; 4]], dirs: &[[u8; 4]]) -> Option<Vec<BumpCorner>> {
+    if dirs.is_empty() || dirs.len() != colours.len() {
+        return None;
+    }
+    const LIT: u8 = 16;
+    let hue = |c: &[u8; 4]| {
+        let m = c[0].max(c[1]).max(c[2]) as f32;
+        [c[0] as f32 / m, c[1] as f32 / m, c[2] as f32 / m]
+    };
+    let mut sum = [0.0f32; 3];
+    let mut n = 0;
+    for c in colours.iter().filter(|c| c[0].max(c[1]).max(c[2]) >= LIT) {
+        let h = hue(c);
+        for k in 0..3 {
+            sum[k] += h[k];
+        }
+        n += 1;
+    }
+    let prop_hue = if n > 0 {
+        let m = sum[0].max(sum[1]).max(sum[2]).max(1e-6);
+        sum.map(|v| v / m)
+    } else {
+        [1.0; 3]
+    };
+    Some(
+        colours
+            .iter()
+            .zip(dirs)
+            .map(|(c, d)| {
+                let v = [0, 1, 2].map(|k| d[k] as f32 / 255.0 * 2.0 - 1.0);
+                let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                let dir = if len > 0.1 {
+                    v.map(|x| x / len)
+                } else {
+                    [0.0; 3]
+                };
+                let h = if c[0].max(c[1]).max(c[2]) >= LIT {
+                    hue(c)
+                } else {
+                    prop_hue
+                };
+                let strength = BUMP_LIGHT_PER_STRENGTH * d[3] as f32 / 255.0;
+                BumpCorner {
+                    dir,
+                    light: h.map(|x| x * strength),
+                }
+            })
+            .collect(),
+    )
 }
 
 #[derive(Default)]
@@ -94,6 +180,9 @@ pub struct Stats {
     pub bsp_polygons_unlit: usize,
     pub mesh_actors_with_colours: usize,
     pub mesh_actors_without_colours: usize,
+    /// Of those, props we light ourselves from the map's lights
+    /// (`unbaked_prop_light`) instead of drawing at full brightness.
+    pub props_lit_from_lights: usize,
     /// Colour lists whose length isn't the mesh's vertex count (not used).
     pub colour_count_mismatch: usize,
     pub lights: usize,
@@ -135,6 +224,12 @@ pub struct Stats {
     /// Doors, lifts and other movers in the map, and how many have a model.
     pub movers: usize,
     pub movers_drawn: usize,
+    /// Ammo and grenade boxes drawn (each on its own, so it can vanish
+    /// when taken), and the furthest one was moved down onto the ground.
+    pub ammo_boxes: usize,
+    /// Weapons lying in the map, drawn on their own like the boxes.
+    pub weapon_pickups: usize,
+    pub ammo_box_drop_max: f32,
     pub sky_props: usize,
     /// Sky props whose stored light is all black, drawn at full brightness.
     pub sky_props_unlit: usize,
@@ -152,6 +247,19 @@ pub struct Stats {
     pub props_zone_from_corners: usize,
     /// Props with bump-mapped light (a stored light direction per corner).
     pub props_bump_lit: usize,
+    /// Of those, the ones drawn with a bump map on at least one part, and
+    /// their parts whose material names no bump map (drawn flat).
+    pub props_bump_drawn: usize,
+    pub bump_parts_without_map: usize,
+    /// Bump maps the drawn props use, and of those the ones stored in the
+    /// game's two-byte bump formats (the rest are colour normal maps).
+    pub bump_maps: usize,
+    pub bump_maps_two_byte: usize,
+    /// BSP surfaces whose material has a bump map. The map stores no light
+    /// direction for them, so they are drawn flat.
+    pub bsp_polygons_bump_flat: usize,
+    /// Bump maps a material names that couldn't be read, with why.
+    pub bump_failures: BTreeMap<String, usize>,
     pub backdrop_polygons: usize,
     /// Terrains (outdoor ground): read, triangles drawn, painted layers
     /// drawn, layers left out with why, terrains that couldn't be read.
@@ -206,7 +314,7 @@ struct Builder {
 }
 
 /// Material, translucent, two-sided, from a mesh, lightmap page, has
-/// colours, in the sky, mover.
+/// colours, in the sky, mover, bump-lit.
 type BatchKey = (
     String,
     bool,
@@ -216,6 +324,7 @@ type BatchKey = (
     bool,
     bool,
     Option<usize>,
+    bool,
 );
 
 impl Builder {
@@ -231,6 +340,7 @@ impl Builder {
         coloured: bool,
         sky: bool,
         mover: Option<usize>,
+        bump_lit: bool,
     ) -> &mut Batch {
         let k = (
             key.to_string(),
@@ -241,6 +351,7 @@ impl Builder {
             coloured,
             sky,
             mover,
+            bump_lit,
         );
         let i = *self.by_key.entry(k).or_insert_with(|| {
             self.batches.push(Batch {
@@ -251,6 +362,7 @@ impl Builder {
                 sky,
                 lightmap_page,
                 mover,
+                bump_lit,
                 ..Default::default()
             });
             self.batches.len() - 1
@@ -363,6 +475,7 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, sky_zone: Option<u
         } else {
             ctx.stats.bsp_polygons_unlit += 1;
         }
+        ctx.stats.bsp_polygons_bump_flat += pic.as_ref().is_some_and(|p| p.bump.is_some()) as usize;
         let batch = b.batch(
             &key,
             &pic,
@@ -373,6 +486,7 @@ fn add_bsp(b: &mut Builder, bsp: &Bsp, lightmaps: &LightMaps, sky_zone: Option<u
             false,
             sky,
             None,
+            false,
         );
         let base = batch.positions.len() as u32;
         let n = dir_to_bevy(poly.normal);
@@ -443,8 +557,12 @@ fn load_mesh(
             }
             ObjectRef::None => return Err("no mesh".to_string()),
         };
-        let mesh = static_mesh::read_static_mesh(&owner.0, &owner.1, &owner.0.exports[k])
+        let mut mesh = static_mesh::read_static_mesh(&owner.0, &owner.1, &owner.0.exports[k])
             .map_err(|e| format!("mesh read error: {e}"))?;
+        // Its simple collision shape, so physics props settle onto the
+        // same things as in `rc_level::map_collision` (a shape that
+        // can't be read leaves none).
+        let _ = rc_level::collision::read_simple_shape(&owner.0, &owner.1, &mut mesh);
         Ok(Rc::new((mesh, owner)))
     })();
     cache.insert(key, result.clone());
@@ -460,10 +578,14 @@ fn add_mesh_actor(
     mesh: &StaticMesh,
     owner: &(Package, Vec<u8>),
     colours: Option<&[[u8; 4]]>,
+    bump_light: Option<&[BumpCorner]>,
     mover: Option<usize>,
 ) {
     let axes = rotation_axes(p.rotation);
     let s3 = p.draw_scale_3d;
+    // Light directions only go with the colours they were baked with.
+    let bump_light = bump_light.filter(|l| colours.is_some_and(|c| c.len() == l.len()));
+    let mut bump_drawn = false;
     // A mirrored actor (an odd number of negative scales) turns its
     // triangles inside out, so flip them back.
     let mirrored = (s3[0] * s3[1] * s3[2] * p.draw_scale) < 0.0;
@@ -491,6 +613,12 @@ fn add_mesh_actor(
                 )
             }
         };
+        let has_map = pic.as_ref().is_some_and(|p| p.bump.is_some());
+        let bump_lit = bump_light.is_some() && has_map;
+        if bump_light.is_some() && !has_map {
+            ctx.stats.bump_parts_without_map += 1;
+        }
+        bump_drawn |= bump_lit;
         let batch = b.batch(
             &key,
             &pic,
@@ -501,6 +629,7 @@ fn add_mesh_actor(
             colours.is_some(),
             sky,
             mover,
+            bump_lit,
         );
         let first = sec.first_index as usize;
         let count = sec.num_faces as usize * 3;
@@ -537,6 +666,25 @@ fn add_mesh_actor(
                     if let Some(c) = colours {
                         batch.colours.push(c[vi as usize]);
                     }
+                    if let (true, Some(l)) = (bump_lit, bump_light) {
+                        let corner = l[vi as usize];
+                        // A direction (not a normal): it scales with the
+                        // mesh, then turns with it.
+                        let mut wd = [0.0f32; 3];
+                        for (k, axis) in axes.iter().enumerate() {
+                            for c in 0..3 {
+                                wd[c] += corner.dir[k] * s3[k] * p.draw_scale * axis[c];
+                            }
+                        }
+                        let len = bsp::dot(wd, wd).sqrt();
+                        let wd = if len > 1e-6 {
+                            wd.map(|x| x / len)
+                        } else {
+                            [0.0; 3]
+                        };
+                        batch.light_dirs.push(dir_to_bevy(wd));
+                        batch.light_colours.push(corner.light);
+                    }
                     batch.positions.len() as u32 - 1
                 });
             }
@@ -548,7 +696,19 @@ fn add_mesh_actor(
             ctx.stats.mesh_triangles += 1;
         }
     }
+    ctx.stats.props_bump_drawn += bump_drawn as usize;
 }
+
+/// A physics prop drawn once the ground is known: placement, mesh, corner
+/// colours, bump light, in the sky, mover.
+type LooseProp = (
+    Placement,
+    Rc<(StaticMesh, Loaded)>,
+    Option<Vec<[u8; 4]>>,
+    Option<Vec<BumpCorner>>,
+    bool,
+    Option<usize>,
+);
 
 /// A stored corner colour with extra light added (0-255 scale, alpha kept).
 fn add_light(c: [u8; 4], extra: [f32; 3]) -> [u8; 4] {
@@ -666,7 +826,10 @@ fn prop_zone(bsp: &Bsp, p: &Placement, mesh: &StaticMesh, stats: &mut Stats) -> 
             counts[z as usize] += 1;
         }
     }
-    match (1..256).max_by_key(|&z| counts[z]).filter(|&z| counts[z] > 0) {
+    match (1..256)
+        .max_by_key(|&z| counts[z])
+        .filter(|&z| counts[z] > 0)
+    {
         Some(z) => {
             stats.props_zone_from_corners += 1;
             Some(z as u8)
@@ -715,6 +878,143 @@ fn terrain_light(normal: [f32; 3], suns: &[(Vec3f, [f32; 3])], ambient: [f32; 3]
 }
 
 type Vec3f = [f32; 3];
+
+/// How a point or spot light fades with distance, for props we light
+/// ourselves (`unbaked_prop_light`): full at the light, nothing at its
+/// radius, in a straight line (see `POINT_LIGHT_SCALE`).
+fn point_falloff(distance: f32, radius: f32) -> f32 {
+    if radius <= 0.0 || distance >= radius {
+        return 0.0;
+    }
+    1.0 - distance / radius
+}
+
+/// Point and spot lights on props we light ourselves: colour x brightness
+/// x facing x `point_falloff` x this. Fitted 2026-11-10 by working out the
+/// light for pro's props that do have stored light and comparing corner
+/// by corner (corners lit in both): with a straight fade the stored light
+/// was 1.58 times ours (middle half 1.46-1.61) and about as many corners
+/// were lit (57,057 stored, 58,894 ours), so the shape fits and only the
+/// strength was off. A fade squared, or a shorter reach, lit too few
+/// corners and spread the ratio out (2.3-4.2). With 1.6: 0.99 (0.91-1.00).
+const POINT_LIGHT_SCALE: f32 = 1.6;
+
+/// Suns on props we light ourselves: colour x brightness x facing x this.
+/// The same comparison on geo_01briefing (sun-lit) gave 0.81 (middle half
+/// 0.80-0.81), which also matches the terrain being about 20% brighter
+/// than the props with the full value (`terrain_light`). On geo_01a the
+/// canyon walls shade much of it (39,519 corners lit there against our
+/// 101,265, no shadows here), so it isn't usable for fitting.
+const SUN_LIGHT_SCALE: f32 = 0.8;
+
+/// Corner light for a prop the map stores no light for, worked out from the
+/// map's lights the way the stored light behaves (0-255 scale, before the
+/// draw gain).
+///
+/// The map only stores light for props that stay put (their
+/// `StaticMeshInstance`). Props a level script moves or shows later, such
+/// as the clone babies in the prologue's tanks (`bStatic` off), have none,
+/// and Unreal lights those as it draws them, from the lights around them.
+/// They used to be drawn at full brightness, which showed them as flat
+/// shapes with no shading at all.
+///
+/// Each corner gets its zone's ambient (the halved value, as on other
+/// props) plus, from each light that doesn't move (moving ones are added
+/// live by `PropMaterial`), the light's colour x brightness x how squarely
+/// the corner faces it x a fade to nothing at its radius. No shadows.
+fn unbaked_prop_light(
+    p: &Placement,
+    mesh: &StaticMesh,
+    lights: &[Light],
+    ambient: [f32; 3],
+) -> Vec<[u8; 4]> {
+    let axes = rotation_axes(p.rotation);
+    let s3 = p.draw_scale_3d;
+    let world_points: Vec<Vec3f> = mesh
+        .vertices
+        .iter()
+        .map(|v| p.transform_point(v.position))
+        .collect();
+    // Only lights that can reach the prop at all.
+    let (lo, hi) = world_points
+        .iter()
+        .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), w| {
+            (
+                [lo[0].min(w[0]), lo[1].min(w[1]), lo[2].min(w[2])],
+                [hi[0].max(w[0]), hi[1].max(w[1]), hi[2].max(w[2])],
+            )
+        });
+    let near: Vec<&Light> = lights
+        .iter()
+        .filter(|l| !l.dynamic)
+        .filter(|l| {
+            l.kind == light::LightKind::Directional || {
+                let d2: f32 = (0..3)
+                    .map(|k| {
+                        let c = l.location[k].clamp(lo[k], hi[k]);
+                        (l.location[k] - c).powi(2)
+                    })
+                    .sum();
+                d2 < l.radius * l.radius
+            }
+        })
+        .collect();
+    mesh.vertices
+        .iter()
+        .zip(&world_points)
+        .map(|(v, w)| {
+            let mut wn = [0.0f32; 3];
+            for (k, axis) in axes.iter().enumerate() {
+                for c in 0..3 {
+                    let sk = if s3[k].abs() < 1e-6 { 1e-6 } else { s3[k] };
+                    wn[c] += v.normal[k] * axis[c] / sk;
+                }
+            }
+            let len = bsp::dot(wn, wn).sqrt().max(1e-6);
+            let n = wn.map(|x| x / len);
+            let mut c = ambient;
+            for l in &near {
+                let colour = l.color().map(|x| x * l.brightness);
+                let strength = match l.kind {
+                    light::LightKind::Directional => {
+                        let dir = rotation_axes(l.rotation)[0];
+                        (-bsp::dot(n, dir)).max(0.0) * SUN_LIGHT_SCALE
+                    }
+                    light::LightKind::Point | light::LightKind::Spot => {
+                        let to = [
+                            l.location[0] - w[0],
+                            l.location[1] - w[1],
+                            l.location[2] - w[2],
+                        ];
+                        let d = bsp::dot(to, to).sqrt().max(1e-3);
+                        let to = to.map(|x| x / d);
+                        let mut k = bsp::dot(n, to).max(0.0)
+                            * point_falloff(d, l.radius)
+                            * POINT_LIGHT_SCALE;
+                        if l.kind == light::LightKind::Spot {
+                            // Same cone reading as the live spotlights
+                            // (`lighting::spawn_lights`): 0-255 is 0-90 degrees.
+                            let axis = rotation_axes(l.rotation)[0];
+                            let outer = (l.cone as f32 / 255.0 * std::f32::consts::FRAC_PI_2)
+                                .clamp(0.02, 1.55);
+                            let along = -bsp::dot(to, axis);
+                            if along < outer.cos() {
+                                k = 0.0;
+                            }
+                        }
+                        k
+                    }
+                };
+                if strength > 0.0 {
+                    for k in 0..3 {
+                        c[k] += colour[k] * strength;
+                    }
+                }
+            }
+            [c[0], c[1], c[2], 255.0].map(|v| v.clamp(0.0, 255.0).round() as u8)
+        })
+        .collect()
+}
 
 /// A terrain's alpha (0-255) at grid point (x, y), read from its alpha map
 /// picture stretched over the whole grid, blending the four nearest pixels
@@ -844,7 +1144,18 @@ fn add_terrain(
         let us = layer.u_scale.abs().max(1e-3) * t.spacing[0];
         let vs = layer.v_scale.abs().max(1e-3) * t.spacing[1];
         let key = format!("terrain {} layer {li}: {key}", t.export);
-        let batch = b.batch(&key, &pic, li > 0, true, false, None, true, sky, None);
+        let batch = b.batch(
+            &key,
+            &pic,
+            li > 0,
+            true,
+            false,
+            None,
+            true,
+            sky,
+            None,
+            false,
+        );
         batch.terrain_layer = Some(li);
         let base = batch.positions.len() as u32;
         for (i, p) in t.points.iter().enumerate() {
@@ -958,10 +1269,31 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     // So do props with a tag of their own, which level scripts may remove
     // (barricades, bunker walls). They are tagged `MoverPart` too.
     mover_exports.extend(rc_level::scripts::tagged_actors(pkg, data, &level).into_keys());
+    // And props weapons can break (barrels, consoles, rock cover).
+    {
+        let mats = &mut *ctx.mats;
+        mover_exports.extend(
+            rc_level::breakables::read(&mut class_looks, pkg, data, &level, &mut |n: &str| {
+                mats.package(n)
+            })
+            .into_iter()
+            .map(|b| b.export),
+        );
+    }
     ctx.stats.movers = movers.movers.len();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
     #[allow(clippy::type_complexity)]
-    let mut loose: Vec<(Placement, Rc<(StaticMesh, Loaded)>, Option<Vec<[u8; 4]>>, bool, Option<usize>)> = Vec::new();
+    let mut loose: Vec<LooseProp> = Vec::new();
+    // Ammo boxes, dropped onto the ground like the game drops them
+    // (`rc_level::pickups::rest_on_ground`).
+    let mut boxes: Vec<LooseProp> = Vec::new();
+    #[allow(clippy::type_complexity)]
+    let mut unbaked: Vec<(
+        Placement,
+        Rc<(StaticMesh, Loaded)>,
+        Option<u8>,
+        Option<usize>,
+    )> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
         let p = match actors::read_placement(pkg, data, a) {
@@ -997,17 +1329,33 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             }
         }
         let mut p = p;
+        // Ammo and grenade boxes, and weapons lying about: drawn on their
+        // own so they can vanish when taken, with the model their
+        // "...Defaults" class gives.
+        let is_box = {
+            let mats = &mut *ctx.mats;
+            rc_level::pickups::is_takeable(&mut class_looks, pkg, p.export, &mut |n: &str| {
+                mats.package(n)
+            })
+        };
         // Props and doors that take their model from their class.
         let mut owner = map.clone();
         if p.static_mesh == 0 {
             let mats = &mut *ctx.mats;
-            match rc_level::class_look::apply_class_look(
-                &mut class_looks,
-                pkg,
-                data,
-                &mut p,
-                &mut |n: &str| mats.package(n),
-            ) {
+            let found = if is_box {
+                rc_level::pickups::apply_box_look(&mut class_looks, pkg, &mut p, &mut |n: &str| {
+                    mats.package(n)
+                })
+            } else {
+                rc_level::class_look::apply_class_look(
+                    &mut class_looks,
+                    pkg,
+                    data,
+                    &mut p,
+                    &mut |n: &str| mats.package(n),
+                )
+            };
+            match found {
                 Some(o) => {
                     owner = o;
                     ctx.stats.class_mesh_actors += 1;
@@ -1030,6 +1378,11 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 };
                 let bump_lit = baked.as_ref().is_some_and(|b| !b.directions.is_empty());
                 ctx.stats.props_bump_lit += bump_lit as usize;
+                // Worked out from the stored colours before ambient is
+                // added: the light directions go with those.
+                let bump_light = baked
+                    .as_ref()
+                    .and_then(|b| bump_corners(&b.colours, &b.directions));
                 let colours = baked.map(|b| b.colours);
                 let zone = prop_zone(&bsp, &p, &m.0, &mut ctx.stats);
                 let in_sky = sky_zone.is_some() && zone == sky_zone;
@@ -1074,7 +1427,11 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                     }
                 };
                 ctx.stats.sky_props += in_sky as usize;
-                let mover = mover_exports.contains(&p.export).then_some(p.export);
+                let mover = (is_box || mover_exports.contains(&p.export)).then_some(p.export);
+                if is_box {
+                    boxes.push((p, m, colours, bump_light, in_sky, mover));
+                    continue;
+                }
                 ctx.stats.movers_drawn += mover
                     .is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m))
                     as usize;
@@ -1088,7 +1445,13 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                         .is_some_and(|l| l.is_a("KarmaProp"))
                 };
                 if is_karma {
-                    loose.push((p, m, colours, in_sky, mover));
+                    loose.push((p, m, colours, bump_light, in_sky, mover));
+                    continue;
+                }
+                // No stored light (props that can move or appear later):
+                // lit from the map's lights once they are all read.
+                if colours.is_none() && !in_sky && !p.unlit && p.static_mesh_instance == 0 {
+                    unbaked.push((p, m, zone, mover));
                     continue;
                 }
                 add_mesh_actor(
@@ -1099,12 +1462,33 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                     &m.0,
                     &m.1,
                     colours.as_deref(),
+                    bump_light.as_deref(),
                     mover,
                 );
                 placed.push((p, m));
             }
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
         }
+    }
+    for (p, m, zone, mover) in unbaked {
+        let ambient = zone
+            .and_then(|z| zone_ambient.get(&z))
+            .copied()
+            .unwrap_or([0.0; 3]);
+        let colours = unbaked_prop_light(&p, &m.0, &lights, ambient);
+        ctx.stats.props_lit_from_lights += 1;
+        add_mesh_actor(
+            &mut b,
+            &mut ctx,
+            false,
+            &p,
+            &m.0,
+            &m.1,
+            Some(&colours),
+            None,
+            mover,
+        );
+        placed.push((p, m));
     }
     let (terrains, terrain_failures) =
         rc_level::terrain::read_terrains(pkg, data, level.actors.iter().flatten().copied());
@@ -1115,16 +1499,82 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         let mut ground = rc_level::collision::collision_triangles(&bsp, &pairs);
         rc_level::collision::add_terrains(&mut ground, &terrains);
         let ground = rc_level::settle::Ground::new(&ground.triangles);
-        for (mut p, m, colours, in_sky, mover) in loose {
+        for (mut p, m, colours, bump_light, in_sky, mover) in loose {
             if let Some(d) = rc_level::settle::settle(&mut p, &m.0, &ground) {
                 ctx.stats.props_settled += 1;
                 ctx.stats.settle_drop_max = ctx.stats.settle_drop_max.max(d);
             }
-            add_mesh_actor(&mut b, &mut ctx, in_sky, &p, &m.0, &m.1, colours.as_deref(), mover);
+            add_mesh_actor(
+                &mut b,
+                &mut ctx,
+                in_sky,
+                &p,
+                &m.0,
+                &m.1,
+                colours.as_deref(),
+                bump_light.as_deref(),
+                mover,
+            );
             placed.push((p, m));
+        }
+        for (mut p, m, colours, bump_light, in_sky, mover) in boxes {
+            let found = {
+                let mats = &mut *ctx.mats;
+                rc_level::pickups::read_box(&mut class_looks, pkg, data, p.export, &mut |n: &str| {
+                    mats.package(n)
+                })
+            };
+            if let Some(mut bx) = found {
+                let d = rc_level::pickups::rest_on_ground(&mut bx, |q| ground.below(q));
+                p.location[2] -= d;
+                ctx.stats.ammo_boxes += 1;
+                ctx.stats.ammo_box_drop_max = ctx.stats.ammo_box_drop_max.max(d);
+            } else {
+                let found = {
+                    let mats = &mut *ctx.mats;
+                    rc_level::pickups::read_weapon(
+                        &mut class_looks,
+                        pkg,
+                        data,
+                        p.export,
+                        &mut |n: &str| mats.package(n),
+                    )
+                };
+                if let Some(mut w) = found {
+                    let d = rc_level::pickups::rest_weapon_on_ground(&mut w, |q| ground.below(q));
+                    p.location[2] -= d;
+                    ctx.stats.weapon_pickups += 1;
+                }
+            }
+            add_mesh_actor(
+                &mut b,
+                &mut ctx,
+                in_sky,
+                &p,
+                &m.0,
+                &m.1,
+                colours.as_deref(),
+                bump_light.as_deref(),
+                mover,
+            );
         }
     }
     ctx.stats.prop_light = average_light(b.batches.iter().filter(|b| b.from_mesh));
+    {
+        let mut seen = std::collections::HashSet::new();
+        for p in b
+            .batches
+            .iter()
+            .filter(|b| b.bump_lit)
+            .filter_map(|b| b.picture.as_ref())
+        {
+            if let Some(m) = p.bump.as_ref().filter(|m| seen.insert(Arc::as_ptr(m))) {
+                ctx.stats.bump_maps += 1;
+                ctx.stats.bump_maps_two_byte += m.two_byte_format as usize;
+            }
+        }
+        ctx.stats.bump_failures = ctx.mats.bump_failures.clone();
+    }
     for t in &terrains {
         let zone = bsp.point_zone(t.point(t.size_x / 2, t.size_y / 2));
         let in_sky = sky_zone.is_some() && zone == sky_zone;

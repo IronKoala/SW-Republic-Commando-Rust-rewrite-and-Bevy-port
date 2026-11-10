@@ -1,0 +1,44 @@
+# What the player fires from the Wookiee heavy turret (the original's
+# first-person turret weapon HeavyTurret, handed to the player while on the
+# turret). Each pull fires a shell from both barrels at once. After 3
+# pulls it cools down for 3 seconds (here: a "reload").
+#
+# Numbers marked "game:" are HeavyTurret (ctinventory.u) with
+# HeavyTurretDefaults (Properties/properties.u) on top, and its ammo
+# HeavyTurretAmmo. "placeholder" marks the few not read yet.
+
+name = "Wookiee Heavy Turret"
+
+[fire]
+mode = "automatic"        # game: FireMode 2 (FM_Automatic)
+shot_delay = 0.75         # game: HeavyTurretDefaults ShotDelay
+aim_error = 0
+offset = [150, 60, -20]   # placeholder: the arms model's muzzle_l and muzzle_r bones
+mirror = true             # game: CalculateFire fires from muzzle_l and muzzle_r
+
+[ammo]
+clip_size = 3             # game: HeavyTurretDefaults ReloadCount (shots before cooling down)
+max_ammo = 10000          # game: Turret AmmoAmount 10000 (never runs out)
+start_ammo = 10000
+reload_time = 3           # game: HeavyTurretDefaults CoolDownTime
+
+[shot]
+kind = "lobbed"           # flies like a grenade
+speed = 5000              # game: HeavyTurretProj Speed
+grenade = "turret_shell"
+
+[recoil]
+kick = [400, 400, 0]      # game: HeavyTurretDefaults WeaponKick
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_dSpidMisFire_01"] # game: HeavyTurretDefaults FireSound (not checked in the package yet)
+
+[model]
+package = "weapons"
+mesh = "DC17mBlaster"     # placeholder: shown only if the arms below can't be read
+
+[arms]
+mesh = "HudArmsWHT"       # game: HeavyTurret Mesh
+fov = 85                  # game: Weapon DisplayFOV
+brightness = 0.75         # our choice, as the other weapons

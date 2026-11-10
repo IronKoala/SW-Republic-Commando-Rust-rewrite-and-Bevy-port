@@ -532,6 +532,13 @@ impl Squad {
             (_, None) => (false, "no target".into()),
             (None, _) => (false, "busy".into()),
         };
+        // An empty speciality gun stays put away.
+        let (want, why) = match &special {
+            Some(j) if want && !j.weapon.is_empty() && !self.has_ammo(i, &j.weapon) => {
+                (false, format!("out of {}", j.weapon))
+            }
+            _ => (want, why),
+        };
         if want != self.members[i].fight.special {
             let job = special
                 .as_ref()
@@ -645,6 +652,11 @@ impl Squad {
         {
             return;
         }
+        let throws = self.settings.ammo.throws.clone();
+        if !self.has_ammo(i, &throws) {
+            return;
+        }
+        self.use_ammo(i, &throws, events);
         let m = &mut self.members[i];
         m.auto_throw_in = j.auto_interval;
         m.fight.throws += 1;
@@ -712,6 +724,11 @@ impl Squad {
         if !moving && off_facing > f.max_aim_yaw {
             return;
         }
+        // Nothing left in this gun: hold fire (`[ammo] limited` only).
+        if !self.has_ammo(i, &f.weapon) {
+            self.members[i].fight.next_shot = now + f.shot_interval;
+            return;
+        }
         let range = to.length();
         // Friends in the way: the leader and the other squad mates, as
         // whole bodies. The shot can stray by our aim error plus the
@@ -766,6 +783,7 @@ impl Squad {
             pitch.sin(),
         );
         let pause = self.rng.range(f.burst_pause_min, f.burst_pause_max);
+        self.use_ammo(i, &f.weapon, events);
         let m = &mut self.members[i];
         let burst_start = m.fight.burst_left == f.burst_count;
         m.fight.shots += 1;

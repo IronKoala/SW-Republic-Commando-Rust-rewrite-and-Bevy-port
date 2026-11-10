@@ -45,7 +45,9 @@ damping = 0.1             # RecoilDampening
 [sound]
 package = "gen_sound"
 fire = ["wep_GEN_dc17Fire_02"]      # FireSound
-reload = "fol_GEN_dc17reload_01"    # played by the Reload animation
+# No reload line: the Reload animation plays fol_GEN_dc17reload_01 itself
+# (see rc_combat::arms_sound). `reload = "..."` is still read, for a
+# weapon with no arms model.
 empty = "wep_GEN_empty_01"          # WeaponEmptySound (Weapon's default)
 
 [model]
