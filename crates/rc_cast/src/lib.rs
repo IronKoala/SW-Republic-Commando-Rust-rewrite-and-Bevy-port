@@ -491,26 +491,41 @@ fn spawn_pieces(
                         RenderAssetUsages::RENDER_WORLD,
                     ))
                 });
-                // As for the squad: the level's light is baked into its
-                // surfaces and the scene has no ambient light, so give the
-                // character a steady share of its own colour.
-                let material = materials.add(StandardMaterial {
-                    base_color: if texture.is_some() {
-                        Color::WHITE
-                    } else {
-                        Color::srgb(0.6, 0.6, 0.6)
-                    },
-                    emissive: LinearRgba::rgb(a, a, a) * if texture.is_some() { 1.0 } else { 0.3 },
-                    emissive_texture: texture.clone(),
-                    base_color_texture: texture,
-                    perceptual_roughness: 0.7,
-                    alpha_mode: if s.skin.as_ref().is_some_and(|k| k.cutout) {
-                        AlphaMode::Mask(0.5)
-                    } else {
-                        AlphaMode::Opaque
-                    },
-                    ..default()
-                });
+                // Holograms (the prologue's hologram rifles and advisor)
+                // glow by themselves: unlit, added to what's behind them,
+                // seen from both sides.
+                let material = if s.skin.as_ref().is_some_and(|k| k.hologram) {
+                    materials.add(StandardMaterial {
+                        base_color_texture: texture,
+                        unlit: true,
+                        alpha_mode: AlphaMode::Add,
+                        double_sided: true,
+                        cull_mode: None,
+                        ..default()
+                    })
+                } else {
+                    // As for the squad: the level's light is baked into its
+                    // surfaces and the scene has no ambient light, so give the
+                    // character a steady share of its own colour.
+                    materials.add(StandardMaterial {
+                        base_color: if texture.is_some() {
+                            Color::WHITE
+                        } else {
+                            Color::srgb(0.6, 0.6, 0.6)
+                        },
+                        emissive: LinearRgba::rgb(a, a, a)
+                            * if texture.is_some() { 1.0 } else { 0.3 },
+                        emissive_texture: texture.clone(),
+                        base_color_texture: texture,
+                        perceptual_roughness: 0.7,
+                        alpha_mode: if s.skin.as_ref().is_some_and(|k| k.cutout) {
+                            AlphaMode::Mask(0.5)
+                        } else {
+                            AlphaMode::Opaque
+                        },
+                        ..default()
+                    })
+                };
                 c.spawn((
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(material),

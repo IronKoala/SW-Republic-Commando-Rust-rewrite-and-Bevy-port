@@ -611,7 +611,7 @@ copy of the game.
   when the projector's throw animation reaches its "start the briefing"
   moment, and let the player go at their end, as in the original (since
   2026-11-10; checked in the cloud from the log, not by playing). Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the holograms' flicker and glow, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
 - Character shadows (since 2026-11-10, needs SQUAD SHADOWS on in the
   GRAPHICS options, as in the original): the characters the map marks

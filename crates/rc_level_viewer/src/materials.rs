@@ -58,6 +58,14 @@ pub struct Picture {
     /// Glow that adds light instead of covering what's behind (the game's
     /// `HsFalloff` light shafts).
     pub additive: bool,
+    /// Blended over what's behind by its alpha, rather than cut into solid
+    /// and see-through parts (`FinalBlend` with `FrameBufferBlending`
+    /// `FB_AlphaBlend`: the briefing holograms' grids and text).
+    pub blend: bool,
+    /// A hologram (`HsHologram`): the picture is already turned into its
+    /// glow colour (`rc_image::hologram`) and is drawn as added light,
+    /// without the level's light on it.
+    pub hologram: bool,
     /// The material's bump map, if it has one (`HsBump...` materials'
     /// `NormalMap`, or a `Shader`'s `Bumpmap`).
     pub bump: Option<Arc<Bump>>,
@@ -215,6 +223,8 @@ fn decode_texture(pkg: &Package, data: &[u8], index: usize) -> Result<Picture, F
         has_alpha: alpha_pixels && uses_alpha,
         alpha_pixels,
         additive: false,
+        blend: false,
+        hologram: false,
         bump: None,
     })
 }
@@ -338,6 +348,23 @@ impl Materials {
         let bytes = &data[start..start + e.serial_size as usize];
         let mut r = rc_package::Reader::new(bytes);
         let props = properties::read_properties(pkg, &mut r).map_err(|e| e.to_string())?;
+        if class == "HsHologram" {
+            return self.hologram(pkg, data, &props, depth);
+        }
+        // `HsFalloff` (light shafts, the prologue's tank liquid) tints its
+        // picture by `DiffuseTint` and `GradientTint` (white, no change,
+        // when not set: the class defaults in Engine.u). Its falloff
+        // picture, which fades the edges by viewing angle, isn't used.
+        let falloff_tint = additive.then(|| {
+            let a = setting_colour(pkg, &props, "DiffuseTint").unwrap_or([255; 4]);
+            let b = setting_colour(pkg, &props, "GradientTint").unwrap_or([255; 4]);
+            [0, 1, 2].map(|k| ((a[k] as u32 * b[k] as u32 + 127) / 255) as u8)
+        });
+        let blend = class == "FinalBlend"
+            && matches!(
+                properties::find(pkg, &props, "FrameBufferBlending").map(|p| &p.value),
+                Some(Value::Byte(2))
+            );
         for link in links {
             if let Some(Value::Object(o)) = properties::find(pkg, &props, link).map(|p| &p.value) {
                 if *o == 0 {
@@ -355,6 +382,10 @@ impl Materials {
                 let bump = self.material_bump(pkg, data, &class, &props, depth);
                 return found.map(|mut p| {
                     p.additive |= additive;
+                    p.blend |= blend && !p.hologram;
+                    if let Some(t) = falloff_tint.filter(|t| *t != [255; 3]) {
+                        rc_image::tint(&mut p.image, t);
+                    }
                     if cuts_holes {
                         p.has_alpha = p.alpha_pixels;
                     }
@@ -367,6 +398,58 @@ impl Materials {
         }
         let names: Vec<_> = props.iter().map(|p| pkg.name(p.name).to_string()).collect();
         Err(format!("{class} has none of {links:?} (it has {names:?})"))
+    }
+}
+
+impl Materials {
+    /// An `HsHologram`: its `DiffuseTexture` (or plain white if it has
+    /// none, like `Holo_Blank`) turned into glow of its `HologramColor`.
+    fn hologram(
+        &mut self,
+        pkg: &Package,
+        data: &[u8],
+        props: &[properties::Property],
+        depth: usize,
+    ) -> Result<Picture, Failure> {
+        let colour = setting_colour(pkg, props, "HologramColor").unwrap_or(HOLOGRAM_COLOUR);
+        let base = match properties::find(pkg, props, "DiffuseTexture").map(|p| &p.value) {
+            Some(Value::Object(o)) if *o != 0 => match ObjectRef::from_index(*o) {
+                ObjectRef::Export(j) => Some(self.follow(pkg, data, j, depth + 1)?),
+                ObjectRef::Import(_) => Some(self.resolve_path(&object_path(pkg, *o), depth + 1)?),
+                ObjectRef::None => None,
+            },
+            _ => None,
+        };
+        let image = match base {
+            Some(p) => p.image,
+            None => Rgba {
+                width: 1,
+                height: 1,
+                pixels: vec![255; 4],
+            },
+        };
+        Ok(Picture {
+            image: rc_image::hologram(&image, [colour[0], colour[1], colour[2]]),
+            has_alpha: false,
+            alpha_pixels: false,
+            additive: true,
+            blend: false,
+            hologram: true,
+            bump: None,
+        })
+    }
+}
+
+/// `HsHologram`'s default `HologramColor` (from its class defaults in the
+/// game's Engine.u), a light blue, as red, green, blue, alpha.
+pub const HOLOGRAM_COLOUR: [u8; 4] = [122, 206, 255, 50];
+
+/// A material's `Color` setting as red, green, blue, alpha (see
+/// `rc_image::unreal_color` for the stored order), if it is set.
+pub fn setting_colour(pkg: &Package, props: &[properties::Property], name: &str) -> Option<[u8; 4]> {
+    match properties::find(pkg, props, name).map(|p| &p.value) {
+        Some(Value::Raw(b)) if b.len() == 4 => Some(rc_image::unreal_color([b[0], b[1], b[2], b[3]])),
+        _ => None,
     }
 }
 
@@ -544,6 +627,8 @@ fn constant_colour(pkg: &Package, data: &[u8], k: usize, name: &str) -> Result<P
         has_alpha: rgba[3] < 255,
         alpha_pixels: rgba[3] < 255,
         additive: false,
+        blend: false,
+        hologram: false,
         bump: None,
     })
 }

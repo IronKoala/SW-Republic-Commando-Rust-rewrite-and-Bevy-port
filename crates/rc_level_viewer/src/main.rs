@@ -455,8 +455,8 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         }
     }
     log.line(format!(
-        "prop baked light: {} drawn props have corner colours, {} have none, {} have a colour list of the wrong length (not used)",
-        s.mesh_actors_with_colours, s.mesh_actors_without_colours, s.colour_count_mismatch
+        "prop baked light: {} drawn props have corner colours, {} have none ({} of those lit from the map's lights), {} have a colour list of the wrong length (not used)",
+        s.mesh_actors_with_colours, s.mesh_actors_without_colours, s.props_lit_from_lights, s.colour_count_mismatch
     ));
     log.line(format!(
         "lights: {} lights read, {} of them real-time (bDynamicLight); {} zones with an ambient light",
