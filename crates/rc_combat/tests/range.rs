@@ -157,6 +157,7 @@ fn every_weapon_file_reads() {
             "e5_blaster_pickup",
             "e5_blaster_tm",
             "elite_beam_enemy",
+            "grievous_missile_rack",
             "sbd_blaster",
             "trandoshan_smg"
         ]
@@ -451,6 +452,7 @@ fn every_grenade_file_reads_and_the_player_carries_them() {
             "dc17m_antiarmor_round",
             "emp_grenade",
             "flash_grenade",
+            "grievous_missile",
             "sonic_detonator",
             "thermal_detonator",
             "thermal_detonator_enemy"

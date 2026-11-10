@@ -509,6 +509,18 @@ copy of the game.
   model, skin, animations, voice lines, 1000 health and damage table. They
   burn you with the Elite Beam in one-second bursts. Settings:
   `data/enemies/geonosian_elite.toml` and `data/weapons/elite_beam_enemy.toml`.
+- **Grievous's bodyguards (tested in the cloud sandbox with automatic
+  tests, not yet in the real game on Windows).** The tall droid guards on
+  Kashyyyk now appear where the original puts them, with the game's model,
+  skin, animations, 2000 health, a 250-point shield and their damage table.
+  Up close they hit with their staff; further off they fire missiles that
+  explode (250 damage, can stun you). On yyy_01e, killing the guards the
+  level sends now ends the level, as in the original. Not done: their
+  missiles don't home in, they don't leap onto walls and ceilings, and the
+  guard that is only meant to be glimpsed by the tower can't be hurt and
+  stays (the level's "seen it" trigger isn't built yet). Settings:
+  `data/enemies/grievous_guard.toml`, `data/weapons/grievous_missile_rack.toml`
+  and `data/grenades/grievous_missile.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each

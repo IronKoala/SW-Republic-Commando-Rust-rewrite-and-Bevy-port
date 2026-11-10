@@ -1,0 +1,39 @@
+# The missile rack on the back of Grievous's bodyguards (GrievousMissileRack).
+# It fires missiles (grievous_missile.toml in data/grenades) that go off on
+# touching anything.
+#
+# The values are the original game's: class GrievousMissileRack
+# (ctinventory.u, parent MissileRack) with GrievousMissileRackDefaults
+# (Properties/properties.u) on top, unless marked otherwise.
+#
+# Not done: the original's missiles home in on their target (HomingMissile,
+# EngineThrust 10000). Ours fly straight at where the guard aimed.
+
+name = "Missile Rack"     # MissileRack ItemName
+
+[fire]
+mode = "semi_auto"        # one missile at a time
+shot_delay = 0.5          # our choice: the guard's FireRockets animation lets off its burst over ~2.6 s
+aim_error = 0
+
+[ammo]
+max_ammo = 100            # MissileRack PickupAmmoCount
+recharge_rate = 100       # never runs dry (Ammunition bInfiniteClipsForNonPlayers)
+
+[shot]
+kind = "lobbed"           # it flies as a grenade does, with no gravity (see the missile's file)
+speed = 2000              # Projectile MaxSpeed (the original starts at 200 and speeds up)
+grenade = "grievous_missile"
+
+[melee]
+range = 250               # GrievousStaff MeleeRange (the guard's staff does its close-up hits)
+damage = 50               # GrievousStaff MeleeDamage
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_dSpidMisFire_01"] # GrievousMissileRackDefaults FireSound
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the rack is part of the guard's own model
+offset = [0, 0, 60]       # our choice: fired from above the shoulders

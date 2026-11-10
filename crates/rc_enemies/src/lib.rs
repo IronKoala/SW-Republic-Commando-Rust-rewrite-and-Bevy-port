@@ -35,7 +35,7 @@ use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
-    Hittable, MeleeAttack, ShotLanded, Stunned, Team, ThrowGrenade,
+    Hittable, MeleeAttack, Shield, ShotLanded, Stunned, Team, ThrowGrenade,
 };
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
@@ -808,6 +808,17 @@ fn think(
                 ));
                 if !p.combat.damage_table.is_empty() {
                     e.insert(DamageTable(p.combat.damage_table.clone()));
+                }
+                if p.combat.shields > 0.0 {
+                    // Grievous's guards: a shield that takes hits first.
+                    // The recharge delay is our choice (the game's is in
+                    // its compiled code); with no recharge rate it never
+                    // matters.
+                    e.insert(Shield::new(
+                        p.combat.shields,
+                        p.combat.shield_recharge_rate,
+                        3.0,
+                    ));
                 }
                 // What the level's scripts call it, and the script it
                 // follows.

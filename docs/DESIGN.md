@@ -2482,6 +2482,18 @@ close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
 with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
 beam weapon is an `instant` shot fired as a burst of quick hits.
 
+**Shields.** `combat.shields` gives an enemy an energy shield that takes
+hits before its health (rc_combat's `Shield`, the same as the player's),
+and `combat.shield_recharge_rate` how fast it comes back (0: never).
+Grievous's bodyguards have 250. **Missiles.** An enemy weapon with a
+`lobbed` shot and a grenade file with `flight.gravity = 0` flies straight
+and goes off on touching anything: the bodyguards' missile rack
+(`grievous_missile_rack.toml` with `data/grenades/grievous_missile.toml`).
+To check that a level's own scripts and its spawners work together without
+a window, `rc_guard_check` (an example in `rc_enemies`) runs yyy_01e's
+scripts and spawners with a stand-in player that kills each bodyguard 3 s
+after it appears, and checks the level ends.
+
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
 `thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
