@@ -4710,6 +4710,8 @@ dependencies = [
  "rc_level",
  "rc_model",
  "rc_movement",
+ "rc_movers",
+ "rc_movers_plugin",
  "rc_nav",
  "rc_package",
  "rc_squad",

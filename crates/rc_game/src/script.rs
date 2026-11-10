@@ -129,6 +129,8 @@ struct Noted {
     /// The player's health and magazine when walking into the level exit,
     /// and the map left.
     leaving: Option<(f32, f32, String)>,
+    /// The ammo box walked into (by name).
+    ammo_box: Option<String>,
 }
 
 pub struct ScriptPlugin;
@@ -915,6 +917,28 @@ fn steps() -> Vec<Step> {
                 c => Err(format!("{c:?}")),
             }
         }),
+        // The map's ammo and grenade boxes (`rc_combat::ammo_box`).
+        Check("geo_01a's ammo and grenade boxes are placed with their models", ammo_boxes_placed),
+        Note(|w| {
+            // Nearly empty rifle, then a DC-17m box at the player's feet.
+            set_rifle(w, 20.0, 0);
+            let name = move_box_to_player(w, "DC17mBlasterBox", 0);
+            w.resource_mut::<Noted>().ammo_box = name;
+        }),
+        Wait(0.3),
+        Check("walking into a DC-17m box fills the rifle to 300", ammo_box_taken),
+        Note(|w| {
+            // Full now: another box is left lying.
+            move_box_to_player(w, "DC17mBlasterBox", 1);
+        }),
+        Wait(0.3),
+        Check("a full rifle leaves the next box lying", ammo_box_left),
+        Note(|w| {
+            set_grenades(w, "thermal_detonator", 0);
+            move_box_to_player(w, "ThermalDetonatorBox", 0);
+        }),
+        Wait(0.5),
+        Check("the grenade crate by the start gives 5 thermal detonators and comes back", grenade_crate),
         // Use some ammo first, so the save differs from a fresh start.
         Hold(Action::Fire, 0.5),
         Wait(0.2),
@@ -1038,6 +1062,7 @@ fn steps() -> Vec<Step> {
             level_script_after_load,
         ),
         Check("quickload puts the doors and lifts back", movers_after_load),
+        Check("quickload keeps the taken ammo box taken", ammo_box_after_load),
         Check("saving again after the load gives the same state", |w| {
             let quick = save_file(w, &SaveSlot::Quick)?;
             let again = rc_save::collect(w, None)?;
@@ -2929,6 +2954,145 @@ fn level_exit_checkpoint(w: &mut World) -> Result<String, String> {
         && reached.first().map(String::as_str) == Some(rc_save::LEVEL_START)
         && (saved - health).abs() < 0.5
     {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+// Ammo and grenade boxes (`rc_combat::ammo_box`), checked on geo_01a: 21
+// DC-17m boxes and the grenade crate by the start, which comes back.
+
+fn ammo_boxes_placed(w: &mut World) -> Result<String, String> {
+    use rc_combat::ammo_box::AmmoBox;
+    let mut q = w.query::<&AmmoBox>();
+    let boxes: Vec<AmmoBox> = q.iter(w).cloned().collect();
+    let mut parts = w.query::<&rc_level_viewer::draw::MoverPart>();
+    let drawn: HashSet<usize> = parts.iter(w).map(|p| p.0).collect();
+    let with_model = boxes.iter().filter(|b| drawn.contains(&b.export)).count();
+    let rifle = boxes.iter().filter(|b| b.class == "DC17mBlasterBox").count();
+    let usable = boxes.iter().filter(|b| b.gives.is_some()).count();
+    let amounts: HashSet<u32> = boxes
+        .iter()
+        .filter(|b| b.class == "DC17mBlasterBox")
+        .map(|b| b.amount)
+        .collect();
+    let got = format!(
+        "{} boxes ({rifle} DC-17m, giving {amounts:?}), {with_model} with a drawn model, {usable} usable",
+        boxes.len()
+    );
+    if boxes.len() == 22 && rifle == 21 && with_model == 22 && usable == 22 && amounts == HashSet::from([300]) {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn set_rifle(w: &mut World, clip: f32, reserve: u32) {
+    let mut q = w.query_filtered::<&mut rc_combat::Arsenal, With<Player>>();
+    if let Some(mut a) = q.iter_mut(w).next() {
+        if let Some((_, s)) = a.weapons.iter_mut().find(|(id, _)| id == "dc17m_blaster") {
+            s.clip = clip;
+            s.reserve = reserve;
+            s.reloading = None;
+        }
+    }
+}
+
+fn set_grenades(w: &mut World, id: &str, n: u32) {
+    let mut q = w.query_filtered::<&mut rc_combat::Grenades, With<Player>>();
+    if let Some(mut g) = q.iter_mut(w).next() {
+        if let Some((_, c)) = g.carried.iter_mut().find(|(i, _)| i == id) {
+            *c = n;
+        }
+    }
+}
+
+/// Put the `nth` untaken box of `class` at the player's feet (its centre
+/// one half-height up), as if they walked into it. Returns its name.
+fn move_box_to_player(w: &mut World, class: &str, nth: usize) -> Option<String> {
+    let mut q = w.query_filtered::<&Transform, With<Player>>();
+    let feet = q.iter(w).next()?.translation;
+    let mut boxes = w.query::<(&mut Transform, &rc_combat::ammo_box::AmmoBox)>();
+    let mut list: Vec<_> = boxes
+        .iter_mut(w)
+        .filter(|(_, b)| b.class == class && !b.taken)
+        .collect();
+    list.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+    let (t, b) = list.get_mut(nth)?;
+    t.translation = feet + Vec3::Y * (b.height / rc_game_core::units::UU_PER_UNIT);
+    Some(b.name.clone())
+}
+
+fn rifle_total(w: &mut World) -> Option<u32> {
+    let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+    let a = q.iter(w).next()?;
+    let (_, s) = a.weapons.iter().find(|(id, _)| id == "dc17m_blaster")?;
+    Some(s.shots_in_clip() + s.reserve)
+}
+
+/// The box's taken flag and whether its model is hidden.
+fn box_state(w: &mut World, name: &str) -> Option<(bool, bool)> {
+    let mut q = w.query::<&rc_combat::ammo_box::AmmoBox>();
+    let b = q.iter(w).find(|b| b.name == name)?.clone();
+    let mut parts = w.query::<(&rc_level_viewer::draw::MoverPart, &Visibility)>();
+    let hidden = parts
+        .iter(w)
+        .filter(|(p, _)| p.0 == b.export)
+        .all(|(_, v)| *v == Visibility::Hidden);
+    Some((b.taken, hidden))
+}
+
+fn ammo_box_taken(w: &mut World) -> Result<String, String> {
+    let name = w.resource::<Noted>().ammo_box.clone().ok_or("no box moved")?;
+    let total = rifle_total(w).ok_or("no rifle")?;
+    let (taken, hidden) = box_state(w, &name).ok_or("box gone")?;
+    let got = format!("{name}: rifle has {total} (was 20), box taken {taken}, model hidden {hidden}");
+    if total == 300 && taken && hidden {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn ammo_box_left(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<&rc_combat::ammo_box::AmmoBox>();
+    let taken = q.iter(w).filter(|b| b.taken).count();
+    let total = rifle_total(w).ok_or("no rifle")?;
+    let got = format!("rifle {total}, {taken} box taken in all");
+    if total == 300 && taken == 1 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn grenade_crate(w: &mut World) -> Result<String, String> {
+    let mut q = w.query_filtered::<&rc_combat::Grenades, With<Player>>();
+    let n = q
+        .iter(w)
+        .next()
+        .and_then(|g| g.carried.iter().find(|(i, _)| i == "thermal_detonator").map(|c| c.1))
+        .ok_or("no thermal detonators carried")?;
+    let mut b = w.query::<&rc_combat::ammo_box::AmmoBox>();
+    let c = b
+        .iter(w)
+        .find(|b| b.class == "ThermalDetonatorBox")
+        .cloned()
+        .ok_or("no crate")?;
+    let got = format!("{n} thermal detonators (was 0); {} back: {}", c.name, !c.taken);
+    if n == 5 && !c.taken && c.respawn.is_some() {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn ammo_box_after_load(w: &mut World) -> Result<String, String> {
+    let name = w.resource::<Noted>().ammo_box.clone().ok_or("no box moved")?;
+    let (taken, hidden) = box_state(w, &name).ok_or("box gone")?;
+    let got = format!("{name}: taken {taken}, model hidden {hidden}");
+    if taken && hidden {
         Ok(got)
     } else {
         Err(got)
