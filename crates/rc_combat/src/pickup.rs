@@ -26,7 +26,7 @@ use crate::library::WeaponLibrary;
 use crate::weapon::WeaponState;
 use crate::{Arsenal, Hittable};
 use bevy::prelude::*;
-use rc_game_core::pickups::LevelWeaponPickups;
+use rc_game_core::pickups::{LevelWeaponPickups, PickedUp};
 use rc_game_core::units::UU_PER_UNIT;
 use rc_game_core::{
     Action, ActionState, GameLog, GamePaths, GameState, HudMessage, InputPrompts, Player,
@@ -56,6 +56,9 @@ pub struct WeaponPickupRules {
     /// The prompt shown while touching a weapon you can take, `@` standing
     /// for the Use button.
     pub prompt: String,
+    /// The sound of taking a weapon that doesn't say its own (one an enemy
+    /// dropped): sound package and name.
+    pub sound: Option<(String, String)>,
 }
 
 impl Default for WeaponPickupRules {
@@ -65,6 +68,7 @@ impl Default for WeaponPickupRules {
             one_at_a_time: Vec::new(),
             swap_when_empty: Vec::new(),
             prompt: "PRESS @ TO PICKUP".into(),
+            sound: Some(("GEN_Sound".into(), "int_GEN_wepPickup_01".into())),
         }
     }
 }
@@ -86,6 +90,11 @@ impl WeaponPickupRules {
         rules.swap_when_empty = lower(t.texts("carry.swap_when_empty")?.unwrap_or_default());
         if let Some(p) = t.text("prompt.text")? {
             rules.prompt = p;
+        }
+        let package = t.text("sound.package")?;
+        let name = t.text("sound.name")?;
+        if let (Some(package), Some(name)) = (package, name) {
+            rules.sound = (!name.is_empty()).then_some((package, name));
         }
         t.finish()?;
         Ok(rules)
@@ -115,6 +124,8 @@ pub struct WeaponPickup {
     /// What to show when it's taken ("Wookiee Bowcaster"). Empty: the
     /// weapon file's name.
     pub message: String,
+    /// The sound of taking it (package, name). `None`: the rules file's.
+    pub sound: Option<(String, String)>,
     /// Touch cylinder, Unreal units.
     pub radius: f32,
     pub height: f32,
@@ -132,6 +143,7 @@ impl WeaponPickup {
             ammo,
             placed: None,
             message: String::new(),
+            sound: None,
             radius: DROPPED_RADIUS,
             height: DROPPED_HEIGHT,
             touching: false,
@@ -259,6 +271,7 @@ pub(crate) fn place_weapons(
                 ammo: Some(w.ammo),
                 placed: Some((w.export, w.name.clone())),
                 message: w.message.clone(),
+                sound: w.sound.clone(),
                 radius: w.radius,
                 height: w.height,
                 touching: false,
@@ -380,6 +393,7 @@ pub(crate) fn collect_pickups(
     shown: Query<(), With<Mesh3d>>,
     mut taken: MessageWriter<WeaponTaken>,
     mut hud: MessageWriter<HudMessage>,
+    mut picked: MessageWriter<PickedUp>,
     log: Option<Res<GameLog>>,
 ) {
     let Ok((me, me_global, body, mut arsenal)) = players.single_mut() else {
@@ -421,6 +435,7 @@ pub(crate) fn collect_pickups(
         } else {
             p.message.clone()
         };
+        let sound = p.sound.clone().or_else(|| rules.sound.clone());
         let carried = arsenal.weapons.iter().find(|(w, _)| *w == p.weapon);
         let swap = rules.swap_when_empty(&p.weapon);
         // Walking into a weapon you carry takes its ammo.
@@ -438,9 +453,9 @@ pub(crate) fn collect_pickups(
                             p.placed.as_ref().map_or("a dropped weapon", |x| &x.1)
                         ),
                     );
-                    hud.write(HudMessage {
-                        text: label.to_uppercase(),
-                        seconds: 2.0,
+                    picked.write(PickedUp {
+                        text: label.clone(),
+                        sound: sound.clone(),
                     });
                     taken.write(WeaponTaken {
                         weapon: p.weapon.clone(),
@@ -515,9 +530,9 @@ pub(crate) fn collect_pickups(
                 me.translation + (fwd * 0.8 * body.radius + left * 0.5 * body.radius) / UU_PER_UNIT;
             spawn_dropped(&mut commands, w, Some(*n), at);
         }
-        hud.write(HudMessage {
-            text: label.to_uppercase(),
-            seconds: 2.0,
+        picked.write(PickedUp {
+            text: label.clone(),
+            sound,
         });
         taken.write(WeaponTaken {
             weapon: p.weapon.clone(),

@@ -48,3 +48,10 @@ swap_when_empty = ["elite_beam"]
 # Shown while touching a weapon you can pick up, followed by its name. @
 # becomes the Use button (game: the HUD's "PRESS @ TO PICKUP", engine.u).
 text = "PRESS @ TO PICKUP"
+
+[sound]
+# The sound of taking a weapon an enemy dropped. Weapons the maps place use
+# their own (game: PickupSound; GEN_Sound.GenericWeaponPickup for the
+# bowcaster, GEN_Sound.int_GEN_wepPickup_01 for the rest).
+package = "GEN_Sound"
+name = "int_GEN_wepPickup_01"

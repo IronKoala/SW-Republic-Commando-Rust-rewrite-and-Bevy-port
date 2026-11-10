@@ -786,6 +786,7 @@ fn place_weapons(r: &mut Range, list: &[(&str, &str, Vec3, u32)]) {
             weapon: weapon.to_string(),
             ammo: *ammo,
             message: format!("{weapon} message"),
+            sound: Some(("GEN_Sound".into(), format!("{weapon}Sound"))),
             radius: 60.0,
             height: 15.0,
         })
@@ -803,6 +804,9 @@ fn taken(r: &mut Range) -> Vec<rc_combat::WeaponTaken> {
 #[test]
 fn level_weapons_are_placed_and_one_enemy_weapon_is_carried_at_a_time() {
     let mut r = Range::new();
+    r.app
+        .init_resource::<PickedUpLog>()
+        .add_systems(Update, keep_picked_up);
     place_weapons(
         &mut r,
         &[
@@ -830,6 +834,14 @@ fn level_weapons_are_placed_and_one_enemy_weapon_is_carried_at_a_time() {
     assert_eq!(t.len(), 1);
     assert_eq!(t[0].placed.as_ref().unwrap().1, "BowcasterPickup0");
     assert!(t[0].new_weapon);
+    // Its words and its own pickup sound.
+    let got = r.app.world().resource::<PickedUpLog>().0.clone();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].text, "Bowcaster message");
+    assert_eq!(
+        got[0].sound,
+        Some(("GEN_Sound".to_string(), "BowcasterSound".to_string()))
+    );
     // Fire one bolt, then go to the repeater and take it: the bowcaster
     // is thrown down with 23 shots, the repeater is in hand.
     r.run(1, &[Action::Fire]);
@@ -1012,6 +1024,8 @@ fn ammo_boxes(r: &mut Range) -> (Entity, Entity) {
         respawn: None,
         radius: 40.0,
         height: 15.0,
+        message: "DC-17m Blaster Clips".into(),
+        sound: Some(("GEN_Sound".into(), "GenericWeaponPickup".into())),
     };
     let crate_ = PlacedAmmoBox {
         export: 9,
@@ -1023,6 +1037,8 @@ fn ammo_boxes(r: &mut Range) -> (Entity, Entity) {
         respawn: Some(0.1),
         radius: 45.0,
         height: 44.0,
+        message: "Thermal Detonators".into(),
+        sound: Some(("GEN_Sound".into(), "GenericWeaponPickup".into())),
     };
     r.app
         .world_mut()
@@ -1133,4 +1149,42 @@ fn the_grenade_crate_refills_and_comes_back() {
     use rc_game_core::save::SavePart;
     let s = rc_combat::ammo_box::PickupsSave::save(r.app.world_mut()).unwrap();
     assert!(s.taken.is_empty(), "boxes that come back aren't saved");
+}
+
+/// Every `PickedUp` sent, kept for the test to read.
+#[derive(Resource, Default)]
+struct PickedUpLog(Vec<rc_game_core::pickups::PickedUp>);
+
+fn keep_picked_up(
+    mut log: ResMut<PickedUpLog>,
+    mut picked: MessageReader<rc_game_core::pickups::PickedUp>,
+) {
+    log.0.extend(picked.read().cloned());
+}
+
+#[test]
+fn taking_a_box_says_what_it_was_and_plays_its_sound() {
+    let mut r = Range::new();
+    r.app
+        .init_resource::<PickedUpLog>()
+        .add_systems(Update, keep_picked_up);
+    ammo_boxes(&mut r);
+    // Full: touching it says nothing.
+    set_rifle(&mut r, 60.0, 240);
+    move_player(&mut r, -200.0, 0.0);
+    r.run(2, &[]);
+    assert!(r.app.world().resource::<PickedUpLog>().0.is_empty());
+    // Not full: one message, with the box's words and sound.
+    set_rifle(&mut r, 10.0, 0);
+    move_player(&mut r, -500.0, 0.0);
+    r.run(2, &[]);
+    move_player(&mut r, -200.0, 0.0);
+    r.run(2, &[]);
+    let got = &r.app.world().resource::<PickedUpLog>().0;
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].text, "DC-17m Blaster Clips");
+    assert_eq!(
+        got[0].sound,
+        Some(("GEN_Sound".to_string(), "GenericWeaponPickup".to_string()))
+    );
 }

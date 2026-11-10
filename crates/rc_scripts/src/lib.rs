@@ -24,6 +24,7 @@
 //! sound lasts, the random seed) are in `data/scripts/scripts.toml`
 //! ([`Settings`]).
 
+pub mod markers;
 pub mod save;
 pub mod settings;
 
@@ -84,10 +85,43 @@ pub enum Effect {
     /// Leave for another map: the player walked into a level exit (a
     /// `Teleporter` with a `URL`), or a script said so
     /// (`ACTION_ChangeLevel`'s `URL`, the debriefing's `NewLevel`). `url`
-    /// is as the map wrote it, like `GEO_01B.ctm#playerstart`.
-    ChangeLevel { url: String, by: String },
+    /// is as the map wrote it, like `GEO_01B.ctm#playerstart`. When the
+    /// end-of-campaign debriefing sent it, `debriefing` is what that
+    /// screen shows; the game shows it first and goes on when the player
+    /// chooses CONTINUE.
+    ChangeLevel {
+        url: String,
+        by: String,
+        debriefing: Option<Debriefing>,
+    },
     /// Something the log should show (a script waiting, a counter, ...).
     Note(String),
+}
+
+/// What an `ACTION_ShowDebriefingScreen` asks the debriefing screen to
+/// show, as the map wrote it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Debriefing {
+    /// The menu class to draw it with (`MenuClass`, such as
+    /// `XInterfaceCTMenus.CTDebriefingInfoGEO`).
+    pub menu_class: String,
+    pub title: String,
+    pub text: String,
+    /// The picture (`PicName`, such as `GUIContent.RAS_Debrief`).
+    pub picture: String,
+}
+
+impl Debriefing {
+    /// Read from the action.
+    pub fn of(a: &ScriptObject) -> Debriefing {
+        let s = |k: &str| a.text(k).unwrap_or("").trim().to_string();
+        Debriefing {
+            menu_class: s("MenuClass"),
+            title: s("Title"),
+            text: s("Text"),
+            picture: s("PicName"),
+        }
+    }
 }
 
 /// Whether an action plays a sound by name (`ACTION_PlaySound`,
@@ -780,6 +814,35 @@ impl Director {
         self.hurt_props(tag, f32::INFINITY)
     }
 
+    /// Blow up the one prop with this actor name (`Prop12`), as a
+    /// demolition charge's `PropToDestroy` does: it comes out as
+    /// [`Effect::PropDestroyed`] on the next step and sends its own
+    /// destroyed event. Returns false if no prop has that name (or it is
+    /// already gone).
+    pub fn destroy_prop_named(&mut self, name: &str) -> bool {
+        let Some(p) = self
+            .props
+            .iter_mut()
+            .find(|p| !p.destroyed && p.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        p.destroyed = true;
+        p.health = 0.0;
+        self.out.push(Effect::PropDestroyed {
+            export: p.export,
+            name: p.name.clone(),
+            tag: p.tag.clone(),
+            mesh: p.mesh.clone(),
+            effect: p.effect.clone(),
+        });
+        if let Some(e) = p.event.clone() {
+            let by = p.name.clone();
+            self.fire(&e, &by);
+        }
+        true
+    }
+
     fn random(&mut self) -> f32 {
         // xorshift64: small, and the same on every machine.
         let mut x = self.rng;
@@ -867,6 +930,7 @@ impl Director {
                 self.out.push(Effect::ChangeLevel {
                     url: url.clone(),
                     by: t.name.clone(),
+                    debriefing: None,
                 });
             }
         }
@@ -1200,8 +1264,8 @@ impl Director {
                     _ => {}
                 }
                 // Leaving the level. The debriefing screen's `NewLevel` is
-                // where the campaign goes on after it (the screen itself
-                // isn't shown yet).
+                // where the campaign goes on after it; the game shows the
+                // screen first.
                 let leave = match kind.as_str() {
                     "changelevel" => a.text("URL"),
                     "showdebriefingscreen" => a.text("NewLevel"),
@@ -1218,9 +1282,12 @@ impl Director {
                         owner: None,
                         waits: false,
                     });
+                    let debriefing =
+                        (kind == "showdebriefingscreen").then(|| Debriefing::of(&a));
                     self.out.push(Effect::ChangeLevel {
                         url: url.to_string(),
                         by: name,
+                        debriefing,
                     });
                     self.scripts[i].pc = next;
                     return;

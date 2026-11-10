@@ -41,6 +41,49 @@ pub struct HudLayout {
     pub layout: LayoutSettings,
     #[serde(default, rename = "element")]
     pub elements: Vec<Element>,
+    /// `[pickup_message]`: how long the pickup message stays.
+    #[serde(default)]
+    pub pickup_message: PickupTiming,
+}
+
+/// How long the "just picked up" message stays and fades.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PickupTiming {
+    /// Seconds on screen, fading included (game: LocalMessage LifeTime 3).
+    #[serde(default = "three")]
+    pub seconds: f32,
+    /// Seconds at the end over which it fades out. **Our choice.**
+    #[serde(default = "one")]
+    pub fade: f32,
+}
+
+impl Default for PickupTiming {
+    fn default() -> Self {
+        PickupTiming {
+            seconds: 3.0,
+            fade: 1.0,
+        }
+    }
+}
+
+impl PickupTiming {
+    /// How much of the message shows, `left` seconds before it ends:
+    /// 1 until the fade starts, then down to 0. Stepped in tenths so the
+    /// HUD is redrawn only ten times while it fades.
+    pub fn strength(&self, left: f32) -> f32 {
+        if left <= 0.0 {
+            return 0.0;
+        }
+        if self.fade <= 0.0 || left >= self.fade {
+            return 1.0;
+        }
+        ((left / self.fade) * 10.0).ceil() / 10.0
+    }
+}
+
+fn three() -> f32 {
+    3.0
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -98,6 +141,7 @@ const ELEMENT_KEYS: &[&str] = &[
     "mirror",
     "text",
     "align",
+    "fade",
 ];
 
 /// Which corner or edge of the HUD area an element is pinned to.
@@ -169,6 +213,11 @@ pub struct Element {
     /// "alpha" (default for pictures) or "add" (glowing; default for text).
     #[serde(default)]
     pub blend: Option<String>,
+    /// A 0..1 value (see `HudValues::fraction`) the element fades with:
+    /// 1 fully shown, 0 gone. For example `fade = "pickup"` makes the
+    /// pickup message fade out as it ends.
+    #[serde(default)]
+    pub fade: Option<String>,
     #[serde(flatten)]
     pub kind: Kind,
 }
@@ -244,6 +293,11 @@ pub struct HudValues {
     pub squad: Vec<SquadLine>,
     /// Short messages, newest last.
     pub messages: Vec<String>,
+    /// What was just picked up ("DC-17m Blaster Clips"), empty when
+    /// nothing is shown.
+    pub pickup: String,
+    /// How much of the pickup message is still shown, 0..1 (it fades out).
+    pub pickup_fade: f32,
 }
 
 impl HudValues {
@@ -258,6 +312,7 @@ impl HudValues {
                     _ => 0.0,
                 },
                 "squad_health" => member?.health,
+                "pickup" => self.pickup_fade,
                 _ => return None,
             }
             .clamp(0.0, 1.0),
@@ -278,6 +333,7 @@ impl HudValues {
             "shield_low" => self.shield < 0.25,
             "health_low" => self.health < 0.25,
             "squad_down" => member?.down,
+            "pickup" => !self.pickup.is_empty(),
             _ => return None,
         };
         Some(v != not)
@@ -309,6 +365,7 @@ impl HudValues {
             "reserve" => self.reserve.map_or("--".into(), |r| r.to_string()),
             "grenade" => self.grenade.as_ref()?.0.to_uppercase(),
             "grenades" => self.grenade.as_ref()?.1.to_string(),
+            "pickup" => self.pickup.clone(),
             "number" => member?.number.clone(),
             "name" => member?.name.to_uppercase(),
             "order" => {
@@ -368,6 +425,9 @@ impl HudLayout {
 
     /// Mistakes a modder would want to hear about at once.
     pub fn check(&self) -> Result<(), String> {
+        if !(self.pickup_message.seconds > 0.0) || self.pickup_message.fade < 0.0 {
+            return Err("[pickup_message]: `seconds` must be above 0 and `fade` 0 or more".into());
+        }
         let known_fill = ["shield", "health", "clip", "squad_health"];
         for e in &self.elements {
             if e.size[0] <= 0.0 || e.size[1] <= 0.0 {
@@ -529,10 +589,17 @@ pub fn hud_quads(
                 .alert_when
                 .as_deref()
                 .is_some_and(|w| values.flag(w, member) == Some(true));
-            let colour = match (alert, e.alert_colour) {
+            let mut colour = match (alert, e.alert_colour) {
                 (true, Some(c)) => c,
                 _ => e.colour,
             };
+            if let Some(f) = &e.fade {
+                let v = values.fraction(f, member).unwrap_or(1.0);
+                if v <= 0.0 {
+                    continue;
+                }
+                colour = faded(colour, v, &e.kind, e.blend.as_deref());
+            }
             let to_screen =
                 |r: [f32; 4]| [r[0] / width, r[1] / height, r[2] / width, r[3] / height];
             match &e.kind {
@@ -590,6 +657,28 @@ pub fn hud_quads(
         }
     }
     out
+}
+
+/// `colour` at `v` (0..1) of its strength. A glowing ("add") part fades
+/// by getting darker, as adding black adds nothing; a see-through one by
+/// its alpha.
+fn faded(colour: [u8; 4], v: f32, kind: &Kind, blend: Option<&str>) -> [u8; 4] {
+    let default = match kind {
+        Kind::Picture(_) => STY_ALPHA,
+        Kind::Text(_) => STY_ADDITIVE,
+    };
+    let v = v.clamp(0.0, 1.0);
+    let scale = |c: u8| (c as f32 * v).round() as u8;
+    if style(blend, default) == STY_ADDITIVE {
+        [
+            scale(colour[0]),
+            scale(colour[1]),
+            scale(colour[2]),
+            colour[3],
+        ]
+    } else {
+        [colour[0], colour[1], colour[2], scale(colour[3])]
+    }
 }
 
 fn style(blend: Option<&str>, default: u8) -> u8 {
@@ -766,6 +855,38 @@ mod tests {
         e.group = "intruder".into();
         l.elements.push(e);
         assert!(!check_plan(&l, 1920.0, 1080.0, 16.0 / 9.0, 3).is_empty());
+    }
+
+    #[test]
+    fn the_pickup_message_fades_at_the_end() {
+        let t = shipped().pickup_message;
+        assert_eq!(t.seconds, 3.0);
+        assert_eq!(t.strength(3.0), 1.0);
+        assert_eq!(t.strength(1.5), 1.0);
+        assert_eq!(t.strength(0.55), 0.6);
+        assert_eq!(t.strength(0.0), 0.0);
+        let v = HudValues {
+            pickup: "Thermal Detonators".into(),
+            pickup_fade: 0.5,
+            ..Default::default()
+        };
+        assert_eq!(v.text("{pickup}", None), "Thermal Detonators");
+        assert_eq!(v.flag("pickup", None), Some(true));
+        assert_eq!(v.fraction("pickup", None), Some(0.5));
+        assert_eq!(HudValues::default().flag("pickup", None), Some(false));
+        // Glowing text fades by darkening; see-through pictures by alpha.
+        let text = Kind::Text(TextPart {
+            text: String::new(),
+            align: None,
+        });
+        assert_eq!(
+            faded([255, 200, 100, 255], 0.5, &text, None),
+            [128, 100, 50, 255]
+        );
+        assert_eq!(
+            faded([255, 200, 100, 255], 0.5, &text, Some("alpha")),
+            [255, 200, 100, 128]
+        );
     }
 
     #[test]

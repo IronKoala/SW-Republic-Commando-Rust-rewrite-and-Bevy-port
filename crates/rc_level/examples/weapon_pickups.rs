@@ -17,13 +17,14 @@ fn main() {
                 for w in &c.weapons {
                     total += 1;
                     println!(
-                        "{}: {} ({}) gives {} with {} shots, \"{}\", radius {} height {}, at {:?}, dropped {:.1}",
+                        "{}: {} ({}) gives {} with {} shots, \"{}\", sound {:?}, radius {} height {}, at {:?}, dropped {:.1}",
                         Path::new(m).file_name().unwrap().to_string_lossy(),
                         w.name,
                         w.class,
                         w.weapon,
                         w.ammo,
                         w.message,
+                        w.sound,
                         w.radius,
                         w.height,
                         w.location,

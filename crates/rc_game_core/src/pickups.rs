@@ -26,6 +26,11 @@ pub struct PlacedAmmoBox {
     /// Touch cylinder radius and half-height, Unreal units.
     pub radius: f32,
     pub height: f32,
+    /// What the game says when it is taken (`PickupMessage`).
+    pub message: String,
+    /// The sound it makes when taken (`PickupSound`): sound package and
+    /// name (`GEN_Sound`, `GenericWeaponPickup`).
+    pub sound: Option<(String, String)>,
 }
 
 /// Every box in the level just loaded. Inserted while the level loads.
@@ -50,6 +55,8 @@ pub struct PlacedWeapon {
     pub ammo: u32,
     /// What the game shows when it's taken ("Wookiee Bowcaster").
     pub message: String,
+    /// The sound it makes when taken: sound package and name.
+    pub sound: Option<(String, String)>,
     /// Touch cylinder radius and half-height, Unreal units.
     pub radius: f32,
     pub height: f32,
@@ -59,3 +66,17 @@ pub struct PlacedWeapon {
 /// loads.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelWeaponPickups(pub Vec<PlacedWeapon>);
+
+/// The player just picked something up. The HUD shows `text` for a few
+/// seconds above the middle of the screen (the original's
+/// `PickupMessagePlus`), and `sound` is played (the original plays a
+/// pickup's `PickupSound` for the player only, from where they are).
+///
+/// Anything that can be picked up sends this: ammo boxes do; weapons on
+/// the floor and health can do the same.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct PickedUp {
+    pub text: String,
+    /// Sound package and the sound's name in it.
+    pub sound: Option<(String, String)>,
+}
