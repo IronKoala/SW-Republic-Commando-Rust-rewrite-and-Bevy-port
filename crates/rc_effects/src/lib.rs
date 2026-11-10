@@ -1,0 +1,11 @@
+//! Particle effects: the game's `Emitter` classes (explosions, sparks,
+//! smoke), read from its script packages (`read`) and run (`sim`). Plain
+//! Rust; `rc_effects_plugin` draws them in Bevy.
+
+pub mod def;
+pub mod read;
+pub mod sim;
+pub mod tagged;
+
+pub use def::{DrawStyle, EffectDef, EmitterDef, EmitterKind};
+pub use sim::{EffectState, Sprite};

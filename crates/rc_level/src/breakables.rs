@@ -31,9 +31,10 @@
 //! values: map first, then the class and its parents. Plain Rust, no Bevy.
 
 use crate::actors::{self, LevelInfo};
-use crate::class_look::{ClassLooks, Loaded};
+use crate::class_look::{object_path, ClassLooks, Loaded};
 use crate::scripts::{to_val, Val, Vals};
-use rc_package::Package;
+use rc_package::properties::{read_properties, Property, Value};
+use rc_package::{Package, Reader};
 
 /// One step a prop goes through (`TransitionInfo` in the game's terms).
 /// Names are the objects' names (`Explosion_Barrel_GEO`,
@@ -50,6 +51,13 @@ pub struct Transition {
     /// plus up to `life_span_max` more at random.
     pub life_span: f32,
     pub life_span_max: f32,
+    /// Where the effect appears, from the prop's spot (uu).
+    pub effect_offset: [f32; 3],
+    /// Full paths (package first) of the model and the sound, for loading
+    /// them: `["MarkerIcons", "SetTrap", "GEO_EplBarrel_Dest"]`,
+    /// `["GEN_Sound", "Impacts_Explos", "exp_GEN_barrel_01"]`.
+    pub mesh_path: Option<Vec<String>>,
+    pub sound_path: Option<Vec<String>>,
 }
 
 impl Transition {
@@ -80,7 +88,39 @@ impl Transition {
             disable_collision: matches!(v.get("bDisableCollision"), Some(Val::Bool(true))),
             life_span: float("StateLifeSpan"),
             life_span_max: float("StateLifeSpanMax"),
+            effect_offset: match v.get("TransitionEffectOffset") {
+                Some(Val::Vector(o)) => *o,
+                _ => [0.0; 3],
+            },
+            mesh_path: None,
+            sound_path: None,
         }
+    }
+
+    /// Read a `TransitionInfo` struct property (written as named values),
+    /// keeping its object references as full paths.
+    fn from_property(pkg: &Package, p: &Property) -> Transition {
+        let mut t = match to_val(pkg, p) {
+            Val::Struct(v) => Transition::from_vals(&v),
+            _ => return Transition::default(),
+        };
+        if let Value::Raw(b) = &p.value {
+            let mut r = Reader::new(b);
+            if let Ok(fields) = read_properties(pkg, &mut r) {
+                let path = |key: &str| {
+                    fields
+                        .iter()
+                        .find(|f| pkg.name(f.name).eq_ignore_ascii_case(key))
+                        .and_then(|f| match f.value {
+                            Value::Object(o) if o != 0 => Some(object_path(pkg, o)),
+                            _ => None,
+                        })
+                };
+                t.mesh_path = path("Mesh");
+                t.sound_path = path("TransitionSound");
+            }
+        }
+        t
     }
 }
 
@@ -109,6 +149,12 @@ pub struct Breakable {
     pub tag: String,
     /// Unreal units.
     pub location: [f32; 3],
+    /// How it is turned (Unreal angle units) and scaled, from the map or
+    /// its class, for drawing its broken model in its place.
+    pub rotation: [i32; 3],
+    pub draw_scale: f32,
+    pub draw_scale_3d: [f32; 3],
+    pub pre_pivot: [f32; 3],
     pub health: f32,
     pub damaged_ratio: f32,
     /// The actor's own `Event`, sent when it breaks (before
@@ -127,6 +173,26 @@ pub struct Breakable {
 }
 
 impl Breakable {
+    /// A point of a model (its own units) where it is in the level, placed
+    /// like this prop.
+    pub fn to_level(&self, v: [f32; 3]) -> [f32; 3] {
+        actors::Placement {
+            export: self.export,
+            class: String::new(),
+            name: String::new(),
+            location: self.location,
+            rotation: self.rotation,
+            draw_scale: self.draw_scale,
+            draw_scale_3d: self.draw_scale_3d,
+            pre_pivot: self.pre_pivot,
+            static_mesh: 0,
+            skins: Vec::new(),
+            hidden: false,
+            static_mesh_instance: 0,
+        }
+        .transform_point(v)
+    }
+
     /// The event the game sends when it breaks.
     pub fn broken_event(&self) -> Option<&str> {
         self.event.as_deref().or(self.destroyed.event.as_deref())
@@ -192,9 +258,19 @@ pub fn read(
         if health <= 0.0 {
             continue;
         }
-        let transition = |key: &str| match value(key) {
-            Some(Val::Struct(v)) => Transition::from_vals(&v),
-            _ => Transition::default(),
+        // A step from the map (which stores the whole struct, every field,
+        // so it replaces the class's: geo_01b's barrels set no broken
+        // model), else from the nearest class.
+        let transition = |key: &str| {
+            if let Some(p) = props
+                .iter()
+                .find(|p| p.array_index == 0 && pkg.name(p.name).eq_ignore_ascii_case(key))
+            {
+                return Transition::from_property(pkg, p);
+            }
+            look.find(key, 0)
+                .map(|(l, p)| Transition::from_property(&l.0, p))
+                .unwrap_or_default()
         };
         let explosion = {
             let damage = number(value("ExplosionDamage")).unwrap_or(0.0);
@@ -210,13 +286,21 @@ pub fn read(
                 status_damage_per_sec: number(value("StatusEffectDamagePerSec")).unwrap_or(0.0),
             })
         };
-        let placement = actors::read_placement(pkg, data, a).ok();
+        let mut placement = actors::read_placement(pkg, data, a).ok();
+        // The class's scale where the map sets none.
+        if let Some(p) = placement.as_mut() {
+            crate::class_look::apply_class_look(looks, pkg, data, p, open);
+        }
         out.push(Breakable {
             export: a,
             name: pkg.name(pkg.exports[a].object_name).to_string(),
             tag: name(value("Tag")).unwrap_or_else(|| class.clone()),
             class,
             location: placement.as_ref().map(|p| p.location).unwrap_or_default(),
+            rotation: placement.as_ref().map(|p| p.rotation).unwrap_or_default(),
+            draw_scale: placement.as_ref().map_or(1.0, |p| p.draw_scale),
+            draw_scale_3d: placement.as_ref().map_or([1.0; 3], |p| p.draw_scale_3d),
+            pre_pivot: placement.as_ref().map(|p| p.pre_pivot).unwrap_or_default(),
             health,
             damaged_ratio: number(value("DamagedRatio")).unwrap_or(0.0),
             event: name(value("Event")),
@@ -262,6 +346,10 @@ mod tests {
             class: "Prop".into(),
             tag: "Prop".into(),
             location: [0.0; 3],
+            rotation: [0; 3],
+            draw_scale: 1.0,
+            draw_scale_3d: [1.0; 3],
+            pre_pivot: [0.0; 3],
             health: 10.0,
             damaged_ratio: 0.0,
             event: None,

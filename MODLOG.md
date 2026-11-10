@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Barrel fireballs, explosion sounds and broken models (rc_effects, rc_effects_plugin, rc_level, rc_scripts_plugin, rc_game)
+
+- **Changed:** New crate `rc_effects`: reads the game's particle effects (`Emitter` classes and their sprite and mesh emitters, with `engine.u`'s defaults) and runs them without Bevy; tool `rc_effect_check`. New crate `rc_effects_plugin`: `SpawnEffect` / `PreloadEffect` messages, draws sprites with the emitter's blend mode and flying debris models, plays the effect's sound, settings in `data/effects/effects.toml`. `rc_level::breakables` now reads each step's effect offset, model path and sound path, and the prop's rotation and scale. `rc_scripts_plugin` shows a breaking prop's effect and sound, and leaves its broken model for the step's life span. `rc_game --script`: 2 new checks. `docs/DESIGN.md`: new "Particle effects" section; `docs/RESEARCH.md`: effect format notes.
+- **Why:** User asked for the barrel's fireball, sound and broken model after barrels started breaking.
+- **Tested how:** `cargo test -p rc_effects -p rc_effects_plugin -p rc_level -p rc_scripts_plugin` with `RC_GAME_DIR` set to the game files copied read only from the PC; `rc_effect_check` (575 effects read, 0 failed); `rc_game --script` in the cloud.
+- **Result:** geo_01a's barrel shows `Explosion_Barrel_GEO` (up to 170 squares and 5 debris pieces at once, over after 9 s) and plays `exp_barrels` and `exp_GEN_barrel_01`; the scripted barricade blast plays `Dirt_Explo_Lrg`. geo_01b's barrels leave no broken model because the map itself says `Mesh=None`; geo_03a's leave `GEO_EplBarrel_Dest`.
+- **Still broken / not tested:** Not tested on Windows, by playing or by looking at it next to the original. Sounds aren't placed in 3D (main has 3D sound since #70; this branch was cut before it). Beam and trail emitters aren't drawn. Debris bounces on a flat floor, not the level. The damaged step's model and the broken look in save files aren't done. Shots, grenades and other things don't spawn effects yet.
+- **Next:** Effects for grenades and shot impacts; bacta dispenser effects (`BactaZap_Dispenser`).
+
 ## 2026-11-10: Shots now hit the Geonosian explosive barrels (rc_level)
 
 - **Changed:** `rc_level::map_collision` gives a breakable prop its drawn triangles (`collision::drawn_triangles`) when its model has collision switched off on every part, as the explosive barrels' model does (the game uses the model's simple collision shape there, which we don't read).

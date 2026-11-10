@@ -489,6 +489,8 @@ fn main() -> AppExit {
     app.add_plugins(rc_level_plugin::LevelPlugin);
     app.add_plugins(rc_movers_plugin::MoversPlugin);
     app.add_plugins(rc_scripts_plugin::ScriptsPlugin);
+    // Explosions, smoke and debris (the game's own effects).
+    app.add_plugins(rc_effects_plugin::EffectsPlugin);
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
