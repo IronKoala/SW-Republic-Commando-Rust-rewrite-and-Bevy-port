@@ -3,6 +3,23 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Optional squad ammo and box fetching, off by default (rc_squad, rc_squad_plugin, data/squad)
+
+- **Changed:** New `rc_squad/src/ammo.rs` (`AmmoSettings`, `SupplyBox`, `Squad::take_box`, `think_fetch`) and `[ammo]` in `data/squad/squad.toml` (`limited = "no"`). Shots and grenades count down only when `limited` is on; `shoot`, `pick_target`, `throw_on_own` and grenade posts check it. New `rc_squad_plugin/src/ammo.rs` (`gather_boxes`, `take_boxes`) uses the player's touch test and marks a taken box like the player's (hidden, saved). Squad mates' counts saved in `[squad]` (`ammo`). New test `rc_squad_plugin/tests/ammo_room.rs` and 7 tests in `rc_squad`. Notes: `docs/DESIGN.md` "Optional squad ammo", README.
+- **Why:** Thread "Let the squad use ammo boxes": the user picked "optional setting, off" after hearing the original squad never takes boxes.
+- **Tested how:** `cargo test -p rc_squad -p rc_squad_plugin` and clippy in the cloud (no game files). Then `rc_game --map geo_01a --frames 1300` (game files copied read only from the PC) with a mod `squad/squad.toml` holding only `[ammo] limited = "yes"`, `fetch_below = 0.5` (so they go at once with 120 of 300), `fetch_range = 6000`.
+- **Result:** rc_squad 57 pass, ammo_room 2 of 2: switched off, nobody counts shots or goes near the boxes; switched on, Sev (20 of 300) and Fixer (0 grenades) fetch the right box in about 2 s, end with 300 and 5, and are back by the player. geo_01a: the mod is read (`ammo: limited, ...`); the nearest boxes to the start are 3700-3900 uu away, so with the shipped 1500 uu range nobody would go there. With 6000 uu, Scorch walked 2745 uu, took `DC17mBlasterBox6` (+180, 300 of 300) and came back to the player. Sev and Fixer got stuck on the way at about (830, 230) (the squad's usual path finding, not new) and gave up after the time limit; they then hopped from box to box, so a wait after giving up was added (test `after_giving_up_on_a_box_they_go_back_before_trying_another`). Re-run with the wait: all three give up at t=40 s, walk back toward the player, wait 40 s (the mod's give-up time), then try other boxes; Scorch took `DC17mBlasterBox6` at t=95 s and came back to 153 uu from the player; Sev and Fixer got stuck at the same spot again.
+- **Still broken / not tested:** Not tested on Windows or by playing. No HUD for squad ammo. Squad mates don't play a reload or say anything about ammo. Fetching only happens with no job; a squad mate on a sniper or anti-armour post who runs out just stops firing that gun. A box on a shelf the squad can't reach costs `fetch_give_up` seconds.
+- **Next:** If wanted, the user tries it with the mod above on Windows.
+
+## 2026-11-10: Checked how the original squad gets ammo (docs only)
+
+- **Changed:** `docs/RESEARCH.md` gains "Squad ammo and ammo boxes"; `docs/DESIGN.md` no longer lists "the squad taking boxes" as missing and says why. No code changed.
+- **Why:** Thread "Let the squad use ammo boxes": the box work (PR #80) listed squad mates not taking boxes as a gap. Before building it, checked what the original does.
+- **Tested how:** Read the script text and class defaults of Engine.u, CTGame.u, CTCharacters.u, CTInventory.u and Properties.u, copied read only from the PC, with `rc_probe --class` (for example `PlayerCommandoDefaults`, `Commando07DeltaDefaults`, `DC17mBlasterCommando`, every ammo class).
+- **Result:** The original squad never takes boxes: only `PlayerCommando` (and whatever pawn the player controls) has `bCanPickupInventory`. When a squad mate's weapon runs dry, `Weapon.ObtainAmmo` gives a fresh magazine for free (`bInfiniteClipsForNonPlayers`, on for every ammo class). A "take a magazine from the player" rule exists (`bSquadUsesPlayerClips`) but no ammo class turns it on. The port's squad already never runs out, so it matches.
+- **Still broken / not tested:** Nothing to play-test (no game change). Whether squad mates play a reload animation or say "Reloading" after 40 shots was not checked.
+- **Next:** The user chose to add squad box pickups anyway, as a setting that is off by default (next entry).
 ## 2026-11-10: Dispenser sounds actually play (rc_level_plugin)
 
 - **Changed:** `anim_props::sound_key` keys each sound by package and name only. The animations name sounds with their group (`GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`) but they were stored without it, so none was found and nothing played, silently. Each sound played is now logged (`level: BactaDispenserGEO0 sound ...`) and the self-test checks them.
