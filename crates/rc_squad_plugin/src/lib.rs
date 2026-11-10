@@ -35,6 +35,7 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
+mod ammo;
 pub mod look;
 pub mod save;
 pub mod voice;
@@ -371,7 +372,9 @@ impl Plugin for SquadPlugin {
                     ride_movers,
                     take_orders,
                     gather_threats,
+                    ammo::gather_boxes,
                     run_squad,
+                    ammo::take_boxes,
                     carry_out_jobs,
                     voice::load_voices,
                     voice::speak,
