@@ -1,5 +1,6 @@
-//! The map's ammo and grenade boxes, handed from the level part (which
-//! reads the map) to the combat part (which lets the player take them).
+//! The map's ammo and grenade boxes and the weapons lying in it, handed
+//! from the level part (which reads the map) to the combat part (which lets
+//! the player take them).
 
 use bevy::prelude::*;
 
@@ -30,3 +31,31 @@ pub struct PlacedAmmoBox {
 /// Every box in the level just loaded. Inserted while the level loads.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelAmmoBoxes(pub Vec<PlacedAmmoBox>);
+
+/// One weapon lying in the map, as the level part reads it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedWeapon {
+    /// Its export index in the map: the drawn model carries the same number
+    /// (`rc_level_viewer::draw::MoverPart`), so it can be hidden when taken.
+    pub export: usize,
+    /// Its name in the map (`BowcasterPickup0`), used in save files.
+    pub name: String,
+    /// Its class (`BowcasterPickup`).
+    pub class: String,
+    /// Centre of its touch cylinder, Bevy units.
+    pub at: Vec3,
+    /// The original's weapon class it gives (`Bowcaster`).
+    pub weapon: String,
+    /// Shots it holds.
+    pub ammo: u32,
+    /// What the game shows when it's taken ("Wookiee Bowcaster").
+    pub message: String,
+    /// Touch cylinder radius and half-height, Unreal units.
+    pub radius: f32,
+    pub height: f32,
+}
+
+/// Every weapon lying in the level just loaded. Inserted while the level
+/// loads.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelWeaponPickups(pub Vec<PlacedWeapon>);

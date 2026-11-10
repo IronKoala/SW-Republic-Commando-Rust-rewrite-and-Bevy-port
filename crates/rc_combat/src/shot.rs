@@ -70,6 +70,19 @@ pub fn add_aim_error(start: Vec3, target: Vec3, aim_error: f32, rng: &mut Rng) -
     t
 }
 
+/// One pellet's direction: `dir` turned by up to half of `spread`
+/// (rotation units, 65536 a full turn) either way, sideways and up or
+/// down. Our reading of the game's `Spread`.
+pub fn stray(dir: Vec3, spread: f32, rng: &mut Rng) -> Vec3 {
+    if spread <= 0.0 {
+        return dir;
+    }
+    let to_rad = std::f32::consts::TAU / 65536.0;
+    let yaw = dir.y.atan2(dir.x) + (rng.next_f32() - 0.5) * spread * to_rad;
+    let pitch = dir.z.clamp(-1.0, 1.0).asin() + (rng.next_f32() - 0.5) * spread * to_rad;
+    view_axes(yaw, pitch).0
+}
+
 /// A laser bolt in flight. The game starts laser bolts at rest and speeds
 /// them up along their direction (`Projectile.PostBeginPlay` with
 /// `bLaserBolt`: speed 0, acceleration `AccelFactor`), up to `MaxSpeed`.

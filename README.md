@@ -217,6 +217,20 @@ copy of the game.
   original. Boxes no longer block you like walls. No pickup sound or
   "picked up" message yet.
 
+- **Weapons lying in the levels (since 2026-11-10; tested in the cloud,
+  not yet on Windows or by playing).** The 40 weapons the campaign maps
+  place (bowcasters on Kashyyyk, ACP repeaters and array guns, concussion
+  rifles, rocket launchers, spare DC-17m attachments, an Elite Beam) appear
+  on the floor with their original models. Walk into a weapon you already
+  carry to take its ammo. For one you don't, the screen says "PRESS F TO
+  PICKUP" with its name: press Use (F) to take it. You carry one weapon
+  taken from the enemy at a time; picking up another drops the old one in
+  front of you. Dropped enemy blasters now need Use too, as in the
+  original. Taken weapons stay gone after a save and load. Not built yet:
+  the bowcaster's charged shot, homing rockets, pickup sounds, and the
+  weapons' own first-person models are only as good as the arms loader
+  (not checked for the new ones).
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis

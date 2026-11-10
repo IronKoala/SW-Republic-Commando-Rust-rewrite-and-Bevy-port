@@ -1,6 +1,6 @@
 //! Ammo and grenade boxes placed in a map (`DC17mBlasterBox`,
 //! `ThermalDetonatorBox`, ...): where each one is, what it refills and by
-//! how much.
+//! how much. Also the weapons lying in the maps (`PlacedWeapon`).
 //!
 //! Every such class comes from the engine's `Ammo` pickup class. The map
 //! stores only where a box is; what it gives is the class's defaults
@@ -190,6 +190,202 @@ pub fn apply_box_look(
     Some(owner)
 }
 
+/// A weapon lying in the map for the player to pick up
+/// (`BowcasterPickup`, `DC17mSniperWeaponPickup`, ...).
+///
+/// These come from the game's `CTPickup` (a `Pickup`), and their
+/// `InventoryType` names a weapon class. The map stores only where one is:
+/// the weapon, its look and its size come from the pickup class, and how
+/// many shots it holds is the weapon's `PickupAmmoCount` (with the
+/// weapon's "...Defaults" class in `Properties/properties.u` on top, as for
+/// the weapon numbers).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedWeapon {
+    /// The pickup's export index in the map.
+    pub export: usize,
+    /// Its name in the map (`BowcasterPickup0`), which save files use.
+    pub name: String,
+    /// Its class (`BowcasterPickup`).
+    pub class: String,
+    /// Centre of its collision cylinder, Unreal units, Z up.
+    pub location: [f32; 3],
+    /// The original's weapon class it gives (`Bowcaster`).
+    pub weapon: String,
+    /// Shots it holds (the weapon's `PickupAmmoCount`).
+    pub ammo: u32,
+    /// The text the game shows when it is taken (`PickupMessage`,
+    /// "Wookiee Bowcaster").
+    pub message: String,
+    /// Collision cylinder: radius and half-height, Unreal units.
+    pub radius: f32,
+    pub height: f32,
+    /// How far it was moved down onto the ground (`rest_weapon_on_ground`).
+    pub dropped: f32,
+}
+
+/// The weapon class (package, class) a pickup class gives, if its
+/// `InventoryType` names a class that comes from the engine's `Weapon`.
+/// `home` is the package of the pickup's class, where a weapon class named
+/// without a package is.
+fn weapon_given(
+    looks: &mut ClassLooks,
+    look: &ClassLook,
+    home: &str,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> Option<(String, String, ClassLook)> {
+    let (owner, p) = look.find("InventoryType", 0)?;
+    let path = match p.value {
+        Value::Object(o) if o != 0 => object_path(&owner.0, o),
+        _ => return None,
+    };
+    let (package, class) = match path.len() {
+        0 => return None,
+        // A class in the same package as the pickup class.
+        1 => (home.to_string(), path[0].clone()),
+        n => (path[0].clone(), path[n - 1].clone()),
+    };
+    let weapon = looks.for_class(&package, &class, open)?;
+    weapon.is_a("Weapon").then_some((package, class, weapon))
+}
+
+/// The package an actor's class is in (`CTInventory`).
+fn class_package(map: &Package, actor: usize) -> String {
+    map.exports
+        .get(actor)
+        .map(|e| object_path(map, e.class_index))
+        .and_then(|p| p.first().cloned())
+        .unwrap_or_default()
+}
+
+/// Whether the actor is a weapon lying in the map: a pickup (not an ammo
+/// box, not health) whose `InventoryType` is a weapon.
+pub fn is_weapon_pickup(
+    looks: &mut ClassLooks,
+    map: &Package,
+    actor: usize,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> bool {
+    let Some(look) = looks.for_actor(map, actor, open) else {
+        return false;
+    };
+    if !look.is_a("Pickup") || look.is_a("Ammo") || look.is_a("PickupHealth") {
+        return false;
+    }
+    let home = class_package(map, actor);
+    weapon_given(looks, &look, &home, open).is_some()
+}
+
+/// The shots a weapon class's pickup holds: `PickupAmmoCount`, from its
+/// "...Defaults" class if that sets it, else the class's own.
+fn pickup_ammo(
+    looks: &mut ClassLooks,
+    class: &str,
+    weapon: &ClassLook,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> u32 {
+    let defaults = looks
+        .for_class(DEFAULTS_PACKAGE, &format!("{class}Defaults"), open)
+        .filter(|l| l.chain.iter().any(|c| c.eq_ignore_ascii_case(class)));
+    let look = defaults.as_ref().unwrap_or(weapon);
+    match look.find("PickupAmmoCount", 0).map(|(_, p)| &p.value) {
+        Some(Value::Int(n)) => (*n).max(0) as u32,
+        _ => 0,
+    }
+}
+
+/// Read one weapon pickup. `None` if the actor isn't one or can't be read.
+pub fn read_weapon(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    actor: usize,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> Option<PlacedWeapon> {
+    if !is_weapon_pickup(looks, map, actor, open) {
+        return None;
+    }
+    let look = box_look(looks, map, actor, open)?;
+    let home = class_package(map, actor);
+    let (_, weapon, weapon_look) = weapon_given(looks, &look, &home, open)?;
+    let ammo = pickup_ammo(looks, &weapon, &weapon_look, open);
+    let place = actors::read_placement(map, map_data, actor).ok()?;
+    let props = actors::read_actor_properties(map, map_data, actor).ok()?;
+    let in_map = |n: &str| rc_package::properties::find(map, &props, n).map(|p| &p.value);
+    let radius = match in_map("CollisionRadius") {
+        Some(Value::Float(f)) => *f,
+        _ => float(&look, "CollisionRadius").unwrap_or(84.0),
+    };
+    let height = match in_map("CollisionHeight") {
+        Some(Value::Float(f)) => *f,
+        _ => float(&look, "CollisionHeight").unwrap_or(8.0),
+    };
+    let message = look
+        .find("PickupMessage", 0)
+        .and_then(|(_, p)| rc_package::class::string_value(p))
+        .unwrap_or_default();
+    Some(PlacedWeapon {
+        export: actor,
+        name: place.name.clone(),
+        class: place.class.clone(),
+        location: place.location,
+        weapon,
+        ammo,
+        message,
+        radius,
+        height,
+        dropped: 0.0,
+    })
+}
+
+/// Every weapon pickup in the map's actor list.
+pub fn read_weapons(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    actors: impl IntoIterator<Item = usize>,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> Vec<PlacedWeapon> {
+    actors
+        .into_iter()
+        .filter_map(|a| read_weapon(looks, map, map_data, a, open))
+        .collect()
+}
+
+/// Whether the actor is a pickup drawn on its own so it can vanish when
+/// taken: an ammo or grenade box, or a weapon.
+pub fn is_takeable(
+    looks: &mut ClassLooks,
+    map: &Package,
+    actor: usize,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> bool {
+    is_ammo_box(looks, map, actor, open) || is_weapon_pickup(looks, map, actor, open)
+}
+
+/// Where a weapon comes to rest, by the same rule as the boxes
+/// (`rest_on_ground`). Returns how far it moved.
+pub fn rest_weapon_on_ground(w: &mut PlacedWeapon, below: impl Fn([f32; 3]) -> Option<f32>) -> f32 {
+    let d = drop_onto_ground(w.location, w.height, below);
+    w.location[2] -= d;
+    w.dropped += d;
+    d
+}
+
+/// How far a pickup centred at `at` with half-height `height` falls onto
+/// the ground below it: 0 if it rests already, or the ground is more than
+/// `MAX_DROP` below.
+fn drop_onto_ground(at: [f32; 3], height: f32, below: impl Fn([f32; 3]) -> Option<f32>) -> f32 {
+    let Some(ground) = below(at) else {
+        return 0.0;
+    };
+    let drop = at[2] - height - ground;
+    if drop > 0.0 && drop <= MAX_DROP {
+        drop
+    } else {
+        0.0
+    }
+}
+
 /// The furthest a box is moved down onto the ground, Unreal units.
 ///
 /// **Our choice.** Across the 477 campaign boxes, almost all sit 0 to 37
@@ -207,17 +403,10 @@ pub const MAX_DROP: f32 = 40.0;
 /// (or sunk a little into the floor), and boxes more than `MAX_DROP` above
 /// the ground found, stay put. Returns how far it moved.
 pub fn rest_on_ground(b: &mut AmmoBox, below: impl Fn([f32; 3]) -> Option<f32>) -> f32 {
-    let Some(ground) = below(b.location) else {
-        return 0.0;
-    };
-    let drop = b.location[2] - b.height - ground;
-    if drop > 0.0 && drop <= MAX_DROP {
-        b.location[2] -= drop;
-        b.dropped += drop;
-        drop
-    } else {
-        0.0
-    }
+    let d = drop_onto_ground(b.location, b.height, below);
+    b.location[2] -= d;
+    b.dropped += d;
+    d
 }
 
 #[cfg(test)]

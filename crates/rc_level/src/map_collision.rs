@@ -62,6 +62,9 @@ pub struct MapCollision {
     /// under them as the game drops them at the start. Pickups are left
     /// out of `triangles`: the player walks into them to take them.
     pub ammo_boxes: Vec<crate::pickups::AmmoBox>,
+    /// Weapons lying in the map (`crate::pickups::PlacedWeapon`), resting
+    /// on the ground the same way.
+    pub weapons: Vec<crate::pickups::PlacedWeapon>,
     /// Pickups of every kind left out of collision.
     pub pickups_not_solid: usize,
 }
@@ -330,10 +333,20 @@ pub fn load(
         level.actors.iter().flatten().copied(),
         &mut |n| pkgs.get(n),
     );
+    let mut weapons = crate::pickups::read_weapons(
+        &mut looks,
+        &map.0,
+        &map.1,
+        level.actors.iter().flatten().copied(),
+        &mut |n| pkgs.get(n),
+    );
     {
         let ground = crate::settle::Ground::new(&mesh.triangles);
         for b in &mut ammo_boxes {
             crate::pickups::rest_on_ground(b, |p| ground.below(p));
+        }
+        for w in &mut weapons {
+            crate::pickups::rest_weapon_on_ground(w, |p| ground.below(p));
         }
     }
     let mut triangles = Vec::with_capacity(mesh.triangles.len());
@@ -381,6 +394,7 @@ pub fn load(
         start,
         arrivals,
         ammo_boxes,
+        weapons,
         pickups_not_solid,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
