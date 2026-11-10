@@ -817,8 +817,39 @@ read from the mesh's `Materials` list). They are still drawn. Before, every
 visible prop was solid, so you bumped into light shafts, cables and other
 decorations. geo_01b: 32 walk-through props and about 50,000 section
 triangles; its solid triangles went from 227,043 to 190,205. geo_01a: 68
-walk-through props and about 15,000 section triangles. Simplified
-collision models (the data after a mesh's streams) are still not read.
+walk-through props and about 15,000 section triangles.
+
+Simple collision shapes (2026-11-10). After its vertex and index lists a
+static mesh stores a reference to a `Model` (the same kind of object as a
+map's BSP, read by `rc_level::bsp`): a few blocky boxes the artists put
+around it. 1,720 of the game's 2,447 meshes have one. Then comes the
+mesh's collision triangle list, which holds exactly the triangles of the
+sections with collision on (checked on 2,295 meshes), so we don't read it.
+For the 660 meshes with collision off on every section (explosive barrels,
+floor and ceiling pipes on Raxus Prime, the jamming device's wrecked
+model) that list is empty: the simple shape is all the game can collide
+with, so `rc_level::collision::solid_local_triangles` uses it
+(`read_simple_shape` fills `StaticMesh::simple_shape`). Meshes with
+collision on keep their own triangles; the original may use the simple
+shape for walking against those too (UE2's `UseSimpleBoxCollision`), but
+its default lives in the engine's C++ code, so we can't read it and left
+them as they were. Six Karma test meshes' shapes don't read (an older
+layout); they keep no shape.
+
+Shots and people (2026-11-10): `rc_level::class_look::blocks` reads what an
+actor stops. People: `bCollideActors` and `bBlockPlayers`. Shots:
+`bCollideActors` and `bBlockZeroExtentTraces`, and it is a shot target
+(`bProjTarget`, on for every `Prop`, or it blocks actors and players). The
+Geonosian shield wall pieces of geo_04c (`K_GEO04_WallComponent`, 89 of
+them) have `bBlockPlayers`, `bBlockActors` and `bBlockNonZeroExtentTraces`
+off in their class: in the game you walk through them but shots hit them.
+`map_collision` keeps such props in `shot_triangles` (or
+`shot_part_triangles` when they are parts, such as breakable ones), and
+`rc_level_plugin::LevelParts::with_shots_only` puts them in
+`LevelCollision` so that only sweeps with no size (shots, looks, blast
+lines) stop at them; a moving body (any size) passes. A broken piece stops
+nothing. Numbers on 2026-11-10: geo_04c 98 props now collide through their
+simple shape and 89 stop shots only; geo_01a 10 and 5; ras_01a 315 and 0.
 
 ### The test room
 
@@ -1622,8 +1653,9 @@ Who does what: `rc_level::map_collision` keeps every breakable prop's
 triangles apart (as a `LevelParts` part), and the level viewer draws each
 as its own `MoverPart`, so it can go when it breaks. Some models have
 collision switched off on every part (the Geonosian explosive barrels):
-the game blocks shots with the model's simple collision shape, which we
-don't read yet, so a breakable prop like that gets its drawn triangles. `rc_scripts::Director`
+those collide through the model's simple collision shape (see "Simple
+collision shapes"). A breakable prop with neither gets its drawn
+triangles, so it can still be shot. `rc_scripts::Director`
 keeps health and steps (`add_breakables`, `hurt_prop`) and sends the
 events, so a script waiting for `Clamp00` carries on. `rc_scripts_plugin`
 turns weapons into damage: a `ShotLanded` on the level hurts the prop whose

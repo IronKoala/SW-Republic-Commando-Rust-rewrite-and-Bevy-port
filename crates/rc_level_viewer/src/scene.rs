@@ -552,8 +552,12 @@ fn load_mesh(
             }
             ObjectRef::None => return Err("no mesh".to_string()),
         };
-        let mesh = static_mesh::read_static_mesh(&owner.0, &owner.1, &owner.0.exports[k])
+        let mut mesh = static_mesh::read_static_mesh(&owner.0, &owner.1, &owner.0.exports[k])
             .map_err(|e| format!("mesh read error: {e}"))?;
+        // Its simple collision shape, so physics props settle onto the
+        // same things as in `rc_level::map_collision` (a shape that
+        // can't be read leaves none).
+        let _ = rc_level::collision::read_simple_shape(&owner.0, &owner.1, &mut mesh);
         Ok(Rc::new((mesh, owner)))
     })();
     cache.insert(key, result.clone());
