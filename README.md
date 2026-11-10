@@ -202,7 +202,7 @@ copy of the game.
   rifle hits or 2 pistol hits. One droid fires back, and its hits take your
   shield before your health. The firing and reload sounds are the game's.
   Every weapon is a text file in `data/weapons`, which mods can edit.
-  `rc_shoot --script` drives itself through 17 checks and passed all of them.
+  `rc_shoot --script` drives itself through 20 checks and passed all of them.
 
 - **First-person arms and weapon animations (tested in the cloud sandbox,
   not yet on Windows or by playing).** The player holds the original
@@ -212,7 +212,9 @@ copy of the game.
   stand still, sway when you walk or run, kick on each shot, play the full
   reload, holster the old weapon and bring up the new one when you switch
   (with the attachment swap between DC-17m attachments), and play the
-  grenade throw and melee hit. They're drawn by their own camera, so the gun
+  grenade throw and melee hit, with the game's own handling sounds for
+  each (reload, bringing up, putting away, attachment swaps, melee, throw;
+  heard in the log in the cloud, not yet listened to on Windows). They're drawn by their own camera, so the gun
   never pokes into walls. The sniper's arms hide while zoomed, as in the
   game. The little screen on the DC-17m and its sniper shows the ammo you
   carry (three digits, like "120") and a bar that empties with the
