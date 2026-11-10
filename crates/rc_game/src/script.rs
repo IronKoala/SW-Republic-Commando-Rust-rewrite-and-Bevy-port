@@ -262,26 +262,30 @@ fn steps() -> Vec<Step> {
         FocusAfter(Action::MenuDown, "MenuOptions[1]"),
         Press(Action::MenuAccept), // LOAD GAME
         Wait(0.3),
-        Check("LOAD GAME opens the original load page (no saves yet)", |w| {
-            let items = save_items(w, "load_game")?;
-            match (page(w), shown_page(w)) {
-                (Page::LoadGame, Some(k)) if k == "load_game" && items.is_empty() => {
-                    Ok("load_game (original), empty".into())
+        Check(
+            "LOAD GAME opens the original load page (no saves yet)",
+            |w| {
+                let items = save_items(w, "load_game")?;
+                match (page(w), shown_page(w)) {
+                    (Page::LoadGame, Some(k)) if k == "load_game" && items.is_empty() => {
+                        Ok("load_game (original), empty".into())
+                    }
+                    (p, k) => Err(format!("{p:?}, original page {k:?}, {items:?}")),
                 }
-                (p, k) => Err(format!("{p:?}, original page {k:?}, {items:?}")),
-            }
-        }),
+            },
+        ),
         Press(Action::MenuBack),
         Wait(0.2),
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         Press(Action::MenuAccept),
         Wait(0.2),
-        Check("CAMPAIGN MAP opens the original campaign page", |w| {
-            match (page(w), shown_page(w)) {
+        Check(
+            "CAMPAIGN MAP opens the original campaign page",
+            |w| match (page(w), shown_page(w)) {
                 (Page::Campaigns, Some(k)) if k == "campaigns" => Ok("campaigns (original)".into()),
                 (p, k) => Err(format!("{p:?}, original page {k:?}")),
-            }
-        }),
+            },
+        ),
         Wait(0.5),
         Check("Geonosis is chosen and its missions are listed", |w| {
             let (title, items) = campaign_list(w)?;
@@ -346,15 +350,24 @@ fn steps() -> Vec<Step> {
         Check("EVERY MAP + fits inside its button", |w| {
             let mut m = w.resource_mut::<OriginalMenus>();
             let p = m.pages.get("campaigns").ok_or("no campaign page")?;
-            let b = match &p.screen.layout.widget("EveryMap").ok_or("no EveryMap")?.kind {
+            let b = match &p
+                .screen
+                .layout
+                .widget("EveryMap")
+                .ok_or("no EveryMap")?
+                .kind
+            {
                 rc_menus::layout::Kind::Button(b) => b.clone(),
                 _ => return Err("not a button".into()),
             };
             let sizes = m.assets.as_mut().ok_or("no assets")?;
             let t = rc_menus::quads::text_box(&b.blurred, sizes).ok_or("no text")?;
-            let bg = rc_menus::quads::sprite_box(&b.background_blurred, sizes)
-                .ok_or("no background")?;
-            let got = format!("text {:.3}..{:.3}, button {:.3}..{:.3}", t[0], t[2], bg[0], bg[2]);
+            let bg =
+                rc_menus::quads::sprite_box(&b.background_blurred, sizes).ok_or("no background")?;
+            let got = format!(
+                "text {:.3}..{:.3}, button {:.3}..{:.3}",
+                t[0], t[2], bg[0], bg[2]
+            );
             if t[0] >= bg[0] && t[2] <= bg[2] {
                 Ok(got)
             } else {
@@ -371,17 +384,25 @@ fn steps() -> Vec<Step> {
         Wait(0.2),
         Pointer(|w| bar_point(w, 1.2).map(|p| (p, true))),
         Wait(0.3),
-        Check("dragging the scroll bar down scrolls to the last maps", |w| {
-            let m = w.resource::<OriginalMenus>();
-            let p = m.pages.get("campaigns").ok_or("no campaign page")?;
-            let l = p.screen.layout.lists.lists.first().ok_or("no list")?;
-            let got = format!("first shown {} of {} ({} rows)", l.position, l.items.len(), l.rows);
-            if l.items.len() > l.rows && l.position == l.items.len() - l.rows {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+        Check(
+            "dragging the scroll bar down scrolls to the last maps",
+            |w| {
+                let m = w.resource::<OriginalMenus>();
+                let p = m.pages.get("campaigns").ok_or("no campaign page")?;
+                let l = p.screen.layout.lists.lists.first().ok_or("no list")?;
+                let got = format!(
+                    "first shown {} of {} ({} rows)",
+                    l.position,
+                    l.items.len(),
+                    l.rows
+                );
+                if l.items.len() > l.rows && l.position == l.items.len() - l.rows {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Shot("campaign_dragged"),
         Pointer(|w| bar_point(w, 1.2).map(|p| (p, false))),
         Wait(0.1),
@@ -568,52 +589,78 @@ fn steps() -> Vec<Step> {
                 Err(got)
             }
         }),
-        Check("the visor starts in tactical mode and the squad glows", |w| {
-            let mode = w.resource::<rc_visor::VisorState>().mode;
-            let r = w.resource::<rc_visor::VisorReadout>().clone();
-            let mut q = w.query_filtered::<&rc_visor::TacticalGlow, With<rc_squad_plugin::SquadMate>>();
-            let mates: Vec<String> = q.iter(w).map(|g| g.0.clone()).collect();
-            let got = format!(
+        Check(
+            "the visor starts in tactical mode and the squad glows",
+            |w| {
+                let mode = w.resource::<rc_visor::VisorState>().mode;
+                let r = w.resource::<rc_visor::VisorReadout>().clone();
+                let mut q =
+                    w.query_filtered::<&rc_visor::TacticalGlow, With<rc_squad_plugin::SquadMate>>();
+                let mates: Vec<String> = q.iter(w).map(|g| g.0.clone()).collect();
+                let got = format!(
                 "{} mode, {} glow colours from the game, {} glowing copies ({} shown), squad {mates:?}",
                 mode.name(),
                 r.colours,
                 r.shells,
                 r.shown
             );
-            if mode == rc_visor::VisorMode::Tactical && r.colours >= 4 && r.shown > 0 && !mates.is_empty() {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+                if mode == rc_visor::VisorMode::Tactical
+                    && r.colours >= 4
+                    && r.shown > 0
+                    && !mates.is_empty()
+                {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Press(Action::Flashlight),
         Wait(0.3),
-        Check("CYCLE VISOR MODE (X) switches to low light with the lamp on", |w| {
-            let mode = w.resource::<rc_visor::VisorState>().mode;
-            let shown = w.resource::<rc_visor::VisorReadout>().shown;
-            let lamps = count::<rc_visor::Headlamp>(w);
-            let got = format!("{} mode, {lamps} lamp, {shown} glowing copies shown", mode.name());
-            if mode == rc_visor::VisorMode::LowLight && lamps == 1 && shown == 0 {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+        Check(
+            "CYCLE VISOR MODE (X) switches to low light with the lamp on",
+            |w| {
+                let mode = w.resource::<rc_visor::VisorState>().mode;
+                let shown = w.resource::<rc_visor::VisorReadout>().shown;
+                let lamps = count::<rc_visor::Headlamp>(w);
+                let got = format!(
+                    "{} mode, {lamps} lamp, {shown} glowing copies shown",
+                    mode.name()
+                );
+                if mode == rc_visor::VisorMode::LowLight && lamps == 1 && shown == 0 {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Press(Action::Flashlight),
         Wait(0.3),
         Press(Action::Flashlight),
         Wait(0.3),
-        Check("two more presses go through normal and back to tactical", |w| {
-            let mode = w.resource::<rc_visor::VisorState>().mode;
-            let r = w.resource::<rc_visor::VisorReadout>().clone();
-            let lamps = count::<rc_visor::Headlamp>(w);
-            let got = format!("{} mode after {} changes, {lamps} lamp, {} shown", mode.name(), r.changes, r.shown);
-            if mode == rc_visor::VisorMode::Tactical && lamps == 0 && r.shown > 0 && r.changes >= 3 {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+        Check(
+            "two more presses go through normal and back to tactical",
+            |w| {
+                let mode = w.resource::<rc_visor::VisorState>().mode;
+                let r = w.resource::<rc_visor::VisorReadout>().clone();
+                let lamps = count::<rc_visor::Headlamp>(w);
+                let got = format!(
+                    "{} mode after {} changes, {lamps} lamp, {} shown",
+                    mode.name(),
+                    r.changes,
+                    r.shown
+                );
+                if mode == rc_visor::VisorMode::Tactical
+                    && lamps == 0
+                    && r.shown > 0
+                    && r.changes >= 3
+                {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Check(
             "the level part loaded walls, props, doors and invisible walls",
             |w| {
@@ -825,6 +872,21 @@ fn steps() -> Vec<Step> {
             10.0,
         ),
         Check("spawners and scripts agree", level_spawn_summary),
+        // Props weapons can break (`rc_scripts_plugin::breakables`):
+        // shoot one of geo_01a's explosive barrels from just above it,
+        // with a stand-in character above that; three DC-17m shots (20
+        // each) take its 60 health, it explodes a moment later, and the
+        // explosion reaches the stand-in.
+        Check("the level's breakable props are read", props_read),
+        Note(props_shoot_barrel),
+        Until("shots break an explosive barrel", props_barrel_broken, 5.0),
+        Until(
+            "the barrel explodes a moment later",
+            props_barrel_exploded,
+            3.0,
+        ),
+        Wait(0.2),
+        Check("its explosion hurts what stands near it", props_blast_hurt),
         // Script actions on characters: geo_01a's "LoneRanger", a
         // Geonosian warrior whose spawner gives him the sequence
         // LoneRangerAI. On LoneRangerJump he walks to a point, turns to
@@ -1132,16 +1194,23 @@ fn steps() -> Vec<Step> {
         FocusPauseItem("SaveGameSelected", 0),
         Press(Action::MenuAccept),
         Wait(0.3),
-        Check("SAVE GAME opens the original save page, listing the autosave and quicksave", |w| {
-            let items = save_items(w, "save_game")?;
-            let got = format!("{:?} {items:?}", page(w));
-            match items.as_slice() {
-                [a, q] if page(w) == Page::SaveGame
-                    && a.starts_with("AUTOSAVE")
-                    && q.starts_with("QUICKSAVE") => Ok(got),
-                _ => Err(got),
-            }
-        }),
+        Check(
+            "SAVE GAME opens the original save page, listing the autosave and quicksave",
+            |w| {
+                let items = save_items(w, "save_game")?;
+                let got = format!("{:?} {items:?}", page(w));
+                match items.as_slice() {
+                    [a, q]
+                        if page(w) == Page::SaveGame
+                            && a.starts_with("AUTOSAVE")
+                            && q.starts_with("QUICKSAVE") =>
+                    {
+                        Ok(got)
+                    }
+                    _ => Err(got),
+                }
+            },
+        ),
         Shot("save_game"),
         FocusOn("YButton"),
         Press(Action::MenuAccept), // NEW
@@ -1162,15 +1231,18 @@ fn steps() -> Vec<Step> {
         Press(Action::MenuDown),
         Press(Action::MenuAccept),
         Wait(0.2),
-        Check("the quicksave can't be overwritten: the original's message", |w| {
-            let asking = w.resource::<OriginalMenus>().asking.clone();
-            match (&asking, question_text(w)) {
-                (Some(original_menu::Asking::Notice), Some(t)) if t.contains("QUICKSAVE") => {
-                    Ok(t)
+        Check(
+            "the quicksave can't be overwritten: the original's message",
+            |w| {
+                let asking = w.resource::<OriginalMenus>().asking.clone();
+                match (&asking, question_text(w)) {
+                    (Some(original_menu::Asking::Notice), Some(t)) if t.contains("QUICKSAVE") => {
+                        Ok(t)
+                    }
+                    other => Err(format!("{other:?}")),
                 }
-                other => Err(format!("{other:?}")),
-            }
-        }),
+            },
+        ),
         Shot("save_notice"),
         Press(Action::MenuBack),
         Wait(0.2),
@@ -1181,12 +1253,13 @@ fn steps() -> Vec<Step> {
         FocusOn("XButton"),
         Press(Action::MenuAccept),
         Wait(0.2),
-        Check("DELETE asks first, with the save's name", |w| {
-            match question_text(w) {
+        Check(
+            "DELETE asks first, with the save's name",
+            |w| match question_text(w) {
                 Some(t) if t.contains("DELETE GEONOSIS 1") => Ok(t),
                 other => Err(format!("{other:?}")),
-            }
-        }),
+            },
+        ),
         FocusOn("AButton"), // YES
         Press(Action::MenuAccept),
         Wait(0.5),
@@ -1218,12 +1291,13 @@ fn steps() -> Vec<Step> {
         Press(Action::MenuDown), // the quicksave, saved in geo_01a
         Press(Action::MenuAccept),
         Wait(0.2),
-        Check("loading in a level asks first (the original's question)", |w| {
-            match question_text(w) {
+        Check(
+            "loading in a level asks first (the original's question)",
+            |w| match question_text(w) {
                 Some(t) if t.contains("UNSAVED PROGRESS") => Ok(t),
                 other => Err(format!("{other:?}")),
-            }
-        }),
+            },
+        ),
         FocusOn("AButton"), // YES
         Press(Action::MenuAccept),
         Until(
@@ -1317,19 +1391,25 @@ fn steps() -> Vec<Step> {
         FocusOn("Options[8]"),    // TACTICAL MODE INTENSITY
         Press(Action::MenuRight), // 2 -> 3
         Wait(0.2),
-        Check("TACTICAL MODE INTENSITY works: right raises it a step", |w| {
-            let shown = button_text(w, "Options[8]").unwrap_or_default();
-            let s = &w.resource::<Settings>().game;
-            let got = format!("visor {:?}, intensity {:.1}, shows {shown}", s.tactical_visor, s.tactical_intensity);
-            if s.tactical_visor == crate::settings::TacticalVisor::Cycle
-                && (s.tactical_intensity - 0.3).abs() < 1e-4
-                && shown == "3"
-            {
-                Ok(got)
-            } else {
-                Err(got)
-            }
-        }),
+        Check(
+            "TACTICAL MODE INTENSITY works: right raises it a step",
+            |w| {
+                let shown = button_text(w, "Options[8]").unwrap_or_default();
+                let s = &w.resource::<Settings>().game;
+                let got = format!(
+                    "visor {:?}, intensity {:.1}, shows {shown}",
+                    s.tactical_visor, s.tactical_intensity
+                );
+                if s.tactical_visor == crate::settings::TacticalVisor::Cycle
+                    && (s.tactical_intensity - 0.3).abs() < 1e-4
+                    && shown == "3"
+                {
+                    Ok(got)
+                } else {
+                    Err(got)
+                }
+            },
+        ),
         Press(Action::MenuLeft), // back to 2
         FocusOn("Sound"),
         Press(Action::MenuAccept), // SOUND
@@ -1588,7 +1668,10 @@ fn shown_page(w: &mut World) -> Option<String> {
     let state = *w.resource::<State<GameState>>().get();
     let play = w.get_resource::<State<Play>>().map(|p| *p.get());
     let menu = w.resource::<Menu>();
-    match w.resource::<OriginalMenus>().shown(&state, play.as_ref(), menu) {
+    match w
+        .resource::<OriginalMenus>()
+        .shown(&state, play.as_ref(), menu)
+    {
         Some(original_menu::Shown::Page(k)) => Some(k),
         _ => None,
     }
@@ -1605,7 +1688,10 @@ fn bar_point(w: &mut World, along: f32) -> Option<Vec2> {
     let (_, node, at) = q.iter(w).find(|(b, _, _)| b.bar == 0)?;
     let size = node.size();
     let centre = at.translation;
-    Some(Vec2::new(centre.x, centre.y - size.y / 2.0 + size.y * along))
+    Some(Vec2::new(
+        centre.x,
+        centre.y - size.y / 2.0 + size.y * along,
+    ))
 }
 
 /// What an original load or save page lists.
@@ -1633,7 +1719,10 @@ fn question_text(w: &mut World) -> Option<String> {
 /// The original campaign page's planet name and list.
 fn campaign_list(w: &mut World) -> Result<(String, Vec<String>), String> {
     let m = w.resource::<OriginalMenus>();
-    let p = m.pages.get("campaigns").ok_or("no original campaign page")?;
+    let p = m
+        .pages
+        .get("campaigns")
+        .ok_or("no original campaign page")?;
     let title = match p.screen.layout.widget("Campaign").map(|w| &w.kind) {
         Some(rc_menus::layout::Kind::Text(t)) => t.text.clone(),
         _ => String::new(),
@@ -2786,6 +2875,151 @@ fn level_spawn_destroy(w: &mut World) {
             point: Vec3::ZERO,
             direction: Vec3::NEG_Y,
         });
+    }
+}
+
+/// The barrel the props checks shoot, and the stand-in above it.
+#[derive(Resource)]
+struct BarrelTest {
+    export: usize,
+    name: String,
+    dummy: Entity,
+}
+
+const BARREL_DUMMY_HEALTH: f32 = 5000.0;
+
+fn props_read(w: &mut World) -> Result<String, String> {
+    let s = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .ok_or("no level scripts")?;
+    let all: Vec<_> = s.breaking.iter().collect();
+    let barrels = all.iter().filter(|b| b.explosion.is_some()).count();
+    let msg = format!(
+        "{} breakable props, {} that explode, director knows {}",
+        all.len(),
+        barrels,
+        s.director.stats.breakables
+    );
+    if barrels >= 2 && s.director.stats.breakables == all.len() {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+fn props_shoot_barrel(w: &mut World) {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return;
+    };
+    let mut barrels: Vec<_> = s
+        .breaking
+        .iter()
+        .filter(|b| b.explosion.is_some() && !b.hidden)
+        .map(|b| (b.export, b.name.clone()))
+        .collect();
+    barrels.sort();
+    let Some((export, name)) = barrels.first().cloned() else {
+        return;
+    };
+    let Some((lo, hi)) = w
+        .get_resource::<rc_level_plugin::LevelParts>()
+        .and_then(|p| p.bounds_of(export))
+    else {
+        return;
+    };
+    let centre = rc_movement::Vec3::new(
+        (lo.x + hi.x) * 0.5,
+        (lo.y + hi.y) * 0.5,
+        (lo.z + hi.z) * 0.5,
+    );
+    let top = hi.z;
+    // The stand-in's feet 120 uu over the barrel's top: its middle is
+    // about 250 uu from the barrel's middle.
+    let feet = rc_movement::Vec3::new(centre.x, centre.y, top + 120.0);
+    let dummy = w
+        .spawn((
+            Transform::from_translation(rc_game_core::units::to_bevy(feet)),
+            rc_combat::Hittable::COMMANDO,
+            rc_combat::Health::new(BARREL_DUMMY_HEALTH),
+            DespawnOnExit(GameState::InGame),
+        ))
+        .id();
+    let shooter = {
+        let mut q = w.query_filtered::<Entity, With<Player>>();
+        q.iter(w).next()
+    };
+    let Some(shooter) = shooter else { return };
+    let origin =
+        rc_game_core::units::to_bevy(rc_movement::Vec3::new(centre.x, centre.y, top + 30.0));
+    for _ in 0..3 {
+        w.write_message(rc_combat::FireShot {
+            shooter,
+            origin,
+            direction: Vec3::NEG_Y,
+            weapon: "dc17m_blaster".into(),
+        });
+    }
+    w.resource::<GameLog>().line(format!(
+        "script: shooting {name} (export {export}) three times from 30 uu above it; stand-in {dummy:?} above it"
+    ));
+    w.insert_resource(BarrelTest {
+        export,
+        name,
+        dummy,
+    });
+}
+
+fn props_barrel_broken(w: &mut World) -> bool {
+    let Some(t) = w.get_resource::<BarrelTest>() else {
+        return false;
+    };
+    let (name, export) = (t.name.clone(), t.export);
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| {
+            s.props.broken.contains(&name)
+                && s.director.prop_health(export).is_some_and(|h| h <= 0.0)
+        })
+}
+
+fn props_barrel_exploded(w: &mut World) -> bool {
+    let Some(t) = w.get_resource::<BarrelTest>() else {
+        return false;
+    };
+    let name = t.name.clone();
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| s.props.exploded.contains(&name))
+}
+
+fn props_blast_hurt(w: &mut World) -> Result<String, String> {
+    let t = w.get_resource::<BarrelTest>().ok_or("no barrel test")?;
+    let (export, dummy) = (t.export, t.dummy);
+    let health = w
+        .get::<rc_combat::Health>(dummy)
+        .map(|h| h.current)
+        .ok_or("the stand-in is gone")?;
+    let solid = w
+        .get_resource::<rc_level_plugin::LevelParts>()
+        .and_then(|p| p.list().into_iter().find(|x| x.0 == export))
+        .map(|x| x.3);
+    let hits = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .map_or(0, |s| s.props.hits);
+    // It must also be gone from view: every drawn piece of it hidden.
+    let (mut drawn, mut hidden) = (0, 0);
+    let mut q = w.query::<(&rc_level_viewer::draw::MoverPart, &Visibility)>();
+    for (p, v) in q.iter(w) {
+        if p.0 == export {
+            drawn += 1;
+            hidden += (*v == Visibility::Hidden) as usize;
+        }
+    }
+    let msg = format!(
+        "stand-in health {health:.0} of {BARREL_DUMMY_HEALTH}; barrel solid now {solid:?}, {hidden} of {drawn} drawn pieces hidden; {hits} hits on props"
+    );
+    if health < BARREL_DUMMY_HEALTH && solid == Some(false) && drawn > 0 && hidden == drawn {
+        Ok(msg)
+    } else {
+        Err(msg)
     }
 }
 

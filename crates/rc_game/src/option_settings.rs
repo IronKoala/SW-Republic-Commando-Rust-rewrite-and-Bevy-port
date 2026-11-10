@@ -393,7 +393,9 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
         // CYCLE), so the value's place is the setting.
         "tactical_visor" => (s.game.tactical_visor.choice().number() as usize).min(n - 1),
         // Its numbers 0 to 10 are tenths.
-        "tactical_intensity" => rc_visor::rules::intensity_step(s.game.tactical_intensity).min(n - 1),
+        "tactical_intensity" => {
+            rc_visor::rules::intensity_step(s.game.tactical_intensity).min(n - 1)
+        }
         "blur" => on_off_index(items, s.video.blur),
         "bloom" => on_off_index(items, s.video.bloom),
         "squad_shadows" => on_off_index(items, s.video.squad_shadows),

@@ -536,8 +536,21 @@ copy of the game.
   placeholder). Checked by `cargo run -p rc_visor --example visor_check`
   and `rc_game --script`.
 
+- **Breakable props (since 2026-11-09, tested in the cloud only, not on
+  Windows or by playing).** Explosive barrels, geo_05b's fuel dispensers
+  and clamps, holo machines, consoles, rock cover, drone eggs and wall
+  panels take damage from shots and grenades and break with the game's own
+  health numbers (838 such props on Geonosis). Barrels and dispensers
+  explode a moment later, hurting characters and setting off other barrels
+  near them. A prop that breaks sends its event to the level scripts (53
+  on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
+  go on. Broken props are kept in save files.
+
 ## What doesn't work yet
 
+- Breakable props just disappear when they break: their broken model,
+  effect and sound aren't shown yet, the burning or electric after-effect
+  some barrels leave isn't done, and loose props aren't pushed by blasts.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:

@@ -38,8 +38,14 @@ impl<'a> Ground<'a> {
     pub fn new(triangles: &'a [[Vec3; 3]]) -> Self {
         let mut cells: HashMap<(i32, i32), Vec<u32>> = HashMap::new();
         for (i, t) in triangles.iter().enumerate() {
-            let (x0, x1) = (t.iter().map(|p| p[0]).fold(f32::MAX, f32::min), t.iter().map(|p| p[0]).fold(f32::MIN, f32::max));
-            let (y0, y1) = (t.iter().map(|p| p[1]).fold(f32::MAX, f32::min), t.iter().map(|p| p[1]).fold(f32::MIN, f32::max));
+            let (x0, x1) = (
+                t.iter().map(|p| p[0]).fold(f32::MAX, f32::min),
+                t.iter().map(|p| p[0]).fold(f32::MIN, f32::max),
+            );
+            let (y0, y1) = (
+                t.iter().map(|p| p[1]).fold(f32::MAX, f32::min),
+                t.iter().map(|p| p[1]).fold(f32::MIN, f32::max),
+            );
             // Triangles covering more than 4096 cells (a 16,000-unit
             // square: sky boxes, backdrops) are left out to keep this small.
             let (cx0, cx1, cy0, cy1) = (cell(x0), cell(x1), cell(y0), cell(y1));
@@ -129,13 +135,19 @@ pub fn starts_awake(pkg: &rc_package::Package, data: &[u8], actor: usize) -> boo
     let Ok(props) = crate::actors::read_actor_properties(pkg, data, actor) else {
         return false;
     };
-    if matches!(properties::find(pkg, &props, "Physics").map(|p| &p.value), Some(Value::Byte(0))) {
+    if matches!(
+        properties::find(pkg, &props, "Physics").map(|p| &p.value),
+        Some(Value::Byte(0))
+    ) {
         return false;
     }
     let Some(Value::Object(k)) = properties::find(pkg, &props, "KParams").map(|p| &p.value) else {
         return false;
     };
-    let Some(e) = usize::try_from(*k - 1).ok().and_then(|i| pkg.exports.get(i)) else {
+    let Some(e) = usize::try_from(*k - 1)
+        .ok()
+        .and_then(|i| pkg.exports.get(i))
+    else {
         return false;
     };
     let Ok(bytes) = crate::actors::object_bytes(data, e) else {
@@ -163,18 +175,36 @@ mod tests {
     fn rock_drops_onto_floor() {
         // A floor at height 10 made of two triangles, 0..1000 square.
         let floor = [
-            [[0.0, 0.0, 10.0], [1000.0, 0.0, 10.0], [1000.0, 1000.0, 10.0]],
-            [[0.0, 0.0, 10.0], [1000.0, 1000.0, 10.0], [0.0, 1000.0, 10.0]],
+            [
+                [0.0, 0.0, 10.0],
+                [1000.0, 0.0, 10.0],
+                [1000.0, 1000.0, 10.0],
+            ],
+            [
+                [0.0, 0.0, 10.0],
+                [1000.0, 1000.0, 10.0],
+                [0.0, 1000.0, 10.0],
+            ],
         ];
         let ground = Ground::new(&floor);
-        let rock = [[500.0, 500.0, 150.0], [520.0, 500.0, 140.0], [500.0, 530.0, 200.0]];
+        let rock = [
+            [500.0, 500.0, 150.0],
+            [520.0, 500.0, 140.0],
+            [500.0, 530.0, 200.0],
+        ];
         assert_eq!(drop_distance(&rock, &ground, MAX_DROP), Some(130.0));
         // Already touching: no drop.
         let resting = [[100.0, 100.0, 10.0], [120.0, 100.0, 40.0]];
         assert_eq!(drop_distance(&resting, &ground, MAX_DROP), Some(0.0));
         // Nothing below.
-        assert_eq!(drop_distance(&[[5000.0, 5000.0, 50.0]], &ground, MAX_DROP), None);
+        assert_eq!(
+            drop_distance(&[[5000.0, 5000.0, 50.0]], &ground, MAX_DROP),
+            None
+        );
         // Too far above.
-        assert_eq!(drop_distance(&[[500.0, 500.0, 900.0]], &ground, MAX_DROP), None);
+        assert_eq!(
+            drop_distance(&[[500.0, 500.0, 900.0]], &ground, MAX_DROP),
+            None
+        );
     }
 }

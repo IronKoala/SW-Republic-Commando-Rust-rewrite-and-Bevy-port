@@ -27,6 +27,7 @@
 pub mod save;
 pub mod settings;
 
+use rc_level::breakables::Breakable;
 use rc_level::movers::TriggerInfo;
 use rc_level::scripts::{MapScripts, ScriptObject, Val, Vals};
 pub use settings::Settings;
@@ -68,6 +69,15 @@ pub enum Effect {
         tag: String,
         mesh: Option<String>,
         effect: Option<String>,
+    },
+    /// A breakable prop went to its damaged step (`DamagedState`). If
+    /// `removed`, it has no damaged look and is gone (the game's rule: no
+    /// broken event then).
+    PropDamaged {
+        export: usize,
+        name: String,
+        tag: String,
+        removed: bool,
     },
     /// A checkpoint was reached: the game saves.
     Checkpoint { name: String },
@@ -168,6 +178,44 @@ struct Prop {
     event: Option<String>,
     mesh: Option<String>,
     effect: Option<String>,
+    /// What the game's damage rules need (`rc_level::breakables`). `None`
+    /// for props only scripts hurt or remove.
+    breaks: Option<Breaks>,
+}
+
+/// A prop weapons can break: the steps of `rc_level::breakables`.
+#[derive(Debug, Clone, PartialEq)]
+struct Breaks {
+    initial: f32,
+    damaged_ratio: f32,
+    /// In its damaged step.
+    damaged: bool,
+    damaged_event: Option<String>,
+    /// The damaged step has a look of its own (else the prop disappears
+    /// on entering it, without its broken event).
+    damaged_look: bool,
+    /// Seconds the damaged step lasts before the prop breaks (0: until
+    /// hurt again), plus up to `damaged_extra` at random.
+    damaged_span: f32,
+    damaged_extra: f32,
+    /// When (director time) the damaged step runs out.
+    break_at: Option<f32>,
+}
+
+/// What [`Director::hurt_prop`] did.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PropHurt {
+    /// No prop has that export index, or it can't be hurt (it started with
+    /// no health: only a script can remove it).
+    NotBreakable,
+    /// Already broken: damage does nothing more.
+    AlreadyBroken,
+    /// Hurt; this much health is left.
+    Hurt(f32),
+    /// It went to its damaged step.
+    Damaged,
+    /// It broke.
+    Broken,
 }
 
 /// Counts for the log and the self-tests.
@@ -181,6 +229,8 @@ pub struct Stats {
     pub conditions: usize,
     pub checkpoints: usize,
     pub props: usize,
+    /// Props weapons can break (`Director::add_breakables`).
+    pub breakables: usize,
     /// `Dispatcher`s: actors that send a timed list of events.
     pub dispatchers: usize,
     /// Teleporters with a `URL`: the level's exits.
@@ -426,9 +476,11 @@ impl Director {
                     tag: o.tag().to_string(),
                     health: o.float("Health").unwrap_or(d.settings.prop_health),
                     destroyed: false,
-                    event: text("Event"),
+                    // The prop's own event comes first, as in the game.
+                    event: o.event().map(str::to_string).or_else(|| text("Event")),
                     mesh: text("Mesh"),
                     effect: text("TransitionEffect"),
+                    breaks: None,
                 });
             }
         }
@@ -562,40 +614,165 @@ impl Director {
             .count()
     }
 
-    /// Hurt every prop with this tag. Destroyed props come out as
-    /// [`Effect::PropDestroyed`] on the next step. Returns how many props
-    /// have the tag.
+    /// Hurt every prop with this tag (`ACTION_HurtActor`). Destroyed props
+    /// come out as [`Effect::PropDestroyed`] on the next step. Returns how
+    /// many props have the tag.
     pub fn hurt_props(&mut self, tag: &str, amount: f32) -> usize {
-        let mut n = 0;
-        let mut events = Vec::new();
-        for p in self
-            .props
-            .iter_mut()
-            .filter(|p| p.tag.eq_ignore_ascii_case(tag))
-        {
-            n += 1;
-            if p.destroyed {
-                continue;
-            }
-            p.health -= amount;
-            if p.health <= 0.0 {
-                p.destroyed = true;
-                self.out.push(Effect::PropDestroyed {
-                    export: p.export,
-                    name: p.name.clone(),
-                    tag: p.tag.clone(),
-                    mesh: p.mesh.clone(),
-                    effect: p.effect.clone(),
-                });
-                if let Some(e) = &p.event {
-                    events.push((e.clone(), p.name.clone()));
+        let hit: Vec<usize> = (0..self.props.len())
+            .filter(|&i| self.props[i].tag.eq_ignore_ascii_case(tag))
+            .collect();
+        for &i in &hit {
+            self.hurt_index(i, amount);
+        }
+        hit.len()
+    }
+
+    /// Give the props weapons can break their full rules (read with
+    /// `rc_level::breakables`): starting health, damaged step, events. Props
+    /// the director already knows (by export index) are updated; the rest
+    /// are added. Call once, right after [`Director::new`] and before
+    /// restoring a save.
+    pub fn add_breakables(&mut self, list: &[Breakable]) {
+        for b in list {
+            let breaks = Breaks {
+                initial: b.health,
+                damaged_ratio: b.damaged_ratio,
+                damaged: false,
+                damaged_event: b.damaged.event.clone(),
+                damaged_look: b.damaged.keeps_a_look() || b.anim_prop,
+                damaged_span: b.damaged.life_span,
+                damaged_extra: b.damaged.life_span_max,
+                break_at: None,
+            };
+            let p = Prop {
+                export: b.export,
+                name: b.name.clone(),
+                tag: b.tag.clone(),
+                health: b.health,
+                destroyed: false,
+                event: b.broken_event().map(str::to_string),
+                mesh: b.destroyed.mesh.clone(),
+                effect: b.destroyed.effect.clone(),
+                breaks: Some(breaks),
+            };
+            match self.props.iter_mut().find(|x| x.export == b.export) {
+                Some(x) => *x = p,
+                None => {
+                    self.stats.props += 1;
+                    self.props.push(p);
                 }
             }
+            self.stats.breakables += 1;
         }
-        for (e, by) in events {
+    }
+
+    /// Damage one prop (a shot, a blast) by its export index, after its
+    /// damage table. See [`PropHurt`].
+    pub fn hurt_prop(&mut self, export: usize, amount: f32) -> PropHurt {
+        match self.props.iter().position(|p| p.export == export) {
+            Some(i) if self.props[i].breaks.is_some() => self.hurt_index(i, amount),
+            _ => PropHurt::NotBreakable,
+        }
+    }
+
+    /// Health left on a prop, by export index.
+    pub fn prop_health(&self, export: usize) -> Option<f32> {
+        self.props.iter().find(|p| p.export == export).map(|p| p.health)
+    }
+
+    fn hurt_index(&mut self, i: usize, amount: f32) -> PropHurt {
+        let now = self.time;
+        let p = &mut self.props[i];
+        if p.destroyed {
+            return PropHurt::AlreadyBroken;
+        }
+        p.health -= amount;
+        let Some(b) = p.breaks.as_mut() else {
+            // A prop only scripts deal with: it breaks at no health.
+            if p.health <= 0.0 {
+                self.break_prop(i);
+                return PropHurt::Broken;
+            }
+            return PropHurt::Hurt(p.health);
+        };
+        // The game's steps: with no damaged step (ratio 0), break at no
+        // health; otherwise go to the damaged step at ratio x the starting
+        // health, and from there break at no health.
+        if b.damaged || b.damaged_ratio == 0.0 {
+            if p.health <= 0.0 {
+                self.break_prop(i);
+                return PropHurt::Broken;
+            }
+            return PropHurt::Hurt(p.health);
+        }
+        if p.health > b.initial * b.damaged_ratio {
+            return PropHurt::Hurt(p.health);
+        }
+        b.damaged = true;
+        let removed = !b.damaged_look;
+        if b.damaged_span > 0.0 && !removed {
+            let extra = b.damaged_extra;
+            let span = b.damaged_span;
+            let r = self.random();
+            if let Some(b) = self.props[i].breaks.as_mut() {
+                b.break_at = Some(now + span + extra * r);
+            }
+        }
+        let p = &mut self.props[i];
+        if removed {
+            p.destroyed = true;
+        }
+        let ev = p.breaks.as_ref().and_then(|b| b.damaged_event.clone());
+        let by = p.name.clone();
+        self.out.push(Effect::PropDamaged {
+            export: p.export,
+            name: p.name.clone(),
+            tag: p.tag.clone(),
+            removed,
+        });
+        if let Some(e) = ev {
             self.fire(&e, &by);
         }
-        n
+        PropHurt::Damaged
+    }
+
+    /// A prop breaks: it says so, and sends its event.
+    fn break_prop(&mut self, i: usize) {
+        let p = &mut self.props[i];
+        p.destroyed = true;
+        if let Some(b) = p.breaks.as_mut() {
+            b.break_at = None;
+        }
+        self.out.push(Effect::PropDestroyed {
+            export: p.export,
+            name: p.name.clone(),
+            tag: p.tag.clone(),
+            mesh: p.mesh.clone(),
+            effect: p.effect.clone(),
+        });
+        if let Some(e) = p.event.clone() {
+            let by = p.name.clone();
+            self.fire(&e, &by);
+        }
+    }
+
+    /// Damaged props whose damaged step has run out break.
+    fn run_out_damaged(&mut self) {
+        let now = self.time;
+        let due: Vec<usize> = (0..self.props.len())
+            .filter(|&i| {
+                let p = &self.props[i];
+                !p.destroyed
+                    && p.breaks
+                        .as_ref()
+                        .and_then(|b| b.break_at)
+                        .is_some_and(|t| now >= t)
+            })
+            .collect();
+        for i in due {
+            self.props[i].health = 0.0;
+            self.break_prop(i);
+        }
     }
 
     /// Remove every prop with this tag at once (`ACTION_DestroyActor`).
@@ -624,6 +801,7 @@ impl Director {
         if let Some(p) = player {
             self.touch(dt, p);
         }
+        self.run_out_damaged();
         // Events and scripts can set each other off; settle within the
         // frame, a few rounds at most.
         // Scripts run first, so ones that are about to wait for an event

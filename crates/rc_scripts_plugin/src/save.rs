@@ -281,6 +281,8 @@ mod tests {
             started: false,
             scene: crate::cutscene::Scene::default(),
             stats: PlayStats::default(),
+            breaking: Default::default(),
+            props: Default::default(),
         });
         w.insert_resource(Objectives::default());
         w
