@@ -289,6 +289,8 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
             "Picked up 2 thermal detonators".into(),
             "Objective: find a way into the hive".into(),
         ],
+        pickup: "DC-17m Blaster Clips".into(),
+        pickup_fade: 1.0,
     };
     let mut ok = true;
     for (w, h) in [

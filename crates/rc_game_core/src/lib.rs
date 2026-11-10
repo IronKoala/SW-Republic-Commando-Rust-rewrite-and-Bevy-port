@@ -86,6 +86,7 @@ impl Plugin for CorePlugin {
             .init_resource::<SquadReadout>()
             .init_resource::<MusicMood>()
             .add_message::<HudMessage>()
+            .add_message::<pickups::PickedUp>()
             .add_message::<ViewKick>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()

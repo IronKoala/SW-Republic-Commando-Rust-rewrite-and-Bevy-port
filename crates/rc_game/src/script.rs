@@ -983,6 +983,10 @@ fn steps() -> Vec<Step> {
         }),
         Wait(0.3),
         Check("walking into a DC-17m box fills the rifle to 300", ammo_box_taken),
+        Check(
+            "taking it shows its pickup message and plays its pickup sound",
+            pickup_feedback,
+        ),
         Note(|w| {
             // Full now: another box is left lying.
             move_box_to_player(w, "DC17mBlasterBox", 1);
@@ -3277,6 +3281,36 @@ fn ammo_box_taken(w: &mut World) -> Result<String, String> {
     let (taken, hidden) = box_state(w, &name).ok_or("box gone")?;
     let got = format!("{name}: rifle has {total} (was 20), box taken {taken}, model hidden {hidden}");
     if total == 300 && taken && hidden {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The box just taken: its words on the original HUD (the "pickup" group,
+/// above the middle) and its sound played.
+fn pickup_feedback(w: &mut World) -> Result<String, String> {
+    let quads = crate::original_hud::layout_drawn(w);
+    let words: Vec<_> = quads.iter().filter(|q| q.widget == "pickup").collect();
+    let middle = words
+        .iter()
+        .map(|q| (q.dst[1] + q.dst[3]) / 2.0)
+        .sum::<f32>()
+        / words.len().max(1) as f32;
+    let sounds = w.resource::<rc_combat::pickup_sound::PickupSounds>();
+    let played = sounds.played.clone();
+    let got = format!(
+        "{} letters drawn in the pickup line, centred {:.0}% down; sounds played {played:?}",
+        words.len(),
+        middle * 100.0
+    );
+    // "DC-17m Blaster Clips" is 18 letters without the spaces.
+    if words.len() >= 15
+        && (0.30..0.40).contains(&middle)
+        && played
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case("GEN_Sound.GenericWeaponPickup"))
+    {
         Ok(got)
     } else {
         Err(got)

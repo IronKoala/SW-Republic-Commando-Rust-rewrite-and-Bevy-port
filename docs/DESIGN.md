@@ -2709,10 +2709,44 @@ amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
   them to come back. Their model is hidden.
 
 The `[pickups]` section of a save file lists the boxes taken, by name.
-`AmmoBoxTaken` is sent for each box taken. Not done yet: the pickup sound
-(`PickupSound`), the on-screen "picked up" message (`PickupMessage`), the
-squad taking boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup`
-and the like, 40 across the campaign).
+`AmmoBoxTaken` is sent for each box taken. Not done yet: the squad taking
+boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup` and the
+like, 40 across the campaign).
+
+#### Pickup sound and message
+
+Each box class names its own `PickupSound` and `PickupMessage`
+(`CTInventory.u`, with the `...Defaults` class in `properties.u` on top,
+read by `rc_level::pickups::read_box` like the amount):
+
+| Box | Message | Sound |
+| --- | --- | --- |
+| DC-17m | DC-17m Blaster Clips (`...Defaults`; "DC-17m Blaster" in the class) | `GEN_Sound.Weapons.GenericWeaponPickup` |
+| Sniper | DC-17m Sniper | same |
+| Anti-armour | DC-17m Anti-Armor Charge Packs (`...Defaults`) | same |
+| Thermal, sonic, flash | Thermal Detonators, Sonic Detonators, Flashbang Detonators | same |
+| EMP | EMP Grenades | `GEN_Sound.Interface.int_GEN_wepPickup_01` |
+
+What the original does with them (engine.u `Pickup.AnnouncePickup`,
+`PlayerController.HandlePickup`, `PickupMessagePlus`, `LocalMessage`): the
+sound is played for the player only, from where they are
+(`ClientPlaySoundLocally`), and the message is a `PickupMessagePlus`:
+centred, 35% of the way down the screen, white, one at a time (a new one
+replaces the last), 3 seconds, fading. The real drawing is in native code
+(`CTHUD` keeps `LastPickupText` and `fPickupStartTime`), so the exact font
+size and fade are **our choice**.
+
+In this port: `take_boxes` sends `rc_game_core::pickups::PickedUp { text,
+sound }` for each box taken (a full player's touch sends nothing).
+Anything else that can be picked up (weapons on the floor, health) can send
+the same message. `rc_combat::pickup_sound` reads the sounds a level's
+boxes name when the level loads (`PickupSounds`) and plays them, at full
+volume scaled by EFFECTS VOLUME, not placed in the level. The original HUD
+(`rc_game/src/original_hud.rs`) shows the text in the `pickup` element of
+`data/ui/hud.toml` (`{pickup}`, `when = "pickup"`, `fade = "pickup"`); how
+long it stays and fades is `[pickup_message]` there. The placeholder HUD
+adds it to its message list instead. The log says `pickups: played sound
+GEN_Sound.GenericWeaponPickup` and `original hud` redraws as it fades.
 
 ### Modding
 
@@ -2720,7 +2754,9 @@ Every weapon is one file in `data/weapons`. A mod folder's file with the
 same name replaces it, and a new file is a new weapon. The player's health,
 shield and starting weapons are in `data/combat/player.toml`. What each
 ammo box fills, and its amount if a mod wants another, is in
-`data/pickups/ammo_boxes.toml`.
+`data/pickups/ammo_boxes.toml`. Where and how long the pickup message
+shows is in `data/ui/hud.toml` (the `pickup` element and
+`[pickup_message]`); any element can fade with `fade = "pickup"`.
 
 ### `rc_shoot`: the firing range
 
