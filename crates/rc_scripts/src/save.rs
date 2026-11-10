@@ -82,6 +82,9 @@ pub struct PropSave {
     pub name: String,
     pub health: f32,
     pub destroyed: bool,
+    /// In its damaged step (breakable props). Older saves don't have it.
+    #[serde(default)]
+    pub damaged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -182,6 +185,7 @@ impl Director {
                     name: p.name.clone(),
                     health: p.health,
                     destroyed: p.destroyed,
+                    damaged: p.breaks.as_ref().is_some_and(|b| b.damaged),
                 })
                 .collect(),
             teleporter: self
@@ -285,6 +289,12 @@ impl Director {
             };
             p.health = s.health;
             p.destroyed = s.destroyed;
+            if let Some(b) = p.breaks.as_mut() {
+                b.damaged = s.damaged;
+                // A damaged step on a clock starts its clock again.
+                b.break_at = (s.damaged && !s.destroyed && b.damaged_span > 0.0)
+                    .then_some(self.time + b.damaged_span);
+            }
             r.restored += 1;
         }
         for s in &save.teleporter {

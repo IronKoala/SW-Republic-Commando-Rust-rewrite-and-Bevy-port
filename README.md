@@ -502,6 +502,13 @@ copy of the game.
   original, they carry no gun: they rush at you and hit up close (350 uu
   reach, 125 damage, about one hit every 1.6 s). Any enemy type can get a
   melee weapon in its `[combat]` section.
+- **Geonosian elites (tested in the cloud sandbox with automatic tests,
+  not yet in the real game on Windows).** The big Geonosians with the beam
+  gun now appear wherever the original puts them (19 spawners on geo_03c,
+  geo_04a, geo_04b, geo_04c, geo_05a and geo_05b), with the game's own
+  model, skin, animations, voice lines, 1000 health and damage table. They
+  burn you with the Elite Beam in one-second bursts. Settings:
+  `data/enemies/geonosian_elite.toml` and `data/weapons/elite_beam_enemy.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -529,8 +536,21 @@ copy of the game.
   placeholder). Checked by `cargo run -p rc_visor --example visor_check`
   and `rc_game --script`.
 
+- **Breakable props (since 2026-11-09, tested in the cloud only, not on
+  Windows or by playing).** Explosive barrels, geo_05b's fuel dispensers
+  and clamps, holo machines, consoles, rock cover, drone eggs and wall
+  panels take damage from shots and grenades and break with the game's own
+  health numbers (838 such props on Geonosis). Barrels and dispensers
+  explode a moment later, hurting characters and setting off other barrels
+  near them. A prop that breaks sends its event to the level scripts (53
+  on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
+  go on. Broken props are kept in save files.
+
 ## What doesn't work yet
 
+- Breakable props just disappear when they break: their broken model,
+  effect and sound aren't shown yet, the burning or electric after-effect
+  some barrels leave isn't done, and loose props aren't pushed by blasts.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
@@ -610,7 +630,13 @@ copy of the game.
   throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors walk
-  instead of flying, jumping and climbing. Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
+  instead of flying, jumping and climbing. Geonosian elites walk too
+  (slowly, 200 uu/s) instead of flying and dodging in the air, their wings
+  are drawn with the body's skin, their beam is drawn as a tracer line,
+  how fast the beam does its damage is our own guess, and the player can't
+  pick up their beam yet. Droidekas, dwarf spider droids, Phidna, drones,
+  seeker droids and placed clone troopers still don't appear
+  (`rc_enemy_spawners` lists them). Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
 - Enemy voices: battle droids, super battle droids, Trandoshans and
   Geonosian warriors say the game's own lines when they spot you, get hurt
   and die, with the hurt and death lines matched to explosions, EMP and

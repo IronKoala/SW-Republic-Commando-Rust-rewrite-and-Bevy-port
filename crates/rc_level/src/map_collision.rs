@@ -9,10 +9,10 @@
 
 use crate::actors::{self, Placement};
 use crate::bsp::{self, Vec3};
+use crate::class_look::{apply_class_look, blocks_players, ClassLooks, Loaded};
 use crate::collision::{add_blocking_volumes, collision_triangles, Source};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
-use crate::class_look::{apply_class_look, blocks_players, ClassLooks, Loaded};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -51,6 +51,9 @@ pub struct MapCollision {
     /// (class, tag). See `crate::scripts::tagged_actors`.
     pub part_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
     pub parts: HashMap<usize, (String, String)>,
+    /// Props weapons can break (`crate::breakables`). They are parts too,
+    /// so their triangles can go when they break.
+    pub breakables: Vec<crate::breakables::Breakable>,
     /// Places to arrive at from another map: each `Teleporter`'s `Tag`,
     /// feet position and facing, as for `start`. A level address like
     /// `RAS_03B.ctm#FromA` names one by its tag.
@@ -103,7 +106,8 @@ fn index_packages(dir: &Path, out: &mut HashMap<String, PathBuf>) {
             // in GameData/System, and must not stand in for it.
             let ext = ext.to_string_lossy().to_ascii_lowercase();
             if ["u", "usx", "utx", "ukx", "uax", "ctm"].contains(&ext.as_str()) {
-                out.entry(stem.to_string_lossy().to_ascii_lowercase()).or_insert(p);
+                out.entry(stem.to_string_lossy().to_ascii_lowercase())
+                    .or_insert(p);
             }
         }
     }
@@ -157,7 +161,9 @@ impl Packages {
 /// the map itself or a class's script package) points at.
 fn load_mesh(pkgs: &mut Packages, map: &Loaded, index: i32) -> Option<StaticMesh> {
     match ObjectRef::from_index(index) {
-        ObjectRef::Export(k) => static_mesh::read_static_mesh(&map.0, &map.1, &map.0.exports[k]).ok(),
+        ObjectRef::Export(k) => {
+            static_mesh::read_static_mesh(&map.0, &map.1, &map.0.exports[k]).ok()
+        }
         ObjectRef::Import(_) => {
             let path = object_path(&map.0, index);
             let loaded = pkgs.get(&path[0])?;
@@ -173,8 +179,13 @@ fn load_mesh(pkgs: &mut Packages, map: &Loaded, index: i32) -> Option<StaticMesh
     }
 }
 
-pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<MapCollision, String> {
-    let data = std::fs::read(map_path).map_err(|e| format!("can't read {}: {e}", map_path.display()))?;
+pub fn load(
+    map_path: &Path,
+    game_data: &Path,
+    collision_height: f32,
+) -> Result<MapCollision, String> {
+    let data =
+        std::fs::read(map_path).map_err(|e| format!("can't read {}: {e}", map_path.display()))?;
     let pkg = Package::parse(&data).map_err(|e| e.to_string())?;
     let level = actors::read_level(&pkg, &data).map_err(|e| format!("level: {e}"))?;
     let model = level.model.ok_or("the level has no BSP model")?;
@@ -182,7 +193,10 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
 
     let mut files = HashMap::new();
     index_packages(game_data, &mut files);
-    let mut pkgs = Packages { files, open: HashMap::new() };
+    let mut pkgs = Packages {
+        files,
+        open: HashMap::new(),
+    };
     let map: Loaded = Rc::new((pkg, data));
     // Keyed by the package the reference is in (by address) and the reference.
     let mut cache: HashMap<(usize, i32), Option<StaticMesh>> = HashMap::new();
@@ -203,14 +217,22 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         };
         if p.class == "PlayerStart" && start.is_none() {
             // Unreal stands the pawn with its centre at the PlayerStart.
-            let feet = [p.location[0], p.location[1], p.location[2] - collision_height];
+            let feet = [
+                p.location[0],
+                p.location[1],
+                p.location[2] - collision_height,
+            ];
             let yaw = p.rotation[1] as f32 / 65536.0 * std::f32::consts::TAU;
             start = Some((feet, yaw));
         }
         if p.class == "Teleporter" {
             // Arriving pawns stand with their centre on it, as at a
             // PlayerStart.
-            let feet = [p.location[0], p.location[1], p.location[2] - collision_height];
+            let feet = [
+                p.location[0],
+                p.location[1],
+                p.location[2] - collision_height,
+            ];
             let yaw = p.rotation[1] as f32 / 65536.0 * std::f32::consts::TAU;
             arrivals.push((actor_tag(&map.0, &map.1, a, &p.class), feet, yaw));
         }
@@ -260,7 +282,8 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         .iter()
         .filter_map(|(p, i)| cache.get(i).and_then(|m| m.as_ref()).map(|m| (p, m)))
         .collect();
-    let (loose, fixed): (Vec<_>, Vec<_>) = pairs.iter().partition(|(p, _)| karma.contains(&p.export));
+    let (loose, fixed): (Vec<_>, Vec<_>) =
+        pairs.iter().partition(|(p, _)| karma.contains(&p.export));
     let mut mesh = collision_triangles(&bsp, &fixed);
     let (terrains, terrain_failures) =
         crate::terrain::read_terrains(&map.0, &map.1, level.actors.iter().flatten().copied());
@@ -276,16 +299,27 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
             })
             .collect()
     };
-    let settled_refs: Vec<(&Placement, &StaticMesh)> = settled.iter().map(|(p, m)| (p, *m)).collect();
+    let settled_refs: Vec<(&Placement, &StaticMesh)> =
+        settled.iter().map(|(p, m)| (p, *m)).collect();
     crate::collision::add_meshes(&mut mesh, &settled_refs);
     let volumes = crate::volumes::blocking_volumes(&map.0, &map.1, &level);
     let blocking_volumes = add_blocking_volumes(&mut mesh, &volumes.volumes, true);
     // Take the movers' triangles out, so they can move.
-    let movers = crate::movers::read_movers(&mut looks, &map.0, &map.1, &level.actors, &mut |n| pkgs.get(n));
-    let is_mover: std::collections::HashSet<usize> = movers.movers.iter().map(|m| m.place.export).collect();
+    let movers = crate::movers::read_movers(&mut looks, &map.0, &map.1, &level.actors, &mut |n| {
+        pkgs.get(n)
+    });
+    let is_mover: std::collections::HashSet<usize> =
+        movers.movers.iter().map(|m| m.place.export).collect();
     let mut mover_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // And the parts scripts can switch off.
     let mut parts = crate::scripts::tagged_actors(&map.0, &map.1, &level);
+    let breakables =
+        crate::breakables::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
+    for b in &breakables {
+        parts
+            .entry(b.export)
+            .or_insert_with(|| (b.class.clone(), b.tag.clone()));
+    }
     parts.retain(|a, _| !is_mover.contains(a));
     let mut part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // Ammo boxes, dropped onto what is below them.
@@ -305,11 +339,36 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut triangles = Vec::with_capacity(mesh.triangles.len());
     for (t, src) in mesh.triangles.into_iter().zip(mesh.sources) {
         match src {
-            Source::Actor(a) if is_mover.contains(&a) => mover_triangles.entry(a).or_default().push(t),
+            Source::Actor(a) if is_mover.contains(&a) => {
+                mover_triangles.entry(a).or_default().push(t)
+            }
             Source::Actor(a) | Source::Volume(a) if parts.contains_key(&a) => {
                 part_triangles.entry(a).or_default().push(t)
             }
             _ => triangles.push(t),
+        }
+    }
+    // Some breakable props have every section's collision switched off,
+    // like the Geonosian explosive barrels: the game blocks shots and
+    // players with the mesh's simple collision shape instead, which we
+    // don't read. Without triangles weapons could never hit them, so they
+    // get their drawn triangles.
+    let shapes: HashMap<usize, (&Placement, &StaticMesh)> = fixed
+        .iter()
+        .copied()
+        .chain(settled_refs.iter().copied())
+        .map(|(p, m)| (p.export, (p, m)))
+        .collect();
+    for b in &breakables {
+        if part_triangles.contains_key(&b.export) || is_mover.contains(&b.export) {
+            continue;
+        }
+        let Some(&(p, m)) = shapes.get(&b.export) else {
+            continue;
+        };
+        let tris = crate::collision::drawn_triangles(p, m);
+        if !tris.is_empty() {
+            part_triangles.insert(b.export, tris);
         }
     }
     Ok(MapCollision {
@@ -318,6 +377,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         mover_triangles,
         part_triangles,
         parts,
+        breakables,
         start,
         arrivals,
         ammo_boxes,
