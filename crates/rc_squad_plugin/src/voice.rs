@@ -277,6 +277,18 @@ pub fn speak(
         };
         let found = chosen.map(|c| (c.1 .0, c.1 .1, Some(c.1 .2)));
         let Some((event, group, Some(sound))) = found else {
+            if s.optional {
+                log_line(
+                    &log,
+                    format!(
+                        "t={:.2} voice: {who} has no recording of {} in the game, quiet (rule {}, optional)",
+                        squad.time,
+                        s.events.join(" / "),
+                        s.rule
+                    ),
+                );
+                continue;
+            }
             stats.missing += 1;
             log_line(
                 &log,

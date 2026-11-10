@@ -215,6 +215,7 @@ pub(crate) fn load_arms(
                 .map(|s| (s.sequence().to_string(), s.sequence().to_string()))
                 .collect(),
             skins: vec![],
+            ..Default::default()
         };
         let made = Model::load(&|rel| paths.game_file(rel), &spec);
         match &made {
@@ -277,6 +278,7 @@ pub(crate) fn animate_arms(
         Option<ResMut<Assets<Image>>>,
     ),
     log: Option<Res<GameLog>>,
+    cutscene: Option<Res<rc_game_core::Cutscene>>,
 ) {
     let (Some(models), Ok((me, arsenal, body, down)), Ok((camera, mut projection))) =
         (models, players.single(), cameras.single_mut())
@@ -357,7 +359,10 @@ pub(crate) fn animate_arms(
     if let (Some(a), Projection::Perspective(p)) = (params, &mut *projection) {
         p.fov = vertical_fov(a.fov);
     }
-    let hidden = down || (zoomed && params.is_some_and(|a| a.hide_zoomed));
+    // A cutscene gives the player other hands (the prologue's baby and
+    // boy), not drawn yet: no grown commando's arms meanwhile.
+    let other_hands = cutscene.is_some_and(|c| c.briefing_weapon.is_some());
+    let hidden = down || other_hands || (zoomed && params.is_some_and(|a| a.hide_zoomed));
     // The shown weapon's ammo (while switching, the shown one may not be
     // the current one yet).
     let reading = arms.shown.as_ref().and_then(|id| {

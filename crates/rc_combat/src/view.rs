@@ -141,6 +141,7 @@ pub(crate) fn show_weapon_model(
     materials: Option<ResMut<Assets<StandardMaterial>>>,
     images: Option<ResMut<Assets<Image>>>,
     log: Option<Res<GameLog>>,
+    cutscene: Option<Res<rc_game_core::Cutscene>>,
 ) {
     let (Some(mut meshes), Some(mut materials), Some(mut images), Some(paths)) =
         (meshes, materials, images, paths)
@@ -158,6 +159,12 @@ pub(crate) fn show_weapon_model(
     let want = arsenal.current().map(|w| w.0.clone()).filter(|id| {
         let has_arms = lib.weapons.get(id).is_some_and(|p| p.arms.is_some());
         !(has_arms && arms.as_ref().is_none_or(|a| a.covers(id)))
+    });
+    // Other hands in a cutscene (not drawn yet): no gun either.
+    let want = want.filter(|_| {
+        !cutscene
+            .as_ref()
+            .is_some_and(|c| c.briefing_weapon.is_some())
     });
     let mut showing = None;
     for c in children.into_iter().flatten() {

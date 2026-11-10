@@ -79,6 +79,23 @@ pub fn add_meshes(out: &mut CollisionMesh, meshes: &[(&Placement, &StaticMesh)])
     }
 }
 
+/// Every triangle of a placed mesh, in the world, collision switched on or
+/// not.
+pub fn drawn_triangles(p: &Placement, mesh: &StaticMesh) -> Vec<[Vec3; 3]> {
+    let world: Vec<Vec3> = mesh
+        .vertices
+        .iter()
+        .map(|v| p.transform_point(v.position))
+        .collect();
+    let get = |i: u16| world.get(i as usize).copied();
+    mesh.indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .filter_map(|t| Some([get(t[0])?, get(t[1])?, get(t[2])?]))
+        .collect()
+}
+
 /// Add the drawn triangles of the map's terrains (outdoor ground). Returns
 /// how many triangles were added.
 pub fn add_terrains(mesh: &mut CollisionMesh, terrains: &[crate::terrain::Terrain]) -> usize {

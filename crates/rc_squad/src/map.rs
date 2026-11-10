@@ -67,6 +67,18 @@ pub struct SquadFactory {
 pub struct MapSquadInfo {
     pub markers: Vec<MarkerSpot>,
     pub factories: Vec<SquadFactory>,
+    /// The map has a `CTSquad` actor: the original sets the squad up only
+    /// in maps that have one (the playable missions, not the prologue,
+    /// briefings or epilogue).
+    pub has_squad_actor: bool,
+}
+
+impl MapSquadInfo {
+    /// Whether this map has a squad at all: a `CTSquad` actor, or any
+    /// squad marker or squad-mate spawner.
+    pub fn wants_squad(&self) -> bool {
+        self.has_squad_actor || !self.markers.is_empty() || !self.factories.is_empty()
+    }
 }
 
 fn v(p: [f32; 3]) -> Vec3 {
@@ -98,7 +110,13 @@ pub fn job_name(anchor_class: &str) -> String {
 /// Read the squad's spots and factories from a map package.
 pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
     let level = actors::read_level(pkg, data).map_err(|e| format!("level: {e}"))?;
-    let mut info = MapSquadInfo::default();
+    let mut info = MapSquadInfo {
+        has_squad_actor: pkg
+            .exports
+            .iter()
+            .any(|e| pkg.export_class_name(e).eq_ignore_ascii_case("CTSquad")),
+        ..Default::default()
+    };
     let placed: Vec<(usize, Placement)> = level
         .actors
         .iter()

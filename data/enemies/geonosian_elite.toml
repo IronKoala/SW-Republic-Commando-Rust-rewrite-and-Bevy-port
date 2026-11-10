@@ -1,0 +1,83 @@
+# Geonosian elite: a big, tough flying Geonosian that burns you with a
+# beam weapon (the Elite Beam).
+#
+# Numbers marked "game:" are the original's: GeonosianElite
+# (ctcharacters.u) with GeonosianEliteDefaults (Properties/properties.u)
+# on top, and its brain GeonosianEliteBot(+Defaults). "guess" and
+# "our choice" mark the rest. Anything not listed takes the battle droid's
+# value (battle_droid.toml).
+#
+# Not done yet: the original's elites fly (Physics = flying, AirSpeed
+# 1200) and dodge in the air; ours walk on the ground and only fly in a
+# straight line when a level script sends them somewhere they can't walk
+# (leap_speed). The player can't pick up its beam yet.
+
+[type]
+id = "geonosian_elite"
+name = "Geonosian elite"
+classes = ["GeonosianElite*"]  # game: the map class
+body = "organic"
+
+[movement]
+ground_speed = 200        # game: GroundSpeed (it mostly flies in the original)
+walk_speed_ratio = 1      # game: WalkSpeedRatio
+accel_rate = 15000        # game: GeonosianEliteDefaults AccelRate
+collision_radius = 70     # game: CollisionRadius
+collision_height = 125    # game: CollisionHeight
+crouch_radius = 50        # game: CrouchRadius
+crouch_height = 75        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: GeonosianEliteDefaults SightRadius
+decision_interval = 0.5   # game: CTBot DecisionInterval
+enemy_memory_time = 15    # game: CTBot EnemyMemoryTime
+
+[combat]
+health = 1000             # game: GeonosianEliteDefaults Health and MaxHealth
+accuracy = 0.7            # game: GeonosianEliteDefaults Accuracy
+max_aim_yaw = 90          # game: GeonosianEliteDefaults MaxAimYaw
+weapon = "elite_beam_enemy" # game: RequiredEquipment Properties.EliteBeamEnemy (data/weapons/elite_beam_enemy.toml)
+weapon_range = 10000      # game: LaserWeaponAmmo Range
+# The beam fires without a break (LaserWeapon BurstCount -1). We send it as
+# a burst of hits: 10 hits a tenth of a second apart, so one second of beam.
+burst_count = 10          # our choice: one second of beam
+shot_delay = 0.1          # our choice: see the weapon file
+burst_pause_min = 1       # game: StateFlyingAttack PostFirePauseTime
+burst_pause_max = 2       # game: LaserWeapon ChargeUpTime (it charges up before each beam)
+uses_cover = false        # game: its attack state (StateEliteAttack) is a flying attack, not cover
+melee_range = 175         # game: EliteBeamDefaults MeleeRange (a hit with the gun up close)
+melee_damage = 220        # game: EliteBeamDefaults MeleeDamage
+melee_damage_type = "CTDamageMelee" # game: EliteBeam MeleeDamageType
+leap_speed = 1200         # game: GeonosianEliteDefaults AirSpeed: flies straight to scripted points it can't walk to
+drops = ""                # not yet: the original drops an Elite Beam the player can pick up
+damage_table = "DV_GeonoshansEliteDamage" # game: MyDamageVariance
+
+[sound]
+# game: GeonosianElite AudioTable = EliteAudio (System/ctaudio.u). Names are
+# groups in GameData/Sounds/character_voice.uax. These are all the lines
+# its table has.
+package = "character_voice"
+spotted = ["GEL_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["GEL_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["GEL_DieSmallArms"]         # game: PAE_DieSmallArms
+death_explosion = ["GEL_DieExplosion"]
+hurt_fire = ["GEL_HurtFire"]
+death_fire = ["GEL_DieFire"]
+death_fall = ["GEL_DieFall"]
+hurt_interval = 2.0                  # our choice: seconds between hurt lines from one character
+
+[look]
+package = "GameData/Animations/geonosian.ukx"   # game: the mesh is in this package
+mesh = "GeonosianElite"                          # game: Mesh
+idle = "ActionBreathe"
+walk = "WalkForward"
+run = "WalkForward"                              # game: bCanRun = false
+walk_back = "WalkForward"
+step_left = "WalkForward"
+step_right = "WalkForward"
+fire = "Fire"
+crouch = "ActionBreathe"
+crouch_fire = "Fire"
+death = "Death"
+melee = "MeleeAttack"
