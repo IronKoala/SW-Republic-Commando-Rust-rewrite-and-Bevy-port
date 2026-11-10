@@ -74,6 +74,20 @@ pub fn to_image_with(p: &rc_image::Rgba, format: TextureFormat) -> Image {
     )
 }
 
+/// The middle of a batch's lowest point (Bevy's up is Y).
+fn bottom_middle(points: &[[f32; 3]]) -> Vec3 {
+    let mut lo = Vec3::splat(f32::MAX);
+    let mut hi = Vec3::splat(f32::MIN);
+    for p in points {
+        lo = lo.min(Vec3::from(*p));
+        hi = hi.max(Vec3::from(*p));
+    }
+    if points.is_empty() {
+        return Vec3::ZERO;
+    }
+    Vec3::new((lo.x + hi.x) / 2.0, lo.y, (lo.z + hi.z) / 2.0)
+}
+
 /// A lightmap page as a Bevy image. Lightmaps are stored on the same
 /// brightness curve as textures, so they are marked sRGB too: Bevy then
 /// multiplies the two in linear light, which on screen matches the game
@@ -160,7 +174,9 @@ pub fn spawn_level(
         if page.is_some() {
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, b.lightmap_uvs.clone());
         }
-        let with_colours = baked && !b.colours.is_empty();
+        // Holograms glow by themselves: the level's light isn't put on them.
+        let hologram = b.picture.as_ref().is_some_and(|p| p.hologram);
+        let with_colours = baked && !b.colours.is_empty() && !hologram;
         // Bump-lit props: opaque, one-sided, with a picture, a bump map and
         // a light direction per corner.
         let bump = b.picture.as_ref().and_then(|p| p.bump.clone()).filter(|_| {
@@ -253,7 +269,7 @@ pub fn spawn_level(
             AlphaMode::Blend
         } else if b.picture.as_ref().is_some_and(|p| p.additive) {
             AlphaMode::Add
-        } else if b.translucent {
+        } else if b.translucent || b.picture.as_ref().is_some_and(|p| p.blend) {
             AlphaMode::Blend
         } else if b.picture.as_ref().is_some_and(|p| p.has_alpha) {
             AlphaMode::Mask(0.5)
@@ -265,6 +281,8 @@ pub fn spawn_level(
         // top (see prop_light.rs); in the sky, or with real-time light on
         // props switched off, a plain unlit material shows just the colours.
         let prop_live = with_colours && page.is_none() && !b.sky && props_live;
+        let two_sided =
+            b.two_sided || hologram || b.picture.as_ref().is_some_and(|p| p.blend);
         let material = StandardMaterial {
             // Lightmapped surfaces go through Bevy's lighting (so real-time
             // lights add to them). Anything without baked light is drawn at
@@ -287,8 +305,11 @@ pub fn spawn_level(
             // Terrain layers share the same triangles; pull each later one
             // slightly towards the camera so it wins over the one below.
             depth_bias: over_layer.map_or(0.0, |l| l as f32),
-            double_sided: b.two_sided,
-            cull_mode: if b.two_sided {
+            // Holograms and blended pictures (the briefing grids and text)
+            // are seen from both sides, as their FinalBlends say
+            // (`TwoSided`).
+            double_sided: two_sided,
+            cull_mode: if two_sided {
                 None
             } else {
                 Some(bevy::render::render_resource::Face::Back)
@@ -304,6 +325,14 @@ pub fn spawn_level(
             coloured_live += 1;
         } else {
             entity.insert(MeshMaterial3d(materials.add(material)));
+        }
+        if hologram {
+            // rc_hologram swaps in the shimmering, flickering look. The
+            // batch is in world space, so its height squashes towards its
+            // bottom middle.
+            entity.insert(rc_hologram::Hologram {
+                pivot: bottom_middle(&b.positions),
+            });
         }
         if let Some(m) = b.mover {
             entity.insert(MoverPart(m));

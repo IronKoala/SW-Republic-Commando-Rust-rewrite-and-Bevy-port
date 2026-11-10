@@ -13,6 +13,7 @@
 
 pub mod assets;
 pub mod campaign;
+pub mod debriefing;
 pub mod fit;
 pub mod gpu;
 pub mod helmet;

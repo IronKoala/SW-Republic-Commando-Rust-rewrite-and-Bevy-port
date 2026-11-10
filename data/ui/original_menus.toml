@@ -341,3 +341,16 @@ copy_of = "Sound"
 text = "GAME"
 move_down = -0.05
 command = "switch:options"
+
+# The end-of-campaign debriefing (checked 2026-11-09 with the install). The
+# last level of each campaign shows it (ACTION_ShowDebriefingScreen) with
+# its own title, text and picture, filled in by rc_menus/src/debriefing.rs.
+# The maps name CTDebriefingInfoGEO, RAS or YYY; those differ from this
+# class only in the music they play. CONTINUE goes on to the next map
+# (rc_game/src/debriefing.rs); back does nothing, as in the original.
+[pages.debriefing]
+class = "XInterfaceCTMenus.CTDebriefingInfo"
+back = "unavailable"
+
+[pages.debriefing.buttons]
+OnAButton = "act:continue"

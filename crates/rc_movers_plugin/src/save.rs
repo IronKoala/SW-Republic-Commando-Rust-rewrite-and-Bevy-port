@@ -223,6 +223,7 @@ mod tests {
                 static_mesh: 0,
                 skins: vec![],
                 hidden: false,
+                unlit: false,
                 static_mesh_instance: 0,
             },
             chain: vec!["Mover".into()],

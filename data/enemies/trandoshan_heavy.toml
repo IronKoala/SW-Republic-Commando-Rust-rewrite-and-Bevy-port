@@ -1,0 +1,67 @@
+# Trandoshan heavy: a huge, slow, armoured Trandoshan who walks at you
+# spraying a heavy repeater.
+#
+# Numbers marked "game:" are the original's: TrandoshanHeavy
+# (ctcharacters.u) with TrandoshanHeavyDefaults (Properties/properties.u)
+# on top, and its brain TrandoshanHeavyBot (no Defaults class). "guess" and
+# "our choice" mark the rest. Anything not listed takes the battle droid's
+# value (battle_droid.toml).
+
+[type]
+id = "trandoshan_heavy"
+name = "Trandoshan heavy"
+classes = ["TrandoshanHeavy"] # game: the map class
+body = "organic"
+
+[movement]
+ground_speed = 300        # game: TrandoshanHeavyDefaults GroundSpeed
+walk_speed_ratio = 0.44   # game: TrandoshanHeavy WalkSpeedRatio
+accel_rate = 1024         # game: TrandoshanHeavy AccelRate
+collision_radius = 60     # game: CollisionRadius
+collision_height = 100    # game: CollisionHeight
+crouch_radius = 100       # game: CrouchRadius (it can't crouch: bCanCrouch false)
+crouch_height = 100       # game: CrouchHeight
+base_eye_height = 70      # game: BaseEyeHeight
+
+[senses]
+sight_radius = 10000      # game: SightRadius (Pawn)
+
+[combat]
+health = 1500             # game: TrandoshanHeavyDefaults Health and MaxHealth
+accuracy = 0.85           # game: TrandoshanHeavyDefaults Accuracy
+max_aim_yaw = 45          # game: TrandoshanHeavy MaxAimYaw
+weapon = "trandoshan_rifle" # game: RequiredEquipment TrandoshanRifle (data/weapons/trandoshan_rifle.toml)
+burst_count = 100         # game: TrandoshanHeavyBot BurstCount
+shot_delay = 0.05         # game: TrandoshanRifle ShotDelay
+weapon_range = 5000       # game: TrandoshanRifleAmmo Range
+melee_range = 200         # game: TrandoshanRifleDefaults MeleeRange
+melee_damage = 210        # game: TrandoshanRifleDefaults MeleeDamage
+melee_damage_type = "CTDamageMeleeHAM" # game: TrandoshanRifleDefaults MeleeDamageType
+melee_delay = 1.4         # game: TrandoshanHeavySet MeleeAttack (42 frames at 30 a second)
+lunge_distance = 250      # guess: swings its gun when this close
+uses_cover = false        # guess: it can't crouch and its attack state (StateTrandoHeavyAttack) stands and fires
+drops = ""                # not yet: the player can't carry the heavy repeater
+damage_table = "DV_OrganicTrandoHeavyDamage" # game: TrandoshanHeavyDefaults MyDamageVariance
+
+[sound]
+# game: TrandoshanHeavy AudioTable = TranHeavyAudio (System/ctaudio.u).
+# Names are groups in GameData/Sounds/character_voice.uax. It has no
+# "spotted" line. Only the kinds the game's table has are listed.
+package = "character_voice"
+hurt = ["THM_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["THM_DieSmallArms"]         # game: PAE_DieSmallArms
+hurt_explosion = ["THM_HurtExplosion"]
+death_explosion = ["THM_DieExplosion"]
+hurt_melee = ["THM_HurtMelee"]
+hurt_fire = ["THM_HurtFire"]
+death_fire = ["THM_DieFire"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
+
+[look]
+# game: TrandoshanHeavy Mesh = TrandoshanHeavy, in trandoshan.ukx, with its
+# moves in TrandoshanHeavySet. It has no crouching moves.
+package = "GameData/Animations/trandoshan.ukx"
+mesh = "TrandoshanHeavy"
+crouch = ""               # game: none in TrandoshanHeavySet (it can't crouch)
+crouch_fire = ""          # game: none
+melee = "MeleeAttack"     # game: TrandoshanHeavySet
