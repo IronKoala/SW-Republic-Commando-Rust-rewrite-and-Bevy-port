@@ -942,6 +942,18 @@ fn steps() -> Vec<Step> {
         // gone once they burn out.
         Check("the barrel's fireball and sounds start", props_effect_shown),
         Until("the fireball and smoke burn out", props_effect_over, 40.0),
+        // Simple collision shapes (`rc_level::collision`): props with
+        // collision off on every section collide through their mesh's
+        // simple shape, and walk-through props that the game lets you
+        // shoot stop a line but not a body.
+        Check(
+            "props collide through their simple shapes",
+            props_simple_shapes,
+        ),
+        Check(
+            "walk-through props stop shots, not people",
+            props_shots_only,
+        ),
         // Script actions on characters: geo_01a's "LoneRanger", a
         // Geonosian warrior whose spawner gives him the sequence
         // LoneRangerAI. On LoneRangerJump he walks to a point, turns to
@@ -3334,6 +3346,68 @@ fn props_effect_over(w: &mut World) -> bool {
         && w
             .get_resource::<rc_effects_plugin::EffectStats>()
             .is_some_and(|s| s.finished >= 1)
+}
+
+
+fn props_simple_shapes(w: &mut World) -> Result<String, String> {
+    let info = w
+        .get_resource::<rc_level_plugin::LevelInfo>()
+        .ok_or("no level info")?;
+    let msg = format!(
+        "{}: {} props collide through their simple shape, {} stop shots but not people",
+        info.map, info.simple_shape_props, info.shot_only_props
+    );
+    if info.simple_shape_props > 0 && info.shot_only_props > 0 {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// For each walk-through prop that stops shots, sweep a line and a small
+/// box from just outside its box to its middle, along each level axis
+/// both ways. Passes when some way has the line stopping at the prop
+/// while the box goes on (other walls may be in the way of some ways).
+fn props_shots_only(w: &mut World) -> Result<String, String> {
+    let parts = w
+        .get_resource::<rc_level_plugin::LevelParts>()
+        .cloned()
+        .ok_or("no LevelParts")?;
+    let world = w.resource::<LevelCollision>().0.clone();
+    let exports = parts.shots_only();
+    let body = rc_movement::Vec3::new(10.0, 10.0, 10.0);
+    let mut good = 0;
+    for &e in &exports {
+        let Some((lo, hi)) = parts.bounds_of(e) else {
+            continue;
+        };
+        let c = (lo + hi) * 0.5;
+        let half = (hi - lo) * 0.5;
+        let ways = [
+            rc_movement::Vec3::new(1.0, 0.0, 0.0),
+            rc_movement::Vec3::new(-1.0, 0.0, 0.0),
+            rc_movement::Vec3::new(0.0, 1.0, 0.0),
+            rc_movement::Vec3::new(0.0, -1.0, 0.0),
+        ];
+        if ways.iter().any(|&d| {
+            let reach = (half.x * d.x).abs() + (half.y * d.y).abs() + 30.0;
+            let a = c - d * reach;
+            let line = world.sweep(rc_movement::Vec3::ZERO, a, c);
+            let boxed = world.sweep(body, a, c);
+            line.is_some_and(|h| !h.start_solid) && boxed.is_none()
+        }) {
+            good += 1;
+        }
+    }
+    let msg = format!(
+        "{} walk-through props that stop shots; at {good} a line stops at it while a body walks on",
+        exports.len()
+    );
+    if good > 0 {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
 }
 
 fn deaths_heard(w: &mut World) -> usize {
