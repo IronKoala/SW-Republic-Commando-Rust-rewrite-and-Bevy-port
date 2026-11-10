@@ -1,0 +1,44 @@
+# The Trandoshan slavers' shotgun, the ACP Array Gun (class Shotgun): one
+# pull fires a spray of eight instant-hit pellets that hurts badly up
+# close. Slavers and slaver grenadiers carry it.
+#
+# The values are the original game's: class Shotgun (ctinventory.u) with
+# ShotgunDefaults (Properties/properties.u) on top, and its ammo
+# ShotgunAmmo (+Defaults), unless marked otherwise. (The slaver's own class
+# names a ShotgunSlaver, but TrandoshanSlaverDefaults swaps it for this
+# plain Shotgun.) The player can't pick it up yet.
+
+name = "ACP Array Gun"
+
+[fire]
+mode = "semi_auto"        # game: Shotgun leaves FireMode at the default (one shot a pull)
+shot_delay = 1.1          # game: ShotgunDefaults ShotDelay
+aim_error = 0             # the enemy's own Accuracy decides its aim
+
+[ammo]
+clip_size = 8             # game: Shotgun ReloadCount
+max_ammo = 24             # game: ShotgunAmmoDefaults MaxAmmo
+start_ammo = 16           # game: ShotgunDefaults PickupAmmoCount
+
+[shot]
+kind = "instant"          # game: ShotgunAmmo bInstantHit
+range = 3500              # game: ShotgunAmmoDefaults Range
+damage = 28               # game: ShotgunAmmoDefaults Damage (each pellet)
+pellets = 8               # game: ShotgunAmmo ProjPerFire
+spread = 1700             # game: ShotgunAmmoDefaults Spread (rotation units; how the game scatters them is our reading)
+damage_kind = "blaster"
+damage_type = "CTDamageBallisticShotgun" # game: ShotgunAmmoDefaults MyDamageType
+
+[melee]
+range = 150               # game: ShotgunDefaults MeleeRange
+damage = 220              # game: ShotgunDefaults MeleeDamage
+
+[sound]
+package = "gen_sound"     # guess: the GEN weapon sounds are in gen_sound.uax
+fire = ["wep_GEN_tranShotgun_03"] # game: Shotgun FireSound
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the shotgun's own model isn't looked up yet
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.6, 0.2]  # our choice, the same as the mercenaries' repeater

@@ -2288,6 +2288,57 @@ that kind nearest the squad, orders it, and checks after 45 s that the job
 was done (or the post taken), that the player asked for it once and that a
 squad mate answered.
 
+### Optional squad ammo (`rc_squad/src/ammo.rs`, `[ammo]` in `squad.toml`)
+
+Off by default, because the original's squad never runs out and never
+takes boxes (docs/RESEARCH.md, "Squad ammo and ammo boxes"). With
+`[ammo] limited = "no"` every squad mate's ammo list is empty, which means
+"never runs out", and none of the code below does anything.
+
+A mod switches it on with a `squad/squad.toml` holding only the lines it
+changes (every other value keeps its built-in default):
+
+```toml
+[ammo]
+limited = "yes"
+```
+
+Then, all our own rules:
+
+- **Counting.** Each squad mate starts with the `start` of each
+  `carry_<id> = most, start` line (the DC-17m 120 of 300, sniper 20 of 20,
+  anti-armour 4 of 4, thermal detonators 2 of 5, from the squad's own guns
+  in the Properties package). Guns or grenades not listed never run out.
+  Every shot (`Squad::shoot`) takes one from the gun fired, every grenade
+  (Fixer's own and grenade posts) one from `throws`. `SquadEvent::OutOfAmmo`
+  when one reaches 0.
+- **Running out.** An empty speciality gun isn't picked (Sev keeps to the
+  rifle with no sniper rounds); with the usual gun empty they hold fire.
+- **Fetching** (`Squad::think_fetch`, before the usual think). A squad mate
+  with no job (no marker, not reviving, not on a post) whose lowest gun is
+  at or below `fetch_below` (25%) of the most walks to the nearest box that
+  fills it, within `fetch_range` (1500 uu) of them and of the spot they're
+  tied to. In a fight (a target, or an enemy within sight) they wait until
+  that gun is empty, unless `fetch_in_fights`. Two squad mates never go for
+  the same box. After `fetch_give_up` (15 s) they leave a box they can't
+  reach alone, and wait as long again (back at their place) before trying
+  another. Events `FetchAmmo` and `FetchStopped` (box gone, full again,
+  busy, enemy to fight first, can't get to it).
+- **Taking** (`rc_squad_plugin/src/ammo.rs`). `gather_boxes` copies the
+  untaken `rc_combat::ammo_box::AmmoBox`es into `Squad::boxes` each frame;
+  `take_boxes` runs after the squad moves and uses the player's touch test
+  (`ammo_box::touches`). `Squad::take_box` fills only what isn't full, up to
+  the most carried, like the player's rule; the box is then marked taken,
+  so it's hidden and saved as taken. A squad mate walking over a box they
+  have room for takes it even if they weren't fetching it.
+- **Saving.** Each squad mate's counts are in the `[squad]` section of a save
+  (`ammo`, left out when empty).
+
+Tests: `cargo test -p rc_squad` (7 ammo tests) and
+`cargo test -p rc_squad_plugin --test ammo_room` (switched off nobody goes
+near the boxes; switched on Sev, low on rifle shots, and Fixer, out of
+grenades, each fetch theirs and come back).
+
 ### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
 
 The lines are the game's: each member's `audio_table` (squad.toml, like
@@ -2567,6 +2618,33 @@ close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
 with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
 beam weapon is an `instant` shot fired as a burst of quick hits.
 
+When a class could match two files, the first file in name order wins, so
+give each file exact class names where they overlap (the Trandoshan
+files list `TrandoshanMercenary`, `TrandoshanMercenaryGrenadier` and so on
+one by one; a test checks each class has exactly one file).
+
+**Shields.** `combat.shields` gives an enemy an energy shield on top of its
+health (the Kashyyyk Trandoshan mercenaries: 100, regaining 10 a second).
+Damage goes to the shield first, as for the player (`rc_combat::Shield`).
+
+**Shotguns.** A weapon's `shot.pellets` fires that many instant hits at
+once, each up to `shot.spread` rotation units off the aim (the slavers'
+shotgun: 8 pellets, 1700, the game's `ProjPerFire` and `Spread`). How the
+original scatters them is our reading.
+
+**The Trandoshans.** Classes that the game builds in
+`Properties/properties.u` straight from a class in `ctcharacters.u` (like
+`TrandoshanMercYYYUp` from `TrandoshanMercenary`) keep that class's own
+values, not its "...Defaults" class's, so the Kashyyyk mercenaries have
+100 health and a shield while the Prosecutor's have 220 and none. The
+evidence: those classes restate every value the Defaults class changes
+that they want (the grenadier repeats Health 220, Shields 0, its damage
+table and sight). The files: `trandoshan` (Prosecutor mercenaries),
+`trandoshan_kashyyyk`, `trandoshan_grenadier`, `trandoshan_slaver`,
+`trandoshan_slaver_berserker`, `trandoshan_slaver_grenadier`,
+`trandoshan_heavy` and `trandoshan_scavenger`, with weapons
+`trandoshan_shotgun`, `trandoshan_rifle` and `scav_beam`.
+
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
 `thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
@@ -2794,10 +2872,50 @@ amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
   them to come back. Their model is hidden.
 
 The `[pickups]` section of a save file lists the boxes taken, by name.
-`AmmoBoxTaken` is sent for each box taken. Not done yet: the pickup sound
-(`PickupSound`), the on-screen "picked up" message (`PickupMessage`), the
-squad taking boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup`
-and the like, 40 across the campaign).
+`AmmoBoxTaken` is sent for each box taken. Not done yet: weapons lying in the maps
+(`DC17mSniperWeaponPickup` and the like, 40 across the campaign).
+
+Squad mates don't take boxes, on purpose: in the original only the player
+can (`bCanPickupInventory`), and anyone else whose weapon runs dry gets a
+fresh magazine for free (`bInfiniteClipsForNonPlayers`). The port's squad
+already fires without running out, which matches. Evidence in
+`docs/RESEARCH.md`, "Squad ammo and ammo boxes". A mod can switch on squad
+ammo and box fetching: see "Optional squad ammo" under Delta Squad.
+
+#### Pickup sound and message
+
+Each box class names its own `PickupSound` and `PickupMessage`
+(`CTInventory.u`, with the `...Defaults` class in `properties.u` on top,
+read by `rc_level::pickups::read_box` like the amount):
+
+| Box | Message | Sound |
+| --- | --- | --- |
+| DC-17m | DC-17m Blaster Clips (`...Defaults`; "DC-17m Blaster" in the class) | `GEN_Sound.Weapons.GenericWeaponPickup` |
+| Sniper | DC-17m Sniper | same |
+| Anti-armour | DC-17m Anti-Armor Charge Packs (`...Defaults`) | same |
+| Thermal, sonic, flash | Thermal Detonators, Sonic Detonators, Flashbang Detonators | same |
+| EMP | EMP Grenades | `GEN_Sound.Interface.int_GEN_wepPickup_01` |
+
+What the original does with them (engine.u `Pickup.AnnouncePickup`,
+`PlayerController.HandlePickup`, `PickupMessagePlus`, `LocalMessage`): the
+sound is played for the player only, from where they are
+(`ClientPlaySoundLocally`), and the message is a `PickupMessagePlus`:
+centred, 35% of the way down the screen, white, one at a time (a new one
+replaces the last), 3 seconds, fading. The real drawing is in native code
+(`CTHUD` keeps `LastPickupText` and `fPickupStartTime`), so the exact font
+size and fade are **our choice**.
+
+In this port: `take_boxes` sends `rc_game_core::pickups::PickedUp { text,
+sound }` for each box taken (a full player's touch sends nothing).
+Anything else that can be picked up (weapons on the floor, health) can send
+the same message. `rc_combat::pickup_sound` reads the sounds a level's
+boxes name when the level loads (`PickupSounds`) and plays them, at full
+volume scaled by EFFECTS VOLUME, not placed in the level. The original HUD
+(`rc_game/src/original_hud.rs`) shows the text in the `pickup` element of
+`data/ui/hud.toml` (`{pickup}`, `when = "pickup"`, `fade = "pickup"`); how
+long it stays and fades is `[pickup_message]` there. The placeholder HUD
+adds it to its message list instead. The log says `pickups: played sound
+GEN_Sound.GenericWeaponPickup` and `original hud` redraws as it fades.
 
 ### Modding
 
@@ -2805,7 +2923,9 @@ Every weapon is one file in `data/weapons`. A mod folder's file with the
 same name replaces it, and a new file is a new weapon. The player's health,
 shield and starting weapons are in `data/combat/player.toml`. What each
 ammo box fills, and its amount if a mod wants another, is in
-`data/pickups/ammo_boxes.toml`.
+`data/pickups/ammo_boxes.toml`. Where and how long the pickup message
+shows is in `data/ui/hud.toml` (the `pickup` element and
+`[pickup_message]`); any element can fade with `fade = "pickup"`.
 
 ### `rc_shoot`: the firing range
 

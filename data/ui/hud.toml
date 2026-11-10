@@ -58,10 +58,12 @@ turn = 90
 # to 32:9 (phones held upright are not supported).
 #
 # Texts: {weapon} {clip} {reserve} {grenade} {grenades} {message1}
-# (newest) {message2} {message3}; for squad rows {number} {name} {order}.
+# (newest) {message2} {message3} {pickup}; for squad rows {number} {name}
+# {order}.
 # Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
-# clip, reserve, grenade, shield_low, health_low, squad_down.
+# clip, reserve, grenade, shield_low, health_low, squad_down, pickup.
 # Bars (`fill`): shield, health, clip, squad_health.
+# Fading (`fade`, 1 shown to 0 gone): pickup.
 
 [layout]
 enabled = true
@@ -264,3 +266,29 @@ size = [260, 11]
 text = "{message1}"
 align = "centre"
 colour = [190, 235, 245, 255]
+
+# --- What was just picked up, above the middle ------------------------------
+# The original's pickup message (engine.u PickupMessagePlus, a LocalMessage):
+# centred across the screen, 35% of the way down (YPos 0.35, DrawPivot
+# middle), white, one at a time (a new one replaces the last), shown for
+# 3 seconds and fading (LifeTime 3, bFadeMessage). The words are each box's
+# PickupMessage ("DC-17m Blaster Clips", "Thermal Detonators"), read from
+# the game. OUR CHOICE: the size, and fading over the last second (the
+# original draws this in native code we can't read). How long it stays and
+# how long it fades are in [pickup_message] below.
+# 35% down a 480-unit screen is 168; the 13-unit line is centred on it.
+
+[pickup_message]
+seconds = 3.0   # on screen, fading included (game: LifeTime 3)
+fade = 1.0      # the last second fades out (our choice)
+
+[[element]]
+group = "pickup"
+anchor = "centre"
+at = [-160, -78.5]
+size = [320, 13]
+when = "pickup"
+text = "{pickup}"
+align = "centre"
+colour = [255, 255, 255, 255]
+fade = "pickup"

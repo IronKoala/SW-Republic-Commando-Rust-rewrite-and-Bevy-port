@@ -409,6 +409,8 @@ fn load(world: &mut World) {
             respawn: b.respawn,
             radius: b.radius,
             height: b.height,
+            message: b.message.clone(),
+            sound: b.sound.clone(),
         })
         .collect();
     log.line(format!(
