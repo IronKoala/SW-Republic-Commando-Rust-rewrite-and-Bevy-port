@@ -151,6 +151,53 @@ at the end of the class" method as the weapon numbers) and `.ini` files:
   `SetStance`, `EngageLocation`...) are native, in `ctgame.dll`. We don't
   read compiled code, so how members pick spots and move is our own design.
 
+### Squad ammo and ammo boxes (read 2026-11-10)
+
+Checked whether the original's squad mates pick up ammo and grenade boxes.
+They don't, and they never need to. From the scripts' text and class
+defaults in Engine.u, CTGame.u, CTCharacters.u, CTInventory.u and the
+Properties package:
+
+- **Only the player can take boxes.** A pickup's `ValidTouch` (Engine.u
+  `Pickup`, state `Pickup`) refuses any pawn whose `bCanPickupInventory` is
+  off, unless the pickup is a `bSpecialPickup` and the pawn
+  `bCanSpecialPickup`. `bCanPickupInventory` is off by default. Only
+  `PlayerCommando` (CTCharacters.u) switches it on in its class defaults,
+  and `CTPlayer.Possess` (CTGame.u) switches it on for whatever pawn the
+  player takes over. `Commando07Delta`, `Commando40Delta`,
+  `Commando62Delta` and their `...Defaults` never set it. No ammo box sets
+  `bSpecialPickup`.
+- **Squad mates have endless magazines.** When a weapon held by anyone
+  who isn't the player runs dry, `Weapon.ObtainAmmo` (Engine.u) refills it.
+  It is called from `ServerThink`, the `NormalFire` state's `Tick`,
+  `WeaponChange` and `ThrowGrenade`. If the ammo's
+  `bSquadUsesPlayerClips` is on and the shooter is in a squad, it takes one
+  full magazine (`ReloadCount`) from the squad leader's (the player's) ammo,
+  and only if the leader has at least a full magazine (`UseSquadAmmo`).
+  Otherwise, if `bInfiniteClipsForNonPlayers` is on, it hands over a fresh
+  `PickupAmmoCount` for free (`GiveAmmo`).
+- `bInfiniteClipsForNonPlayers` is on in the `Ammunition` base class and no
+  ammo class switches it off. No ammo class in CTInventory.u or the
+  Properties package switches `bSquadUsesPlayerClips` on. So in the shipped
+  game the squad never takes ammo from the player either: the leader path
+  is unused.
+- The squad's own weapons (`CommandoNNDeltaDefaults.RequiredEquipment`):
+  `DC17mBlasterCommando` (magazine `ReloadCount` 40, refill
+  `PickupAmmoCount` 120, ammo `DC17mBlasterAmmoCommando` MaxAmmo 300),
+  `DC17mSniperCommando` (magazine 5, refill 20), `DC17mAntiArmorCommando`
+  (magazine 1, refill 4), plus `SonicDetonator`, `EMPGrenade` and
+  `FlashBang` grenades (refilled the same way when a squad mate throws).
+- Magazines still count down: after 40 shots the weapon goes to its
+  `Reloading` state. For anyone who isn't the player, that state's
+  `BeginState` calls `FinishedReloading` at once instead of playing the
+  reload animation, and `EndState` refills the magazine. So in the weapon
+  script a squad mate's reload takes no time. (Whether their body plays a
+  reload animation or says "Reloading" is decided elsewhere, in native
+  code or the voice tables; not checked here.)
+
+So in this port the squad's unlimited ammo, and their not taking boxes,
+already match the original.
+
 ## Squad markers (read for the context orders, 2026-10-29)
 
 Read with `rc_probe --classes ctmarkers.u <Class>`, `rc_probe --class`, and
@@ -464,6 +511,49 @@ second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
 - Which class names the maps' spawners actually use for these enemies
   (log line `spawners no enemy file claims`).
 - `GeonosianDrone` (not read yet). `GeonosianElite`: see below.
+
+## The other Trandoshans (read 2026-11-10)
+
+Read only from the user's install with `rc_probe --class` (ctcharacters.u,
+ctinventory.u, Properties/properties.u) and `rc_audio_tables`
+(System/ctaudio.u). Classes made in properties.u from a ctcharacters.u
+class keep that class's values, not its "...Defaults" class's (see
+docs/DESIGN.md, "The Trandoshans").
+
+| Class | Health | Speed | Size (r x h) | Accuracy | Weapon | Brain: burst, grenades |
+|---|---|---|---|---|---|---|
+| `TrandoshanSlaver` (+Defaults) | 150 | 338 | 50 x 75 | 0.65 | `Shotgun`, thermal detonators, `SlaverBlades` | 2; 0.1 every 20 s |
+| `TrandoshanSlaverBerserker` | 160 | 338 | 50 x 75 | 1 | `SlaverBladesBerserker` only | -; none (StateBerserk only) |
+| `TrandoshanSlaverGrenadier` | 150 | 338 | 50 x 75 | 0.65 | `Shotgun`, thermal detonators | 2; 0.85 every 5 s |
+| `TrandoshanHeavy` (+Defaults) | 1500 | 300 | 60 x 100 | 0.85 | `TrandoshanRifle` | 100; none |
+| `TrandoshanScav` (+Defaults), `TrandoshanScavNoWookiee` | 50 | flies, 800 | 45 x 30 | 0.75 | `ScavBeam` | -; none |
+| `TrandoshanMercYYYUp`, `TrandoshanMercYYYLow` | 100 + 100 shield (10/s) | 450 | 40 x 84 | 0.75 | `SMG`, thermal detonators | 9; 0.05 every 20 s |
+| `TrandoshanMercenaryGrenadier`, `TrandoshanMercGrenYYYUp/Low` | 220 | 450 | 40 x 84 | 0.75 | `SMG`, thermal detonators | 14; 1.0 every 5 s |
+
+- Damage tables: slaver and slaver grenadier `DV_OrganicTrandoSlaverDamage`,
+  berserker `DV_OrganicTrandoSlaverBerserker`, heavy
+  `DV_OrganicTrandoHeavyDamage`, scavenger `DV_DroidsTrandoScavengerDamage`,
+  grenadiers `DV_OrganicTrandoMercDamage`; the Kashyyyk mercenaries name none.
+- `Shotgun` (+Defaults, as `TrandoshanSlaverDefaults` gives slavers):
+  ShotDelay 1.1, 8 a magazine, `ShotgunAmmo`(+Defaults) instant hit,
+  ProjPerFire 8, Spread 1700, Range 3500, Damage 28 each,
+  `CTDamageBallisticShotgun`; melee 150 / 220; sound `wep_GEN_tranShotgun_03`.
+- `SlaverBlades`: melee 200 / 50 `CTDamageMelee`. `SlaverBladesBerserker`:
+  300 / 65 `CTDamageMeleeBerserker`, ValidRange 300 to 7000.
+- `TrandoshanRifle` (+Defaults): automatic, ShotDelay 0.05, 200 a magazine,
+  AimError 25, instant hit, Range 5000, Damage 20 `CTDamageBallisticHAM`;
+  melee 200 / 210 `CTDamageMeleeHAM`; sound `wep_GEN_hamTranNew_01`.
+- `ScavBeam` (a `LaserWeapon`): every frame, Damage 1, Range 2000,
+  `CTDamageSonic`, ChargeUpTime 2; sound `wep_GEN_scavBeam_lp_01`. The
+  scavenger blows up when destroyed (ExplosionDamage 100, radius 500; 40
+  for NoWookiee).
+- Models in `trandoshan.ukx`: `TrandoshanSlaver` (TrandoshanSlaverSet, 72
+  moves incl. Berserk..., ThrowGrenade 26 frames, MeleeAttack 47),
+  `TrandoshanHeavy` (TrandoshanHeavySet, no crouch, MeleeAttack 42),
+  `TrandoshanScav` (TrandoshanScavSet: ActionBreathe, FlyForward,
+  FlyBackward, Dodge..., no death). Each mesh's own skin is the real one.
+- Voices: `TranSlavAudio` = `TSR_...`, `TranHeavyAudio` = `THM_...` (no
+  spotted line), `ScavAudio` is empty.
 
 ## Geonosian elite and the Elite Beam (read 2026-11-09)
 

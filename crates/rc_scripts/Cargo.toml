@@ -6,6 +6,8 @@ description = "Runs a map's level scripting (scripted triggers and sequences, tr
 
 [dependencies]
 rc_level = { path = "../rc_level" }
+# Line-of-sight checks through the level's collision.
+rc_movement = { path = "../rc_movement" }
 rc_package = { path = "../rc_package" }
 # Reading our settings file. serde (MIT OR Apache-2.0), https://serde.rs;
 # toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.

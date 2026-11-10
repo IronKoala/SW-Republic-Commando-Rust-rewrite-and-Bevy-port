@@ -4422,6 +4422,21 @@ name = "rc_audio"
 version = "0.1.0"
 
 [[package]]
+name = "rc_cast"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_anim",
+ "rc_game_core",
+ "rc_level",
+ "rc_model",
+ "rc_movement",
+ "rc_package",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "rc_character"
 version = "0.1.0"
 dependencies = [
@@ -4491,6 +4506,7 @@ dependencies = [
  "bevy",
  "blake3",
  "rc_audio",
+ "rc_cast",
  "rc_combat",
  "rc_effects_plugin",
  "rc_enemies",
@@ -4539,9 +4555,11 @@ name = "rc_level_plugin"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rc_combat",
  "rc_game_core",
  "rc_level",
  "rc_level_viewer",
+ "rc_model",
  "rc_movement",
  "rc_package",
 ]
@@ -4661,6 +4679,7 @@ name = "rc_scripts"
 version = "0.1.0"
 dependencies = [
  "rc_level",
+ "rc_movement",
  "rc_package",
  "serde",
  "toml 0.8.23",
@@ -4742,6 +4761,7 @@ dependencies = [
  "bevy",
  "rc_game_core",
  "rc_image",
+ "rc_menus",
  "rc_package",
  "serde",
  "toml 0.8.23",

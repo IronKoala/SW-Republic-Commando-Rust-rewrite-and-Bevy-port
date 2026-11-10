@@ -675,6 +675,7 @@ mod tests {
             scene: crate::cutscene::Scene::default(),
             stats: PlayStats::default(),
             breaking: Breakables::new(&list),
+            anchors: vec![],
             props: PropStats::default(),
         });
         w.insert_resource(Objectives::default());
