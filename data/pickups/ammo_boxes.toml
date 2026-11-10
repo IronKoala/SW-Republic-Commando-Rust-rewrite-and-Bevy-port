@@ -1,0 +1,34 @@
+# Ammo and grenade boxes in the levels.
+#
+# The maps place the original's boxes (DC17mBlasterBox, ThermalDetonatorBox,
+# ...). How much each one gives, how big it is and its model are read from
+# the game when a level loads: the box class's AmmoAmount, CollisionRadius,
+# CollisionHeight and StaticMesh (ctinventory.u), with its "...Defaults"
+# class in Properties/properties.u on top. For reference, the campaign's
+# boxes give:
+#
+#   DC17mBlasterBox      300 shots   (DC17mBlasterBoxDefaults AmmoAmount)
+#   DC17mSniperBox        20 shots   (DC17mSniperBox AmmoAmount)
+#   DC17mAntiArmorBox      4 rounds  (DC17mAntiArmorBoxDefaults AmmoAmount)
+#   ThermalDetonatorBox    5         (ThermalDetonatorBox AmmoAmount)
+#   SonicDetonatorBox      5, EMPGrenadeBox 5, FlashBangBox 5
+#
+# A box only fills ammo you already carry, never more than the most you can
+# carry, and is left lying if you are full (game: Pickup and Ammunition
+# scripts in engine.u).
+
+# Which of this port's weapons (weapons/*.toml) or grenades
+# (grenades/*.toml) each of the original's ammo kinds refills.
+[ammo]
+DC17mBlasterAmmo = "dc17m_blaster"
+DC17mSniperAmmo = "dc17m_sniper"
+DC17mAntiArmorAmmo = "dc17m_antiarmor"
+ThermalDetonatorAmmo = "thermal_detonator"
+SonicDetonatorAmmo = "sonic_detonator"
+EMPGrenadeAmmo = "emp_grenade"
+FlashBangAmmo = "flash_grenade"
+
+# Change what a box class gives (a mod's choice; empty means the game's own
+# amounts). For example:
+#   DC17mBlasterBox = 120
+[amount]
