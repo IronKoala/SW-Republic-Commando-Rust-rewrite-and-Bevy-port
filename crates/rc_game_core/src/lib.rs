@@ -50,7 +50,7 @@ pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
-    LevelScriptsRun, MarkerJob, MarkerJobStep, RaiseEvent, ScriptEvent, ScriptTags,
+    LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
     SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
@@ -92,6 +92,7 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
             .add_message::<MarkerJob>()
+            .add_message::<PropAnim>()
             .add_message::<ChangeLevel>()
             .init_resource::<Cutscene>()
             .add_message::<TeleportPlayer>()

@@ -816,6 +816,24 @@ fn steps() -> Vec<Step> {
             "the barricade is gone: not solid, not drawn, the way through is open",
             |w| level_script_way(w, false),
         ),
+        Check("the dispenser played its Load and Holster animations", |w| {
+            let mut q = w.query::<&rc_level_plugin::anim_props::AnimProp>();
+            let p = q
+                .iter(w)
+                .find(|p| p.name.eq_ignore_ascii_case("BactaDispenserGEO0"))
+                .ok_or("no BactaDispenserGEO0")?;
+            let msg = format!(
+                "played {:?}, now {:?}, holds {:?}; its animations name {} sounds",
+                p.played,
+                p.playing.as_ref().map(|x| &x.0),
+                p.last,
+                p.model.sounds.values().map(|v| v.len()).sum::<usize>()
+            );
+            let ok = p.played.first().is_some_and(|a| a == "Load")
+                && p.played.iter().any(|a| a == "Holster")
+                && p.playing.is_none();
+            if ok { Ok(msg) } else { Err(msg) }
+        }),
         Check(
             "the scripts' events, damage, healing and checkpoint",
             level_script_chain,

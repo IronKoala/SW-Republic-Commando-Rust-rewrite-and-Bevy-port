@@ -93,6 +93,7 @@ impl Plugin for ScriptsPlugin {
             .add_message::<ChangeLevel>()
             .add_message::<rc_game_core::MarkerJob>()
             .init_resource::<rc_game_core::UseClaimed>()
+            .add_message::<rc_game_core::PropAnim>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
@@ -497,6 +498,7 @@ fn bacta(
     mut player: Query<(&Transform, Option<&mut Health>), With<Player>>,
     log: Res<GameLog>,
     mut claimed: ResMut<rc_game_core::UseClaimed>,
+    mut anims: MessageWriter<rc_game_core::PropAnim>,
 ) {
     claimed.0 = false;
     let Some(mut script) = script else { return };
@@ -529,6 +531,11 @@ fn bacta(
             if let Some(e) = &d.active_event {
                 fire.push((e.clone(), d.name.clone()));
             }
+            // The canister swings in (the model's own animation and sounds).
+            anims.write(rc_game_core::PropAnim {
+                actor: d.name.clone(),
+                anim: "Load".into(),
+            });
         }
         if d.in_use {
             let full = match health.as_deref_mut() {
@@ -542,6 +549,10 @@ fn bacta(
             };
             if full || !can {
                 d.in_use = false;
+                anims.write(rc_game_core::PropAnim {
+                    actor: d.name.clone(),
+                    anim: "Holster".into(),
+                });
                 if full {
                     d.recharge_left = recharge;
                     log.line(format!(

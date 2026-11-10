@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Bacta dispensers play their animation and sounds (rc_model, rc_level_plugin, rc_scripts_plugin)
+
+- **Changed:** `rc_model::Model::sounds`: the sounds an animation names (`AnimNotify_Sound`) and when. New message `rc_game_core::PropAnim` (actor, animation). `rc_level_plugin::anim_props` reads the props' `Load` and `Holster` animations and their sounds, and `animate` plays an asked-for animation once (re-posing the model each frame) with its sounds from the prop. The bacta system sends `Load` when the player starts healing and `Holster` when they stop.
+- **Why:** User playtest: healing worked and the barricade opened, but the dispenser didn't move and made no sound.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_model -p rc_level_plugin`; `rc_game --script` in the cloud with GEN_Sound.uax copied read only from the PC.
+- **Result:** The dispenser's animations name `GEN_Sound` clunks (mach_GEN_Bdroid_Dispense_open/close, fol_GEN_trapFiddle_01); 3 read. New check passes: `played ["Load", "Holster"]`. 111 checks passed, 2 failed (the same level-sound checks: Character_Voice and GEO_Sound not copied).
+- **Still broken / not tested:** Not heard or seen on Windows. Which animation the original plays when is our reading of the names (Load on start, Holster on stop). The zap effect (`DispenserEffectClass` BactaZap_Dispenser, and BactaZap_Dispenser_Body on the player) waits for the particle effects system being built in its own thread. Dispensers still aren't solid.
+- **Next:** The user heals at the dispenser and says whether it looks and sounds right.
+
 ## 2026-11-10: Dispensers stand on the floor; F uses them instead of ordering the squad (rc_level, rc_scripts_plugin, rc_squad_plugin)
 
 - **Changed:** Animated props are drawn lower by their `CollisionHeight` (`class_look::anim_mesh_of` returns it; `map_collision` moves them down). New shared resource `rc_game_core::UseClaimed`: the scripts' bacta system sets it while the player stands at a switched-on dispenser, and the squad leaves that F press alone (F is both Use and the squad's context order).

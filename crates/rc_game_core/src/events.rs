@@ -187,3 +187,14 @@ pub struct MarkerJob {
     /// Who did it, for the log.
     pub by: String,
 }
+
+/// Play animation `anim` (the model's own sequence name, such as `Load`)
+/// on the map actor called `actor` (`BactaDispenserGEO0`), for props drawn
+/// with an animated model (`rc_level_plugin::anim_props`). The animation's
+/// own sounds play with it. Sent by whatever uses the prop (the bacta
+/// dispenser when the player starts and stops healing).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct PropAnim {
+    pub actor: String,
+    pub anim: String,
+}

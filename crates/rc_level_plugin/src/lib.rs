@@ -65,9 +65,16 @@ impl Plugin for LevelPlugin {
         app.add_plugins((sky::SkyPlugin, BumpMapPlugin, prop_light::PropLightPlugin))
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
+            .add_message::<rc_game_core::PropAnim>()
             .add_systems(
                 Update,
                 let_sky_through.run_if(in_state(GameState::InGame)),
+            )
+            .add_systems(
+                Update,
+                anim_props::animate
+                    .in_set(rc_game_core::GameSet::Simulate)
+                    .run_if(rc_game_core::playing),
             )
             .add_systems(OnExit(GameState::InGame), forget);
     }
@@ -338,9 +345,10 @@ fn load(world: &mut World) {
     world.insert_resource(PlayerStart { feet, yaw });
     let anim = anim_props::spawn(world, &paths, &lvl.anim_props);
     log.line(format!(
-        "{PART}: {} props with an animated model drawn ({}){}",
+        "{PART}: {} props with an animated model drawn ({}), {} animation sounds{}",
         anim.drawn,
         anim.models.join(", "),
+        anim.sounds,
         if anim.failures.is_empty() {
             String::new()
         } else {
