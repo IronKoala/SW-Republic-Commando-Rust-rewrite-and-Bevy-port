@@ -576,7 +576,7 @@ copy of the game.
   comes along in maps that have one (not the
   prologue, briefings or epilogue), and the grown commando's arms are
   hidden while the prologue gives you a child's hands. Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the holograms' flicker and glow, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
