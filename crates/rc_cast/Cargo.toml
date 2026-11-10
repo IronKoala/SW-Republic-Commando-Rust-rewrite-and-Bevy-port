@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 rc_anim = { path = "../rc_anim" }
 rc_game_core = { path = "../rc_game_core" }
+rc_hologram = { path = "../rc_hologram" }
 # Reading the map's actors.
 rc_level = { path = "../rc_level" }
 # The original models, read from the game.
