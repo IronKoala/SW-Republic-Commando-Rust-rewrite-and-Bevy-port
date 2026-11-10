@@ -25,6 +25,8 @@
 //! clearing). A VR mod's camera gets the sky the same way: give it
 //! `PlayerCamera`.
 
+pub mod anim_props;
+
 use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 use rc_game_core::{
@@ -60,12 +62,24 @@ pub struct LevelPlugin;
 
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((sky::SkyPlugin, BumpMapPlugin, prop_light::PropLightPlugin))
+        app.add_plugins((
+            sky::SkyPlugin,
+            BumpMapPlugin,
+            prop_light::PropLightPlugin,
+            rc_hologram::HologramPlugin,
+        ))
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
+            .add_message::<rc_game_core::PropAnim>()
             .add_systems(
                 Update,
                 let_sky_through.run_if(in_state(GameState::InGame)),
+            )
+            .add_systems(
+                Update,
+                anim_props::animate
+                    .in_set(rc_game_core::GameSet::Simulate)
+                    .run_if(rc_game_core::playing),
             )
             .add_systems(OnExit(GameState::InGame), forget);
     }
@@ -80,8 +94,17 @@ pub struct LevelInfo {
     pub props: usize,
     /// Props and doors whose model comes from their class.
     pub class_props: usize,
+    /// Props drawn with an animated model (bacta dispensers and the like),
+    /// and the ones whose model couldn't be read.
+    pub anim_props: usize,
+    pub anim_prop_failures: usize,
     pub unreadable_props: usize,
     pub blocking_volumes: usize,
+    /// Props that collide through their mesh's simple collision shape
+    /// (collision off on every section, like the explosive barrels).
+    pub simple_shape_props: usize,
+    /// Props people walk through but shots stop at.
+    pub shot_only_props: usize,
     pub drawn_triangles: usize,
     /// The sky box's position (Bevy units), if the map has one.
     pub sky: Option<[f32; 3]>,
@@ -113,11 +136,16 @@ pub struct Part {
     pub class: String,
     pub tag: String,
     pub solid: bool,
+    /// Stops shots but not people (`rc_level::class_look::Blocks`), like
+    /// the shield wall pieces of geo_04c.
+    pub shots_only: bool,
     world: Option<TriangleWorld>,
 }
 
 struct PartsShared {
     fixed: Arc<dyn MoveWorld + Send + Sync>,
+    /// Props that stop shots but not people, other than parts.
+    shots_only: Option<TriangleWorld>,
     parts: RwLock<Vec<Part>>,
 }
 
@@ -134,22 +162,43 @@ impl LevelParts {
         tagged: &HashMap<usize, (String, String)>,
         triangles: HashMap<usize, Vec<[[f32; 3]; 3]>>,
     ) -> Self {
+        Self::with_shots_only(fixed, tagged, triangles, Vec::new(), HashMap::new())
+    }
+
+    /// As `new`, plus what stops shots but not people: `shot_triangles`
+    /// (props that aren't parts) and `shot_parts` (parts, by export index;
+    /// their triangles are not in `triangles`). In the `world` these only
+    /// stop sweeps with no size (shots, looks), never a walking body. See
+    /// `rc_level::map_collision::MapCollision::shot_triangles`.
+    pub fn with_shots_only(
+        fixed: Arc<dyn MoveWorld + Send + Sync>,
+        tagged: &HashMap<usize, (String, String)>,
+        triangles: HashMap<usize, Vec<[[f32; 3]; 3]>>,
+        shot_triangles: Vec<[[f32; 3]; 3]>,
+        shot_parts: HashMap<usize, Vec<[[f32; 3]; 3]>>,
+    ) -> Self {
         let v = |p: [f32; 3]| Vec3::new(p[0], p[1], p[2]);
+        let world_of = |ts: &Vec<[[f32; 3]; 3]>| {
+            TriangleWorld::new(ts.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect())
+        };
         let mut parts: Vec<Part> = tagged
             .iter()
-            .map(|(&export, (class, tag))| Part {
-                export,
-                class: class.clone(),
-                tag: tag.clone(),
-                solid: true,
-                world: triangles.get(&export).map(|ts| {
-                    TriangleWorld::new(ts.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect())
-                }),
+            .map(|(&export, (class, tag))| {
+                let shot = shot_parts.get(&export);
+                Part {
+                    export,
+                    class: class.clone(),
+                    tag: tag.clone(),
+                    solid: true,
+                    shots_only: shot.is_some(),
+                    world: shot.or(triangles.get(&export)).map(world_of),
+                }
             })
             .collect();
         parts.sort_by_key(|p| p.export);
         LevelParts(Arc::new(PartsShared {
             fixed,
+            shots_only: (!shot_triangles.is_empty()).then(|| world_of(&shot_triangles)),
             parts: RwLock::new(parts),
         }))
     }
@@ -204,6 +253,16 @@ impl LevelParts {
             .and_then(|p| p.world.as_ref().map(|w| w.bounds()))
     }
 
+    /// The parts that stop shots but not people (export indices).
+    pub fn shots_only(&self) -> Vec<usize> {
+        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
+        parts
+            .iter()
+            .filter(|p| p.shots_only && p.world.is_some())
+            .map(|p| p.export)
+            .collect()
+    }
+
     /// The level plus the parts that are solid now.
     pub fn world(&self) -> Arc<dyn MoveWorld + Send + Sync> {
         Arc::new(WithParts(self.0.clone()))
@@ -215,14 +274,25 @@ struct WithParts(Arc<PartsShared>);
 impl MoveWorld for WithParts {
     fn sweep(&self, extent: Vec3, start: Vec3, end: Vec3) -> Option<Hit> {
         let mut best = self.0.fixed.sweep(extent, start, end);
-        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
-        for p in parts.iter().filter(|p| p.solid) {
-            let Some(w) = &p.world else { continue };
-            if let Some(h) = w.sweep(extent, start, end) {
+        let mut take = |h: Option<Hit>| {
+            if let Some(h) = h {
                 if best.is_none_or(|b| h.time < b.time || (h.start_solid && !b.start_solid)) {
                     best = Some(h);
                 }
             }
+        };
+        // A sweep with no size is a shot or a look; anything with a size
+        // is a body moving.
+        let line = extent == Vec3::ZERO;
+        if line {
+            if let Some(w) = &self.0.shots_only {
+                take(w.sweep(extent, start, end));
+            }
+        }
+        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
+        for p in parts.iter().filter(|p| p.solid && (line || !p.shots_only)) {
+            let Some(w) = &p.world else { continue };
+            take(w.sweep(extent, start, end));
         }
         best
     }
@@ -233,8 +303,17 @@ impl MoveWorld for WithParts {
 #[derive(Resource)]
 struct Countdown(u32);
 
-fn begin(mut commands: Commands, mut gate: ResMut<LoadingGate>) {
+fn begin(
+    mut commands: Commands,
+    mut gate: ResMut<LoadingGate>,
+    paths: Option<Res<GamePaths>>,
+) {
     gate.wait(PART);
+    // Where rc_hologram reads the game's own hologram glow and noise
+    // pictures from.
+    if let Some(paths) = paths {
+        commands.insert_resource(rc_hologram::HologramGameData(paths.game_data()));
+    }
     commands.insert_resource(Countdown(3));
 }
 
@@ -244,6 +323,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelParts>();
     commands.remove_resource::<LevelBreakables>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
+    commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -310,6 +390,8 @@ fn load(world: &mut World) {
         class_props: lvl.class_mesh_actors,
         unreadable_props: lvl.mesh_failures,
         blocking_volumes: lvl.blocking_volumes,
+        simple_shape_props: lvl.simple_shape_props,
+        shot_only_props: lvl.shot_only_props,
         has_player_start: lvl.start.is_some(),
         load_ms,
         ..default()
@@ -348,11 +430,35 @@ fn load(world: &mut World) {
         yaw.to_degrees()
     ));
     world.insert_resource(PlayerStart { feet, yaw });
+    let anim = anim_props::spawn(world, &paths, &lvl.anim_props);
+    log.line(format!(
+        "{PART}: {} props with an animated model drawn ({}), {} animation sounds{}",
+        anim.drawn,
+        anim.models.join(", "),
+        anim.sounds,
+        if anim.failures.is_empty() {
+            String::new()
+        } else {
+            format!("; NOT drawn: {}", anim.failures.join("; "))
+        }
+    ));
+    info.anim_props = anim.drawn;
+    info.anim_prop_failures = lvl.anim_props.len() - anim.drawn;
     world.insert_resource(LevelMoverData {
         movers: lvl.movers,
         triangles: lvl.mover_triangles,
     });
-    let parts = LevelParts::new(Arc::new(tw), &lvl.parts, lvl.part_triangles);
+    let parts = LevelParts::with_shots_only(
+        Arc::new(tw),
+        &lvl.parts,
+        std::mem::take(&mut lvl.part_triangles),
+        std::mem::take(&mut lvl.shot_triangles),
+        std::mem::take(&mut lvl.shot_part_triangles),
+    );
+    log.line(format!(
+        "{PART}: {} props collide through their simple collision shape; {} props stop shots but not people",
+        lvl.simple_shape_props, lvl.shot_only_props
+    ));
     log.line(format!(
         "{PART}: {} parts a script may switch off ({} solid ones)",
         lvl.parts.len(),
@@ -382,6 +488,8 @@ fn load(world: &mut World) {
             respawn: b.respawn,
             radius: b.radius,
             height: b.height,
+            message: b.message.clone(),
+            sound: b.sound.clone(),
         })
         .collect();
     log.line(format!(
@@ -392,6 +500,31 @@ fn load(world: &mut World) {
         lvl.pickups_not_solid
     ));
     world.insert_resource(rc_game_core::pickups::LevelAmmoBoxes(boxes));
+    // Weapons lying in the map, the same way.
+    let weapons: Vec<_> = lvl
+        .weapons
+        .iter()
+        .map(|w| rc_game_core::pickups::PlacedWeapon {
+            export: w.export,
+            name: w.name.clone(),
+            class: w.class.clone(),
+            at: bevy::math::Vec3::new(w.location[0], w.location[2], w.location[1])
+                / rc_game_core::units::UU_PER_UNIT,
+            weapon: w.weapon.clone(),
+            ammo: w.ammo,
+            message: w.message.clone(),
+            sound: w.sound.clone(),
+            radius: w.radius,
+            height: w.height,
+        })
+        .collect();
+    log.line(format!(
+        "{PART}: {} weapons lying in the map ({} moved down onto the ground, the furthest {:.0} uu)",
+        weapons.len(),
+        lvl.weapons.iter().filter(|w| w.dropped > 0.0).count(),
+        lvl.weapons.iter().map(|w| w.dropped).fold(0.0f32, f32::max),
+    ));
+    world.insert_resource(rc_game_core::pickups::LevelWeaponPickups(weapons));
 
     // The look. If it can't be built the level is still solid, just
     // invisible, so the game goes on and says so in the log.
@@ -498,6 +631,60 @@ fn let_sky_through(
     for (e, mut cam) in &mut views {
         cam.clear_color = ClearColorConfig::None;
         commands.entity(e).insert(SkyViewer);
-        log.line(format!("{PART}: the player's camera now shows the sky behind the level"));
+        log.line(format!(
+            "{PART}: the player's camera now shows the sky behind the level"
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A wall (x = 10) that stops shots only, as a part and as a plain
+    /// prop: a line stops at it, a body walks through, and a broken part
+    /// stops nothing.
+    #[test]
+    fn shots_only_walls_stop_lines_not_bodies() {
+        let wall = |x: f32| {
+            vec![
+                [[x, -100.0, -100.0], [x, 100.0, -100.0], [x, 0.0, 100.0]],
+                [[x, -100.0, 100.0], [x, 100.0, 100.0], [x, 0.0, -100.0]],
+            ]
+        };
+        let tagged = HashMap::from([(
+            7usize,
+            ("K_GEO04_WallComponent".to_string(), "W".to_string()),
+        )]);
+        let body = Vec3::new(20.0, 20.0, 40.0);
+        let (a, b) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 0.0, 0.0));
+        for (loose, part) in [
+            (wall(10.0), HashMap::new()),
+            (Vec::new(), HashMap::from([(7usize, wall(10.0))])),
+        ] {
+            let parts = LevelParts::with_shots_only(
+                Arc::new(TriangleWorld::new(vec![])),
+                &tagged,
+                HashMap::new(),
+                loose,
+                part,
+            );
+            let w = parts.world();
+            let hit = w.sweep(Vec3::ZERO, a, b).expect("a shot stops at the wall");
+            assert!((hit.time - 0.25).abs() < 0.01, "hit at {}", hit.time);
+            assert!(w.sweep(body, a, b).is_none(), "a body walks through");
+        }
+        let parts = LevelParts::with_shots_only(
+            Arc::new(TriangleWorld::new(vec![])),
+            &tagged,
+            HashMap::new(),
+            Vec::new(),
+            HashMap::from([(7usize, wall(10.0))]),
+        );
+        parts.set_solid_export(7, false);
+        assert!(
+            parts.world().sweep(Vec3::ZERO, a, b).is_none(),
+            "a broken piece stops nothing"
+        );
     }
 }

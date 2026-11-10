@@ -25,6 +25,7 @@
 
 pub mod ammo_box;
 pub mod arms;
+pub mod arms_sound;
 mod arms_view;
 pub mod audio_table;
 pub mod counter;
@@ -37,6 +38,7 @@ pub mod health;
 mod library;
 mod melee;
 pub mod pickup;
+pub mod pickup_sound;
 pub mod save;
 pub mod shot;
 mod throw;
@@ -53,7 +55,7 @@ pub use library::{
     read_audio_params, read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary,
 };
 pub use melee::{MeleeAttack, MeleeSwing};
-pub use pickup::{spawn_pickup, WeaponPickup};
+pub use pickup::{spawn_pickup, WeaponPickup, WeaponTaken};
 pub use rc_package::sound::AudioParams;
 pub use throw::{Blast, Body, Explode, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{ArmsParams, WeaponParams, WeaponState};
@@ -205,6 +207,21 @@ impl Plugin for WeaponsPlugin {
                 )
                     .chain(),
             )
+            // Pickup sounds (`pickup_sound`).
+            .init_resource::<pickup_sound::PickupSounds>()
+            .init_resource::<arms_sound::ArmsSounds>()
+            .add_systems(
+                Update,
+                (
+                    pickup_sound::read_level_sounds
+                        .run_if(resource_exists::<rc_game_core::pickups::LevelAmmoBoxes>)
+                        .run_if(resource_exists::<GamePaths>)
+                        .run_if(resource_exists::<Assets<AudioSource>>),
+                    pickup_sound::play_pickup_sounds
+                        .after(ammo_box::take_boxes)
+                        .run_if(resource_exists::<Assets<AudioSource>>),
+                ),
+            )
             .add_systems(
                 Update,
                 (ammo_box::bring_back, ammo_box::take_boxes)
@@ -215,6 +232,28 @@ impl Plugin for WeaponsPlugin {
             )
             .add_systems(Update, ammo_box::show_boxes.in_set(GameSet::View))
             .add_systems(OnExit(rc_game_core::GameState::InGame), ammo_box::forget_boxes)
+            // The weapons lying in the levels (`pickup`).
+            .add_message::<pickup::WeaponTaken>()
+            .init_resource::<pickup::WeaponsGone>()
+            .add_systems(
+                Update,
+                (
+                    pickup::load_rules
+                        .run_if(not(resource_exists::<pickup::WeaponPickupRules>))
+                        .run_if(resource_exists::<GamePaths>),
+                    pickup::place_weapons
+                        .run_if(resource_exists::<rc_game_core::pickups::LevelWeaponPickups>)
+                        .run_if(resource_exists::<pickup::WeaponPickupRules>)
+                        .run_if(resource_exists::<WeaponLibrary>),
+                    pickup::apply_saved.run_if(resource_exists::<pickup::WeaponsTakenFromSave>),
+                )
+                    .chain(),
+            )
+            .add_systems(Update, pickup::hide_taken.in_set(GameSet::View))
+            .add_systems(
+                OnExit(rc_game_core::GameState::InGame),
+                (pickup::forget_weapons, pickup::forget_gone),
+            )
             .add_message::<ThrowGrenade>()
             .add_message::<MeleeAttack>()
             .add_message::<MeleeSwing>()

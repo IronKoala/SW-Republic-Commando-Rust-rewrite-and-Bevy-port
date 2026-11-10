@@ -8,7 +8,12 @@
 //! package version 149, one more from 155). Written from those descriptions;
 //! no code copied.
 //!
-//! The collision data after the streams is not read.
+//! After the streams comes a reference to the mesh's simple collision
+//! shape (a `Model`, read by `rc_level::bsp`), then the collision
+//! triangle list and its search tree. Only the reference is read: the
+//! triangle list holds exactly the triangles of the sections with
+//! collision on (checked on 2,295 of the 2,447 meshes), which
+//! `StaticMesh::triangle_collides` already tells.
 
 use crate::properties::{self, Property, PropertyType, Value};
 use crate::{Export, Package, ReadError, Reader, Result};
@@ -66,6 +71,16 @@ pub struct StaticMesh {
     pub indices: Vec<u16>,
     /// Second index list (wireframe lines in UE2). Not used for drawing.
     pub indices2: Vec<u16>,
+    /// Object reference of the mesh's simple collision shape: a `Model`
+    /// (the same kind of object as a map's BSP), an export of the same
+    /// package. 0 when the mesh has none. A few blocky boxes around the
+    /// model, made by the artists; meshes with collision off on every
+    /// section (barrels, shield walls) collide with this shape instead.
+    pub collision_model: i32,
+    /// That shape's triangles, in the mesh's own coordinates. Empty after
+    /// `read_static_mesh`: this crate doesn't read `Model`s, so whoever
+    /// needs it fills it in (`rc_level::collision::read_simple_shape`).
+    pub simple_shape: Vec<[[f32; 3]; 3]>,
     /// Bytes after the part we read (collision data). Not checked.
     pub unread: usize,
 }
@@ -225,7 +240,7 @@ pub fn read_static_mesh(pkg: &Package, data: &[u8], export: &Export) -> Result<S
     }
     let indices = index_buffer(&mut r, "index")?;
     let indices2 = index_buffer(&mut r, "second index")?;
-    r.compact_index()?; // object reference, unknown (collision?)
+    let collision_model = r.compact_index()?;
 
     Ok(StaticMesh {
         properties,
@@ -240,6 +255,8 @@ pub fn read_static_mesh(pkg: &Package, data: &[u8], export: &Export) -> Result<S
         uv_sets,
         indices,
         indices2,
+        collision_model,
+        simple_shape: Vec::new(),
         unread: object.len() - r.pos(),
     })
 }
@@ -418,6 +435,8 @@ mod tests {
             uv_sets: Vec::new(),
             indices: vec![0; 9],
             indices2: Vec::new(),
+            collision_model: 0,
+            simple_shape: Vec::new(),
             unread: 0,
         };
         assert!(m.triangle_collides(0));

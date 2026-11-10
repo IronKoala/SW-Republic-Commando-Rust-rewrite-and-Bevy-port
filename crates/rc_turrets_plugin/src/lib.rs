@@ -48,8 +48,8 @@ use rc_game_core::save::{SaveAppExt, SavePart};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, HudMessage,
-    LoadingGate, Manning, OnTurret, Player, PlayerCamera, RaiseEvent, ScriptTags, TeleportPlayer,
-    TurretOrder,
+    LoadingGate, Manning, OnTurret, Player, PlayerCamera, RaiseEvent, ScriptTags,
+    TeleportPlayer, TurretOrder, UseClaimed,
 };
 use rc_turrets::{first_tagged, for_marker, Gunner, Mounted, Turret, TurretParams};
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,12 @@ pub struct TurretsPlugin;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TurretSet;
 
+/// Marks the Use button as taken ([`UseClaimed`]) while a turret is
+/// offered or manned. The game puts it after whatever resets the flag and
+/// before the squad reads it.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TurretUseSet;
+
 impl Plugin for TurretsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<TurretOrder>()
@@ -91,6 +97,13 @@ impl Plugin for TurretsPlugin {
                 (orders, player_use, player_on, characters, settle, pose)
                     .chain()
                     .in_set(TurretSet)
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing),
+            )
+            .add_systems(
+                Update,
+                claim_use
+                    .in_set(TurretUseSet)
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
             )
@@ -125,6 +138,9 @@ pub struct LevelTurrets {
     previous_weapon: Option<usize>,
     /// The turret the player is offered (close and facing it).
     offered: Option<usize>,
+    /// This frame's Use press got the player on or off a turret, so
+    /// nothing else acts on it (getting off again, the squad's order).
+    use_taken: bool,
     /// Character gunners: when each turret last fired, seconds.
     last_shot: Vec<f32>,
     /// Squad mates on turrets: each one's entity, by turret.
@@ -166,6 +182,7 @@ impl LevelTurrets {
             looks: HashMap::new(),
             previous_weapon: None,
             offered: None,
+            use_taken: false,
             last_shot: vec![f32::NEG_INFINITY; n],
             squad_gunners: HashMap::new(),
             time: 0.0,
@@ -388,6 +405,7 @@ fn load(
         looks,
         previous_weapon: None,
         offered: None,
+        use_taken: false,
         last_shot: vec![f32::NEG_INFINITY; n],
         squad_gunners: HashMap::new(),
         time: 0.0,
@@ -717,6 +735,7 @@ fn player_use(
     log: Res<GameLog>,
 ) {
     let Some(mut lt) = turrets else { return };
+    lt.use_taken = false;
     let Ok((me, t, arsenal)) = player.single_mut() else {
         lt.offered = None;
         return;
@@ -793,6 +812,7 @@ fn player_use(
         weapon,
     });
     lt.offered = None;
+    lt.use_taken = true;
     lt.stats.player.push(format!("on {name}"));
     log.line(format!(
         "{PART}: t={:.2} the player gets on {name}, facing {:.0} deg",
@@ -823,6 +843,21 @@ fn hand_over(arsenal: &mut Arsenal, weapon: &str, lib: Option<&WeaponLibrary>, l
 
 /// On the turret: the look turns it, Use gets off.
 #[allow(clippy::too_many_arguments)]
+/// The Use button is the turret's while the player is offered one or is
+/// on one, so the squad doesn't also take the press as an order. Runs
+/// after the parts that reset [`UseClaimed`] each frame (the game orders
+/// it with [`TurretUseSet`]).
+fn claim_use(
+    turrets: Option<Res<LevelTurrets>>,
+    manning: Query<(), (With<Player>, With<Manning>)>,
+    claimed: Option<ResMut<UseClaimed>>,
+) {
+    let (Some(lt), Some(mut claimed)) = (turrets, claimed) else {
+        return;
+    };
+    claimed.0 |= lt.offered.is_some() || lt.use_taken || !manning.is_empty();
+}
+
 fn player_on(
     mut commands: Commands,
     time: Res<Time>,
@@ -845,8 +880,10 @@ fn player_on(
     };
     // Getting off: Use, or going down (the original puts a downed gunner
     // off the turret).
-    let leave = actions.just_pressed(Action::Use) || down;
+    // The press that got the player on this frame doesn't count.
+    let leave = (actions.just_pressed(Action::Use) && !lt.use_taken) || down;
     if leave {
+        lt.use_taken |= actions.just_pressed(Action::Use);
         let name = lt.list[i].place.name.clone();
         let events = match lt.list[i].leave() {
             Mounted::Off(e) => e,

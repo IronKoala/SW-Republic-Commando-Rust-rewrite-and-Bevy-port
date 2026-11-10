@@ -138,6 +138,17 @@ pub struct Member {
     /// and turns them with the turret (radians). They don't move, think or
     /// fire their own gun meanwhile; the game fires the turret.
     pub mounted: Option<(Vec3, f32)>,
+    /// Shots or grenades left, by gun or grenade id. Empty unless
+    /// `[ammo] limited` is on; anything not listed never runs out.
+    pub ammo: std::collections::BTreeMap<String, u32>,
+    /// The box (`SupplyBox::id`) they're walking to, if any.
+    pub fetching: Option<u64>,
+    /// Seconds on the way to it.
+    pub(crate) fetch_time: f32,
+    /// Boxes they couldn't get to.
+    pub(crate) skip_boxes: Vec<u64>,
+    /// Seconds before they look for another box after giving up on one.
+    pub(crate) fetch_wait: f32,
     path: Vec<Vec3>,
     pub(crate) planned_for: Option<Vec3>,
     pub(crate) think_in: f32,
@@ -153,6 +164,35 @@ pub enum SquadEvent {
     Spawned {
         member: String,
         feet: Vec3,
+    },
+    /// A gun or grenade ran out (`[ammo] limited` only).
+    OutOfAmmo {
+        member: String,
+        weapon: String,
+    },
+    /// Setting off for an ammo box.
+    FetchAmmo {
+        member: String,
+        name: String,
+        gives: String,
+        have: u32,
+        distance: f32,
+    },
+    /// No longer going for that box.
+    FetchStopped {
+        member: String,
+        name: String,
+        why: String,
+    },
+    /// Took a box: the game marks it taken.
+    AmmoTaken {
+        member: String,
+        index: usize,
+        name: String,
+        gives: String,
+        added: u32,
+        now: u32,
+        max: u32,
     },
     OrderGiven {
         order: String,
@@ -359,6 +399,18 @@ impl fmt::Display for SquadEvent {
         let p = |v: &Vec3| format!("({:.0}, {:.0}, {:.0})", v.x, v.y, v.z);
         match self {
             SquadEvent::Spawned { member, feet } => write!(f, "{member} spawned, feet {}", p(feet)),
+            SquadEvent::OutOfAmmo { member, weapon } => write!(f, "{member} is out of {weapon}"),
+            SquadEvent::FetchAmmo { member, name, gives, have, distance } => write!(
+                f,
+                "{member} goes for ammo box {name} ({gives}, has {have}), {distance:.0} uu away"
+            ),
+            SquadEvent::FetchStopped { member, name, why } => {
+                write!(f, "{member} stops going for {name}: {why}")
+            }
+            SquadEvent::AmmoTaken { member, name, gives, added, now, max, .. } => write!(
+                f,
+                "{member} took {name}: +{added} {gives}, now {now} of {max}"
+            ),
             SquadEvent::OrderGiven { order, stance } => write!(f, "ORDER {order} -> stance {stance}"),
             SquadEvent::OrderIgnored { order, why } => write!(f, "order {order} ignored: {why}"),
             SquadEvent::SetOff { member, tether_distance, urgent, by_order, goal } => write!(
@@ -510,6 +562,9 @@ pub struct Squad {
     pub time: f32,
     /// Charges and grenades waiting to go off.
     pub pending: Vec<Pending>,
+    /// The ammo and grenade boxes not yet taken (only used with
+    /// `[ammo] limited`). The game part fills this every frame.
+    pub boxes: Vec<crate::ammo::SupplyBox>,
     /// "Auto pull maneuvers" (the original's GAME option, on by default):
     /// an order that needs more squad mates than are free takes them off
     /// pullable posts. Off, the order is refused while they're busy.
@@ -617,6 +672,11 @@ impl Squad {
                     cover_retry_in: 0.0,
                     crouch: false,
                     mounted: None,
+                    ammo: settings.ammo.starting(),
+                    fetching: None,
+                    fetch_time: 0.0,
+                    skip_boxes: Vec::new(),
+                    fetch_wait: 0.0,
                     path: Vec::new(),
                     planned_for: None,
                     think_in: 0.0,
@@ -640,6 +700,7 @@ impl Squad {
             rng: Rng::new(0x0D17_DE17),
             time: 0.0,
             pending: Vec::new(),
+            boxes: Vec::new(),
             auto_pull: true,
         };
         (squad, events)
@@ -1139,6 +1200,9 @@ impl Squad {
                 None
             };
         let reached_patient = self.reached_patient(i, leader);
+        if self.members[i].revive.is_none() && self.think_fetch(i, tether, leader, events) {
+            return;
+        }
         let job = self.members[i]
             .marker
             .and_then(|k| self.job_of(k))
@@ -1656,6 +1720,11 @@ impl Squad {
             return;
         };
         self.members[i].throw_in = interval;
+        let throws = self.settings.ammo.throws.clone();
+        if !self.has_ammo(i, &throws) {
+            return;
+        }
+        self.use_ammo(i, &throws, events);
         self.throw_at(i, from, &t, (fuse, damage, radius), false, events);
     }
 

@@ -6,17 +6,21 @@
 //! `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p rc_visor --example visor_check`
 //! It ends `VISOR CHECK: N passed, 0 failed`. With RC_GAME_DIR set to the
 //! game's folder it uses the game's own colours; without, stand-in ones
-//! (red for the ball, pale blue for the box). Pictures are saved as
+//! (red for the ball, pale blue for the box). Low light mode must turn the
+//! picture black and white (with the game folder: dark corners outside the
+//! visor window) and normal mode must take that away again. Pictures are
+//! saved as
 //! `logs/visor_check_<step>.png`.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use rc_game_core::{Action, ActionState, CorePlugin, GameLog, GameSet, GameState, PlayerCamera};
+use rc_visor::night_original::NightOriginal;
 use rc_visor::original::{self, Original, VisorFile};
 use rc_visor::{
-    TacticalGlow, VisorChoice, VisorLook, VisorMode, VisorPlugin, VisorReadout, VisorSettings,
-    VisorState,
+    NightVisionImages, TacticalGlow, VisorChoice, VisorLook, VisorMode, VisorPlugin, VisorReadout,
+    VisorSettings, VisorState,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -56,6 +60,13 @@ struct Measured {
     ball_middle_red: f32,
     box_blue: f32,
     floor: f32,
+    /// How coloured the picture is: the biggest minus the smallest of red,
+    /// green and blue, averaged over the whole picture.
+    colour: f32,
+    /// Brightness of the top left corner.
+    corner: f32,
+    /// Whole-picture brightness.
+    picture: f32,
     mode: Option<VisorMode>,
     shown: usize,
 }
@@ -64,7 +75,9 @@ struct Measured {
 struct Run {
     frame: u32,
     step: usize,
-    pending: Option<(usize, VisorMode, usize)>,
+    pending: Option<(usize, VisorMode, usize, bool)>,
+    /// The install's visor window picture is in use.
+    window: bool,
     results: Arc<Mutex<Vec<(usize, Measured)>>>,
 }
 
@@ -72,10 +85,19 @@ fn main() {
     let log = GameLog::terminal();
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
     let file = VisorFile::read(&data.join(original::DATA_FILE)).expect("data file");
+    let mut night = NightOriginal::default();
     let found = match std::env::var_os("RC_GAME_DIR") {
         Some(dir) => {
             let dir = PathBuf::from(dir);
-            println!("using the game's colours from {}", dir.display());
+            println!(
+                "using the game's colours and low light look from {}",
+                dir.display()
+            );
+            night = rc_visor::read_low_light(&file, &dir.join("GameData"));
+            println!(
+                "low light: grain {:?}, repeats {:?}, fog {:?}, problems {:?}",
+                night.grain, night.grain_tiles, night.fog, night.problems
+            );
             original::read(&file, &|rel| rc_game_core::paths::resolve(&dir, rel))
         }
         None => {
@@ -93,6 +115,7 @@ fn main() {
         "colours: {:?}; problems: {:?}",
         found.colours, found.problems
     );
+    let has_window = night.mask.is_some();
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -103,16 +126,38 @@ fn main() {
         }))
         .add_plugins(CorePlugin)
         .insert_resource(log)
+        .insert_resource(NightPictures(Mutex::new(Some(night.clone()))))
         .insert_resource(VisorLook {
             file,
             original: found,
+            night,
         })
-        .init_resource::<Run>()
+        .insert_resource(Run {
+            window: has_window,
+            ..default()
+        })
         .add_plugins(VisorPlugin)
         .add_systems(Startup, scene)
+        .add_systems(PostStartup, night_pictures)
         .add_systems(Update, drive.in_set(GameSet::Input))
         .add_observer(measure)
         .run();
+}
+
+/// The install's low light pictures, handed over once the visor's stand-ins
+/// exist.
+#[derive(Resource)]
+struct NightPictures(Mutex<Option<NightOriginal>>);
+
+fn night_pictures(
+    pictures: Res<NightPictures>,
+    mut images: ResMut<Assets<Image>>,
+    have: Option<ResMut<NightVisionImages>>,
+) {
+    let (Some(mut night), Some(mut have)) = (pictures.0.lock().unwrap().take(), have) else {
+        return;
+    };
+    rc_visor::use_night_pictures(&mut night, &mut images, &mut have);
 }
 
 fn scene(
@@ -216,7 +261,7 @@ fn drive(
         println!("step: {name}");
     }
     if f == 0 && run.step < STEPS.len() {
-        run.pending = Some((run.step, state.mode, readout.shown));
+        run.pending = Some((run.step, state.mode, readout.shown, readout.night_vision));
         commands.spawn(Screenshot::primary_window());
         run.step += 1;
     }
@@ -283,18 +328,43 @@ fn measure(captured: On<ScreenshotCaptured>, run: Res<Run>) {
         }
     }
     floor /= ((h / 10) * (w / 5)) as f32;
-    let (step, mode, shown) = run.pending.unwrap_or((usize::MAX, VisorMode::Normal, 0));
+    // The whole picture, every 4th pixel.
+    let (mut colour, mut picture, mut n) = (0.0, 0.0, 0.0);
+    for y in (0..h).step_by(4) {
+        for x in (0..w).step_by(4) {
+            let p = px(x as f32, y as f32);
+            colour += p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2]);
+            picture += (p[0] + p[1] + p[2]) / 3.0;
+            n += 1.0;
+        }
+    }
+    colour /= n;
+    picture /= n;
+    let mut corner = 0.0;
+    for y in 0..h / 20 {
+        for x in 0..w / 20 {
+            let p = px(x as f32, y as f32);
+            corner += (p[0] + p[1] + p[2]) / 3.0;
+        }
+    }
+    corner /= ((h / 20) * (w / 20)).max(1) as f32;
+    let (step, mode, shown, night) =
+        run.pending
+            .unwrap_or((usize::MAX, VisorMode::Normal, 0, false));
     let name = STEPS.get(step).map(|s| s.0).unwrap_or("?");
     let m = Measured {
         ball_edge_red: edge,
         ball_middle_red: middle,
         box_blue,
         floor,
+        colour,
+        corner,
+        picture,
         mode: Some(mode),
         shown,
     };
     println!(
-        "  {name}: mode {:?}, shells shown {shown}, ball edge red {edge:.1}, middle {middle:.1}, box blue {box_blue:.1}, floor {floor:.1}",
+        "  {name}: mode {:?}, shells shown {shown}, night vision {night}, ball edge red {edge:.1}, middle {middle:.1}, box blue {box_blue:.1}, floor {floor:.1}, picture {picture:.1}, colour {colour:.1}, corner {corner:.1}",
         mode
     );
     let _ = std::fs::create_dir_all("logs");
@@ -393,10 +463,37 @@ fn failures(run: &Run, readout: &VisorReadout) -> Vec<String> {
             low.ball_edge_red, low.shown
         ));
     }
-    if low.floor < normal.floor + 5.0 {
+    // The lamp is on, and the black-and-white picture (which darkens dim
+    // parts) must not leave the lit floor darker than before.
+    // (The floor's patch is below the visor window when that is in use.)
+    if !run.window && low.floor < normal.floor - 3.0 {
         out.push(format!(
-            "low light: the lamp doesn't light the floor ({:.1} against {:.1})",
+            "low light: the floor got darker ({:.1} against {:.1})",
             low.floor, normal.floor
+        ));
+    }
+    // The night-vision picture: black and white (the red glow, the blue
+    // box edge and the light's colour gone; the original's window adds a
+    // faint blue of its own, 10 of 255), and gone again in normal mode.
+    if low.colour > 12.0 || low.ball_edge_red > 2.0 {
+        out.push(format!(
+            "low light: the picture isn't black and white (colour {:.1})",
+            low.colour
+        ));
+    }
+    if (back_normal.colour - normal.colour).abs() > 2.0
+        || (back_normal.picture - normal.picture).abs() > 3.0
+    {
+        out.push(format!(
+            "back in normal mode the picture differs (colour {:.1} against {:.1})",
+            back_normal.colour, normal.colour
+        ));
+    }
+    // With the install's visor window the corners are black.
+    if run.window && low.corner > 6.0 {
+        out.push(format!(
+            "low light: the corner isn't dark behind the visor window ({:.1})",
+            low.corner
         ));
     }
     if (back_normal.floor - normal.floor).abs() > 3.0
@@ -424,7 +521,7 @@ fn report(run: &Run, readout: &VisorReadout) {
     for x in &f {
         println!("FAIL: {x}");
     }
-    let checks = 17;
+    let checks = 20;
     println!(
         "VISOR CHECK: {} passed, {} failed",
         checks - f.len().min(checks),

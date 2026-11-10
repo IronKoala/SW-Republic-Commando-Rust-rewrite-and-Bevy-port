@@ -159,6 +159,13 @@ copy of the game.
   compiled code we don't read, so the rules are our own; every number is
   in `data/squad/squad.toml` (`use_specialities = "no"` turns it off).
 
+- **Optional squad ammo, off by default (tested in the cloud sandbox by
+  numbers, not yet on Windows or with eyes).** As in the original, squad
+  mates never run out and never take ammo boxes. A mod can switch on
+  `[ammo] limited = "yes"` in `data/squad/squad.toml`: then squad mates
+  count their shots and grenades and walk to a nearby box when they run
+  low (only once the gun is empty in a fight).
+
 - **Squad context orders (tested in the cloud sandbox by numbers, not yet
   on Windows, in a real level, or with eyes).** Each kind of squad marker
   does its own job: bacta heals the squad mate who uses it; demolition and
@@ -168,8 +175,14 @@ copy of the game.
   anti-armour positions are held until you press F4, the sniper firing
   single long-range shots, the grenadier throwing a grenade every few
   seconds. Every job is a `[job.*]` part of `data/squad/squad.toml`, so
-  mods can change them or add new ones. Doors don't open yet: the squad
-  reports the job done, and the level scripts part will act on it. The
+  mods can change them or add new ones. When a job is
+  done the level hears about it (tested in the cloud sandbox with the
+  game's files, not yet on Windows or by playing): a demolition charge
+  sends its map events and blows away the bunker door or barricade it is
+  on, a sliced console sends its events, and a sliced or breached door
+  lock opens its locked double door, so the level's scripts carry on.
+  The charge, console and lock don't change their look yet, and you can't
+  do these jobs yourself yet (only the squad). The
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
   are the game's; how long the work takes is our guess. Traps and mines
@@ -189,7 +202,7 @@ copy of the game.
   rifle hits or 2 pistol hits. One droid fires back, and its hits take your
   shield before your health. The firing and reload sounds are the game's.
   Every weapon is a text file in `data/weapons`, which mods can edit.
-  `rc_shoot --script` drives itself through 17 checks and passed all of them.
+  `rc_shoot --script` drives itself through 20 checks and passed all of them.
 
 - **First-person arms and weapon animations (tested in the cloud sandbox,
   not yet on Windows or by playing).** The player holds the original
@@ -199,7 +212,9 @@ copy of the game.
   stand still, sway when you walk or run, kick on each shot, play the full
   reload, holster the old weapon and bring up the new one when you switch
   (with the attachment swap between DC-17m attachments), and play the
-  grenade throw and melee hit. They're drawn by their own camera, so the gun
+  grenade throw and melee hit, with the game's own handling sounds for
+  each (reload, bringing up, putting away, attachment swaps, melee, throw;
+  heard in the log in the cloud, not yet listened to on Windows). They're drawn by their own camera, so the gun
   never pokes into walls. The sniper's arms hide while zoomed, as in the
   game. The little screen on the DC-17m and its sniper shows the ammo you
   carry (three digits, like "120") and a bar that empties with the
@@ -214,8 +229,24 @@ copy of the game.
   4, grenades 5, never more than you can carry. A full player leaves the
   box lying. Taken boxes vanish and stay gone after a save and load, except
   geo_01a's grenade crate by the start, which comes back as in the
-  original. Boxes no longer block you like walls. No pickup sound or
-  "picked up" message yet.
+  original. Boxes no longer block you like walls. Taking one plays the
+  game's own pickup sound and shows what you took ("DC-17m Blaster Clips",
+  "Thermal Detonators") in the original font above the middle of the
+  screen for 3 seconds, fading out (not tested on Windows yet).
+
+- **Weapons lying in the levels (since 2026-11-10; tested in the cloud,
+  not yet on Windows or by playing).** The 40 weapons the campaign maps
+  place (bowcasters on Kashyyyk, ACP repeaters and array guns, concussion
+  rifles, rocket launchers, spare DC-17m attachments, an Elite Beam) appear
+  on the floor with their original models. Walk into a weapon you already
+  carry to take its ammo. For one you don't, the screen says "PRESS F TO
+  PICKUP" with its name: press Use (F) to take it. You carry one weapon
+  taken from the enemy at a time; picking up another drops the old one in
+  front of you. Dropped enemy blasters now need Use too, as in the
+  original. Taken weapons stay gone after a save and load. Not built yet:
+  the bowcaster's charged shot, homing rockets, pickup sounds, and the
+  weapons' own first-person models are only as good as the arms loader
+  (not checked for the new ones).
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
@@ -293,7 +324,9 @@ copy of the game.
   Windows).** The game reads each map's own scripting (79 of 79 maps, 2,842
   scripts, 19,041 actions, nothing unreadable) and runs it: scripts wait
   for events and timers, touch triggers, counters and conditions send
-  events on, doors open by event, checkpoints ask for a save, and
+  events on, line-of-sight triggers go off when you look at what they
+  watch (45 in 25 maps, such as seeing Grievous on yyy_01e; since
+  2026-11-10, not tested by playing), doors open by event, checkpoints ask for a save, and
   barricades come down. On geo_01a the landing zone now plays like the
   original: after the intro you are hit by a shell, the advisor tells you
   to heal, the bacta dispenser switches on, and holding Use at it heals you
@@ -509,6 +542,14 @@ copy of the game.
   model, skin, animations, voice lines, 1000 health and damage table. They
   burn you with the Elite Beam in one-second bursts. Settings:
   `data/enemies/geonosian_elite.toml` and `data/weapons/elite_beam_enemy.toml`.
+- **Every Trandoshan (tested in the cloud sandbox on ras_02c and yyy_04b,
+  not yet in the real game on Windows).** Slavers with shotguns and blades,
+  berserkers who charge with blades, slaver grenadiers, mercenary
+  grenadiers, the huge heavies with their heavy repeater, scavenger droids,
+  and the Kashyyyk mercenaries with their energy shields now appear
+  wherever the original puts them (685 more spawners on the Prosecutor and
+  Kashyyyk levels), with the game's own models, skins, animations, voice
+  lines, health and damage tables. Settings: `data/enemies/trandoshan_*.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -532,9 +573,13 @@ copy of the game.
   the colours the original gives them (read from the install). The GAME
   options page's TACTICAL VISOR MODE (ON, OFF, CYCLE: which modes X steps
   through) and TACTICAL MODE INTENSITY (how strong the glow is) work, as in
-  the original. Low light mode only switches on a helmet lamp for now (a
-  placeholder). Checked by `cargo run -p rc_visor --example visor_check`
-  and `rc_game --script`.
+  the original. Low light mode shows the original's night-vision picture:
+  black and white with more contrast, seen through the original's
+  visor-shaped window (widened, not stretched, on wide screens), with its
+  film grain and its distance fog, and the helmet lamp on. The window, grain
+  and numbers are read from the install. Not yet: the original's faint
+  trail of the last picture. Checked by `cargo run -p rc_visor --example
+  visor_check` and `rc_game --script`.
 
 - **Breakable props (since 2026-11-09, tested in the cloud only, not on
   Windows or by playing).** Explosive barrels, geo_05b's fuel dispensers
@@ -584,18 +629,31 @@ copy of the game.
   distance, unless the game's own settings for that sound say it is radio
   (most dialogue is). Tested in the cloud on a silent sound card, not yet
   listened to or run on Windows. No subtitles yet. Music cues, characters walking or animating, the squad
-  joining and leaving and camera moves are logged as "not done yet". The
-  end-of-campaign debriefing screen isn't shown: the game goes straight
-  on. Not tested on Windows.
+  joining and leaving and camera moves are logged as "not done yet". At the
+  end of each campaign the original debriefing screen shows (its own
+  picture, frame and texts, with the level's title, words and picture);
+  CONTINUE goes on to the next campaign. Its campaign music isn't played
+  yet. Not tested by playing a campaign to its end. Not tested on Windows.
 - Cutscenes (since 2026-11-09): the prologue, briefings and epilogue run
   to their end and go on to the next map. The player is held still with
   the original's look limits, moved between rooms, and the screen fades
   and flashes as the scripts ask; the HUD and helmet frame hide when they
-  say. The squad only comes along in maps that have one (not the
+  say. The characters the map places (Kaminoans, young clones,
+  troopers, Delta at the end) stand, talk and move as the scripts say;
+  the ones brought in during the scene aren't there yet. The squad only
+  comes along in maps that have one (not the
   prologue, briefings or epilogue), and the grown commando's arms are
-  hidden while the prologue gives you a child's hands. Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, many cutscene characters, hologram text, the title card,
-  the credits, and the logo videos. Not tested on Windows or by playing.
+  hidden while the prologue gives you a child's hands. Hologram
+  briefings at the start of missions (yyy_04b, ras_03a, geo_03a) start
+  when the projector's throw animation reaches its "start the briefing"
+  moment, and let the player go at their end, as in the original (since
+  2026-11-10; checked in the cloud from the log, not by playing). Not done yet:
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the title card,
+  the credits, and the logo videos. Holograms shimmer and flicker like
+  the original's (edges fade, a speckle that jumps about, brightness
+  flicker, now and then a squash in height), and the briefing holograms
+  wear their hologram skins; checked in the cloud, not yet looked at on
+  Windows. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
@@ -606,8 +664,12 @@ copy of the game.
   sounds a few metres away are louder than before (not yet listened to).
 - Collision follows each prop's "can be walked through" settings and
   each mesh part's collision switch (since 2026-10-30; before, every prop
-  was solid). Simplified collision shapes aren't read, so solid props
-  block by their drawn shape. Not tested on Windows or by playing.
+  was solid). Since 2026-11-10 models with collision off on every part
+  (barrels, Raxus Prime's floor and ceiling pipes) collide through the
+  simple box shape the game stores with them, instead of not at all. Props
+  the game lets you walk through but shoot (geo_04c's shield wall pieces)
+  now stop shots but still not people. Other solid props block by their
+  drawn shape. Not tested on Windows or by playing.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
@@ -654,7 +716,10 @@ copy of the game.
   how fast the beam does its damage is our own guess, and the player can't
   pick up their beam yet. Droidekas, dwarf spider droids, Phidna, drones,
   seeker droids and placed clone troopers still don't appear
-  (`rc_enemy_spawners` lists them). Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
+  (`rc_enemy_spawners` lists them). Trandoshan scavenger droids move along the
+  ground instead of flying, and don't blow up; slavers don't go berserk;
+  the player can't pick up the shotgun or heavy repeater; the Prosecutor's
+  concussion-rifle mercenaries carry the ordinary repeater.
 - Enemy voices: battle droids, super battle droids, Trandoshans and
   Geonosian warriors say the game's own lines when they spot you, get hurt
   and die, with the hurt and death lines matched to explosions, EMP and

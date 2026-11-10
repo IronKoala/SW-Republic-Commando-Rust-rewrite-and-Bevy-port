@@ -404,24 +404,28 @@ pub(crate) fn launch_shots(
                 });
             }
             ShotKind::Instant { range } => {
-                let end = start + dir * range;
-                let hit = trace(level, targets, start, end, Some(f.shooter));
-                let t = hit.as_ref().map_or(1.0, |h| h.t);
-                let point = start + (end - start) * t;
-                land(
-                    p,
-                    base,
-                    &lib,
-                    &tables,
-                    &log,
-                    f.shooter,
-                    start,
-                    point,
-                    dir,
-                    hit.as_ref().map(|h| (h.entity, true)),
-                    &mut damage,
-                    &mut landed,
-                );
+                // A shotgun fires several pellets, each a little off the
+                // aim; everything else fires one shot straight along it.
+                for dir in shot::pellet_directions(dir, p.pellets, p.spread, &mut rng.0) {
+                    let end = start + dir * range;
+                    let hit = trace(level, targets, start, end, Some(f.shooter));
+                    let t = hit.as_ref().map_or(1.0, |h| h.t);
+                    let point = start + (end - start) * t;
+                    land(
+                        p,
+                        base,
+                        &lib,
+                        &tables,
+                        &log,
+                        f.shooter,
+                        start,
+                        point,
+                        dir,
+                        hit.as_ref().map(|h| (h.entity, true)),
+                        &mut damage,
+                        &mut landed,
+                    );
+                }
             }
             ShotKind::Bolt {
                 accel,

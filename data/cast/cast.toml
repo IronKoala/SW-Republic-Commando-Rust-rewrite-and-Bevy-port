@@ -1,0 +1,71 @@
+# The cast: characters placed in a map that no other part of the game owns.
+# These are the Kaminoans, young clones, clone troopers and Delta commandos
+# of the prologue, briefings and epilogue, and the troopers and props that
+# stand or move in the missions. Read by rc_cast when a map loads.
+#
+# Each one is drawn with its class's model from the game's files (the
+# class's `Mesh`, or the map's own `Mesh` value), stands where the map put
+# it, and does what the level scripts tell it (walk, run, turn, play an
+# animation, teleport, hide, go away). Nothing here is copied from the
+# game, only names.
+#
+# Mods: change any value and restart. If the file can't be read (a misspelt
+# name, a missing value), the log says why and the game uses the values
+# built into the game, which are this file as it ships.
+
+# Light every cast member always gets, 0 to 1 of its own colour. Guess, the
+# same as the squad's and droids': the original lights characters with each
+# zone's ambient light, which we don't read yet.
+ambient = 0.5
+
+# Walking speed as a share of the class's GroundSpeed. Guess: the original
+# decides this in compiled code.
+walk_speed_ratio = 0.5
+
+# Which animation plays while the character stands, walks or runs: the
+# first of each list the character's own animation sets have. A character
+# with none of them holds its model's own pose.
+idle = ["ActionBreathe", "SitIdle", "Idle", "Breathe", "Idle_Rest"]
+walk = ["WalkForward", "Walk"]
+run = ["RunForward", "Run"]
+
+# Seconds a script waits for the player to come near (ACTION_WaitForPlayer)
+# before carrying on anyway, so a cutscene never gets stuck when our player
+# stands somewhere the original's wouldn't. Our choice; 0 waits forever, as
+# the original does.
+wait_for_player_limit = 20
+
+# Only characters this near the player (Unreal units) have their animation
+# drawn each frame; farther ones hold their last pose. The cutscene maps
+# hold many rooms with dozens of characters, and posing each one costs
+# time every frame. Our choice; 0 poses every one.
+pose_distance = 4000
+
+# Classes left to other parts of the game (enemies fight, the squad
+# follows). `*` matches any ending. A placed character whose class or any
+# parent class matches is not part of the cast.
+leave_out = [
+    "BattleDroid*",
+    "SuperBattleDroid*",
+    "DwarfSpiderDroid*",
+    "Droideka*",
+    "Geonosian*",
+    "Trandoshan*",
+    "Turret*",
+    "CTPlayer",
+    "PlayerPawn",
+]
+
+# Characters that need a different model than their class gives: replacement
+# materials by slot (as UnrealEd shows them, Package.Group.Object; "" keeps
+# the mesh's own), or another mesh. Delta's armour colours are swapped by
+# the original's compiled code, so the commandos are listed here (the same
+# pictures as data/squad/looks.toml).
+[class.Commando07Delta]
+skins = ["CloneTextures.CloneTextures.CloneCommando07_Shader"]
+
+[class.Commando40Delta]
+skins = ["CloneTextures.CloneTextures.CloneCommando40_Shader"]
+
+[class.Commando62Delta]
+skins = ["CloneTextures.CloneTextures.CloneCommando62_Shader"]

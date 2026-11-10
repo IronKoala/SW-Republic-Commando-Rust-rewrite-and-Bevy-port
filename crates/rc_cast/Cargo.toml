@@ -1,0 +1,29 @@
+[package]
+name = "rc_cast"
+version = "0.1.0"
+description = "The characters placed in a map that no other part owns (cutscene Kaminoans, young clones, troopers, animated props): drawn with the game's models and moved by the level scripts"
+edition.workspace = true
+
+[dependencies]
+rc_anim = { path = "../rc_anim" }
+rc_game_core = { path = "../rc_game_core" }
+rc_hologram = { path = "../rc_hologram" }
+# Reading the map's actors.
+rc_level = { path = "../rc_level" }
+# The original models, read from the game.
+rc_model = { path = "../rc_model" }
+rc_movement = { path = "../rc_movement" }
+# The game's script classes (each character's default model).
+rc_package = { path = "../rc_package" }
+# Reading data/cast/cast.toml. serde (MIT OR Apache-2.0), https://serde.rs;
+# toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Game states, and the 3D
+# meshes, pictures and materials for the bodies. No window: the game brings
+# that.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state", "bevy_pbr"]
