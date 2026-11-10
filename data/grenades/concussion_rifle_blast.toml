@@ -1,0 +1,34 @@
+# The concussion rifle's shot (concussion_rifle.toml): goes off where it
+# lands. See that file for why this is a fast round, not an instant hit.
+#
+# Numbers marked "game:" are ConcussionRifleAmmo's defaults (ctinventory.u,
+# with ConcussionRifleAmmoDefaults in Properties/properties.u on top).
+
+name = "Concussion Blast"
+
+[ammo]
+max_count = 1             # not carried by hand; the weapon's ammo counts
+
+[throw]
+speed = 20000             # our choice (the weapon's shot.speed sets it)
+
+[fuse]
+time = 0.5                # game: Range 10000 at 20000 uu/s
+after_impact = 0          # goes off on touching
+on_actor = true
+on_world = true
+
+[flight]
+bounce = 0
+actor_bounce = 0
+rest_speed = 20
+gravity = 0               # flies straight
+
+[blast]
+damage = 300              # game: ConcussionRifleAmmoDefaults Damage
+radius = 700              # game: ConcussionRifleAmmoDefaults DamageRadius
+damage_type = "CTDamageEnergyConc" # game: MyDamageType
+damage_kind = "explosion"
+
+[model]
+blast_colour = [0.6, 0.8, 1.0]  # our choice

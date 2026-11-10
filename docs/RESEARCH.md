@@ -635,6 +635,49 @@ ctinventory.u, ctgame.u, Properties/properties.u, System/ctaudio.u).
   geo_03c (3), geo_04a (2), geo_04b (1), geo_04c (2), geo_05a (8),
   geo_05b (3).
 
+## Weapons lying in the levels (read 2026-11-10)
+
+Read from the class defaults with `rc_probe --class` and the scripts'
+text in `Engine.u`, `CTGame.u` and `CTInventory.u` (read only, in our own
+words here; nothing copied).
+
+- **Classes:** every weapon pickup is a `CTPickup` (CTGame, a `Pickup` with
+  `bUsableBySquad`): `BowcasterPickup`, `ShotgunPickup`, `SMGPickup`,
+  `ConcussionRiflePickup`, `RocketLauncherPickup`, `EliteBeamPickup`,
+  `DC17mBlasterWeaponPickup`, `DC17mSniperWeaponPickup`,
+  `DC17mAntiArmorWeaponPickup` (CTInventory) and `TrandoshanRifleMPPickup`
+  (properties.u). `InventoryType` names the weapon. `CTPickup`
+  `CollisionRadius` 84, `CollisionHeight` 8; pickup classes override
+  (bowcaster 60 x 15, SMG 40 x 8, shotgun 65 x 8, concussion 75 x 10).
+- **Shots held:** the weapon's `PickupAmmoCount`, Defaults on top
+  (Bowcaster 24, SMG 160, Shotgun 16, ConcussionRifle 10, RocketLauncher 5,
+  EliteBeam 450, TrandoshanRifleMP 160, DC17mSniper 20, DC17mAntiArmor 4,
+  DC17mBlaster 120).
+- **Rules** (`Pickup` state `Pickup`, `Weapon.HandlePickupQuery`,
+  `PlayerController.ServerUse`): touching only does anything if the pawn
+  already has the `InventoryType`; then the weapon adds the pickup's
+  `PickupAmmoCount` to its ammo unless full (recharging weapons refuse).
+  Otherwise the player's Use key calls `PickupUsedBy` on touched pickups.
+  `Weapon.GiveTo` asks `ShouldTossWeapon`: a player may carry
+  `NumWeaponsAllowed` per inventory group (not set: 0, so always "full"),
+  and if full the current tossable weapon (`WeaponType` 2 = secondary with
+  `bCanThrow`) is thrown down (`TossWeapon`, 0.8 x radius ahead, 0.5 x
+  radius to the left) with its ammo as the pickup's. The new weapon is
+  switched to. Every enemy weapon has `InventoryGroup` 5; the DC-17m modes
+  are `WeaponType` 1 (primary) in groups 1-3.
+- **Elite Beam:** `EliteBeamPickup` ignores touch and refuses Use while the
+  carried beam has ammo.
+- **Prompt:** the HUD's string "PRESS @ TO PICKUP" (Engine.u, next to
+  "PRESS @ TO MOUNT TURRET"), `@` being the key. The message on taking is
+  the pickup's `PickupMessage` ("Wookiee Bowcaster", "ACP Repeater Gun",
+  "LJ-50 Concussion Rifle", ...); sound `PickupSound`
+  (`GenericWeaponPickup` or `int_GEN_wepPickup_01`).
+- **Reload animations** (hudarms.ukx, 30 fps): HudArmsBow Reload 53 frames,
+  HudArmsShotgun 73, HudArmsConc 122, HudArmsRocket 51, HudArmsTranRifle
+  213. HudArmsEliteBeam has none.
+- **Shotgun:** `ShotgunAmmo` `ProjPerFire` 8, `Spread` 1700 (Defaults),
+  `Damage` 28 per pellet, `Range` 3500.
+
 ## Grenade explosion sounds and enemy voices (read 2026-10-30)
 
 Read only from the user's install with `rc_probe --class` and the package
