@@ -313,13 +313,19 @@ pub fn apply_class_look(
 /// dispensers). Other actors with an animated model are characters,
 /// vehicles and ropes the scripts bring in and move; drawn here they would
 /// stand frozen in the wrong place.
+///
+/// The third value is the actor's `CollisionHeight` (the map's, else the
+/// class's): the map places these actors by the middle of their collision
+/// cylinder, while the models have their origin at the base, so the model
+/// is drawn that much lower (geo_01a's five dispensers each stand 116 to
+/// 121 units above the floor under them; their class's height is 120).
 pub fn anim_mesh_of(
     looks: &mut ClassLooks,
     map: &Package,
     map_data: &[u8],
     place: &crate::actors::Placement,
     open: &mut dyn FnMut(&str) -> Option<Loaded>,
-) -> Option<(String, String)> {
+) -> Option<(String, String, f32)> {
     if place.static_mesh != 0 {
         return None;
     }
@@ -356,9 +362,17 @@ pub fn anim_mesh_of(
             }
         }
     };
+    let float = |v: &Value| match v {
+        Value::Float(f) => Some(*f),
+        _ => None,
+    };
+    let height = own("CollisionHeight")
+        .and_then(|p| float(&p.value))
+        .or_else(|| look.find("CollisionHeight", 0).and_then(|(_, p)| float(&p.value)))
+        .unwrap_or(0.0);
     // Package and mesh name; a group in between doesn't matter.
     match path.as_slice() {
-        [package, .., mesh] if path.len() >= 2 => Some((package.clone(), mesh.clone())),
+        [package, .., mesh] if path.len() >= 2 => Some((package.clone(), mesh.clone(), height)),
         _ => None,
     }
 }

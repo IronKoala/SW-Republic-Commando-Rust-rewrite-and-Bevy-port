@@ -51,7 +51,7 @@ pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
     LevelScriptsRun, MarkerJob, MarkerJobStep, RaiseEvent, ScriptEvent, ScriptTags,
-    SquadStanceOrder,
+    SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,

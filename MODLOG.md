@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Dispensers stand on the floor; F uses them instead of ordering the squad (rc_level, rc_scripts_plugin, rc_squad_plugin)
+
+- **Changed:** Animated props are drawn lower by their `CollisionHeight` (`class_look::anim_mesh_of` returns it; `map_collision` moves them down). New shared resource `rc_game_core::UseClaimed`: the scripts' bacta system sets it while the player stands at a switched-on dispenser, and the squad leaves that F press alone (F is both Use and the squad's context order).
+- **Why:** The user's playtest: the dispenser floated about 2.4 m up (the map places these actors by the middle of their collision cylinder, the model's origin is its base: all five on geo_01a stood 116 to 121 units above the floor, the class height is 120). Their log also showed each F press sent the squad to "secure position" at the aim, and they let go of F at 195/200 health, so the dispenser never finished and the barricade stayed.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_squad_plugin -p rc_level -p rc_game_core`; `rc_game --script` in the cloud.
+- **Result:** Tests pass. 110 checks passed, 2 failed (the same sound checks). The picture shows the dispenser standing on the floor; the log says `context order left alone: the player is using something` when Use is held at it, and the barricade opens 3.7 s later.
+- **Still broken / not tested:** Not tested on Windows. Use still has to be held until health is full (as in the original); nothing shows healing except the health bar. Dispensers aren't solid and don't animate.
+- **Next:** The user holds F at the dispenser until health is full.
+
 ## 2026-11-10: Bacta dispensers are drawn (rc_level, rc_level_plugin)
 
 - **Changed:** `rc_level::class_look::anim_mesh_of` finds props the player uses (`ActivateItem`: bacta dispensers) whose class draws an animated model (`DrawType` DT_Mesh). `map_collision::load` lists them (`anim_props`). New `crates/rc_level_plugin/src/anim_props.rs` reads each model once with `rc_model` and draws every copy where the map puts it (`AnimProp` component; `LevelInfo::anim_props`). `rc_game --script` has 2 new checks and a picture `logs/bacta_dispenser.png`.

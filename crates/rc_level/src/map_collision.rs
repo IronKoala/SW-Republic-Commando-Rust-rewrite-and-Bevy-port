@@ -57,7 +57,8 @@ pub struct MapCollision {
     pub arrivals: Vec<(String, Vec3, f32)>,
     /// Props drawn with an animated model from their class (bacta
     /// dispensers and the like, `class_look::anim_mesh_of`): where each
-    /// stands, and the package and skeletal mesh. Not solid yet.
+    /// stands (moved down by its collision height, so the model's base is
+    /// on the floor), and the package and skeletal mesh. Not solid yet.
     pub anim_props: Vec<(Placement, String, String)>,
 }
 
@@ -222,9 +223,11 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
                 }
                 Some(_) => continue,
                 None => {
-                    if let Some((package, mesh)) =
+                    if let Some((package, mesh, height)) =
                         anim_mesh_of(&mut looks, &map.0, &map.1, &p, &mut |n| pkgs.get(n))
                     {
+                        let mut p = p;
+                        p.location[2] -= height;
                         anim_props.push((p, package, mesh));
                     }
                     continue;

@@ -697,7 +697,7 @@ fn take_orders(
     collision: Option<Res<LevelCollision>>,
     options: Option<Res<SquadOptions>>,
     mut heard: ResMut<voice::SquadHeard>,
-    log: Option<Res<GameLog>>,
+    (log, use_claimed): (Option<Res<GameLog>>, Option<Res<rc_game_core::UseClaimed>>),
 ) {
     let (Some(squad), Ok(pt)) = (state.squad.as_mut(), player.single()) else {
         orders.clear();
@@ -748,9 +748,15 @@ fn take_orders(
         }
         // Aimed orders: a marker under the aim takes priority for the
         // context order (and for Use); otherwise the spot aimed at.
-        let context = a.just_pressed(Action::SquadCommand);
+        let mut context = a.just_pressed(Action::SquadCommand);
         let secure = a.just_pressed(Action::SquadSecurePosition);
-        let use_key = a.just_pressed(Action::Use);
+        let mut use_key = a.just_pressed(Action::Use);
+        // At a switched-on bacta dispenser the shared key uses it.
+        if (context || use_key) && use_claimed.is_some_and(|u| u.0) {
+            log_line(&log, "context order left alone: the player is using something");
+            context = false;
+            use_key = false;
+        }
         if context || secure || use_key {
             match aimed() {
                 None => log_line(&log, "aimed order ignored: no player camera"),

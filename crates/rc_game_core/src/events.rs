@@ -36,6 +36,13 @@ pub struct RaiseEvent {
 #[derive(Resource, Debug, Default)]
 pub struct LevelScriptsRun;
 
+/// True while the player stands at something the Use button works on
+/// (a bacta dispenser that is switched on). The Use button and the squad's
+/// context order share a key (F, as in the original), so the squad leaves
+/// that press alone: it uses the thing, not orders the squad.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct UseClaimed(pub bool);
+
 /// A script's order to the enemy spawners tagged `tag` (`rc_enemies`
 /// carries it out); sent by the level scripts part.
 #[derive(Message, Debug, Clone, PartialEq)]

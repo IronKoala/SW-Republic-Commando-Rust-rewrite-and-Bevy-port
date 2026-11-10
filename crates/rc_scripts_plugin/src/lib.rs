@@ -92,6 +92,7 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<ChangeLevel>()
             .add_message::<rc_game_core::MarkerJob>()
+            .init_resource::<rc_game_core::UseClaimed>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
@@ -495,7 +496,9 @@ fn bacta(
     actions: Res<ActionState>,
     mut player: Query<(&Transform, Option<&mut Health>), With<Player>>,
     log: Res<GameLog>,
+    mut claimed: ResMut<rc_game_core::UseClaimed>,
 ) {
+    claimed.0 = false;
     let Some(mut script) = script else { return };
     let Ok((t, health)) = player.single_mut() else {
         return;
@@ -515,6 +518,7 @@ fn bacta(
         let dx = feet.x - d.location[0];
         let dy = feet.y - d.location[1];
         let near = (dx * dx + dy * dy).sqrt() < range && (feet.z - d.location[2]).abs() < 256.0;
+        claimed.0 |= near && d.enabled && d.recharge_left <= 0.0;
         let can = near && using && d.enabled && d.recharge_left <= 0.0;
         if can && !d.in_use {
             d.in_use = true;
