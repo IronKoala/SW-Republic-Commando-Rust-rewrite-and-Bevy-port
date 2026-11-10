@@ -4432,6 +4432,7 @@ dependencies = [
  "rc_model",
  "rc_movement",
  "rc_package",
+ "rc_shadows",
  "serde",
  "toml 0.8.23",
 ]
@@ -4501,6 +4502,7 @@ dependencies = [
  "rc_save",
  "rc_scripts",
  "rc_scripts_plugin",
+ "rc_shadows",
  "rc_squad_plugin",
  "rc_visor",
  "serde",
@@ -4675,6 +4677,17 @@ dependencies = [
  "rc_movers_plugin",
  "rc_package",
  "rc_scripts",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_shadows"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "rc_image",
  "serde",
  "toml 0.8.23",
 ]

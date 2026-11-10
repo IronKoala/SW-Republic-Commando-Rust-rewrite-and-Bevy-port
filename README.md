@@ -558,6 +558,14 @@ copy of the game.
   hidden while the prologue gives you a child's hands. Not done yet:
   riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
+- Character shadows (since 2026-11-10, needs SQUAD SHADOWS on in the
+  GRAPHICS options, as in the original): the characters the map marks
+  (in the prologue 7 troopers, 3 young clones and the Kaminoan in the
+  gym) cast their shape onto the floor from a light high above, as the
+  original's shadow projectors do. Checked in a stand-in scene and seen
+  in the prologue's gym in the cloud; not tested on Windows. The shadow
+  stays flat at the feet (not on steps, slopes or walls) and has sharp
+  edges. The squad and enemies don't have these yet.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game

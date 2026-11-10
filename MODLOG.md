@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Cutscene characters cast shadows (rc_shadows, rc_cast, rc_game, rc_level_viewer)
+
+- **Changed:** New crate `rc_shadows` (`ShadowsPlugin`, `CastsShadow`, `CharacterShadows`, `ShadowMaterial` + `shadow.wesl`, example `shadow_check`) and data file `data/shadows/shadows.toml`. `rc_cast` reads `bActorShadows` (`CastMember::shadow`) and tags marked characters. `rc_game` adds the plugin and sets it from SQUAD SHADOWS (`graphics.rs`). Separate fix in `rc_level_viewer/src/bump.rs`: the bump-mapped prop material no longer changes the vertex layout of Bevy's depth-only (shadow map) pipeline. DESIGN ("Character shadows"), README.
+- **Why:** User: characters in the prologue cutscene cast no shadows. The bump fix: with SQUAD SHADOWS on, `rc_game --map pro` quit at once with `CRASH: graphics error (Validation) ... prepass_pipeline ... Location[7] Float32x4 ... not provided` (before this change too; any map with bump-mapped props).
+- **Tested how:** Read the original's shadow code and numbers from `Engine.u`, `CTCharacters.u`, `XInterfaceCTMenus.u` and `pro.ctm` (copied read only from the PC). `cargo test -p rc_shadows -p rc_cast`. `shadow_check` under Xvfb. `rc_game --map pro` in the cloud with SQUAD SHADOWS on, F12 screenshots (player start moved to the gym with a temporary change, not committed).
+- **Result:** Original: `Normal(vect(1,1,3))`, `LightDistance` 380, `MaxTraceDistance` 350, `CullDistance` 1200, `ShadowDarkness` 255, only `CloneCommando` sets `bActorShadows`; pro marks 11 pawns. `SHADOW CHECK: 7 passed, 0 failed` (floor darkened by 0.75, data file 0.75; overlap 0.246 vs 0.246; off and far away: no shadow). With the depth trick switched off the overlap check fails (0.004 vs 0.044), so it catches double-dark patches. pro: `21 characters, 26 copies` (the 11 marked plus the commandos), no crash with SQUAD SHADOWS on; the gym screenshot shows the Kaminoan's and troopers' shapes on the floor. Before the bump fix: crash; after: none.
+- **Still broken / not tested:** Not tested on Windows or by playing. Flat at the feet (not on steps, slopes, walls or props). Sharp edges. The final darkness is our reading of the original's numbers, not compared with an original screenshot (the original doesn't run on the PC now). Squad and enemies not given these shadows.
+- **Next:** Playtest the prologue on the PC with SQUAD SHADOWS on; then the same shadows for the squad (Delta's class sets `bActorShadows`) and enemies the maps mark.
+
 ## 2026-11-09: The cutscene characters appear (rc_cast, rc_model, rc_game)
 
 - **Changed:** New crate `rc_cast` (`CastPlugin`, `read::find_cast`) and data file `data/cast/cast.toml`. `rc_model::ModelSpec::keep_sets`, `Model::sets`, `Model::named_clip`, `Model::local_clip`. `rc_game` adds `CastPlugin`. `docs/DESIGN.md`: new "The cast" section and crate table row.
