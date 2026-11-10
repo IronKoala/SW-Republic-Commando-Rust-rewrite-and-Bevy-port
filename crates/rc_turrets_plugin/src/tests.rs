@@ -37,6 +37,10 @@ fn placed(yaw: i32) -> PlacedTurret {
         speed: None,
         exit_spot: None,
         exit_offset: None,
+        event: None,
+        first_damaged_event: None,
+        deployed: None,
+        health: None,
     }
 }
 
@@ -63,7 +67,7 @@ fn turret_models_point_and_turn_the_way_they_aim() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/turrets");
     let (files, errors) = rc_turrets::params::load_folders(&[&root]);
     assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(files.len(), 3);
+    assert_eq!(files.len(), 5);
     for (id, p) in &files {
         let (kl, notes) = load_look(&paths, p).unwrap_or_else(|e| panic!("{id}: {e}"));
         assert!(
@@ -97,5 +101,54 @@ fn turret_models_point_and_turn_the_way_they_aim() {
         eprintln!("{id}: turned left and up: {turned:?}");
         assert!(turned[0] < rest[0] - 1.0, "{id}: yaw turns the wrong way");
         assert!(turned[2] > rest[2] + 1.0, "{id}: pitch turns the wrong way");
+    }
+}
+
+/// The core ship's wall turrets (geo_04b) are placed on their sides
+/// (pitch -16383, roll -32763): turned toward a target, the barrels must
+/// point at it all the same.
+#[test]
+fn a_turret_on_its_side_points_at_its_target() {
+    let Some(dir) = game() else {
+        eprintln!("no game files: not checked");
+        return;
+    };
+    let paths = GamePaths::new(dir, vec![]);
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/turrets");
+    let (files, _) = rc_turrets::params::load_folders(&[&root]);
+    let p = &files["core_ship_turret"];
+    let (kl, notes) = load_look(&paths, p).unwrap();
+    assert!(
+        kl.closed.is_some() && kl.deploy.is_some() && kl.dead.is_some(),
+        "{notes:?}"
+    );
+    for rotation in [[0, 0, 0], [0, 16408, 0], [-16383, 0, -32763]] {
+        let mut place = placed(0);
+        place.rotation = rotation;
+        let mut t = Turret::new(place, "core_ship_turret", p);
+        // Somewhere the turret can see: out from its base, a little aside.
+        let [f, r, u] = t.axes();
+        let target: [f32; 3] = std::array::from_fn(|k| 600.0 * f[k] + 300.0 * r[k] + 200.0 * u[k]);
+        for _ in 0..200 {
+            let from = t.to_level(kl.aim_pivot);
+            t.turn_toward_by(from, target, 0.05, kl.aim_rest);
+        }
+        let (_, g) = turret_bones(&kl, t.yaw, t.pitch);
+        let piv = model_to_level(
+            &kl.look,
+            &t,
+            p.gunner.half_height,
+            g[kl.pitch_bone.unwrap()].pos,
+        );
+        let m = muzzle(&kl, &t, p.gunner.half_height);
+        let gun: [f32; 3] = std::array::from_fn(|k| m[k] - piv[k]);
+        let want: [f32; 3] = std::array::from_fn(|k| target[k] - piv[k]);
+        let len = |v: [f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let cos = (gun[0] * want[0] + gun[1] * want[1] + gun[2] * want[2]) / (len(gun) * len(want));
+        eprintln!("rotation {rotation:?}: yaw {:.0} pitch {:.0}, gun {gun:?}, to target {want:?}, cos {cos:.3}", t.yaw, t.pitch);
+        assert!(
+            cos > 0.9,
+            "rotation {rotation:?}: the barrels point {gun:?}, the target is {want:?}"
+        );
     }
 }

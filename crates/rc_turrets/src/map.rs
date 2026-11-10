@@ -37,6 +37,15 @@ pub struct PlacedTurret {
     pub exit_spot: Option<[f32; 3]>,
     /// Or its offset from the turret (`NavPtLocs`): forward, right, up.
     pub exit_offset: Option<[f32; 3]>,
+    /// Sent when it is destroyed (`Event`, as for any character).
+    pub event: Option<String>,
+    /// Sent the first time it is hurt (`FirstDamagedEvent`).
+    pub first_damaged_event: Option<String>,
+    /// An automatic turret switched on from the start (`bDeployed`);
+    /// `None` keeps the class's.
+    pub deployed: Option<bool>,
+    /// How much damage destroys it (`Health`); `None` keeps the class's.
+    pub health: Option<f32>,
 }
 
 /// Every actor whose class `claims` says is a turret, in the map's order
@@ -100,6 +109,10 @@ pub fn read(
             speed: obj.float("Speed"),
             exit_spot,
             exit_offset,
+            event: obj.text("Event").map(str::to_string),
+            first_damaged_event: obj.text("FirstDamagedEvent").map(str::to_string),
+            deployed: flag(&obj, "bDeployed"),
+            health: obj.float("Health"),
         });
     }
     (out, problems)

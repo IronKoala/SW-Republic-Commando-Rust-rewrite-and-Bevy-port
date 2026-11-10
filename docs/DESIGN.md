@@ -4159,6 +4159,31 @@ the original). ras_03b's missile turret sends `TurretResponseDudes` and
 `rc_turrets_plugin`'s test turns each model and checks the muzzles move
 the way the gun aims (needs the game files).
 
+**Turrets that run themselves (`[automatic]`).** The core ship turrets
+(geo_04b, geo_05a, geo_05c) are `AutoTurret`s in the original: folded
+(`ClosedBreathe`) until a `Trigger` with their tag, then they play
+`Deploy`, look for the nearest enemy they can see from `BaseEyeHeight`,
+turn toward it and fire (`ShotDelay` 0.15 s), barrels in turn, straight
+from the barrel at the target. After 4 s of firing they stop for 1 s
+(`TimeUntilCooldown`, `CooldownDuration`). Another `Trigger` with their tag
+switches them off. They have health (256), a damage table
+(`DV_TurretsCoreshipAuto`) and send `FirstDamagedEvent` on the first hit and
+`Event` when destroyed; nobody can get on them. In the port a turret file's
+`[automatic]` section turns this on (`deployed`, `closed_pose`, `deploy`,
+`fire_for`, `cool_down`, `side`, `health`, `damage_table`, `eye_height`).
+Each automatic turret gets a hidden target entity (`LevelTurrets::hits`)
+that shots and blasts hit and enemies aim at; the turret fires as that
+entity. Turrets mounted on walls (geo_04b) use their full map rotation
+(`Turret::axes`, `to_level`), and aim in their own frame
+(`turn_toward_by`), allowing for barrels that hang below the pivot.
+
+**Gunship cannons.** `GunshipCannon` (geo_04a, geo_04d) is a player turret
+like the others: sit-down (`SitToUse`), yaw and pitch +-90 degrees, and an
+instant-hit weapon (`GunshipTurret`: 50 damage, `CTDamageEnergyGunshipTurret`,
+range 10000). Getting on sends its `ControlEvent`, which the scripts there
+wait for. Our choice: the game fires it every frame (`FireRate` 0.01); we
+fire every 0.05 s.
+
 **Our choices.** Facing the turret within 1.2 radians counts as looking at
 it (the original asks for the crosshair on it). The Trandoshan turret's
 four barrels fire one after another for a character gunner. The turret

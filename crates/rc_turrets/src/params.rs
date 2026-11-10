@@ -21,6 +21,53 @@ pub struct TurretParams {
     /// A character on the turret (a squad mate, an enemy).
     #[serde(default)]
     pub auto: Auto,
+    /// An automatic turret (the original's `AutoTurret`: the core ship's
+    /// laser turrets): nobody sits at it, it aims and fires on its own
+    /// with the `[auto]` weapon, and it can be shot. Absent for turrets a
+    /// gunner works.
+    #[serde(default)]
+    pub automatic: Option<Automatic>,
+}
+
+/// How an automatic turret (`AutoTurret`) behaves.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Automatic {
+    /// Switched on from the start (`bDeployed`; a map can set its own).
+    /// One that isn't waits, folded away, for a level event with its tag.
+    #[serde(default)]
+    pub deployed: bool,
+    /// The animation it holds while folded away (`ClosedBreathe`), and the
+    /// one it plays when switched on (`Deploy`). Empty: none.
+    #[serde(default)]
+    pub closed_pose: String,
+    #[serde(default)]
+    pub deploy: String,
+    /// After firing this long without a break, seconds, it stops to cool
+    /// down (`TimeUntilCooldown`; 0: never)...
+    #[serde(default)]
+    pub fire_for: f32,
+    /// ... for this long, seconds (`CooldownDuration`).
+    #[serde(default)]
+    pub cool_down: f32,
+    /// Whose side it is on: `separatist` (shoots the player and the squad)
+    /// or `republic` (`TeamIndex`: more than 2 is the enemy's).
+    #[serde(default = "separatist")]
+    pub side: String,
+    /// How much damage destroys it (`Health`); 0: it can't be hurt.
+    #[serde(default)]
+    pub health: f32,
+    /// How much each damage type counts against it (`MyDamageVariance`,
+    /// a table in `combat/damage_types.toml`).
+    #[serde(default)]
+    pub damage_table: Option<String>,
+    /// Where it looks from, uu above its centre (`BaseEyeHeight`).
+    #[serde(default)]
+    pub eye_height: f32,
+}
+
+fn separatist() -> String {
+    "separatist".into()
 }
 
 /// The turret's animated model in the game's animation packages.
@@ -141,6 +188,22 @@ impl TurretParams {
         }
         if p.aim.min_pitch > p.aim.max_pitch || p.aim.min_yaw > p.aim.max_yaw {
             return Err("aim: a min is more than its max".into());
+        }
+        if let Some(a) = &p.automatic {
+            if !["separatist", "republic"].contains(&a.side.as_str()) {
+                return Err(format!(
+                    "automatic.side is {:?}: say \"separatist\" or \"republic\"",
+                    a.side
+                ));
+            }
+            if p.auto.weapon.is_none() {
+                return Err("an automatic turret needs [auto] weapon".into());
+            }
+            if a.fire_for < 0.0 || a.cool_down < 0.0 || a.health < 0.0 {
+                return Err(
+                    "automatic: fire_for, cool_down and health can't be less than 0".into(),
+                );
+            }
         }
         Ok(p)
     }
