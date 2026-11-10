@@ -10,7 +10,7 @@
 [type]
 id = "trandoshan"
 name = "Trandoshan mercenary"
-classes = ["TrandoshanMercenary*"]  # game: the map class
+classes = ["TrandoshanMercenary", "TrandoshanMercenaryConc"] # game: the map classes (the grenadiers and the Kashyyyk mercenaries have their own files; the Conc one carries a concussion rifle we stand in for with the repeater)
 body = "organic"
 
 [movement]

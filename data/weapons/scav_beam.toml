@@ -1,0 +1,40 @@
+# The scavenger droid's beam (class ScavBeam, a LaserWeapon): a short
+# instant-hit beam held on its target.
+#
+# The values are the original game's: class ScavBeam (ctinventory.u) with
+# ScavBeamDefaults (Properties/properties.u) on top, and its ammo
+# ScavBeamAmmo (+Defaults) and LaserWeaponAmmo, unless marked otherwise.
+#
+# The original's beam hits every frame while held (ShotDelay 0.01) for
+# Damage 1. We send one hit a tenth of a second for 10, the same damage a
+# second at 100 frames a second; how the game spreads it over time is in
+# its compiled code.
+
+name = "Scavenger Beam"
+
+[fire]
+mode = "automatic"        # game: LaserWeapon FireMode 2
+shot_delay = 0.1          # our choice (the game's ShotDelay 0.01 is once a frame)
+aim_error = 0             # the enemy's own Accuracy decides its aim
+
+[ammo]
+clip_size = 500           # game: LaserWeapon ReloadCount
+max_ammo = 500            # game: LaserWeaponAmmo MaxAmmo
+start_ammo = 500          # game: LaserWeapon PickupAmmoCount
+
+[shot]
+kind = "instant"          # game: LaserWeaponAmmo bInstantHit
+range = 2000              # game: ScavBeamAmmo Range
+damage = 10               # our choice: ScavBeamAmmo Damage 1 a frame, as 10 a tenth of a second
+damage_kind = "sonic"
+damage_type = "CTDamageSonic" # game: LaserWeaponAmmo MyDamageType
+
+[sound]
+package = "gen_sound"     # guess: the GEN weapon sounds are in gen_sound.uax
+fire = ["wep_GEN_scavBeam_lp_01"] # game: ScavBeamDefaults FireSound (a loop)
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the beam's own model isn't looked up yet
+offset = [20, 0, -5]
+bolt_colour = [0.4, 1.0, 0.3] # our choice: green like the elite beam
