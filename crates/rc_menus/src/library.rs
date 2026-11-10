@@ -162,6 +162,24 @@ impl Library {
         self.packages.get(&key).cloned().flatten()
     }
 
+    /// The full path of an object named with its group left out
+    /// (`GUIContent.GEO_Debrief` for `GUIContent.LoadInfoScreens.GEO_Debrief`):
+    /// the path as given when it is found as it is, else the first object
+    /// in that package with that name, in any group. Some of the original's
+    /// level scripts name pictures this way and the game still found them.
+    pub fn resolve_loose(&mut self, path: &str) -> Option<String> {
+        if self.find(path).is_ok() {
+            return Some(path.to_string());
+        }
+        let (top, rest) = path.split_once('.')?;
+        let last = rest.rsplit('.').next()?;
+        let loaded = self.package(top)?;
+        let pkg = &loaded.pkg;
+        (0..pkg.exports.len())
+            .find(|&i| pkg.name(pkg.exports[i].object_name).eq_ignore_ascii_case(last))
+            .map(|i| format!("{top}.{}", object_path(pkg, i as i32 + 1)))
+    }
+
     /// Find an object by its full dotted path, like
     /// `GUIContent.Menu.CT_Kamino`. Returns the package and export index.
     pub fn find(&mut self, path: &str) -> Result<(Arc<Loaded>, usize), String> {
