@@ -13,6 +13,7 @@ pub mod collision;
 pub mod lightmap;
 pub mod map_collision;
 pub mod movers;
+pub mod pickups;
 pub mod scripts;
 pub mod settle;
 pub mod terrain;

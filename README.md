@@ -206,6 +206,17 @@ copy of the game.
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
 
+- **Ammo and grenade boxes (since 2026-11-09; tested in the cloud, not
+  yet on Windows or by playing).** The 477 boxes the campaign maps place
+  (DC-17m, sniper and anti-armour ammo; thermal, sonic, EMP and flash
+  grenades) appear with their original models, resting on the floor. Walk
+  into one to refill: a DC-17m box gives 300 shots, sniper 20, anti-armour
+  4, grenades 5, never more than you can carry. A full player leaves the
+  box lying. Taken boxes vanish and stay gone after a save and load, except
+  geo_01a's grenade crate by the start, which comes back as in the
+  original. Boxes no longer block you like walls. No pickup sound or
+  "picked up" message yet.
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
@@ -272,7 +283,9 @@ copy of the game.
   map and logs the numbers: all 863 that could be timed opened and closed
   on time, and all 33 rideable lifts carried the player. They also run
   in the game itself (`rc_game`, tested in the cloud sandbox on geo_01a):
-  doors are solid where they stand and move when set off. Doors that the
+  doors are solid where they stand and move when set off. Squad mates
+  ride lifts with you and get pushed by doors (tested in the cloud with a
+  test lift, not yet on a real map or on Windows). Doors that the
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
 
@@ -489,6 +502,13 @@ copy of the game.
   original, they carry no gun: they rush at you and hit up close (350 uu
   reach, 125 damage, about one hit every 1.6 s). Any enemy type can get a
   melee weapon in its `[combat]` section.
+- **Geonosian elites (tested in the cloud sandbox with automatic tests,
+  not yet in the real game on Windows).** The big Geonosians with the beam
+  gun now appear wherever the original puts them (19 spawners on geo_03c,
+  geo_04a, geo_04b, geo_04c, geo_05a and geo_05b), with the game's own
+  model, skin, animations, voice lines, 1000 health and damage table. They
+  burn you with the Elite Beam in one-second bursts. Settings:
+  `data/enemies/geonosian_elite.toml` and `data/weapons/elite_beam_enemy.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -546,9 +566,12 @@ copy of the game.
   doors, barricades, damage to the player, bacta dispensers, prompts,
   objectives (kept, not shown), checkpoints, enemy spawners, level
   changes, and lines of dialogue and sounds (the game's own, read from its
-  sound files; a script waiting for a line waits for its real length). No
-  subtitles yet, and every scripted sound plays at full loudness wherever
-  its speaker is. Music cues, characters walking or animating, the squad
+  sound files; a script waiting for a line waits for its real length).
+  Since 2026-11-09 a scripted sound comes from its place in the level
+  (the droid, gunship or spot it belongs to) and gets quieter with
+  distance, unless the game's own settings for that sound say it is radio
+  (most dialogue is). Tested in the cloud on a silent sound card, not yet
+  listened to or run on Windows. No subtitles yet. Music cues, characters walking or animating, the squad
   joining and leaving and camera moves are logged as "not done yet". The
   end-of-campaign debriefing screen isn't shown: the game goes straight
   on. Not tested on Windows.
@@ -564,8 +587,11 @@ copy of the game.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
-  picks from) are played for weapons, grenades and enemy voices. No 3D
-  (positional) sound yet: enemy sounds just get quieter with distance.
+  picks from) are played for weapons, grenades and enemy voices. With 3D
+  SOUND on, enemy and scripted sounds are heard from their side. Before
+  2026-11-09 the 3D sound also made placed sounds far too quiet (one over
+  the distance squared, in metres); that is switched off now, so enemy
+  sounds a few metres away are louder than before (not yet listened to).
 - Collision follows each prop's "can be walked through" settings and
   each mesh part's collision switch (since 2026-10-30; before, every prop
   was solid). Simplified collision shapes aren't read, so solid props
@@ -610,7 +636,13 @@ copy of the game.
   throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors walk
-  instead of flying, jumping and climbing. Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
+  instead of flying, jumping and climbing. Geonosian elites walk too
+  (slowly, 200 uu/s) instead of flying and dodging in the air, their wings
+  are drawn with the body's skin, their beam is drawn as a tracer line,
+  how fast the beam does its damage is our own guess, and the player can't
+  pick up their beam yet. Droidekas, dwarf spider droids, Phidna, drones,
+  seeker droids and placed clone troopers still don't appear
+  (`rc_enemy_spawners` lists them). Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
 - Enemy voices: battle droids, super battle droids, Trandoshans and
   Geonosian warriors say the game's own lines when they spot you, get hurt
   and die, with the hurt and death lines matched to explosions, EMP and
@@ -641,8 +673,8 @@ copy of the game.
   without SDL and without gyro).
 - Lighting: the overall brightness follows the convention of the game's era
   (baked light drawn at double strength) and hasn't been compared with the
-  real game side by side. Real-time lights use placeholder strengths and
-  don't light props yet. Shadows from moving lights aren't drawn. Bump maps
+  real game side by side. Real-time lights use placeholder strengths. They
+  now light props and terrain as well as walls, bump-mapped props included. Shadows from moving lights aren't drawn. Bump maps
   are drawn on props only, with our own rule for how the stored light
   direction lights them (see `docs/DESIGN.md`).
 - 17 textures have small copies (mipmaps) that differ from the full picture.

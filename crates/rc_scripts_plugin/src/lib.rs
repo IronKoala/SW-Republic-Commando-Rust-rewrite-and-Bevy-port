@@ -55,9 +55,8 @@ use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind, Health};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
-    GamePaths, GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player,
-    PlayerVitals, RaiseEvent,
+    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog, GamePaths,
+    GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player, PlayerVitals, RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
@@ -115,7 +114,7 @@ impl Plugin for ScriptsPlugin {
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
             )
-            .add_systems(Update, (sounds::started, sounds::pause))
+            .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
@@ -220,6 +219,8 @@ pub struct PlayStats {
     pub sounds_started: usize,
     /// Sounds asked for that weren't loaded.
     pub sounds_missing: Vec<String>,
+    /// The sounds played from a place in the level (not heard everywhere).
+    pub sounds_placed: Vec<String>,
     pub not_done: usize,
     /// Orders sent to characters: `KIND WHO`.
     pub character_orders: Vec<String>,
@@ -392,7 +393,11 @@ fn build(
             at[0],
             at[1],
             at[2],
-            if open { "" } else { " (closed until the scripts open it)" }
+            if open {
+                ""
+            } else {
+                " (closed until the scripts open it)"
+            }
         ));
     }
     let dispensers: Vec<Dispenser> = map
@@ -559,10 +564,7 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change): (
-        MessageWriter<CheckpointReached>,
-        MessageWriter<ChangeLevel>,
-    ),
+    (mut checkpoints, mut change): (MessageWriter<CheckpointReached>, MessageWriter<ChangeLevel>),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
     restoring: Option<Res<RestoringSave>>,
@@ -967,9 +969,13 @@ fn carry_out(
                 log.line(format!("{at}: switched off in the map; not played"));
             } else {
                 let volume = script.director.settings.sound_volume;
-                script
-                    .sounds
-                    .push(sounds::request(&call.script, call.index, a, volume));
+                script.sounds.push(sounds::request(
+                    &call.script,
+                    call.index,
+                    a,
+                    volume,
+                    call.owner.clone(),
+                ));
             }
         }
         "changelevel" => {

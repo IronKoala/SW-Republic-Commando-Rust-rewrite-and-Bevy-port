@@ -485,3 +485,57 @@ fn droid_says_the_games_lines() {
         "{hurts} hurt lines for {hits} hits"
     );
 }
+
+#[derive(Resource, Default)]
+struct BeamOnPlayer(Vec<(f32, rc_combat::DamageKind)>);
+
+fn record_player_damage(
+    mut out: ResMut<BeamOnPlayer>,
+    mut d: bevy::ecs::message::MessageReader<Damage>,
+    players: Query<(), With<Player>>,
+) {
+    out.0.extend(
+        d.read()
+            .filter(|d| players.contains(d.target))
+            .map(|d| (d.amount, d.kind)),
+    );
+}
+
+#[test]
+fn a_geonosian_elite_burns_the_player_with_its_beam() {
+    let p = enemy_file("geonosian_elite");
+    assert!(p.kind.matches("GeonosianElite"));
+    assert!(!p.kind.matches("GeonosianWarrior"));
+    assert_eq!(p.combat.health, 1000.0);
+    assert_eq!(p.combat.weapon, "elite_beam_enemy");
+    assert_eq!(p.combat.damage_table, "DV_GeonoshansEliteDamage");
+    let mut r = Room::with(p.clone());
+    r.app
+        .init_resource::<BeamOnPlayer>()
+        .add_systems(Last, record_player_damage);
+    r.seconds(0.5, &[]);
+    let d = r.droids()[0];
+    {
+        let w = r.app.world();
+        assert_eq!(*w.get::<Health>(d).unwrap(), Health::new(1000.0));
+        assert_eq!(*w.get::<Body>(d).unwrap(), Body::Organic);
+        assert_eq!(w.get::<Droid>(d).unwrap().kind, "geonosian_elite");
+        let name = w.get::<Name>(d).unwrap().to_string();
+        assert!(name.starts_with("Geonosian elite"), "{name}");
+    }
+    r.seconds(8.0, &[]);
+    let w = r.app.world();
+    let fight = w.resource::<Fight>();
+    println!("{:?}", fight.stats);
+    // Bursts of 10 beam hits, with a rest of 1 to 2 s between them.
+    assert!(fight.stats.shots >= 20, "{:?}", fight.stats);
+    let hits = &w.resource::<BeamOnPlayer>().0;
+    assert!(!hits.is_empty(), "the beam never hit the player");
+    // 18 a hit, times the player's table for CTDamageEnergyBeamEnemy (x0.15).
+    assert!(
+        hits.iter()
+            .all(|&(a, k)| (a - 2.7).abs() < 1e-3 && k == rc_combat::DamageKind::Blaster),
+        "{hits:?}"
+    );
+    assert!(w.get::<Dead>(d).is_none());
+}
