@@ -130,6 +130,8 @@ fn main() {
     let mut guard_params: Option<Arc<AiParams>> = None;
     let mut leaving: Option<(String, f32)> = None;
     let mut fired_spawn = false;
+    let (mut fired_tower, mut fired_seen) = (false, false);
+    let mut tower_removed: Option<f32> = None;
 
     let mut time = 0.0f32;
     let mut to_scripts: Vec<(String, String)> = Vec::new();
@@ -141,6 +143,22 @@ fn main() {
                 "{time:6.2} s: stand-in: Spawn_Guard (the landing pad door work)"
             ));
             director.fire("Spawn_Guard", "rc_guard_check");
+        }
+        // The tower guard: the player walks into the tower trigger, then
+        // sees Grievous (a LineOfSightTrigger sends GreivousVerified).
+        if !fired_tower && time >= 10.0 {
+            fired_tower = true;
+            line(format!(
+                "{time:6.2} s: stand-in: Mover_Enter_Tower (the tower trigger)"
+            ));
+            director.fire("Mover_Enter_Tower", "rc_guard_check");
+        }
+        if !fired_seen && time >= 14.0 {
+            fired_seen = true;
+            line(format!(
+                "{time:6.2} s: stand-in: GreivousVerified (the line-of-sight trigger)"
+            ));
+            director.fire("GreivousVerified", "rc_guard_check");
         }
         // Scripts first; their events go to the spawners.
         for e in director.step(DT, None) {
@@ -172,14 +190,27 @@ fn main() {
                     index,
                     action,
                     waits,
-                    ..
+                    owner,
                 } => {
+                    // DestroyPawn removes the script's characters, as
+                    // rc_scripts_plugin's characters part does.
+                    if action.class.to_ascii_lowercase().ends_with("destroypawn") {
+                        if let Some(o) = &owner {
+                            for id in battle.following(o) {
+                                line(format!("{time:6.2} s: scripts: {o} removes character {id}"));
+                                battle.remove(id);
+                                kill_at.remove(&id);
+                                if o.eq_ignore_ascii_case("SeeGuardScript") {
+                                    tower_removed = Some(time);
+                                }
+                            }
+                        }
+                    }
                     if waits {
                         // Stand in for the game: everything it is asked to
                         // do is done at once.
                         director.action_done(&script, index);
                     }
-                    let _ = action;
                 }
                 _ => {}
             }
@@ -270,6 +301,11 @@ fn main() {
             guard_births.len()
         ),
     );
+    check(
+        &mut line,
+        tower_removed.is_some(),
+        format!("the tower guard is gone after GreivousVerified (at {tower_removed:?} s)"),
+    );
     match &leaving {
         Some((url, t)) => check(
             &mut line,
@@ -322,7 +358,9 @@ fn handle(
                 "{time:6.2} s: spawner {} made {kind} {id} (tag {tag}) at ({:.0}, {:.0}, {:.0})",
                 sp.factory.name, feet.x, feet.y, feet.z
             ));
-            if kind == "grievous_guard" {
+            // The tower guard can't be hurt (its script makes it
+            // invulnerable); the player kills the others.
+            if kind == "grievous_guard" && !tag.eq_ignore_ascii_case("SeeGrievousGuard") {
                 guard_births.push((*id, tag, time));
                 kill_at.insert(*id, time + KILL_AFTER);
                 *guard_params = Some(sp.params.clone());
