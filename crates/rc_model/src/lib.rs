@@ -87,6 +87,12 @@ pub struct Model {
     /// the animation: when (0 to 1 through it) and the sound's dotted
     /// path (`GEN_Sound.mach_GEN_Bdroid_Dispense_open`).
     pub sounds: HashMap<String, Vec<(f32, String)>>,
+    /// Events each animation sends (`AnimNotify_Trigger`), by our name for
+    /// the animation: when (0 to 1 through it) and what it does. The
+    /// hologram projector's throw sends `StartBriefing` this way.
+    /// With [`ModelSpec::keep_sets`], every kept animation's too, by the
+    /// animation's own name.
+    pub triggers: HashMap<String, Vec<(f32, NotifyTrigger)>>,
     /// Every animation set read, first set first, when
     /// [`ModelSpec::keep_sets`] asked for them (empty otherwise).
     pub sets: Vec<rc_package::animation::MeshAnimation>,
@@ -193,13 +199,53 @@ fn find_in(pkg: &Package, path: &str, class: Option<&str>) -> Option<usize> {
     })
 }
 
+/// What an `AnimNotify_Trigger` does when its animation reaches it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NotifyTrigger {
+    /// Send this event into the level (`EventName`).
+    Event(String),
+    /// Trigger the actor playing the animation itself (`TriggerSelf`).
+    SelfTrigger,
+}
+
+/// What an `AnimNotify_Trigger` object does: trigger its owner
+/// (`TriggerSelf`), else send `EventName` (nothing when that is empty).
+fn notify_trigger(pkg: &Package, data: &[u8], object: i32) -> Option<NotifyTrigger> {
+    let ObjectRef::Export(k) = ObjectRef::from_index(object) else {
+        return None;
+    };
+    let e = pkg.exports.get(k)?;
+    if !pkg
+        .export_class_name(e)
+        .eq_ignore_ascii_case("AnimNotify_Trigger")
+    {
+        return None;
+    }
+    let props = export_props(pkg, data, e).ok()?;
+    if let Some(Value::Bool(true)) = properties::find(pkg, &props, "TriggerSelf").map(|p| &p.value)
+    {
+        return Some(NotifyTrigger::SelfTrigger);
+    }
+    match properties::find(pkg, &props, "EventName")?.value {
+        Value::Name(n) => {
+            let n = pkg.name(n);
+            (!n.is_empty() && !n.eq_ignore_ascii_case("None"))
+                .then(|| NotifyTrigger::Event(n.to_string()))
+        }
+        _ => None,
+    }
+}
+
 /// The sound an `AnimNotify_Sound` object plays, as a dotted path.
 fn notify_sound(pkg: &Package, data: &[u8], object: i32) -> Option<String> {
     let ObjectRef::Export(k) = ObjectRef::from_index(object) else {
         return None;
     };
     let e = pkg.exports.get(k)?;
-    if !pkg.export_class_name(e).eq_ignore_ascii_case("AnimNotify_Sound") {
+    if !pkg
+        .export_class_name(e)
+        .eq_ignore_ascii_case("AnimNotify_Sound")
+    {
         return None;
     }
     let props = export_props(pkg, data, e).ok()?;
@@ -394,6 +440,7 @@ impl Model {
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
         let mut sounds = HashMap::new();
+        let mut triggers = HashMap::new();
         let mut read_sets: Vec<Option<rc_package::animation::MeshAnimation>> =
             (0..sets.len()).map(|_| None).collect();
         for (key, seq_name) in &spec.sequences {
@@ -425,6 +472,14 @@ impl Model {
                         .collect();
                     if !heard.is_empty() {
                         sounds.insert(key.clone(), heard);
+                    }
+                    let sent: Vec<(f32, NotifyTrigger)> = seq
+                        .notifies
+                        .iter()
+                        .filter_map(|n| notify_trigger(&pkg, &data, n.object).map(|t| (n.time, t)))
+                        .collect();
+                    if !sent.is_empty() {
+                        triggers.insert(key.clone(), sent);
                     }
                     if k > 0 {
                         notes.push(format!(
@@ -567,6 +622,7 @@ impl Model {
             lift: 0.0,
             flipped,
             sounds,
+            triggers,
             sets: Vec::new(),
         };
         if spec.keep_sets {
@@ -586,6 +642,27 @@ impl Model {
                     },
                 };
                 model.sets.extend(anim);
+            }
+            // The events every kept animation sends, by its own name (for
+            // `named_clip` users such as the cast).
+            for anim in &model.sets {
+                for seq in &anim.sequences {
+                    if model
+                        .triggers
+                        .keys()
+                        .any(|k| k.eq_ignore_ascii_case(&seq.name))
+                    {
+                        continue;
+                    }
+                    let sent: Vec<(f32, NotifyTrigger)> = seq
+                        .notifies
+                        .iter()
+                        .filter_map(|n| notify_trigger(&pkg, &data, n.object).map(|t| (n.time, t)))
+                        .collect();
+                    if !sent.is_empty() {
+                        model.triggers.insert(seq.name.clone(), sent);
+                    }
+                }
             }
         }
         // Stand the first animation's first frame on the floor (the mesh
@@ -646,6 +723,18 @@ impl Model {
     /// The animation called `key`, if it was found.
     pub fn clip(&self, key: &str) -> Option<&Clip> {
         self.clips.get(key)
+    }
+
+    /// The events animation `name` sends whose moment falls after `from`
+    /// and up to `to` (0 to 1 through the animation).
+    pub fn triggers_between(&self, name: &str, from: f32, to: f32) -> Vec<NotifyTrigger> {
+        self.triggers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case(name))
+            .flat_map(|(_, list)| list.iter())
+            .filter(|(t, _)| *t > from && *t <= to)
+            .map(|(_, n)| n.clone())
+            .collect()
     }
 
     /// A sequence by its name in the game (any case), from the kept sets
@@ -815,5 +904,52 @@ impl Model {
             total += area;
         }
         (total > 0.0).then(|| sum.map(|c| c / total))
+    }
+}
+
+#[cfg(test)]
+mod notify_tests {
+    use super::*;
+
+    /// The hologram projector's throw sends `StartBriefing` (what starts
+    /// the briefings of yyy_04b, ras_03a and geo_03a). Needs the game:
+    /// set RC_GAME_DIR to the folder holding `GameData`.
+    #[test]
+    fn projector_throw_starts_the_briefing() {
+        let Some(game) = std::env::var_os("RC_GAME_DIR").map(std::path::PathBuf::from) else {
+            println!("skipped: no game folder (set RC_GAME_DIR)");
+            return;
+        };
+        let spec = ModelSpec {
+            package: "GameData/Animations/BriefingAnimProps.ukx".into(),
+            mesh: "HoloProjector".into(),
+            keep_sets: true,
+            ..Default::default()
+        };
+        let open = |rel: &str| {
+            let p = game.join(rel);
+            if p.exists() {
+                return Some(p);
+            }
+            // Case-insensitive file names, as on Windows.
+            let dir = p.parent()?;
+            let want = p.file_name()?.to_string_lossy().to_ascii_lowercase();
+            std::fs::read_dir(dir)
+                .ok()?
+                .flatten()
+                .find(|e| e.file_name().to_string_lossy().to_ascii_lowercase() == want)
+                .map(|e| e.path())
+        };
+        let (model, _) =
+            match Model::load(&|rel| open(rel).unwrap_or_else(|| game.join(rel)), &spec) {
+                Ok(m) => m,
+                Err(e) => panic!("projector not read: {e}"),
+            };
+        assert!(model.named_clip("ThrowHoloProjector").is_some());
+        let sent = model.triggers_between("ThrowHoloProjector", -1.0, 1.0);
+        assert!(
+            sent.contains(&NotifyTrigger::Event("StartBriefing".into())),
+            "sends {sent:?}"
+        );
     }
 }
