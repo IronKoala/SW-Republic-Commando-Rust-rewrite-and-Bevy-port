@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Bacta dispensers are drawn (rc_level, rc_level_plugin)
+
+- **Changed:** `rc_level::class_look::anim_mesh_of` finds props the player uses (`ActivateItem`: bacta dispensers) whose class draws an animated model (`DrawType` DT_Mesh). `map_collision::load` lists them (`anim_props`). New `crates/rc_level_plugin/src/anim_props.rs` reads each model once with `rc_model` and draws every copy where the map puts it (`AnimProp` component; `LevelInfo::anim_props`). `rc_game --script` has 2 new checks and a picture `logs/bacta_dispenser.png`.
+- **Why:** The user couldn't find geo_01a's landing-zone bacta dispenser, so the barricade never came down: the port only drew props with a static model, and dispensers have an animated one, so they were invisible. Their log showed the dispenser switched on and "Hold F" shown, but the player never got within reach.
+- **Tested how:** `cargo test --release -p rc_level -p rc_level_plugin`; `rc_game --script` in the cloud with the game's files copied read only from the PC.
+- **Result:** The log says `5 props with an animated model drawn (BactaDispensers.BactaDispenserGEO x5)` on geo_01a; the picture shows the dispenser standing in the landing zone. 110 checks passed, 2 failed (the same level-sound checks, sound packages not copied). A first try drew every actor with an animated model and put frozen clone troopers, droids and a gunship around the level, so it is limited to things the player uses.
+- **Still broken / not tested:** Not tested on Windows. Dispensers stand still (their Load/Holster animations aren't played) and aren't solid. Scripted characters, vehicles and ropes with animated models are still not drawn.
+- **Next:** The user walks up to the dispenser and holds F.
+
 ## 2026-11-09: Level prompts name the real Use key (rc_scripts_plugin)
 
 - **Changed:** `crates/rc_scripts_plugin/src/lib.rs`: a script prompt's `@` (the Use button) is now replaced with the button's name on the device used last (`InputPrompts`), not the word "USE".

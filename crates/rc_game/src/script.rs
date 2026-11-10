@@ -788,6 +788,25 @@ fn steps() -> Vec<Step> {
             level_script_dispenser_on,
             300.0,
         ),
+        // The dispenser is drawn with its animated model (it used to be
+        // invisible, so a player couldn't find it).
+        Check("the level's animated props are drawn", level_anim_props),
+        Note(level_script_view_dispenser),
+        Wait(0.5),
+        Shot("bacta_dispenser"),
+        Check("the bacta dispenser can be seen", |w| {
+            let s = w
+                .resource::<Shots>()
+                .stats
+                .get("bacta_dispenser")
+                .copied()
+                .ok_or("no picture")?;
+            if s.lit > 0.5 {
+                Ok(format!("{:.0}% of the picture lit", s.lit * 100.0))
+            } else {
+                Err(format!("only {:.0}% of the picture lit", s.lit * 100.0))
+            }
+        }),
         Note(level_script_stand_at_dispenser),
         Wait(0.5),
         Hold(Action::Use, 5.0),
@@ -2459,6 +2478,60 @@ fn level_script_dispenser_on(w: &mut World) -> bool {
         .dispensers()
         .iter()
         .any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
+}
+
+/// geo_01a's five bacta dispensers draw with their animated model.
+fn level_anim_props(w: &mut World) -> Result<String, String> {
+    let info = w
+        .get_resource::<rc_level_plugin::LevelInfo>()
+        .ok_or("no LevelInfo")?;
+    let (drawn, failed) = (info.anim_props, info.anim_prop_failures);
+    let mut q = w.query::<&rc_level_plugin::anim_props::AnimProp>();
+    let dispensers = q
+        .iter(w)
+        .filter(|p| p.class.to_ascii_lowercase().starts_with("bactadispenser"))
+        .count();
+    let msg = format!("{drawn} drawn, {failed} not drawn, {dispensers} bacta dispensers");
+    if dispensers >= 5 && failed == 0 {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// Stand a few steps back from the landing zone's dispenser, looking at
+/// it, for a picture.
+fn level_script_view_dispenser(w: &mut World) {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return;
+    };
+    let Some(d) = s
+        .dispensers()
+        .into_iter()
+        .find(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ"))
+    else {
+        return;
+    };
+    let spot = d.stand.unwrap_or(d.location);
+    let (dx, dy) = (spot[0] - d.location[0], spot[1] - d.location[1]);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    let back = 260.0;
+    let at = [
+        d.location[0] + dx / len * back,
+        d.location[1] + dy / len * back,
+        spot[2] + 10.0,
+    ];
+    let log = w.resource::<GameLog>().clone();
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.pawn.location = rc_movement::Vec3::new(at[0], at[1], at[2]);
+        b.yaw = (-dy).atan2(-dx);
+        b.pitch = 0.0;
+        log.line(format!(
+            "script: player looks at {} from ({:.0}, {:.0}, {:.0})",
+            d.name, at[0], at[1], at[2]
+        ));
+    }
 }
 
 /// Put the player where a squad mate would stand to use the dispenser.

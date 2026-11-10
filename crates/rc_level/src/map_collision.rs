@@ -12,7 +12,7 @@ use crate::bsp::{self, Vec3};
 use crate::collision::{add_blocking_volumes, collision_triangles, Source};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
-use crate::class_look::{apply_class_look, blocks_players, ClassLooks, Loaded};
+use crate::class_look::{anim_mesh_of, apply_class_look, blocks_players, ClassLooks, Loaded};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -55,6 +55,10 @@ pub struct MapCollision {
     /// feet position and facing, as for `start`. A level address like
     /// `RAS_03B.ctm#FromA` names one by its tag.
     pub arrivals: Vec<(String, Vec3, f32)>,
+    /// Props drawn with an animated model from their class (bacta
+    /// dispensers and the like, `class_look::anim_mesh_of`): where each
+    /// stands, and the package and skeletal mesh. Not solid yet.
+    pub anim_props: Vec<(Placement, String, String)>,
 }
 
 impl MapCollision {
@@ -186,6 +190,7 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
     let mut arrivals = Vec::new();
     let mut mesh_failures = 0;
     let mut class_mesh_actors = 0;
+    let mut anim_props = Vec::new();
     let mut not_solid = 0;
     // Physics props that fall as the level starts, moved down onto the
     // ground below (`crate::settle`).
@@ -215,7 +220,15 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
                     owner = o;
                     class_mesh_actors += 1;
                 }
-                _ => continue,
+                Some(_) => continue,
+                None => {
+                    if let Some((package, mesh)) =
+                        anim_mesh_of(&mut looks, &map.0, &map.1, &p, &mut |n| pkgs.get(n))
+                    {
+                        anim_props.push((p, package, mesh));
+                    }
+                    continue;
+                }
             }
         }
         // Hidden props are left out, as in the level viewer.
@@ -304,5 +317,6 @@ pub fn load(map_path: &Path, game_data: &Path, collision_height: f32) -> Result<
         terrains: terrains.len(),
         terrain_triangles,
         terrain_failures,
+        anim_props,
     })
 }
