@@ -641,8 +641,12 @@ copy of the game.
   sounds a few metres away are louder than before (not yet listened to).
 - Collision follows each prop's "can be walked through" settings and
   each mesh part's collision switch (since 2026-10-30; before, every prop
-  was solid). Simplified collision shapes aren't read, so solid props
-  block by their drawn shape. Not tested on Windows or by playing.
+  was solid). Since 2026-11-10 models with collision off on every part
+  (barrels, Raxus Prime's floor and ceiling pipes) collide through the
+  simple box shape the game stores with them, instead of not at all. Props
+  the game lets you walk through but shoot (geo_04c's shield wall pieces)
+  now stop shots but still not people. Other solid props block by their
+  drawn shape. Not tested on Windows or by playing.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat
