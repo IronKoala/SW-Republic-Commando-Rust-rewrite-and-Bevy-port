@@ -486,7 +486,13 @@ fn main() {
                         format!("prop {name} ({tag}) destroyed")
                     }
                     Effect::Checkpoint { name } => format!("checkpoint {name}: save"),
-                    Effect::ChangeLevel { url, by } => format!("{by}: leave for {url}"),
+                    Effect::ChangeLevel { url, by, debriefing } => match debriefing {
+                        Some(d) => format!(
+                            "{by}: debriefing {:?} ({}, picture {}), then leave for {url}",
+                            d.title, d.menu_class, d.picture
+                        ),
+                        None => format!("{by}: leave for {url}"),
+                    },
                 };
                 log.line(format!("   t={t:6.2} {text}"));
             }

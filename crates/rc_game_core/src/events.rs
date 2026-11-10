@@ -152,6 +152,24 @@ pub struct ChangeLevel {
     pub by: String,
 }
 
+/// Show the end-of-campaign debriefing screen, then leave for the next
+/// map. Sent by the level scripts part for `ACTION_ShowDebriefingScreen`
+/// with a `NewLevel`; the game (`rc_game`) pauses play, shows the screen
+/// drawn from the original's own menu class, and sends `then` when the
+/// player chooses CONTINUE. A program with no screen to show it should
+/// send `then` at once.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct ShowDebriefing {
+    /// The map's menu class (`XInterfaceCTMenus.CTDebriefingInfoGEO`).
+    pub menu_class: String,
+    pub title: String,
+    pub text: String,
+    /// The picture's object path (`GUIContent.GEO_Debrief`).
+    pub picture: String,
+    /// Where to go on CONTINUE.
+    pub then: ChangeLevel,
+}
+
 /// Where the player should arrive on the map being loaded: a `Teleporter`'s
 /// `Tag` (see [`ChangeLevel::portal`]). Put in by the save part before
 /// loading; the level part reads it, uses that teleporter's place as the
