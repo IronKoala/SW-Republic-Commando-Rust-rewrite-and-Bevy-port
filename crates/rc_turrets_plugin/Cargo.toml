@@ -35,3 +35,8 @@ features = [
     "bevy_audio",
     "wav",
 ]
+
+[dev-dependencies]
+# Only for the squad_turret test: a squad mate sent to a turret marker.
+rc_squad = { path = "../rc_squad" }
+rc_squad_plugin = { path = "../rc_squad_plugin" }

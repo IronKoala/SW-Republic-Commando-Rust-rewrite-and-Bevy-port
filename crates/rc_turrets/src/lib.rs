@@ -5,8 +5,10 @@
 //! gunner at a time gets on. This crate holds its rules, read from the
 //! original's script defaults and written down in our own words:
 //!
-//! - **Who is on it** ([`Gunner`]). Nobody, the player, or a character a
-//!   level script put there (`ACTION_AttachToTurret`). Only one at a time.
+//! - **Who is on it** ([`Gunner`]). Nobody, the player, a character a
+//!   level script put there (`ACTION_AttachToTurret`), or a squad mate the
+//!   player ordered there (the turret marker, `MarkerTurret`). Only one at
+//!   a time.
 //!   The player may get on only while the turret is player-usable
 //!   (`bPlayerUsable`, which maps and `ACTION_SetTurretUsable` change).
 //! - **The events it sends.** Getting on sends `PlayerControlEvent` (the
@@ -52,6 +54,34 @@ pub enum Gunner {
     /// A character a script sent there: the script's tag (the
     /// `ScriptedSequence` it runs).
     Character(String),
+    /// A squad mate the player sent to the turret's marker: their name
+    /// (`Sev`).
+    Squad(String),
+}
+
+impl Gunner {
+    /// How saves and the log write it: `nobody`, `player`, `squad:Sev`,
+    /// or a script's tag.
+    pub fn save_name(&self) -> String {
+        match self {
+            Gunner::Nobody => "nobody".into(),
+            Gunner::Player => "player".into(),
+            Gunner::Character(c) => c.clone(),
+            Gunner::Squad(n) => format!("squad:{n}"),
+        }
+    }
+
+    /// The other way round.
+    pub fn from_save_name(s: &str) -> Gunner {
+        match s {
+            "nobody" => Gunner::Nobody,
+            "player" => Gunner::Player,
+            _ => match s.strip_prefix("squad:") {
+                Some(n) => Gunner::Squad(n.to_string()),
+                None => Gunner::Character(s.to_string()),
+            },
+        }
+    }
 }
 
 /// What happened when someone tried to get on or off.
@@ -259,6 +289,30 @@ pub fn wrap(units: f32) -> f32 {
     } else {
         w
     }
+}
+
+/// The turret a squad marker is for: the one called `anchor` (the
+/// marker's `Anchor` or the spot's `MyAnchor`), else the nearest to `near`
+/// within `within` uu (a marker whose anchor isn't the turret itself).
+pub fn for_marker(list: &[Turret], anchor: &str, near: [f32; 3], within: f32) -> Option<usize> {
+    if !anchor.is_empty() {
+        if let Some(i) = list
+            .iter()
+            .position(|t| t.place.name.eq_ignore_ascii_case(anchor))
+        {
+            return Some(i);
+        }
+    }
+    let d = |t: &Turret| {
+        let [x, y, z] = t.place.location;
+        ((x - near[0]).powi(2) + (y - near[1]).powi(2) + (z - near[2]).powi(2)).sqrt()
+    };
+    list.iter()
+        .enumerate()
+        .map(|(i, t)| (i, d(t)))
+        .filter(|&(_, d)| d <= within)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
 }
 
 /// The first turret tagged `tag`, in the map's order, as the original's

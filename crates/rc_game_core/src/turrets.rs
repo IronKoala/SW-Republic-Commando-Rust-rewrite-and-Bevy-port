@@ -57,4 +57,34 @@ pub enum TurretOrder {
         usable: bool,
         by: String,
     },
+    /// A squad mate the player sent to a turret marker ("Man turret") gets
+    /// on (`on`) or off it (recalled, sent elsewhere, or down). Sent by the
+    /// squad part. The turret is the one called `anchor` (the marker's
+    /// anchor), else the nearest to `near` (Unreal units). The answer is
+    /// [`OnTurret`] on `gunner`, or nothing when the turret is taken.
+    Squad {
+        anchor: String,
+        near: [f32; 3],
+        gunner: Entity,
+        /// The squad mate's name (`Sev`), for saves and the log.
+        member: String,
+        on: bool,
+    },
+}
+
+/// On a squad mate's entity while they work a mounted turret. Written by
+/// the turret part every frame; removed when they get off. The squad part
+/// holds the body at `body` (it owns where squad mates stand) and doesn't
+/// fire their own gun meanwhile: the turret part aims the turret at
+/// enemies and fires it.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct OnTurret {
+    pub turret: Entity,
+    /// The turret's name in the map, for the log.
+    pub name: String,
+    /// Where the body is held: the centre of its collision, Unreal units.
+    pub body: [f32; 3],
+    /// Where the turret points, radians, Unreal's convention.
+    pub yaw: f32,
+    pub pitch: f32,
 }

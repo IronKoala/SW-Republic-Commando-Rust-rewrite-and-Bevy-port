@@ -1900,8 +1900,9 @@ grenades and who prefers which job are the game's numbers; how long the
 work takes and the posts' firing rhythm are compiled code in the
 original, so those are our own, marked in the file. A job's `preferred`
 squad mate takes it when free (Scorch demolition and anti-armour, Fixer
-slicing, Sev sniping, as in the original). Mods can change a job or add a new one (say a
-`[job.turret]` matching "turret").
+slicing, Sev sniping, as in the original). Mods can change a job or add a new one.
+`[job.turret]` ("Man turret") is a post with `mount = "yes"`: see
+"Squad mates on turrets" under "Mounted turrets".
 
 - **Once** jobs (bacta, demolition, breach, slice): walk to the spot,
   work `work_time` seconds, done. The member is free again at once. Then,
@@ -3482,6 +3483,33 @@ the original). ras_03b's missile turret sends `TurretResponseDudes` and
 `SpawnPerch3`; ras_03c's two missile turrets and E-Web send theirs.
 `rc_turrets_plugin`'s test turns each model and checks the muzzles move
 the way the gun aims (needs the game files).
+
+**Squad mates on turrets ("Man turret").** The maps mark turrets the
+squad can man with squad spots whose anchor is the turret (yyy_06d's
+`SquadMarkerSpot161`..`164` at the Wookiee turrets) or with a
+`MarkerTurret` order marker. `[job.turret]` in `data/squad/squad.toml`
+matches them: a pullable post with `mount = "yes"`. Once the squad mate
+is posted at the spot, `rc_squad_plugin` (`man_turrets`) sends
+`TurretOrder::Squad { anchor, near, gunner, member, on }`. The turret part
+puts them on the turret the anchor names (else the nearest within 512 uu
+of the spot, our choice), sends its `ControlEvent`, and puts
+`rc_game_core::OnTurret` (where to hold the body, where the gun points)
+on the squad mate. The squad part owns where squad mates stand, so it
+holds the body there itself (`Squad::hold_on_turret`): while mounted the
+member doesn't think, move or fire their own gun. The turret part aims
+and fires the turret's `[auto]` weapon at the nearest enemy in range,
+exactly as for a script's character. Recall (F4), a new order, an auto
+pull or going down takes them off the post: the squad part asks them off
+(`on: false`), the `ReleaseEvent` goes, `OnTurret` is removed and
+`Squad::off_turret` puts them back on their feet at the spot. A turret
+that's taken (the player is on it) leaves them fighting from the spot;
+they ask again every 2 s (`TURRET_ASK_EVERY`), so they get on once it's
+free. Saves write the gunner as `squad:<name>`; after loading, the
+squad mate is still posted, asks again, and the turret, already theirs,
+takes them back without sending its event twice. Test:
+`rc_turrets_plugin/tests/squad_turret.rs` (no game files). Check the maps
+with `cargo run --release -p rc_turrets_plugin --example
+squad_turret_survey -- <Maps folder> [map ...]`.
 
 **Our choices.** Facing the turret within 1.2 radians counts as looking at
 it (the original asks for the crosshair on it). The Trandoshan turret's

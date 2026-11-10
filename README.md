@@ -172,8 +172,8 @@ copy of the game.
   reports the job done, and the level scripts part will act on it. The
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
-  are the game's; how long the work takes is our guess. Traps, mines and
-  turrets aren't done yet. With "auto pull maneuvers" on (the default,
+  are the game's; how long the work takes is our guess. Traps and mines
+  aren't done yet. With "auto pull maneuvers" on (the default,
   as in the original), ordering a new job when everyone is busy takes
   the squad mate who has held a sniper, grenade or anti-armour position
   longest off it; switch it off in `settings.toml`
@@ -554,11 +554,18 @@ copy of the game.
   once you man its turret. Level scripts can put characters on turrets,
   and they shoot at enemies on their own. Each kind is a file in
   `data/turrets/`, so mods can add more. Not tried in a running game yet.
+- Squad mates man turrets: aim at a "Man turret" marker (like the Wookiee
+  turrets at the start of yyy_06d) and order it. A squad mate walks to
+  it, gets on, and fires the turret at enemies in range until you recall
+  the squad (F4), give them another job, or they go down. If you're on
+  that turret yourself they wait and get on once you're off. Checked in a
+  test room with no game files; not tried in a running game yet.
 
 ## What doesn't work yet
 
-- Turrets: the squad can't be ordered onto a turret yet (the "man turret"
-  markers), ceiling turrets that fire by themselves aren't done, and
+- Turrets: squad mates on turrets say nothing (no turret voice lines
+  yet), stand still in their usual pose, and are held where the player's
+  body goes on that turret (not compared with the original); ceiling turrets that fire by themselves aren't done, and
   turrets can't be destroyed. The last level's ending also needs the
   rockets that hit the ship, which aren't done.
 

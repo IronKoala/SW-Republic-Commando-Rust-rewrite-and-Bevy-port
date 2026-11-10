@@ -207,3 +207,43 @@ fn wrap_keeps_half_a_turn_each_way() {
     assert_eq!(wrap(32769.0), -32767.0);
     assert_eq!(wrap(-40000.0), 25536.0);
 }
+
+#[test]
+fn a_squad_marker_finds_its_turret_by_name_or_nearby() {
+    let p = params();
+    let mut a = placed();
+    a.name = "WookieeHeavyTurret0".into();
+    let mut b = placed();
+    b.name = "WookieeHeavyTurret4".into();
+    b.location = [2000.0, 0.0, 300.0];
+    let list = vec![Turret::new(a, "x", &p), Turret::new(b, "x", &p)];
+    assert_eq!(
+        for_marker(&list, "wookieeheavyturret4", [0.0; 3], 500.0),
+        Some(1)
+    );
+    // An anchor that isn't a turret: the nearest one close enough.
+    assert_eq!(
+        for_marker(&list, "Something", [1900.0, 50.0, 250.0], 500.0),
+        Some(1)
+    );
+    assert_eq!(for_marker(&list, "", [5000.0, 0.0, 0.0], 500.0), None);
+}
+
+#[test]
+fn a_squad_mate_gets_on_like_a_character_and_saves_by_name() {
+    let mut t = Turret::new(placed(), "x", &params());
+    let sev = Gunner::Squad("Sev".into());
+    assert!(matches!(t.mount(sev.clone()), Mounted::On(_)));
+    // Asking again (after loading a save) sends nothing more.
+    assert_eq!(t.mount(sev.clone()), Mounted::On(Vec::new()));
+    assert_eq!(t.mount(Gunner::Player), Mounted::Taken);
+    assert!(!t.usable_by_player());
+    for g in [
+        Gunner::Nobody,
+        Gunner::Player,
+        sev,
+        Gunner::Character("WookieeTurretScript".into()),
+    ] {
+        assert_eq!(Gunner::from_save_name(&g.save_name()), g);
+    }
+}

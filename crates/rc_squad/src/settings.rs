@@ -848,6 +848,13 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                 }
             }
         }
+        "mount" => {
+            j.mount = match text(value)?.as_str() {
+                "yes" => true,
+                "no" => false,
+                _ => return Err("mount must be \"yes\" or \"no\"".into()),
+            };
+        }
         "pullable" => {
             j.pullable = match text(value)?.as_str() {
                 "yes" => true,

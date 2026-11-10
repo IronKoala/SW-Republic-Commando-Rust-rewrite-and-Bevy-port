@@ -134,6 +134,10 @@ pub struct Member {
     pub(crate) cover_retry_in: f32,
     /// Crouching this frame (in cover, between bursts).
     pub crouch: bool,
+    /// On a turret (a `mount` post): the game holds the body's centre here
+    /// and turns them with the turret (radians). They don't move, think or
+    /// fire their own gun meanwhile; the game fires the turret.
+    pub mounted: Option<(Vec3, f32)>,
     path: Vec<Vec3>,
     pub(crate) planned_for: Option<Vec3>,
     pub(crate) think_in: f32,
@@ -612,6 +616,7 @@ impl Squad {
                     cover_time: 0.0,
                     cover_retry_in: 0.0,
                     crouch: false,
+                    mounted: None,
                     path: Vec::new(),
                     planned_for: None,
                     think_in: 0.0,
@@ -667,6 +672,38 @@ impl Squad {
             if let Some(name) = self.job_of(k).map(|j| j.name.clone()) {
                 self.markers[k].0.job = name;
             }
+        }
+    }
+
+    /// The turret post member `i` holds: the marker of a `mount` job they're
+    /// posted at (and so should be on its turret), if any.
+    pub fn turret_post(&self, i: usize) -> Option<usize> {
+        let m = self.members.get(i)?;
+        if m.down || m.state != MemberState::Posted {
+            return None;
+        }
+        let k = m.marker?;
+        self.job_of(k).filter(|j| j.mount).map(|_| k)
+    }
+
+    /// The game has member `i` on a turret: hold the body's centre at
+    /// `centre`, facing `yaw` (radians).
+    pub fn hold_on_turret(&mut self, i: usize, centre: Vec3, yaw: f32) {
+        if let Some(m) = self.members.get_mut(i) {
+            m.mounted = Some((centre, yaw));
+        }
+    }
+
+    /// Member `i` is off their turret: back on their feet at `feet`.
+    pub fn off_turret(&mut self, i: usize, feet: Vec3) {
+        let Some(m) = self.members.get_mut(i) else {
+            return;
+        };
+        if m.mounted.take().is_some() {
+            let up = m.pawn.location - m.pawn.feet();
+            m.pawn.location = feet + up;
+            m.pawn.velocity = Vec3::ZERO;
+            m.think_in = 0.0;
         }
     }
 
@@ -1278,6 +1315,19 @@ impl Squad {
                 let m = &mut self.members[i];
                 m.input = MoveInput::default();
                 m.pawn.step(dt, &m.input, world);
+                continue;
+            }
+            if let Some((centre, yaw)) = self.members[i].mounted {
+                // On a turret: held there, turned with it.
+                let m = &mut self.members[i];
+                m.pawn.location = centre;
+                m.pawn.velocity = Vec3::ZERO;
+                m.yaw = yaw.rem_euclid(TAU);
+                m.crouch = false;
+                m.input = MoveInput {
+                    yaw: m.yaw,
+                    ..Default::default()
+                };
                 continue;
             }
             self.members[i].think_in -= dt;

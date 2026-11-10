@@ -4728,6 +4728,8 @@ dependencies = [
  "rc_level",
  "rc_movement",
  "rc_package",
+ "rc_squad",
+ "rc_squad_plugin",
  "rc_turrets",
  "serde",
 ]
