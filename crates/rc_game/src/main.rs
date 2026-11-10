@@ -495,6 +495,7 @@ fn main() -> AppExit {
     app.add_plugins(rc_squad_plugin::SquadPlugin);
     app.add_plugins(rc_turrets_plugin::TurretsPlugin);
     app.add_plugins(rc_cast::CastPlugin);
+    app.add_plugins(rc_shadows::ShadowsPlugin);
     app.add_plugins(rc_save::SavePlugin);
     // The end-of-campaign debriefing screen (after the scripts part, which
     // asks for it).

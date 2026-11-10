@@ -26,6 +26,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
 | `rc_hologram` | `HologramPlugin`: holograms shimmer and flicker like the original's `DynamicHologram` shader, with the game's own glow and noise pictures. Check: `hologram_check` example in `rc_level_viewer`. |
 | `rc_cast` | `CastPlugin`, the characters placed in a map that no other part owns (the Kaminoans, young clones, troopers and commandos of the cutscenes, animated props, troopers and vehicles standing about in missions): drawn with the game's models and moved by the level scripts. |
+| `rc_shadows` | `ShadowsPlugin`, character shadows the way the original draws them: each marked character's shape laid on the floor from a light high above (`CastsShadow`, `data/shadows/shadows.toml`). The `shadow_check` example checks it without the game. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
 | `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
 | `rc_scripts` | Level scripts: runs a map's own scripting (scripted triggers and sequences, touch triggers, counters, true/false conditions, checkpoints, destructible props) as events and tags. No Bevy. `rc_script_check` reads every map's scripts and runs them without a window. |
@@ -3785,6 +3786,56 @@ was held for good.
 cast can't be hurt), and saving their places (the cutscene maps have no
 checkpoints). In missions, the placed troopers, walkers and the scripted
 spider droid now stand and move as their scripts say but don't fight.
+
+## Character shadows (`rc_shadows`)
+
+**What the original does** (read from its install: the script text and
+class defaults in `Engine.u`, `CTCharacters.u` and
+`XInterfaceCTMenus.u`; nothing copied). Every `Pawn` checks each frame:
+if its `bActorShadows` is set and the "Shadows" option is on (the
+GRAPHICS page's SQUAD SHADOWS row, `EnableShadows`), it makes a
+`ShadowProjector`: a 128x128 picture of the character's shape seen from
+`Normal(vect(1,1,3))` (high above and a little to one side, the same for
+every character), laid on the floors and walls around it, fading over
+`MaxTraceDistance` 350 units and not drawn beyond `CullDistance` 1200
+units from the camera, at full `ShadowDarkness`. Only `CloneCommando`
+(Delta) sets `bActorShadows` in its class; maps set it on chosen actors.
+The prologue marks 7 troopers, 3 young clones and 1 Kaminoan (Kaminoan2,
+in the gym); the two Kaminoans in the opening nursery are not marked, so
+they cast no shadow in the original either. `AnimProp`s carry the flag in
+the prologue but aren't pawns, so they never make a projector.
+
+**What we do.** `rc_cast` reads `bActorShadows` (the map's value, else
+the class's) and puts `rc_shadows::CastsShadow` on each marked character.
+`ShadowsPlugin` gives every mesh under it a "shadow twin": the same mesh
+(same pose, updated with it), drawn with `ShadowMaterial`, whose small
+shader (`shadow.wesl`) slides each point down along the light onto the
+floor at the character's feet and draws it black and see-through by
+`strength`: `darkness x (1 - distance along the light from the middle of
+the body / max_trace_distance)`, about 0.75 for a standing trooper. The
+twin writes depth with a strict "nearer than" test, and rounds its depth,
+so the body's many overlapping triangles darken each floor spot once. No
+extra camera or picture is drawn: one more draw of each body with a
+very small shader, which phones and VR headsets can afford.
+`CharacterShadows` switches all of them; `rc_game` sets it from SQUAD
+SHADOWS (`video.squad_shadows`). Shadows farther than `cull_distance`
+from `PlayerCamera` are hidden. All numbers are in
+`data/shadows/shadows.toml`.
+
+**Differences from the original.** The floor is taken as flat at the
+feet: the shadow doesn't bend onto steps, slopes or walls, and it shows
+under (not on) a prop standing on the floor next to the character. The
+edges are sharp where the original's small picture softens them. How the
+original's blending turns `ShadowDarkness` 255 into a final darkness
+isn't known for sure. The squad and enemies don't use it yet (the squad
+has the old flat round patch under each commando).
+
+**Checking it.** `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p
+rc_shadows --example shadow_check`: two overlapping boxes on a white
+floor, seen from above; checks where the shadow falls, its darkness, that
+overlaps aren't darker, the off switch and the far-away cut-off. In the
+game the log says `shadows: N more shadow copies (C characters, ...)`
+and `shadows: character shadows on/off`.
 
 ## Holograms, tank liquid and props with no stored light
 
