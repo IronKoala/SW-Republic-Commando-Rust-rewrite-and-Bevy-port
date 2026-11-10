@@ -3233,8 +3233,38 @@ of each section, so a round trip can be checked from the log.
   `ACTION_ChangeLevel` (`URL`).
 - The last level of each campaign shows the debriefing,
   `ACTION_ShowDebriefingScreen` with a `NewLevel` (the same action with
-  only `Text` is a hint screen, and doesn't leave). The screen itself isn't
-  shown yet; the game goes straight on to `NewLevel`.
+  only `Text` is a hint screen, and doesn't leave). The game shows the
+  screen first and goes on to `NewLevel` at CONTINUE (see "The debriefing
+  screen" below).
+
+**The debriefing screen.** geo_05c, ras_04d and yyy_06d each end with
+`ACTION_ShowDebriefingScreen`: a menu class (`CTDebriefingInfoGEO`, `RAS`
+or `YYY`), a `Title`, a `Text`, a picture (`PicName`) and `NewLevel`. The
+director puts what the screen shows on its `Effect::ChangeLevel`
+(`debriefing`), and the scripts part sends
+`rc_game_core::ShowDebriefing` with the `ChangeLevel` held inside instead
+of sending the `ChangeLevel` itself. In `rc_game`, `debriefing.rs` pauses
+play and opens the `debriefing` page (`[pages.debriefing]` in
+`data/ui/original_menus.toml`, class `CTDebriefingInfo`).
+`rc_menus::debriefing` fills it in as the original's `SetInfoOptions` and
+`Init` do: title and text into `InfoTitle`/`InfoText`, the picture into
+`InfoPic` (whole picture), CONTINUE (`AButton`) shown on a PC, "YOU HAVE
+UNLOCKED / EXTRAS CONTENT" shown (English). Two maps name the picture
+without its group (`GUIContent.GEO_Debrief` is really
+`GUIContent.LoadInfoScreens.Geo_Debrief`), so `Library::resolve_loose`
+finds a picture by package and name when the full path doesn't match.
+CONTINUE (`act:continue`) sets `Menu::go_on`; `debriefing.rs` then sends
+the held `ChangeLevel` and the save part travels as for any exit. Back
+does nothing on this page (`back = "unavailable"`), as in the original. Our wrapped text came out
+longer than the frame, and CONTINUE wider than its bar, so
+`debriefing::fit_continue` widens the bar and `debriefing::fit_text`
+makes the text smaller in steps (not below 60%) until it fits. The real
+texts end up at 85-90% of their size. If
+the original page can't be drawn, a placeholder page marked as one shows
+the title and text with Continue. Not done: the GEO/RAS/YYY classes differ
+only in the music they play (`musGEO_cadence_lp` and so on); that music
+isn't played yet. Hint screens (`bIsForHintText`) aren't shown: the
+original shows them only with a debug switch.
 
 Following the first exit of each map from `pro` visits all 56 campaign
 maps in order and ends at `epilogue`; no exit names a missing map.

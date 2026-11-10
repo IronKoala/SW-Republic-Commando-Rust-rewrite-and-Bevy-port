@@ -161,7 +161,7 @@ fn main() {
                         );
                     }
                 }
-                Effect::ChangeLevel { url, by } => {
+                Effect::ChangeLevel { url, by, .. } => {
                     line(format!(
                         "{time:6.2} s: scripts: LEAVE the level for {url} (by {by})"
                     ));
