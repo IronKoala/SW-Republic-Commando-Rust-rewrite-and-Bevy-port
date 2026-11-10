@@ -3481,6 +3481,14 @@ measures a hologram ball on screen over 40 pictures: it got the new
 material, it is light blue, its rim is darker than its middle (0.17 of
 it), its brightness flickers (160 to 224) and its speckle moves.
 
+**Cast skins.** A cast member's materials come from `data/cast/cast.toml`
+if it names any, else the `Skins` the map sets on the actor
+(`rc_cast::read::map_skins`), else its class's default `Skins`
+(`ClassLibrary::object_list`). The briefing holograms rely on the last:
+`Holo_Advisor` is a clone trooper mesh with the `CloneAdvisor`
+hologram skin, `Holo_BattleDroid` a battle droid with
+`Holo_BattleDroidRedShader`.
+
 **Colour settings are stored blue first.** A material's `Color` setting
 (`HologramColor`, `DiffuseTint`) is 4 bytes in the order blue, green,
 red, alpha (`rc_image::unreal_color`). Read the other way the hologram

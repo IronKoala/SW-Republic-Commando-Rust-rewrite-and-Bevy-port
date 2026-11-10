@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Cast members wear their class's and the map's skins (rc_cast, rc_package)
+
+- **Changed:** `rc_package::class_library::ClassLibrary::object_list` (a class's default object list, like `Skins`, as full paths). `rc_cast::read::map_skins` (the `Skins` a map sets on an actor) and `find_cast` now uses: cast.toml, then the map's `Skins`, then the class's. The cast log line lists the skins.
+- **Why:** User playtest of the yyy_04b briefing: the hologram clone "didn't look like a hologram and didn't look like the commander". `Holo_Advisor` is a clone trooper mesh whose class (AnimPropProperties.u) gives it the `CloneTextures.CloneAdvisor` hologram skin; we ignored it, so it wore plain trooper textures.
+- **Tested how:** In the cloud with game files copied read only: `rc_game --map yyy_04b --frames 200` and `rc_game --map pro --frames 200`; `cargo test -p rc_cast -p rc_package`.
+- **Result:** yyy_04b: `Holo_Advisor0 ... skins CloneTextures.CloneAdvisorTextures.CloneAdvisor`, the two `Holo_BattleDroid`s `skins BriefingTextures.Holograms.Holo_BattleDroidRedShader`; "4 more meshes shimmer". pro: 35 hologram meshes (34 before; the advisor is now one).
+- **Still broken / not tested:** Not tested on Windows or looked at. The Wookiee in yyy_04b (`Wookiee0`, class `Wookiee`, tag LeaderWookiee) has no hologram skin in the map or its class, so it stays solid; whether the original shows it there at all is for the briefing thread (#94). Skins made inside the map itself can't be loaded.
+- **Next:** The user looks at the yyy_04b briefing again.
+
 ## 2026-11-10: Holograms shimmer and flicker like the original (rc_hologram, rc_level_viewer, rc_cast, rc_level_plugin, rc_image)
 
 - **Changed:** New crate `rc_hologram` (`HologramPlugin`, `Hologram`, `HologramMaterial`, `HologramLook`, shader `hologram.wesl`). `draw::spawn_level` and `rc_cast` mark hologram meshes; `rc_level_plugin` and `rc_level_viewer` add the plugin and tell it the `GameData` folder. `rc_image::hologram` uses the shader's brightness weights (0.5, 0.6, 0.5, capped). New check `rc_level_viewer/examples/hologram_check.rs`. `docs/DESIGN.md`: "Shimmer and flicker".
