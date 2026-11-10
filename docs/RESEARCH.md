@@ -465,6 +465,49 @@ second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
   (log line `spawners no enemy file claims`).
 - `GeonosianDrone` (not read yet). `GeonosianElite`: see below.
 
+## The other Trandoshans (read 2026-11-10)
+
+Read only from the user's install with `rc_probe --class` (ctcharacters.u,
+ctinventory.u, Properties/properties.u) and `rc_audio_tables`
+(System/ctaudio.u). Classes made in properties.u from a ctcharacters.u
+class keep that class's values, not its "...Defaults" class's (see
+docs/DESIGN.md, "The Trandoshans").
+
+| Class | Health | Speed | Size (r x h) | Accuracy | Weapon | Brain: burst, grenades |
+|---|---|---|---|---|---|---|
+| `TrandoshanSlaver` (+Defaults) | 150 | 338 | 50 x 75 | 0.65 | `Shotgun`, thermal detonators, `SlaverBlades` | 2; 0.1 every 20 s |
+| `TrandoshanSlaverBerserker` | 160 | 338 | 50 x 75 | 1 | `SlaverBladesBerserker` only | -; none (StateBerserk only) |
+| `TrandoshanSlaverGrenadier` | 150 | 338 | 50 x 75 | 0.65 | `Shotgun`, thermal detonators | 2; 0.85 every 5 s |
+| `TrandoshanHeavy` (+Defaults) | 1500 | 300 | 60 x 100 | 0.85 | `TrandoshanRifle` | 100; none |
+| `TrandoshanScav` (+Defaults), `TrandoshanScavNoWookiee` | 50 | flies, 800 | 45 x 30 | 0.75 | `ScavBeam` | -; none |
+| `TrandoshanMercYYYUp`, `TrandoshanMercYYYLow` | 100 + 100 shield (10/s) | 450 | 40 x 84 | 0.75 | `SMG`, thermal detonators | 9; 0.05 every 20 s |
+| `TrandoshanMercenaryGrenadier`, `TrandoshanMercGrenYYYUp/Low` | 220 | 450 | 40 x 84 | 0.75 | `SMG`, thermal detonators | 14; 1.0 every 5 s |
+
+- Damage tables: slaver and slaver grenadier `DV_OrganicTrandoSlaverDamage`,
+  berserker `DV_OrganicTrandoSlaverBerserker`, heavy
+  `DV_OrganicTrandoHeavyDamage`, scavenger `DV_DroidsTrandoScavengerDamage`,
+  grenadiers `DV_OrganicTrandoMercDamage`; the Kashyyyk mercenaries name none.
+- `Shotgun` (+Defaults, as `TrandoshanSlaverDefaults` gives slavers):
+  ShotDelay 1.1, 8 a magazine, `ShotgunAmmo`(+Defaults) instant hit,
+  ProjPerFire 8, Spread 1700, Range 3500, Damage 28 each,
+  `CTDamageBallisticShotgun`; melee 150 / 220; sound `wep_GEN_tranShotgun_03`.
+- `SlaverBlades`: melee 200 / 50 `CTDamageMelee`. `SlaverBladesBerserker`:
+  300 / 65 `CTDamageMeleeBerserker`, ValidRange 300 to 7000.
+- `TrandoshanRifle` (+Defaults): automatic, ShotDelay 0.05, 200 a magazine,
+  AimError 25, instant hit, Range 5000, Damage 20 `CTDamageBallisticHAM`;
+  melee 200 / 210 `CTDamageMeleeHAM`; sound `wep_GEN_hamTranNew_01`.
+- `ScavBeam` (a `LaserWeapon`): every frame, Damage 1, Range 2000,
+  `CTDamageSonic`, ChargeUpTime 2; sound `wep_GEN_scavBeam_lp_01`. The
+  scavenger blows up when destroyed (ExplosionDamage 100, radius 500; 40
+  for NoWookiee).
+- Models in `trandoshan.ukx`: `TrandoshanSlaver` (TrandoshanSlaverSet, 72
+  moves incl. Berserk..., ThrowGrenade 26 frames, MeleeAttack 47),
+  `TrandoshanHeavy` (TrandoshanHeavySet, no crouch, MeleeAttack 42),
+  `TrandoshanScav` (TrandoshanScavSet: ActionBreathe, FlyForward,
+  FlyBackward, Dodge..., no death). Each mesh's own skin is the real one.
+- Voices: `TranSlavAudio` = `TSR_...`, `TranHeavyAudio` = `THM_...` (no
+  spotted line), `ScavAudio` is empty.
+
 ## Geonosian elite and the Elite Beam (read 2026-11-09)
 
 Read only from the user's install with `rc_probe --class` (ctcharacters.u,
