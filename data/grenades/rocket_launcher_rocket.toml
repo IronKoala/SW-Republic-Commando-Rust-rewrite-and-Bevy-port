@@ -1,0 +1,36 @@
+# The Wookiee rocket launcher's rocket (rocket_launcher.toml): flies
+# straight and goes off on touching anything. Homing is not built.
+#
+# Numbers marked "game:" are RocketLauncherMissile's defaults
+# (ctinventory.u, with RocketLauncherMissileDefaults in
+# Properties/properties.u on top, and its parent HomingMissile).
+
+name = "Homing Rocket"
+
+[ammo]
+max_count = 1             # not carried by hand; the weapon's ammo counts
+
+[throw]
+speed = 1500              # game: RocketLauncherMissileDefaults Speed (the weapon's shot.speed sets it)
+
+[fuse]
+time = 10                 # game: HomingMissile FuseTime
+after_impact = 0          # goes off on touching
+on_actor = true           # game: HomingMissile bActorDetonate
+on_world = true           # game: HomingMissile bWorldDetonate
+
+[flight]
+bounce = 0
+actor_bounce = 0
+rest_speed = 20
+gravity = 0               # game: Physics 10 (flies under its own power)
+
+[blast]
+damage = 600              # game: RocketLauncherMissileDefaults Damage
+radius = 800              # game: RocketLauncherMissileDefaults DamageRadius
+damage_type = "CTDamageExplosionRocket" # game: MyDamageType
+damage_kind = "explosion"
+
+[model]
+mesh = "WookieeRocketShell" # game: HomingMissile StaticMesh (not drawn yet)
+blast_colour = [1.0, 0.6, 0.2]  # our choice

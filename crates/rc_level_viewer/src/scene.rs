@@ -227,6 +227,8 @@ pub struct Stats {
     /// Ammo and grenade boxes drawn (each on its own, so it can vanish
     /// when taken), and the furthest one was moved down onto the ground.
     pub ammo_boxes: usize,
+    /// Weapons lying in the map, drawn on their own like the boxes.
+    pub weapon_pickups: usize,
     pub ammo_box_drop_max: f32,
     pub sky_props: usize,
     /// Sky props whose stored light is all black, drawn at full brightness.
@@ -1323,11 +1325,12 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             }
         }
         let mut p = p;
-        // Ammo and grenade boxes: drawn on their own so they can vanish
-        // when taken, with the model their "...Defaults" class gives.
+        // Ammo and grenade boxes, and weapons lying about: drawn on their
+        // own so they can vanish when taken, with the model their
+        // "...Defaults" class gives.
         let is_box = {
             let mats = &mut *ctx.mats;
-            rc_level::pickups::is_ammo_box(&mut class_looks, pkg, p.export, &mut |n: &str| {
+            rc_level::pickups::is_takeable(&mut class_looks, pkg, p.export, &mut |n: &str| {
                 mats.package(n)
             })
         };
@@ -1422,7 +1425,6 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 ctx.stats.sky_props += in_sky as usize;
                 let mover = (is_box || mover_exports.contains(&p.export)).then_some(p.export);
                 if is_box {
-                    ctx.stats.ammo_boxes += 1;
                     boxes.push((p, m, colours, bump_light, in_sky, mover));
                     continue;
                 }
@@ -1521,7 +1523,24 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             if let Some(mut bx) = found {
                 let d = rc_level::pickups::rest_on_ground(&mut bx, |q| ground.below(q));
                 p.location[2] -= d;
+                ctx.stats.ammo_boxes += 1;
                 ctx.stats.ammo_box_drop_max = ctx.stats.ammo_box_drop_max.max(d);
+            } else {
+                let found = {
+                    let mats = &mut *ctx.mats;
+                    rc_level::pickups::read_weapon(
+                        &mut class_looks,
+                        pkg,
+                        data,
+                        p.export,
+                        &mut |n: &str| mats.package(n),
+                    )
+                };
+                if let Some(mut w) = found {
+                    let d = rc_level::pickups::rest_weapon_on_ground(&mut w, |q| ground.below(q));
+                    p.location[2] -= d;
+                    ctx.stats.weapon_pickups += 1;
+                }
             }
             add_mesh_actor(
                 &mut b,
