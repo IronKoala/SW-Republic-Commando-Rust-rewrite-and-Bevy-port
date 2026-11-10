@@ -20,6 +20,18 @@ scale = 1.0
 [crosshair.weapons]
 "DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistolPC"
 
+# The use panel round the crosshair, while you stand at something you use by
+# holding Use (a bacta dispenser). The pictures are the original's; when
+# the original shows which, and how the outer part moves, is native code,
+# so that part is our reading: `ready` shows at the dispenser, `inside`
+# and `outside` while you heal, the outer part turning `turn` degrees
+# (clockwise) from empty to full health. Remove this part to turn it off.
+[use_panel]
+ready = "HUDTextures.Reticles.HUD_Use"
+inside = "HUDTextures.Reticles.HUD_UsePanelInside"
+outside = "HUDTextures.Reticles.HUD_UsePanelOutside"
+turn = 90
+
 # ---------------------------------------------------------------------------
 # The rest of the HUD: shield, health, ammunition, grenades, squad and
 # messages, from the original's pictures (HUDTextures.Icons.CloneIcons and

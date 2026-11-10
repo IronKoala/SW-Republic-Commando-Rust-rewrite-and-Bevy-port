@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Bacta dispenser: pull and hold, hologram, heal sounds and use panel (rc_game_core, rc_scripts, rc_scripts_plugin, rc_game, rc_menus)
+
+- **Changed:** New `rc_game_core::UseItem` (a `UseLock` spot and facing, and a `UsePanel` state) and `ActionState::hold_for_use`. New `crates/rc_scripts_plugin/src/bacta.rs` (the bacta system moved here from lib.rs): pulls and holds the player 90 units in front of the dispenser while healing, places the squad marker hologram (`MarkerIcons.Revive.reviveSM1BactaDispenser`) at each dispenser's squad spot, and plays the HUD's aim, healing and health-full sounds. `rc_game/src/player.rs` carries out the pull; `cutscene.rs` holds the controls; `original_hud.rs` draws the original's use panel pictures round the crosshair (`[use_panel]` in `data/ui/hud.toml`). New `[bacta]` values in `data/scripts/scripts.toml`. 3 new `rc_game --script` checks.
+- **Why:** User playtest of PR #77: still missing the hologram, its sounds, the "pulls and locks player into position" feature and the healing progress on screen.
+- **Tested how:** `cargo test -p rc_game_core -p rc_scripts -p rc_scripts_plugin -p rc_menus -p rc_game`; `rc_game --script` in the cloud with the game's files copied read only from the PC. Values read with `rc_probe --classes` (BactaDispenser, BactaDispenserDefaults, MarkerGetBacta, SquadMarker, CTHUDDefaults).
+- **Result:** Tests pass. Self-test 124 passed, 2 failed (the 2 level-line checks that failed before this change too). New checks: `5 placed, 1 showing, colour [254, 126, 122], sounds ["aim"]`; `showing ["Ready"]`; `pulled 1 time(s) to (-1058, -297), player now 0.0 uu from it; panel reached 100%; sounds ["aim", "healing", "full"]`. The picture shows the red hologram commando in front of the dispenser. First try drew nothing: the hologram's picture went through the additive blend as invisible, so it is a plain tint now.
+- **Still broken / not tested:** Not tested on Windows, not heard, not compared with the original (it doesn't run on the PC right now). Our readings: when each sound plays, how the outer panel moves (turns 90 degrees as health fills), pull speed, the hologram hiding while in use, and its brightness. The hologram is a flat tint, not the original's flickering shader. Not done: the first-person arm plugging in (BactaHealer / HudArmsBacta), the zap effects, the HUD icon over the dispenser, dispensers being solid.
+- **Next:** The user heals at geo_01a's landing-zone dispenser and says what looks or sounds different from the original.
+
 ## 2026-11-10: Dispenser sounds actually play (rc_level_plugin)
 
 - **Changed:** `anim_props::sound_key` keys each sound by package and name only. The animations name sounds with their group (`GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`) but they were stored without it, so none was found and nothing played, silently. Each sound played is now logged (`level: BactaDispenserGEO0 sound ...`) and the self-test checks them.

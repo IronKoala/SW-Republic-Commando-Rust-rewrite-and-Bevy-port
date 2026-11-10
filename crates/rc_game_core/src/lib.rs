@@ -32,6 +32,9 @@
 //!   scripts, [`RaiseEvent`] into them), [`ChangeLevel`] when a level
 //!   exit sends the player on to the next map, and [`ShowDebriefing`] when
 //!   a campaign's last level ends.
+//! - [`UseItem`]: something the player uses by holding Use (a bacta
+//!   dispenser) pulls them into place, holds them there and shows its
+//!   progress round the crosshair.
 //! - [`save`]: the interface each part fills in so it is saved and loaded
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
 //!
@@ -49,6 +52,7 @@ pub mod save;
 pub mod sound;
 mod state;
 pub mod units;
+pub mod use_item;
 
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
@@ -61,12 +65,13 @@ pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
 pub use log::GameLog;
-pub use sound::{SoundAt, Voice};
 pub use paths::GamePaths;
+pub use sound::{SoundAt, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, Play, Player, PlayerCamera, PlayerStart,
 };
+pub use use_item::{UseItem, UseLock, UsePanel};
 
 use bevy::prelude::*;
 
@@ -100,6 +105,7 @@ impl Plugin for CorePlugin {
             .add_message::<ChangeLevel>()
             .add_message::<ShowDebriefing>()
             .init_resource::<Cutscene>()
+            .init_resource::<UseItem>()
             .add_message::<TeleportPlayer>()
             .init_resource::<save::SaveList>()
             .add_message::<save::SaveGame>()

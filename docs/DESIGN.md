@@ -1592,6 +1592,46 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
 
+The rest of the dispenser (`rc_scripts_plugin/src/bacta.rs`, numbers and
+names in `[bacta]` of `data/scripts/scripts.toml`), read from the game's
+class defaults with `rc_probe --classes`:
+- **Pull and hold.** `BactaDispenser` has `bLockPlayerLocation` and
+  `BactaDispenserDefaults` `PlayerOffset` 90. While healing, the bacta
+  system fills in `rc_game_core::UseItem::lock` (a spot 90 units in front
+  of the dispenser, along its own facing, and the way back to it); the
+  player part (`rc_game/src/player.rs`) pulls the body there and turns it
+  to face the dispenser, then holds it (`ActionState::hold_for_use`: like
+  a cutscene hold, but Use still counts, so letting go stops). After the
+  turn, looking around is free. The front was checked on geo_01a: each
+  dispenser's squad spot (`NavPts`) lies along its facing, 135 units out.
+- **Hologram.** `MarkerGetBacta` (CTGame.u) names its participant's
+  `IconMesh` `MarkerIcons.Revive.reviveSM1BactaDispenser`: a see-through
+  commando, 183 units tall, origin at the feet, drawn with a hologram
+  shader (`HsHologram` HoloMarkerClone). One is placed at each dispenser's
+  squad spot, on the dispenser's floor, facing it. Shown while the
+  dispenser is switched on, not in use, and the player is within
+  `TargetingDistance` (3000, SquadMarker); tinted `EnabledColor` (blue)
+  when a squad mate is hurt, `OmitColor` (red) when the squad is full
+  (the marker's "SQUAD HEALTH CURRENTLY AT MAXIMUM"). Drawn as a flat
+  additive tint; the flickering hologram shader is `rc_hologram`'s job.
+- **Sounds.** The HUD's own (`CTHUDDefaults`): `TargetMarker`
+  (int_GEN_retCrossZoom_01) when the crosshair moves onto a usable
+  dispenser's collision cylinder, `HealthRecharging`
+  (int_GEN_hudHlthChrgng_02) looping while healing, `HealthCharged`
+  (int_GEN_hudHlthChrgd_01) at full. Heard from the helmet (no `SoundAt`).
+- **Use panel.** `UseItem::panel` is `Ready` at a usable dispenser and
+  `Working(health fraction)` while healing; `rc_game/src/original_hud.rs`
+  draws `HUDTextures.Reticles.HUD_Use` for Ready and `HUD_UsePanelInside`
+  plus `HUD_UsePanelOutside` (turned clockwise by the fraction times
+  `[use_panel] turn` in `data/ui/hud.toml`) while working.
+- **Our readings, not checked against the original** (it doesn't run on
+  the user's PC right now): when each sound plays, how the outer panel
+  moves, the pull's speed, that the hologram hides while in use, and its
+  brightness. Not done: the first-person arm plugging in
+  (`BactaHealer`, `HudArms.HudArmsBacta` with BactaLoad/BactaLoop/
+  BactaHolster), the zap effects, and `HUDIconX/Y` (an icon over the
+  dispenser).
+
 ### Breakable props (`rc_level::breakables`, `rc_scripts_plugin/src/breakables.rs`)
 
 Explosive barrels, geo_05b's fuel dispensers and their clamps, holo

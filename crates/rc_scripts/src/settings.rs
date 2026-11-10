@@ -44,6 +44,32 @@ pub struct Settings {
     pub bacta_heal_per_second: f32,
     /// Seconds before a used dispenser works again.
     pub bacta_recharge_seconds: f32,
+    /// Units in front of a dispenser the player is pulled to while using
+    /// it (the game's `PlayerOffset`).
+    pub bacta_player_offset: f32,
+    /// Pull the player into place and hold them there while they use a
+    /// dispenser (the game's `bLockPlayerLocation`).
+    pub bacta_lock_player: bool,
+    /// How fast the pull moves the player (units a second) and turns them
+    /// to face the dispenser (degrees a second).
+    pub bacta_pull_speed: f32,
+    pub bacta_turn_speed: f32,
+    /// The squad marker hologram shown at a dispenser's squad spot, as
+    /// `Package.Group.Mesh`; empty for none.
+    pub bacta_hologram: String,
+    /// How near (uu) the player must be to see the hologram.
+    pub bacta_hologram_range: f32,
+    /// The hologram's colour (sRGB, 0 to 255) when a squad mate could use
+    /// the dispenser, and when none needs to.
+    pub bacta_hologram_colour: [u8; 3],
+    pub bacta_hologram_full_colour: [u8; 3],
+    /// How bright the hologram is drawn, 0 to 1.
+    pub bacta_hologram_brightness: f32,
+    /// Sounds (`Package.Group.Name`, empty for none): the crosshair moves
+    /// onto a dispenser; healing (repeats); health full.
+    pub bacta_sound_aim: String,
+    pub bacta_sound_healing: String,
+    pub bacta_sound_full: String,
     /// Size (uu) of a level exit (`Teleporter`) the map gives none.
     pub teleporter_radius: f32,
     pub teleporter_height: f32,
@@ -69,6 +95,25 @@ impl Default for Settings {
             bacta_range: 256.0,
             bacta_heal_per_second: 50.0,
             bacta_recharge_seconds: 10.0,
+            // BactaDispenserDefaults (Properties/properties.u).
+            bacta_player_offset: 90.0,
+            // BactaDispenser (System/ctgame.u).
+            bacta_lock_player: true,
+            bacta_pull_speed: 300.0,
+            bacta_turn_speed: 360.0,
+            // MarkerGetBacta's Participants IconMesh (System/ctgame.u).
+            bacta_hologram: "MarkerIcons.Revive.reviveSM1BactaDispenser".into(),
+            // SquadMarker's TargetingDistance (System/engine.u).
+            bacta_hologram_range: 3000.0,
+            // SquadMarker's EnabledColor and OmitColor (System/engine.u).
+            bacta_hologram_colour: [122, 206, 255],
+            bacta_hologram_full_colour: [254, 126, 122],
+            bacta_hologram_brightness: 0.6,
+            // CTHUDDefaults (Properties/properties.u): TargetMarker,
+            // HealthRecharging, HealthCharged.
+            bacta_sound_aim: "GEN_Sound.Interface.int_GEN_retCrossZoom_01".into(),
+            bacta_sound_healing: "GEN_Sound.Interface.int_GEN_hudHlthChrgng_02".into(),
+            bacta_sound_full: "GEN_Sound.Interface.int_GEN_hudHlthChrgd_01".into(),
             // engine.u's Teleporter defaults (from NavigationPoint).
             teleporter_radius: 80.0,
             teleporter_height: 100.0,
@@ -111,6 +156,18 @@ struct Bacta {
     range: Option<f32>,
     heal_per_second: Option<f32>,
     recharge_seconds: Option<f32>,
+    player_offset: Option<f32>,
+    lock_player: Option<bool>,
+    pull_speed: Option<f32>,
+    turn_speed: Option<f32>,
+    hologram: Option<String>,
+    hologram_range: Option<f32>,
+    hologram_colour: Option<[u8; 3]>,
+    hologram_full_colour: Option<[u8; 3]>,
+    hologram_brightness: Option<f32>,
+    sound_aim: Option<String>,
+    sound_healing: Option<String>,
+    sound_full: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -183,6 +240,42 @@ impl Settings {
         }
         if let Some(v) = b.recharge_seconds {
             self.bacta_recharge_seconds = v;
+        }
+        if let Some(v) = b.player_offset {
+            self.bacta_player_offset = v;
+        }
+        if let Some(v) = b.lock_player {
+            self.bacta_lock_player = v;
+        }
+        if let Some(v) = b.pull_speed {
+            self.bacta_pull_speed = v.max(1.0);
+        }
+        if let Some(v) = b.turn_speed {
+            self.bacta_turn_speed = v.max(1.0);
+        }
+        if let Some(v) = b.hologram {
+            self.bacta_hologram = v;
+        }
+        if let Some(v) = b.hologram_range {
+            self.bacta_hologram_range = v;
+        }
+        if let Some(v) = b.hologram_colour {
+            self.bacta_hologram_colour = v;
+        }
+        if let Some(v) = b.hologram_full_colour {
+            self.bacta_hologram_full_colour = v;
+        }
+        if let Some(v) = b.hologram_brightness {
+            self.bacta_hologram_brightness = v.clamp(0.0, 1.0);
+        }
+        if let Some(v) = b.sound_aim {
+            self.bacta_sound_aim = v;
+        }
+        if let Some(v) = b.sound_healing {
+            self.bacta_sound_healing = v;
+        }
+        if let Some(v) = b.sound_full {
+            self.bacta_sound_full = v;
         }
         if let Some(v) = f.sound.volume {
             self.sound_volume = v.clamp(0.0, 1.0);

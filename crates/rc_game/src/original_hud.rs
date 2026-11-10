@@ -41,6 +41,9 @@ const BASE_LINES: f32 = 480.0;
 #[serde(deny_unknown_fields)]
 pub struct HudPlan {
     pub crosshair: CrosshairPlan,
+    /// The use panel round the crosshair (bacta dispensers).
+    #[serde(default)]
+    pub use_panel: Option<UsePanelPlan>,
     /// Read by `rc_menus::hud` (see `HudLayout`).
     #[serde(default)]
     layout: Option<toml::Value>,
@@ -62,6 +65,27 @@ pub struct CrosshairPlan {
     /// Weapon name (as in its weapon file) to picture.
     #[serde(default)]
     pub weapons: BTreeMap<String, String>,
+}
+
+/// `[use_panel]`: pictures drawn round the crosshair while the player
+/// stands at something they use by holding Use (a bacta dispenser).
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct UsePanelPlan {
+    /// Standing at it, not using it yet.
+    pub ready: String,
+    /// While using it: the still part, and the part that turns as the use
+    /// goes on.
+    pub inside: String,
+    pub outside: String,
+    /// How far the turning part turns from start to done, degrees
+    /// (clockwise).
+    #[serde(default = "quarter")]
+    pub turn: f32,
+}
+
+fn quarter() -> f32 {
+    90.0
 }
 
 fn yes() -> bool {
@@ -124,6 +148,14 @@ struct LayoutRoot;
 #[derive(Component)]
 struct CrossPicture;
 
+/// One picture of the use panel.
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+enum UsePart {
+    Ready,
+    Inside,
+    Outside,
+}
+
 pub struct OriginalHudPlugin;
 
 impl Plugin for OriginalHudPlugin {
@@ -137,6 +169,7 @@ impl Plugin for OriginalHudPlugin {
                 (
                     spawn_picture,
                     update_crosshair,
+                    update_use_panel,
                     collect_messages,
                     draw_layout,
                     hide_placeholder,
@@ -434,6 +467,115 @@ fn spawn_picture(
         ))
         .id();
     commands.entity(centre).add_child(picture);
+    for part in [UsePart::Ready, UsePart::Inside, UsePart::Outside] {
+        let p = commands
+            .spawn((
+                part,
+                ImageNode::default(),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+                UiTransform::IDENTITY,
+                Visibility::Hidden,
+            ))
+            .id();
+        commands.entity(centre).add_child(p);
+    }
+}
+
+/// The use panel round the crosshair: shown while the player stands at
+/// something they use by holding Use, its outer part turning as the use
+/// goes on. What the original draws when is native code; the pictures are
+/// its own (`HUDTextures.Reticles.HUD_Use*`), the rest our reading.
+#[allow(clippy::type_complexity)]
+fn update_use_panel(
+    mut hud: ResMut<OriginalHud>,
+    use_item: Res<rc_game_core::UseItem>,
+    mut images: ResMut<Assets<Image>>,
+    mut parts: Query<(
+        &UsePart,
+        &mut ImageNode,
+        &mut Node,
+        &mut UiTransform,
+        &mut Visibility,
+    )>,
+    log: Res<GameLog>,
+    mut last: Local<Option<rc_game_core::UsePanel>>,
+) {
+    let hud = &mut *hud;
+    let (Some(plan), Some(library)) = (&hud.plan, hud.library.as_mut()) else {
+        return;
+    };
+    let Some(panel) = plan.use_panel.clone() else {
+        return;
+    };
+    let scale = plan.crosshair.scale;
+    let state = use_item.panel;
+    let changed = |a: &rc_game_core::UsePanel, b: &rc_game_core::UsePanel| {
+        std::mem::discriminant(a) != std::mem::discriminant(b)
+    };
+    if last.as_ref().is_none_or(|l| changed(l, &state)) {
+        if last.is_some() || state != rc_game_core::UsePanel::Hidden {
+            log.line(format!("original hud: use panel {state:?}"));
+        }
+        *last = Some(state);
+    }
+    for (part, mut image, mut node, mut transform, mut shown) in &mut parts {
+        let (path, angle) = match (part, state) {
+            (UsePart::Ready, rc_game_core::UsePanel::Ready) => (&panel.ready, 0.0),
+            (UsePart::Inside, rc_game_core::UsePanel::Working(_)) => (&panel.inside, 0.0),
+            (UsePart::Outside, rc_game_core::UsePanel::Working(p)) => {
+                (&panel.outside, p.clamp(0.0, 1.0) * panel.turn)
+            }
+            _ => {
+                if *shown != Visibility::Hidden {
+                    *shown = Visibility::Hidden;
+                }
+                continue;
+            }
+        };
+        let key = path.to_ascii_lowercase();
+        let picture = hud
+            .pictures
+            .entry(key)
+            .or_insert_with(|| load_picture(library, path, &mut images, &log))
+            .clone();
+        let Some((handle, size)) = picture else {
+            if *shown != Visibility::Hidden {
+                *shown = Visibility::Hidden;
+            }
+            continue;
+        };
+        if *shown != Visibility::Inherited {
+            *shown = Visibility::Inherited;
+        }
+        if image.image != handle {
+            image.image = handle;
+        }
+        // Sized like the crosshair: by screen height.
+        let s = scale * 100.0 / BASE_LINES;
+        let (w, h) = (Val::Vh(size.x * s), Val::Vh(size.y * s));
+        if node.width != w || node.height != h {
+            node.width = w;
+            node.height = h;
+            node.left = Val::Vh(-size.x * s / 2.0);
+            node.top = Val::Vh(-size.y * s / 2.0);
+        }
+        let r = Rot2::degrees(angle);
+        if transform.rotation != r {
+            transform.rotation = r;
+        }
+    }
+}
+
+/// Which use panel pictures are on screen now (for the script's check).
+pub fn use_panel_showing(w: &mut World) -> Vec<String> {
+    let mut q = w.query::<(&UsePart, &Visibility)>();
+    q.iter(w)
+        .filter(|(_, v)| **v != Visibility::Hidden)
+        .map(|(p, _)| format!("{p:?}"))
+        .collect()
 }
 
 fn load_picture(
@@ -446,7 +588,7 @@ fn load_picture(
         Ok(rgba) => {
             let size = Vec2::new(rgba.width as f32, rgba.height as f32);
             log.line(format!(
-                "original hud: crosshair {path}: {}x{}",
+                "original hud: picture {path}: {}x{}",
                 rgba.width, rgba.height
             ));
             let image = Image::new(
@@ -464,7 +606,7 @@ fn load_picture(
         }
         Err(e) => {
             log.line(format!(
-                "original hud: crosshair {path}: {e}; keeping the placeholder crosshair"
+                "original hud: picture {path}: {e}; not drawn (the crosshair keeps its placeholder)"
             ));
             None
         }

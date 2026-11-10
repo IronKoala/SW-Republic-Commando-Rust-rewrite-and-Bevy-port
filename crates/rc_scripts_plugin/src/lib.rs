@@ -47,6 +47,7 @@
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
+pub mod bacta;
 pub mod breakables;
 pub mod characters;
 pub mod cutscene;
@@ -55,12 +56,12 @@ pub mod save;
 pub mod sounds;
 
 use bevy::prelude::*;
-use rc_combat::{Damage, DamageKind, Health};
+use rc_combat::{Damage, DamageKind};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
-    GamePaths, GameSet, GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player,
-    PlayerVitals, RaiseEvent,
+    playing, units::to_unreal, Action, ChangeLevel, CurrentLevel, GameLog, GamePaths, GameSet,
+    GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player, PlayerVitals,
+    RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
@@ -100,11 +101,24 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::ShowDebriefing>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
-            .add_systems(Update, build.run_if(in_state(GameState::Loading)))
+            .add_systems(
+                Update,
+                (build, bacta::prepare)
+                    .chain()
+                    .run_if(in_state(GameState::Loading)),
+            )
+            .init_resource::<rc_game_core::UseItem>()
+            .add_systems(OnEnter(GameState::InGame), bacta::place_holograms)
+            .add_systems(
+                Update,
+                bacta::show_holograms
+                    .in_set(GameSet::View)
+                    .run_if(in_state(GameState::InGame)),
+            )
             .add_systems(
                 Update,
                 (
-                    bacta,
+                    bacta::heal,
                     markers::run,
                     breakables::shots,
                     breakables::blasts,
@@ -156,6 +170,9 @@ struct Dispenser {
     name: String,
     tag: String,
     location: [f32; 3],
+    /// Which way it faces, radians (Unreal yaw): its front, where the
+    /// player stands to use it.
+    yaw: f32,
     /// Where a character stands to use it (its `NavPts` marker), if any.
     stand: Option<[f32; 3]>,
     enabled: bool,
@@ -277,6 +294,8 @@ fn begin(
     log: Res<GameLog>,
 ) {
     gate.wait(PART);
+    commands.remove_resource::<bacta::BactaAssets>();
+    commands.remove_resource::<bacta::BactaStats>();
     let settings = load_settings(&paths, &log);
     let Some(map) = &current.map else {
         gate.fail(PART, "no map chosen");
@@ -423,6 +442,13 @@ fn build(
             name: a.obj.name.clone(),
             tag: a.obj.tag().to_string(),
             location: a.location,
+            yaw: match a.obj.get("Rotation") {
+                Some(Val::Raw(b)) if b.len() >= 8 => {
+                    i32::from_le_bytes([b[4], b[5], b[6], b[7]]) as f32 * std::f32::consts::TAU
+                        / 65536.0
+                }
+                _ => 0.0,
+            },
             stand: match a.obj.get("NavPts") {
                 Some(Val::List(l)) => l.first().and_then(|n| {
                     map.actors
@@ -503,90 +529,6 @@ fn text_of(v: Option<&Val>) -> String {
         Some(Val::Byte(b)) => format!("{b}"),
         Some(Val::Bool(b)) => format!("{b}"),
         _ => String::new(),
-    }
-}
-
-/// Bacta dispensers: hold Use near one that is switched on to heal. It
-/// sends its "in use" event when you start and its "used" event when you
-/// are full.
-fn bacta(
-    time: Res<Time>,
-    script: Option<ResMut<LevelScript>>,
-    actions: Res<ActionState>,
-    mut player: Query<(&Transform, Option<&mut Health>), With<Player>>,
-    log: Res<GameLog>,
-    mut claimed: ResMut<rc_game_core::UseClaimed>,
-    mut anims: MessageWriter<rc_game_core::PropAnim>,
-) {
-    claimed.0 = false;
-    let Some(mut script) = script else { return };
-    let Ok((t, health)) = player.single_mut() else {
-        return;
-    };
-    let dt = time.delta_secs().min(0.25);
-    let feet = to_unreal(t.translation);
-    let using = actions.pressed(Action::Use);
-    let range = script.director.settings.bacta_range;
-    let rate = script.director.settings.bacta_heal_per_second;
-    let recharge = script.director.settings.bacta_recharge_seconds;
-    let now = script.director.time;
-    let mut health = health;
-    let mut fire = Vec::new();
-    let mut healed = 0.0;
-    for d in &mut script.dispensers {
-        d.recharge_left = (d.recharge_left - dt).max(0.0);
-        let dx = feet.x - d.location[0];
-        let dy = feet.y - d.location[1];
-        let near = (dx * dx + dy * dy).sqrt() < range && (feet.z - d.location[2]).abs() < 256.0;
-        claimed.0 |= near && d.enabled && d.recharge_left <= 0.0;
-        let can = near && using && d.enabled && d.recharge_left <= 0.0;
-        if can && !d.in_use {
-            d.in_use = true;
-            log.line(format!(
-                "{PART}: t={now:.2} the player uses bacta dispenser {}",
-                d.name
-            ));
-            if let Some(e) = &d.active_event {
-                fire.push((e.clone(), d.name.clone()));
-            }
-            // The canister swings in (the model's own animation and sounds).
-            anims.write(rc_game_core::PropAnim {
-                actor: d.name.clone(),
-                anim: "Load".into(),
-            });
-        }
-        if d.in_use {
-            let full = match health.as_deref_mut() {
-                Some(h) => {
-                    let before = h.current;
-                    h.current = (h.current + rate * dt).min(h.max);
-                    healed += h.current - before;
-                    h.current >= h.max
-                }
-                None => true,
-            };
-            if full || !can {
-                d.in_use = false;
-                anims.write(rc_game_core::PropAnim {
-                    actor: d.name.clone(),
-                    anim: "Holster".into(),
-                });
-                if full {
-                    d.recharge_left = recharge;
-                    log.line(format!(
-                        "{PART}: t={now:.2} bacta dispenser {} done: health full",
-                        d.name
-                    ));
-                    if let Some(e) = &d.used_event {
-                        fire.push((e.clone(), d.name.clone()));
-                    }
-                }
-            }
-        }
-    }
-    script.stats.bacta_healed += healed;
-    for (e, by) in fire {
-        script.director.fire(&e, &by);
     }
 }
 
@@ -750,7 +692,8 @@ fn run(
                 log.line(format!(
                     "{PART}: t={now:.2} prop {name} ({tag}) damaged{}",
                     if removed {
-                        "; it has no damaged look, so it is gone (no longer solid or drawn)".to_string()
+                        "; it has no damaged look, so it is gone (no longer solid or drawn)"
+                            .to_string()
                     } else {
                         look.map(|m| format!("; should become {m} (not drawn yet)"))
                             .unwrap_or_default()
@@ -822,8 +765,7 @@ fn run(
                 };
                 // Cutscenes: holding the player, fades, the player's
                 // teleports.
-                if cutscene::KINDS.contains(&call.kind.as_str()) || call.kind == "teleporttopoint"
-                {
+                if cutscene::KINDS.contains(&call.kind.as_str()) || call.kind == "teleporttopoint" {
                     let at = format!(
                         "{PART}: t={now:.2} {} #{} {}",
                         call.script, call.index, call.kind

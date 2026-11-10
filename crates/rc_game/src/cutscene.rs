@@ -44,9 +44,16 @@ impl Plugin for CutscenePlugin {
     }
 }
 
-fn hold_player(cut: Res<Cutscene>, mut actions: ResMut<ActionState>) {
+fn hold_player(
+    cut: Res<Cutscene>,
+    use_item: Res<rc_game_core::UseItem>,
+    mut actions: ResMut<ActionState>,
+) {
     if let Some(h) = &cut.held {
         actions.hold_still(h.weapon_change);
+    } else if use_item.lock.is_some() {
+        // At a bacta dispenser: held, but letting go of Use still stops.
+        actions.hold_for_use();
     }
 }
 

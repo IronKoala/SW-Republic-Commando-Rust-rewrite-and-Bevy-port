@@ -334,8 +334,10 @@ impl HudLayout {
         // serde can't refuse unknown names in a flattened struct, so a
         // misspelt one is caught here.
         let mut raw: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
-        // `[crosshair]` in the same file is read by the game.
+        // `[crosshair]` and `[use_panel]` in the same file are read by
+        // the game.
         raw.remove("crosshair");
+        raw.remove("use_panel");
         for (i, e) in raw
             .get("element")
             .and_then(|e| e.as_array())
