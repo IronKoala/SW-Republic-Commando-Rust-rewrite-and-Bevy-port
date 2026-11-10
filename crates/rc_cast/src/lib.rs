@@ -394,6 +394,11 @@ fn spawn_cast(
             DespawnOnExit(GameState::InGame),
             Name::new(format!("cast {}", m.name)),
         ));
+        if m.shadow {
+            e.insert(rc_shadows::CastsShadow {
+                middle: m.half_height / UU_PER_UNIT,
+            });
+        }
         let look = match (model, assets.as_mut()) {
             (Some(model), Some((meshes, materials, images))) => {
                 drawn += 1;

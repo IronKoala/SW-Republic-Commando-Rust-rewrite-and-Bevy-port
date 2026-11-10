@@ -89,6 +89,10 @@ pub struct WeaponParams {
     pub melee: Option<(f32, f32)>,
     /// Where shots start, from the eye: forward, right, up (`FPFireOffset`).
     pub fire_offset: [f32; 3],
+    /// Twin barrels: every shot also fires from the mirror of
+    /// `fire_offset` (left for right), at the same time (`fire.mirror`;
+    /// the Wookiee heavy turret's `muzzle_l` and `muzzle_r`).
+    pub mirror_fire: bool,
     /// The camera kick per shot, in rotation units: up, sideways
     /// (`WeaponKick`). Sideways is random between minus and plus this.
     pub kick: [f32; 2],
@@ -214,6 +218,7 @@ impl WeaponParams {
             },
             damage_kind,
             fire_offset: t.vec3("fire.offset")?.unwrap_or([0.0; 3]),
+            mirror_fire: t.boolean("fire.mirror")?.unwrap_or(false),
             kick: [kick[0], kick[1]],
             recoil_spring: t.number("recoil.spring")?.unwrap_or(0.0),
             recoil_damping: t.number("recoil.damping")?.unwrap_or(0.0),

@@ -25,6 +25,7 @@
 
 pub mod ammo_box;
 pub mod arms;
+pub mod arms_sound;
 mod arms_view;
 pub mod audio_table;
 pub mod counter;
@@ -208,6 +209,7 @@ impl Plugin for WeaponsPlugin {
             )
             // Pickup sounds (`pickup_sound`).
             .init_resource::<pickup_sound::PickupSounds>()
+            .init_resource::<arms_sound::ArmsSounds>()
             .add_systems(
                 Update,
                 (

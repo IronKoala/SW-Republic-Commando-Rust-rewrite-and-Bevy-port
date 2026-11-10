@@ -202,7 +202,7 @@ copy of the game.
   rifle hits or 2 pistol hits. One droid fires back, and its hits take your
   shield before your health. The firing and reload sounds are the game's.
   Every weapon is a text file in `data/weapons`, which mods can edit.
-  `rc_shoot --script` drives itself through 17 checks and passed all of them.
+  `rc_shoot --script` drives itself through 20 checks and passed all of them.
 
 - **First-person arms and weapon animations (tested in the cloud sandbox,
   not yet on Windows or by playing).** The player holds the original
@@ -212,7 +212,9 @@ copy of the game.
   stand still, sway when you walk or run, kick on each shot, play the full
   reload, holster the old weapon and bring up the new one when you switch
   (with the attachment swap between DC-17m attachments), and play the
-  grenade throw and melee hit. They're drawn by their own camera, so the gun
+  grenade throw and melee hit, with the game's own handling sounds for
+  each (reload, bringing up, putting away, attachment swaps, melee, throw;
+  heard in the log in the cloud, not yet listened to on Windows). They're drawn by their own camera, so the gun
   never pokes into walls. The sniper's arms hide while zoomed, as in the
   game. The little screen on the DC-17m and its sniper shows the ammo you
   carry (three digits, like "120") and a bar that empties with the
@@ -596,7 +598,21 @@ copy of the game.
   geo_01b's map says its barrels leave none). Settings in
   `data/effects/effects.toml`.
 
+- Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
+  missile turret or an E-Web and press Use. You get on, look around to
+  turn the gun (only as fast and as far as the original's turret turns),
+  fire its own weapon, and press Use again to get off. Getting on and off
+  sends the map's turret events, so the last level's ending can go on
+  once you man its turret. Level scripts can put characters on turrets,
+  and they shoot at enemies on their own. Each kind is a file in
+  `data/turrets/`, so mods can add more. Not tried in a running game yet.
+
 ## What doesn't work yet
+
+- Turrets: the squad can't be ordered onto a turret yet (the "man turret"
+  markers), ceiling turrets that fire by themselves aren't done, and
+  turrets can't be destroyed. The last level's ending also needs the
+  rockets that hit the ship, which aren't done.
 
 - Breakable props: the damaged step's model isn't swapped in, the
   burning or electric after-effect some barrels leave isn't done, and
@@ -640,6 +656,14 @@ copy of the game.
   flicker, now and then a squash in height), and the briefing holograms
   wear their hologram skins; checked in the cloud, not yet looked at on
   Windows. Not tested on Windows or by playing.
+- Character shadows (since 2026-11-10, needs SQUAD SHADOWS on in the
+  GRAPHICS options, as in the original): the characters the map marks
+  (in the prologue 7 troopers, 3 young clones and the Kaminoan in the
+  gym) cast their shape onto the floor from a light high above, as the
+  original's shadow projectors do. Checked in a stand-in scene and seen
+  in the prologue's gym in the cloud; not tested on Windows. The shadow
+  stays flat at the feet (not on steps, slopes or walls) and has sharp
+  edges. The squad and enemies don't have these yet.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game

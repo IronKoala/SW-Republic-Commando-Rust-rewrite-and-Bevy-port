@@ -26,6 +26,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
 | `rc_hologram` | `HologramPlugin`: holograms shimmer and flicker like the original's `DynamicHologram` shader, with the game's own glow and noise pictures. Check: `hologram_check` example in `rc_level_viewer`. |
 | `rc_cast` | `CastPlugin`, the characters placed in a map that no other part owns (the Kaminoans, young clones, troopers and commandos of the cutscenes, animated props, troopers and vehicles standing about in missions): drawn with the game's models and moved by the level scripts. |
+| `rc_shadows` | `ShadowsPlugin`, character shadows the way the original draws them: each marked character's shape laid on the floor from a light high above (`CastsShadow`, `data/shadows/shadows.toml`). The `shadow_check` example checks it without the game. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
 | `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
 | `rc_scripts` | Level scripts: runs a map's own scripting (scripted triggers and sequences, touch triggers, counters, true/false conditions, checkpoints, destructible props) as events and tags. No Bevy. `rc_script_check` reads every map's scripts and runs them without a window. |
@@ -3138,10 +3139,31 @@ Not done: the anti-armour's grenade digit (`PannerClip`, shown when the
 ammo has `DigitalClipDisplay`) and the DC-15s charge bar (its recharge
 uses other numbers we haven't read); they show their pictures unslid.
 
-**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
+**The arms' sounds** (`arms_sound.rs`). The reload clatter, the click of
+bringing a weapon up, putting it away, the melee swing and the grenade
+throw aren't in the weapon classes. They are `AnimNotify_Sound` events in
+the arms animations: each names a sound and a moment (0 = start, 1 = end).
+`rc_model` reads them into `Model::sounds`; when a weapon's arms are read,
+`ArmsSounds` reads every sound they name (all in `GEN_Sound`). Each frame
+`spans` works out which stretch of which animation the arms went through
+(including the end of a reload or holster that finished this frame, the
+old weapon's holster when switching, and both ends when breathing or
+running goes round), and `play` plays every event in it. List them with
+`cargo run -p rc_combat --example rc_arms_sounds -- <game folder>`. What
+the five arms make (2026-11-10): reload (DC-17m 1, sniper 5, anti-armour 1,
+repeater 2, pistol none, as its charge refills by itself), holster and
+load 1 each, attachment swaps 1 each, idle 1-3, run 2 armour footsteps,
+throw 2-3, melee 1-6. **Our choices:** played for the player only at full
+volume, not placed in the level; quiet while the player is down or a
+cutscene gives them other hands; still played when the sniper's zoom hides
+the arms. A weapon file's `sound.reload` is still read (for a weapon with
+no arms), but the DC-17m's was taken out, since its animation plays it.
+
+**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths), 9
+in `arms_sound.rs`;
 `rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,
 `Holster`, the pistol's `Fire`, and the rifle again after switching back,
-and that the gun corner of the picture is textured; `rc_game --script`
+that the reload played the game's own reload sound, and that the gun corner of the picture is textured; `rc_game --script`
 checks the arms show the weapon in hand after loading a level.
 
 **VR:** the arms are a child of the player camera with their own camera,
@@ -3775,6 +3797,56 @@ cast can't be hurt), and saving their places (the cutscene maps have no
 checkpoints). In missions, the placed troopers, walkers and the scripted
 spider droid now stand and move as their scripts say but don't fight.
 
+## Character shadows (`rc_shadows`)
+
+**What the original does** (read from its install: the script text and
+class defaults in `Engine.u`, `CTCharacters.u` and
+`XInterfaceCTMenus.u`; nothing copied). Every `Pawn` checks each frame:
+if its `bActorShadows` is set and the "Shadows" option is on (the
+GRAPHICS page's SQUAD SHADOWS row, `EnableShadows`), it makes a
+`ShadowProjector`: a 128x128 picture of the character's shape seen from
+`Normal(vect(1,1,3))` (high above and a little to one side, the same for
+every character), laid on the floors and walls around it, fading over
+`MaxTraceDistance` 350 units and not drawn beyond `CullDistance` 1200
+units from the camera, at full `ShadowDarkness`. Only `CloneCommando`
+(Delta) sets `bActorShadows` in its class; maps set it on chosen actors.
+The prologue marks 7 troopers, 3 young clones and 1 Kaminoan (Kaminoan2,
+in the gym); the two Kaminoans in the opening nursery are not marked, so
+they cast no shadow in the original either. `AnimProp`s carry the flag in
+the prologue but aren't pawns, so they never make a projector.
+
+**What we do.** `rc_cast` reads `bActorShadows` (the map's value, else
+the class's) and puts `rc_shadows::CastsShadow` on each marked character.
+`ShadowsPlugin` gives every mesh under it a "shadow twin": the same mesh
+(same pose, updated with it), drawn with `ShadowMaterial`, whose small
+shader (`shadow.wesl`) slides each point down along the light onto the
+floor at the character's feet and draws it black and see-through by
+`strength`: `darkness x (1 - distance along the light from the middle of
+the body / max_trace_distance)`, about 0.75 for a standing trooper. The
+twin writes depth with a strict "nearer than" test, and rounds its depth,
+so the body's many overlapping triangles darken each floor spot once. No
+extra camera or picture is drawn: one more draw of each body with a
+very small shader, which phones and VR headsets can afford.
+`CharacterShadows` switches all of them; `rc_game` sets it from SQUAD
+SHADOWS (`video.squad_shadows`). Shadows farther than `cull_distance`
+from `PlayerCamera` are hidden. All numbers are in
+`data/shadows/shadows.toml`.
+
+**Differences from the original.** The floor is taken as flat at the
+feet: the shadow doesn't bend onto steps, slopes or walls, and it shows
+under (not on) a prop standing on the floor next to the character. The
+edges are sharp where the original's small picture softens them. How the
+original's blending turns `ShadowDarkness` 255 into a final darkness
+isn't known for sure. The squad and enemies don't use it yet (the squad
+has the old flat round patch under each commando).
+
+**Checking it.** `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p
+rc_shadows --example shadow_check`: two overlapping boxes on a white
+floor, seen from above; checks where the shadow falls, its darkness, that
+overlaps aren't darker, the off switch and the far-away cut-off. In the
+game the log says `shadows: N more shadow copies (C characters, ...)`
+and `shadows: character shadows on/off`.
+
 ## Holograms, tank liquid and props with no stored light
 
 **Holograms (`HsHologram`).** Republic Commando's own hologram material
@@ -4027,6 +4099,70 @@ debris bounces off a flat floor at the prop's base, not the level;
 ignored; beam and trail emitters aren't drawn; sounds aren't placed in 3D
 yet, only made quieter with distance (the level scripts' 3D sound in
 `rc_scripts_plugin/src/sounds.rs` could be reused).
+
+## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
+
+**What the original does.** A `Turret` (the Wookiee heavy turret on
+Kashyyyk, the Trandoshan missile turrets on the ship, the E-Web) holds one
+gunner at a time. The player walks up, looks at it and presses Use
+("PRESS @ TO MOUNT TURRET"); the view moves onto the gun, looking turns it
+(at most `Speed` rotation units a second, inside `MinYaw..MaxYaw` and
+`MinPitch..MaxPitch`, or all the way round with `bUnlimitedYaw`), Fire
+fires the turret's own first-person weapon (`HeavyTurret`,
+`MissileTurret`, `EWebTurret`), and Use again gets off at the map's exit
+spot (`NavPts`, else `NavPtLocs` turned with the turret). Getting on sends
+`PlayerControlEvent` (player only) then `ControlEvent`; getting off sends
+`ReleaseEvent`. Scripts put characters on turrets with
+`ACTION_AttachToTurret` (the first turret with that tag, in map order) and
+change who may use one with `ACTION_SetTurretUsable` (`bPlayerUsable`).
+
+**How we split it.**
+
+- `rc_turrets` (no Bevy): the rules. `Turret::mount`/`leave` return the
+  events to send; `turn` clamps by speed and limits and wraps the yaw to
+  -32768..32768 after the limits, as the original does, so yyy_06d's
+  limits of a whole turn mean no limit; `turn_toward` and `settle` for a
+  character gunner and an empty turret. `map::read` reads each placed
+  turret's tag, events, limits and exit spot. `params` reads
+  `data/turrets/<id>.toml`.
+- `data/turrets/*.toml`: one file per kind, claiming map classes
+  (`classes = ["WookieeHeavyTurret"]`). Model and bones, aim limits and
+  speed, gunner height, reach, exit offset, the player's weapon
+  (`data/weapons/<id>.toml`) and, under `[auto]`, what a character gunner
+  fires. A turret class no file claims is left out and logged
+  (`MarkerTurret`, `RASCeilingTurret`). A mod adds a turret with a new file.
+- `rc_game_core::Manning` (component on the player): which turret, where
+  the body is held, where the gun points. The player's body and camera
+  read it, so the view code doesn't know about turrets (a VR camera reads
+  the same thing). `rc_game_core::TurretOrder` messages carry the script
+  steps from `rc_scripts_plugin` without a dependency.
+- `rc_turrets_plugin` (Bevy): draws the turrets (their `turrets.ukx` model,
+  the yaw and pitch bones turned in the model's own axes), offers the
+  prompt, reads `Action::Use` and `ActionState::look` (so mouse, pad, gyro
+  and touch all aim it), swaps the turret's weapon into the player's
+  `Arsenal` while on (and back after), sends the turret's events as
+  `RaiseEvent`s, moves the player to the exit spot with `TeleportPlayer`,
+  holds character gunners on the gun and fires `FireShot`s at the nearest
+  enemy in range. Saves aim, gunner and usable flag (`turrets` save part).
+- `rc_combat`: `fire.mirror = true` in a weapon file fires a second shot
+  from the mirrored offset (the Wookiee turret's two barrels). While on a
+  turret the player can't switch weapons or reload by hand.
+
+**Checked against the maps** with `rc_turret_check` (reads only):
+yyy_06d has four Wookiee turrets; `WookieeHeavyTurret0` is the player's
+(sends `MountedTurret4`, `MaxPitch 16384`), and getting on it moves
+`ScriptedTrigger11` (the ending) on to waiting for the targets to die.
+The other three are tagged for `ACTION_AttachToTurret` (two share
+`WookieeCannon1`; the first in the map, `WookieeHeavyTurret4`, wins, as in
+the original). ras_03b's missile turret sends `TurretResponseDudes` and
+`SpawnPerch3`; ras_03c's two missile turrets and E-Web send theirs.
+`rc_turrets_plugin`'s test turns each model and checks the muzzles move
+the way the gun aims (needs the game files).
+
+**Our choices.** Facing the turret within 1.2 radians counts as looking at
+it (the original asks for the crosshair on it). The Trandoshan turret's
+four barrels fire one after another for a character gunner. The turret
+weapons' first-person offsets and the E-Web's reload time are guesses.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 
