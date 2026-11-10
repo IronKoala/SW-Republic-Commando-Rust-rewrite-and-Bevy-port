@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Dispenser sounds actually play (rc_level_plugin)
+
+- **Changed:** `anim_props::sound_key` keys each sound by package and name only. The animations name sounds with their group (`GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`) but they were stored without it, so none was found and nothing played, silently. Each sound played is now logged (`level: BactaDispenserGEO0 sound ...`) and the self-test checks them.
+- **Why:** User playtest: animations played, no sound.
+- **Tested how:** `rc_game --script` in the cloud with GEN_Sound.uax copied read only.
+- **Result:** Load plays fol_GEN_trapFiddle_01, mach_GEN_Bdroid_Dispense_close and _open; Holster the same three. Check passes; 111 passed, 2 failed (same level-sound checks).
+- **Still broken / not tested:** Not heard on Windows.
+- **Next:** The user listens at the dispenser.
+
 ## 2026-11-10: Bacta dispensers play their animation and sounds (rc_model, rc_level_plugin, rc_scripts_plugin)
 
 - **Changed:** `rc_model::Model::sounds`: the sounds an animation names (`AnimNotify_Sound`) and when. New message `rc_game_core::PropAnim` (actor, animation). `rc_level_plugin::anim_props` reads the props' `Load` and `Holster` animations and their sounds, and `animate` plays an asked-for animation once (re-posing the model each frame) with its sounds from the prop. The bacta system sends `Load` when the player starts healing and `Holster` when they stop.

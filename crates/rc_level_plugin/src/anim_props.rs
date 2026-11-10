@@ -58,11 +58,23 @@ pub struct AnimProp {
     pub last: Option<String>,
     /// Every animation started, in order (for the log and self-tests).
     pub played: Vec<String>,
+    /// Every sound its animations played, by dotted path ("(not
+    /// loaded)" added when it couldn't be read).
+    pub heard: Vec<String>,
 }
 
-/// The sounds the props' animations play, by lower-case dotted path.
+/// The sounds the props' animations play, by [`sound_key`].
 #[derive(Resource, Default)]
 pub struct AnimPropSounds(pub HashMap<String, GameSound>);
+
+/// A sound's key: its package and name, lower case, without the groups in
+/// between (`GEN_Sound.Machines.mach_X` -> `gen_sound.mach_x`), the way
+/// the sound packages are read.
+pub fn sound_key(path: &str) -> String {
+    let package = path.split('.').next().unwrap_or(path);
+    let name = path.rsplit('.').next().unwrap_or(path);
+    format!("{package}.{name}").to_ascii_lowercase()
+}
 
 /// What `spawn` did, for the log.
 #[derive(Default, Debug)]
@@ -152,6 +164,7 @@ pub fn spawn(world: &mut World, paths: &GamePaths, props: &[(Placement, String, 
                     playing: None,
                     last: None,
                     played: Vec::new(),
+                    heard: Vec::new(),
                 },
                 Transform::default(),
                 Visibility::default(),
@@ -178,7 +191,7 @@ fn load_sounds(world: &mut World, paths: &GamePaths, model: &Model, report: &mut
     {
         let have = world.get_resource_or_init::<AnimPropSounds>();
         for (_, path) in model.sounds.values().flatten() {
-            if have.0.contains_key(&path.to_ascii_lowercase()) {
+            if have.0.contains_key(&sound_key(path)) {
                 continue;
             }
             if let Some((package, name)) = path.split_once('.') {
@@ -197,7 +210,7 @@ fn load_sounds(world: &mut World, paths: &GamePaths, model: &Model, report: &mut
         report.failures.extend(notes);
         let mut have = world.resource_mut::<AnimPropSounds>();
         for (name, sound) in found {
-            have.0.insert(format!("{package}.{name}").to_ascii_lowercase(), sound);
+            have.0.insert(sound_key(&format!("{package}.{name}")), sound);
         }
         report.sounds += names.len();
     }
@@ -228,7 +241,11 @@ pub fn animate(
                     p.playing = Some((a.anim.clone(), 0.0));
                     p.played.push(a.anim.clone());
                     // Sounds at the very start play on the first step.
-                    play_sounds(&p, &a.anim, -1.0, 0.0, &sounds, &camera, &mut commands);
+                    let heard = play_sounds(&p, &a.anim, -1.0, 0.0, &sounds, &camera, &mut commands);
+                    for h in heard {
+                        log.line(format!("level: {} sound {h}", p.name));
+                        p.heard.push(h);
+                    }
                 }
                 None => log.line(format!("level: {} has no animation {}", p.name, a.anim)),
             }
@@ -249,7 +266,11 @@ pub fn animate(
         let last = (clip.num_frames - 1.0).max(0.0);
         let next = (frame + clip.rate * dt).min(last);
         let span = clip.num_frames.max(1.0);
-        play_sounds(&p, &anim, frame / span, next / span, &sounds, &camera, &mut commands);
+        let heard = play_sounds(&p, &anim, frame / span, next / span, &sounds, &camera, &mut commands);
+        for h in heard {
+            log.line(format!("level: {} sound {h}", p.name));
+            p.heard.push(h);
+        }
         let points = placed_points(&p.model, &p.place, &anim, next);
         let normals = p.model.normals(&points);
         for (s, h) in p.model.sections.iter().zip(&p.meshes) {
@@ -278,9 +299,10 @@ fn play_sounds(
     sounds: &Option<Res<AnimPropSounds>>,
     camera: &Query<&GlobalTransform, With<PlayerCamera>>,
     commands: &mut Commands,
-) {
+) -> Vec<String> {
+    let mut out = Vec::new();
     let Some(list) = p.model.sounds.get(anim) else {
-        return;
+        return out;
     };
     let at = rc_game_core::units::to_bevy(rc_movement::Vec3::new(
         p.place.location[0],
@@ -293,9 +315,10 @@ fn play_sounds(
         }
         let Some(h) = sounds
             .as_ref()
-            .and_then(|s| s.0.get(&path.to_ascii_lowercase()))
+            .and_then(|s| s.0.get(&sound_key(path)))
             .and_then(|g| g.pick())
         else {
+            out.push(format!("{path} (not loaded)"));
             continue;
         };
         let distance = camera
@@ -313,7 +336,9 @@ fn play_sounds(
             SoundAt::place(at),
             DespawnOnExit(GameState::InGame),
         ));
+        out.push(path.clone());
     }
+    out
 }
 
 /// One material per section of `model`, with its picture.
