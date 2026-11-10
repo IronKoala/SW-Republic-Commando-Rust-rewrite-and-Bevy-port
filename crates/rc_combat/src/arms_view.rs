@@ -215,6 +215,7 @@ pub(crate) fn load_arms(
                 .map(|s| (s.sequence().to_string(), s.sequence().to_string()))
                 .collect(),
             skins: vec![],
+            ..Default::default()
         };
         let made = Model::load(&|rel| paths.game_file(rel), &spec);
         match &made {
