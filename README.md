@@ -591,7 +591,21 @@ copy of the game.
   on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
   go on. Broken props are kept in save files.
 
+- Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
+  missile turret or an E-Web and press Use. You get on, look around to
+  turn the gun (only as fast and as far as the original's turret turns),
+  fire its own weapon, and press Use again to get off. Getting on and off
+  sends the map's turret events, so the last level's ending can go on
+  once you man its turret. Level scripts can put characters on turrets,
+  and they shoot at enemies on their own. Each kind is a file in
+  `data/turrets/`, so mods can add more. Not tried in a running game yet.
+
 ## What doesn't work yet
+
+- Turrets: the squad can't be ordered onto a turret yet (the "man turret"
+  markers), ceiling turrets that fire by themselves aren't done, and
+  turrets can't be destroyed. The last level's ending also needs the
+  rockets that hit the ship, which aren't done.
 
 - Breakable props just disappear when they break: their broken model,
   effect and sound aren't shown yet, the burning or electric after-effect

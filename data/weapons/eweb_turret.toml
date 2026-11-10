@@ -1,0 +1,48 @@
+# What the player fires from the E-Web turret (the original's first-person
+# turret weapon EWebTurret): a fast repeating blaster.
+#
+# Numbers marked "game:" are EWebTurret (ctinventory.u) with
+# EWebTurretDefaults (Properties/properties.u) on top, its ammo
+# EWebTurretAmmo and bolt EWebTurretProj.
+
+name = "EWHB-12 Mounted Turret"   # game: EWebTurretDefaults ItemName
+
+[fire]
+mode = "automatic"        # game: FireMode 2 (FM_Automatic)
+shot_delay = 0.12         # game: EWebTurretDefaults ShotDelay
+aim_error = 25            # game: EWebTurretDefaults AimError
+offset = [300.4, 0, -6.56] # game: EWebTurret FPFireOffset
+
+[ammo]
+clip_size = 100           # game: EWebTurret ReloadCount
+max_ammo = 10000          # game: Turret AmmoAmount 10000 (never runs out)
+start_ammo = 10000
+reload_time = 2           # placeholder: no cool-down time read for the E-Web
+
+[shot]
+kind = "bolt"
+accel = 60000             # game: AccelFactor (Projectile's default)
+max_speed = 5000          # game: EWebTurretProj MaxSpeed
+life_span = 10            # game: EWebTurretProj LifeSpan
+damage = 50               # game: EWebTurretProj Damage
+damage_kind = "blaster"
+damage_type = "CTDamageEnergy" # game: MyDamageType
+
+[recoil]
+kick = [300, 100, 0]      # game: EWebTurretDefaults WeaponKick
+spring = 50               # game: RecoilConstant
+damping = 0.3             # game: RecoilDampening
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_sbdFire_01"] # game: EWebTurretDefaults FireSound (not checked in the package yet)
+
+[model]
+package = "weapons"
+mesh = "DC17mBlaster"     # placeholder: shown only if the arms below can't be read
+bolt_colour = [1.0, 0.3, 0.1] # our choice
+
+[arms]
+mesh = "HudArmsEWebTurret" # game: EWebTurret Mesh
+fov = 85
+brightness = 0.75

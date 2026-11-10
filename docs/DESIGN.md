@@ -4003,6 +4003,70 @@ picture after cycling round), and `rc_game --script` (starts in tactical
 with the squad glowing, X goes to low light with the lamp and back, the two
 GAME page rows change the settings).
 
+## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
+
+**What the original does.** A `Turret` (the Wookiee heavy turret on
+Kashyyyk, the Trandoshan missile turrets on the ship, the E-Web) holds one
+gunner at a time. The player walks up, looks at it and presses Use
+("PRESS @ TO MOUNT TURRET"); the view moves onto the gun, looking turns it
+(at most `Speed` rotation units a second, inside `MinYaw..MaxYaw` and
+`MinPitch..MaxPitch`, or all the way round with `bUnlimitedYaw`), Fire
+fires the turret's own first-person weapon (`HeavyTurret`,
+`MissileTurret`, `EWebTurret`), and Use again gets off at the map's exit
+spot (`NavPts`, else `NavPtLocs` turned with the turret). Getting on sends
+`PlayerControlEvent` (player only) then `ControlEvent`; getting off sends
+`ReleaseEvent`. Scripts put characters on turrets with
+`ACTION_AttachToTurret` (the first turret with that tag, in map order) and
+change who may use one with `ACTION_SetTurretUsable` (`bPlayerUsable`).
+
+**How we split it.**
+
+- `rc_turrets` (no Bevy): the rules. `Turret::mount`/`leave` return the
+  events to send; `turn` clamps by speed and limits and wraps the yaw to
+  -32768..32768 after the limits, as the original does, so yyy_06d's
+  limits of a whole turn mean no limit; `turn_toward` and `settle` for a
+  character gunner and an empty turret. `map::read` reads each placed
+  turret's tag, events, limits and exit spot. `params` reads
+  `data/turrets/<id>.toml`.
+- `data/turrets/*.toml`: one file per kind, claiming map classes
+  (`classes = ["WookieeHeavyTurret"]`). Model and bones, aim limits and
+  speed, gunner height, reach, exit offset, the player's weapon
+  (`data/weapons/<id>.toml`) and, under `[auto]`, what a character gunner
+  fires. A turret class no file claims is left out and logged
+  (`MarkerTurret`, `RASCeilingTurret`). A mod adds a turret with a new file.
+- `rc_game_core::Manning` (component on the player): which turret, where
+  the body is held, where the gun points. The player's body and camera
+  read it, so the view code doesn't know about turrets (a VR camera reads
+  the same thing). `rc_game_core::TurretOrder` messages carry the script
+  steps from `rc_scripts_plugin` without a dependency.
+- `rc_turrets_plugin` (Bevy): draws the turrets (their `turrets.ukx` model,
+  the yaw and pitch bones turned in the model's own axes), offers the
+  prompt, reads `Action::Use` and `ActionState::look` (so mouse, pad, gyro
+  and touch all aim it), swaps the turret's weapon into the player's
+  `Arsenal` while on (and back after), sends the turret's events as
+  `RaiseEvent`s, moves the player to the exit spot with `TeleportPlayer`,
+  holds character gunners on the gun and fires `FireShot`s at the nearest
+  enemy in range. Saves aim, gunner and usable flag (`turrets` save part).
+- `rc_combat`: `fire.mirror = true` in a weapon file fires a second shot
+  from the mirrored offset (the Wookiee turret's two barrels). While on a
+  turret the player can't switch weapons or reload by hand.
+
+**Checked against the maps** with `rc_turret_check` (reads only):
+yyy_06d has four Wookiee turrets; `WookieeHeavyTurret0` is the player's
+(sends `MountedTurret4`, `MaxPitch 16384`), and getting on it moves
+`ScriptedTrigger11` (the ending) on to waiting for the targets to die.
+The other three are tagged for `ACTION_AttachToTurret` (two share
+`WookieeCannon1`; the first in the map, `WookieeHeavyTurret4`, wins, as in
+the original). ras_03b's missile turret sends `TurretResponseDudes` and
+`SpawnPerch3`; ras_03c's two missile turrets and E-Web send theirs.
+`rc_turrets_plugin`'s test turns each model and checks the muzzles move
+the way the gun aims (needs the game files).
+
+**Our choices.** Facing the turret within 1.2 radians counts as looking at
+it (the original asks for the crosshair on it). The Trandoshan turret's
+four barrels fire one after another for a character gunner. The turret
+weapons' first-person offsets and the E-Web's reload time are guesses.
+
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 
 Every pull request, and every push to `main`, is built and tested by GitHub's
