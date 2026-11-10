@@ -2474,6 +2474,14 @@ walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
 
+To see which file claims each map's spawners, and which classes no file
+claims yet, run `rc_enemy_spawners` (an example in `rc_enemies`, needs the
+game folder in `RC_GAME_DIR`; writes `logs/enemy_spawners.log`). A new
+enemy type that fights like the existing ones (walks, shoots, hits up
+close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
+with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
+beam weapon is an `instant` shot fired as a burst of quick hits.
+
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
 `thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
