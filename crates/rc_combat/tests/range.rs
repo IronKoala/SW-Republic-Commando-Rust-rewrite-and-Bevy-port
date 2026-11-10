@@ -155,6 +155,7 @@ fn every_weapon_file_reads() {
     assert_eq!(
         ids,
         [
+            "core_ship_turret",
             "dc15s_pistol",
             "dc17m_antiarmor",
             "dc17m_blaster",
@@ -164,6 +165,7 @@ fn every_weapon_file_reads() {
             "e5_blaster_tm",
             "elite_beam_enemy",
             "eweb_turret",
+            "gunship_turret",
             "heavy_turret",
             "missile_turret",
             "sbd_blaster",

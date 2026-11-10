@@ -1,0 +1,37 @@
+# The beam cannon of a crashed Republic gunship (geo_04a, geo_04d), sat
+# at. The player gets on with Use and fires a continuous beam; both levels
+# point the player at it with an objective marker and wait for its
+# ControlEvent.
+#
+# See wookiee_heavy_turret.toml for how these files work. "game:" values
+# are GunshipCannon (ctcharacters.u), Turret (engine.u) and
+# GunshipCannonDefaults (Properties/properties.u) on top.
+
+name = "Gunship Cannon"
+classes = ["GunshipCannon"]
+
+[model]
+mesh = "GunshipTurret"             # game: Mesh
+pose = "Fire"                      # game: its only animation; frame 0 is at rest
+muzzles = ["muzzle"]               # game: GunshipCannon GetWeaponBoneFor 'muzzle'
+
+[aim]
+speed = 20000                      # game: GunshipCannonDefaults Speed
+min_yaw = -16384                   # game: GunshipCannonDefaults MinYaw
+max_yaw = 16384                    # game: GunshipCannonDefaults MaxYaw
+min_pitch = -8194                  # game: Turret MinPitch
+max_pitch = 8194                   # game: Turret MaxPitch
+
+[gunner]
+height = -50                       # game: TurretHeight
+sit = true                         # game: SitToUse
+radius = 100                       # game: CollisionRadius
+half_height = 110                  # game: CollisionHeight
+reach = 100                        # our choice
+exit = [0, 127, -50]               # game: NavPtLocs offset (both maps give a spot instead)
+weapon = "gunship_turret"          # game: FPWeaponClass GunshipTurret
+
+[auto]
+weapon = "gunship_turret"          # a squad mate on it fires the same beam
+shot_delay = 0.05                  # as the player's beam (see weapons/gunship_turret.toml)
+range = 10000                      # game: LaserWeaponAmmo Range

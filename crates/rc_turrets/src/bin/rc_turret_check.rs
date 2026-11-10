@@ -3,6 +3,7 @@
 //!
 //! Usage:
 //!   rc_turret_check [MAP ...] [--secs N] [--mount NAME@SECONDS] [--fire EVENT@SECONDS ...]
+//!                   [--hurt NAME@SECONDS:AMOUNT ...]
 //!
 //! For each map (yyy_06d, ras_03b and ras_03c if none are named) it logs
 //! every turret: its class, the data file that claims it, its tag, events,
@@ -12,7 +13,10 @@
 //! `SetTurretUsable` changes who may use it). With `--mount NAME@T` the
 //! player gets on that turret at T seconds (by name, or `any` for the
 //! first one the player may use), sending its events into the scripts.
-//! `--fire Name@T` sends any other event. Everything goes to
+//! `--fire Name@T` sends any other event. Automatic turrets (core ship
+//! turrets) switch on and off when an event with their tag goes off;
+//! `--hurt NAME@T:AMOUNT` damages one (by name) at T seconds, sending its
+//! first-hurt and destroyed events into the scripts. Everything goes to
 //! `logs/rc_turret_check.log`. The game folder is RC_GAME_DIR or the
 //! default Steam path; nothing is written there.
 
@@ -62,12 +66,18 @@ fn main() {
     let mut secs = 120.0f32;
     let mut mount: Option<(String, f32)> = None;
     let mut fires: Vec<(String, f32)> = Vec::new();
+    let mut hurts: Vec<(String, f32, f32)> = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--secs" => secs = args.next().and_then(|s| s.parse().ok()).unwrap_or(secs),
             "--mount" => mount = args.next().as_deref().and_then(at),
             "--fire" => fires.extend(args.next().as_deref().and_then(at)),
+            "--hurt" => hurts.extend(args.next().as_deref().and_then(|s| {
+                let (a, amount) = s.rsplit_once(':')?;
+                let (name, t) = at(a)?;
+                Some((name, t, amount.parse().ok()?))
+            })),
             _ => names.push(a),
         }
     }
@@ -98,7 +108,8 @@ fn main() {
         // Every actor whose class looks like a turret, to show the ones no
         // file claims.
         let (all, _) = rc_turrets::map::read(&pkg, &bytes, &level, &|c: &str| {
-            c.to_ascii_lowercase().contains("turret") || c.eq_ignore_ascii_case("EWebCannon")
+            let c = c.to_ascii_lowercase();
+            c.contains("turret") || c.ends_with("cannon")
         });
         let mut list: Vec<Turret> = Vec::new();
         log.line(format!("== {name}: {} turret actors", all.len()));
@@ -107,13 +118,13 @@ fn main() {
                 Some((id, f)) => {
                     let t = Turret::new(p, id, f);
                     log.line(format!(
-                        "   {} ({}, file {}): tag {}, at {:?} yaw {}, player usable {}, control {:?}, player control {:?}, release {:?}, yaw {}..{}{} pitch {}..{} speed {}, exit {:?}",
+                        "   {} ({}, file {}): tag {}, at {:?} turned {:?} (pitch, yaw, roll), player usable {}, control {:?}, player control {:?}, release {:?}, yaw {}..{}{} pitch {}..{} speed {}, exit {:?}{}",
                         t.place.name,
                         t.place.class,
                         t.kind,
                         t.place.tag,
                         t.place.location,
-                        t.place.rotation[1],
+                        t.place.rotation,
                         t.player_usable,
                         t.place.control_event,
                         t.place.player_control_event,
@@ -125,6 +136,16 @@ fn main() {
                         t.limits.max_pitch,
                         t.limits.speed,
                         t.exit_point(),
+                        match &t.automatic {
+                            Some(a) => format!(
+                                "; AUTOMATIC: {}, health {}, destroyed sends {:?}, first hurt sends {:?}",
+                                if a.on { "on from the start" } else { "off until its tag's event" },
+                                a.max_health,
+                                t.place.event,
+                                t.place.first_damaged_event
+                            ),
+                            None => String::new(),
+                        }
                     ));
                     list.push(t);
                 }
@@ -147,6 +168,7 @@ fn main() {
         let mut now = 0.0f32;
         let mut mounted = false;
         let mut fired = vec![false; fires.len()];
+        let mut hurt_done = vec![false; hurts.len()];
         while now < secs {
             let mut send: Vec<(String, String)> = Vec::new();
             if let Some((who, t)) = &mount {
@@ -182,6 +204,30 @@ fn main() {
                     send.push((e.clone(), "rc_turret_check".into()));
                 }
             }
+            for (k, (who, t, amount)) in hurts.iter().enumerate() {
+                if hurt_done[k] || now < *t {
+                    continue;
+                }
+                hurt_done[k] = true;
+                match list
+                    .iter()
+                    .position(|x| x.place.name.eq_ignore_ascii_case(who))
+                {
+                    Some(i) => {
+                        let r = list[i].hurt(*amount);
+                        log.line(format!(
+                            "t={now:.1} {} takes {amount} damage: health {:?}, destroyed {}",
+                            list[i].place.name,
+                            list[i].automatic.as_ref().map(|a| a.health),
+                            r.destroyed
+                        ));
+                        for e in r.events {
+                            send.push((e, list[i].place.name.clone()));
+                        }
+                    }
+                    None => log.line(format!("t={now:.1} no turret {who} to hurt")),
+                }
+            }
             for (e, by) in send {
                 log.line(format!("t={now:.1} send {e} (from {by})"));
                 d.fire(&e, &by);
@@ -193,6 +239,8 @@ fn main() {
                         &t.place.control_event,
                         &t.place.player_control_event,
                         &t.place.release_event,
+                        &t.place.event,
+                        &t.place.first_damaged_event,
                     ]
                     .into_iter()
                     .flatten()
@@ -206,6 +254,18 @@ fn main() {
                 match effect {
                     Effect::Event { name: e, by } => {
                         log.line(format!("t={now:.1} event {e} (by {by})"));
+                        for t in list
+                            .iter_mut()
+                            .filter(|t| t.place.tag.eq_ignore_ascii_case(&e))
+                        {
+                            let r = t.trigger(now, 0.0);
+                            if r != rc_turrets::Switched::Nothing {
+                                log.line(format!(
+                                    "t={now:.1} AUTOMATIC {} switched {r:?} by {e}",
+                                    t.place.name
+                                ));
+                            }
+                        }
                     }
                     Effect::Action {
                         script,
@@ -280,8 +340,14 @@ fn main() {
         }
         for t in &list {
             log.line(format!(
-                "   at the end: {} gunner {:?}, player usable {}",
-                t.place.name, t.gunner, t.player_usable
+                "   at the end: {} gunner {:?}, player usable {}{}",
+                t.place.name,
+                t.gunner,
+                t.player_usable,
+                t.automatic.as_ref().map_or(String::new(), |a| format!(
+                    ", automatic on {}, health {}, destroyed {}",
+                    a.on, a.health, a.dead
+                ))
             ));
         }
         // Scripts that wait for, or were woken by, a turret's events.
@@ -292,6 +358,8 @@ fn main() {
                     t.place.control_event.clone(),
                     t.place.player_control_event.clone(),
                     t.place.release_event.clone(),
+                    t.place.event.clone(),
+                    t.place.first_damaged_event.clone(),
                 ]
             })
             .flatten()
