@@ -625,8 +625,12 @@ copy of the game.
   when the projector's throw animation reaches its "start the briefing"
   moment, and let the player go at their end, as in the original (since
   2026-11-10; checked in the cloud from the log, not by playing). Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the holograms' flicker and glow, the title card,
-  the credits, and the logo videos. Not tested on Windows or by playing.
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the title card,
+  the credits, and the logo videos. Holograms shimmer and flicker like
+  the original's (edges fade, a speckle that jumps about, brightness
+  flicker, now and then a squash in height), and the briefing holograms
+  wear their hologram skins; checked in the cloud, not yet looked at on
+  Windows. Not tested on Windows or by playing.
 - Character shadows (since 2026-11-10, needs SQUAD SHADOWS on in the
   GRAPHICS options, as in the original): the characters the map marks
   (in the prologue 7 troopers, 3 young clones and the Kaminoan in the

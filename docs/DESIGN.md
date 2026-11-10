@@ -24,6 +24,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
+| `rc_hologram` | `HologramPlugin`: holograms shimmer and flicker like the original's `DynamicHologram` shader, with the game's own glow and noise pictures. Check: `hologram_check` example in `rc_level_viewer`. |
 | `rc_cast` | `CastPlugin`, the characters placed in a map that no other part owns (the Kaminoans, young clones, troopers and commandos of the cutscenes, animated props, troopers and vehicles standing about in missions): drawn with the game's models and moved by the level scripts. |
 | `rc_shadows` | `ShadowsPlugin`, character shadows the way the original draws them: each marked character's shape laid on the floor from a light high above (`CastsShadow`, `data/shadows/shadows.toml`). The `shadow_check` example checks it without the game. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
@@ -3791,16 +3792,64 @@ its `DynamicHologram` hardware shader, whose assembly text is stored in
 `GameData/Textures/hardwareshaders.utx` (read to learn what it does,
 not copied): the base picture's brightness x a glow by how squarely the
 surface faces the eye x a scrolling noise picture x a flicker x the
-colour. We do the first and last parts: `rc_image::hologram` turns the
-picture into its brightness in the hologram colour, and it is drawn
-unlit, added to what is behind it, from both sides. Used by the level's
+colour. `rc_image::hologram` turns the picture into its brightness
+(0.5 x red + 0.6 x green + 0.5 x blue, capped, as the shader does) in
+the hologram colour; the rest is done while drawing by `rc_hologram`
+(next section). Without that part the hologram is drawn as a steady
+glow: unlit, added to what is behind it, from both sides. Used by the level's
 static meshes (`rc_level_viewer::materials`, `Picture::hologram`) and by
 models (`rc_model`, `Skin::hologram`; `rc_cast` draws them): the
 prologue's hologram rifles (`Holo_DC17m`) and advisor (`Holo_Advisor`, a
 clone trooper with a hologram skin). Without a picture (`Holo_Blank`) it
 is plain glow. The default colour (Engine.u class defaults) is a light
-blue. Not done: the facing glow, noise and flicker, and the shader's
-swelling along the surface.
+blue.
+
+**Shimmer and flicker (`rc_hologram`).** `HologramPlugin` swaps the steady
+glow for `HologramMaterial` on every mesh with a `Hologram` component
+(`draw::spawn_level` and `rc_cast` add it to hologram meshes). Its
+shader, `hologram.wesl`, does what `DynamicHologram` does, read from the
+shader's assembly text and its constants (`VSConstants`, `PSConstants`,
+each a constant type from Engine.u's `SConstant` enum and four numbers
+stored W, X, Y, Z):
+
+| The original | Ours |
+| --- | --- |
+| Glow picture `GreyHoloFade` looked up at 0.11 x (eye . surface) | the same, read from `hardwareshaders.utx`; edges seen side-on fade out |
+| Noise picture `NoiseDigital` across the model's X and Z at 0.0171 per unit, moved by -flicker x (0.2, 0.5) | the same; the noise jumps somewhere new each step (shimmer) |
+| Vertex colour = facing x flicker (c22) | brightness x facing x small flicker |
+| Height x flicker (c21, "big rare flicker") | the model's height squashes towards its pivot now and then |
+| Position + flicker (c22, "small frequent flicker") | the model is nudged by about 1 unit |
+| Additive, source alpha = glow picture's alpha | added, x the glow's alpha |
+| A "distort" and "scan" swelling | not done: its switch heights (c18, 123,000 units) are never reached, so it's off in the game too |
+
+The flicker values (`EVC_Flicker`) are filled by game code we can't see.
+Their settings come in pairs (0.99/0.3, 0.1/0.4, 0/1); we read them as
+"chance a step stays at 1" and "most it drops", the one reading that fits
+all three. Steps come 30 times a second whatever the frame rate (the
+original changed them every frame); the values come from a hash of the
+step number in the shader, so there's no per-frame work on the CPU.
+`HologramLook` holds every number for mods. The game's pictures are read
+when `HologramGameData` names the `GameData` folder (`rc_level_plugin`
+sets it from `GamePaths`); until then a plain fade and no noise stand in.
+
+Open question: whether the game also multiplies by `HologramColor`'s
+alpha (50 of 255 in every hologram, which would make them about five
+times dimmer). We don't, so holograms stay as bright as the steady glow
+the user has seen; `HologramLook::brightness` can turn them down.
+
+Check: `cargo run -p rc_level_viewer --example hologram_check` (under
+`xvfb-run` in the cloud; set `RC_GAME_DIR` to test the noise too)
+measures a hologram ball on screen over 40 pictures: it got the new
+material, it is light blue, its rim is darker than its middle (0.17 of
+it), its brightness flickers (160 to 224) and its speckle moves.
+
+**Cast skins.** A cast member's materials come from `data/cast/cast.toml`
+if it names any, else the `Skins` the map sets on the actor
+(`rc_cast::read::map_skins`), else its class's default `Skins`
+(`ClassLibrary::object_list`). The briefing holograms rely on the last:
+`Holo_Advisor` is a clone trooper mesh with the `CloneAdvisor`
+hologram skin, `Holo_BattleDroid` a battle droid with
+`Holo_BattleDroidRedShader`.
 
 **Colour settings are stored blue first.** A material's `Color` setting
 (`HologramColor`, `DiffuseTint`) is 4 bytes in the order blue, green,

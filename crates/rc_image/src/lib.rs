@@ -34,14 +34,15 @@ pub fn unreal_color(bytes: [u8; 4]) -> [u8; 4] {
 ///
 /// From the game's `DynamicHologram` hardware shader (its assembly text is
 /// stored in `hardwareshaders.utx`): it takes the base picture's
-/// brightness, multiplies it by a glow that depends on how squarely the
-/// surface faces the eye, a scrolling noise picture, a flicker and the
-/// material's `HologramColor`. Only the brightness and the colour are done
-/// here; the glow, noise and flicker are not.
+/// brightness as 0.5 x red + 0.6 x green + 0.5 x blue, capped at full
+/// (its pixel shader's first constant), and multiplies it by the
+/// material's `HologramColor`. The rest of that shader (the glow by how
+/// squarely the surface faces the eye, the jumping noise and the flicker)
+/// is done while drawing, by `rc_hologram`.
 pub fn hologram(image: &Rgba, colour: [u8; 3]) -> Rgba {
     let mut pixels = Vec::with_capacity(image.pixels.len());
     for px in image.pixels.as_chunks::<4>().0 {
-        let lum = 0.30 * px[0] as f32 + 0.59 * px[1] as f32 + 0.11 * px[2] as f32;
+        let lum = (0.5 * px[0] as f32 + 0.6 * px[1] as f32 + 0.5 * px[2] as f32).min(255.0);
         for c in colour {
             pixels.push((lum * c as f32 / 255.0).round().clamp(0.0, 255.0) as u8);
         }
@@ -356,12 +357,16 @@ mod tests {
     #[test]
     fn hologram_keeps_brightness_in_the_colour() {
         let img = super::Rgba {
-            width: 2,
+            width: 3,
             height: 1,
-            pixels: vec![255, 255, 255, 10, 0, 0, 0, 255],
+            pixels: vec![255, 255, 255, 10, 0, 0, 0, 255, 100, 100, 100, 255],
         };
         let h = super::hologram(&img, [100, 200, 255]);
-        assert_eq!(h.pixels, vec![100, 200, 255, 255, 0, 0, 0, 255]);
+        // White is capped at full; mid grey 100 counts as 160.
+        assert_eq!(
+            h.pixels,
+            vec![100, 200, 255, 255, 0, 0, 0, 255, 63, 125, 160, 255]
+        );
     }
 
     #[test]

@@ -74,6 +74,20 @@ pub fn to_image_with(p: &rc_image::Rgba, format: TextureFormat) -> Image {
     )
 }
 
+/// The middle of a batch's lowest point (Bevy's up is Y).
+fn bottom_middle(points: &[[f32; 3]]) -> Vec3 {
+    let mut lo = Vec3::splat(f32::MAX);
+    let mut hi = Vec3::splat(f32::MIN);
+    for p in points {
+        lo = lo.min(Vec3::from(*p));
+        hi = hi.max(Vec3::from(*p));
+    }
+    if points.is_empty() {
+        return Vec3::ZERO;
+    }
+    Vec3::new((lo.x + hi.x) / 2.0, lo.y, (lo.z + hi.z) / 2.0)
+}
+
 /// A lightmap page as a Bevy image. Lightmaps are stored on the same
 /// brightness curve as textures, so they are marked sRGB too: Bevy then
 /// multiplies the two in linear light, which on screen matches the game
@@ -311,6 +325,14 @@ pub fn spawn_level(
             coloured_live += 1;
         } else {
             entity.insert(MeshMaterial3d(materials.add(material)));
+        }
+        if hologram {
+            // rc_hologram swaps in the shimmering, flickering look. The
+            // batch is in world space, so its height squashes towards its
+            // bottom middle.
+            entity.insert(rc_hologram::Hologram {
+                pivot: bottom_middle(&b.positions),
+            });
         }
         if let Some(m) = b.mover {
             entity.insert(MoverPart(m));

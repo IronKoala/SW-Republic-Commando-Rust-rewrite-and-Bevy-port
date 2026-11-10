@@ -55,6 +55,8 @@ pub struct CastPlugin;
 
 impl Plugin for CastPlugin {
     fn build(&self, app: &mut App) {
+        // Holograms in the cast (the prologue's rifles and advisor) shimmer.
+        app.add_plugins(rc_hologram::HologramPlugin);
         app.init_resource::<CastCache>()
             .init_resource::<CastPlan>()
             .add_message::<CharacterOrder>()
@@ -169,9 +171,11 @@ fn load_cast(
         .and_then(|d| {
             let pkg = rc_package::Package::parse(&d).map_err(|e| e.to_string())?;
             let level = rc_level::actors::read_level(&pkg, &d).map_err(|e| e.to_string())?;
-            Ok(rc_level::scripts::read(&pkg, &d, &level))
+            let scripts = rc_level::scripts::read(&pkg, &d, &level);
+            let skins = read::map_skins(&pkg, &d, &scripts.actors);
+            Ok((scripts, skins))
         });
-    let scripts = match read {
+    let (scripts, map_skins) = match read {
         Ok(s) => s,
         Err(e) => {
             log_line(&log, format!("can't read {}: {e}; no cast", path.display()));
@@ -181,7 +185,7 @@ fn load_cast(
     let (Some(lib), Some(meshes)) = (cache.classes.clone(), cache.meshes.clone()) else {
         return;
     };
-    let (members, notes) = read::find_cast(&scripts.actors, &lib, &meshes, &file);
+    let (members, notes) = read::find_cast(&scripts.actors, &lib, &meshes, &file, &map_skins);
     for n in notes {
         log_line(&log, n);
     }
@@ -221,7 +225,7 @@ fn load_cast(
         log_line(
             &log,
             format!(
-                "{} ({}) at ({:.0}, {:.0}, {:.0}) facing {:.0} deg: {} from {}{}{}{}",
+                "{} ({}) at ({:.0}, {:.0}, {:.0}) facing {:.0} deg: {} from {}{}{}{}{}",
                 m.name,
                 m.class,
                 m.location[0],
@@ -239,7 +243,19 @@ fn load_cast(
                 } else {
                     String::new()
                 },
-                if m.hidden { ", hidden" } else { "" }
+                if m.hidden { ", hidden" } else { "" },
+                if m.skins.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        ", skins {}",
+                        m.skins
+                            .iter()
+                            .map(|s| s.as_deref().unwrap_or("-"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                }
             ),
         );
         list.push((m, model));
@@ -526,11 +542,15 @@ fn spawn_pieces(
                         ..default()
                     })
                 };
-                c.spawn((
+                let mut piece = c.spawn((
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(material),
                     NoFrustumCulling,
                 ));
+                // rc_hologram swaps in the shimmering, flickering look.
+                if s.skin.as_ref().is_some_and(|k| k.hologram) {
+                    piece.insert(rc_hologram::Hologram { pivot: Vec3::ZERO });
+                }
                 pieces.push((i, handle));
             }
         });
