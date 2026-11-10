@@ -567,9 +567,11 @@ copy of the game.
   distance, unless the game's own settings for that sound say it is radio
   (most dialogue is). Tested in the cloud on a silent sound card, not yet
   listened to or run on Windows. No subtitles yet. Music cues, characters walking or animating, the squad
-  joining and leaving and camera moves are logged as "not done yet". The
-  end-of-campaign debriefing screen isn't shown: the game goes straight
-  on. Not tested on Windows.
+  joining and leaving and camera moves are logged as "not done yet". At the
+  end of each campaign the original debriefing screen shows (its own
+  picture, frame and texts, with the level's title, words and picture);
+  CONTINUE goes on to the next campaign. Its campaign music isn't played
+  yet. Not tested by playing a campaign to its end. Not tested on Windows.
 - Cutscenes (since 2026-11-09): the prologue, briefings and epilogue run
   to their end and go on to the next map. The player is held still with
   the original's look limits, moved between rooms, and the screen fades

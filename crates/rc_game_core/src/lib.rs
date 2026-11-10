@@ -29,8 +29,9 @@
 //!   where it comes from), for the VOICES volume and 3D SOUND options.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
 //! - [`events`]: the level's named events ([`ScriptEvent`] out of the level
-//!   scripts, [`RaiseEvent`] into them), and [`ChangeLevel`] when a level
-//!   exit sends the player on to the next map.
+//!   scripts, [`RaiseEvent`] into them), [`ChangeLevel`] when a level
+//!   exit sends the player on to the next map, and [`ShowDebriefing`] when
+//!   a campaign's last level ends.
 //! - [`save`]: the interface each part fills in so it is saved and loaded
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
 //!
@@ -53,7 +54,7 @@ pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
-    LevelScriptsRun, RaiseEvent, ScriptEvent, ScriptTags, SquadStanceOrder,
+    LevelScriptsRun, RaiseEvent, ScriptEvent, ScriptTags, ShowDebriefing, SquadStanceOrder,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
@@ -94,6 +95,7 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
             .add_message::<ChangeLevel>()
+            .add_message::<ShowDebriefing>()
             .init_resource::<Cutscene>()
             .add_message::<TeleportPlayer>()
             .init_resource::<save::SaveList>()
