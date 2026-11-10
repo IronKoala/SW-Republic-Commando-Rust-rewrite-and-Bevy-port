@@ -2248,6 +2248,57 @@ that kind nearest the squad, orders it, and checks after 45 s that the job
 was done (or the post taken), that the player asked for it once and that a
 squad mate answered.
 
+### Optional squad ammo (`rc_squad/src/ammo.rs`, `[ammo]` in `squad.toml`)
+
+Off by default, because the original's squad never runs out and never
+takes boxes (docs/RESEARCH.md, "Squad ammo and ammo boxes"). With
+`[ammo] limited = "no"` every squad mate's ammo list is empty, which means
+"never runs out", and none of the code below does anything.
+
+A mod switches it on with a `squad/squad.toml` holding only the lines it
+changes (every other value keeps its built-in default):
+
+```toml
+[ammo]
+limited = "yes"
+```
+
+Then, all our own rules:
+
+- **Counting.** Each squad mate starts with the `start` of each
+  `carry_<id> = most, start` line (the DC-17m 120 of 300, sniper 20 of 20,
+  anti-armour 4 of 4, thermal detonators 2 of 5, from the squad's own guns
+  in the Properties package). Guns or grenades not listed never run out.
+  Every shot (`Squad::shoot`) takes one from the gun fired, every grenade
+  (Fixer's own and grenade posts) one from `throws`. `SquadEvent::OutOfAmmo`
+  when one reaches 0.
+- **Running out.** An empty speciality gun isn't picked (Sev keeps to the
+  rifle with no sniper rounds); with the usual gun empty they hold fire.
+- **Fetching** (`Squad::think_fetch`, before the usual think). A squad mate
+  with no job (no marker, not reviving, not on a post) whose lowest gun is
+  at or below `fetch_below` (25%) of the most walks to the nearest box that
+  fills it, within `fetch_range` (1500 uu) of them and of the spot they're
+  tied to. In a fight (a target, or an enemy within sight) they wait until
+  that gun is empty, unless `fetch_in_fights`. Two squad mates never go for
+  the same box. After `fetch_give_up` (15 s) they leave a box they can't
+  reach alone, and wait as long again (back at their place) before trying
+  another. Events `FetchAmmo` and `FetchStopped` (box gone, full again,
+  busy, enemy to fight first, can't get to it).
+- **Taking** (`rc_squad_plugin/src/ammo.rs`). `gather_boxes` copies the
+  untaken `rc_combat::ammo_box::AmmoBox`es into `Squad::boxes` each frame;
+  `take_boxes` runs after the squad moves and uses the player's touch test
+  (`ammo_box::touches`). `Squad::take_box` fills only what isn't full, up to
+  the most carried, like the player's rule; the box is then marked taken,
+  so it's hidden and saved as taken. A squad mate walking over a box they
+  have room for takes it even if they weren't fetching it.
+- **Saving.** Each squad mate's counts are in the `[squad]` section of a save
+  (`ammo`, left out when empty).
+
+Tests: `cargo test -p rc_squad` (7 ammo tests) and
+`cargo test -p rc_squad_plugin --test ammo_room` (switched off nobody goes
+near the boxes; switched on Sev, low on rifle shots, and Fixer, out of
+grenades, each fetch theirs and come back).
+
 ### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
 
 The lines are the game's: each member's `audio_table` (squad.toml, like
@@ -2754,9 +2805,15 @@ amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
   them to come back. Their model is hidden.
 
 The `[pickups]` section of a save file lists the boxes taken, by name.
-`AmmoBoxTaken` is sent for each box taken. Not done yet: the squad taking
-boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup` and the
-like, 40 across the campaign).
+`AmmoBoxTaken` is sent for each box taken. Not done yet: weapons lying in the maps
+(`DC17mSniperWeaponPickup` and the like, 40 across the campaign).
+
+Squad mates don't take boxes, on purpose: in the original only the player
+can (`bCanPickupInventory`), and anyone else whose weapon runs dry gets a
+fresh magazine for free (`bInfiniteClipsForNonPlayers`). The port's squad
+already fires without running out, which matches. Evidence in
+`docs/RESEARCH.md`, "Squad ammo and ammo boxes". A mod can switch on squad
+ammo and box fetching: see "Optional squad ammo" under Delta Squad.
 
 #### Pickup sound and message
 

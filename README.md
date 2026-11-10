@@ -159,6 +159,13 @@ copy of the game.
   compiled code we don't read, so the rules are our own; every number is
   in `data/squad/squad.toml` (`use_specialities = "no"` turns it off).
 
+- **Optional squad ammo, off by default (tested in the cloud sandbox by
+  numbers, not yet on Windows or with eyes).** As in the original, squad
+  mates never run out and never take ammo boxes. A mod can switch on
+  `[ammo] limited = "yes"` in `data/squad/squad.toml`: then squad mates
+  count their shots and grenades and walk to a nearby box when they run
+  low (only once the gun is empty in a fight).
+
 - **Squad context orders (tested in the cloud sandbox by numbers, not yet
   on Windows, in a real level, or with eyes).** Each kind of squad marker
   does its own job: bacta heals the squad mate who uses it; demolition and
