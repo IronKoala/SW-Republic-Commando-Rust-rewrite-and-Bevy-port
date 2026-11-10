@@ -113,6 +113,10 @@ pub struct CastMember {
     pub hidden: bool,
     /// A prop's own animation and whether it loops.
     pub prop_anim: Option<(String, bool)>,
+    /// What a prop plays when a level event named by its tag triggers it
+    /// (`AnimTriggered`), and whether it loops: the hologram projector's
+    /// `ThrowHoloProjector`, which starts the briefings.
+    pub prop_trigger: Option<(String, bool)>,
     /// Running speed, Unreal units a second (`GroundSpeed`).
     pub ground_speed: f32,
 }
@@ -272,6 +276,15 @@ pub fn find_cast(
                 }
                 _ => None,
             });
+        let prop_trigger = o
+            .structure("AnimTriggered")
+            .and_then(|s| match s.get("Anim") {
+                Some(Val::Text(t)) if !t.is_empty() && !t.eq_ignore_ascii_case("None") => {
+                    Some((t.clone(), matches!(s.get("bLoop"), Some(Val::Bool(true)))))
+                }
+                _ => None,
+            })
+            .filter(|_| is_prop && !is_pawn);
         out.push(CastMember {
             name: o.name.clone(),
             class: o.class.clone(),
@@ -301,6 +314,7 @@ pub fn find_cast(
                 .map(|v| matches!(v, Val::Bool(true)))
                 .unwrap_or_else(|| defaults.bool("bHidden").unwrap_or(false)),
             prop_anim,
+            prop_trigger,
             ground_speed: number("GroundSpeed", 440.0),
         });
     }
