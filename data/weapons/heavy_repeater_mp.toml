@@ -1,0 +1,53 @@
+# The Trandoshan LS-150 heavy ACP repeater, the multiplayer version
+# (class TrandoshanRifleMP) that one campaign map, ras_04b, places.
+#
+# Numbers marked "game:" are TrandoshanRifleMP's class defaults
+# (Properties/properties.u, on top of TrandoshanRifle in ctinventory.u) and
+# its ammo TrandoshanRifleMPAmmo.
+#
+# NOT BUILT: the player slowing to PlayerSpeedModifier 0.75 while carrying
+# it.
+
+name = "LS-150 Heavy ACP Repeater"
+
+[fire]
+mode = "automatic"        # game: TrandoshanRifle FireMode 2
+shot_delay = 0.05         # game: TrandoshanRifle ShotDelay
+aim_error = 0             # game: no AimError on this class (TrandoshanRifleDefaults' 25 is not its parent)
+offset = [127.4, 35, -50] # game: FPFireOffset
+
+[ammo]
+clip_size = 80            # game: ReloadCount
+max_ammo = 160            # game: TrandoshanRifleMPAmmo MaxAmmo
+start_ammo = 160          # game: PickupAmmoCount
+reload_time = 7.1         # game: the arms' Reload animation (HudArmsTranRifle), 213 frames at 30 fps
+
+[shot]
+kind = "instant"          # game: TrandoshanRifleAmmo bInstantHit
+range = 5000              # game: TrandoshanRifleAmmo Range
+damage = 30               # game: TrandoshanRifleMPAmmo Damage
+damage_kind = "blaster"
+damage_type = "CTDamageBallistic" # game: TrandoshanRifleAmmo MyDamageType
+
+[melee]
+range = 250               # game: MeleeRange
+damage = 50               # game: TrandoshanRifle MeleeDamage
+
+[recoil]
+kick = [150, 400, 0]      # game: WeaponKick
+
+[sound]
+package = "gen_sound"     # guess: wep_GEN_ sounds are in gen_sound.uax
+fire = ["wep_GEN_hamTranNew_MP"] # game: FireSound
+empty = "wep_GEN_empty_01"
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: shown only if the arms can't load
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.6, 0.2]
+
+[arms]
+mesh = "HudArmsTranRifle" # game: TrandoshanRifle's Mesh
+fov = 85                  # game: DisplayFOV
+brightness = 0.75         # our choice, as the other weapons

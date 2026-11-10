@@ -1,0 +1,58 @@
+# The Wookiee bowcaster, lying about on Kashyyyk: heavy, slow bolts.
+#
+# Numbers marked "game:" are Bowcaster's class defaults (ctinventory.u,
+# with BowcasterDefaults in Properties/properties.u on top), its ammo
+# BowcasterAmmo(+Defaults) and bolt BowcasterProj(+Defaults).
+#
+# NOT BUILT: the charged "skewer" shot (hold fire for SkewerChargeupTime
+# 2 s, uses SkewerAmmoUsage 3 shots). Only the plain shot is here.
+
+name = "Wookiee Bowcaster"
+
+[fire]
+mode = "semi_auto"        # game: FireMode (the Weapon default)
+shot_delay = 0.75         # game: BowcasterDefaults ShotDelay
+aim_error = 1             # game: BowcasterDefaults AimError
+offset = [127.4, 10, -7.56] # placeholder: the ACP repeater's FPFireOffset
+zoom_fovs = [30]          # game: BowcasterDefaults ZoomFOVs[1]
+
+[ammo]
+clip_size = 12            # game: BowcasterDefaults ReloadCount
+max_ammo = 24             # game: BowcasterAmmoDefaults MaxAmmo
+start_ammo = 24           # game: BowcasterDefaults PickupAmmoCount
+reload_time = 1.77        # game: the arms' Reload animation (HudArmsBow), 53 frames at 30 fps
+
+[shot]
+kind = "bolt"             # game: BowcasterProj, a flying projectile
+accel = 60000             # our choice: the game launches it at Speed 7000 straight away
+max_speed = 10000         # game: BowcasterProjDefaults MaxSpeed
+life_span = 4             # game: BowcasterProjDefaults LifeSpan
+damage = 120              # game: BowcasterProjDefaults Damage
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyBow" # game: BowcasterProjDefaults MyDamageType
+
+[melee]
+range = 150               # game: BowcasterDefaults MeleeRange
+damage = 200              # game: BowcasterDefaults MeleeDamage
+
+[recoil]
+kick = [250, 0, 0]        # game: WeaponKick
+spring = 2                # game: RecoilConstant
+damping = 0.1             # game: RecoilDampening
+
+[sound]
+package = "gen_sound"     # guess: wep_GEN_ sounds are in gen_sound.uax
+fire = ["wep_GEN_bowcasterFire_06"] # game: BowcasterDefaults FireSound
+empty = "wep_GEN_empty_01"
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: shown only if the arms can't load
+offset = [40, 12, -14]
+bolt_colour = [0.3, 1.0, 0.4] # our choice, from the bolt light's hue 76
+
+[arms]
+mesh = "HudArmsBow"       # game: Bowcaster's Mesh
+fov = 85                  # game: DisplayFOV
+hide_zoomed = true        # game: BowcasterDefaults bZoomedUsesNoHUDArms
+brightness = 0.75         # our choice, as the other weapons
