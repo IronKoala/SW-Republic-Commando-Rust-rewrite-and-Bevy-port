@@ -516,6 +516,10 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         s.props_settled, s.settle_drop_max
     ));
     log.line(format!(
+        "ammo and grenade boxes drawn on their own: {}, furthest moved down onto the ground {:.0} units",
+        s.ammo_boxes, s.ammo_box_drop_max
+    ));
+    log.line(format!(
         "blocking volumes (invisible walls): {} read, {} stop players, {} stop the AI, {} unreadable, {} with a scale not applied; {} PathNodes/PlayerStarts inside one (should be 0 or close), {} volumes within 512 units of a path point",
         s.blocking_volumes,
         s.volumes_block_players,

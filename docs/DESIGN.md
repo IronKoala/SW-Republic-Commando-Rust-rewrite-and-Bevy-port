@@ -2574,11 +2574,67 @@ display. The player's kinds and their order are `grenades` in
   one already carried gets the ammo. Enemies drop the weapon file named by
   `combat.drops` in their settings file.
 
+### Ammo and grenade boxes (`rc_level::pickups`, `rc_combat/src/ammo_box.rs`)
+
+The campaign maps place 477 boxes of seven kinds (`DC17mBlasterBox` 225,
+`DC17mAntiArmorBox` 64, `ThermalDetonatorBox` 62, `EMPGrenadeBox` 50,
+`DC17mSniperBox` 42, `SonicDetonatorBox` 17, `FlashBangBox` 17). All come
+from the engine's `Ammo` pickup class. A map stores only where each box
+is; everything else is the class's defaults with its "...Defaults" class in
+`Properties/properties.u` on top, as for the weapons:
+
+| Box | Gives | Touch cylinder (radius, half-height) | Model |
+|---|---|---|---|
+| DC-17m | 300 shots (`DC17mBlasterBoxDefaults`; 120 in `CTInventory.u`) | 40, 15 | `PickupMeshes.ClonePickups.DC17mBox` |
+| Sniper | 20 | 50, 30 | `SniperBox` |
+| Anti-armour | 4 (`DC17mAntiArmorBoxDefaults`; 6 in `CTInventory.u`) | 50, 31 | `AntiArmorBox` |
+| Thermal, EMP, flash | 5 | 45, 44 | `ThermalDetonatorBox`, `EMPBox`, `FlashGrenadeBox` |
+| Sonic | 5 | 45, 44 | `GeoGrenadeBox` (the Defaults class swaps it) |
+
+No campaign map changes a box's amount; one box sets `bForceRespawn`
+(geo_01a's grenade crate by the start, back 0.1 s after it's taken).
+
+**Reading** (`rc_level::pickups`, plain Rust): `read_boxes` finds every
+actor whose class comes from `Ammo` and reads its amount, the ammo class it
+fills (`InventoryType`), its cylinder and whether it comes back.
+`map_collision::load` does this, leaves every pickup out of collision (the
+game's pickups don't block: touching one is how you take it; before, the
+boxes were solid), and drops each box onto the ground under it, as the game
+drops pickups at the start. **Our choice:** a box more than 40 uu above
+the ground found stays where the map put it, because it rests on
+something the port doesn't count as ground (ten boxes, 50 to 745 uu up).
+The level viewer draws each box on its own (`MoverPart` with its export
+index) with its "...Defaults" model, dropped the same way.
+
+**Taking them** (`ammo_box.rs`): `rc_level_plugin` hands the boxes over as
+`rc_game_core::pickups::LevelAmmoBoxes`; combat makes an `AmmoBox` entity
+for each. `data/pickups/ammo_boxes.toml` says which weapon or grenade file
+each of the original's ammo classes fills, and can change a box class's
+amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
+
+- A box is tried when the player starts touching it (the two cylinders
+  overlap: the player is 40 wide and 168 tall from the feet). Standing on
+  it doesn't keep trying.
+- It only fills ammo the player already carries, and only if it isn't
+  full; otherwise it's left lying.
+- It adds its whole amount, capped at the most carried, and is used up.
+- If the weapon in hand was empty, it reloads at once.
+- Taken boxes are gone for good in single player, unless the map marks
+  them to come back. Their model is hidden.
+
+The `[pickups]` section of a save file lists the boxes taken, by name.
+`AmmoBoxTaken` is sent for each box taken. Not done yet: the pickup sound
+(`PickupSound`), the on-screen "picked up" message (`PickupMessage`), the
+squad taking boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup`
+and the like, 40 across the campaign).
+
 ### Modding
 
 Every weapon is one file in `data/weapons`. A mod folder's file with the
 same name replaces it, and a new file is a new weapon. The player's health,
-shield and starting weapons are in `data/combat/player.toml`.
+shield and starting weapons are in `data/combat/player.toml`. What each
+ammo box fills, and its amount if a mod wants another, is in
+`data/pickups/ammo_boxes.toml`.
 
 ### `rc_shoot`: the firing range
 

@@ -141,6 +141,10 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         s.props_settled, s.settle_drop_max
     ));
     log.line(format!(
+        "  ammo and grenade boxes drawn on their own: {}, furthest moved down onto the ground {:.0} units",
+        s.ammo_boxes, s.ammo_box_drop_max
+    ));
+    log.line(format!(
         "  blocking volumes {} ({} stop players, {} stop the AI, {} unreadable, {} scaled); {} path points inside one, {} volumes near a path point",
         s.blocking_volumes,
         s.volumes_block_players,

@@ -221,6 +221,10 @@ pub struct Stats {
     /// Doors, lifts and other movers in the map, and how many have a model.
     pub movers: usize,
     pub movers_drawn: usize,
+    /// Ammo and grenade boxes drawn (each on its own, so it can vanish
+    /// when taken), and the furthest one was moved down onto the ground.
+    pub ammo_boxes: usize,
+    pub ammo_box_drop_max: f32,
     pub sky_props: usize,
     /// Sky props whose stored light is all black, drawn at full brightness.
     pub sky_props_unlit: usize,
@@ -1123,6 +1127,9 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
     #[allow(clippy::type_complexity)]
     let mut loose: Vec<LooseProp> = Vec::new();
+    // Ammo boxes, dropped onto the ground like the game drops them
+    // (`rc_level::pickups::rest_on_ground`).
+    let mut boxes: Vec<LooseProp> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
         let p = match actors::read_placement(pkg, data, a) {
@@ -1158,17 +1165,32 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             }
         }
         let mut p = p;
+        // Ammo and grenade boxes: drawn on their own so they can vanish
+        // when taken, with the model their "...Defaults" class gives.
+        let is_box = {
+            let mats = &mut *ctx.mats;
+            rc_level::pickups::is_ammo_box(&mut class_looks, pkg, p.export, &mut |n: &str| {
+                mats.package(n)
+            })
+        };
         // Props and doors that take their model from their class.
         let mut owner = map.clone();
         if p.static_mesh == 0 {
             let mats = &mut *ctx.mats;
-            match rc_level::class_look::apply_class_look(
-                &mut class_looks,
-                pkg,
-                data,
-                &mut p,
-                &mut |n: &str| mats.package(n),
-            ) {
+            let found = if is_box {
+                rc_level::pickups::apply_box_look(&mut class_looks, pkg, &mut p, &mut |n: &str| {
+                    mats.package(n)
+                })
+            } else {
+                rc_level::class_look::apply_class_look(
+                    &mut class_looks,
+                    pkg,
+                    data,
+                    &mut p,
+                    &mut |n: &str| mats.package(n),
+                )
+            };
+            match found {
                 Some(o) => {
                     owner = o;
                     ctx.stats.class_mesh_actors += 1;
@@ -1240,7 +1262,12 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                     }
                 };
                 ctx.stats.sky_props += in_sky as usize;
-                let mover = mover_exports.contains(&p.export).then_some(p.export);
+                let mover = (is_box || mover_exports.contains(&p.export)).then_some(p.export);
+                if is_box {
+                    ctx.stats.ammo_boxes += 1;
+                    boxes.push((p, m, colours, bump_light, in_sky, mover));
+                    continue;
+                }
                 ctx.stats.movers_drawn += mover
                     .is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m))
                     as usize;
@@ -1299,6 +1326,30 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 mover,
             );
             placed.push((p, m));
+        }
+        for (mut p, m, colours, bump_light, in_sky, mover) in boxes {
+            let found = {
+                let mats = &mut *ctx.mats;
+                rc_level::pickups::read_box(&mut class_looks, pkg, data, p.export, &mut |n: &str| {
+                    mats.package(n)
+                })
+            };
+            if let Some(mut bx) = found {
+                let d = rc_level::pickups::rest_on_ground(&mut bx, |q| ground.below(q));
+                p.location[2] -= d;
+                ctx.stats.ammo_box_drop_max = ctx.stats.ammo_box_drop_max.max(d);
+            }
+            add_mesh_actor(
+                &mut b,
+                &mut ctx,
+                in_sky,
+                &p,
+                &m.0,
+                &m.1,
+                colours.as_deref(),
+                bump_light.as_deref(),
+                mover,
+            );
         }
     }
     ctx.stats.prop_light = average_light(b.batches.iter().filter(|b| b.from_mesh));

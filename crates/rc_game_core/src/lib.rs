@@ -41,6 +41,7 @@ pub mod events;
 mod hud;
 mod log;
 pub mod paths;
+pub mod pickups;
 pub mod save;
 pub mod sound;
 mod state;
