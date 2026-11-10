@@ -678,3 +678,34 @@ mean the character has no line for that event. The groups are
 `SoundMultiple`s in `character_voice.uax` (prefixes `BD1_`, `SBD_`, `TMC_`,
 `GWR_`), each holding 2 to 10 takes. Which take plays, and how often a
 character may speak, is in compiled code we don't read.
+
+## Gunship cannons and core ship turrets (read 2026-11-10)
+
+Read from the script text and defaults in `ctcharacters.u`, `engine.u`,
+`ctinventory.u` and the maps, for understanding only (nothing copied).
+
+- `AutoTurret` (`engine.u`): state `Inactive` until `Trigger`, then state
+  `AutoTurret` plays `Deploy` and sets `bDeployed`. `Trigger` again goes to
+  `Resetting` (off). `Fire()` counts `TimeUntilCooldown` from the first shot
+  and then waits `CooldownDuration`. `IsAvailableFor` is false (nobody gets
+  on). Pawn `Event` on death, `FirstDamagedEvent` on the first damage.
+- `CoreShipTurret`: `Speed` 40000, yaw unlimited, `Health` 256,
+  `ShotDelay` 0.15, `TimeUntilCooldown` 4, `CooldownDuration` 1,
+  `NumMuzzles` 3 (`muzzle1..3` in turn, aimed from the muzzle at
+  `Enemy.Location`), `BaseEyeHeight` -80, collision radius 60 and height
+  90, `MyDamageVariance` `DV_TurretsCoreshipAuto`, team 5 (Separatist).
+  Weapon ammo `AutoTurretAmmo`, bolt `AutoTurretProj` (damage 10,
+  `CTDamageEnergy`, acceleration 40000, top speed 8000). Animations
+  `ClosedBreathe`, `Deploy`, `Death`, `Fire` (`CoreShipTurretSet`).
+- `GunshipCannon`: `Speed` 20000, yaw +-16384, pitch +-8194, `TurretHeight`
+  -50, `SitToUse`, radius 100, height 110, `NavPtLocs` (0, 127, -50),
+  first-person weapon `GunshipTurret` (`HudArmsGunshipTurret`, ammo
+  `GunshipTurretAmmo`: damage 50, `CTDamageEnergyGunshipTurret`, instant,
+  range 10000).
+- Maps: geo_04a `GunshipCannon0` (`ControlEvent` `ClearTurretTracker`,
+  waited for by `ScriptedTrigger14`); geo_04d `GunshipCannon0`
+  (`Conversation1454`); geo_04b two wall turrets tagged `CoreShipTurret00`
+  (rotation -16383, 0, -32763); geo_05a `CoreShipTurret1` (tag `BDTurrets`,
+  `Event` `Security00`, `FirstDamagedEvent` `TurretsShot`, which
+  `ScriptedTrigger42` waits for before `EliteStart`) and `CoreShipTurret2`
+  (`SBDTurret00`); geo_05c three tagged `Lasers01`.

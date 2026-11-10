@@ -601,11 +601,19 @@ copy of the game.
   and they shoot at enemies on their own. Each kind is a file in
   `data/turrets/`, so mods can add more. Not tried in a running game yet.
 
+- Gunship ball turrets (geo_04a, geo_04d) can be used like the other
+  turrets, and the core ship's own turrets (geo_04b, geo_05a, geo_05c)
+  unfold when the level switches them on, shoot at you and the squad,
+  and can be shot to pieces, which tells the level scripts (geo_05a's
+  elites come in after you shoot its turret). Not tried in a running
+  game yet.
+
 ## What doesn't work yet
 
 - Turrets: the squad can't be ordered onto a turret yet (the "man turret"
-  markers), ceiling turrets that fire by themselves aren't done, and
-  turrets can't be destroyed. The last level's ending also needs the
+  markers), the Rishi ceiling turrets and Geonosis anti-air turrets
+  aren't done, and only the core ship turrets can be destroyed (no
+  explosion or broken pieces yet). The last level's ending also needs the
   rockets that hit the ship, which aren't done.
 
 - Breakable props just disappear when they break: their broken model,
