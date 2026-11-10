@@ -937,6 +937,11 @@ fn steps() -> Vec<Step> {
         ),
         Wait(0.2),
         Check("its explosion hurts what stands near it", props_blast_hurt),
+        // Its effect (`rc_effects_plugin`): the game's Explosion_Barrel_GEO
+        // with its sound, the barrel's own sound, particles drawn, and all
+        // gone once they burn out.
+        Check("the barrel's fireball and sounds start", props_effect_shown),
+        Until("the fireball and smoke burn out", props_effect_over, 40.0),
         // Simple collision shapes (`rc_level::collision`): props with
         // collision off on every section collide through their mesh's
         // simple shape, and walk-through props that the game lets you
@@ -3319,6 +3324,40 @@ fn props_blast_hurt(w: &mut World) -> Result<String, String> {
         Err(msg)
     }
 }
+
+fn props_effect_shown(w: &mut World) -> Result<String, String> {
+    let st = w
+        .get_resource::<rc_effects_plugin::EffectStats>()
+        .ok_or("no effect stats")?;
+    let msg = format!(
+        "effects {:?}, up to {} squares and {} debris models drawn, sounds {:?}, missing {:?}",
+        st.spawned, st.peak_sprites, st.peak_meshes, st.sounds, st.missing
+    );
+    let has = |n: &str| st.sounds.iter().any(|s| s.eq_ignore_ascii_case(n));
+    if st.spawned.iter().any(|e| e == "Explosion_Barrel_GEO")
+        && st.peak_sprites > 0
+        && st.peak_meshes > 0
+        && has("exp_GEN_barrel_01")
+        && has("exp_barrels")
+        && st.missing.is_empty()
+    {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+fn props_effect_over(w: &mut World) -> bool {
+    let running = {
+        let mut q = w.query::<&rc_effects_plugin::RunningEffect>();
+        q.iter(w).count()
+    };
+    running == 0
+        && w
+            .get_resource::<rc_effects_plugin::EffectStats>()
+            .is_some_and(|s| s.finished >= 1)
+}
+
 
 fn props_simple_shapes(w: &mut World) -> Result<String, String> {
     let info = w

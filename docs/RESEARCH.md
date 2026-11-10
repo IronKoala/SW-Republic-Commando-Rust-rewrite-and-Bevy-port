@@ -679,6 +679,31 @@ mean the character has no line for that event. The groups are
 `GWR_`), each holding 2 to 10 takes. Which take plays, and how often a
 character may speak, is in compiled code we don't read.
 
+## Particle effects (read 2026-11-10)
+
+Effects are `Emitter` subclasses (575 in the install, most in
+`Properties/CTEffects.u`). Their defaults hold `Emitters`, a list (compact
+count, then object references) of the package's own `SpriteEmitter`,
+`MeshEmitter`, `SparkEmitter`, `BeamEmitter` or `TrailEmitter` objects,
+each with no outer, whose data is a plain list of named values. Unset
+values come from `ParticleEmitter`'s defaults in `engine.u` (checked:
+`MaxParticles` 10, `DrawStyle` 3 Translucent, `StartSize` 100, `Lifetime`
+4, `RespawnDeadParticles` and `AutomaticInitialSpawning` on; a
+`MeshEmitter`'s `StartSize` is 1). `Range` is `{Min, Max}`, `RangeVector`
+is three ranges, and `Color` is stored blue, green, red, alpha. `DrawStyle`
+bytes: 0 Regular, 1 AlphaBlend, 2 Modulated, 3 Translucent, 4
+AlphaModulate, 5 Darken, 6 Brighten. Example: `Explosion_Barrel_GEO` has 7
+emitters (smoke column, smoke, a 5x5-frame fireball drawn Brighten, specks,
+`AssaultShip_PR.Debris.DebriB` debris that collides, spray, a blue flare),
+`SpawnSound` `GEN_Sound.Impacts_Explos.exp_barrels`. Breakable props name
+their effect in `DestroyedState.Effect`, their sound in
+`TransitionSound` (`exp_GEN_barrel_01` for the barrel) and their broken
+model in `Mesh` (`MarkerIcons.SetTrap.GEO_EplBarrel_Dest`), with
+`StateLifeSpan` 5 s. A map that writes `DestroyedState` writes every field,
+so it replaces the class's (geo_01b: `Mesh=None`). Checked with
+`rc_effect_check` and `cargo test -p rc_effects` / `-p rc_level` with
+`RC_GAME_DIR` set.
+
 ## Gunship cannons and core ship turrets (read 2026-11-10)
 
 Read from the script text and defaults in `ctcharacters.u`, `engine.u`,

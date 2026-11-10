@@ -23,8 +23,9 @@
 //!   the player's eyes.
 //! - [`MovingFloors`]: lifts and doors that carry or push bodies other than
 //!   the player (squad mates, droids).
-//! - [`MusicMood`]: calm or battle music; whoever knows a fight started
-//!   sets it.
+//! - [`MusicMood`]: whether the enemies are fighting. [`music`]: the level
+//!   scripts' music actions ([`MusicCue`]) and the enemies the music watches
+//!   ([`MusicThreats`]).
 //! - [`Voice`] and [`SoundAt`]: tags for a sound a part plays (speech;
 //!   where it comes from), for the VOICES volume and 3D SOUND options.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
@@ -47,6 +48,7 @@ pub mod cutscene;
 pub mod events;
 mod hud;
 mod log;
+pub mod music;
 pub mod paths;
 pub mod place_light;
 pub mod pickups;
@@ -67,6 +69,7 @@ pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
 pub use log::GameLog;
+pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use sound::{SoundAt, Voice};
@@ -95,6 +98,8 @@ impl Plugin for CorePlugin {
             .init_resource::<WeaponReadout>()
             .init_resource::<SquadReadout>()
             .init_resource::<MusicMood>()
+            .init_resource::<MusicThreats>()
+            .add_message::<MusicCue>()
             .add_message::<HudMessage>()
             .add_message::<pickups::PickedUp>()
             .add_message::<ViewKick>()
