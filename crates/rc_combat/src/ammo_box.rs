@@ -19,13 +19,16 @@
 //! - In single player a taken box is gone for good, unless the map marks
 //!   it to come back (`bForceRespawn`), which only geo_01a's grenade crate
 //!   by the start does (back after 0.1 s: an endless supply).
+//! - Taking one plays its `PickupSound` and shows its `PickupMessage`
+//!   (sent as `rc_game_core::pickups::PickedUp`; see `pickup_sound` and
+//!   the HUD). A full player's touch is silent.
 
 use crate::data::Table;
 use crate::health::Dead;
 use crate::library::WeaponLibrary;
 use crate::{Arsenal, Grenades, Hittable};
 use bevy::prelude::*;
-use rc_game_core::pickups::LevelAmmoBoxes;
+use rc_game_core::pickups::{LevelAmmoBoxes, PickedUp};
 use rc_game_core::save::SavePart;
 use rc_game_core::units::UU_PER_UNIT;
 use rc_game_core::{GameLog, GamePaths, GameState, Player};
@@ -94,6 +97,10 @@ pub struct AmmoBox {
     /// The player touched it last frame (a box is tried when touching
     /// starts).
     pub touching: bool,
+    /// What the HUD says when it is taken (the game's `PickupMessage`).
+    pub message: String,
+    /// The sound it makes when taken: sound package and name.
+    pub sound: Option<(String, String)>,
 }
 
 /// What happened to a box this frame, for the log and self-tests.
@@ -213,6 +220,8 @@ pub(crate) fn place_boxes(
                 taken: false,
                 back_in: 0.0,
                 touching: false,
+                message: b.message.clone(),
+                sound: b.sound.clone(),
             },
             Transform::from_translation(b.at),
             DespawnOnExit(GameState::InGame),
@@ -311,6 +320,7 @@ pub(crate) fn take_boxes(
     >,
     mut boxes: Query<(&Transform, &mut AmmoBox), Without<Player>>,
     mut taken: MessageWriter<AmmoBoxTaken>,
+    mut picked: MessageWriter<PickedUp>,
     log: Option<Res<GameLog>>,
 ) {
     let Ok((me, body, mut arsenal, mut grenades)) = players.single_mut() else {
@@ -370,6 +380,10 @@ pub(crate) fn take_boxes(
             added,
             now,
             max,
+        });
+        picked.write(PickedUp {
+            text: b.message.clone(),
+            sound: b.sound.clone(),
         });
     }
 }
