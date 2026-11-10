@@ -18,7 +18,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
 | `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, each prop's baked corner colours, blocking volumes, models that come from a prop's class, and a map's walking collision (`map_collision`). No Bevy. |
 | `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, with its sky, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`, `sky`) that `rc_walk` uses to draw maps. `rc_level_check` loads every map without a window and logs the results. |
-| `rc_movers` | Doors, lifts and hatches: runs a map's movers through their keys, makes their collision move with them, carries the player on lifts, and runs triggers. No Bevy. `rc_mover_check` runs every mover in every map without a window and logs the numbers. |
+| `rc_movers` | Doors, lifts and hatches: runs a map's movers through their keys, makes their collision move with them, carries the player and squad mates on lifts, and runs triggers. No Bevy. `rc_mover_check` runs every mover in every map without a window and logs the numbers. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
@@ -1351,6 +1351,37 @@ A `MoverSystems` set (in `GameSet::View`) then logs what happened
 Other parts open a door the way the original's scripts do: by event name.
 `LevelMovers::send("D_Exit")` sets off every mover whose `Tag` is `D_Exit`.
 
+### Squad mates (and other bodies) ride too
+
+In the original every pawn standing on a mover is carried by it, not only
+the player, so the squad rides lifts with you (geo_05a, b and c start on
+one). Here the player's movement steps the movers, and `MoverSet::step`
+remembers which movers moved that step and from where. Any other body is
+then carried with `MoverSet::carry` (in the game: `LevelMovers::carry`, or
+the `MovingFloors` resource in `rc_game_core`, which hides the movers
+behind a small `CarryBodies` trait), called once per body before that
+body's own move:
+
+1. What it stands on is judged where the movers were before this step's
+   move (where its feet still are), with the same short sweep down as for
+   the player.
+2. A mover it stands on moves it by the same amount.
+3. A mover that now overlaps it pushes it along. If it can't be pushed,
+   the mover's "when blocked" rule applies as for the player: it is put
+   back where it was and stops or turns round. It is not put back if it
+   carried the player this step (the player was already moved with it).
+
+Triggers and bump-opened doors still only answer the player. A frame
+where the movers don't step (a cutscene holds the player) carries nobody:
+`MoversPlugin` forgets the last step's moves at the start of every frame.
+
+The squad part calls it in `ride_movers`, just before the squad moves, and
+logs `squad: t=... Sev stands on Mover37` and `... steps off ...`. Test:
+`cargo test -p rc_movers` (a squad mate rides a lift up and down, is left
+behind without `carry`, and a closing door goes back for them) and
+`cargo test -p rc_squad_plugin --test lift_room` (the real squad and
+lifts plugins: all three ride a 400 uu lift with the player).
+
 Where every mover is goes into save files as `[movers]` (see "Saving,
 loading and checkpoints").
 
@@ -2575,11 +2606,67 @@ display. The player's kinds and their order are `grenades` in
   one already carried gets the ammo. Enemies drop the weapon file named by
   `combat.drops` in their settings file.
 
+### Ammo and grenade boxes (`rc_level::pickups`, `rc_combat/src/ammo_box.rs`)
+
+The campaign maps place 477 boxes of seven kinds (`DC17mBlasterBox` 225,
+`DC17mAntiArmorBox` 64, `ThermalDetonatorBox` 62, `EMPGrenadeBox` 50,
+`DC17mSniperBox` 42, `SonicDetonatorBox` 17, `FlashBangBox` 17). All come
+from the engine's `Ammo` pickup class. A map stores only where each box
+is; everything else is the class's defaults with its "...Defaults" class in
+`Properties/properties.u` on top, as for the weapons:
+
+| Box | Gives | Touch cylinder (radius, half-height) | Model |
+|---|---|---|---|
+| DC-17m | 300 shots (`DC17mBlasterBoxDefaults`; 120 in `CTInventory.u`) | 40, 15 | `PickupMeshes.ClonePickups.DC17mBox` |
+| Sniper | 20 | 50, 30 | `SniperBox` |
+| Anti-armour | 4 (`DC17mAntiArmorBoxDefaults`; 6 in `CTInventory.u`) | 50, 31 | `AntiArmorBox` |
+| Thermal, EMP, flash | 5 | 45, 44 | `ThermalDetonatorBox`, `EMPBox`, `FlashGrenadeBox` |
+| Sonic | 5 | 45, 44 | `GeoGrenadeBox` (the Defaults class swaps it) |
+
+No campaign map changes a box's amount; one box sets `bForceRespawn`
+(geo_01a's grenade crate by the start, back 0.1 s after it's taken).
+
+**Reading** (`rc_level::pickups`, plain Rust): `read_boxes` finds every
+actor whose class comes from `Ammo` and reads its amount, the ammo class it
+fills (`InventoryType`), its cylinder and whether it comes back.
+`map_collision::load` does this, leaves every pickup out of collision (the
+game's pickups don't block: touching one is how you take it; before, the
+boxes were solid), and drops each box onto the ground under it, as the game
+drops pickups at the start. **Our choice:** a box more than 40 uu above
+the ground found stays where the map put it, because it rests on
+something the port doesn't count as ground (ten boxes, 50 to 745 uu up).
+The level viewer draws each box on its own (`MoverPart` with its export
+index) with its "...Defaults" model, dropped the same way.
+
+**Taking them** (`ammo_box.rs`): `rc_level_plugin` hands the boxes over as
+`rc_game_core::pickups::LevelAmmoBoxes`; combat makes an `AmmoBox` entity
+for each. `data/pickups/ammo_boxes.toml` says which weapon or grenade file
+each of the original's ammo classes fills, and can change a box class's
+amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
+
+- A box is tried when the player starts touching it (the two cylinders
+  overlap: the player is 40 wide and 168 tall from the feet). Standing on
+  it doesn't keep trying.
+- It only fills ammo the player already carries, and only if it isn't
+  full; otherwise it's left lying.
+- It adds its whole amount, capped at the most carried, and is used up.
+- If the weapon in hand was empty, it reloads at once.
+- Taken boxes are gone for good in single player, unless the map marks
+  them to come back. Their model is hidden.
+
+The `[pickups]` section of a save file lists the boxes taken, by name.
+`AmmoBoxTaken` is sent for each box taken. Not done yet: the pickup sound
+(`PickupSound`), the on-screen "picked up" message (`PickupMessage`), the
+squad taking boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup`
+and the like, 40 across the campaign).
+
 ### Modding
 
 Every weapon is one file in `data/weapons`. A mod folder's file with the
 same name replaces it, and a new file is a new weapon. The player's health,
-shield and starting weapons are in `data/combat/player.toml`.
+shield and starting weapons are in `data/combat/player.toml`. What each
+ammo box fills, and its amount if a mod wants another, is in
+`data/pickups/ammo_boxes.toml`.
 
 ### `rc_shoot`: the firing range
 

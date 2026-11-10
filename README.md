@@ -206,6 +206,17 @@ copy of the game.
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
 
+- **Ammo and grenade boxes (since 2026-11-09; tested in the cloud, not
+  yet on Windows or by playing).** The 477 boxes the campaign maps place
+  (DC-17m, sniper and anti-armour ammo; thermal, sonic, EMP and flash
+  grenades) appear with their original models, resting on the floor. Walk
+  into one to refill: a DC-17m box gives 300 shots, sniper 20, anti-armour
+  4, grenades 5, never more than you can carry. A full player leaves the
+  box lying. Taken boxes vanish and stay gone after a save and load, except
+  geo_01a's grenade crate by the start, which comes back as in the
+  original. Boxes no longer block you like walls. No pickup sound or
+  "picked up" message yet.
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
@@ -272,7 +283,9 @@ copy of the game.
   map and logs the numbers: all 863 that could be timed opened and closed
   on time, and all 33 rideable lifts carried the player. They also run
   in the game itself (`rc_game`, tested in the cloud sandbox on geo_01a):
-  doors are solid where they stand and move when set off. Doors that the
+  doors are solid where they stand and move when set off. Squad mates
+  ride lifts with you and get pushed by doors (tested in the cloud with a
+  test lift, not yet on a real map or on Windows). Doors that the
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
 
