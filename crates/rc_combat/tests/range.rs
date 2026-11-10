@@ -33,6 +33,7 @@ struct Seen {
     died: Vec<Died>,
     damage: Vec<Damage>,
     blasts: Vec<Blast>,
+    taken: Vec<rc_combat::WeaponTaken>,
 }
 
 fn record(
@@ -41,7 +42,9 @@ fn record(
     mut d: MessageReader<Died>,
     mut h: MessageReader<Damage>,
     mut x: MessageReader<Blast>,
+    mut t: MessageReader<rc_combat::WeaponTaken>,
 ) {
+    seen.taken.extend(t.read().cloned());
     seen.blasts.extend(x.read().cloned());
     seen.landed.extend(l.read().cloned());
     seen.died.extend(d.read().cloned());
@@ -155,6 +158,9 @@ fn every_weapon_file_reads() {
     assert_eq!(
         ids,
         [
+            "acp_array_gun",
+            "bowcaster",
+            "concussion_rifle",
             "dc15s_pistol",
             "dc17m_antiarmor",
             "dc17m_blaster",
@@ -162,10 +168,13 @@ fn every_weapon_file_reads() {
             "e5_blaster",
             "e5_blaster_pickup",
             "e5_blaster_tm",
+            "elite_beam",
             "elite_beam_enemy",
             "eweb_turret",
+            "heavy_repeater_mp",
             "heavy_turret",
             "missile_turret",
+            "rocket_launcher",
             "sbd_blaster",
             "scav_beam",
             "trandoshan_rifle",
@@ -460,9 +469,11 @@ fn every_grenade_file_reads_and_the_player_carries_them() {
     assert_eq!(
         ids,
         [
+            "concussion_rifle_blast",
             "dc17m_antiarmor_round",
             "emp_grenade",
             "flash_grenade",
+            "rocket_launcher_rocket",
             "sonic_detonator",
             "thermal_detonator",
             "thermal_detonator_enemy",
@@ -745,21 +756,25 @@ fn melee_hits_only_within_reach() {
 }
 
 #[test]
-fn walking_over_a_dropped_weapon_picks_it_up() {
+fn a_dropped_weapon_is_picked_up_with_use() {
     let mut r = Range::new();
     let p = r.app.world().resource::<WeaponLibrary>().weapons["e5_blaster_pickup"].clone();
     let mut commands = r.app.world_mut().commands();
     rc_combat::spawn_pickup(&mut commands, "e5_blaster_pickup", b(-200.0, 0.0, 0.0));
-    r.run(2, &[]);
+    r.run(2, &[Action::Use]);
+    r.run(1, &[]);
     assert_eq!(r.arsenal().weapons.len(), 4, "not picked up from 300 uu");
     r.app
         .world_mut()
         .entity_mut(r.player)
         .insert(Transform::from_translation(b(-220.0, 0.0, 0.0)));
-    r.run(2, &[]);
+    r.run(3, &[]);
+    assert_eq!(r.arsenal().weapons.len(), 4, "walking over it isn't enough");
+    r.run(1, &[Action::Use]);
+    r.run(1, &[]);
     let a = r.arsenal();
-    let (id, w) = a.weapons.last().unwrap();
-    assert_eq!(id, "e5_blaster_pickup");
+    let (id, w) = a.current().unwrap();
+    assert_eq!(id, "e5_blaster_pickup", "in hand");
     assert_eq!(w.shots_in_clip() + w.reserve, p.start_ammo);
     let mut q = r.app.world_mut().query::<&rc_combat::WeaponPickup>();
     assert_eq!(
@@ -767,6 +782,189 @@ fn walking_over_a_dropped_weapon_picks_it_up() {
         0,
         "it's gone from the ground"
     );
+}
+
+/// Put weapons in the "level" as the level part hands them over: name,
+/// original class, Unreal position of the cylinder's centre.
+fn place_weapons(r: &mut Range, list: &[(&str, &str, Vec3, u32)]) {
+    use rc_game_core::pickups::{LevelWeaponPickups, PlacedWeapon};
+    let weapons = list
+        .iter()
+        .enumerate()
+        .map(|(i, (name, weapon, at, ammo))| PlacedWeapon {
+            export: 1000 + i,
+            name: name.to_string(),
+            class: format!("{weapon}Pickup"),
+            at: *at,
+            weapon: weapon.to_string(),
+            ammo: *ammo,
+            message: format!("{weapon} message"),
+            sound: Some(("GEN_Sound".into(), format!("{weapon}Sound"))),
+            radius: 60.0,
+            height: 15.0,
+        })
+        .collect();
+    r.app
+        .world_mut()
+        .insert_resource(LevelWeaponPickups(weapons));
+    r.run(3, &[]);
+}
+
+fn taken(r: &mut Range) -> Vec<rc_combat::WeaponTaken> {
+    std::mem::take(&mut r.app.world_mut().resource_mut::<Seen>().taken)
+}
+
+#[test]
+fn level_weapons_are_placed_and_one_enemy_weapon_is_carried_at_a_time() {
+    let mut r = Range::new();
+    r.app
+        .init_resource::<PickedUpLog>()
+        .add_systems(Update, keep_picked_up);
+    place_weapons(
+        &mut r,
+        &[
+            ("BowcasterPickup0", "Bowcaster", b(-480.0, 0.0, 15.0), 24),
+            ("SMGPickup1", "SMG", b(-480.0, 600.0, 15.0), 160),
+            ("MysteryPickup0", "NoSuchWeapon", b(0.0, 600.0, 15.0), 1),
+        ],
+    );
+    let mut q = r.app.world_mut().query::<&rc_combat::WeaponPickup>();
+    let placed: Vec<String> = q
+        .iter(r.app.world())
+        .filter_map(|p| p.placed.as_ref().map(|x| x.1.clone()))
+        .collect();
+    assert_eq!(placed.len(), 2, "the unknown one is left out: {placed:?}");
+    // Standing on the bowcaster: the prompt, not the weapon.
+    assert_eq!(r.arsenal().weapons.len(), 4);
+    // Take it with Use: in hand, the pickup gone.
+    r.run(1, &[Action::Use]);
+    r.run(1, &[]);
+    let a = r.arsenal();
+    assert_eq!(a.current().unwrap().0, "bowcaster");
+    let bow = &a.current().unwrap().1;
+    assert_eq!(bow.shots_in_clip() + bow.reserve, 24);
+    let t = taken(&mut r);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].placed.as_ref().unwrap().1, "BowcasterPickup0");
+    assert!(t[0].new_weapon);
+    // Its words and its own pickup sound.
+    let got = r.app.world().resource::<PickedUpLog>().0.clone();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].text, "Bowcaster message");
+    assert_eq!(
+        got[0].sound,
+        Some(("GEN_Sound".to_string(), "BowcasterSound".to_string()))
+    );
+    // Fire one bolt, then go to the repeater and take it: the bowcaster
+    // is thrown down with 23 shots, the repeater is in hand.
+    r.run(1, &[Action::Fire]);
+    r.seconds(1.0, &[]);
+    r.app
+        .world_mut()
+        .entity_mut(r.player)
+        .insert(Transform::from_translation(b(-480.0, 600.0, 0.0)));
+    r.run(2, &[]);
+    r.run(1, &[Action::Use]);
+    r.run(1, &[]);
+    let a = r.arsenal();
+    let ids: Vec<&str> = a.weapons.iter().map(|w| w.0.as_str()).collect();
+    assert_eq!(ids.iter().filter(|i| **i == "bowcaster").count(), 0, "{ids:?}");
+    assert_eq!(a.current().unwrap().0, "trandoshan_smg");
+    let t = taken(&mut r);
+    assert_eq!(t[0].dropped.as_deref(), Some("bowcaster"));
+    let mut q = r.app.world_mut().query::<&rc_combat::WeaponPickup>();
+    let dropped: Vec<(String, Option<u32>)> = q
+        .iter(r.app.world())
+        .filter(|p| p.placed.is_none())
+        .map(|p| (p.weapon.clone(), p.ammo))
+        .collect();
+    assert_eq!(dropped, [("bowcaster".to_string(), Some(23))]);
+    // The save lists both map weapons as taken.
+    let gone = r
+        .app
+        .world()
+        .resource::<rc_combat::pickup::WeaponsGone>()
+        .names();
+    assert_eq!(gone, ["BowcasterPickup0", "SMGPickup1"]);
+}
+
+#[test]
+fn walking_into_a_carried_weapon_takes_its_ammo() {
+    let mut r = Range::new();
+    // Use some sniper ammo first.
+    {
+        let mut a = r
+            .app
+            .world_mut()
+            .get_mut::<Arsenal>(r.player)
+            .unwrap();
+        let s = a
+            .weapons
+            .iter_mut()
+            .find(|w| w.0 == "dc17m_sniper")
+            .unwrap();
+        s.1.clip = 1.0;
+        s.1.reserve = 0;
+    }
+    place_weapons(
+        &mut r,
+        &[("DC17mSniperWeaponPickup0", "DC17mSniper", b(-480.0, 0.0, 15.0), 20)],
+    );
+    let a = r.arsenal();
+    let s = &a.weapons.iter().find(|w| w.0 == "dc17m_sniper").unwrap().1;
+    assert_eq!(s.shots_in_clip() + s.reserve, 20, "1 + 20, capped at 20");
+    let t = taken(&mut r);
+    assert_eq!(t.len(), 1);
+    assert!(!t[0].new_weapon);
+    assert_eq!(t[0].added, 19);
+}
+
+#[test]
+fn the_acp_array_gun_fires_eight_pellets() {
+    let mut r = Range::new();
+    place_weapons(
+        &mut r,
+        &[("ShotgunPickup0", "Shotgun", b(-480.0, 0.0, 15.0), 16)],
+    );
+    r.run(1, &[Action::Use]);
+    r.run(1, &[]);
+    assert_eq!(r.arsenal().current().unwrap().0, "acp_array_gun");
+    r.seen();
+    r.run(1, &[Action::Fire]);
+    r.run(2, &[]);
+    let seen = r.seen();
+    assert_eq!(seen.landed.len(), 8, "one shot, eight pellets");
+    let a = r.arsenal();
+    let g = &a.current().unwrap().1;
+    assert_eq!(g.shots_in_clip(), 7, "one shell used");
+}
+
+#[test]
+fn rockets_and_concussion_shots_blast_the_droid() {
+    for (class, id, wait) in [
+        ("RocketLauncher", "rocket_launcher", 1.5),
+        ("ConcussionRifle", "concussion_rifle", 0.5),
+    ] {
+        let mut r = Range::new();
+        place_weapons(
+            &mut r,
+            &[(&format!("{class}Pickup0"), class, b(-480.0, 0.0, 15.0), 5)],
+        );
+        r.run(1, &[Action::Use]);
+        r.run(1, &[]);
+        assert_eq!(r.arsenal().current().unwrap().0, id);
+        r.seen();
+        // Aim at the droid's middle (1000 uu ahead, centre 84 uu up; the
+        // eye is 144 uu up).
+        r.run(1, &[Action::Fire]);
+        r.seconds(wait, &[]);
+        let seen = r.seen();
+        assert_eq!(seen.blasts.len(), 1, "{id}: one blast");
+        assert!(
+            seen.damage.iter().any(|d| d.target == r.droid),
+            "{id}: the droid is hurt"
+        );
+    }
 }
 
 #[test]

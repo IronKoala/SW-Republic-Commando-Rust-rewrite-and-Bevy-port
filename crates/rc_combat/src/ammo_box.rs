@@ -453,13 +453,19 @@ pub(crate) fn apply_saved(
     commands.remove_resource::<TakenFromSave>();
 }
 
-/// The `[pickups]` section of a save file: the boxes already taken.
+/// The `[pickups]` section of a save file: the boxes and weapons already
+/// taken.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PickupsSave {
     /// Names of the taken boxes (`DC17mBlasterBox14`). Boxes that come back
     /// by themselves aren't listed.
     #[serde(default)]
     pub taken: Vec<String>,
+    /// Names of the weapons the map placed that were taken
+    /// (`BowcasterPickup0`). **Not saved:** weapons thrown down by the
+    /// player or dropped by enemies.
+    #[serde(default)]
+    pub weapons_taken: Vec<String>,
 }
 
 impl SavePart for PickupsSave {
@@ -472,11 +478,19 @@ impl SavePart for PickupsSave {
             .filter(|b| b.taken && b.respawn.is_none())
             .map(|b| b.name.clone())
             .collect();
-        Some(PickupsSave { taken })
+        let weapons_taken = world
+            .get_resource::<crate::pickup::WeaponsGone>()
+            .map(|g| g.0.iter().map(|(_, n)| n.clone()).collect())
+            .unwrap_or_default();
+        Some(PickupsSave {
+            taken,
+            weapons_taken,
+        })
     }
 
     fn load(world: &mut World, d: Self) -> Result<(), String> {
         world.insert_resource(TakenFromSave(d.taken));
+        world.insert_resource(crate::pickup::WeaponsTakenFromSave(d.weapons_taken));
         Ok(())
     }
 }

@@ -1049,6 +1049,35 @@ fn steps() -> Vec<Step> {
         }),
         Wait(0.5),
         Check("the grenade crate by the start gives 5 thermal detonators and comes back", grenade_crate),
+        // A weapon on the floor (`rc_combat::pickup`): walking over one you
+        // don't carry isn't enough; Use takes it and puts it in hand.
+        Note(|w| {
+            let mut q = w.query_filtered::<&Transform, With<Player>>();
+            if let Some(feet) = q.iter(w).next().map(|t| t.translation) {
+                let mut commands = w.commands();
+                rc_combat::spawn_pickup(&mut commands, "acp_array_gun", feet);
+                w.flush();
+            }
+        }),
+        Wait(0.3),
+        Check("walking onto a weapon you don't carry leaves it lying", |w| {
+            let held = carries(w, "acp_array_gun");
+            let lying = weapons_lying(w, "acp_array_gun");
+            let got = format!("carried {held}, lying {lying}");
+            if !held && lying == 1 { Ok(got) } else { Err(got) }
+        }),
+        Press(Action::Use),
+        Wait(0.3),
+        Check("pressing Use picks the weapon up into your hands", |w| {
+            let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+            let a = q.iter(w).next().ok_or("no arsenal")?;
+            let current = a.current().map(|c| c.0.clone()).unwrap_or_default();
+            let lying = weapons_lying(w, "acp_array_gun");
+            let got = format!("in hand {current}, lying {lying}");
+            if current == "acp_array_gun" && lying == 0 { Ok(got) } else { Err(got) }
+        }),
+        Press(Action::WeaponBlaster),
+        Wait(0.2),
         // Use some ammo first, so the save differs from a fresh start.
         Hold(Action::Fire, 0.5),
         Wait(0.2),
@@ -3556,6 +3585,18 @@ fn move_box_to_player(w: &mut World, class: &str, nth: usize) -> Option<String> 
     let (t, b) = list.get_mut(nth)?;
     t.translation = feet + Vec3::Y * (b.height / rc_game_core::units::UU_PER_UNIT);
     Some(b.name.clone())
+}
+
+fn carries(w: &mut World, id: &str) -> bool {
+    let mut q = w.query_filtered::<&rc_combat::Arsenal, With<Player>>();
+    q.iter(w)
+        .next()
+        .is_some_and(|a| a.weapons.iter().any(|(w, _)| w == id))
+}
+
+fn weapons_lying(w: &mut World, id: &str) -> usize {
+    let mut q = w.query::<&rc_combat::WeaponPickup>();
+    q.iter(w).filter(|p| p.weapon == id).count()
 }
 
 fn rifle_total(w: &mut World) -> Option<u32> {
