@@ -24,6 +24,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
+| `rc_cast` | `CastPlugin`, the characters placed in a map that no other part owns (the Kaminoans, young clones, troopers and commandos of the cutscenes, animated props, troopers and vehicles standing about in missions): drawn with the game's models and moved by the level scripts. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
 | `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
 | `rc_scripts` | Level scripts: runs a map's own scripting (scripted triggers and sequences, touch triggers, counters, true/false conditions, checkpoints, destructible props) as events and tags. No Bevy. `rc_script_check` reads every map's scripts and runs them without a window. |
@@ -3354,12 +3355,72 @@ themselves are compiled code we don't read. Not done yet: the player
 riding the gunship (`ACTION_AttachToGunship` to a bone of the
 `BriefingGunship`, whose `GEO01fly` animation carries the camera through
 the sky), drawing what the player holds (`BriefingWeapon`: the baby's and
-boy's hands, the briefing helmet; for now nothing is drawn), placed characters that the game doesn't
-spawn yet (Kaminoans, clone troopers, the hologram advisor), hiding and
+boy's hands, the briefing helmet; for now nothing is drawn), characters brought in by factories during
+a scene (placed ones are the cast, see `rc_cast` below), hiding and
 showing actors that aren't level parts (the hologram text), view shakes,
 the title card, the credits, and the cutscene state in save files (the
 cutscene maps have no checkpoints, so only a quick save mid-scene would
 lose the hold).
+
+## The cast: characters no other part owns (`rc_cast`)
+
+**Why.** The first playtest of the prologue showed an empty Kamino: the
+level scripts ran, but the characters they talk to didn't exist, so the
+log had 158 "no character ... in the game" lines. The droids belong to
+the enemies part and Delta to the squad part; everything else a map
+places was never spawned.
+
+**Who is in the cast.** When a map loads, `rc_cast::read::find_cast`
+looks at every placed actor whose class comes from `Pawn` (characters
+and vehicles) or `AnimProp` (animated props, like the young clones
+sitting in the nursery). Class parents come from the game's script
+packages (`GameData/System/*.u` and `GameData/Properties/*.u`, read with
+`rc_package::class_library`). Left out:
+
+- classes `data/cast/cast.toml` leaves to other parts (`leave_out`: the
+  droids, Geonosians, Trandoshans and turrets the enemies part fights);
+- in a map with a squad (a `CTSquad` actor), commandos that can join the
+  squad (`bCanBeSquadMember`, the squad part's). In the prologue every
+  commando is cast.
+
+Each wears the map's `Mesh` value or its class's default `Mesh`, found by
+name among the skeletal meshes of `GameData/Animations/*.ukx`, and read
+with `rc_model` with every animation set kept (`ModelSpec::keep_sets`,
+`Model::named_clip`), so scripts can play any of its animations by name.
+`[class.*]` in the data file can change a class's mesh or materials: the
+commandos' armour colours come from there (the original swaps them in
+compiled code). Characters stand with their feet `CollisionHeight` below
+their `Location`; props are drawn at theirs.
+
+**What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
+is the class name when the map gives none, as in Unreal, and its
+`AIScriptTag`) with `follows_orders` on, so the level scripts part finds
+it and sends `CharacterOrder`s:
+
+- `MoveTo`, `MoveToPlayer`: a straight line at `GroundSpeed` (walking at
+  `walk_speed_ratio` of it), turning to face the way it goes, playing the
+  first walk or run animation its sets have. No collision and no falling:
+  cutscene walks are short and on clear floors. Arriving puts it on the
+  point.
+- `TurnToPlayer`, `Teleport`, `Hidden`, `Remove`.
+- `PlayAnim` by name from its own sets, looping or once; `WaitForAnimEnd`
+  waits for the one playing. A name its sets don't have is logged and the
+  script carries on.
+- `WaitForPlayer` waits for the player to come within the distance, but
+  only `wait_for_player_limit` seconds (our choice, 20): our player may
+  stand where the original's wouldn't, and a stuck cutscene is worse.
+
+Between orders a character plays the first of `idle` its sets have (an
+animated prop plays its own `AnimHealthy`). Models are posed on the CPU
+each frame like the squad's; hidden ones aren't posed.
+
+**Not done.** Characters brought in by `PawnFactory`s during a cutscene
+(the prologue's walking young clones), riding vehicles, hologram
+materials (`HsHologram`, drawn plain grey), lighting by zone (a steady
+`ambient` share of their own colour, as the squad), damage and death (the
+cast can't be hurt), and saving their places (the cutscene maps have no
+checkpoints). In missions, the placed troopers, walkers and the scripted
+spider droid now stand and move as their scripts say but don't fight.
 
 ## The visor: tactical and low light modes (`rc_visor`)
 

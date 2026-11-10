@@ -748,15 +748,21 @@ fn steps() -> Vec<Step> {
         Shot("no_helmet"),
         Check("HELMET OFF takes the frame away", |w| {
             let shown = w.resource::<crate::helmet::HelmetReadout>().shown;
+            // Compared with the same view with the frame on: dark things in
+            // the scene (the gunship overhead in geo_01a) can match the
+            // frame's colours by chance, so a fixed share isn't enough.
+            let with = helmet_match(w, "look_up")?.map_or(1.0, |(s, _)| s);
             match helmet_match(w, "no_helmet")? {
                 None => Ok("no model in the install, nothing to take away".into()),
-                Some((share, _)) if !shown && share < 0.3 => Ok(format!(
-                    "hidden; {:.0}% of its pixels still match",
-                    share * 100.0
+                Some((share, _)) if !shown && share < 0.3f32.max(with * 0.5) => Ok(format!(
+                    "hidden; {:.0}% of its pixels still match (with the frame: {:.0}%)",
+                    share * 100.0,
+                    with * 100.0
                 )),
                 Some((share, _)) => Err(format!(
-                    "shown {shown}; {:.0}% of its pixels still match",
-                    share * 100.0
+                    "shown {shown}; {:.0}% of its pixels still match (with the frame: {:.0}%)",
+                    share * 100.0,
+                    with * 100.0
                 )),
             }
         }),
