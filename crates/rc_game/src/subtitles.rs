@@ -247,7 +247,10 @@ fn show(
         log.line(format!("subtitles: {}: \"{text}\"", s.name));
         commands.entity(area).with_children(|p| {
             p.spawn((
-                SubtitleLine { sound: e, shown: 0.0 },
+                SubtitleLine {
+                    sound: e,
+                    shown: 0.0,
+                },
                 Node {
                     padding: UiRect::axes(Val::VMin(1.0), Val::VMin(0.3)),
                     ..default()
@@ -287,7 +290,8 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         let mut subs = Subtitles::default();
-        subs.by_sound.insert("line1".into(), "Sev: Copy that.".into());
+        subs.by_sound
+            .insert("line1".into(), "Sev: Copy that.".into());
         app.add_plugins(MinimalPlugins)
             .insert_resource(Settings::default())
             .insert_resource(Theme::default())
@@ -299,7 +303,9 @@ mod tests {
     }
 
     fn shown(app: &mut App) -> Vec<String> {
-        let mut q = app.world_mut().query_filtered::<&Text, With<SubtitleLine>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Text, With<SubtitleLine>>();
         q.iter(app.world()).map(|t| t.0.clone()).collect()
     }
 
