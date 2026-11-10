@@ -9,7 +9,7 @@
 
 use crate::actors::{self, Placement};
 use crate::bsp::{self, Vec3};
-use crate::class_look::{anim_mesh_of, apply_class_look, blocks_players, ClassLooks, Loaded};
+use crate::class_look::{anim_mesh_of, apply_class_look, blocks, ClassLooks, Loaded};
 use crate::collision::{add_blocking_volumes, collision_triangles, Source};
 use rc_package::static_mesh::{self, StaticMesh};
 use rc_package::{ObjectRef, Package};
@@ -29,7 +29,23 @@ pub struct MapCollision {
     pub class_mesh_actors: usize,
     /// Props left out of collision because the game doesn't let them
     /// block (`bCollideActors` or `bBlockPlayers` off). Still drawn.
+    /// Includes the `shot_only_props`.
     pub not_solid_props: usize,
+    /// Props people walk through but shots stop at (`Blocks::shots`
+    /// without `Blocks::players`), such as the shield wall pieces of
+    /// geo_04c. Their triangles are in `shot_triangles`, or in
+    /// `shot_part_triangles` when they are parts.
+    pub shot_only_props: usize,
+    /// Triangles that stop shots (lines with no thickness) but not
+    /// movement.
+    pub shot_triangles: Vec<[Vec3; 3]>,
+    /// The same for shots-only props that are parts (`parts`), by export
+    /// index, so they can go when they break. Not in `part_triangles`.
+    pub shot_part_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
+    /// Placed meshes that collide through their simple collision shape
+    /// (collision off on every section; see
+    /// `crate::collision::solid_local_triangles`).
+    pub simple_shape_props: usize,
     /// Blocking volumes added (the ones that stop players), and ones that
     /// couldn't be read.
     pub blocking_volumes: usize,
@@ -168,23 +184,25 @@ impl Packages {
 /// Read the static mesh that `index` (a reference inside package `map`,
 /// the map itself or a class's script package) points at.
 fn load_mesh(pkgs: &mut Packages, map: &Loaded, index: i32) -> Option<StaticMesh> {
-    match ObjectRef::from_index(index) {
-        ObjectRef::Export(k) => {
-            static_mesh::read_static_mesh(&map.0, &map.1, &map.0.exports[k]).ok()
-        }
+    let (owner, k) = match ObjectRef::from_index(index) {
+        ObjectRef::Export(k) => (map.clone(), k),
         ObjectRef::Import(_) => {
             let path = object_path(&map.0, index);
-            let loaded = pkgs.get(&path[0])?;
-            let (owner, data) = (&loaded.0, &loaded.1);
+            let owner = pkgs.get(&path[0])?;
             let rest = &path[1..];
-            let k = (0..owner.exports.len()).find(|&i| {
-                let p = object_path(owner, i as i32 + 1);
+            let k = (0..owner.0.exports.len()).find(|&i| {
+                let p = object_path(&owner.0, i as i32 + 1);
                 p.len() == rest.len() && p.iter().zip(rest).all(|(a, b)| a.eq_ignore_ascii_case(b))
             })?;
-            static_mesh::read_static_mesh(owner, data, &owner.exports[k]).ok()
+            (owner, k)
         }
-        ObjectRef::None => None,
-    }
+        ObjectRef::None => return None,
+    };
+    let mut mesh = static_mesh::read_static_mesh(&owner.0, &owner.1, &owner.0.exports[k]).ok()?;
+    // A shape that can't be read leaves the mesh as it was (its own
+    // triangles, or nothing).
+    let _ = crate::collision::read_simple_shape(&owner.0, &owner.1, &mut mesh);
+    Some(mesh)
 }
 
 pub fn load(
@@ -209,6 +227,7 @@ pub fn load(
     // Keyed by the package the reference is in (by address) and the reference.
     let mut cache: HashMap<(usize, i32), Option<StaticMesh>> = HashMap::new();
     let mut placed: Vec<(Placement, (usize, i32))> = Vec::new();
+    let mut shot_only: Vec<(Placement, (usize, i32))> = Vec::new();
     let mut looks = ClassLooks::new();
     let mut start = None;
     let mut arrivals = Vec::new();
@@ -275,9 +294,20 @@ pub fn load(
             pickups_not_solid += 1;
             continue;
         }
-        // So are props the game lets you walk through.
-        if !blocks_players(&mut looks, &map.0, &map.1, a, &mut |n| pkgs.get(n)) {
+        // So are props the game lets you walk through; some of those
+        // still stop shots.
+        let stops = blocks(&mut looks, &map.0, &map.1, a, &mut |n| pkgs.get(n));
+        if !stops.players {
             not_solid += 1;
+            if stops.shots {
+                let key = (Rc::as_ptr(&owner) as usize, p.static_mesh);
+                let mesh = cache
+                    .entry(key)
+                    .or_insert_with(|| load_mesh(&mut pkgs, &owner, p.static_mesh));
+                if mesh.is_some() {
+                    shot_only.push((p, key));
+                }
+            }
             continue;
         }
         if crate::settle::starts_awake(&map.0, &map.1, a)
@@ -301,6 +331,12 @@ pub fn load(
         .iter()
         .filter_map(|(p, i)| cache.get(i).and_then(|m| m.as_ref()).map(|m| (p, m)))
         .collect();
+    let simple_shape_props = pairs
+        .iter()
+        .filter(|(_, m)| {
+            !m.simple_shape.is_empty() && (0..m.triangle_count()).all(|k| !m.triangle_collides(k))
+        })
+        .count();
     let (loose, fixed): (Vec<_>, Vec<_>) =
         pairs.iter().partition(|(p, _)| karma.contains(&p.export));
     let mut mesh = collision_triangles(&bsp, &fixed);
@@ -377,11 +413,9 @@ pub fn load(
             _ => triangles.push(t),
         }
     }
-    // Some breakable props have every section's collision switched off,
-    // like the Geonosian explosive barrels: the game blocks shots and
-    // players with the mesh's simple collision shape instead, which we
-    // don't read. Without triangles weapons could never hit them, so they
-    // get their drawn triangles.
+    // A breakable prop with no collision at all (every section's
+    // collision off and no simple shape) could never be hit, so it gets
+    // its drawn triangles.
     let shapes: HashMap<usize, (&Placement, &StaticMesh)> = fixed
         .iter()
         .copied()
@@ -400,8 +434,29 @@ pub fn load(
             part_triangles.insert(b.export, tris);
         }
     }
+    // Props that stop shots but not people.
+    let mut shot_triangles = Vec::new();
+    let mut shot_part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
+    for (p, key) in &shot_only {
+        let Some(Some(m)) = cache.get(key) else {
+            continue;
+        };
+        let tris = crate::collision::solid_triangles(p, m);
+        if parts.contains_key(&p.export) {
+            shot_part_triangles
+                .entry(p.export)
+                .or_default()
+                .extend(tris);
+        } else {
+            shot_triangles.extend(tris);
+        }
+    }
     Ok(MapCollision {
         triangles,
+        shot_only_props: shot_only.len(),
+        shot_triangles,
+        shot_part_triangles,
+        simple_shape_props,
         movers,
         mover_triangles,
         part_triangles,
