@@ -8,7 +8,9 @@ description = "The level part of the game: loads the chosen mission's map into r
 rc_game_core = { path = "../rc_game_core" }
 rc_hologram = { path = "../rc_hologram" }
 rc_level = { path = "../rc_level" }
+rc_combat = { path = "../rc_combat" }
 rc_level_viewer = { path = "../rc_level_viewer" }
+rc_model = { path = "../rc_model" }
 rc_movement = { path = "../rc_movement" }
 rc_package = { path = "../rc_package" }
 

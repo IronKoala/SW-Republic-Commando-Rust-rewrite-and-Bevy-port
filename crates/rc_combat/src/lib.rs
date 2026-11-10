@@ -37,6 +37,7 @@ pub mod health;
 mod library;
 mod melee;
 pub mod pickup;
+pub mod pickup_sound;
 pub mod save;
 pub mod shot;
 mod throw;
@@ -204,6 +205,20 @@ impl Plugin for WeaponsPlugin {
                     ammo_box::apply_saved.run_if(resource_exists::<ammo_box::TakenFromSave>),
                 )
                     .chain(),
+            )
+            // Pickup sounds (`pickup_sound`).
+            .init_resource::<pickup_sound::PickupSounds>()
+            .add_systems(
+                Update,
+                (
+                    pickup_sound::read_level_sounds
+                        .run_if(resource_exists::<rc_game_core::pickups::LevelAmmoBoxes>)
+                        .run_if(resource_exists::<GamePaths>)
+                        .run_if(resource_exists::<Assets<AudioSource>>),
+                    pickup_sound::play_pickup_sounds
+                        .after(ammo_box::take_boxes)
+                        .run_if(resource_exists::<Assets<AudioSource>>),
+                ),
             )
             .add_systems(
                 Update,

@@ -1,0 +1,79 @@
+# Trandoshan slaver: the big, slow Trandoshan with a shotgun, thermal
+# detonators, and blades for anyone who gets close.
+#
+# Numbers marked "game:" are the original's: TrandoshanSlaver
+# (ctcharacters.u) with TrandoshanSlaverDefaults (Properties/properties.u)
+# on top, and its brain TrandoshanSlaverBot(+Defaults). "guess" and "our
+# choice" mark the rest. Anything not listed takes the battle droid's
+# value (battle_droid.toml).
+#
+# Not done yet: the original's slavers can go berserk (StateBerserk) and
+# charge with their blades; ours shoot and only use the blades up close.
+
+[type]
+id = "trandoshan_slaver"
+name = "Trandoshan slaver"
+classes = ["TrandoshanSlaver"] # game: the map class (the berserker and grenadier have their own files)
+body = "organic"
+
+[movement]
+ground_speed = 338        # game: TrandoshanSlaver GroundSpeed
+accel_rate = 1000         # game: TrandoshanSlaver AccelRate
+collision_radius = 50     # game: CollisionRadius
+collision_height = 75     # game: CollisionHeight
+crouch_radius = 50        # game: CrouchRadius
+crouch_height = 50        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: TrandoshanSlaverDefaults SightRadius
+
+[combat]
+health = 150              # game: TrandoshanSlaver Health and MaxHealth
+accuracy = 0.65           # game: TrandoshanSlaverDefaults Accuracy
+max_aim_yaw = 70          # game: MaxAimYaw
+weapon = "trandoshan_shotgun" # game: TrandoshanSlaverDefaults RequiredEquipment Shotgun (data/weapons/trandoshan_shotgun.toml)
+burst_count = 2           # game: TrandoshanSlaverBot BurstCount
+shot_delay = 1.1          # game: ShotgunDefaults ShotDelay
+weapon_range = 3500       # game: ShotgunAmmoDefaults Range
+melee_range = 200         # game: SlaverBlades MeleeRange (RequiredEquipment[2])
+melee_damage = 50         # game: SlaverBlades MeleeDamage
+melee_damage_type = "CTDamageMelee" # game: SlaverBlades MeleeDamageType
+melee_delay = 1.57        # game: TrandoshanSlaverSet MeleeAttack (47 frames at 30 a second)
+lunge_distance = 300      # guess: steps in to slash when this close
+drops = ""                # not yet: the player can't carry the shotgun
+damage_table = "DV_OrganicTrandoSlaverDamage" # game: TrandoshanSlaverDefaults MyDamageVariance
+
+[grenades]
+grenade = "thermal_detonator_enemy" # game: RequiredEquipment[1] ThermalDetonatorEnemy (data/grenades/thermal_detonator_enemy.toml)
+count = 2                 # game: ThermalDetonatorEnemyDefaults InitAmmoAmount
+probability = 0.1         # game: TrandoshanSlaverBotDefaults GrenadeProbability
+min_time = 20             # game: TrandoshanSlaverBotDefaults MinGrenadeTime
+throw_time = 0.87         # game: TrandoshanSlaverSet ThrowGrenade (26 frames at 30 a second)
+
+[sound]
+# game: TrandoshanSlaver AudioTable = TranSlavAudio (System/ctaudio.u).
+# Names are groups in GameData/Sounds/character_voice.uax. Only the kinds
+# the game's table has are listed.
+package = "character_voice"
+spotted = ["TSR_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["TSR_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["TSR_DieSmallArms"]         # game: PAE_DieSmallArms
+hurt_explosion = ["TSR_HurtExplosion"]
+death_explosion = ["TSR_DieExplosion"]
+hurt_electrical = ["TSR_HurtElectricity"]
+death_electrical = ["TSR_DieElectricity"]
+hurt_melee = ["TSR_HurtMelee"]
+death_fire = ["TSR_DieFire"]
+hurt_fall = ["TSR_HurtFall"]
+death_fall = ["TSR_DieFall"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
+
+[look]
+# game: TrandoshanSlaver Mesh = TrandoshanSlaver, in trandoshan.ukx, with
+# its everyday moves in TrandoshanSlaverSet (the names the battle droid
+# file uses: ActionBreathe, WalkForward, RunForward, Fire, Death, ...).
+package = "GameData/Animations/trandoshan.ukx"
+mesh = "TrandoshanSlaver"
+throw = "ThrowGrenade"   # game: TrandoshanSlaverSet
+melee = "MeleeAttack"    # game: TrandoshanSlaverSet

@@ -25,6 +25,8 @@
 //! clearing). A VR mod's camera gets the sky the same way: give it
 //! `PlayerCamera`.
 
+pub mod anim_props;
+
 use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 use rc_game_core::{
@@ -68,9 +70,16 @@ impl Plugin for LevelPlugin {
         ))
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
+            .add_message::<rc_game_core::PropAnim>()
             .add_systems(
                 Update,
                 let_sky_through.run_if(in_state(GameState::InGame)),
+            )
+            .add_systems(
+                Update,
+                anim_props::animate
+                    .in_set(rc_game_core::GameSet::Simulate)
+                    .run_if(rc_game_core::playing),
             )
             .add_systems(OnExit(GameState::InGame), forget);
     }
@@ -85,6 +94,10 @@ pub struct LevelInfo {
     pub props: usize,
     /// Props and doors whose model comes from their class.
     pub class_props: usize,
+    /// Props drawn with an animated model (bacta dispensers and the like),
+    /// and the ones whose model couldn't be read.
+    pub anim_props: usize,
+    pub anim_prop_failures: usize,
     pub unreadable_props: usize,
     pub blocking_volumes: usize,
     pub drawn_triangles: usize,
@@ -362,6 +375,20 @@ fn load(world: &mut World) {
         yaw.to_degrees()
     ));
     world.insert_resource(PlayerStart { feet, yaw });
+    let anim = anim_props::spawn(world, &paths, &lvl.anim_props);
+    log.line(format!(
+        "{PART}: {} props with an animated model drawn ({}), {} animation sounds{}",
+        anim.drawn,
+        anim.models.join(", "),
+        anim.sounds,
+        if anim.failures.is_empty() {
+            String::new()
+        } else {
+            format!("; NOT drawn: {}", anim.failures.join("; "))
+        }
+    ));
+    info.anim_props = anim.drawn;
+    info.anim_prop_failures = lvl.anim_props.len() - anim.drawn;
     world.insert_resource(LevelMoverData {
         movers: lvl.movers,
         triangles: lvl.mover_triangles,
@@ -396,6 +423,8 @@ fn load(world: &mut World) {
             respawn: b.respawn,
             radius: b.radius,
             height: b.height,
+            message: b.message.clone(),
+            sound: b.sound.clone(),
         })
         .collect();
     log.line(format!(

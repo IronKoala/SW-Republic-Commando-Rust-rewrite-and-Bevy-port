@@ -35,8 +35,9 @@ use rc_anim::Clip;
 use rc_game_core::units::{to_bevy, to_unreal, UU_PER_UNIT};
 use rc_game_core::{
     playing, CharacterAct, CharacterOrder, CharacterOrderDone, CurrentLevel, GameLog, GamePaths,
-    GameSet, GameState, Player, PlayerCamera, ScriptTags,
+    GameSet, GameState, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
 };
+use rc_model::NotifyTrigger;
 use rc_model::{Model, ModelSpec};
 use read::{CastFile, CastMember, Kind};
 use std::collections::HashMap;
@@ -60,10 +61,12 @@ impl Plugin for CastPlugin {
             .init_resource::<CastPlan>()
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()
+            .add_message::<ScriptEvent>()
+            .add_message::<RaiseEvent>()
             .add_systems(OnEnter(GameState::Loading), load_cast)
             .add_systems(
                 Update,
-                (spawn_cast, follow_orders, move_cast)
+                (spawn_cast, follow_orders, trigger_props, move_cast)
                     .chain()
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
@@ -307,6 +310,32 @@ pub struct Cast {
     moving: Option<bool>,
     look: Option<Look>,
     time: f32,
+    /// Props: the name level events must have to trigger it, and what it
+    /// plays then (`AnimTriggered`, looping or not).
+    tag: String,
+    trigger: Option<(String, bool)>,
+}
+
+impl Cast {
+    /// The original's `AnimProp.Trigger`: stop `AnimTriggered` if it is
+    /// playing, else start it. What happened, for the log.
+    fn trigger(&mut self) -> Option<String> {
+        let (anim, looping) = self.trigger.clone()?;
+        let look = self.look.as_ref()?;
+        let on = self
+            .scripted
+            .as_ref()
+            .is_some_and(|s| s.clip.name.eq_ignore_ascii_case(&anim));
+        if on {
+            self.scripted = None;
+            return Some(format!("stops {anim}"));
+        }
+        let Some(clip) = look.model.named_clip(&anim) else {
+            return Some(format!("has no animation {anim}"));
+        };
+        self.scripted = Some(Scripted { clip, looping });
+        Some(format!("plays {anim}"))
+    }
 }
 
 /// The model and the animations it plays on its own.
@@ -402,6 +431,8 @@ fn spawn_cast(
             moving: None,
             look,
             time: 0.0,
+            tag: m.tag.clone(),
+            trigger: m.prop_trigger.clone(),
         });
     }
     if !plan.members.is_empty() {
@@ -823,15 +854,43 @@ fn place_cast(mut cast: Query<(&Cast, &mut Transform)>) {
     }
 }
 
+/// Level events trigger the props tagged with their name (`AnimProp`'s
+/// `Trigger`): the scripts send `HoloProjector` and the projector plays
+/// its throw.
+fn trigger_props(
+    mut events: MessageReader<ScriptEvent>,
+    mut cast: Query<&mut Cast>,
+    log: Option<Res<GameLog>>,
+) {
+    for e in events.read() {
+        for mut c in &mut cast {
+            if c.trigger.is_none() || !c.tag.eq_ignore_ascii_case(&e.name) {
+                continue;
+            }
+            if let Some(what) = c.trigger() {
+                log_line(
+                    &log,
+                    format!(
+                        "t={:.2} {} triggered by {} ({}): {what}",
+                        c.time, c.name, e.name, e.by
+                    ),
+                );
+            }
+        }
+    }
+}
+
 /// Play each cast member's animation and pose its meshes. Only those
 /// near the player are posed (`pose_distance`): the cutscene maps hold
 /// many rooms, and the player sees one at a time.
 fn animate_cast(
     time: Res<Time>,
     plan: Res<CastPlan>,
-    mut cast: Query<(&mut Cast, &InheritedVisibility, &Transform)>,
+    mut cast: Query<(Entity, &mut Cast, &InheritedVisibility, &Transform)>,
     player: Query<&GlobalTransform, With<PlayerCamera>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
+    mut raise: MessageWriter<RaiseEvent>,
+    log: Option<Res<GameLog>>,
 ) {
     let Some(mut meshes) = meshes else {
         return;
@@ -839,7 +898,10 @@ fn animate_cast(
     let dt = time.delta_secs();
     let reach = plan.settings.as_ref().map_or(4000.0, |s| s.pose_distance) / UU_PER_UNIT;
     let eye = player.single().ok().map(|t| t.translation());
-    for (mut c, shown, at) in &mut cast {
+    // Props whose animation triggers them again (`TriggerSelf`).
+    let mut again = Vec::new();
+    for (entity, mut c, shown, at) in &mut cast {
+        let name_of = c.name.clone();
         let Cast {
             scripted,
             moving,
@@ -860,16 +922,57 @@ fn animate_cast(
             (None, None) => true,
             _ => false,
         };
+        // The stretches of the clip passed this frame (0 to 1 through
+        // it), for the events its notifies send.
+        let mut passed: Vec<(f32, f32)> = Vec::new();
         if !same {
             look.playing = clip.map(|k| k.name.clone());
             look.frame = 0.0;
+            passed.push((-1.0, 0.0));
         } else if let Some(k) = clip {
             let n = k.num_frames.max(1.0);
+            let before = look.frame;
+            let ahead = before + dt * k.rate;
             look.frame = if looping {
-                (look.frame + dt * k.rate).rem_euclid(n)
+                ahead.rem_euclid(n)
             } else {
-                (look.frame + dt * k.rate).min(n - 1.0)
+                ahead.min(n - 1.0)
             };
+            if looping && ahead >= n {
+                passed.push((before / n, 1.0));
+                passed.push((-1.0, look.frame / n));
+            } else if !looping && look.frame >= n - 1.0 {
+                // The last frame shows the end: notifies at the very end
+                // go off too, once.
+                if before < n - 1.0 {
+                    passed.push((before / n, 1.0));
+                }
+            } else {
+                passed.push((before / n, look.frame / n));
+            }
+        }
+        let mut self_trigger = false;
+        if let Some(k) = clip {
+            for (from, to) in passed {
+                for t in look.model.triggers_between(&k.name, from, to) {
+                    match t {
+                        NotifyTrigger::Event(name) => {
+                            log_line(
+                                &log,
+                                format!("{} animation {} sends event {name}", name_of, k.name),
+                            );
+                            raise.write(RaiseEvent {
+                                name,
+                                by: format!("{name_of} animation"),
+                            });
+                        }
+                        NotifyTrigger::SelfTrigger => self_trigger = true,
+                    }
+                }
+            }
+        }
+        if self_trigger {
+            again.push(entity);
         }
         // Hidden or far away ones aren't posed; a still pose only once.
         let far = reach > 0.0 && eye.is_some_and(|e| e.distance(at.translation) > reach);
@@ -890,6 +993,16 @@ fn animate_cast(
             if let Some(mut m) = meshes.get_mut(handle) {
                 m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
+            }
+        }
+    }
+    for e in again {
+        if let Ok((_, mut c, _, _)) = cast.get_mut(e) {
+            if let Some(what) = c.trigger() {
+                log_line(
+                    &log,
+                    format!("{} animation triggers itself: {what}", c.name),
+                );
             }
         }
     }
