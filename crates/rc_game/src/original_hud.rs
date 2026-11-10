@@ -336,6 +336,7 @@ fn draw_layout(
     commands
         .spawn((
             LayoutRoot,
+            crate::cutscene::HudRoot,
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),

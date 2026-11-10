@@ -42,6 +42,25 @@ pub struct Blast {
     pub hit: u32,
 }
 
+/// "Something blew up here": a barrel, a fuel dispenser, anything that
+/// isn't a thrown grenade. Every character within `radius` whose centre
+/// the blast can see takes `damage` falling off with distance (the
+/// engine's `HurtRadius`, as for grenades), times its damage table for
+/// `damage_type`. A [`Blast`] is sent too (named `what`), so the AI hears
+/// it. Bevy space; `radius` in Unreal units.
+#[derive(Message, Debug, Clone)]
+pub struct Explode {
+    pub point: Vec3,
+    pub damage: f32,
+    pub radius: f32,
+    /// A damage type class name, like `CTDamageExplosionGeoBarrel`.
+    pub damage_type: String,
+    pub kind: DamageKind,
+    pub instigator: Option<Entity>,
+    /// What went off, for the log and the `Blast`.
+    pub what: String,
+}
+
 /// What kind of body a character has (for effects and the log). Characters
 /// without one count as `Organic`. How much damage a character takes is its
 /// `DamageTable`.
@@ -512,6 +531,76 @@ fn blast(
         ),
     );
     hit_count
+}
+
+/// Carry out every [`Explode`]: hurt the characters around it.
+pub(crate) fn explosions(
+    mut explode: MessageReader<Explode>,
+    lib: Res<WeaponLibrary>,
+    targets: Query<(Entity, &GlobalTransform, &Hittable, Option<&DamageTable>), Without<Dead>>,
+    level: Option<Res<LevelCollision>>,
+    mut damage: MessageWriter<Damage>,
+    mut blasts: MessageWriter<Blast>,
+    log: Option<Res<GameLog>>,
+) {
+    let v = |p: Vec3| rc_movement::Vec3::new(p.x, p.y, p.z);
+    for x in explode.read() {
+        let point = to_unreal(x.point);
+        let mut hit = 0;
+        for (e, gt, h, table) in &targets {
+            let centre = to_unreal(gt.translation()) + Vec3::Z * h.center_up;
+            let dist = (centre - point).length();
+            let scale = blast_scale(dist, h.radius, x.radius);
+            if scale <= 0.0 {
+                continue;
+            }
+            // Walls in between keep it off.
+            let blocked = level.as_deref().is_some_and(|l| {
+                l.0.sweep(rc_movement::Vec3::ZERO, v(point), v(centre))
+                    .is_some_and(|hit| hit.time < 0.999)
+            });
+            if blocked {
+                continue;
+            }
+            let m = lib
+                .damage_types
+                .multiplier(table.map(|t| t.0.as_str()), &x.damage_type);
+            let amount = x.damage * scale * m;
+            if amount <= 0.0 {
+                continue;
+            }
+            hit += 1;
+            damage.write(Damage {
+                target: e,
+                amount,
+                kind: x.kind,
+                instigator: x.instigator,
+                point: x.point,
+                direction: to_bevy(centre - point).normalize_or_zero(),
+            });
+            say(
+                &log,
+                format!(
+                    "explosions: {} reached {e:?} at {dist:.0} uu: {amount:.1} damage (x{scale:.2} by distance, x{m} by its table)",
+                    x.what
+                ),
+            );
+        }
+        say(
+            &log,
+            format!(
+                "explosions: {} went off at ({:.0}, {:.0}, {:.0}), damage {}, radius {}, {hit} characters reached",
+                x.what, point.x, point.y, point.z, x.damage, x.radius
+            ),
+        );
+        blasts.write(Blast {
+            grenade: x.what.clone(),
+            point: x.point,
+            radius: x.radius,
+            instigator: x.instigator,
+            hit,
+        });
+    }
 }
 
 /// Stuns and electrocutions wear off; electrocution hurts while it lasts.

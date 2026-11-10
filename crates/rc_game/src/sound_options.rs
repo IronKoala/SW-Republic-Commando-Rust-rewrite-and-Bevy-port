@@ -10,7 +10,7 @@
 
 use crate::music::Track;
 use crate::settings::Settings;
-use bevy::audio::{PlaybackSettings, SpatialListener, Volume};
+use bevy::audio::{PlaybackSettings, SpatialListener, SpatialScale, Volume};
 use bevy::prelude::*;
 use rc_game_core::{GameLog, PlayerCamera, SoundAt, Voice};
 use std::collections::VecDeque;
@@ -31,6 +31,16 @@ impl Plugin for SoundOptionsPlugin {
 /// The distance between the listener's ears, in Bevy units (a head is
 /// about 0.2 m; a Bevy unit is 50 Unreal units, about a metre).
 const EAR_GAP: f32 = 0.2;
+
+/// Bevy's 3D sound (rodio's) also makes a sound quieter with distance, by
+/// one over the distance squared in Bevy units: a droid 10 m away would
+/// play at 1/100 of its loudness. The parts that place sounds already
+/// work out their own loudness with distance (from the game's numbers),
+/// so placed sounds are shrunk by this much before Bevy sees them: its own
+/// fading then only starts beyond 1000 units (50,000 uu, a kilometre).
+/// Which ear a sound is nearer doesn't change with the shrinking, so the
+/// left/right of 3D SOUND stays as it was.
+const SPATIAL_SHRINK: f32 = 1e-3;
 
 /// How loud a new sound plays: its own loudness times the master volume
 /// and the VOICES or SOUND FX volume.
@@ -59,6 +69,7 @@ fn adjust_new_sounds(
         }
         if placed && settings.audio.sound_3d {
             p.spatial = true;
+            p.spatial_scale = Some(SpatialScale::new(SPATIAL_SHRINK));
         }
     }
 }
@@ -106,10 +117,24 @@ fn ears(
 ) {
     for (e, has) in &cameras {
         if settings.audio.sound_3d && !has {
-            commands.entity(e).insert(SpatialListener::new(EAR_GAP));
+            commands.entity(e).insert(ears_swapped());
         } else if !settings.audio.sound_3d && has {
             commands.entity(e).remove::<SpatialListener>();
         }
+    }
+}
+
+/// The listener's ears, swapped on purpose. Bevy's 3D sound (rodio 0.22's
+/// `Spatial`) makes the ear *further* from a sound the louder one: a
+/// sound on the left plays at 0.5 in the left speaker and 1.0 in the
+/// right (measured in the cloud with rodio's own `Spatial` on a test tone,
+/// 2026-11-09). Telling it the left ear is on the right puts every sound
+/// back on its own side.
+fn ears_swapped() -> SpatialListener {
+    let plain = SpatialListener::new(EAR_GAP);
+    SpatialListener {
+        left_ear_offset: plain.right_ear_offset,
+        right_ear_offset: plain.left_ear_offset,
     }
 }
 
@@ -171,6 +196,14 @@ mod tests {
         assert!(w.get_entity(second).is_ok() && w.get_entity(third).is_ok());
     }
 
+    /// The left ear is on the camera's right (+X), to undo rodio's swap.
+    #[test]
+    fn ears_are_swapped_for_rodio() {
+        let l = ears_swapped();
+        assert!(l.left_ear_offset.x > 0.0 && l.right_ear_offset.x < 0.0);
+        assert!((l.left_ear_offset.x - l.right_ear_offset.x - EAR_GAP).abs() < 1e-6);
+    }
+
     #[test]
     fn placed_sounds_are_3d_only_with_the_option_on() {
         let mut app = app(32);
@@ -179,7 +212,12 @@ mod tests {
             .spawn((PlaybackSettings::ONCE, SoundAt::place(Vec3::X)))
             .id();
         app.update();
-        assert!(app.world().get::<PlaybackSettings>(e).unwrap().spatial);
+        let p = app.world().get::<PlaybackSettings>(e).unwrap();
+        assert!(p.spatial);
+        assert_eq!(
+            p.spatial_scale.map(|s| s.0),
+            Some(Vec3::splat(SPATIAL_SHRINK))
+        );
         app.world_mut().resource_mut::<Settings>().audio.sound_3d = false;
         let e = app
             .world_mut()

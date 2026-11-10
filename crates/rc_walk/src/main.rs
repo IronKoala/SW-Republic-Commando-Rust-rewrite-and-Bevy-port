@@ -44,7 +44,7 @@ use bevy::render::view::Tonemapping;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
-use rc_level_viewer::{materials, scene, sky};
+use rc_level_viewer::{materials, prop_light, scene, sky};
 use rc_movement::room::test_room;
 use rc_level_viewer::draw::MoverPart;
 use rc_movement::{
@@ -194,6 +194,8 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut bump_materials: ResMut<Assets<rc_level_viewer::bump::BumpLitMaterial>>,
+    mut prop_materials: ResMut<Assets<prop_light::PropMaterial>>,
     mut images: ResMut<Assets<Image>>,
     world: Res<TestWorld>,
     look: Option<Res<MapLook>>,
@@ -231,6 +233,8 @@ fn setup(
                         &mut meshes,
                         &mut images,
                         &mut materials,
+                        Some(&mut bump_materials),
+                        &mut prop_materials,
                         &sc,
                         &settings,
                     );
@@ -243,11 +247,12 @@ fn setup(
                         log.line("sky: this map has no SkyZoneInfo, so no sky");
                     }
                     log.line(format!(
-                        "map drawn: {} triangles, {} batches with a texture; {} with a lightmap, {} with baked corner colours, {} at full brightness; real-time lights: {} point, {} spot, {} sun",
+                        "map drawn: {} triangles, {} batches with a texture; {} with a lightmap, {} with baked corner colours ({} also lit by real-time lights), {} at full brightness; real-time lights: {} point, {} spot, {} sun",
                         r.triangles,
                         r.textured,
                         r.lightmapped,
                         r.coloured,
+                        r.coloured_live,
                         r.full_bright,
                         r.lights.point,
                         r.lights.spot,
@@ -969,7 +974,8 @@ fn main() -> AppExit {
     .init_resource::<FrameCount>()
     .init_resource::<PlayerIntent>()
     .configure_sets(Update, (Stage::Input, Stage::Move, Stage::View, Stage::Report).chain())
-    .add_plugins(sky::SkyPlugin)
+    .add_plugins((sky::SkyPlugin, rc_level_viewer::bump::BumpMapPlugin))
+    .add_plugins(prop_light::PropLightPlugin)
     .add_systems(Startup, setup)
     .add_systems(Update, move_body.in_set(Stage::Move))
     .add_systems(Update, (place_view, place_movers).in_set(Stage::View))

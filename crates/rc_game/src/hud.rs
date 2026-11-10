@@ -183,6 +183,7 @@ fn spawn_hud(
             },
             DespawnOnExit(GameState::InGame),
             GlobalZIndex(1),
+            crate::cutscene::HudRoot,
         ))
         .with_children(|root| {
             for (top, left) in [(true, true), (true, false), (false, true), (false, false)] {
@@ -477,7 +478,10 @@ fn update_messages(
             .as_ref()
             .is_some_and(|s| s.stats.prompts.contains(&msg.text));
         if prompt && !settings.game.prompt_text {
-            log.line(format!("hud: prompt \"{}\" not shown (PROMPT TEXT off)", msg.text));
+            log.line(format!(
+                "hud: prompt \"{}\" not shown (PROMPT TEXT off)",
+                msg.text
+            ));
             continue;
         }
         log.line(format!(

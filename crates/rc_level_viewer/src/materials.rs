@@ -4,15 +4,18 @@
 //! Unreal materials can wrap each other: a `Shader` points at its `Diffuse`
 //! texture, a `TexPanner` at the `Material` it moves, and so on. We follow
 //! those links until we reach a plain `Texture`, which is enough to show the
-//! surface's main picture. Lighting, bump maps and animation come later.
+//! surface's main picture. Republic Commando's bump-mapped materials also
+//! name a bump map, which is decoded alongside (see `Bump`). Animation
+//! comes later.
 
 use rc_image::{PixelFormat, Rgba};
 use rc_package::properties::{self, Value};
 use rc_package::texture;
 use rc_package::{ObjectRef, Package};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// A package and its file bytes, shared between users.
 pub type Loaded = Rc<(Package, Vec<u8>)>;
@@ -55,6 +58,50 @@ pub struct Picture {
     /// Glow that adds light instead of covering what's behind (the game's
     /// `HsFalloff` light shafts).
     pub additive: bool,
+    /// The material's bump map, if it has one (`HsBump...` materials'
+    /// `NormalMap`, or a `Shader`'s `Bumpmap`).
+    pub bump: Option<Arc<Bump>>,
+}
+
+/// A bump map ready for drawing: which way each pixel of the surface tilts.
+///
+/// `image` holds the usual normal-map colours, already turned the way the
+/// level shader wants them: red is the tilt along the texture's width (the
+/// U direction), green along its height (V, down the picture), blue how much
+/// the pixel faces straight out, each 0..255 for -1..1. A flat pixel is
+/// (128, 128, 255).
+///
+/// Nothing documents which way the game's bump maps point, so it was
+/// measured (docs/DESIGN.md "Drawing bump maps"). A real tilt map is the
+/// slope of some height map, and the slopes of a height map have to fit
+/// together (how the tilt along the width changes going down equals how the
+/// tilt along the height changes going across), which tells which channel
+/// runs which way. Whether a tilt means a bump or a dent comes from the
+/// main picture: grooves are painted darker, so the picture is darker where
+/// the tilts point inwards.
+///
+/// - Colour normal maps (most bump maps on level props: all 16 used by
+///   yyy_06a, geo_01a and ras_01a): red along the width, green down the
+///   picture, as stored. All 16 fit that way round; the main picture
+///   agrees on the direction for 11 of the 13 we could compare (the
+///   others use a different repeat).
+/// - The game's two-byte formats (12 V8U8 and 14 L6V5U5, mostly on
+///   characters and weapons): the other way round. The low bits (what
+///   Direct3D calls U, and `rc_image` puts in red) follow the picture's
+///   height, so the two are swapped here. On the 104 L6V5U5 maps (at mip
+///   1, to quiet the 5-bit steps) that fitted clearly best on 49 and the
+///   next best reading on 2. The 29 V8U8 maps are mixed (13 clearly
+///   decided: 9 swapped, 4 not) and are read the same way.
+pub struct Bump {
+    pub image: Rgba,
+    /// How many times the bump map repeats per repeat of the main picture
+    /// (`BumpUVScale`, 1 when not set).
+    pub uv_scale: f32,
+    /// True when the map was stored in one of the game's two-byte bump
+    /// formats (12 or 14), false for a colour normal map.
+    pub two_byte_format: bool,
+    /// Where the bump map came from, for the log.
+    pub name: String,
 }
 
 /// Why a material couldn't be shown, kept for the log.
@@ -66,6 +113,10 @@ pub struct Materials {
     packages: HashMap<String, Option<Loaded>>,
     /// Cache by full object path, e.g. `geo_textures.walls.TierWall`.
     cache: HashMap<String, Result<Picture, Failure>>,
+    /// Bump maps by full object path.
+    bumps: HashMap<String, Result<Arc<Bump>, Failure>>,
+    /// Bump maps named by a material that couldn't be read, with why.
+    pub bump_failures: BTreeMap<String, usize>,
 }
 
 /// The dotted path of an import or export, outermost package first.
@@ -164,6 +215,7 @@ fn decode_texture(pkg: &Package, data: &[u8], index: usize) -> Result<Picture, F
         has_alpha: alpha_pixels && uses_alpha,
         alpha_pixels,
         additive: false,
+        bump: None,
     })
 }
 
@@ -188,6 +240,8 @@ impl Materials {
             files,
             packages: HashMap::new(),
             cache: HashMap::new(),
+            bumps: HashMap::new(),
+            bump_failures: BTreeMap::new(),
         }
     }
 
@@ -298,10 +352,14 @@ impl Materials {
                     ObjectRef::None => continue,
                 };
                 let cuts_holes = wrapper_uses_alpha(pkg, &class, &props);
+                let bump = self.material_bump(pkg, data, &class, &props, depth);
                 return found.map(|mut p| {
                     p.additive |= additive;
                     if cuts_holes {
                         p.has_alpha = p.alpha_pixels;
+                    }
+                    if bump.is_some() {
+                        p.bump = bump;
                     }
                     p
                 });
@@ -309,6 +367,137 @@ impl Materials {
         }
         let names: Vec<_> = props.iter().map(|p| pkg.name(p.name).to_string()).collect();
         Err(format!("{class} has none of {links:?} (it has {names:?})"))
+    }
+}
+
+impl Materials {
+    /// The bump map a material names, if any: `NormalMap` on Republic
+    /// Commando's `Hs...` materials (with `BumpUVScale`), `Bumpmap` on a
+    /// `Shader` (with `BumpUVScale`). Failures are counted in
+    /// `bump_failures` and the surface is drawn without one.
+    fn material_bump(
+        &mut self,
+        pkg: &Package,
+        data: &[u8],
+        class: &str,
+        props: &[properties::Property],
+        depth: usize,
+    ) -> Option<Arc<Bump>> {
+        let link = match class {
+            c if c.starts_with("Hs") => "NormalMap",
+            "Shader" => "Bumpmap",
+            _ => return None,
+        };
+        let Some(Value::Object(o)) = properties::find(pkg, props, link).map(|p| &p.value) else {
+            return None;
+        };
+        let o = *o;
+        if o == 0 {
+            return None;
+        }
+        let uv_scale = match properties::find(pkg, props, "BumpUVScale").map(|p| &p.value) {
+            Some(Value::Float(f)) if *f > 0.0 => *f,
+            _ => 1.0,
+        };
+        let path = object_path(pkg, o);
+        let key = match ObjectRef::from_index(o) {
+            ObjectRef::Export(_) => format!("(local){}", path.join(".")),
+            _ => path.join("."),
+        };
+        let cached = match self.bumps.get(&key) {
+            Some(b) => b.clone(),
+            None => {
+                let found = match ObjectRef::from_index(o) {
+                    ObjectRef::Export(j) => self.bump_texture(pkg, data, j, depth + 1, &key),
+                    _ => self.bump_path(&path, depth + 1, &key),
+                };
+                self.bumps.insert(key.clone(), found.clone());
+                found
+            }
+        };
+        match cached {
+            Ok(b) if (b.uv_scale - uv_scale).abs() < 1e-6 => Some(b),
+            Ok(b) => Some(Arc::new(Bump {
+                image: b.image.clone(),
+                uv_scale,
+                two_byte_format: b.two_byte_format,
+                name: b.name.clone(),
+            })),
+            Err(e) => {
+                *self.bump_failures.entry(e).or_default() += 1;
+                None
+            }
+        }
+    }
+
+    fn bump_path(
+        &mut self,
+        path: &[String],
+        depth: usize,
+        key: &str,
+    ) -> Result<Arc<Bump>, Failure> {
+        let Some((top, rest)) = path.split_first() else {
+            return Err("empty bump map path".into());
+        };
+        let loaded = self
+            .package(top)
+            .ok_or_else(|| format!("bump map package {top} not found"))?;
+        let k = find_export(&loaded.0, rest)
+            .ok_or_else(|| format!("bump map {} not found in {top}", rest.join(".")))?;
+        self.bump_texture(&loaded.0, &loaded.1, k, depth, key)
+    }
+
+    /// Decode a bump map texture (following wrapper materials, as for
+    /// pictures, if it isn't a plain texture).
+    fn bump_texture(
+        &mut self,
+        pkg: &Package,
+        data: &[u8],
+        k: usize,
+        depth: usize,
+        key: &str,
+    ) -> Result<Arc<Bump>, Failure> {
+        let e = &pkg.exports[k];
+        if pkg.export_class_name(e) != "Texture" {
+            // Something else used as a bump map: take its picture.
+            let p = self.follow(pkg, data, k, depth)?;
+            return Ok(Arc::new(Bump {
+                image: p.image,
+                uv_scale: 1.0,
+                two_byte_format: false,
+                name: key.to_string(),
+            }));
+        }
+        let tex = texture::read_texture(pkg, data, e).map_err(|e| e.to_string())?;
+        let (image, two_byte_format) = match tex.format {
+            12 | 14 => {
+                let format = if tex.format == 12 {
+                    PixelFormat::V8U8
+                } else {
+                    PixelFormat::L6V5U5
+                };
+                let mip = tex
+                    .mip_for(texture::Detail::World)
+                    .ok_or("bump map has no mipmaps")?;
+                let bytes = &data[mip.data_offset..mip.data_offset + mip.data_len];
+                let mut image =
+                    rc_image::decode(format, mip.width as usize, mip.height as usize, bytes, None)
+                        .map_err(|e| e.to_string())?;
+                // Red follows the picture's height and green its width in
+                // the stored maps (see `Bump`); swap them.
+                for p in image.pixels.as_chunks_mut::<4>().0 {
+                    p.swap(0, 1);
+                }
+                (image, true)
+            }
+            _ => (decode_texture(pkg, data, k)?.image, false),
+        };
+        Ok(Arc::new(Bump {
+            image,
+            uv_scale: 1.0,
+            two_byte_format,
+            name: key.to_string(),
+        }))
     }
 }
 
@@ -355,5 +544,6 @@ fn constant_colour(pkg: &Package, data: &[u8], k: usize, name: &str) -> Result<P
         has_alpha: rgba[3] < 255,
         alpha_pixels: rgba[3] < 255,
         additive: false,
+        bump: None,
     })
 }

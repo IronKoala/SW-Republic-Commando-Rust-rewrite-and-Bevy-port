@@ -45,7 +45,9 @@
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
+pub mod breakables;
 pub mod characters;
+pub mod cutscene;
 pub mod save;
 pub mod sounds;
 
@@ -53,12 +55,11 @@ use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind, Health};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
-    GamePaths, GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player,
-    PlayerVitals, RaiseEvent,
+    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog, GamePaths,
+    GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player, PlayerVitals, RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
-use rc_level_plugin::{LevelMoverData, LevelParts};
+use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
 use rc_level_viewer::draw::MoverPart;
 use rc_movers_plugin::{Happened, LevelMovers, MoverHappened};
 use rc_scripts::{Director, Effect, PlayerBody, Settings};
@@ -94,14 +95,28 @@ impl Plugin for ScriptsPlugin {
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
             .add_systems(
                 Update,
-                (bacta, run, characters::cast, sounds::play, hide_parts)
+                (
+                    bacta,
+                    breakables::shots,
+                    breakables::blasts,
+                    breakables::explode,
+                    run,
+                    characters::cast,
+                    sounds::play,
+                    hide_parts,
+                    cutscene::apply,
+                )
                     .chain()
                     .in_set(ScriptSystems)
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
             )
-            .add_systems(Update, (sounds::started, sounds::pause))
-            .add_systems(OnExit(GameState::InGame), (forget, sounds::forget));
+            .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
+            .add_systems(OnEnter(GameState::Loading), cutscene::forget)
+            .add_systems(
+                OnExit(GameState::InGame),
+                (forget, sounds::forget, cutscene::forget),
+            );
     }
 }
 
@@ -170,8 +185,14 @@ pub struct LevelScript {
     /// Sounds the scripts asked for this frame.
     sounds: Vec<sounds::SoundRequest>,
     started: bool,
+    /// What the cutscene asks of the player and the screen.
+    pub scene: cutscene::Scene,
     /// Counts for the self-tests.
     pub stats: PlayStats,
+    /// Props weapons can break, and explosions about to go off.
+    pub breaking: breakables::Breakables,
+    /// What weapons did to props.
+    pub props: breakables::PropStats,
 }
 
 /// What the scripts did in the game, for the log and the self-tests.
@@ -195,6 +216,8 @@ pub struct PlayStats {
     pub sounds_started: usize,
     /// Sounds asked for that weren't loaded.
     pub sounds_missing: Vec<String>,
+    /// The sounds played from a place in the level (not heard everywhere).
+    pub sounds_placed: Vec<String>,
     pub not_done: usize,
     /// Orders sent to characters: `KIND WHO`.
     pub character_orders: Vec<String>,
@@ -314,6 +337,7 @@ fn build(
     mut commands: Commands,
     loaded: Option<Res<Loaded>>,
     movers: Option<Res<LevelMoverData>>,
+    breakable: Option<Res<LevelBreakables>>,
     mut gate: ResMut<LoadingGate>,
     paths: Res<GamePaths>,
     audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
@@ -324,6 +348,9 @@ fn build(
     };
     let Loaded(map, settings, places) = &*loaded;
     let mut director = Director::new(map, &movers.movers.triggers, settings.clone());
+    // Props weapons can break get the game's full damage rules.
+    let breakable = breakable.map(|b| b.0.clone()).unwrap_or_default();
+    director.add_breakables(&breakable);
     // Characters really walk and animate in the game: scripts wait for them.
     director.game_runs_characters = true;
     let places = characters::Places::new(places.clone());
@@ -341,7 +368,7 @@ fn build(
     }
     let s = &director.stats;
     log.line(format!(
-        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} counters, {} conditions, {} checkpoints, {} props, {} level exits; level start sends {:?}",
+        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} counters, {} conditions, {} checkpoints, {} props ({} weapons can break), {} level exits; level start sends {:?}",
         s.scripts,
         s.sequences,
         s.actions,
@@ -350,6 +377,7 @@ fn build(
         s.conditions,
         s.checkpoints,
         s.props,
+        s.breakables,
         s.exits,
         director.start_events()
     ));
@@ -359,7 +387,11 @@ fn build(
             at[0],
             at[1],
             at[2],
-            if open { "" } else { " (closed until the scripts open it)" }
+            if open {
+                ""
+            } else {
+                " (closed until the scripts open it)"
+            }
         ));
     }
     let dispensers: Vec<Dispenser> = map
@@ -410,7 +442,10 @@ fn build(
         places,
         sounds: Vec::new(),
         started: false,
+        scene: cutscene::Scene::default(),
         stats: PlayStats::default(),
+        breaking: breakables::Breakables::new(&breakable),
+        props: breakables::PropStats::default(),
     });
     commands.insert_resource(Objectives::default());
     commands.remove_resource::<Loaded>();
@@ -523,10 +558,7 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change): (
-        MessageWriter<CheckpointReached>,
-        MessageWriter<ChangeLevel>,
-    ),
+    (mut checkpoints, mut change): (MessageWriter<CheckpointReached>, MessageWriter<ChangeLevel>),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
     restoring: Option<Res<RestoringSave>>,
@@ -623,10 +655,46 @@ fn run(
                 }
                 script.hidden.insert(export);
                 script.stats.props_destroyed.push(tag.clone());
+                // Explosions go off 0.1 to 0.2 s later, as in the game.
+                let delay = 0.1 + 0.1 * ((export as f32 * 0.618).fract());
+                let explodes = script.breaking.broke(export, now, delay);
+                let sound = script
+                    .breaking
+                    .get(export)
+                    .and_then(|b| b.destroyed.sound.clone());
                 log.line(format!(
-                    "{PART}: t={now:.2} prop {name} ({tag}) destroyed: no longer solid or drawn{}{}",
+                    "{PART}: t={now:.2} prop {name} ({tag}) destroyed: no longer solid or drawn{}{}{}{}",
+                    if explodes { "; explodes in a moment" } else { "" },
                     mesh.map(|m| format!("; should become {m} (not drawn yet)")).unwrap_or_default(),
-                    effect.map(|m| format!("; effect {m} (not shown yet)")).unwrap_or_default()
+                    effect.map(|m| format!("; effect {m} (not shown yet)")).unwrap_or_default(),
+                    sound.map(|m| format!("; sound {m} (not played yet)")).unwrap_or_default()
+                ));
+            }
+            Effect::PropDamaged {
+                export,
+                name,
+                tag,
+                removed,
+            } => {
+                if removed {
+                    if let Some(p) = &parts {
+                        p.set_solid_export(export, false);
+                    }
+                    script.hidden.insert(export);
+                    script.stats.props_destroyed.push(tag.clone());
+                }
+                let look = script
+                    .breaking
+                    .get(export)
+                    .and_then(|b| b.damaged.mesh.clone());
+                log.line(format!(
+                    "{PART}: t={now:.2} prop {name} ({tag}) damaged{}",
+                    if removed {
+                        "; it has no damaged look, so it is gone (no longer solid or drawn)".to_string()
+                    } else {
+                        look.map(|m| format!("; should become {m} (not drawn yet)"))
+                            .unwrap_or_default()
+                    }
                 ));
             }
             Effect::Checkpoint { name } => {
@@ -668,6 +736,27 @@ fn run(
                     waits,
                     deadline: now + script.director.settings.character_grace_seconds,
                 };
+                // Cutscenes: holding the player, fades, the player's
+                // teleports.
+                if cutscene::KINDS.contains(&call.kind.as_str()) || call.kind == "teleporttopoint"
+                {
+                    let at = format!(
+                        "{PART}: t={now:.2} {} #{} {}",
+                        call.script, call.index, call.kind
+                    );
+                    let settings = &script.director.settings;
+                    let places = &script.places;
+                    if script.scene.take(
+                        &call.action,
+                        now,
+                        |t| settings.is_player(t),
+                        |d| places.find(d).map(|p| (p.location, p.yaw)),
+                        &at,
+                        &log,
+                    ) {
+                        continue;
+                    }
+                }
                 if characters::KINDS.contains(&call.kind.as_str()) {
                     script.calls.push(call);
                     continue;
@@ -872,9 +961,13 @@ fn carry_out(
                 log.line(format!("{at}: switched off in the map; not played"));
             } else {
                 let volume = script.director.settings.sound_volume;
-                script
-                    .sounds
-                    .push(sounds::request(&call.script, call.index, a, volume));
+                script.sounds.push(sounds::request(
+                    &call.script,
+                    call.index,
+                    a,
+                    volume,
+                    call.owner.clone(),
+                ));
             }
         }
         "changelevel" => {

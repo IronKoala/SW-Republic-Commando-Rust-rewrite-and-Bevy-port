@@ -14,6 +14,7 @@
 //! `logs/rc_script_check.log`. The game folder is RC_GAME_DIR or the
 //! default Steam path; nothing is written there.
 
+use rc_package::sound::AudioParams;
 use rc_package::Package;
 use rc_scripts::{Director, Effect, Settings};
 use std::collections::BTreeMap;
@@ -95,8 +96,14 @@ fn main() {
         names = all;
     }
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
-    // Sound packages read so far: the lower-case names of their sounds.
-    let mut packages: BTreeMap<String, Option<std::collections::HashSet<String>>> = BTreeMap::new();
+    // Sound packages read so far: their sounds by lower-case name, with
+    // the game's settings each names (`params_vox.voice_ca1_2d`).
+    let mut packages: BTreeMap<String, Option<SoundSet>> = BTreeMap::new();
+    // The game's sound settings (AudioParams) by `package.name`.
+    let mut params: BTreeMap<String, Option<BTreeMap<String, AudioParams>>> = BTreeMap::new();
+    // How each script sound would be heard in the game (see
+    // rc_scripts_plugin's sounds.rs), counted over all maps.
+    let mut heard: BTreeMap<&'static str, usize> = BTreeMap::new();
     let (mut sounds_total, mut sounds_found) = (0, 0);
     let mut classes: BTreeMap<String, usize> = BTreeMap::new();
     // Map -> the maps its exits lead to.
@@ -159,7 +166,11 @@ fn main() {
         // Triggers with their class defaults, as the movers part reads them.
         let (triggers, tags) = rc_level::map_collision::load(&path, &data, 84.0)
             .map(|l| {
-                let tags = l.arrivals.iter().map(|a| a.0.to_ascii_lowercase()).collect();
+                let tags = l
+                    .arrivals
+                    .iter()
+                    .map(|a| a.0.to_ascii_lowercase())
+                    .collect();
                 (l.movers.triggers, tags)
             })
             .unwrap_or_default();
@@ -209,7 +220,7 @@ fn main() {
                         .entry(pkg_name.to_ascii_lowercase())
                         .or_insert_with(|| sound_names_in(&data, &pkg_name))
                         .as_ref()
-                        .map(|set| set.contains(&n.to_ascii_lowercase()));
+                        .map(|set| set.contains_key(&n.to_ascii_lowercase()));
                     *classes.entry(r.class.clone()).or_default() += 1;
                     match ok {
                         Some(true) => found += 1,
@@ -231,6 +242,66 @@ fn main() {
                 format!("; missing: {}", lost.join(", "))
             }
         ));
+        // Where each sound action would be heard from in the game.
+        let mut here: BTreeMap<&'static str, usize> = BTreeMap::new();
+        for a in map.scripts() {
+            for act in &a.actions {
+                if !rc_scripts::sound_action(act) || act.flag("bDisabled", false) {
+                    continue;
+                }
+                let Some(n) = act.text("Sound").map(str::to_ascii_lowercase) else {
+                    continue;
+                };
+                let set = map
+                    .sounds
+                    .get(&n)
+                    .and_then(|r| r.package.clone())
+                    .and_then(|p| packages.get(&p.to_ascii_lowercase()).cloned().flatten());
+                let pr = set.as_ref().and_then(|s| s.get(&n).cloned().flatten());
+                let ap = pr.as_ref().and_then(|pr| {
+                    let (pk, _) = pr.split_once('.')?;
+                    params
+                        .entry(pk.to_string())
+                        .or_insert_with(|| audio_params_in(&data, pk))
+                        .as_ref()?
+                        .get(pr)
+                        .cloned()
+                });
+                let tag = act
+                    .text("SoundSourceTag")
+                    .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("None"));
+                let kind = if act.class.to_ascii_lowercase().ends_with("playlocalsound") {
+                    "everywhere: a local sound"
+                } else if ap.as_ref().is_some_and(|p| p.non_positional) {
+                    "everywhere: the game plays it as radio"
+                } else if tag.is_some_and(|t| settings.is_player(t)) {
+                    "everywhere: aimed at the player"
+                } else if let Some(t) = tag {
+                    if places
+                        .iter()
+                        .any(|p| p.tag.eq_ignore_ascii_case(t) || p.name.eq_ignore_ascii_case(t))
+                    {
+                        "placed: at the actor its tag names"
+                    } else {
+                        "placed if a character with its tag is there, else everywhere"
+                    }
+                } else if a.obj.class.eq_ignore_ascii_case("ScriptedSequence") {
+                    "placed: at the sequence's character, else the script"
+                } else {
+                    "placed: at the script's spot"
+                };
+                *here.entry(kind).or_default() += 1;
+                if ap.is_none() && !kind.starts_with("everywhere: a local") {
+                    *here
+                        .entry("  (of those: no game settings found)")
+                        .or_default() += 1;
+                }
+            }
+        }
+        log.line(format!("   sounds heard from: {here:?}"));
+        for (k, v) in here {
+            *heard.entry(k).or_default() += v;
+        }
         for a in map.scripts() {
             log.line(format!(
                 "   {} {} (tag {})",
@@ -261,7 +332,11 @@ fn main() {
                 at[0],
                 at[1],
                 at[2],
-                if open { "" } else { " (closed until a script or event opens it)" }
+                if open {
+                    ""
+                } else {
+                    " (closed until a script or event opens it)"
+                }
             ));
             leads.push(url);
         }
@@ -309,6 +384,10 @@ fn main() {
                     Effect::Note(n) => n,
                     Effect::Event { .. } => continue,
                     Effect::Untrigger { name, by } => format!("untrigger {name} (by {by})"),
+                    Effect::PropDamaged { name, tag, removed, .. } => format!(
+                        "prop {name} ({tag}) damaged{}",
+                        if removed { ", gone" } else { "" }
+                    ),
                     Effect::Action {
                         script,
                         index,
@@ -369,7 +448,9 @@ fn main() {
         for m in to {
             if !have.contains(m) {
                 missing += 1;
-                log.line(format!("== ERROR: {from} leads to {m}, which isn't in GameData/Maps"));
+                log.line(format!(
+                    "== ERROR: {from} leads to {m}, which isn't in GameData/Maps"
+                ));
             }
         }
     }
@@ -393,7 +474,9 @@ fn main() {
             }
         ));
     }
-    println!("{at_teleporter} exits arrive at a teleporter, {at_start} at the next map's player start");
+    println!(
+        "{at_teleporter} exits arrive at a teleporter, {at_start} at the next map's player start"
+    );
     if have.iter().any(|n| n == "pro") {
         let mut chain = vec!["pro".to_string()];
         loop {
@@ -409,12 +492,13 @@ fn main() {
             chain.len(),
             chain.join(" -> ")
         ));
-        println!("campaign: {} maps from pro to {}", chain.len(), chain.last().unwrap());
+        println!(
+            "campaign: {} maps from pro to {}",
+            chain.len(),
+            chain.last().unwrap()
+        );
     }
-    let ends: Vec<&String> = have
-        .iter()
-        .filter(|n| !exits.contains_key(*n))
-        .collect();
+    let ends: Vec<&String> = have.iter().filter(|n| !exits.contains_key(*n)).collect();
     log.line(format!("== maps with no exit: {ends:?}"));
     println!("{missing} exits lead to a map that isn't there");
     let line = format!(
@@ -423,12 +507,43 @@ fn main() {
     );
     log.line(&line);
     log.line(format!("== script sounds by kind (per map): {classes:?}"));
+    log.line("== where script sounds are heard from, over all maps:");
+    for (k, v) in &heard {
+        log.line(format!("   {k}: {v}"));
+    }
     println!("{line}");
+    println!("script sounds heard from: {heard:?}");
+}
+
+/// A sound package's sounds by lower-case name, with the settings
+/// (`AudioParams`) each names, as `package.name` in lower case.
+type SoundSet = std::collections::HashMap<String, Option<String>>;
+
+/// Every `AudioParams` in `GameData/Sounds/<package>.uax`, by
+/// `package.name` in lower case.
+fn audio_params_in(data: &std::path::Path, package: &str) -> Option<BTreeMap<String, AudioParams>> {
+    let path = fs::read_dir(data.join("Sounds"))
+        .ok()?
+        .flatten()
+        .find_map(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&format!("{package}.uax"))
+                .then(|| e.path())
+        })?;
+    let bytes = fs::read(path).ok()?;
+    let pkg = Package::parse(&bytes).ok()?;
+    Some(
+        rc_package::sound::read_all_audio_params(&pkg, &bytes)
+            .into_iter()
+            .map(|(n, p)| (format!("{package}.{n}").to_ascii_lowercase(), p))
+            .collect(),
+    )
 }
 
 /// The lower-case names of every sound in a sound package
 /// (`GameData/Sounds/<name>.uax`), or in a map when `name` is one.
-fn sound_names_in(data: &std::path::Path, name: &str) -> Option<std::collections::HashSet<String>> {
+fn sound_names_in(data: &std::path::Path, name: &str) -> Option<SoundSet> {
     // File names differ in case from what the maps say (`GEO_Voice`).
     let find = |dir: &str, file: String| {
         fs::read_dir(data.join(dir)).ok()?.flatten().find_map(|e| {
@@ -451,7 +566,15 @@ fn sound_names_in(data: &std::path::Path, name: &str) -> Option<std::collections
                     "Sound" | "SoundMultiple" | "SoundStreamed"
                 )
             })
-            .map(|e| pkg.name(e.object_name).to_ascii_lowercase())
+            .map(|e| {
+                // A plain sound's settings; groups and streamed sounds are
+                // left without (the game looks at a group's members).
+                let p = (pkg.export_class_name(e) == "Sound")
+                    .then(|| rc_package::sound::read_sound(&pkg, &bytes, e).ok())
+                    .flatten()
+                    .and_then(|s| rc_package::sound::params_of(&pkg, &s.properties, name));
+                (pkg.name(e.object_name).to_ascii_lowercase(), p)
+            })
             .collect(),
     )
 }
