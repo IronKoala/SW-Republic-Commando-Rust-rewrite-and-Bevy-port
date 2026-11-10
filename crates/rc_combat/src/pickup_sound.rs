@@ -15,7 +15,7 @@
 use crate::library::{read_sounds, GameSound};
 use bevy::audio::{PlaybackSettings, Volume};
 use bevy::prelude::*;
-use rc_game_core::pickups::{LevelAmmoBoxes, PickedUp};
+use rc_game_core::pickups::{LevelAmmoBoxes, LevelWeaponPickups, PickedUp};
 use rc_game_core::{GameLog, GamePaths};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -81,10 +81,12 @@ impl PickupSounds {
     }
 }
 
-/// Read the sounds this level's boxes make, when a level's boxes arrive.
+/// Read the sounds this level's boxes and weapons make, when a level's
+/// boxes arrive (the weapons arrive with them).
 pub(crate) fn read_level_sounds(
     mut sounds: ResMut<PickupSounds>,
     level: Res<LevelAmmoBoxes>,
+    weapons: Option<Res<LevelWeaponPickups>>,
     paths: Res<GamePaths>,
     mut audio: ResMut<Assets<AudioSource>>,
     log: Option<Res<GameLog>>,
@@ -92,7 +94,11 @@ pub(crate) fn read_level_sounds(
     if !level.is_changed() {
         return;
     }
-    let wanted: Vec<(String, String)> = level.0.iter().filter_map(|b| b.sound.clone()).collect();
+    let mut wanted: Vec<(String, String)> =
+        level.0.iter().filter_map(|b| b.sound.clone()).collect();
+    if let Some(w) = &weapons {
+        wanted.extend(w.0.iter().filter_map(|w| w.sound.clone()));
+    }
     sounds.read(wanted, &paths, &mut audio, &log);
 }
 

@@ -309,6 +309,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelParts>();
     commands.remove_resource::<LevelBreakables>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
+    commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -485,6 +486,31 @@ fn load(world: &mut World) {
         lvl.pickups_not_solid
     ));
     world.insert_resource(rc_game_core::pickups::LevelAmmoBoxes(boxes));
+    // Weapons lying in the map, the same way.
+    let weapons: Vec<_> = lvl
+        .weapons
+        .iter()
+        .map(|w| rc_game_core::pickups::PlacedWeapon {
+            export: w.export,
+            name: w.name.clone(),
+            class: w.class.clone(),
+            at: bevy::math::Vec3::new(w.location[0], w.location[2], w.location[1])
+                / rc_game_core::units::UU_PER_UNIT,
+            weapon: w.weapon.clone(),
+            ammo: w.ammo,
+            message: w.message.clone(),
+            sound: w.sound.clone(),
+            radius: w.radius,
+            height: w.height,
+        })
+        .collect();
+    log.line(format!(
+        "{PART}: {} weapons lying in the map ({} moved down onto the ground, the furthest {:.0} uu)",
+        weapons.len(),
+        lvl.weapons.iter().filter(|w| w.dropped > 0.0).count(),
+        lvl.weapons.iter().map(|w| w.dropped).fold(0.0f32, f32::max),
+    ));
+    world.insert_resource(rc_game_core::pickups::LevelWeaponPickups(weapons));
 
     // The look. If it can't be built the level is still solid, just
     // invisible, so the game goes on and says so in the log.

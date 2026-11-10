@@ -134,6 +134,8 @@ pub struct Placement {
     /// Material overrides by section (`Skins` property), 0 where not set.
     pub skins: Vec<i32>,
     pub hidden: bool,
+    /// `bUnlit`: drawn at full brightness, whatever light reaches it.
+    pub unlit: bool,
     /// Object reference to the actor's `StaticMeshInstance` (its baked
     /// per-vertex light), 0 if none.
     pub static_mesh_instance: i32,
@@ -178,6 +180,7 @@ pub fn read_placement(pkg: &Package, data: &[u8], index: usize) -> Result<Placem
         static_mesh: 0,
         skins: Vec::new(),
         hidden: false,
+        unlit: false,
         static_mesh_instance: 0,
     };
     if let Some(v) = find("Location").and_then(raw_vec3) {
@@ -200,6 +203,9 @@ pub fn read_placement(pkg: &Package, data: &[u8], index: usize) -> Result<Placem
     }
     if let Some(Value::Bool(b)) = find("bHidden").map(|p| &p.value) {
         p.hidden = *b;
+    }
+    if let Some(Value::Bool(b)) = find("bUnlit").map(|p| &p.value) {
+        p.unlit = *b;
     }
     if let Some(Value::Object(o)) = find("StaticMeshInstance").map(|p| &p.value) {
         p.static_mesh_instance = *o;
@@ -382,6 +388,7 @@ mod tests {
             static_mesh: 0,
             skins: vec![],
             hidden: false,
+            unlit: false,
             static_mesh_instance: 0,
         };
         // One unit forward, doubled, turned to +Y, then moved.

@@ -1,0 +1,57 @@
+# Weapons lying in the levels, and weapons enemies drop.
+#
+# The maps place the original's weapon pickups (BowcasterPickup,
+# ShotgunPickup, DC17mSniperWeaponPickup, ...). Where each one is, which
+# weapon it gives, how many shots it holds (the weapon's PickupAmmoCount)
+# and its model are read from the game when a level loads. The 40 in the
+# campaign give:
+#
+#   Bowcaster            14   (Kashyyyk)      24 shots
+#   SMG                   9   ACP Repeater   160 shots
+#   RocketLauncher        6                    5 rockets
+#   Shotgun               3   ACP Array Gun   16 shells
+#   ConcussionRifle       3   LJ-50           10 cells
+#   DC17mAntiArmor        2   (ammo for the attachment)
+#   DC17mSniper           1   (ammo for the attachment)
+#   DC17mBlaster          1   (ammo for the rifle)
+#   EliteBeam             1   (geo_03d)      450
+#   TrandoshanRifleMP     1   (ras_04b)      160
+#
+# The rules (game: the Pickup, Weapon and PlayerController scripts in
+# engine.u): walk into a weapon you carry to take its ammo; press Use on
+# one you don't to pick it up. You carry one weapon taken from the enemy at
+# a time: picking up another throws the old one down.
+
+# Which of this port's weapons (weapons/*.toml) each of the original's
+# weapon classes is.
+[weapons]
+DC17mBlaster = "dc17m_blaster"
+DC17mSniper = "dc17m_sniper"
+DC17mAntiArmor = "dc17m_antiarmor"
+SMG = "trandoshan_smg"
+Shotgun = "acp_array_gun"
+Bowcaster = "bowcaster"
+ConcussionRifle = "concussion_rifle"
+RocketLauncher = "rocket_launcher"
+EliteBeam = "elite_beam"
+TrandoshanRifleMP = "heavy_repeater_mp"
+
+[carry]
+# Weapons carried one at a time (game: the weapons with InventoryGroup 5,
+# the "secondary" slot, which the game swaps instead of adding).
+one_at_a_time = ["trandoshan_smg", "acp_array_gun", "bowcaster", "concussion_rifle", "rocket_launcher", "elite_beam", "heavy_repeater_mp", "e5_blaster_pickup"]
+# Weapons never taken for their ammo: Use swaps one in once yours is empty
+# (game: EliteBeamPickup).
+swap_when_empty = ["elite_beam"]
+
+[prompt]
+# Shown while touching a weapon you can pick up, followed by its name. @
+# becomes the Use button (game: the HUD's "PRESS @ TO PICKUP", engine.u).
+text = "PRESS @ TO PICKUP"
+
+[sound]
+# The sound of taking a weapon an enemy dropped. Weapons the maps place use
+# their own (game: PickupSound; GEN_Sound.GenericWeaponPickup for the
+# bowcaster, GEN_Sound.int_GEN_wepPickup_01 for the rest).
+package = "GEN_Sound"
+name = "int_GEN_wepPickup_01"
