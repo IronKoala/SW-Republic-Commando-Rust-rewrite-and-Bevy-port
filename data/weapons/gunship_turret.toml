@@ -1,0 +1,52 @@
+# What the player fires from the crashed gunship's cannon (the original's
+# first-person turret weapon GunshipTurret, a LaserWeapon, handed to the
+# player while on the cannon): a beam that hits instantly while the
+# trigger is held, and never runs out.
+#
+# Numbers marked "game:" are GunshipTurret (ctinventory.u) with
+# GunshipTurretDefaults (Properties/properties.u) on top, and its ammo
+# GunshipTurretAmmo(+Defaults). "our choice" and "placeholder" mark the
+# rest.
+#
+# The original's beam hits once a frame while held (ShotDelay 0.01) for
+# the ammo's full Damage, 50, so how much it does a second depended on the
+# frame rate. We hit 20 times a second (1000 damage a second), which kills
+# a battle droid (100 health) in a tenth of a second, as the original's
+# does at any frame rate.
+
+name = "Gunship Turret"
+
+[fire]
+mode = "automatic"        # game: LaserWeapon FireMode 2
+shot_delay = 0.05         # our choice (game: ShotDelay 0.01, once a frame)
+aim_error = 0             # game: no AimError
+
+[ammo]
+clip_size = 5000          # game: GunshipTurretDefaults ReloadCount
+max_ammo = 10000          # game: Turret AmmoAmount 10000; GunshipTurretAmmo never deducts
+start_ammo = 10000
+
+[shot]
+kind = "instant"          # game: LaserWeaponAmmo bInstantHit
+range = 10000             # game: LaserWeaponAmmo Range
+damage = 50               # game: GunshipTurretAmmo Damage
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyGunshipTurret" # game: GunshipTurretAmmoDefaults MyDamageType
+
+[recoil]
+kick = [10, 10, 10]       # game: GunshipTurretDefaults WeaponKick
+spring = 0.1              # game: GunshipTurretDefaults RecoilConstant
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_GnShpBmFire_01"] # game: GunshipTurretDefaults FireStartSound (its loop is wep_GEN_GnShpBeam_lp_02; not checked in the package yet)
+
+[model]
+package = "weapons"
+mesh = "DC17mBlaster"     # placeholder: shown only if the arms below can't be read
+bolt_colour = [0.4, 0.6, 1.0] # our choice: the gunship's beam is blue
+
+[arms]
+mesh = "HudArmsGunshipTurret" # game: GunshipTurret Mesh
+fov = 85                  # game: Weapon DisplayFOV
+brightness = 0.75         # our choice, as the other weapons

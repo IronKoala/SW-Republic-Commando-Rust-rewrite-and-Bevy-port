@@ -1,0 +1,54 @@
+# The Trade Federation core ship's laser turrets (geo_04b, geo_05a,
+# geo_05c): automatic turrets with three barrels that nobody sits at. Each
+# stays folded away until a level event with its tag switches it on; then
+# it unfolds, turns all the way round to the nearest enemy it can see and
+# fires from one barrel after another. After 4 seconds of firing it cools
+# down for 1 second. It can be shot to pieces (256 health): its Event goes
+# off when it is destroyed and its FirstDamagedEvent the first time it is
+# hurt (geo_05a's elites come out when a turret is first shot).
+#
+# See wookiee_heavy_turret.toml for how these files work. "game:" values
+# are CoreShipTurret and AutoTurret (ctcharacters.u), Turret and Pawn
+# (engine.u), and CoreShipTurretDefaults (Properties/properties.u) on top.
+
+name = "Core Ship Turret"
+classes = ["CoreShipTurret"]
+
+[model]
+mesh = "CoreShipTurret"            # game: Mesh
+pose = "Fire"                      # its first frame is the gun unfolded at rest
+muzzles = ["muzzle1", "muzzle2", "muzzle3"] # game: CoreShipTurret FireProjectile
+hide_when_player_on = false
+
+[aim]
+speed = 40000                      # game: CoreShipTurretDefaults Speed
+min_yaw = -65535                   # game: CoreShipTurretDefaults MinYaw
+max_yaw = 65535                    # game: CoreShipTurretDefaults MaxYaw
+min_pitch = -65535                 # game: CoreShipTurretDefaults MinPitch
+max_pitch = 65535                  # game: CoreShipTurretDefaults MaxPitch
+unlimited_yaw = true               # game: CoreShipTurretDefaults bUnlimitedYaw
+
+[gunner]
+height = 0                         # nobody sits at it
+player_usable = false              # game: AutoTurret bPlayerUsable
+radius = 60                        # game: CollisionRadius
+half_height = 90                   # game: CollisionHeight
+reach = 0
+exit = [0, 0, 0]
+
+[auto]
+weapon = "core_ship_turret"        # game: AmmoName AutoTurretAmmo (weapons/core_ship_turret.toml)
+shot_delay = 0.15                  # game: CoreShipTurretDefaults ShotDelay
+range = 10000                      # game: Pawn SightRadius
+muzzles_in_turn = true             # game: CoreShipTurret ToggleMuzzle, muzzle1 to muzzle3 in turn
+
+[automatic]
+deployed = false                   # game: AutoTurret bDeployed (a map can set it)
+closed_pose = "ClosedBreathe"      # game: played while not deployed
+deploy = "Deploy"                  # game: played when switched on
+fire_for = 4                       # game: CoreShipTurretDefaults TimeUntilCooldown
+cool_down = 1                      # game: AutoTurret CooldownDuration
+side = "separatist"                # game: AutoTurret TeamIndex 5 (more than 2: the enemy's)
+health = 256                       # game: CoreShipTurretDefaults Health / MaxHealth
+damage_table = "DV_TurretsCoreshipAuto" # game: CoreShipTurretDefaults MyDamageVariance
+eye_height = -80                   # game: CoreShipTurret BaseEyeHeight (from its centre)
