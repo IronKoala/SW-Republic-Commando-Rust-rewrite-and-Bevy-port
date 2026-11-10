@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Shots now hit the Geonosian explosive barrels (rc_level)
+
+- **Changed:** `rc_level::map_collision` gives a breakable prop its drawn triangles (`collision::drawn_triangles`) when its model has collision switched off on every part, as the explosive barrels' model does (the game uses the model's simple collision shape there, which we don't read).
+- **Why:** The user shot an explosive barrel in geo_01b and nothing happened. All 20 of geo_01b's barrels had nothing to hit, so shots flew through them and landed on the sturdier canister behind (the log showed `K_GeoBarrel4` taking the hits).
+- **Tested how:** Read geo_01b, 03a, 03c, 03d, 04c, 04d and 05b with the game files copied read only from the PC and counted breakable props with nothing to hit: geo_01b 21 -> 1 (hidden), geo_04d 15 -> 6 (all hidden; the rock covers only needed their model packages copied), geo_05b 0. `cargo test -p rc_level` passes. `rc_game --script` (cloud, game files copied read only): a geo_01a barrel breaks after 3 shots, explodes 0.3 s later and hurts the stand-in next to it; 108 checks passed, 2 failed (the level sound checks: sound files not copied).
+- **Still broken / not tested:** geo_04c's 89 `K_GEO04_WallComponent`s and geo_03a's `JammingDevice` are props players walk through, which we leave out of collision, so shots still pass through them. Not tested on Windows yet.
+- **Next:** The user shoots a barrel again.
+
 ## 2026-11-09: Breakable props: barrels, clamps, holo machines, rock cover (rc_level, rc_scripts, rc_scripts_plugin, rc_combat, rc_level_plugin, rc_level_viewer, rc_game)
 
 - **Changed:** New `rc_level::breakables` reads every prop's health, damaged and destroyed steps, explosion and events (map first, then class defaults). `map_collision` and the level viewer keep them as separate parts. `rc_scripts::Director::add_breakables` / `hurt_prop` run the game's break rules and send the props' events (and a prop's own `Event` now comes before `DestroyedState.Event`); damaged state is saved. New `rc_scripts_plugin/src/breakables.rs`: shots (`ShotLanded`, which now carries damage and damage type) and grenade blasts hurt props; props with an explosion go off 0.1-0.2 s after breaking. New `rc_combat::Explode` (radius damage for anything that isn't a grenade). `rc_game --script`: 4 new checks (shoot a geo_01a barrel). `docs/DESIGN.md`: "Breakable props".

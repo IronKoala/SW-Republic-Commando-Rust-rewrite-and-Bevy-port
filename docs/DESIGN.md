@@ -1535,7 +1535,10 @@ How a prop breaks (our reading of the game, in our words):
 
 Who does what: `rc_level::map_collision` keeps every breakable prop's
 triangles apart (as a `LevelParts` part), and the level viewer draws each
-as its own `MoverPart`, so it can go when it breaks. `rc_scripts::Director`
+as its own `MoverPart`, so it can go when it breaks. Some models have
+collision switched off on every part (the Geonosian explosive barrels):
+the game blocks shots with the model's simple collision shape, which we
+don't read yet, so a breakable prop like that gets its drawn triangles. `rc_scripts::Director`
 keeps health and steps (`add_breakables`, `hurt_prop`) and sends the
 events, so a script waiting for `Clamp00` carries on. `rc_scripts_plugin`
 turns weapons into damage: a `ShotLanded` on the level hurts the prop whose
@@ -1546,7 +1549,9 @@ set each other off). Broken and damaged state are saved with the scripts.
 
 Not done yet: the broken or damaged model (props just disappear), the
 effect and sound, the burning or electric after-effect some barrels leave,
-the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`.
+the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
+through (geo_04c's wall components) aren't in the collision, so shots pass
+through them.
 
 ### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
 
