@@ -176,7 +176,8 @@ pub struct VideoSection {
     /// BLOOM EFFECTS: a glow around bright lights.
     pub bloom: bool,
     /// SQUAD SHADOWS: the level's moving lights cast shadows (the squad,
-    /// droids and props in the light). Off is faster.
+    /// droids and props in the light), and characters the map marks cast
+    /// the original's shadow on the floor (rc_shadows). Off is faster.
     pub squad_shadows: bool,
     /// FSAA: smooths jagged edges by drawing this many samples per pixel
     /// (1 is off, 2 or 4; more counts as 4).
@@ -421,7 +422,7 @@ texture_detail = 1.0     # walls and props: 0 quarter-size pictures, 1 full size
 character_detail = 1.0   # squad, enemies, arms and weapons: the same
 blur = false             # motion blur
 bloom = false            # glow around bright lights
-squad_shadows = false    # moving lights cast shadows
+squad_shadows = false    # character shadows, and moving lights cast shadows
 fsaa = 1                 # edge smoothing: 1 (off), 2 or 4 samples
 
 [audio]

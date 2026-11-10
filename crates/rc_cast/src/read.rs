@@ -119,6 +119,9 @@ pub struct CastMember {
     pub prop_trigger: Option<(String, bool)>,
     /// Running speed, Unreal units a second (`GroundSpeed`).
     pub ground_speed: f32,
+    /// Casts a shadow (`bActorShadows`, from the map or the class). Only
+    /// characters: in the original only a `Pawn` makes a shadow projector.
+    pub shadow: bool,
 }
 
 /// Every skeletal mesh in the animation packages, by lower-case name: the
@@ -371,6 +374,10 @@ pub fn find_cast(
             prop_anim,
             prop_trigger,
             ground_speed: number("GroundSpeed", 440.0),
+            shadow: is_pawn
+                && o.get("bActorShadows")
+                    .map(|v| matches!(v, Val::Bool(true)))
+                    .unwrap_or_else(|| defaults.bool("bActorShadows").unwrap_or(false)),
         });
     }
     (out, notes)
