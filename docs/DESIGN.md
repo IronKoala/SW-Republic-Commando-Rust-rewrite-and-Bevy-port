@@ -1495,6 +1495,49 @@ without waiting stops after 64 actions in a frame and carries on the next
 The level starts by sending the first `PlayerStart`'s `Event` (`levelstart`
 in most campaign maps; `Startup`, `SetupLevel` and others in some).
 
+### Line-of-sight triggers (`LineOfSightTrigger`)
+
+Some scripted moments wait for the player to *see* something: Grievous on
+the tower (yyy_01e `GreivousVerified`), the Trandoshan dragging a clone
+away (ras_03c), the Wookiee about to be killed (yyy_01e `Wookie_Die`), a
+hack terminal ("we need to slice that"). The map places a
+`LineOfSightTrigger` with an `Event`, and usually a `SeenActorTag` naming
+what to look at; with none (or no actor with that tag) it watches its own
+spot. 45 of them in 25 campaign maps
+(`cargo run -p rc_scripts --example sight_triggers` lists them all, what
+each watches, what waits for its event, and whether the line to it is clear
+through the real walls).
+
+The rule, from Unreal Engine 2's public description of the class and the
+values the game's engine.u stores (`rc_probe --class LineOfSightTrigger`:
+`MaxViewDist` 3000, `MaxViewAngle` 15, `bEnabled` true): while switched on
+and not used yet, if the watched thing is within `MaxViewDist` of the
+player's eye, within `MaxViewAngle` degrees of where the player looks, and
+no level geometry is in between, the trigger sends its event, once. An
+event with the trigger's tag switches it on (`bEnabled=False` ones wait for
+that: ras_01a, ras_01b, yyy_05f).
+
+- `rc_scripts::Director::sight_candidates_live` does the distance and
+  angle test; `seen` sends the event; `look` does both with a line check
+  passed in. Switched on and used are kept in saves (`[scripts] sight`).
+- `rc_scripts::sight::clear_line` checks the line through the level's
+  collision (walls, solid props, closed doors), stopping 32 uu short of
+  the watched thing so its own solid shape doesn't hide it.
+- `rc_scripts_plugin::sight::look` runs each frame before the scripts: eye
+  and view from the `PlayerCamera` (so a VR camera works the same), the
+  line through `LevelCollision`. Many triggers watch a character (a
+  Trandoshan, a Wookiee, a Delta mate): where a character with a matching
+  `ScriptTags` tag is now is used (its middle: feet plus `Hittable`'s
+  `center_up`, or 84 uu), else where the map placed it. A dead player sees
+  nothing. Log line: `scripts: ... the player sees what LineOfSightTrigger0
+  watches for`.
+- Data: `[sight]` in `data/scripts/scripts.toml` holds the class defaults
+  for a trigger that gives none.
+
+Not the same as the original: its engine also checks the watched thing was
+drawn recently; ours uses the line check instead. A watched thing hidden
+inside a big solid prop may be missed (the 32 uu allowance is a guess).
+
 ### In the game (`rc_scripts_plugin`)
 
 While loading, the plugin reads the map's scripts and builds the director
