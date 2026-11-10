@@ -493,6 +493,7 @@ fn main() -> AppExit {
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
+    app.add_plugins(rc_turrets_plugin::TurretsPlugin);
     app.add_plugins(rc_cast::CastPlugin);
     app.add_plugins(rc_shadows::ShadowsPlugin);
     app.add_plugins(rc_save::SavePlugin);
@@ -508,6 +509,19 @@ fn main() -> AppExit {
     app.configure_sets(
         Update,
         rc_scripts_plugin::ScriptSystems.after(player::PlayerMoveSet),
+    );
+    // The turret the player is on sets where the player is and looks
+    // before the player's body moves.
+    app.configure_sets(
+        Update,
+        rc_turrets_plugin::TurretSet.before(player::PlayerMoveSet),
+    );
+    // Use at a turret is the turret's, not a squad order.
+    app.configure_sets(
+        Update,
+        rc_turrets_plugin::TurretUseSet
+            .after(rc_scripts_plugin::ScriptSystems)
+            .before(rc_squad_plugin::SquadSet),
     );
 
     #[cfg(all(feature = "sdl", not(target_os = "android")))]

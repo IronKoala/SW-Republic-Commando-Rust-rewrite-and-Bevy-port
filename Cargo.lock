@@ -4505,6 +4505,7 @@ dependencies = [
  "rc_scripts_plugin",
  "rc_shadows",
  "rc_squad_plugin",
+ "rc_turrets_plugin",
  "rc_visor",
  "serde",
  "toml 0.8.23",
@@ -4745,6 +4746,34 @@ dependencies = [
  "rc_squad",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_turrets"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_package",
+ "rc_scripts",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_turrets_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_ai",
+ "rc_anim",
+ "rc_combat",
+ "rc_enemies",
+ "rc_game_core",
+ "rc_level",
+ "rc_movement",
+ "rc_package",
+ "rc_turrets",
+ "serde",
 ]
 
 [[package]]
