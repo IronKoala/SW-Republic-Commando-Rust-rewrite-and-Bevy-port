@@ -1,0 +1,67 @@
+# Trandoshan slaver berserker: a slaver with no gun who charges in with
+# its blades.
+#
+# Numbers marked "game:" are the original's: TrandoshanSlaverBerserker
+# (Properties/properties.u), made from TrandoshanSlaver (ctcharacters.u),
+# and its brain TrandoshanSlaverBerserkerBot (whose only attack state is
+# StateBerserk). "guess" and "our choice" mark the rest. Anything not
+# listed takes the battle droid's value (battle_droid.toml).
+
+[type]
+id = "trandoshan_slaver_berserker"
+name = "Trandoshan berserker"
+classes = ["TrandoshanSlaverBerserker"] # game: the map class
+body = "organic"
+
+[movement]
+ground_speed = 338        # game: TrandoshanSlaver GroundSpeed
+accel_rate = 1000         # game: TrandoshanSlaver AccelRate
+collision_radius = 50     # game: CollisionRadius
+collision_height = 75     # game: CollisionHeight
+crouch_radius = 50        # game: CrouchRadius
+crouch_height = 50        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: TrandoshanSlaverBerserker SightRadius
+
+[combat]
+health = 160              # game: TrandoshanSlaverBerserker MaxHealth
+accuracy = 1              # game: TrandoshanSlaverBerserker Accuracy
+max_aim_yaw = 70          # game: MaxAimYaw
+weapon = ""               # game: RequiredEquipment is only SlaverBladesBerserker, a melee weapon (no gun, no grenades)
+burst_count = 2           # game: TrandoshanSlaverBot BurstCount
+melee_range = 300         # game: SlaverBladesBerserker MeleeRange
+melee_damage = 65         # game: SlaverBladesBerserker MeleeDamage
+melee_damage_type = "CTDamageMeleeBerserker" # game: SlaverBladesBerserker MeleeDamageType
+melee_delay = 1.7         # game: TrandoshanSlaverSet BerserkAttack (51 frames at 30 a second)
+lunge_distance = 7000     # game: SlaverBladesBerserker ValidRange 300 to 7000
+cover_boredom_time = 1    # game: TrandoshanSlaverBerserkerBot CoverBoredomTime
+uses_cover = false        # game: its only attack state is StateBerserk, a charge
+drops = ""
+damage_table = "DV_OrganicTrandoSlaverBerserker" # game: MyDamageVariance
+
+[sound]
+# game: TranSlavAudio, the slaver's table (see trandoshan_slaver.toml).
+package = "character_voice"
+spotted = ["TSR_SpottedEnemy"]
+hurt = ["TSR_HurtSmallArms"]
+death = ["TSR_DieSmallArms"]
+hurt_explosion = ["TSR_HurtExplosion"]
+death_explosion = ["TSR_DieExplosion"]
+hurt_electrical = ["TSR_HurtElectricity"]
+death_electrical = ["TSR_DieElectricity"]
+hurt_melee = ["TSR_HurtMelee"]
+death_fire = ["TSR_DieFire"]
+hurt_fall = ["TSR_HurtFall"]
+death_fall = ["TSR_DieFall"]
+hurt_interval = 2.0       # our choice
+
+[look]
+# game: the slaver's model, playing its Berserk... moves from
+# TrandoshanSlaverSet.
+package = "GameData/Animations/trandoshan.ukx"
+mesh = "TrandoshanSlaver"
+idle = "BerserkBreathe"   # game: TrandoshanSlaverSet
+run = "BerserkRunForward" # game: TrandoshanSlaverSet
+melee = "BerserkAttack"   # game: TrandoshanSlaverSet

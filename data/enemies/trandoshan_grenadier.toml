@@ -1,0 +1,83 @@
+# Trandoshan mercenary grenadier: a mercenary who throws thermal
+# detonators whenever it can (TrandoshanMercenaryGrenadier on the
+# Prosecutor, TrandoshanMercGrenYYYUp and TrandoshanMercGrenYYYLow on
+# Kashyyyk).
+#
+# Numbers marked "game:" are the original's: TrandoshanMercenaryGrenadier
+# (Properties/properties.u), made from TrandoshanMercenary
+# (ctcharacters.u), and its brain TrandoshanMercenaryGrenadierBot. The
+# Kashyyyk ones are made from it and change only their rag doll, jetpack
+# push and shield colour. Anything not listed takes the battle droid's
+# value (battle_droid.toml).
+
+[type]
+id = "trandoshan_grenadier"
+name = "Trandoshan grenadier"
+classes = ["TrandoshanMercenaryGrenadier", "TrandoshanMercGrenYYYUp", "TrandoshanMercGrenYYYLow"] # game: the map classes
+body = "organic"
+
+[movement]
+ground_speed = 450        # game: TrandoshanMercenary GroundSpeed
+collision_radius = 40     # game: CollisionRadius (Pawn)
+collision_height = 84     # game: TrandoshanMercenary CollisionHeight
+crouch_height = 56        # game: TrandoshanMercenary CrouchHeight
+base_eye_height = 60      # game: TrandoshanMercenary BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: TrandoshanMercenaryGrenadier SightRadius
+
+[combat]
+health = 220              # game: TrandoshanMercenaryGrenadier Health and MaxHealth (Shields 0)
+accuracy = 0.75           # game: TrandoshanMercenary Accuracy
+max_aim_yaw = 70          # game: MaxAimYaw
+weapon = "trandoshan_smg" # game: RequiredEquipment SMG
+burst_count = 14          # game: TrandoshanMercenaryBot BurstCount (its Defaults' 9 is for that class only)
+shot_delay = 0.1          # game: SMGDefaults ShotDelay
+weapon_range = 5000       # game: SMGAmmo Range
+drops = "trandoshan_smg"  # the player can pick up its repeater
+damage_table = "DV_OrganicTrandoMercDamage" # game: MyDamageVariance
+
+[grenades]
+grenade = "thermal_detonator_enemy" # game: RequiredEquipment[1] ThermalDetonatorEnemy
+count = 2                 # game: ThermalDetonatorEnemyDefaults InitAmmoAmount
+probability = 1.0         # game: TrandoshanMercenaryGrenadierBot GrenadeProbability
+min_time = 5              # game: TrandoshanMercenaryGrenadierBot MinGrenadeTime
+throw_time = 2.17         # game: CloneCommandoSet ThrowGrenade (65 frames at 30 a second)
+
+[sound]
+# What the mercenary says. Names are groups (SoundMultiple) in
+# GameData/Sounds/character_voice.uax; each time one line from the group
+# plays. List a package's sounds with
+# `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
+#
+# game: TrandoshanMercenary AudioTable = TranMercAudio (System/ctaudio.u), a table of one
+# group per event (engine.u EPawnAudioEvent). "hurt_<kind>" and
+# "death_<kind>" are used when that kind of damage did it (blaster,
+# explosion, sonic, electrical, fire, melee, fall, other); otherwise
+# "hurt" and "death". Only the kinds the game's table has are listed.
+# Its other lines (LargeArms, Quiet, HeardSomething, SearchAbort,
+# SeeGrenade, KilledExcited, Retreat, ...) aren't hooked up yet.
+package = "character_voice"
+spotted = ["TMC_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["TMC_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["TMC_DieSmallArms"]         # game: PAE_DieSmallArms
+hurt_explosion = ["TMC_HurtExplosion"]
+death_explosion = ["TMC_DieExplosion"]
+hurt_electrical = ["TMC_HurtElectricity"]
+death_electrical = ["TMC_DieElectricity"]
+hurt_fire = ["TMC_HurtFire"]
+death_fire = ["TMC_DieFire"]
+hurt_fall = ["TMC_HurtFall"]
+death_fall = ["TMC_DieFall"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
+
+[look]
+# The same model as the other mercenaries (trandoshan.toml).
+# game: TrandoshanMercenary Mesh = Clone.TrandoshanMerc. The mercenary is
+# built on the commandos' skeleton, so its mesh lives in clone.ukx (not
+# trandoshan.ukx, which holds the slaver, heavy and scavenger) and its
+# everyday moves come from CloneCommandoSet, one of the sets it links to.
+package = "GameData/Animations/clone.ukx"
+mesh = "TrandoshanMerc"
+skin = "CloneTextures.TrandoshanMercTextures.TrandoshanMerc_Shader" # game: TrandoshanMercenaryDefaults Skins[0] (the mesh's own material is a grey stand-in, TrandoshanMercProxy)
+throw = "ThrowGrenade"                           # game: CloneCommandoSet's throwing animation

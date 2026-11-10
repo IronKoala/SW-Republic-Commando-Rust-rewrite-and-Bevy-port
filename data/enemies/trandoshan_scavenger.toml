@@ -1,0 +1,66 @@
+# Trandoshan scavenger droid (TrandoshanScav, TrandoshanScavNoWookiee): a
+# small, fragile flying droid that zaps you with a short beam and blows up
+# when it is destroyed.
+#
+# Numbers marked "game:" are the original's: TrandoshanScav
+# (ctcharacters.u) with TrandoshanScavDefaults (Properties/properties.u) on
+# top, and its brain TrandoshanScavBot. TrandoshanScavNoWookiee
+# (properties.u) is made from TrandoshanScav and sets the same values as
+# the Defaults class. "guess" and "our choice" mark the rest. Anything not
+# listed takes the battle droid's value (battle_droid.toml).
+#
+# Not done yet: the original's scavengers fly (Physics = flying, AirSpeed
+# 800), cling to walls and blow up when destroyed (ExplosionDamage 100 in a
+# 500 uu radius; 40 for the NoWookiee ones). Ours move along the ground
+# and just fall. They have no voice (the game's ScavAudio table is empty)
+# and their hum (drd_GEN_scavenger_lp_01) isn't played.
+
+[type]
+id = "trandoshan_scavenger"
+name = "Trandoshan scavenger droid"
+classes = ["TrandoshanScav", "TrandoshanScavNoWookiee"] # game: the map classes
+body = "droid"            # game: TypeOfMaterial 22 and a droid damage table
+
+[movement]
+ground_speed = 800        # game: TrandoshanScavDefaults AirSpeed (it flies; this is how fast ours move)
+walk_speed_ratio = 0.25   # game: TrandoshanScav WalkSpeedRatio
+collision_radius = 45     # game: CollisionRadius
+collision_height = 30     # game: CollisionHeight
+crouch_radius = 45        # game: CrouchRadius (it can't crouch: bCanCrouch false)
+crouch_height = 30        # our choice: the same as standing
+base_eye_height = 5       # game: BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: TrandoshanScavDefaults SightRadius
+
+[combat]
+health = 50               # game: TrandoshanScavDefaults MaxHealth
+accuracy = 0.75           # game: TrandoshanScav Accuracy
+max_aim_yaw = 80          # game: MaxAimYaw (Pawn)
+weapon = "scav_beam"      # game: RequiredEquipment ScavBeam (data/weapons/scav_beam.toml)
+weapon_range = 2000       # game: ScavBeamAmmo Range
+# The beam fires without a break (LaserWeapon BurstCount -1). We send it as
+# a burst of hits: 10 hits a tenth of a second apart, so one second of beam.
+burst_count = 10          # our choice: one second of beam
+shot_delay = 0.1          # our choice: see the weapon file
+burst_pause_min = 2       # game: LaserWeapon ChargeUpTime (it charges up before each beam)
+burst_pause_max = 3       # guess
+uses_cover = false        # guess: its attack state (StateScavDroidAttack) flies at you
+drops = ""
+damage_table = "DV_DroidsTrandoScavengerDamage" # game: TrandoshanScavDefaults MyDamageVariance
+
+[look]
+# game: TrandoshanScav Mesh = TrandoshanScav, in trandoshan.ukx, with its
+# moves in TrandoshanScavSet: it only hovers, flies and dodges.
+package = "GameData/Animations/trandoshan.ukx"
+mesh = "TrandoshanScav"
+idle = "ActionBreathe"    # game: TrandoshanScavSet
+walk = "FlyForward"       # game: TrandoshanScavSet
+run = "FlyForward"        # game: TrandoshanScavSet
+walk_back = "FlyBackward" # game: TrandoshanScavSet
+step_left = "DodgeLeft"   # game: TrandoshanScavSet
+step_right = "DodgeRight" # game: TrandoshanScavSet
+fire = ""                 # game: none (the beam needs no move)
+crouch = ""               # game: none
+crouch_fire = ""          # game: none
+death = ""                # game: none (the original blows it up)

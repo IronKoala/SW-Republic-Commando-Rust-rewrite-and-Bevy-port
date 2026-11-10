@@ -1495,6 +1495,49 @@ without waiting stops after 64 actions in a frame and carries on the next
 The level starts by sending the first `PlayerStart`'s `Event` (`levelstart`
 in most campaign maps; `Startup`, `SetupLevel` and others in some).
 
+### Line-of-sight triggers (`LineOfSightTrigger`)
+
+Some scripted moments wait for the player to *see* something: Grievous on
+the tower (yyy_01e `GreivousVerified`), the Trandoshan dragging a clone
+away (ras_03c), the Wookiee about to be killed (yyy_01e `Wookie_Die`), a
+hack terminal ("we need to slice that"). The map places a
+`LineOfSightTrigger` with an `Event`, and usually a `SeenActorTag` naming
+what to look at; with none (or no actor with that tag) it watches its own
+spot. 45 of them in 25 campaign maps
+(`cargo run -p rc_scripts --example sight_triggers` lists them all, what
+each watches, what waits for its event, and whether the line to it is clear
+through the real walls).
+
+The rule, from Unreal Engine 2's public description of the class and the
+values the game's engine.u stores (`rc_probe --class LineOfSightTrigger`:
+`MaxViewDist` 3000, `MaxViewAngle` 15, `bEnabled` true): while switched on
+and not used yet, if the watched thing is within `MaxViewDist` of the
+player's eye, within `MaxViewAngle` degrees of where the player looks, and
+no level geometry is in between, the trigger sends its event, once. An
+event with the trigger's tag switches it on (`bEnabled=False` ones wait for
+that: ras_01a, ras_01b, yyy_05f).
+
+- `rc_scripts::Director::sight_candidates_live` does the distance and
+  angle test; `seen` sends the event; `look` does both with a line check
+  passed in. Switched on and used are kept in saves (`[scripts] sight`).
+- `rc_scripts::sight::clear_line` checks the line through the level's
+  collision (walls, solid props, closed doors), stopping 32 uu short of
+  the watched thing so its own solid shape doesn't hide it.
+- `rc_scripts_plugin::sight::look` runs each frame before the scripts: eye
+  and view from the `PlayerCamera` (so a VR camera works the same), the
+  line through `LevelCollision`. Many triggers watch a character (a
+  Trandoshan, a Wookiee, a Delta mate): where a character with a matching
+  `ScriptTags` tag is now is used (its middle: feet plus `Hittable`'s
+  `center_up`, or 84 uu), else where the map placed it. A dead player sees
+  nothing. Log line: `scripts: ... the player sees what LineOfSightTrigger0
+  watches for`.
+- Data: `[sight]` in `data/scripts/scripts.toml` holds the class defaults
+  for a trigger that gives none.
+
+Not the same as the original: its engine also checks the watched thing was
+drawn recently; ours uses the line check instead. A watched thing hidden
+inside a big solid prop may be missed (the 32 uu allowance is a guess).
+
 ### In the game (`rc_scripts_plugin`)
 
 While loading, the plugin reads the map's scripts and builds the director
@@ -1691,6 +1734,50 @@ the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
 `GotoState` on characters, characters the game doesn't spawn yet (placed
 clone troopers and the like are logged and skipped), one sequence run
 separately per character, and `ScriptPriority`.
+
+### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
+
+Every squad marker in a map (`MarkerDemolition`, `MarkerHackTerminal`,
+`MarkerHackDoor`, `MarkerDoorBreach`, `MarkerSnipe`, ...) names an
+**anchor** (`Anchor`): the map actor the job is for. The anchor holds the
+level's side of the job as map settings, and the level's scripts wait for
+the events it sends:
+
+| Anchor class | Started | Armed | Done | Also |
+|---|---|---|---|---|
+| `DemolitionCharge` | `EventUnderway` | `ChargeArmed.Event` | `ChargeExplode.Event` | blows away `PropToDestroy` |
+| `HackTerminal*` (console) | `EventUnderway`, `ActiveState.Event` | | `HackedState.Event` | |
+| `HackDoor*` (lock, sliced) | `EventUnderway` | | `DoorUnlockedState.Event` | opens its door |
+| `BreachDoor*` (lock, blown) | `EventUnderway` | | `DoorDamagedState.Event`, `DoorUnlockedState.Event` | opens `DoorLeft`, `DoorRight` |
+| anything else (a sniper post's anchor) | `EventUnderway` | | | |
+
+The order marker can have its own `EventUnderway` too (geo_01a's
+`MarkerDemolition2` sends `SpawnDemoDroids`), sent with the anchor's.
+A door can have both a slice lock and a breach lock; they name each other
+(`MatchingComponent`) and either one opens the door. The doors are the
+`MoverDB_*` double doors, whose class default state is `Locked`: they
+never open on their own, so the movers part treats them as still until
+`LevelMovers::open_named` opens them. They then stay open (the original
+lets a sliced door work as an automatic door again; not done).
+
+How it flows: the squad part (`rc_squad_plugin`) sends
+`rc_game_core::MarkerJob { anchor, step }` when a squad mate starts a job
+or takes up a post (`Started`), lights a fuse (`Armed`) and finishes
+(`Done`, with the job's result). `markers::run` in the scripts part sends
+the anchor's events into the director, once per step per anchor (a
+`Done` with no `Started` before it sends both), blows away the prop
+(`Director::destroy_prop_named`, which also sends that prop's own
+destroyed event) and opens the doors. Another part can send `MarkerJob`
+too (the player doing a job himself, later).
+
+`rc_script_check` lists every map's anchors and checks that each door they
+open is a door the movers part moves. On the 13 Geonosis maps: 57 anchors,
+61 of their events are ones scripts wait for, and 38 of 38 doors found.
+
+Not done: the anchor's own look changing (a lit charge, a console's
+screen, the blown lock's mesh), its sounds, the player doing a job with
+Use, and saving which steps were sent (after a load a step can be sent
+again if the squad repeats it).
 
 ### geo_01a, worked through
 
@@ -2204,6 +2291,57 @@ that kind nearest the squad, orders it, and checks after 45 s that the job
 was done (or the post taken), that the player asked for it once and that a
 squad mate answered.
 
+### Optional squad ammo (`rc_squad/src/ammo.rs`, `[ammo]` in `squad.toml`)
+
+Off by default, because the original's squad never runs out and never
+takes boxes (docs/RESEARCH.md, "Squad ammo and ammo boxes"). With
+`[ammo] limited = "no"` every squad mate's ammo list is empty, which means
+"never runs out", and none of the code below does anything.
+
+A mod switches it on with a `squad/squad.toml` holding only the lines it
+changes (every other value keeps its built-in default):
+
+```toml
+[ammo]
+limited = "yes"
+```
+
+Then, all our own rules:
+
+- **Counting.** Each squad mate starts with the `start` of each
+  `carry_<id> = most, start` line (the DC-17m 120 of 300, sniper 20 of 20,
+  anti-armour 4 of 4, thermal detonators 2 of 5, from the squad's own guns
+  in the Properties package). Guns or grenades not listed never run out.
+  Every shot (`Squad::shoot`) takes one from the gun fired, every grenade
+  (Fixer's own and grenade posts) one from `throws`. `SquadEvent::OutOfAmmo`
+  when one reaches 0.
+- **Running out.** An empty speciality gun isn't picked (Sev keeps to the
+  rifle with no sniper rounds); with the usual gun empty they hold fire.
+- **Fetching** (`Squad::think_fetch`, before the usual think). A squad mate
+  with no job (no marker, not reviving, not on a post) whose lowest gun is
+  at or below `fetch_below` (25%) of the most walks to the nearest box that
+  fills it, within `fetch_range` (1500 uu) of them and of the spot they're
+  tied to. In a fight (a target, or an enemy within sight) they wait until
+  that gun is empty, unless `fetch_in_fights`. Two squad mates never go for
+  the same box. After `fetch_give_up` (15 s) they leave a box they can't
+  reach alone, and wait as long again (back at their place) before trying
+  another. Events `FetchAmmo` and `FetchStopped` (box gone, full again,
+  busy, enemy to fight first, can't get to it).
+- **Taking** (`rc_squad_plugin/src/ammo.rs`). `gather_boxes` copies the
+  untaken `rc_combat::ammo_box::AmmoBox`es into `Squad::boxes` each frame;
+  `take_boxes` runs after the squad moves and uses the player's touch test
+  (`ammo_box::touches`). `Squad::take_box` fills only what isn't full, up to
+  the most carried, like the player's rule; the box is then marked taken,
+  so it's hidden and saved as taken. A squad mate walking over a box they
+  have room for takes it even if they weren't fetching it.
+- **Saving.** Each squad mate's counts are in the `[squad]` section of a save
+  (`ammo`, left out when empty).
+
+Tests: `cargo test -p rc_squad` (7 ammo tests) and
+`cargo test -p rc_squad_plugin --test ammo_room` (switched off nobody goes
+near the boxes; switched on Sev, low on rifle shots, and Fixer, out of
+grenades, each fetch theirs and come back).
+
 ### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
 
 The lines are the game's: each member's `audio_table` (squad.toml, like
@@ -2483,10 +2621,35 @@ close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
 with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
 beam weapon is an `instant` shot fired as a burst of quick hits.
 
-**Shields.** `combat.shields` gives an enemy an energy shield that takes
-hits before its health (rc_combat's `Shield`, the same as the player's),
-and `combat.shield_recharge_rate` how fast it comes back (0: never).
-Grievous's bodyguards have 250. **Missiles.** An enemy weapon with a
+When a class could match two files, the first file in name order wins, so
+give each file exact class names where they overlap (the Trandoshan
+files list `TrandoshanMercenary`, `TrandoshanMercenaryGrenadier` and so on
+one by one; a test checks each class has exactly one file).
+
+**Shields.** `combat.shields` gives an enemy an energy shield on top of its
+health (the Kashyyyk Trandoshan mercenaries: 100, regaining 10 a second).
+Damage goes to the shield first, as for the player (`rc_combat::Shield`).
+
+**Shotguns.** A weapon's `shot.pellets` fires that many instant hits at
+once, each up to `shot.spread` rotation units off the aim (the slavers'
+shotgun: 8 pellets, 1700, the game's `ProjPerFire` and `Spread`). How the
+original scatters them is our reading.
+
+**The Trandoshans.** Classes that the game builds in
+`Properties/properties.u` straight from a class in `ctcharacters.u` (like
+`TrandoshanMercYYYUp` from `TrandoshanMercenary`) keep that class's own
+values, not its "...Defaults" class's, so the Kashyyyk mercenaries have
+100 health and a shield while the Prosecutor's have 220 and none. The
+evidence: those classes restate every value the Defaults class changes
+that they want (the grenadier repeats Health 220, Shields 0, its damage
+table and sight). The files: `trandoshan` (Prosecutor mercenaries),
+`trandoshan_kashyyyk`, `trandoshan_grenadier`, `trandoshan_slaver`,
+`trandoshan_slaver_berserker`, `trandoshan_slaver_grenadier`,
+`trandoshan_heavy` and `trandoshan_scavenger`, with weapons
+`trandoshan_shotgun`, `trandoshan_rifle` and `scav_beam`.
+
+Grievous's bodyguards have 250 shield, which never recharges.
+**Missiles.** An enemy weapon with a
 `lobbed` shot and a grenade file with `flight.gravity = 0` flies straight
 and goes off on touching anything: the bodyguards' missile rack
 (`grievous_missile_rack.toml` with `data/grenades/grievous_missile.toml`).
@@ -2722,10 +2885,50 @@ amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
   them to come back. Their model is hidden.
 
 The `[pickups]` section of a save file lists the boxes taken, by name.
-`AmmoBoxTaken` is sent for each box taken. Not done yet: the pickup sound
-(`PickupSound`), the on-screen "picked up" message (`PickupMessage`), the
-squad taking boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup`
-and the like, 40 across the campaign).
+`AmmoBoxTaken` is sent for each box taken. Not done yet: weapons lying in the maps
+(`DC17mSniperWeaponPickup` and the like, 40 across the campaign).
+
+Squad mates don't take boxes, on purpose: in the original only the player
+can (`bCanPickupInventory`), and anyone else whose weapon runs dry gets a
+fresh magazine for free (`bInfiniteClipsForNonPlayers`). The port's squad
+already fires without running out, which matches. Evidence in
+`docs/RESEARCH.md`, "Squad ammo and ammo boxes". A mod can switch on squad
+ammo and box fetching: see "Optional squad ammo" under Delta Squad.
+
+#### Pickup sound and message
+
+Each box class names its own `PickupSound` and `PickupMessage`
+(`CTInventory.u`, with the `...Defaults` class in `properties.u` on top,
+read by `rc_level::pickups::read_box` like the amount):
+
+| Box | Message | Sound |
+| --- | --- | --- |
+| DC-17m | DC-17m Blaster Clips (`...Defaults`; "DC-17m Blaster" in the class) | `GEN_Sound.Weapons.GenericWeaponPickup` |
+| Sniper | DC-17m Sniper | same |
+| Anti-armour | DC-17m Anti-Armor Charge Packs (`...Defaults`) | same |
+| Thermal, sonic, flash | Thermal Detonators, Sonic Detonators, Flashbang Detonators | same |
+| EMP | EMP Grenades | `GEN_Sound.Interface.int_GEN_wepPickup_01` |
+
+What the original does with them (engine.u `Pickup.AnnouncePickup`,
+`PlayerController.HandlePickup`, `PickupMessagePlus`, `LocalMessage`): the
+sound is played for the player only, from where they are
+(`ClientPlaySoundLocally`), and the message is a `PickupMessagePlus`:
+centred, 35% of the way down the screen, white, one at a time (a new one
+replaces the last), 3 seconds, fading. The real drawing is in native code
+(`CTHUD` keeps `LastPickupText` and `fPickupStartTime`), so the exact font
+size and fade are **our choice**.
+
+In this port: `take_boxes` sends `rc_game_core::pickups::PickedUp { text,
+sound }` for each box taken (a full player's touch sends nothing).
+Anything else that can be picked up (weapons on the floor, health) can send
+the same message. `rc_combat::pickup_sound` reads the sounds a level's
+boxes name when the level loads (`PickupSounds`) and plays them, at full
+volume scaled by EFFECTS VOLUME, not placed in the level. The original HUD
+(`rc_game/src/original_hud.rs`) shows the text in the `pickup` element of
+`data/ui/hud.toml` (`{pickup}`, `when = "pickup"`, `fade = "pickup"`); how
+long it stays and fades is `[pickup_message]` there. The placeholder HUD
+adds it to its message list instead. The log says `pickups: played sound
+GEN_Sound.GenericWeaponPickup` and `original hud` redraws as it fades.
 
 ### Modding
 
@@ -2733,7 +2936,9 @@ Every weapon is one file in `data/weapons`. A mod folder's file with the
 same name replaces it, and a new file is a new weapon. The player's health,
 shield and starting weapons are in `data/combat/player.toml`. What each
 ammo box fills, and its amount if a mod wants another, is in
-`data/pickups/ammo_boxes.toml`.
+`data/pickups/ammo_boxes.toml`. Where and how long the pickup message
+shows is in `data/ui/hud.toml` (the `pickup` element and
+`[pickup_message]`); any element can fade with `fade = "pickup"`.
 
 ### `rc_shoot`: the firing range
 

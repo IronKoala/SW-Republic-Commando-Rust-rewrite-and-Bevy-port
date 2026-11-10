@@ -810,14 +810,10 @@ fn think(
                     e.insert(DamageTable(p.combat.damage_table.clone()));
                 }
                 if p.combat.shields > 0.0 {
-                    // Grievous's guards: a shield that takes hits first.
-                    // The recharge delay is our choice (the game's is in
-                    // its compiled code); with no recharge rate it never
-                    // matters.
                     e.insert(Shield::new(
                         p.combat.shields,
                         p.combat.shield_recharge_rate,
-                        3.0,
+                        p.combat.shield_recharge_delay,
                     ));
                 }
                 // What the level's scripts call it, and the script it

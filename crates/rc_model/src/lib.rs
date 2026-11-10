@@ -83,6 +83,10 @@ pub struct Model {
     pub lift: f32,
     /// Whether the stored triangle order had to be reversed.
     pub flipped: bool,
+    /// Sounds each animation plays (`AnimNotify_Sound`), by our name for
+    /// the animation: when (0 to 1 through it) and the sound's dotted
+    /// path (`GEN_Sound.mach_GEN_Bdroid_Dispense_open`).
+    pub sounds: HashMap<String, Vec<(f32, String)>>,
     /// Every animation set read, first set first, when
     /// [`ModelSpec::keep_sets`] asked for them (empty otherwise).
     pub sets: Vec<rc_package::animation::MeshAnimation>,
@@ -187,6 +191,22 @@ fn find_in(pkg: &Package, path: &str, class: Option<&str>) -> Option<usize> {
                 None => materials.iter().any(|m| c.eq_ignore_ascii_case(m)),
             }
     })
+}
+
+/// The sound an `AnimNotify_Sound` object plays, as a dotted path.
+fn notify_sound(pkg: &Package, data: &[u8], object: i32) -> Option<String> {
+    let ObjectRef::Export(k) = ObjectRef::from_index(object) else {
+        return None;
+    };
+    let e = pkg.exports.get(k)?;
+    if !pkg.export_class_name(e).eq_ignore_ascii_case("AnimNotify_Sound") {
+        return None;
+    }
+    let props = export_props(pkg, data, e).ok()?;
+    match properties::find(pkg, &props, "Sound")?.value {
+        Value::Object(o) if o != 0 => Some(rc_package::class::object_path(pkg, o)),
+        _ => None,
+    }
 }
 
 fn export_props(
@@ -373,6 +393,7 @@ impl Model {
         sets.extend(linked.into_iter().filter(|e| !std::ptr::eq(*e, first)));
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
+        let mut sounds = HashMap::new();
         let mut read_sets: Vec<Option<rc_package::animation::MeshAnimation>> =
             (0..sets.len()).map(|_| None).collect();
         for (key, seq_name) in &spec.sequences {
@@ -397,6 +418,14 @@ impl Model {
                     .find(|s| s.name.eq_ignore_ascii_case(seq_name))
                 {
                     clips.insert(key.clone(), Clip::new(anim, seq, &skeleton));
+                    let heard: Vec<(f32, String)> = seq
+                        .notifies
+                        .iter()
+                        .filter_map(|n| notify_sound(&pkg, &data, n.object).map(|s| (n.time, s)))
+                        .collect();
+                    if !heard.is_empty() {
+                        sounds.insert(key.clone(), heard);
+                    }
                     if k > 0 {
                         notes.push(format!(
                             "{name}: {key} = {seq_name} from {}",
@@ -537,6 +566,7 @@ impl Model {
             sections,
             lift: 0.0,
             flipped,
+            sounds,
             sets: Vec::new(),
         };
         if spec.keep_sets {

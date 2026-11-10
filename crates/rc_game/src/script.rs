@@ -848,6 +848,25 @@ fn steps() -> Vec<Step> {
             level_script_dispenser_on,
             300.0,
         ),
+        // The dispenser is drawn with its animated model (it used to be
+        // invisible, so a player couldn't find it).
+        Check("the level's animated props are drawn", level_anim_props),
+        Note(level_script_view_dispenser),
+        Wait(0.5),
+        Shot("bacta_dispenser"),
+        Check("the bacta dispenser can be seen", |w| {
+            let s = w
+                .resource::<Shots>()
+                .stats
+                .get("bacta_dispenser")
+                .copied()
+                .ok_or("no picture")?;
+            if s.lit > 0.5 {
+                Ok(format!("{:.0}% of the picture lit", s.lit * 100.0))
+            } else {
+                Err(format!("only {:.0}% of the picture lit", s.lit * 100.0))
+            }
+        }),
         Note(level_script_stand_at_dispenser),
         Wait(0.5),
         Hold(Action::Use, 5.0),
@@ -857,6 +876,26 @@ fn steps() -> Vec<Step> {
             "the barricade is gone: not solid, not drawn, the way through is open",
             |w| level_script_way(w, false),
         ),
+        Check("the dispenser played its Load and Holster animations and their sounds", |w| {
+            let mut q = w.query::<&rc_level_plugin::anim_props::AnimProp>();
+            let p = q
+                .iter(w)
+                .find(|p| p.name.eq_ignore_ascii_case("BactaDispenserGEO0"))
+                .ok_or("no BactaDispenserGEO0")?;
+            let msg = format!(
+                "played {:?}, now {:?}, holds {:?}; sounds {:?}",
+                p.played,
+                p.playing.as_ref().map(|x| &x.0),
+                p.last,
+                p.heard
+            );
+            let ok = p.played.first().is_some_and(|a| a == "Load")
+                && p.played.iter().any(|a| a == "Holster")
+                && p.playing.is_none()
+                && !p.heard.is_empty()
+                && p.heard.iter().all(|h| !h.ends_with("(not loaded)"));
+            if ok { Ok(msg) } else { Err(msg) }
+        }),
         Check(
             "the scripts' events, damage, healing and checkpoint",
             level_script_chain,
@@ -994,6 +1033,10 @@ fn steps() -> Vec<Step> {
         }),
         Wait(0.3),
         Check("walking into a DC-17m box fills the rifle to 300", ammo_box_taken),
+        Check(
+            "taking it shows its pickup message and plays its pickup sound",
+            pickup_feedback,
+        ),
         Note(|w| {
             // Full now: another box is left lying.
             move_box_to_player(w, "DC17mBlasterBox", 1);
@@ -1159,6 +1202,20 @@ fn steps() -> Vec<Step> {
             }
             Ok(notes.join(", "))
         }),
+        // Squad marker jobs reach the level: geo_01a's bunker door charge
+        // (DemolitionCharge2) going off sends its map events, the script
+        // waiting for BunkerDoorDestroyed carries on, and the door prop
+        // (Prop12) is blown away.
+        Note(|w| marker_job(w, DEMO_ANCHOR)),
+        Until(
+            "the bunker door charge's events reach the scripts",
+            |w| marker_heard(w, DEMO_DONE_EVENT),
+            5.0,
+        ),
+        Check(
+            "the charge blew the bunker door away and the waiting script went on",
+            marker_demo_summary,
+        ),
         // The level exit: geo_01a's arrows lead to geo_01b.
         Check(
             "the level has an open exit to the next map",
@@ -1186,6 +1243,20 @@ fn steps() -> Vec<Step> {
         Check(
             "the next map's start is saved as a checkpoint, with the health",
             level_exit_checkpoint,
+        ),
+        // geo_01b's hangar door: slicing its lock (HackDoorGeo6) sends
+        // HangarDoorHacked and opens the locked double door.
+        Check("the hangar door starts locked shut", |w| {
+            match door_closed(w, HANGAR_DOOR) {
+                Some(true) => Ok(format!("{HANGAR_DOOR} closed")),
+                other => Err(format!("{HANGAR_DOOR}: {other:?}")),
+            }
+        }),
+        Note(|w| marker_job(w, HANGAR_LOCK)),
+        Until(
+            "slicing the lock opens the hangar door",
+            |w| marker_heard(w, HANGAR_EVENT) && door_closed(w, HANGAR_DOOR) == Some(false),
+            5.0,
         ),
         // The end-of-campaign debriefing, asked for the way geo_05c's
         // last script asks (sent here directly; the real one waits for
@@ -2601,6 +2672,60 @@ fn level_script_dispenser_on(w: &mut World) -> bool {
         .any(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ") && d.enabled)
 }
 
+/// geo_01a's five bacta dispensers draw with their animated model.
+fn level_anim_props(w: &mut World) -> Result<String, String> {
+    let info = w
+        .get_resource::<rc_level_plugin::LevelInfo>()
+        .ok_or("no LevelInfo")?;
+    let (drawn, failed) = (info.anim_props, info.anim_prop_failures);
+    let mut q = w.query::<&rc_level_plugin::anim_props::AnimProp>();
+    let dispensers = q
+        .iter(w)
+        .filter(|p| p.class.to_ascii_lowercase().starts_with("bactadispenser"))
+        .count();
+    let msg = format!("{drawn} drawn, {failed} not drawn, {dispensers} bacta dispensers");
+    if dispensers >= 5 && failed == 0 {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// Stand a few steps back from the landing zone's dispenser, looking at
+/// it, for a picture.
+fn level_script_view_dispenser(w: &mut World) {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return;
+    };
+    let Some(d) = s
+        .dispensers()
+        .into_iter()
+        .find(|d| d.tag.eq_ignore_ascii_case("BactaDispenserLZ"))
+    else {
+        return;
+    };
+    let spot = d.stand.unwrap_or(d.location);
+    let (dx, dy) = (spot[0] - d.location[0], spot[1] - d.location[1]);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    let back = 260.0;
+    let at = [
+        d.location[0] + dx / len * back,
+        d.location[1] + dy / len * back,
+        spot[2] + 10.0,
+    ];
+    let log = w.resource::<GameLog>().clone();
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.pawn.location = rc_movement::Vec3::new(at[0], at[1], at[2]);
+        b.yaw = (-dy).atan2(-dx);
+        b.pitch = 0.0;
+        log.line(format!(
+            "script: player looks at {} from ({:.0}, {:.0}, {:.0})",
+            d.name, at[0], at[1], at[2]
+        ));
+    }
+}
+
 /// Put the player where a squad mate would stand to use the dispenser.
 fn level_script_stand_at_dispenser(w: &mut World) {
     let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
@@ -2690,6 +2815,73 @@ const SPAWN_DEATH_EVENT: &str = "DeadGunnerDroid";
 
 /// The bunker spawners, and the living droids they made: (id, feet,
 /// spawner location).
+const DEMO_ANCHOR: &str = "DemolitionCharge2";
+const DEMO_DONE_EVENT: &str = "BunkerDoorDestroyed";
+const HANGAR_LOCK: &str = "HackDoorGeo6";
+const HANGAR_EVENT: &str = "HangarDoorHacked";
+const HANGAR_DOOR: &str = "MoverDB_GEO6";
+
+/// Report a squad marker job done, as the squad part does when a squad
+/// mate finishes it.
+fn marker_job(w: &mut World, anchor: &str) {
+    w.write_message(rc_game_core::MarkerJob {
+        anchor: anchor.into(),
+        step: rc_game_core::MarkerJobStep::Done,
+        by: "self-test".into(),
+    });
+}
+
+/// Whether the level's scripts have had this event.
+fn marker_heard(w: &mut World, event: &str) -> bool {
+    w.get_resource::<rc_scripts_plugin::LevelScript>()
+        .is_some_and(|s| s.director.history.iter().any(|(_, e)| e.eq_ignore_ascii_case(event)))
+}
+
+/// Whether the door with this actor name is shut (`None`: no such door).
+fn door_closed(w: &mut World, name: &str) -> Option<bool> {
+    let m = w.get_resource::<rc_movers_plugin::LevelMovers>()?;
+    let set = m.read();
+    set.movers
+        .iter()
+        .find(|d| d.info.place.name.eq_ignore_ascii_case(name))
+        .map(|d| d.is_closed())
+}
+
+fn marker_demo_summary(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
+        return Err("no level scripts".into());
+    };
+    let sent: Vec<&str> = s
+        .director
+        .history
+        .iter()
+        .map(|(_, e)| e.as_str())
+        .filter(|e| {
+            ["DemoUnderway", "SpawnDemoDroids", "DemoChargeArmed", DEMO_DONE_EVENT]
+                .iter()
+                .any(|x| x.eq_ignore_ascii_case(e))
+        })
+        .collect();
+    // ScriptedTrigger4 waits for BunkerDoorDestroyed at its action 1.
+    let waiting = s
+        .director
+        .script_states()
+        .into_iter()
+        .find(|(n, ..)| n.eq_ignore_ascii_case("ScriptedTrigger4"))
+        .map(|(_, next, what)| format!("{next} {what}"))
+        .unwrap_or_default();
+    let got = format!(
+        "sent {sent:?}; steps {:?}; props destroyed {:?}; ScriptedTrigger4 at {waiting}",
+        s.stats.marker_steps, s.stats.props_destroyed
+    );
+    let gone = !s.stats.props_destroyed.is_empty();
+    if sent.len() == 4 && gone && !waiting.contains("bunkerdoordestroyed") {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 const CAST_SPAWN: &str = "SpawnTrench02";
 const CAST_GO: &str = "LoneRangerJump";
 const CAST_TAG: &str = "LoneRanger";
@@ -3391,6 +3583,36 @@ fn ammo_box_taken(w: &mut World) -> Result<String, String> {
     let (taken, hidden) = box_state(w, &name).ok_or("box gone")?;
     let got = format!("{name}: rifle has {total} (was 20), box taken {taken}, model hidden {hidden}");
     if total == 300 && taken && hidden {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The box just taken: its words on the original HUD (the "pickup" group,
+/// above the middle) and its sound played.
+fn pickup_feedback(w: &mut World) -> Result<String, String> {
+    let quads = crate::original_hud::layout_drawn(w);
+    let words: Vec<_> = quads.iter().filter(|q| q.widget == "pickup").collect();
+    let middle = words
+        .iter()
+        .map(|q| (q.dst[1] + q.dst[3]) / 2.0)
+        .sum::<f32>()
+        / words.len().max(1) as f32;
+    let sounds = w.resource::<rc_combat::pickup_sound::PickupSounds>();
+    let played = sounds.played.clone();
+    let got = format!(
+        "{} letters drawn in the pickup line, centred {:.0}% down; sounds played {played:?}",
+        words.len(),
+        middle * 100.0
+    );
+    // "DC-17m Blaster Clips" is 18 letters without the spaces.
+    if words.len() >= 15
+        && (0.30..0.40).contains(&middle)
+        && played
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case("GEN_Sound.GenericWeaponPickup"))
+    {
         Ok(got)
     } else {
         Err(got)
