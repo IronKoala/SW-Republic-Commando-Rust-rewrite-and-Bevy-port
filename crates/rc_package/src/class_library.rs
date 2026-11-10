@@ -157,7 +157,11 @@ impl ClassLibrary {
                 let (_, pkg, _) = &self.packages[c.package];
                 (k, pkg.name(pkg.exports[c.export].object_name).to_string())
             })
-            .filter(|(k, _)| self.chain(k).iter().any(|c| c.eq_ignore_ascii_case(ancestor)))
+            .filter(|(k, _)| {
+                self.chain(k)
+                    .iter()
+                    .any(|c| c.eq_ignore_ascii_case(ancestor))
+            })
             .map(|(_, n)| n)
             .collect();
         out.sort();
@@ -211,6 +215,52 @@ impl ClassLibrary {
                 })
                 .collect(),
         )
+    }
+
+    /// A list of objects a class sets by default (like `Skins`), each as its
+    /// full dotted path with its package first
+    /// (`BriefingTextures.Holo.Holo_AdvisorShader`), from the nearest class
+    /// in the chain that sets it. `None` entries stay `None`. `None` if no
+    /// class in the chain sets it.
+    pub fn object_list(&self, class: &str, name: &str) -> Option<Vec<Option<String>>> {
+        for c in self.chain(class) {
+            let Some(info) = self.classes.get(&c.to_ascii_lowercase()) else {
+                continue;
+            };
+            let (pkg_name, pkg, data) = &self.packages[info.package];
+            let e = &pkg.exports[info.export];
+            let is_property = |n: &str| self.property_names.contains(&n.to_ascii_lowercase());
+            let Some(found) = class_defaults(pkg, data, e, &is_property) else {
+                continue;
+            };
+            let Some(p) = found
+                .properties
+                .iter()
+                .find(|p| pkg.name(p.name).eq_ignore_ascii_case(name))
+            else {
+                continue;
+            };
+            let Value::Raw(b) = &p.value else {
+                return None;
+            };
+            let mut r = crate::Reader::new(b);
+            let n = r.compact_index().ok()?.max(0);
+            let mut out = Vec::new();
+            for _ in 0..n {
+                let o = r.compact_index().ok()?;
+                out.push(match ObjectRef::from_index(o) {
+                    ObjectRef::None => None,
+                    ObjectRef::Import(_) => Some(crate::class::object_path(pkg, o)),
+                    // The package's own name isn't stored in an export's
+                    // path.
+                    ObjectRef::Export(_) => {
+                        Some(format!("{pkg_name}.{}", crate::class::object_path(pkg, o)))
+                    }
+                });
+            }
+            return Some(out);
+        }
+        None
     }
 
     /// Every default value for `class`: its own, then whatever its parents
