@@ -114,6 +114,12 @@ pub struct LevelMoverData {
     pub triangles: std::collections::HashMap<usize, Vec<[[f32; 3]; 3]>>,
 }
 
+/// Props weapons can break (`rc_level::breakables`): barrels, consoles,
+/// rock cover, clamps. Each is also a part in `LevelParts`, by its export
+/// index. Present from the end of loading until the game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
+
 /// One part of the level a script can switch off (see `LevelParts`).
 pub struct Part {
     pub export: usize,
@@ -201,6 +207,16 @@ impl LevelParts {
             .collect()
     }
 
+    /// The box around one part (by export index), if it has collision
+    /// (lowest corner, highest corner), Unreal units.
+    pub fn bounds_of(&self, export: usize) -> Option<(Vec3, Vec3)> {
+        let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
+        parts
+            .iter()
+            .find(|p| p.export == export)
+            .and_then(|p| p.world.as_ref().map(|w| w.bounds()))
+    }
+
     /// The level plus the parts that are solid now.
     pub fn world(&self) -> Arc<dyn MoveWorld + Send + Sync> {
         Arc::new(WithParts(self.0.clone()))
@@ -239,6 +255,8 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelInfo>();
     commands.remove_resource::<LevelMoverData>();
     commands.remove_resource::<LevelParts>();
+    commands.remove_resource::<LevelBreakables>();
+    commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -267,7 +285,7 @@ fn load(world: &mut World) {
     // stands at the PlayerStart, so the feet are one collision height lower.
     let height = MoveParams::player_commando().collision_height;
     let t = Instant::now();
-    let lvl = match rc_level::map_collision::load(&path, &game_data, height) {
+    let mut lvl = match rc_level::map_collision::load(&path, &game_data, height) {
         Ok(l) => l,
         Err(e) => {
             log.line(format!("{PART}: ERROR loading {}: {e}", path.display()));
@@ -367,8 +385,40 @@ fn load(world: &mut World) {
         lvl.parts.len(),
         parts.list().iter().filter(|p| p.4).count()
     ));
+    log.line(format!(
+        "{PART}: {} props weapons can break ({} explode, {} tell the level scripts when they break)",
+        lvl.breakables.len(),
+        lvl.breakables.iter().filter(|b| b.explosion.is_some()).count(),
+        lvl.breakables.iter().filter(|b| b.broken_event().is_some()).count()
+    ));
+    world.insert_resource(LevelBreakables(std::mem::take(&mut lvl.breakables)));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(parts);
+    // Ammo and grenade boxes, for the combat part to hand out.
+    let boxes: Vec<_> = lvl
+        .ammo_boxes
+        .iter()
+        .map(|b| rc_game_core::pickups::PlacedAmmoBox {
+            export: b.export,
+            name: b.name.clone(),
+            class: b.class.clone(),
+            at: bevy::math::Vec3::new(b.location[0], b.location[2], b.location[1])
+                / rc_game_core::units::UU_PER_UNIT,
+            ammo: b.ammo.clone(),
+            amount: b.amount,
+            respawn: b.respawn,
+            radius: b.radius,
+            height: b.height,
+        })
+        .collect();
+    log.line(format!(
+        "{PART}: {} ammo and grenade boxes ({} moved down onto the ground, the furthest {:.0} uu); {} pickups of all kinds left out of collision",
+        boxes.len(),
+        lvl.ammo_boxes.iter().filter(|b| b.dropped > 0.0).count(),
+        lvl.ammo_boxes.iter().map(|b| b.dropped).fold(0.0f32, f32::max),
+        lvl.pickups_not_solid
+    ));
+    world.insert_resource(rc_game_core::pickups::LevelAmmoBoxes(boxes));
 
     // The look. If it can't be built the level is still solid, just
     // invisible, so the game goes on and says so in the log.

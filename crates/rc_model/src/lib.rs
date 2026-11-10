@@ -37,6 +37,10 @@ pub struct ModelSpec {
     /// own). Written `Package.Object` or `Package.Group.Object`, as
     /// UnrealEd shows them. The original swaps skins this way per class.
     pub skins: Vec<Option<String>>,
+    /// Keep every animation set the mesh links to, so any sequence can be
+    /// played later by name ([`Model::named_clip`]): for characters that
+    /// level scripts animate.
+    pub keep_sets: bool,
 }
 
 /// A material's picture.
@@ -83,6 +87,9 @@ pub struct Model {
     /// the animation: when (0 to 1 through it) and the sound's dotted
     /// path (`GEN_Sound.mach_GEN_Bdroid_Dispense_open`).
     pub sounds: HashMap<String, Vec<(f32, String)>>,
+    /// Every animation set read, first set first, when
+    /// [`ModelSpec::keep_sets`] asked for them (empty otherwise).
+    pub sets: Vec<rc_package::animation::MeshAnimation>,
 }
 
 /// A mesh point (the mesh's own units and axes) to Unreal units relative
@@ -560,7 +567,27 @@ impl Model {
             lift: 0.0,
             flipped,
             sounds,
+            sets: Vec::new(),
         };
+        if spec.keep_sets {
+            for (k, set) in sets.iter().enumerate() {
+                let anim = match read_sets[k].take() {
+                    Some(a) => Some(a),
+                    None => match read_mesh_animation(&pkg, &data, set) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            notes.push(format!(
+                                "{}: animation set {} not read: {e}",
+                                model.name,
+                                pkg.name(set.object_name)
+                            ));
+                            None
+                        }
+                    },
+                };
+                model.sets.extend(anim);
+            }
+        }
         // Stand the first animation's first frame on the floor (the mesh
         // itself when no animation was found).
         let rest = match spec.sequences.first() {
@@ -619,6 +646,28 @@ impl Model {
     /// The animation called `key`, if it was found.
     pub fn clip(&self, key: &str) -> Option<&Clip> {
         self.clips.get(key)
+    }
+
+    /// A sequence by its name in the game (any case), from the kept sets
+    /// (see [`ModelSpec::keep_sets`]), first set first.
+    pub fn named_clip(&self, name: &str) -> Option<Clip> {
+        self.sets.iter().find_map(|anim| {
+            anim.sequences
+                .iter()
+                .find(|s| s.name.eq_ignore_ascii_case(name))
+                .map(|seq| Clip::new(anim, seq, &self.skeleton))
+        })
+    }
+
+    /// Each bone's local transform at `frame` of `clip`, the root bone's
+    /// sideways travel removed (as [`Model::local_pose`]).
+    pub fn local_clip(&self, clip: &Clip, frame: f32) -> Vec<Transform> {
+        let mut local = clip.sample(&self.skeleton, frame);
+        if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
+            l.pos[0] = rest.pos[0];
+            l.pos[1] = rest.pos[1];
+        }
+        local
     }
 
     /// Each bone's local transform at `frame` of animation `key` (the

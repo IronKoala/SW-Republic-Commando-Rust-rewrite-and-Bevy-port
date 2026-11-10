@@ -310,6 +310,8 @@ mod tests {
             sounds: vec![],
             anchors: read_anchors(&m),
             scene: crate::cutscene::Scene::default(),
+            breaking: Default::default(),
+            props: Default::default(),
             started: true,
             stats: PlayStats::default(),
         });

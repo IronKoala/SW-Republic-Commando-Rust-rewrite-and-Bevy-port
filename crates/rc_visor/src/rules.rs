@@ -8,7 +8,9 @@
 //!   up glow pale blue (each one's `EnhancedVisionColor`; black means no
 //!   glow, which is why enemies and walls don't glow). The strength is the
 //!   TACTICAL MODE INTENSITY option.
-//! - **Low light**: the night view with the helmet lamp on.
+//! - **Low light**: the night-vision picture (black and white, seen
+//!   through a visor-shaped window, with film grain) with the helmet lamp
+//!   on.
 //!
 //! The TACTICAL VISOR MODE option (the original's `VisorModeDefault`)
 //! decides which modes the CYCLE VISOR MODE key (X) steps through. These
@@ -173,6 +175,42 @@ pub fn glow_amount(facing: f32, power: f32, fill: f32, strength: f32) -> f32 {
     (fill + (1.0 - fill) * edge) * strength.max(0.0)
 }
 
+/// The night-vision picture's brightness for one pixel: `rgb` is the
+/// pixel as shown on screen (0 to 1). Red, green and blue are squared and
+/// added up, so the picture turns black and white, dark parts get darker
+/// and lit parts stand out (the original's low light shader does this sum;
+/// ours in `night_vision.wesl` does the same). `boost` is the data file's
+/// extra (1 is the original).
+pub fn night_brightness(rgb: [f32; 3], boost: f32) -> f32 {
+    let [r, g, b] = rgb.map(|c| c.clamp(0.0, 1.0));
+    ((r * r + g * g + b * b) * boost).clamp(0.0, 1.0)
+}
+
+/// Where across the original's 4:3 visor window picture (0 to 1) a place
+/// across the screen (`x`, 0 to 1) looks, on a screen `aspect` wide (width
+/// over height). Wider than 4:3, the picture's middle (`middle` screen
+/// heights each side of the centre) and its outer parts keep their shape and
+/// the plain part between is drawn longer, so nothing is stretched
+/// sideways. The shader does the same.
+pub fn window_u(x: f32, aspect: f32, middle: f32) -> f32 {
+    let four_three = 4.0 / 3.0;
+    if aspect <= four_three {
+        return x;
+    }
+    let half_picture = four_three * 0.5;
+    let middle = middle.clamp(0.0, half_picture);
+    let d = (x - 0.5) * aspect;
+    let a = d.abs();
+    let o = if a <= middle {
+        a
+    } else if a >= aspect * 0.5 - (half_picture - middle) {
+        half_picture - (aspect * 0.5 - a)
+    } else {
+        middle
+    };
+    0.5 + d.signum() * o / four_three
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +274,45 @@ mod tests {
         assert!((middle - 0.1).abs() < 1e-6);
         assert!((edge - 1.0).abs() < 1e-6);
         assert_eq!(glow_amount(0.0, 2.0, 0.1, 0.0), 0.0);
+    }
+
+    #[test]
+    fn night_vision_is_black_and_white_with_more_contrast() {
+        // White stays white, black stays black.
+        assert_eq!(night_brightness([1.0; 3], 1.0), 1.0);
+        assert_eq!(night_brightness([0.0; 3], 1.0), 0.0);
+        // Mid grey 0.5 brightens (3 x 0.25), dark grey 0.1 darkens.
+        assert!((night_brightness([0.5; 3], 1.0) - 0.75).abs() < 1e-6);
+        assert!(night_brightness([0.1; 3], 1.0) < 0.1);
+        // A pure red and a pure green the same strength look the same.
+        assert_eq!(
+            night_brightness([0.6, 0.0, 0.0], 1.0),
+            night_brightness([0.0, 0.6, 0.0], 1.0)
+        );
+    }
+
+    #[test]
+    fn the_window_widens_without_stretching() {
+        // 4:3 and narrower: the picture as it is.
+        assert_eq!(window_u(0.3, 4.0 / 3.0, 0.25), 0.3);
+        assert_eq!(window_u(0.3, 1.0, 0.25), 0.3);
+        for aspect in [16.0 / 9.0, 21.0 / 9.0, 32.0 / 9.0] {
+            // Edges and middle land on the picture's edges and middle.
+            assert!((window_u(0.0, aspect, 0.25) - 0.0).abs() < 1e-5);
+            assert!((window_u(1.0, aspect, 0.25) - 1.0).abs() < 1e-5);
+            assert!((window_u(0.5, aspect, 0.25) - 0.5).abs() < 1e-5);
+            // Near the edge one screen height across is one picture height
+            // across (4:3 picture: 0.75 of its width), so no stretch.
+            let h = 0.01;
+            let step = (window_u(h / aspect, aspect, 0.25) - window_u(0.0, aspect, 0.25)) / h;
+            assert!((step - 0.75).abs() < 1e-3, "{aspect}: {step}");
+            // Always left to right, never jumping back.
+            let mut last = -1.0;
+            for i in 0..=200 {
+                let u = window_u(i as f32 / 200.0, aspect, 0.25);
+                assert!(u >= last - 1e-6);
+                last = u;
+            }
+        }
     }
 }

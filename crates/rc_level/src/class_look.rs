@@ -233,7 +233,8 @@ impl ClassLooks {
             if look.draw_scale_3d.is_none() {
                 if let Some(Value::Raw(b)) = find("DrawScale3D").map(|p| &p.value) {
                     if b.len() == 12 {
-                        let f = |i: usize| f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+                        let f =
+                            |i: usize| f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
                         look.draw_scale_3d = Some([f(0), f(1), f(2)]);
                     }
                 }
@@ -271,7 +272,11 @@ pub fn apply_class_look(
     let look = looks.for_actor(map, place.export, open)?;
     let (owner, mesh) = look.static_mesh.clone()?;
     let props = crate::actors::read_actor_properties(map, map_data, place.export).ok()?;
-    let set = |n: &str| props.iter().any(|p| map.name(p.name).eq_ignore_ascii_case(n));
+    let set = |n: &str| {
+        props
+            .iter()
+            .any(|p| map.name(p.name).eq_ignore_ascii_case(n))
+    };
     let hidden = if set("bHidden") {
         place.hidden
     } else {
@@ -400,7 +405,11 @@ pub fn blocks_players(
             return *b;
         }
         let look = look.get_or_insert_with(|| looks.for_actor(map, actor, open));
-        match look.as_ref().and_then(|l| l.find(name, 0)).map(|(_, p)| &p.value) {
+        match look
+            .as_ref()
+            .and_then(|l| l.find(name, 0))
+            .map(|(_, p)| &p.value)
+        {
             Some(Value::Bool(b)) => *b,
             _ => true,
         }

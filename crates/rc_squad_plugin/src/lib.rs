@@ -8,7 +8,9 @@
 //!   aiming at a squad marker), or from a `SquadOrder` message, so keys,
 //!   gamepads, touch and VR all work the same way;
 //! - the leader is the entity with `Player`, the aim is the `PlayerCamera`;
-//! - bodies collide with `LevelCollision`;
+//! - bodies collide with `LevelCollision`, and ride lifts and get pushed by
+//!   doors through `MovingFloors` (the doors and lifts part), as the
+//!   player does;
 //! - each squad mate is an `rc_combat` target (`Health`, `Shield`, `Team`,
 //!   `Hittable`) with the original's numbers from `data/squad/squad.toml`;
 //!   at 0 health they go down (squad mates can't die) and stop;
@@ -46,8 +48,8 @@ use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
-    LevelCollision, MarkerJob, MarkerJobStep, Player, PlayerCamera, SquadMember, SquadReadout,
-    SquadStatus,
+    LevelCollision, MarkerJob, MarkerJobStep, MovingFloors, Player, PlayerCamera, SquadMember,
+    SquadReadout, SquadStatus,
 };
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
@@ -84,6 +86,9 @@ pub struct SquadState {
     since_log: f32,
     /// Post weapons not found, logged once each.
     missing_weapons: std::collections::BTreeSet<String>,
+    /// The lift or other mover each squad mate stands on (its name in the
+    /// map), by `Squad::members` index.
+    pub riding: Vec<Option<String>>,
 }
 
 /// Player options that change how the squad takes orders. The game sets
@@ -365,6 +370,7 @@ impl Plugin for SquadPlugin {
                 (
                     spawn_squad,
                     check_down,
+                    ride_movers,
                     take_orders,
                     gather_threats,
                     run_squad,
@@ -439,6 +445,7 @@ fn clear_squad(
         log_line(&log, fight_line(squad, &stats));
     }
     state.squad = None;
+    state.riding.clear();
 }
 
 /// Read the settings file (a mod's copy first), or use the built-in values.
@@ -833,6 +840,43 @@ fn gather_threats(
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// Lifts carry squad mates, and doors push them, the way they do the
+/// player. Runs after the player's movement has moved the movers this
+/// frame, before the squad's own moves (`run_squad`).
+fn ride_movers(
+    floors: Option<Res<MovingFloors>>,
+    mut state: ResMut<SquadState>,
+    log: Option<Res<GameLog>>,
+) {
+    let Some(floors) = floors else { return };
+    let state = &mut *state;
+    let Some(squad) = state.squad.as_mut() else {
+        return;
+    };
+    state.riding.resize(squad.members.len(), None);
+    for (i, m) in squad.members.iter_mut().enumerate() {
+        let on = floors.0.carry(&mut m.pawn);
+        if on != state.riding[i] {
+            let name = &m.settings.name;
+            let feet = m.pawn.feet();
+            let what = match (&state.riding[i], &on) {
+                (_, Some(now)) => format!("{name} stands on {now}"),
+                (Some(was), None) => format!("{name} steps off {was}"),
+                (None, None) => unreachable!(),
+            };
+            log_line(
+                &log,
+                format!(
+                    "t={:.2} {what}, feet ({:.0}, {:.0}, {:.0})",
+                    squad.time, feet.x, feet.y, feet.z
+                ),
+            );
+            state.riding[i] = on;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_squad(
     time: Res<Time>,
     mut state: ResMut<SquadState>,

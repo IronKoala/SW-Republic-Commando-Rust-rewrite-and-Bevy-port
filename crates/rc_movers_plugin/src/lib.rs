@@ -9,6 +9,9 @@
 //!   and pushes them out of a closing door. The player's movement calls it
 //!   just before its own step, because a mover moves first in the original
 //!   too (UE2 ticks movers before pawns);
+//! - squad mates and anything else that moves its own body ride lifts and
+//!   get pushed by doors too, through `MovingFloors` (see
+//!   [`LevelMovers::carry`]);
 //! - the drawn parts of each mover (`MoverPart`) follow it;
 //! - everything that happens (a door starts opening, a trigger fires, the
 //!   player boards a lift) is logged with a `movers:` prefix and sent as a
@@ -28,7 +31,8 @@ pub mod save;
 use bevy::prelude::*;
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::{
-    units::to_bevy, GameLog, GamePaths, GameSet, GameState, LevelCollision, LoadingGate,
+    units::to_bevy, CarryBodies, GameLog, GamePaths, GameSet, GameState, LevelCollision,
+    LoadingGate, MovingFloors,
 };
 use rc_level_plugin::LevelMoverData;
 use rc_level_viewer::draw::MoverPart;
@@ -59,6 +63,9 @@ impl Plugin for MoversPlugin {
             .add_save_part::<save::MoversSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
+            // A frame where the player's movement doesn't step the movers
+            // (a cutscene holds the player) carries nobody.
+            .add_systems(First, forget_moves)
             .add_systems(
                 Update,
                 (report, place_parts)
@@ -132,6 +139,26 @@ impl LevelMovers {
         self.queue(t, events);
     }
 
+    /// Carry or push a body other than the player (a squad mate, a droid)
+    /// by what the movers did in this frame's [`Self::step`], as the
+    /// original carries every pawn standing on a lift. Call it after
+    /// `step` (the player's movement), before the body's own move. A
+    /// mover that can't push it out of the way stops or goes back, as for
+    /// the player. See [`MoverSet::carry`].
+    pub fn carry(&self, pawn: &mut Pawn) -> rc_movers::Ride {
+        let mut set = self.shared.set.write().unwrap_or_else(|e| e.into_inner());
+        let ride = set.carry(self.shared.fixed.as_ref(), pawn);
+        let t = set.time;
+        drop(set);
+        self.queue(t, ride.events.clone());
+        ride
+    }
+
+    /// The movers as [`MovingFloors`], for other parts.
+    pub fn floors(&self) -> MovingFloors {
+        MovingFloors(Arc::new(self.clone()))
+    }
+
     /// Send an event to every mover whose `Tag` is that name, as the
     /// original's `TriggerEvent` does. Returns how many movers got it.
     pub fn send(&self, event: &str) -> usize {
@@ -196,6 +223,16 @@ impl LevelMovers {
     }
 }
 
+impl CarryBodies for LevelMovers {
+    fn carry(&self, pawn: &mut Pawn) -> Option<String> {
+        let ride = LevelMovers::carry(self, pawn);
+        let set = self.read();
+        ride.on
+            .and_then(|i| set.movers.get(i))
+            .map(|m| m.info.place.name.clone())
+    }
+}
+
 /// The level and the movers together, for sweeps.
 struct WithMovers(Arc<Shared>);
 
@@ -212,6 +249,17 @@ fn begin(mut gate: ResMut<LoadingGate>) {
 
 fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelMovers>();
+    commands.remove_resource::<MovingFloors>();
+}
+
+fn forget_moves(movers: Option<Res<LevelMovers>>) {
+    if let Some(m) = movers {
+        m.shared
+            .set
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .forget_moves();
+    }
 }
 
 fn load_settings(paths: &GamePaths, log: &GameLog) -> Settings {
@@ -306,6 +354,7 @@ fn build(
     }
     let movers = LevelMovers::new(set, collision.0.clone());
     commands.insert_resource(LevelCollision(movers.world()));
+    commands.insert_resource(movers.floors());
     commands.insert_resource(movers);
     gate.done(PART);
 }
@@ -343,7 +392,7 @@ fn report(
                 (name(*mover), format!("closed after {secs:.2} s"))
             }
             MoverEvent::Blocked { mover, what } => {
-                (name(*mover), format!("blocked by the player ({what:?})"))
+                (name(*mover), format!("blocked by someone in the way ({what:?})"))
             }
             MoverEvent::Sound { mover, sound } => {
                 (name(*mover), format!("sound {sound} (not played yet)"))

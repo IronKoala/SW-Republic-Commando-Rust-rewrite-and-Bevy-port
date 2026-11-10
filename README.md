@@ -212,6 +212,17 @@ copy of the game.
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
 
+- **Ammo and grenade boxes (since 2026-11-09; tested in the cloud, not
+  yet on Windows or by playing).** The 477 boxes the campaign maps place
+  (DC-17m, sniper and anti-armour ammo; thermal, sonic, EMP and flash
+  grenades) appear with their original models, resting on the floor. Walk
+  into one to refill: a DC-17m box gives 300 shots, sniper 20, anti-armour
+  4, grenades 5, never more than you can carry. A full player leaves the
+  box lying. Taken boxes vanish and stay gone after a save and load, except
+  geo_01a's grenade crate by the start, which comes back as in the
+  original. Boxes no longer block you like walls. No pickup sound or
+  "picked up" message yet.
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
@@ -278,7 +289,9 @@ copy of the game.
   map and logs the numbers: all 863 that could be timed opened and closed
   on time, and all 33 rideable lifts carried the player. They also run
   in the game itself (`rc_game`, tested in the cloud sandbox on geo_01a):
-  doors are solid where they stand and move when set off. Doors that the
+  doors are solid where they stand and move when set off. Squad mates
+  ride lifts with you and get pushed by doors (tested in the cloud with a
+  test lift, not yet on a real map or on Windows). Doors that the
   game's scripts open (472 of them, plus the `Locked` ones) stay shut for
   now. Our own settings are in `data/movers/movers.toml`.
 
@@ -495,6 +508,13 @@ copy of the game.
   original, they carry no gun: they rush at you and hit up close (350 uu
   reach, 125 damage, about one hit every 1.6 s). Any enemy type can get a
   melee weapon in its `[combat]` section.
+- **Geonosian elites (tested in the cloud sandbox with automatic tests,
+  not yet in the real game on Windows).** The big Geonosians with the beam
+  gun now appear wherever the original puts them (19 spawners on geo_03c,
+  geo_04a, geo_04b, geo_04c, geo_05a and geo_05b), with the game's own
+  model, skin, animations, voice lines, 1000 health and damage table. They
+  burn you with the Elite Beam in one-second bursts. Settings:
+  `data/enemies/geonosian_elite.toml` and `data/weapons/elite_beam_enemy.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -518,12 +538,29 @@ copy of the game.
   the colours the original gives them (read from the install). The GAME
   options page's TACTICAL VISOR MODE (ON, OFF, CYCLE: which modes X steps
   through) and TACTICAL MODE INTENSITY (how strong the glow is) work, as in
-  the original. Low light mode only switches on a helmet lamp for now (a
-  placeholder). Checked by `cargo run -p rc_visor --example visor_check`
-  and `rc_game --script`.
+  the original. Low light mode shows the original's night-vision picture:
+  black and white with more contrast, seen through the original's
+  visor-shaped window (widened, not stretched, on wide screens), with its
+  film grain and its distance fog, and the helmet lamp on. The window, grain
+  and numbers are read from the install. Not yet: the original's faint
+  trail of the last picture. Checked by `cargo run -p rc_visor --example
+  visor_check` and `rc_game --script`.
+
+- **Breakable props (since 2026-11-09, tested in the cloud only, not on
+  Windows or by playing).** Explosive barrels, geo_05b's fuel dispensers
+  and clamps, holo machines, consoles, rock cover, drone eggs and wall
+  panels take damage from shots and grenades and break with the game's own
+  health numbers (838 such props on Geonosis). Barrels and dispensers
+  explode a moment later, hurting characters and setting off other barrels
+  near them. A prop that breaks sends its event to the level scripts (53
+  on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
+  go on. Broken props are kept in save files.
 
 ## What doesn't work yet
 
+- Breakable props just disappear when they break: their broken model,
+  effect and sound aren't shown yet, the burning or electric after-effect
+  some barrels leave isn't done, and loose props aren't pushed by blasts.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
@@ -543,10 +580,13 @@ copy of the game.
   to their end and go on to the next map. The player is held still with
   the original's look limits, moved between rooms, and the screen fades
   and flashes as the scripts ask; the HUD and helmet frame hide when they
-  say. The squad only comes along in maps that have one (not the
+  say. The characters the map places (Kaminoans, young clones,
+  troopers, Delta at the end) stand, talk and move as the scripts say;
+  the ones brought in during the scene aren't there yet. The squad only
+  comes along in maps that have one (not the
   prologue, briefings or epilogue), and the grown commando's arms are
   hidden while the prologue gives you a child's hands. Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, many cutscene characters, hologram text, the title card,
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
@@ -600,7 +640,13 @@ copy of the game.
   throw grenades at grenade markers. Grenade explosions play the game's own
   explosion sounds (tested: the sounds are found; not listened to).
 - Enemy types: not yet checked on the real maps. Geonosian warriors walk
-  instead of flying, jumping and climbing. Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
+  instead of flying, jumping and climbing. Geonosian elites walk too
+  (slowly, 200 uu/s) instead of flying and dodging in the air, their wings
+  are drawn with the body's skin, their beam is drawn as a tracer line,
+  how fast the beam does its damage is our own guess, and the player can't
+  pick up their beam yet. Droidekas, dwarf spider droids, Phidna, drones,
+  seeker droids and placed clone troopers still don't appear
+  (`rc_enemy_spawners` lists them). Trandoshan mercenaries use their own model, skin and animations from the game (checked by loading them; not yet seen on a real map).
 - Enemy voices: battle droids, super battle droids, Trandoshans and
   Geonosian warriors say the game's own lines when they spot you, get hurt
   and die, with the hurt and death lines matched to explosions, EMP and

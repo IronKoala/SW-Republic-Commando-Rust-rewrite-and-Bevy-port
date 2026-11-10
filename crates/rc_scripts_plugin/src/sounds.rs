@@ -711,6 +711,8 @@ mod tests {
             started: true,
             scene: crate::cutscene::Scene::default(),
             stats: Default::default(),
+            breaking: Default::default(),
+            props: Default::default(),
         });
         w
     }

@@ -23,6 +23,7 @@
 // Bevy queries read best written out in place.
 #![allow(clippy::type_complexity)]
 
+pub mod ammo_box;
 pub mod arms;
 mod arms_view;
 pub mod audio_table;
@@ -54,7 +55,7 @@ pub use library::{
 pub use melee::{MeleeAttack, MeleeSwing};
 pub use pickup::{spawn_pickup, WeaponPickup};
 pub use rc_package::sound::AudioParams;
-pub use throw::{Blast, Body, GrenadeFlight, Stunned, ThrowGrenade};
+pub use throw::{Blast, Body, Explode, GrenadeFlight, Stunned, ThrowGrenade};
 pub use weapon::{ArmsParams, WeaponParams, WeaponState};
 
 use bevy::prelude::*;
@@ -105,6 +106,11 @@ pub struct ShotLanded {
     pub on_level: bool,
     /// Unreal units from where the shot started.
     pub distance: f32,
+    /// The shot's damage before any damage table, and its damage type
+    /// (`CTDamageEnergyDC17`): for what it hit on the level (props that
+    /// can break, `rc_level::breakables`).
+    pub damage: f32,
+    pub damage_type: String,
 }
 
 /// The view kick from one shot is the shared `rc_game_core::ViewKick`
@@ -183,10 +189,37 @@ impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FireShot>()
             .add_message::<ShotLanded>()
+            .add_message::<ammo_box::AmmoBoxTaken>()
+            // The levels' ammo and grenade boxes (`ammo_box`).
+            .add_systems(
+                Update,
+                (
+                    ammo_box::load_rules
+                        .run_if(not(resource_exists::<ammo_box::AmmoBoxRules>))
+                        .run_if(resource_exists::<GamePaths>),
+                    ammo_box::place_boxes
+                        .run_if(resource_exists::<rc_game_core::pickups::LevelAmmoBoxes>)
+                        .run_if(resource_exists::<ammo_box::AmmoBoxRules>)
+                        .run_if(resource_exists::<WeaponLibrary>),
+                    ammo_box::apply_saved.run_if(resource_exists::<ammo_box::TakenFromSave>),
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (ammo_box::bring_back, ammo_box::take_boxes)
+                    .chain()
+                    .in_set(CombatSet::Flight)
+                    .run_if(playing)
+                    .run_if(resource_exists::<WeaponLibrary>),
+            )
+            .add_systems(Update, ammo_box::show_boxes.in_set(GameSet::View))
+            .add_systems(OnExit(rc_game_core::GameState::InGame), ammo_box::forget_boxes)
             .add_message::<ThrowGrenade>()
             .add_message::<MeleeAttack>()
             .add_message::<MeleeSwing>()
             .add_message::<Blast>()
+            .add_message::<Explode>()
             .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
                 Update,
@@ -223,6 +256,7 @@ impl Plugin for WeaponsPlugin {
                     fire::fly_bolts,
                     throw::fly_grenades,
                     throw::wear_off_stuns,
+                    throw::explosions,
                     pickup::collect_pickups,
                 )
                     .in_set(CombatSet::Flight)
@@ -266,6 +300,7 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((HealthPlugin, WeaponsPlugin))
-            .add_save_part::<save::CombatSave>();
+            .add_save_part::<save::CombatSave>()
+            .add_save_part::<ammo_box::PickupsSave>();
     }
 }
