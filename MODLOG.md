@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Clone babies get shading, holograms glow (rc_level_viewer, rc_model, rc_cast, rc_image, rc_level)
+
+- **Changed:** `rc_level_viewer::scene::unbaked_prop_light` lights props that have no stored light from the map's lights (`Stats::props_lit_from_lights`, `Placement::unlit` from `bUnlit`). `rc_image::hologram`, `tint`, `unreal_color`. `materials.rs`: `HsHologram` pictures (`Picture::hologram`), `HsFalloff` tints, `FinalBlend` alpha blending (`Picture::blend`); `draw.rs` draws holograms unlit and added, blended pictures blended and two-sided. `rc_model`: `HsHologram` and other `Hs...` materials (`Skin::hologram`); `rc_cast` draws hologram skins as added light. `docs/DESIGN.md`: new "Holograms, tank liquid and props with no stored light".
+- **Why:** User playtest of the prologue: the nursery babies were flat white-lavender shapes and the holograms plain grey. The babies (`CloneBaby`, `bStatic` off) have no stored light and were drawn at full brightness; `HsHologram` wasn't read at all.
+- **Tested how:** In the cloud with game files copied read only from the PC: `cargo test` on the changed crates; the light formula compared corner by corner with the stored light of pro's and geo_01briefing's props (see DESIGN); `rc_level_viewer pro` from beside the babies before and after; `rc_game --map pro` screenshots of the hologram rifles; `rc_game --script`: 114 passed, 0 failed (on main after #74 and the breakable props).
+- **Result:** Babies now have light and shade (picture `cutscenes/babies-before-after.png` in the project files). Hologram rifles and the advisor show as light-blue glow instead of grey. Fitted light: pro 0.99 of the stored light (middle half 0.91-1.00).
+- **Still broken / not tested:** Not tested on Windows or by playing. The original game can't be run right now, so not compared with it. Holograms have no flicker, noise or facing glow. Props lit this way have no shadows and aren't re-lit when moved. The babies' test tubes and liquid weren't seen in the cloud views. `ConstantColor` materials still read their colour red first (probably wrong the same way; not checked).
+- **Next:** The user looks at the nursery and the hologram rifles.
+
 ## 2026-11-10: Hologram briefings start and let the player go (rc_model, rc_cast)
 
 - **Changed:** `rc_model::Model::triggers` reads the events an animation sends (`AnimNotify_Trigger`: `EventName`, or `TriggerSelf`), for the animations a model reads and, with `keep_sets`, every kept one (`Model::triggers_between`). `rc_cast`: an animated prop now reads its `AnimTriggered`; a level event named by its tag plays it (or stops it if playing), as the original's `AnimProp.Trigger` does (`trigger_props`). While any cast member's animation plays, `animate_cast` sends the events it passes to the level scripts as `RaiseEvent`s. New test `rc_model` `projector_throw_starts_the_briefing` (needs RC_GAME_DIR, else it says skipped).
