@@ -2710,9 +2710,15 @@ amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
 
 The `[pickups]` section of a save file lists the boxes taken, by name.
 `AmmoBoxTaken` is sent for each box taken. Not done yet: the pickup sound
-(`PickupSound`), the on-screen "picked up" message (`PickupMessage`), the
-squad taking boxes, and weapons lying in the maps (`DC17mSniperWeaponPickup`
-and the like, 40 across the campaign).
+(`PickupSound`), the on-screen "picked up" message (`PickupMessage`), and
+weapons lying in the maps (`DC17mSniperWeaponPickup` and the like, 40
+across the campaign).
+
+Squad mates don't take boxes, on purpose: in the original only the player
+can (`bCanPickupInventory`), and anyone else whose weapon runs dry gets a
+fresh magazine for free (`bInfiniteClipsForNonPlayers`). The port's squad
+already fires without running out, which matches. Evidence in
+`docs/RESEARCH.md`, "Squad ammo and ammo boxes".
 
 ### Modding
 

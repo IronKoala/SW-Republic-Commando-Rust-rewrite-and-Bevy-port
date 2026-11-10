@@ -151,6 +151,53 @@ at the end of the class" method as the weapon numbers) and `.ini` files:
   `SetStance`, `EngageLocation`...) are native, in `ctgame.dll`. We don't
   read compiled code, so how members pick spots and move is our own design.
 
+### Squad ammo and ammo boxes (read 2026-11-10)
+
+Checked whether the original's squad mates pick up ammo and grenade boxes.
+They don't, and they never need to. From the scripts' text and class
+defaults in Engine.u, CTGame.u, CTCharacters.u, CTInventory.u and the
+Properties package:
+
+- **Only the player can take boxes.** A pickup's `ValidTouch` (Engine.u
+  `Pickup`, state `Pickup`) refuses any pawn whose `bCanPickupInventory` is
+  off, unless the pickup is a `bSpecialPickup` and the pawn
+  `bCanSpecialPickup`. `bCanPickupInventory` is off by default. Only
+  `PlayerCommando` (CTCharacters.u) switches it on in its class defaults,
+  and `CTPlayer.Possess` (CTGame.u) switches it on for whatever pawn the
+  player takes over. `Commando07Delta`, `Commando40Delta`,
+  `Commando62Delta` and their `...Defaults` never set it. No ammo box sets
+  `bSpecialPickup`.
+- **Squad mates have endless magazines.** When a weapon held by anyone
+  who isn't the player runs dry, `Weapon.ObtainAmmo` (Engine.u) refills it.
+  It is called from `ServerThink`, the `NormalFire` state's `Tick`,
+  `WeaponChange` and `ThrowGrenade`. If the ammo's
+  `bSquadUsesPlayerClips` is on and the shooter is in a squad, it takes one
+  full magazine (`ReloadCount`) from the squad leader's (the player's) ammo,
+  and only if the leader has at least a full magazine (`UseSquadAmmo`).
+  Otherwise, if `bInfiniteClipsForNonPlayers` is on, it hands over a fresh
+  `PickupAmmoCount` for free (`GiveAmmo`).
+- `bInfiniteClipsForNonPlayers` is on in the `Ammunition` base class and no
+  ammo class switches it off. No ammo class in CTInventory.u or the
+  Properties package switches `bSquadUsesPlayerClips` on. So in the shipped
+  game the squad never takes ammo from the player either: the leader path
+  is unused.
+- The squad's own weapons (`CommandoNNDeltaDefaults.RequiredEquipment`):
+  `DC17mBlasterCommando` (magazine `ReloadCount` 40, refill
+  `PickupAmmoCount` 120, ammo `DC17mBlasterAmmoCommando` MaxAmmo 300),
+  `DC17mSniperCommando` (magazine 5, refill 20), `DC17mAntiArmorCommando`
+  (magazine 1, refill 4), plus `SonicDetonator`, `EMPGrenade` and
+  `FlashBang` grenades (refilled the same way when a squad mate throws).
+- Magazines still count down: after 40 shots the weapon goes to its
+  `Reloading` state. For anyone who isn't the player, that state's
+  `BeginState` calls `FinishedReloading` at once instead of playing the
+  reload animation, and `EndState` refills the magazine. So in the weapon
+  script a squad mate's reload takes no time. (Whether their body plays a
+  reload animation or says "Reloading" is decided elsewhere, in native
+  code or the voice tables; not checked here.)
+
+So in this port the squad's unlimited ammo, and their not taking boxes,
+already match the original.
+
 ## Squad markers (read for the context orders, 2026-10-29)
 
 Read with `rc_probe --classes ctmarkers.u <Class>`, `rc_probe --class`, and

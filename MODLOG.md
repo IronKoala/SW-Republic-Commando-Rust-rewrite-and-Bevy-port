@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Checked how the original squad gets ammo (docs only)
+
+- **Changed:** `docs/RESEARCH.md` gains "Squad ammo and ammo boxes"; `docs/DESIGN.md` no longer lists "the squad taking boxes" as missing and says why. No code changed.
+- **Why:** Thread "Let the squad use ammo boxes": the box work (PR #80) listed squad mates not taking boxes as a gap. Before building it, checked what the original does.
+- **Tested how:** Read the script text and class defaults of Engine.u, CTGame.u, CTCharacters.u, CTInventory.u and Properties.u, copied read only from the PC, with `rc_probe --class` (for example `PlayerCommandoDefaults`, `Commando07DeltaDefaults`, `DC17mBlasterCommando`, every ammo class).
+- **Result:** The original squad never takes boxes: only `PlayerCommando` (and whatever pawn the player controls) has `bCanPickupInventory`. When a squad mate's weapon runs dry, `Weapon.ObtainAmmo` gives a fresh magazine for free (`bInfiniteClipsForNonPlayers`, on for every ammo class). A "take a magazine from the player" rule exists (`bSquadUsesPlayerClips`) but no ammo class turns it on. The port's squad already never runs out, so it matches.
+- **Still broken / not tested:** Nothing to play-test (no game change). Whether squad mates play a reload animation or say "Reloading" after 40 shots was not checked.
+- **Next:** None for boxes; the user chooses whether to keep the original's rule.
+
 ## 2026-11-09: Geonosian elites appear and fight (data/enemies, data/weapons, rc_enemies)
 
 - **Changed:** New `data/enemies/geonosian_elite.toml` (claims `GeonosianElite*`) and `data/weapons/elite_beam_enemy.toml` (the Elite Beam as an instant-hit weapon fired in one-second bursts of 10 hits). No engine code changed. New tool `rc_enemy_spawners` (example in `rc_enemies`): lists which enemy file claims each map's spawners and which classes no file claims. New test `a_geonosian_elite_burns_the_player_with_its_beam`. `docs/RESEARCH.md` gains the elite's and the beam's numbers; `docs/DESIGN.md` and README updated.
