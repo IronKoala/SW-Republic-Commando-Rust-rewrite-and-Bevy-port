@@ -82,6 +82,10 @@ pub struct BumpParams {
     pub live_light: f32,
 }
 
+/// The name Bevy gives the pipeline that draws depth only (shadow maps and
+/// prepasses), which uses Bevy's own vertex shader.
+pub const PREPASS_LABEL: &str = "prepass_pipeline";
+
 /// A prop surface drawn with its picture, its stored light and its bump map.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct BumpLitMaterial {
@@ -112,6 +116,14 @@ impl Material for BumpLitMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        // The depth-only drawing for shadow maps (and any prepass) uses
+        // Bevy's own vertex shader, which wants the mesh's own layout
+        // (colours at place 7, not 5). Changing it there made the game quit
+        // with a graphics error as soon as a light cast shadows (SQUAD
+        // SHADOWS on) in a map with bump-mapped props.
+        if descriptor.label.as_deref() == Some(PREPASS_LABEL) {
+            return Ok(());
+        }
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
