@@ -49,6 +49,27 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
     {
         screens::setup_titled(&mut layout);
     }
+    if rc_menus::debriefing::is_debriefing(&data.family) {
+        // As a level script fills it in. The words are this probe's own
+        // sample (the real ones are in the maps); the picture is the
+        // Geonosis one, named without its group as the map names it.
+        let filled = rc_menus::debriefing::setup(
+            &mut layout,
+            &mut assets.library,
+            "SAMPLE DEBRIEFING TITLE",
+            "Sample text written by rc_probe to check the layout: a long \
+             paragraph has to wrap onto several lines inside the frame, the \
+             way a real debriefing's text does, without running into the \
+             picture or the CONTINUE button below it.",
+            "GUIContent.GEO_Debrief",
+        );
+        let widened = rc_menus::debriefing::fit_continue(&mut layout, &mut assets);
+        let size = rc_menus::debriefing::fit_text(&mut layout, &mut assets);
+        log.line(format!(
+            "debriefing filled in: picture {:?}, problems {:?}, CONTINUE widened: {widened}, text size {size:.2}",
+            filled.picture, filled.problems
+        ));
+    }
     if class.eq_ignore_ascii_case(campaign::CAMPAIGN_MENU) {
         // As the game shows it: Geonosis chosen, its third mission picked.
         if let Some(mut c) = campaign::read(&data) {
@@ -208,6 +229,10 @@ pub(crate) fn pages(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path
         let verdict = match assets.library.class(&plan.class) {
             Ok(c) => {
                 let mut layout = rc_menus::build(&c);
+                if rc_menus::debriefing::is_debriefing(&c.family) {
+                    // As the game sets it up (CONTINUE shows on a PC).
+                    rc_menus::debriefing::show_continue(&mut layout);
+                }
                 match rc_menus::pages::check(&mut layout, plan) {
                     Ok(b) => {
                         // Fill the campaign page's list as the game does,

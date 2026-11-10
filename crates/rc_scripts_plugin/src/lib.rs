@@ -21,9 +21,11 @@
 //!   `save.rs`). After a load the scripts carry on from there, and the
 //!   level-start events aren't sent again.
 //! - level exits: walking into an open exit (a `Teleporter` with a `URL`),
-//!   `ACTION_ChangeLevel`, or the end-of-campaign debriefing's `NewLevel`
-//!   sends a [`ChangeLevel`]; the save part loads that map and carries the
-//!   player over;
+//!   or `ACTION_ChangeLevel` sends a [`ChangeLevel`]; the save part loads
+//!   that map and carries the player over. The end-of-campaign debriefing
+//!   (`ACTION_ShowDebriefingScreen` with a `NewLevel`) sends a
+//!   [`rc_game_core::ShowDebriefing`] instead, holding that `ChangeLevel`
+//!   for the game to send after the screen;
 //! - enemy spawners (`rc_enemies`) hear every event and switch on by tag;
 //!   `ACTION_StopFactorySpawning` and `ACTION_ResetFactory` become
 //!   [`FactoryOrder`]s for them, and what they send back (a droid's death
@@ -48,6 +50,7 @@
 pub mod breakables;
 pub mod characters;
 pub mod cutscene;
+pub mod markers;
 pub mod save;
 pub mod sounds;
 
@@ -55,8 +58,9 @@ use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind, Health};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog, GamePaths,
-    GameSet, GameState, HudMessage, LevelScriptsRun, LoadingGate, Player, PlayerVitals, RaiseEvent,
+    playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
+    GamePaths, GameSet, GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player,
+    PlayerVitals, RaiseEvent,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
@@ -90,6 +94,10 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<ChangeLevel>()
+            .add_message::<rc_game_core::MarkerJob>()
+            .init_resource::<rc_game_core::UseClaimed>()
+            .add_message::<rc_game_core::PropAnim>()
+            .add_message::<rc_game_core::ShowDebriefing>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
@@ -97,6 +105,7 @@ impl Plugin for ScriptsPlugin {
                 Update,
                 (
                     bacta,
+                    markers::run,
                     breakables::shots,
                     breakables::blasts,
                     breakables::explode,
@@ -184,6 +193,9 @@ pub struct LevelScript {
     pub places: characters::Places,
     /// Sounds the scripts asked for this frame.
     sounds: Vec<sounds::SoundRequest>,
+    /// Squad marker anchors (charges, consoles, door locks) and what they
+    /// set off (see `markers.rs`).
+    pub anchors: Vec<markers::Anchor>,
     started: bool,
     /// What the cutscene asks of the player and the screen.
     pub scene: cutscene::Scene,
@@ -230,6 +242,10 @@ pub struct PlayStats {
     pub squad_orders: Vec<String>,
     /// Characters an action named that weren't found.
     pub no_character: Vec<String>,
+    /// Squad marker job steps carried out: `ANCHOR Step`.
+    pub marker_steps: Vec<String>,
+    /// Locked doors opened by a breach or a slice (mover names).
+    pub doors_unlocked: Vec<String>,
 }
 
 impl LevelScript {
@@ -433,6 +449,26 @@ fn build(
         "{PART}: {} places characters can be sent to",
         places.len()
     ));
+    let anchors = markers::read_anchors(map);
+    for a in &anchors {
+        log.line(format!(
+            "{PART}:   marker anchor {} ({}): started {:?}, armed {:?}, done {:?}{}{}",
+            a.name,
+            a.class,
+            a.started,
+            a.armed,
+            a.done,
+            a.destroys
+                .as_ref()
+                .map(|(p, _)| format!(", blows away {p}"))
+                .unwrap_or_default(),
+            if a.doors.is_empty() {
+                String::new()
+            } else {
+                format!(", opens doors {:?}", a.doors)
+            }
+        ));
+    }
     commands.insert_resource(LevelScript {
         director,
         dispensers,
@@ -441,6 +477,7 @@ fn build(
         calls: Vec::new(),
         places,
         sounds: Vec::new(),
+        anchors,
         started: false,
         scene: cutscene::Scene::default(),
         stats: PlayStats::default(),
@@ -478,7 +515,10 @@ fn bacta(
     actions: Res<ActionState>,
     mut player: Query<(&Transform, Option<&mut Health>), With<Player>>,
     log: Res<GameLog>,
+    mut claimed: ResMut<rc_game_core::UseClaimed>,
+    mut anims: MessageWriter<rc_game_core::PropAnim>,
 ) {
+    claimed.0 = false;
     let Some(mut script) = script else { return };
     let Ok((t, health)) = player.single_mut() else {
         return;
@@ -498,6 +538,7 @@ fn bacta(
         let dx = feet.x - d.location[0];
         let dy = feet.y - d.location[1];
         let near = (dx * dx + dy * dy).sqrt() < range && (feet.z - d.location[2]).abs() < 256.0;
+        claimed.0 |= near && d.enabled && d.recharge_left <= 0.0;
         let can = near && using && d.enabled && d.recharge_left <= 0.0;
         if can && !d.in_use {
             d.in_use = true;
@@ -508,6 +549,11 @@ fn bacta(
             if let Some(e) = &d.active_event {
                 fire.push((e.clone(), d.name.clone()));
             }
+            // The canister swings in (the model's own animation and sounds).
+            anims.write(rc_game_core::PropAnim {
+                actor: d.name.clone(),
+                anim: "Load".into(),
+            });
         }
         if d.in_use {
             let full = match health.as_deref_mut() {
@@ -521,6 +567,10 @@ fn bacta(
             };
             if full || !can {
                 d.in_use = false;
+                anims.write(rc_game_core::PropAnim {
+                    actor: d.name.clone(),
+                    anim: "Holster".into(),
+                });
                 if full {
                     d.recharge_left = recharge;
                     log.line(format!(
@@ -558,13 +608,23 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change): (MessageWriter<CheckpointReached>, MessageWriter<ChangeLevel>),
+    (mut checkpoints, mut change, mut debrief): (
+        MessageWriter<CheckpointReached>,
+        MessageWriter<ChangeLevel>,
+        MessageWriter<rc_game_core::ShowDebriefing>,
+    ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
-    restoring: Option<Res<RestoringSave>>,
+    (restoring, prompts): (Option<Res<RestoringSave>>, Option<Res<InputPrompts>>),
     log: Res<GameLog>,
 ) {
     let Some(mut script) = script else { return };
+    // The Use button's name on the device used last, for prompts' `@`.
+    let use_key = prompts
+        .as_ref()
+        .and_then(|p| p.label(Action::Use))
+        .unwrap_or("USE")
+        .to_string();
     // A save is being put back: its [scripts] section says where the
     // scripts are, so nothing starts or runs until it has.
     if restoring.is_some() {
@@ -700,7 +760,11 @@ fn run(
             Effect::Checkpoint { name } => {
                 script.held.push(name);
             }
-            Effect::ChangeLevel { url, by } => match rc_scripts::level_url(&url) {
+            Effect::ChangeLevel {
+                url,
+                by,
+                debriefing,
+            } => match rc_scripts::level_url(&url) {
                 Some((map, portal)) => {
                     log.line(format!(
                         "{PART}: t={now:.2} {by}: the level is over; on to {map}{}",
@@ -710,7 +774,27 @@ fn run(
                             .unwrap_or_default()
                     ));
                     script.stats.left_for = Some(url);
-                    change.write(ChangeLevel { map, portal, by });
+                    let then = ChangeLevel { map, portal, by };
+                    match debriefing {
+                        // The campaign's end: the game shows the
+                        // debriefing first and goes on at CONTINUE.
+                        Some(d) => {
+                            log.line(format!(
+                                "{PART}: t={now:.2} debriefing {:?} ({}, picture {}) before going on",
+                                d.title, d.menu_class, d.picture
+                            ));
+                            debrief.write(rc_game_core::ShowDebriefing {
+                                menu_class: d.menu_class,
+                                title: d.title,
+                                text: d.text,
+                                picture: d.picture,
+                                then,
+                            });
+                        }
+                        None => {
+                            change.write(then);
+                        }
+                    }
                 }
                 None => log.line(format!(
                     "{PART}: t={now:.2} {by}: ERROR can't read the level address {url:?}; staying"
@@ -771,6 +855,7 @@ fn run(
                     &mut hud,
                     &mut damage,
                     &mut factories,
+                    &use_key,
                     &log,
                 );
             }
@@ -799,6 +884,7 @@ fn carry_out(
     hud: &mut MessageWriter<HudMessage>,
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
+    use_key: &str,
     log: &GameLog,
 ) {
     let a = &call.action;
@@ -920,8 +1006,9 @@ fn carry_out(
         "showprompt" => {
             let text = a.text("PromptText").unwrap_or("").to_string();
             if a.flag("bShowOnPC", true) {
-                // `@` stands for the button; the original fills in its name.
-                let shown = text.replace('@', "USE");
+                // `@` stands for the Use button; the original fills in its
+                // name, as we do (F on the keyboard, X on an Xbox pad, ...).
+                let shown = text.replace('@', use_key);
                 hud.write(HudMessage {
                     text: shown.clone(),
                     seconds: a.float("PromptTime").unwrap_or(5.0),
@@ -977,9 +1064,8 @@ fn carry_out(
             ));
         }
         "showdebriefingscreen" if a.text("NewLevel").is_some() => {
-            script.stats.not_done += 1;
             log.line(format!(
-                "{at}: the debriefing \"{}\" (not shown yet), then on to {}",
+                "{at}: the debriefing \"{}\", then on to {}",
                 a.text("Title").unwrap_or(""),
                 a.text("NewLevel").unwrap_or("")
             ));

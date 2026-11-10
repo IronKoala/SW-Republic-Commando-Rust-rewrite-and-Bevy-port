@@ -11,6 +11,95 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** The game's words: "DC-17m Blaster Clips", "DC-17m Sniper", "DC-17m Anti-Armor Charge Packs", "Thermal Detonators", "Sonic Detonators", "EMP Grenades", "Flashbang Detonators". Sound `GEN_Sound.Weapons.GenericWeaponPickup` (EMP box: `GEN_Sound.Interface.int_GEN_wepPickup_01`). Log: `pickups: 1 of 1 pickup sounds read from gen_sound: GenericWeaponPickup`, `pickups: played sound GEN_Sound.GenericWeaponPickup`. Self-test: "taking it shows its pickup message and plays its pickup sound: 20 letters drawn in the pickup line, centred 35% down" PASS; 114 passed, 2 failed (the two level voice checks: RAS_Voice etc. weren't copied, same as before this change). Picture: project files `pickup-feedback/pickup_message_preview_16x9.png`.
 - **Still broken / not tested:** Not tested on Windows, and the sound was not listened to (the cloud has no speakers; it was read and started). The original draws this message in native code, so its exact size and fade are our choice; position, colour, 3 seconds and one-at-a-time come from the game's `PickupMessagePlus`. The EMP box's sound wasn't heard in a level (geo_01a has none).
 - **Next:** User takes a box on Windows and listens. Weapon pickups (another thread) can send the same `PickedUp` message.
+## 2026-11-10: Dispenser sounds actually play (rc_level_plugin)
+
+- **Changed:** `anim_props::sound_key` keys each sound by package and name only. The animations name sounds with their group (`GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`) but they were stored without it, so none was found and nothing played, silently. Each sound played is now logged (`level: BactaDispenserGEO0 sound ...`) and the self-test checks them.
+- **Why:** User playtest: animations played, no sound.
+- **Tested how:** `rc_game --script` in the cloud with GEN_Sound.uax copied read only.
+- **Result:** Load plays fol_GEN_trapFiddle_01, mach_GEN_Bdroid_Dispense_close and _open; Holster the same three. Check passes; 111 passed, 2 failed (same level-sound checks).
+- **Still broken / not tested:** Not heard on Windows.
+- **Next:** The user listens at the dispenser.
+
+## 2026-11-10: Bacta dispensers play their animation and sounds (rc_model, rc_level_plugin, rc_scripts_plugin)
+
+- **Changed:** `rc_model::Model::sounds`: the sounds an animation names (`AnimNotify_Sound`) and when. New message `rc_game_core::PropAnim` (actor, animation). `rc_level_plugin::anim_props` reads the props' `Load` and `Holster` animations and their sounds, and `animate` plays an asked-for animation once (re-posing the model each frame) with its sounds from the prop. The bacta system sends `Load` when the player starts healing and `Holster` when they stop.
+- **Why:** User playtest: healing worked and the barricade opened, but the dispenser didn't move and made no sound.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_model -p rc_level_plugin`; `rc_game --script` in the cloud with GEN_Sound.uax copied read only from the PC.
+- **Result:** The dispenser's animations name `GEN_Sound` clunks (mach_GEN_Bdroid_Dispense_open/close, fol_GEN_trapFiddle_01); 3 read. New check passes: `played ["Load", "Holster"]`. 111 checks passed, 2 failed (the same level-sound checks: Character_Voice and GEO_Sound not copied).
+- **Still broken / not tested:** Not heard or seen on Windows. Which animation the original plays when is our reading of the names (Load on start, Holster on stop). The zap effect (`DispenserEffectClass` BactaZap_Dispenser, and BactaZap_Dispenser_Body on the player) waits for the particle effects system being built in its own thread. Dispensers still aren't solid.
+- **Next:** The user heals at the dispenser and says whether it looks and sounds right.
+
+## 2026-11-10: Dispensers stand on the floor; F uses them instead of ordering the squad (rc_level, rc_scripts_plugin, rc_squad_plugin)
+
+- **Changed:** Animated props are drawn lower by their `CollisionHeight` (`class_look::anim_mesh_of` returns it; `map_collision` moves them down). New shared resource `rc_game_core::UseClaimed`: the scripts' bacta system sets it while the player stands at a switched-on dispenser, and the squad leaves that F press alone (F is both Use and the squad's context order).
+- **Why:** The user's playtest: the dispenser floated about 2.4 m up (the map places these actors by the middle of their collision cylinder, the model's origin is its base: all five on geo_01a stood 116 to 121 units above the floor, the class height is 120). Their log also showed each F press sent the squad to "secure position" at the aim, and they let go of F at 195/200 health, so the dispenser never finished and the barricade stayed.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_squad_plugin -p rc_level -p rc_game_core`; `rc_game --script` in the cloud.
+- **Result:** Tests pass. 110 checks passed, 2 failed (the same sound checks). The picture shows the dispenser standing on the floor; the log says `context order left alone: the player is using something` when Use is held at it, and the barricade opens 3.7 s later.
+- **Still broken / not tested:** Not tested on Windows. Use still has to be held until health is full (as in the original); nothing shows healing except the health bar. Dispensers aren't solid and don't animate.
+- **Next:** The user holds F at the dispenser until health is full.
+
+## 2026-11-10: Bacta dispensers are drawn (rc_level, rc_level_plugin)
+
+- **Changed:** `rc_level::class_look::anim_mesh_of` finds props the player uses (`ActivateItem`: bacta dispensers) whose class draws an animated model (`DrawType` DT_Mesh). `map_collision::load` lists them (`anim_props`). New `crates/rc_level_plugin/src/anim_props.rs` reads each model once with `rc_model` and draws every copy where the map puts it (`AnimProp` component; `LevelInfo::anim_props`). `rc_game --script` has 2 new checks and a picture `logs/bacta_dispenser.png`.
+- **Why:** The user couldn't find geo_01a's landing-zone bacta dispenser, so the barricade never came down: the port only drew props with a static model, and dispensers have an animated one, so they were invisible. Their log showed the dispenser switched on and "Hold F" shown, but the player never got within reach.
+- **Tested how:** `cargo test --release -p rc_level -p rc_level_plugin`; `rc_game --script` in the cloud with the game's files copied read only from the PC.
+- **Result:** The log says `5 props with an animated model drawn (BactaDispensers.BactaDispenserGEO x5)` on geo_01a; the picture shows the dispenser standing in the landing zone. 110 checks passed, 2 failed (the same level-sound checks, sound packages not copied). A first try drew every actor with an animated model and put frozen clone troopers, droids and a gunship around the level, so it is limited to things the player uses.
+- **Still broken / not tested:** Not tested on Windows. Dispensers stand still (their Load/Holster animations aren't played) and aren't solid. Scripted characters, vehicles and ropes with animated models are still not drawn.
+- **Next:** The user walks up to the dispenser and holds F.
+
+## 2026-11-09: Level prompts name the real Use key (rc_scripts_plugin)
+
+- **Changed:** `crates/rc_scripts_plugin/src/lib.rs`: a script prompt's `@` (the Use button) is now replaced with the button's name on the device used last (`InputPrompts`), not the word "USE".
+- **Why:** The user couldn't use geo_01a's bacta dispenser: the prompt said "Hold USE to use Bacta Dispenser", but Use is F on the keyboard (E does nothing), so the barricade never came down.
+- **Tested how:** `rc_game --script` in the cloud with the game's files.
+- **Result:** The log shows `ShowPrompt: shows "Hold F to use Bacta Dispenser"` at t=47 s, about 16 s after the shell hits the player. 107 checks passed, 2 failed (the same two level-sound checks as before, sound packages not copied).
+- **Still broken / not tested:** Not tested on Windows. Gamepad names come from `button_names.toml` and weren't checked here.
+- **Next:** The user tries the dispenser again with F.
+
+## 2026-11-09: Charges, slicing and breaching set off the level (rc_scripts, rc_scripts_plugin, rc_squad_plugin, rc_movers)
+
+- **Changed:** New shared message `rc_game_core::MarkerJob` (anchor, step Started/Armed/Done). `rc_squad_plugin` sends it when a squad mate starts a marker job or takes a post, lights a fuse, and finishes. New `rc_scripts::markers` reads every squad marker's anchor (DemolitionCharge, HackTerminal*, HackDoor*, BreachDoor*) and the map events it sends; new `rc_scripts_plugin/src/markers.rs` sends them to the level scripts, blows away a charge's `PropToDestroy` (`Director::destroy_prop_named`) and opens the locked double doors (`MoverSet::open_named`, `LevelMovers::open_named`). `rc_script_check` lists each map's anchors. `rc_game --script` has 4 new checks (geo_01a's bunker charge, geo_01b's hangar door).
+- **Why:** An audit of the prologue and all 13 Geonosis maps found this the biggest thing stopping play: the squad did demolition, slicing and breach jobs, but nothing listened (`SquadJobDone` had no reader), so bunker doors, barricades, shields and locked doors never opened and the scripts waiting for them (about 45 places) stood still.
+- **Tested how:** `cargo test --release -p rc_scripts -p rc_scripts_plugin -p rc_movers -p rc_movers_plugin -p rc_squad_plugin -p rc_game_core` (3 new tests in markers.rs). `rc_script_check` on pro and the 13 Geonosis maps with the game's files copied read only from the PC. `rc_game --script` in the cloud (see Result).
+- **Result:** All tests pass. rc_script_check: `57 marker anchors; 61 of their events are waited for by scripts; 38 of 38 doors they open are doors the game moves`. `rc_game --script` (cloud, software drawing): 107 checks passed, 2 failed. The 4 new ones passed: geo_01a's charge sent DemoUnderway, SpawnDemoDroids, DemoChargeArmed and BunkerDoorDestroyed, the bunker door prop (LargeBunker) was blown away and ScriptedTrigger4 moved on; geo_01b's hangar door MoverDB_GEO6 started shut and opened 0.12 s after the lock was sliced. The 2 failures are the level-sound checks: this run didn't have the big sound packages (character_voice, gen_sound, geo_sound) copied over, which those checks need.
+- **Still broken / not tested:** Not tested on Windows or by playing a level through. The charge, console and lock don't change their look or play their sounds. The player can't do these jobs with Use yet. Sliced doors stay open instead of working as automatic doors again. Which steps were sent isn't saved.
+- **Next:** The user orders the squad to blow geo_01a's bunker door. Separate threads handle ammo boxes, breakable objects, missing enemies and squad lifts.
+## 2026-11-09: Debriefing screen: CONTINUE and the level's text stay inside their frames
+
+- **Changed:** `rc_menus::debriefing`: `fit_continue` widens CONTINUE's bar to fit the word; `fit_text` makes the level's text smaller in 5% steps (not below 60%) until its last line is inside its frame. `rc_game` (`original_menu.rs`) and `rc_probe --menu` use both.
+- **Why:** The user saw CONTINUE running past its bar in the screenshot. Checking the three real campaign texts showed they also ran one or two lines past the bottom of their frame.
+- **Tested how:** `rc_probe --menu` with each of the three real texts (put in only on the cloud copy, not committed), then the full `rc_game --script` again.
+- **Result:** CONTINUE's bar now spans 0.587-0.826 of the width (was 0.611-0.801). The texts fit at 85% (Prosecutor) and 90% (Geonosis, Kashyyyk) of their size, with the last line above the frame's edge.
+- **Still broken / not tested:** Why the original fits these texts at full size isn't known (it may pick a smaller font at some screen sizes). The texts are a little smaller than the class asks for. Not tested on Windows.
+- **Next:** As before.
+
+## 2026-11-09: The original debriefing screen at the end of each campaign (rc_game, rc_menus, rc_scripts)
+
+- **Changed:** `rc_scripts`: `Effect::ChangeLevel` carries a `debriefing` (menu class, title, text, picture) when `ACTION_ShowDebriefingScreen` sent it. `rc_game_core`: new `ShowDebriefing` message holding the `ChangeLevel`. `rc_scripts_plugin` sends it instead of the `ChangeLevel` for the debriefing. `rc_menus`: new `debriefing.rs` fills the original `CTDebriefingInfo` page in (title, text, picture, CONTINUE on a PC); `Library::resolve_loose` finds a picture named without its group. `rc_game`: new `debriefing.rs` pauses play, opens the new `debriefing` page (`[pages.debriefing]` in `data/ui/original_menus.toml`) and sends the held `ChangeLevel` at CONTINUE; back does nothing there; a marked placeholder page if the original can't be drawn. `rc_probe --menu`/`--pages` fill the page with sample words. `rc_game --script`: 5 new checks.
+- **Why:** The end of each campaign went straight on to the next one; the original shows its debriefing screen first. User asked for one thread per remaining item.
+- **Tested how:** Read the three campaign endings from geo_05c, ras_04d and yyy_06d with `rc_script_check` (staged copies of the maps). `rc_probe --pages` with the install's files. `cargo test -p rc_scripts -p rc_scripts_plugin -p rc_menus -p rc_game_core -p rc_save`. Full `xvfb-run rc_game --script` in the cloud with about 860 MB of staged game files: it asks for a debriefing in geo_01b the way geo_05c does, then presses Back and CONTINUE.
+- **Result:** `rc_probe --pages`: `page debriefing: USES THE ORIGINAL (1 buttons), 0 overlapping texts`. The geo_05c and ras_04d pictures are named without their group (`GUIContent.GEO_Debrief`) and are found as `GUIContent.LoadInfoScreens.Geo_Debrief`. Self-test `SCRIPT DONE: 109 checks passed, 0 failed`; the debriefing screenshot matches the software painting (mean difference 5.3 of 255, 2.8% of pixels off by more than 40); Back leaves it showing; CONTINUE loads geo_01b in 0.6 s.
+- **Still broken / not tested:** Not tested on Windows or by playing a campaign to its end (the real screens were only read from the maps, not reached in play). The GEO/RAS/YYY classes' own music (`musGEO_cadence_lp` and so on) isn't played; the level's music carries on. Hint screens (`bIsForHintText`) still aren't shown (the original shows them only with a debug switch). Other languages: the original hides "YOU HAVE UNLOCKED" outside English; we always show it.
+- **Next:** Play the debriefing's own music; check the three real endings by playing to them.
+
+## 2026-11-09: Low light mode gets the original's night-vision look (rc_visor)
+
+- **Changed:** New `crates/rc_visor/src/night_original.rs` (reads the original's low light vision mode `FrameFX.VisionModes.VisionNight`, its shader's window and grain pictures and numbers from the install), `night_vision.rs` and `night_vision.wesl` (one full-screen pass on the player's camera: black and white from the sum of squared colours, the original's visor window, its film grain, fade in from black), `lib.rs` (the pass, the mode's black distance fog, log lines), `rules.rs` (`night_brightness`, `window_u` and their tests), `[low_light]` in `data/visor/tactical.toml`, `visor_check` (black and white, dark corners outside the window, picture back to normal after), the `rc_game --script` visor checks (night vision and fog on in low light, off after). rc_visor now uses rc_menus and rc_image.
+- **Why:** Low light mode was only a weak helmet lamp (a placeholder). The original also changes the whole picture.
+- **Tested how:** In the cloud with the game files copied read only from the PC. `RC_GAME_DIR=... cargo test -p rc_visor`; `visor_check` with and without the game folder; `rc_game --script` on geo_01a.
+- **Result:** Read from the install: window HUD_GlassNight 512x512, grain FilmGrain 128x128, grain strength 0.118, grain repeats 9.22 x 6.54, keeps 0.2 of the last picture, fog 555 to 4500. rc_visor 13 tests pass. visor_check: 20 passed, 0 failed with and without the game folder (low light: colour spread 5.0 against 17.6 in tactical, top left corner 0.9 of 255 behind the window).
+- **Still broken / not tested:** Not tested on Windows or by playing. Not compared with the real game (it doesn't run on the user's PC right now). The original's 20% trail of the last picture and the fade out are not done. The black-and-white sum darkens dim places, as the original's does; whether ours matches its brightness is not checked.
+- **Next:** The user tries low light in a dark place (X twice from the start of a level) and says whether it is too dark; `boost` in the data file brightens it.
+
+## 2026-11-09: The cutscene characters appear (rc_cast, rc_model, rc_game)
+
+- **Changed:** New crate `rc_cast` (`CastPlugin`, `read::find_cast`) and data file `data/cast/cast.toml`. `rc_model::ModelSpec::keep_sets`, `Model::sets`, `Model::named_clip`, `Model::local_clip`. `rc_game` adds `CastPlugin`. `docs/DESIGN.md`: new "The cast" section and crate table row.
+- **Why:** User playtest of the prologue: "no other NPC's of any kind". Characters placed in maps that weren't droids or Delta were never spawned (158 "no character" lines in the prologue's log).
+- **Tested how:** `cargo test -p rc_cast -p rc_model`; `rc_game --map pro` in the cloud with screenshots, run on through geo_01briefing to geo_01a; `rc_game --script`.
+- **Result:** pro: 54 cast members, all drawn with their models: Taun We and the second Kaminoan talking in the nursery, the young clones sitting at their desks and looking about on cue, the holograms hidden and shown on cue, troopers in the helmet room, and Sev, Fixer and Scorch in their own colours at the end. geo_01briefing: 15 (troopers, the gunship, walkers, spider droids); geo_01a: 14 (the gunship troopers, the rope, walkers). "no character" lines in a full prologue-to-geo_01a run: 38, from 192.
+- **Still broken / not tested:** Not tested on Windows. Characters brought in by `PawnFactory`s aren't spawned (the prologue's walking young clones). Hologram materials are plain grey. The cast doesn't collide, fall, fight or get hurt. Lit with a steady ambient share, not the zone's light.
+- **Next:** Characters made by `PawnFactory`s in cutscenes; the player riding the gunship in the briefings.
+
 
 ## 2026-11-09: Geonosian elites appear and fight (data/enemies, data/weapons, rc_enemies)
 
