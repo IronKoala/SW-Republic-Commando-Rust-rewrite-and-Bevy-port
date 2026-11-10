@@ -55,6 +55,13 @@ pub struct Senses {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Combat {
     pub health: f32,
+    /// An energy shield on top of health (`Shields`): damage goes to it
+    /// first. 0 for none.
+    pub shields: f32,
+    /// Shield regained per second (`ShieldRechargeRate`).
+    pub shield_recharge_rate: f32,
+    /// Seconds after a hit before the shield recharges.
+    pub shield_recharge_delay: f32,
     pub accuracy: f32,
     /// Degrees of aim error at accuracy 0.
     pub max_aim_error: f32,
@@ -287,6 +294,9 @@ impl AiParams {
             },
             combat: Combat {
                 health: 100.0,
+                shields: 0.0,
+                shield_recharge_rate: 0.0,
+                shield_recharge_delay: 0.0,
                 accuracy: 0.4,
                 max_aim_error: 10.0,
                 weapon: "e5_blaster_tm".into(),
@@ -474,6 +484,9 @@ impl AiParams {
             ("senses", "turn_rate") => s.turn_rate = num()?,
             ("senses", "hearing_radius") => s.hearing_radius = num()?,
             ("combat", "health") => c.health = num()?,
+            ("combat", "shields") => c.shields = num()?.max(0.0),
+            ("combat", "shield_recharge_rate") => c.shield_recharge_rate = num()?,
+            ("combat", "shield_recharge_delay") => c.shield_recharge_delay = num()?,
             ("combat", "accuracy") => c.accuracy = num()?,
             ("combat", "max_aim_error") => c.max_aim_error = num()?,
             ("combat", "weapon") => c.weapon = text(),

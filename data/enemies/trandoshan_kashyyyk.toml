@@ -1,0 +1,89 @@
+# Trandoshan mercenary on Kashyyyk (TrandoshanMercYYYUp and
+# TrandoshanMercYYYLow, for the upper and lower Kashyyyk levels): the
+# repeater-firing mercenary with an energy shield that must be shot down
+# before it can be hurt.
+#
+# Numbers marked "game:" are the original's. These two classes are made in
+# Properties/properties.u straight from the TrandoshanMercenary class
+# (ctcharacters.u), so they keep its own values: health 100 behind a
+# 100-point shield, not the 220 and no shield that
+# TrandoshanMercenaryDefaults gives the Prosecutor's mercenaries
+# (trandoshan.toml). The two differ only in their rag doll (KParams) and
+# jetpack push (ThrustForce), which we don't use. Their brain is
+# TrandoshanMercenaryBot with its Defaults. Anything not listed takes the
+# battle droid's value (battle_droid.toml).
+
+[type]
+id = "trandoshan_kashyyyk"
+name = "Trandoshan mercenary (Kashyyyk)"
+classes = ["TrandoshanMercYYYUp", "TrandoshanMercYYYLow"] # game: the map classes
+body = "organic"
+
+[movement]
+ground_speed = 450        # game: TrandoshanMercenary GroundSpeed
+collision_radius = 40     # game: CollisionRadius (Pawn)
+collision_height = 84     # game: TrandoshanMercenary CollisionHeight
+crouch_height = 56        # game: TrandoshanMercenary CrouchHeight
+base_eye_height = 60      # game: TrandoshanMercenary BaseEyeHeight
+
+[senses]
+sight_radius = 10000      # game: SightRadius (Pawn; only the Defaults class shortens it)
+
+[combat]
+health = 100              # game: TrandoshanMercenary Health
+shields = 100             # game: TrandoshanMercenary Shields and MaxShields
+shield_recharge_rate = 10 # game: TrandoshanMercenary ShieldRechargeRate (per second)
+shield_recharge_delay = 0 # game: not set in its classes, so it recharges straight away (not sure: may be compiled code)
+accuracy = 0.75           # game: TrandoshanMercenary Accuracy
+max_aim_yaw = 70          # game: MaxAimYaw
+weapon = "trandoshan_smg" # game: RequiredEquipment SMG (data/weapons/trandoshan_smg.toml)
+burst_count = 9           # game: TrandoshanMercenaryBotDefaults BurstCount
+shot_delay = 0.1          # game: SMGDefaults ShotDelay
+weapon_range = 5000       # game: SMGAmmo Range
+drops = "trandoshan_smg"  # the player can pick up its repeater
+damage_table = ""         # game: no MyDamageVariance in its classes (every damage type x1)
+
+[grenades]
+grenade = "thermal_detonator_enemy" # game: RequiredEquipment[1] ThermalDetonatorEnemy
+count = 2                 # game: ThermalDetonatorEnemyDefaults InitAmmoAmount
+probability = 0.05        # game: TrandoshanMercenaryBotDefaults GrenadeProbability
+min_time = 20             # game: TrandoshanMercenaryBotDefaults MinGrenadeTime
+throw_time = 2.17         # game: CloneCommandoSet ThrowGrenade (65 frames at 30 a second)
+
+[sound]
+# What the mercenary says. Names are groups (SoundMultiple) in
+# GameData/Sounds/character_voice.uax; each time one line from the group
+# plays. List a package's sounds with
+# `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
+#
+# game: TrandoshanMercenary AudioTable = TranMercAudio (System/ctaudio.u), a table of one
+# group per event (engine.u EPawnAudioEvent). "hurt_<kind>" and
+# "death_<kind>" are used when that kind of damage did it (blaster,
+# explosion, sonic, electrical, fire, melee, fall, other); otherwise
+# "hurt" and "death". Only the kinds the game's table has are listed.
+# Its other lines (LargeArms, Quiet, HeardSomething, SearchAbort,
+# SeeGrenade, KilledExcited, Retreat, ...) aren't hooked up yet.
+package = "character_voice"
+spotted = ["TMC_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["TMC_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["TMC_DieSmallArms"]         # game: PAE_DieSmallArms
+hurt_explosion = ["TMC_HurtExplosion"]
+death_explosion = ["TMC_DieExplosion"]
+hurt_electrical = ["TMC_HurtElectricity"]
+death_electrical = ["TMC_DieElectricity"]
+hurt_fire = ["TMC_HurtFire"]
+death_fire = ["TMC_DieFire"]
+hurt_fall = ["TMC_HurtFall"]
+death_fall = ["TMC_DieFall"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
+
+[look]
+# The same model as the Prosecutor's mercenaries (trandoshan.toml).
+# game: TrandoshanMercenary Mesh = Clone.TrandoshanMerc. The mercenary is
+# built on the commandos' skeleton, so its mesh lives in clone.ukx (not
+# trandoshan.ukx, which holds the slaver, heavy and scavenger) and its
+# everyday moves come from CloneCommandoSet, one of the sets it links to.
+package = "GameData/Animations/clone.ukx"
+mesh = "TrandoshanMerc"
+skin = "CloneTextures.TrandoshanMercTextures.TrandoshanMerc_Shader" # game: TrandoshanMercenaryDefaults Skins[0] (the mesh's own material is a grey stand-in, TrandoshanMercProxy)
+throw = "ThrowGrenade"                           # game: CloneCommandoSet's throwing animation

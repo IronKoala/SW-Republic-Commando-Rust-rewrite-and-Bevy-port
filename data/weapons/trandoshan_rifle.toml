@@ -1,0 +1,42 @@
+# The Trandoshan heavy's machine gun, the LS-150 Heavy ACP Repeater Gun
+# (class TrandoshanRifle): a very fast instant-hit gun fired in long
+# sprays.
+#
+# The values are the original game's: class TrandoshanRifle (ctinventory.u)
+# with TrandoshanRifleDefaults (Properties/properties.u) on top, and its
+# ammo TrandoshanRifleAmmo (+Defaults), unless marked otherwise. The player
+# can't pick it up yet.
+
+name = "LS-150 Heavy ACP Repeater Gun"
+
+[fire]
+mode = "automatic"        # game: TrandoshanRifle FireMode 2
+shot_delay = 0.05         # game: TrandoshanRifle ShotDelay
+aim_error = 25            # game: TrandoshanRifleDefaults AimError
+offset = [127.4, 10, -7.56] # game: TrandoshanRifle FPFireOffset
+
+[ammo]
+clip_size = 200           # game: TrandoshanRifle ReloadCount
+max_ammo = 400            # game: TrandoshanRifleAmmo MaxAmmo
+start_ammo = 400          # game: TrandoshanRifleDefaults PickupAmmoCount
+
+[shot]
+kind = "instant"          # game: TrandoshanRifleAmmo bInstantHit
+range = 5000              # game: TrandoshanRifleAmmo Range
+damage = 20               # game: TrandoshanRifleAmmoDefaults Damage
+damage_kind = "blaster"
+damage_type = "CTDamageBallisticHAM" # game: TrandoshanRifleAmmoDefaults MyDamageType
+
+[melee]
+range = 200               # game: TrandoshanRifleDefaults MeleeRange
+damage = 210              # game: TrandoshanRifleDefaults MeleeDamage
+
+[sound]
+package = "gen_sound"     # guess: the GEN weapon sounds are in gen_sound.uax
+fire = ["wep_GEN_hamTranNew_01"] # game: TrandoshanRifleDefaults FireSound
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the gun's own model isn't looked up yet
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.5, 0.15] # our choice

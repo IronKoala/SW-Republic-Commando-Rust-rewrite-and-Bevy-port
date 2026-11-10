@@ -158,6 +158,9 @@ fn every_weapon_file_reads() {
             "e5_blaster_tm",
             "elite_beam_enemy",
             "sbd_blaster",
+            "scav_beam",
+            "trandoshan_rifle",
+            "trandoshan_shotgun",
             "trandoshan_smg"
         ]
     );
