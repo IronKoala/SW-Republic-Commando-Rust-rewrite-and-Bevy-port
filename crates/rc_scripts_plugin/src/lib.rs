@@ -30,6 +30,9 @@
 //!   `ACTION_StopFactorySpawning` and `ACTION_ResetFactory` become
 //!   [`FactoryOrder`]s for them, and what they send back (a droid's death
 //!   event, a spawner running out) arrives as a `RaiseEvent`.
+//! - turrets: `ACTION_AttachToTurret` and `ACTION_SetTurretUsable` become
+//!   [`TurretOrder`]s for the turret part (`rc_turrets_plugin`), whose
+//!   events (a turret taken or let go) arrive as a `RaiseEvent`.
 //!
 //! - lines of dialogue and sounds (`ACTION_PlaySound`,
 //!   `ACTION_PlayLocalSound`) play from the game's own sound packages, read
@@ -61,7 +64,7 @@ use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
     playing, units::to_unreal, Action, ActionState, ChangeLevel, CurrentLevel, GameLog,
     GamePaths, GameSet, GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player,
-    PlayerVitals, RaiseEvent,
+    PlayerVitals, RaiseEvent, TurretOrder,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
@@ -96,6 +99,7 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<rc_game_core::SquadMembership>()
             .add_message::<ChangeLevel>()
+            .add_message::<TurretOrder>()
             .add_message::<rc_game_core::MarkerJob>()
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
@@ -271,6 +275,9 @@ pub struct PlayStats {
     pub sight_seen: Vec<String>,
     /// Characters an action named that weren't found.
     pub no_character: Vec<String>,
+    /// Orders sent to turrets: `attach TAG`, `detach TAG`, `usable TAG`,
+    /// `unusable TAG`.
+    pub turret_orders: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
@@ -634,7 +641,7 @@ fn run(
         MessageReader<RaiseEvent>,
         MessageReader<rc_game_core::CharacterOrderDone>,
     ),
-    mut factories: MessageWriter<FactoryOrder>,
+    (mut factories, mut turrets): (MessageWriter<FactoryOrder>, MessageWriter<TurretOrder>),
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
@@ -780,7 +787,8 @@ fn run(
                 log.line(format!(
                     "{PART}: t={now:.2} prop {name} ({tag}) damaged{}",
                     if removed {
-                        "; it has no damaged look, so it is gone (no longer solid or drawn)".to_string()
+                        "; it has no damaged look, so it is gone (no longer solid or drawn)"
+                            .to_string()
                     } else {
                         look.map(|m| format!("; should become {m} (not drawn yet)"))
                             .unwrap_or_default()
@@ -852,8 +860,7 @@ fn run(
                 };
                 // Cutscenes: holding the player, fades, the player's
                 // teleports.
-                if cutscene::KINDS.contains(&call.kind.as_str()) || call.kind == "teleporttopoint"
-                {
+                if cutscene::KINDS.contains(&call.kind.as_str()) || call.kind == "teleporttopoint" {
                     let at = format!(
                         "{PART}: t={now:.2} {} #{} {}",
                         call.script, call.index, call.kind
@@ -885,6 +892,7 @@ fn run(
                     &mut hud,
                     &mut damage,
                     &mut factories,
+                    &mut turrets,
                     &use_key,
                     &log,
                 );
@@ -914,6 +922,7 @@ fn carry_out(
     hud: &mut MessageWriter<HudMessage>,
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
+    turrets: &mut MessageWriter<TurretOrder>,
     use_key: &str,
     log: &GameLog,
 ) {
@@ -1065,6 +1074,43 @@ fn carry_out(
                 tag,
                 for_good,
                 remove_offspring,
+            });
+        }
+        // Turrets are the turret part's (rc_turrets_plugin).
+        "attachtoturret" => {
+            let turret = a.text("DestinationTag").unwrap_or("").to_string();
+            let attach = a.flag("Attach", true);
+            log.line(format!(
+                "{at}: the characters running {} get {} turret {turret}",
+                call.owner.as_deref().unwrap_or("(no sequence)"),
+                if attach { "on" } else { "off" }
+            ));
+            script.stats.turret_orders.push(format!(
+                "{} {turret}",
+                if attach { "attach" } else { "detach" }
+            ));
+            turrets.write(TurretOrder::Attach {
+                turret,
+                attach,
+                owner: call.owner.clone(),
+                by: format!("{} #{}", call.script, call.index),
+            });
+        }
+        "setturretusable" => {
+            let turret = a.text("TurretTag").unwrap_or("").to_string();
+            let usable = a.flag("IsPlayerUsable", true);
+            log.line(format!(
+                "{at}: turrets {turret} {} by the player",
+                if usable { "usable" } else { "not usable" }
+            ));
+            script.stats.turret_orders.push(format!(
+                "{} {turret}",
+                if usable { "usable" } else { "unusable" }
+            ));
+            turrets.write(TurretOrder::SetUsable {
+                turret,
+                usable,
+                by: format!("{} #{}", call.script, call.index),
             });
         }
         "resetfactory" => {

@@ -1,0 +1,26 @@
+[package]
+name = "rc_shadows"
+version = "0.1.0"
+description = "Character shadows as the original draws them: each marked character casts its own shape onto the floor, from a light high above at a fixed angle"
+edition.workspace = true
+
+[dependencies]
+rc_game_core = { path = "../rc_game_core" }
+# Reading data/shadows/shadows.toml. serde (MIT OR Apache-2.0),
+# https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The shadow's material and
+# shader. No window: the game brings that.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["default_app", "std", "bevy_state", "3d_bevy_render"]
+
+[dev-dependencies]
+# Saving the shadow_check example's picture as a BMP/PNG.
+rc_image = { path = "../rc_image" }
+# Only for the shadow_check example, which opens a window: the same Bevy
+# with window and renderer features switched on.
+bevy = { version = "0.20.1", default-features = false, features = ["default_app", "std", "bevy_state", "3d_bevy_render", "bevy_winit", "x11", "wayland", "png"] }

@@ -294,10 +294,18 @@ fn apply_shadows(
     )>,
     mut last: Local<Option<bool>>,
     log: Res<GameLog>,
+    characters: Option<ResMut<rc_shadows::CharacterShadows>>,
 ) {
     // Checked every frame so lights a level adds later follow it too; only
     // a light that differs is touched.
     let on = settings.video.squad_shadows;
+    // The original's "Shadows" option (this row) is what switches its
+    // character shadows on and off.
+    if let Some(mut c) = characters {
+        if c.on != on {
+            c.on = on;
+        }
+    }
     if *last != Some(on) {
         log.line(format!("graphics: squad shadows {on}"));
         *last = Some(on);

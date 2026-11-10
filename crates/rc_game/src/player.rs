@@ -12,7 +12,7 @@ use rc_game_core::save::{SaveAppExt, SavePart};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
     playing, Action, ActionState, Cutscene, GameLog, GamePaths, GameSet, GameState, LevelCollision,
-    Player, PlayerCamera, PlayerStart, TeleportPlayer, ViewKick,
+    Manning, Player, PlayerCamera, PlayerStart, TeleportPlayer, ViewKick,
 };
 use rc_movement::{Mode, MoveInput, MoveParams, Pawn, Vec3 as UVec3, World};
 use serde::{Deserialize, Serialize};
@@ -266,10 +266,18 @@ fn move_body(
     movers: Option<Res<rc_movers_plugin::LevelMovers>>,
     mut kicks: MessageReader<ViewKick>,
     (cut, mut teleports): (Res<Cutscene>, MessageReader<TeleportPlayer>),
-    mut body: Query<(&mut Body, &mut Transform, Has<rc_combat::Dead>), With<Player>>,
+    mut body: Query<
+        (
+            &mut Body,
+            &mut Transform,
+            Has<rc_combat::Dead>,
+            Option<&Manning>,
+        ),
+        With<Player>,
+    >,
     log: Res<GameLog>,
 ) {
-    let Ok((mut body, mut t, down)) = body.single_mut() else {
+    let Ok((mut body, mut t, down, manning)) = body.single_mut() else {
         return;
     };
     let dt = time.delta_secs().min(0.25);
@@ -287,6 +295,21 @@ fn move_body(
             body.yaw.to_degrees(),
             tp.by
         ));
+    }
+    // On a mounted turret: the body is held where the turret part says and
+    // looks where the turret points (the turret part turns it from the
+    // look input, within the turret's limits).
+    if let Some(m) = manning {
+        kicks.clear();
+        let [x, y, z] = m.body;
+        body.pawn.location = UVec3::new(x, y, z);
+        body.pawn.velocity = UVec3::ZERO;
+        body.yaw = m.yaw.rem_euclid(std::f32::consts::TAU);
+        body.pitch = m.pitch.clamp(-1.5, 1.5);
+        body.time += dt;
+        t.translation = to_bevy(body.pawn.feet());
+        t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
+        return;
     }
     // Recoil adds to the look. (The original springs back afterwards; not
     // done yet.)

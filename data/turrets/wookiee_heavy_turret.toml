@@ -1,0 +1,47 @@
+# The Wookiee heavy turret (Kashyyyk): two shell launchers side by side.
+# The last level's ending is the player on one (yyy_06d), shooting at the
+# Separatist cruiser.
+#
+# Mods: change any value and restart. A misspelt name stops this file
+# loading with an error naming it (see logs/rc_game.log). A map can set its
+# own aim limits, speed and "player may use it" for one turret.
+#
+# Numbers marked "game:" are the original's class defaults: the turret
+# class in ctcharacters.u, its parent Turret in engine.u, and the
+# "...Defaults" class in Properties/properties.u on top. "our choice" marks
+# the few that are ours. Angles are rotation units (65536 = a full turn),
+# distances Unreal units (uu, about 1.1 cm).
+
+name = "Wookiee Heavy Turret"
+classes = ["WookieeHeavyTurret"]   # game: the class maps place
+
+[model]
+package = "GameData/Animations/turrets.ukx"
+mesh = "WookieeHeavyTurret"        # game: Mesh
+pose = "Fire"                      # game: its only animation; frame 0 is at rest
+yaw_bone = "pivotYaw"              # game: Turret YawJoint
+pitch_bone = "pivotPitch"          # game: Turret PitchJoint
+muzzles = ["muzzle_l", "muzzle_r"] # game: WookieeHeavyTurret fires from both
+
+[aim]
+speed = 10000                      # game: Turret Speed (units a second)
+min_yaw = -8194                    # game: Turret MinYaw
+max_yaw = 8194                     # game: Turret MaxYaw
+min_pitch = -8194                  # game: Turret MinPitch
+max_pitch = 8194                   # game: Turret MaxPitch
+
+[gunner]
+height = 120                       # game: TurretHeight
+sit = false                        # game: SitToUse
+player_usable = true               # game: Turret bPlayerUsable
+radius = 80                        # game: CollisionRadius
+half_height = 125                  # game: CollisionHeight
+reach = 100                        # our choice: how close to get on
+exit = [-120, 0, -50]              # game: NavPtLocs offset (maps give a spot instead)
+weapon = "heavy_turret"            # game: FPWeaponClass HeavyTurret (weapons/heavy_turret.toml)
+prompt = "PRESS @ TO MOUNT TURRET" # game: MountTurretPromptText
+
+[auto]
+weapon = "heavy_turret"            # a character on it fires the same shells
+shot_delay = 2                     # game: WookieeHeavyTurret ShotDelay
+range = 6000                       # our choice: how far it looks for a target
