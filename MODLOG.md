@@ -9,7 +9,8 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Why:** Thread "Let the squad man turrets": the user asked for the squad's "Man turret" markers (yyy_06d's `SquadMarkerSpot161`..`164` at the Wookiee turrets) to work.
 - **Tested how:** In the cloud, no game files: `cargo test --release -p rc_turrets -p rc_turrets_plugin -p rc_squad -p rc_squad_plugin -p rc_game_core`.
 - **Result:** All pass. Test room: Sev walks to the spot, gets on in under 10 s, is held at the gunner's place (900, 0, 245), the turret sends its `ControlEvent`, fires 4 shells in 7 s at a droid while Sev fires 0 of his own shots, turns toward it (yaw 1198); F4 takes him off (`ReleaseEvent`), back on the floor. With the player on the turret Sev waits at the spot, then gets on within 2.5 s of it being free.
-- **Still broken / not tested:** Not checked against the real maps yet (needs `squad_turret_survey` run on the PC), not run in the game or on Windows. No turret voice lines. Squad mates on a turret stand in their usual pose where the player's body would be held.
+- **Checked on the PC (2026-11-10):** `squad_turret_survey yyy_06d`: 4 of 4 "Man turret" spots (`SquadMarkerSpot161`..`164`) find their turret by anchor name (`WookieeHeavyTurret4`, `2`, `3`, `0`), each 120 uu from its spot.
+- **Still broken / not tested:** Not run in the game. `SquadMarkerSpot164` is at the player's turret `WookieeHeavyTurret0`; a squad mate on it sends its `ControlEvent` like anyone would, as the original's rules say. No turret voice lines. Squad mates on a turret stand in their usual pose where the player's body would be held.
 - **Next:** The user runs `squad_turret_survey` on yyy_06d, then orders a squad mate onto a Wookiee turret in game.
 
 ## 2026-11-10: Mounted turrets for the player and scripted characters (rc_turrets, rc_turrets_plugin, rc_game_core, rc_combat, rc_scripts_plugin, rc_game)
