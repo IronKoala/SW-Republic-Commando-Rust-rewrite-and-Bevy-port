@@ -373,3 +373,96 @@ fn restore_skips_names_the_map_does_not_have() {
     assert_eq!(set.movers[0].key, 1);
     assert!((set.movers[0].pose.pos.z - 100.0).abs() < 1e-3);
 }
+
+#[test]
+fn lift_carries_a_squad_mate_up_and_back_down_with_the_player() {
+    // The same platform as above. The player and a squad mate both stand
+    // on it; only the player sets it off.
+    let plat = box_tris(Vec3::new(-150.0, -150.0, 0.0), Vec3::new(150.0, 150.0, 10.0));
+    let mut set = set_of(mover("StandOpenTimed", &[[0.0; 3], [0.0, 0.0, 400.0]], 2.0, 1.0), plat);
+    let fixed = floor();
+    let mut p = Pawn::new(MoveParams::player_commando(), Vec3::new(-60.0, 0.0, 10.5));
+    let mut mate = Pawn::new(MoveParams::player_commando(), Vec3::new(70.0, 30.0, 10.5));
+    let input = MoveInput::default();
+    let mut top = f32::MIN;
+    let mut rode = 0;
+    for _ in 0..(60 * 8) {
+        set.step(DT, &fixed, &mut p);
+        let ride = set.carry(&fixed, &mut mate);
+        rode += (ride.on == Some(0)) as u32;
+        let w = set.world(&fixed);
+        p.step(DT, &input, &w);
+        mate.step(DT, &input, &w);
+        top = top.max(mate.feet().z);
+        let lift_top = set.movers[0].pose.pos.z + 10.0;
+        assert!(mate.feet().z > lift_top - 1.0, "mate feet {} lift {}", mate.feet().z, lift_top);
+        assert!(mate.feet().z < lift_top + 5.0, "mate floats: feet {} lift {}", mate.feet().z, lift_top);
+    }
+    assert!((top - 410.0).abs() < 3.0, "top {top}");
+    assert!((mate.feet().z - 10.0).abs() < 3.0, "feet {}", mate.feet().z);
+    assert_eq!(mate.mode, Mode::Walking);
+    // It stayed where it stood on the platform.
+    assert!((mate.location.x - 70.0).abs() < 1.0 && (mate.location.y - 30.0).abs() < 1.0);
+    assert!(rode > 400, "rode {rode} frames");
+}
+
+#[test]
+fn without_carry_a_squad_mate_is_left_behind() {
+    // What happened before `carry`: the lift rose out from under them.
+    let plat = box_tris(Vec3::new(-150.0, -150.0, 0.0), Vec3::new(150.0, 150.0, 10.0));
+    let mut set = set_of(mover("StandOpenTimed", &[[0.0; 3], [0.0, 0.0, 400.0]], 2.0, 10.0), plat);
+    let fixed = floor();
+    let mut p = Pawn::new(MoveParams::player_commando(), Vec3::new(-60.0, 0.0, 10.5));
+    let mut mate = Pawn::new(MoveParams::player_commando(), Vec3::new(70.0, 30.0, 10.5));
+    let input = MoveInput::default();
+    for _ in 0..(60 * 3) {
+        set.step(DT, &fixed, &mut p);
+        let w = set.world(&fixed);
+        p.step(DT, &input, &w);
+        mate.step(DT, &input, &w);
+    }
+    assert!(p.feet().z > 400.0);
+    assert!(mate.feet().z < 300.0, "mate feet {}", mate.feet().z);
+}
+
+#[test]
+fn closing_door_goes_back_when_a_squad_mate_is_in_the_way() {
+    let door = box_tris(Vec3::new(-10.0, -100.0, 0.0), Vec3::new(10.0, 100.0, 200.0));
+    let mut info = mover("TriggerOpenTimed", &[[0.0; 3], [0.0, 0.0, 250.0]], 1.0, 0.5);
+    info.encroach = Encroach::Return;
+    let mut set = set_of(info, door);
+    let fixed = floor();
+    let mut ev = Vec::new();
+    set.send("Door1", &mut ev);
+    let mut p = far_player();
+    for _ in 0..60 {
+        set.step(DT, &fixed, &mut p);
+        set.carry(&fixed, &mut far_player());
+    }
+    let mut mate = Pawn::new(MoveParams::player_commando(), Vec3::new(0.0, 0.0, 0.5));
+    let mut blocked = 0;
+    for _ in 0..120 {
+        set.step(DT, &fixed, &mut p);
+        let ride = set.carry(&fixed, &mut mate);
+        blocked += ride.events.iter().filter(|e| matches!(e, MoverEvent::Blocked { .. })).count();
+        assert!(set.movers[0].pose.pos.z > mate.location.z + mate.extent().z - 1.0);
+    }
+    assert!(blocked >= 1);
+}
+
+#[test]
+fn carry_moves_nobody_after_forget_moves() {
+    let plat = box_tris(Vec3::new(-150.0, -150.0, 0.0), Vec3::new(150.0, 150.0, 10.0));
+    let mut set = set_of(mover("StandOpenTimed", &[[0.0; 3], [0.0, 0.0, 400.0]], 2.0, 1.0), plat);
+    let fixed = floor();
+    let mut p = Pawn::new(MoveParams::player_commando(), Vec3::new(-60.0, 0.0, 10.5));
+    let mut mate = Pawn::new(MoveParams::player_commando(), Vec3::new(70.0, 30.0, 10.5));
+    for _ in 0..30 {
+        set.step(DT, &fixed, &mut p);
+        set.carry(&fixed, &mut mate);
+    }
+    set.forget_moves();
+    let ride = set.carry(&fixed, &mut mate);
+    assert_eq!(ride.on, Some(0));
+    assert_eq!(ride.moved_by, Vec3::ZERO);
+}

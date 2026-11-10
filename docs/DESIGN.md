@@ -18,7 +18,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
 | `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, each prop's baked corner colours, blocking volumes, models that come from a prop's class, and a map's walking collision (`map_collision`). No Bevy. |
 | `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, with its sky, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`, `sky`) that `rc_walk` uses to draw maps. `rc_level_check` loads every map without a window and logs the results. |
-| `rc_movers` | Doors, lifts and hatches: runs a map's movers through their keys, makes their collision move with them, carries the player on lifts, and runs triggers. No Bevy. `rc_mover_check` runs every mover in every map without a window and logs the numbers. |
+| `rc_movers` | Doors, lifts and hatches: runs a map's movers through their keys, makes their collision move with them, carries the player and squad mates on lifts, and runs triggers. No Bevy. `rc_mover_check` runs every mover in every map without a window and logs the numbers. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
@@ -1349,6 +1349,37 @@ A `MoverSystems` set (in `GameSet::View`) then logs what happened
 
 Other parts open a door the way the original's scripts do: by event name.
 `LevelMovers::send("D_Exit")` sets off every mover whose `Tag` is `D_Exit`.
+
+### Squad mates (and other bodies) ride too
+
+In the original every pawn standing on a mover is carried by it, not only
+the player, so the squad rides lifts with you (geo_05a, b and c start on
+one). Here the player's movement steps the movers, and `MoverSet::step`
+remembers which movers moved that step and from where. Any other body is
+then carried with `MoverSet::carry` (in the game: `LevelMovers::carry`, or
+the `MovingFloors` resource in `rc_game_core`, which hides the movers
+behind a small `CarryBodies` trait), called once per body before that
+body's own move:
+
+1. What it stands on is judged where the movers were before this step's
+   move (where its feet still are), with the same short sweep down as for
+   the player.
+2. A mover it stands on moves it by the same amount.
+3. A mover that now overlaps it pushes it along. If it can't be pushed,
+   the mover's "when blocked" rule applies as for the player: it is put
+   back where it was and stops or turns round. It is not put back if it
+   carried the player this step (the player was already moved with it).
+
+Triggers and bump-opened doors still only answer the player. A frame
+where the movers don't step (a cutscene holds the player) carries nobody:
+`MoversPlugin` forgets the last step's moves at the start of every frame.
+
+The squad part calls it in `ride_movers`, just before the squad moves, and
+logs `squad: t=... Sev stands on Mover37` and `... steps off ...`. Test:
+`cargo test -p rc_movers` (a squad mate rides a lift up and down, is left
+behind without `carry`, and a closing door goes back for them) and
+`cargo test -p rc_squad_plugin --test lift_room` (the real squad and
+lifts plugins: all three ride a 400 uu lift with the player).
 
 Where every mover is goes into save files as `[movers]` (see "Saving,
 loading and checkpoints").
