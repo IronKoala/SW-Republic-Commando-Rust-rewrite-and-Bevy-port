@@ -15,6 +15,7 @@
 //! Everything is logged to `logs/rc_game.log`.
 
 mod cutscene;
+mod debriefing;
 mod display;
 mod graphics;
 mod helmet;
@@ -492,7 +493,11 @@ fn main() -> AppExit {
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
+    app.add_plugins(rc_cast::CastPlugin);
     app.add_plugins(rc_save::SavePlugin);
+    // The end-of-campaign debriefing screen (after the scripts part, which
+    // asks for it).
+    app.add_plugins(debriefing::DebriefingPlugin);
     app.add_plugins(visor::GameVisorPlugin);
     app.add_plugins(cutscene::CutscenePlugin);
     app.configure_sets(

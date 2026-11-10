@@ -32,6 +32,7 @@ fn main() {
             .map(|n| (n.to_string(), n.to_string()))
             .collect(),
         skins: vec![],
+        ..Default::default()
     };
     let resolve = |r: &str| {
         // Any upper or lower case, as on Windows.
