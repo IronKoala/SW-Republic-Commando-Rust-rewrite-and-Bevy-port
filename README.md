@@ -308,7 +308,9 @@ copy of the game.
   Windows).** The game reads each map's own scripting (79 of 79 maps, 2,842
   scripts, 19,041 actions, nothing unreadable) and runs it: scripts wait
   for events and timers, touch triggers, counters and conditions send
-  events on, doors open by event, checkpoints ask for a save, and
+  events on, line-of-sight triggers go off when you look at what they
+  watch (45 in 25 maps, such as seeing Grievous on yyy_01e; since
+  2026-11-10, not tested by playing), doors open by event, checkpoints ask for a save, and
   barricades come down. On geo_01a the landing zone now plays like the
   original: after the intro you are hit by a shell, the advisor tells you
   to heal, the bacta dispenser switches on, and holding Use at it heals you

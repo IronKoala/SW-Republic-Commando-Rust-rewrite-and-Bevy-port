@@ -1081,3 +1081,154 @@ fn broken_props_are_saved() {
     assert_eq!(e.hurt_prop(7, 1.0), PropHurt::AlreadyBroken);
     assert_eq!(e.destroyed_props(), vec![(7, "B".to_string())]);
 }
+
+fn sight(name: &str, vals: &[(&str, Val)], at: [f32; 3]) -> ScriptActor {
+    let mut a = actor(obj(50, "LineOfSightTrigger", name, vals), vec![]);
+    a.location = at;
+    a
+}
+
+/// A line-of-sight trigger sends its event once, only when the player
+/// looks at it from near enough, straight on, with a clear line.
+#[test]
+fn line_of_sight_trigger_fires_when_looked_at() {
+    let map = MapScripts {
+        actors: vec![
+            sight(
+                "LineOfSightTrigger0",
+                &[
+                    ("Event", t("SawDroids")),
+                    ("MaxViewDist", Val::Float(1000.0)),
+                    ("MaxViewAngle", Val::Int(10)),
+                ],
+                [500.0, 0.0, 0.0],
+            ),
+            script(
+                "Waits",
+                vec![act("WaitForEvent", &[("ExternalEvent", t("SawDroids"))])],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    assert_eq!(d.stats.sight_triggers, 1);
+    let eye = [0.0, 0.0, 0.0];
+    // Looking the other way, or too far off to the side: nothing.
+    assert!(d.sight_candidates(eye, [-1.0, 0.0, 0.0]).is_empty());
+    assert!(d.sight_candidates(eye, [0.0, 1.0, 0.0]).is_empty());
+    // 20 degrees off: outside the 10 degree angle.
+    let a = 20f32.to_radians();
+    assert!(d.sight_candidates(eye, [a.cos(), a.sin(), 0.0]).is_empty());
+    // Too far away, even straight on.
+    assert!(d
+        .sight_candidates([-600.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+        .is_empty());
+    // Straight on but a wall in the way.
+    assert_eq!(d.look(eye, [1.0, 0.0, 0.0], &mut |_, _| false), 0);
+    run(&mut d, 0.1);
+    assert!(!sent(&d).contains(&"SawDroids".to_string()));
+    // 5 degrees off with a clear line: it goes off.
+    let a = 5f32.to_radians();
+    assert_eq!(d.look(eye, [a.cos(), a.sin(), 0.0], &mut |_, _| true), 1);
+    run(&mut d, 0.1);
+    assert_eq!(sent(&d), vec!["SawDroids".to_string()]);
+    // Only once.
+    assert_eq!(d.look(eye, [1.0, 0.0, 0.0], &mut |_, _| true), 0);
+    let st = d.script_states();
+    assert!(
+        st.iter().any(|(n, _, s)| n == "Waits" && s == "finished"),
+        "{st:?}"
+    );
+}
+
+/// `SeenActorTag` points it at another actor; `bEnabled=False` keeps it
+/// off until an event with its tag switches it on; saves keep both.
+#[test]
+fn line_of_sight_trigger_seen_actor_and_switch_on() {
+    let mut droid = actor(
+        obj(60, "Prop", "Target0", &[("Tag", t("LookHere"))]),
+        vec![],
+    );
+    droid.location = [0.0, 800.0, 0.0];
+    let map = MapScripts {
+        actors: vec![
+            sight(
+                "LOS1",
+                &[
+                    ("Tag", t("ArmLOS")),
+                    ("Event", t("Seen")),
+                    ("SeenActorTag", t("LookHere")),
+                    ("bEnabled", Val::Bool(false)),
+                ],
+                [5000.0, 0.0, 0.0],
+            ),
+            droid,
+        ],
+        ..Default::default()
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    let eye = [0.0, 0.0, 0.0];
+    // Off at first.
+    assert!(d.sight_candidates(eye, [0.0, 1.0, 0.0]).is_empty());
+    d.fire("ArmLOS", "test");
+    run(&mut d, 0.05);
+    // Looks at the seen actor, not the trigger's own place.
+    assert!(d.sight_candidates(eye, [1.0, 0.0, 0.0]).is_empty());
+    let c = d.sight_candidates(eye, [0.0, 1.0, 0.0]);
+    assert_eq!(c, vec![(0, [0.0, 800.0, 0.0])]);
+    let save = d.snapshot();
+    assert_eq!(save.sight.len(), 1);
+    assert!(save.sight[0].enabled && !save.sight[0].triggered);
+    d.look(eye, [0.0, 1.0, 0.0], &mut |_, _| true);
+    run(&mut d, 0.05);
+    assert!(sent(&d).contains(&"Seen".to_string()));
+    // A load from before it was seen makes it ready again.
+    let mut fresh = Director::new(&map, &[], Settings::default());
+    fresh.restore(&save);
+    assert_eq!(
+        fresh.sight_triggers(),
+        vec![("LOS1".to_string(), true, false)]
+    );
+}
+
+/// A watched character that moved: the game says where it is now.
+#[test]
+fn line_of_sight_trigger_follows_a_moving_character() {
+    let mut guy = actor(
+        obj(
+            61,
+            "TrandoshanScav",
+            "TrandoshanScav0",
+            &[("Tag", t("Dragger1"))],
+        ),
+        vec![],
+    );
+    guy.location = [1000.0, 0.0, 0.0];
+    let map = MapScripts {
+        actors: vec![
+            sight(
+                "LineOfSightTrigger1",
+                &[
+                    ("Event", t("Dragger1Seen")),
+                    ("SeenActorTag", t("Dragger1")),
+                    ("MaxViewAngle", Val::Int(30)),
+                ],
+                [0.0; 3],
+            ),
+            guy,
+        ],
+        ..Default::default()
+    };
+    let d = Director::new(&map, &[], Settings::default());
+    let eye = [0.0; 3];
+    // Placed along +X; it walked to +Y.
+    let moved = |tag: &str| (tag == "dragger1").then_some([0.0, 1000.0, 0.0]);
+    assert_eq!(d.sight_candidates(eye, [1.0, 0.0, 0.0]).len(), 1);
+    assert!(d
+        .sight_candidates_live(eye, [1.0, 0.0, 0.0], &moved)
+        .is_empty());
+    assert_eq!(
+        d.sight_candidates_live(eye, [0.0, 1.0, 0.0], &moved),
+        vec![(0, [0.0, 1000.0, 0.0])]
+    );
+}
