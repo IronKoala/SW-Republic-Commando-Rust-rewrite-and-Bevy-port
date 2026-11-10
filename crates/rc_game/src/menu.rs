@@ -55,6 +55,9 @@ pub enum Page {
     /// they can be drawn from the install; there is no placeholder.
     LoadGame,
     SaveGame,
+    /// The end-of-campaign debriefing (`debriefing.rs`). Back does
+    /// nothing; only CONTINUE leaves it.
+    Debriefing,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +66,8 @@ pub enum Cmd {
     Play(String),
     Back,
     Resume,
+    /// Leave the debriefing for the next map.
+    Continue,
     QuitToMenu,
     Quit,
     Setting(Opt),
@@ -102,6 +107,8 @@ pub struct Menu {
     /// A message shown under the title (an error, like a level that failed
     /// to load).
     pub notice: Option<String>,
+    /// CONTINUE was chosen on the debriefing (`debriefing.rs` goes on).
+    pub go_on: bool,
     /// True when the menu needs drawing again.
     dirty: bool,
 }
@@ -114,6 +121,7 @@ impl Menu {
             scroll: 0,
             history: vec![],
             notice: None,
+            go_on: false,
             dirty: true,
         }
     }
@@ -148,7 +156,7 @@ impl Menu {
         }
     }
 
-    fn reset(&mut self, page: Page) {
+    pub(crate) fn reset(&mut self, page: Page) {
         let notice = self.notice.take();
         *self = Menu::new(page);
         self.notice = notice;
@@ -171,9 +179,17 @@ impl Plugin for MenuPlugin {
                     m.reset(if paths.0 { Page::Main } else { Page::NoGame });
                 },
             )
-            .add_systems(OnEnter(Play::Paused), |mut m: ResMut<Menu>| {
-                m.reset(Page::Paused)
-            })
+            .add_systems(
+                OnEnter(Play::Paused),
+                |mut m: ResMut<Menu>, d: Res<crate::debriefing::Debriefing>| {
+                    // A level's debriefing pauses play too.
+                    m.reset(if d.showing.is_some() {
+                        Page::Debriefing
+                    } else {
+                        Page::Paused
+                    })
+                },
+            )
             .add_systems(
                 Update,
                 (pause_key, navigate, draw_menu, highlight)
@@ -306,6 +322,12 @@ pub fn items(
             "SAVES (PLACEHOLDER)".into(),
             vec![it("Back", Cmd::Back)],
         ),
+        // Marked: the original page couldn't be drawn. The title and text
+        // are shown as the notice under the title.
+        Page::Debriefing => (
+            "DEBRIEFING (PLACEHOLDER)".into(),
+            vec![it("Continue", Cmd::Continue)],
+        ),
         Page::Paused => (
             "PAUSED".into(),
             vec![
@@ -411,7 +433,10 @@ fn navigate(
         menu.dirty = true;
     }
     let back = actions.just_pressed(Action::MenuBack);
-    let cmd = if back {
+    let cmd = if back && menu.page == Page::Debriefing {
+        // Only CONTINUE leaves the debriefing, as in the original.
+        None
+    } else if back {
         Some(Cmd::Back)
     } else if step != 0 {
         match &list[menu.selected.min(n - 1)].cmd {
@@ -453,6 +478,7 @@ fn navigate(
                 n.set(Play::Running);
             }
         }
+        Cmd::Continue => menu.go_on = true,
         Cmd::QuitToMenu => next_state.set(GameState::MainMenu),
         Cmd::Quit => {
             log.line("menu: quit");

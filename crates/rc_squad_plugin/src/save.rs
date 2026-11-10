@@ -56,6 +56,9 @@ pub struct MemberSave {
     pub health: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shield: Option<f32>,
+    /// Shots and grenades left, only with `[ammo] limited` on.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ammo: std::collections::BTreeMap<String, u32>,
 }
 
 /// A loaded `[squad]` section waiting for the squad to appear.
@@ -186,6 +189,7 @@ impl SavePart for SquadSave {
                         revive: m.revive.map(patient_name),
                         health: body.map_or(0.0, |b| b.1),
                         shield: body.and_then(|b| b.2),
+                        ammo: m.ammo.clone(),
                     }
                 })
                 .collect(),
@@ -251,6 +255,14 @@ pub(crate) fn apply_pending(world: &mut World) {
             m.engaging = None;
             m.down = s.down;
             m.revive = s.revive.as_deref().and_then(patient);
+            m.fetching = None;
+            // Only what this squad counts (a save made with `limited` off
+            // has none; one made with it on keeps its counts).
+            for (id, n) in m.ammo.iter_mut() {
+                if let Some(v) = s.ammo.get(id) {
+                    *n = *v;
+                }
+            }
         }
     }
     // Their bodies: place, health, shield, down or up.

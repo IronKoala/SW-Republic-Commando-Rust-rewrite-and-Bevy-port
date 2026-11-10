@@ -28,6 +28,10 @@ pub type Loaded = Rc<(Package, Vec<u8>)>;
 /// `DrawType` for a static mesh (UE2's `EDrawType::DT_StaticMesh`).
 pub const DT_STATIC_MESH: u8 = 8;
 
+/// `DrawType` for an animated mesh (UE2's `EDrawType::DT_Mesh`): bacta
+/// and ammo dispensers, consoles and other props that move.
+pub const DT_MESH: u8 = 2;
+
 #[derive(Clone)]
 pub struct ClassLook {
     /// Class first, then its parents.
@@ -302,6 +306,80 @@ pub fn apply_class_look(
         }
     }
     Some(owner)
+}
+
+/// The animated model an actor is drawn with, when it has no static mesh
+/// and draws as `DT_Mesh` (bacta dispensers and the like): the package and
+/// the skeletal mesh's name, such as `("BactaDispensers",
+/// "BactaDispenserGEO")`. The map's own `Mesh`, `DrawType` and `bHidden`
+/// win over the class's. `None` for anything else, or a hidden actor.
+///
+/// Only things the player uses (`ActivateItem`: bacta and ammo
+/// dispensers). Other actors with an animated model are characters,
+/// vehicles and ropes the scripts bring in and move; drawn here they would
+/// stand frozen in the wrong place.
+///
+/// The third value is the actor's `CollisionHeight` (the map's, else the
+/// class's): the map places these actors by the middle of their collision
+/// cylinder, while the models have their origin at the base, so the model
+/// is drawn that much lower (geo_01a's five dispensers each stand 116 to
+/// 121 units above the floor under them; their class's height is 120).
+pub fn anim_mesh_of(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    place: &crate::actors::Placement,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> Option<(String, String, f32)> {
+    if place.static_mesh != 0 {
+        return None;
+    }
+    let look = looks.for_actor(map, place.export, open)?;
+    if !look.is_a("ActivateItem") {
+        return None;
+    }
+    let props = crate::actors::read_actor_properties(map, map_data, place.export).ok()?;
+    let own = |n: &str| props.iter().find(|p| map.name(p.name).eq_ignore_ascii_case(n));
+    let draw_type = own("DrawType")
+        .and_then(|p| match p.value {
+            Value::Byte(b) => Some(b),
+            _ => None,
+        })
+        .or(look.draw_type);
+    if draw_type != Some(DT_MESH) {
+        return None;
+    }
+    let hidden = if own("bHidden").is_some() {
+        place.hidden
+    } else {
+        look.hidden.unwrap_or(false)
+    };
+    if hidden {
+        return None;
+    }
+    let path = match own("Mesh").map(|p| &p.value) {
+        Some(Value::Object(o)) => object_path(map, *o),
+        _ => {
+            let (pkg, p) = look.find("Mesh", 0)?;
+            match p.value {
+                Value::Object(o) => object_path(&pkg.0, o),
+                _ => return None,
+            }
+        }
+    };
+    let float = |v: &Value| match v {
+        Value::Float(f) => Some(*f),
+        _ => None,
+    };
+    let height = own("CollisionHeight")
+        .and_then(|p| float(&p.value))
+        .or_else(|| look.find("CollisionHeight", 0).and_then(|(_, p)| float(&p.value)))
+        .unwrap_or(0.0);
+    // Package and mesh name; a group in between doesn't matter.
+    match path.as_slice() {
+        [package, .., mesh] if path.len() >= 2 => Some((package.clone(), mesh.clone(), height)),
+        _ => None,
+    }
 }
 
 /// What an actor stops: players walking, and shots.

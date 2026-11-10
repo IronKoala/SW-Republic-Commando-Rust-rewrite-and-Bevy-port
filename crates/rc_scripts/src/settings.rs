@@ -47,6 +47,10 @@ pub struct Settings {
     /// Size (uu) of a level exit (`Teleporter`) the map gives none.
     pub teleporter_radius: f32,
     pub teleporter_height: f32,
+    /// A `LineOfSightTrigger` the map gives no `MaxViewDist` / `MaxViewAngle`:
+    /// how near (uu) and how straight on (degrees) the player must look.
+    pub sight_max_view_dist: f32,
+    pub sight_max_view_angle: f32,
 }
 
 impl Default for Settings {
@@ -72,6 +76,8 @@ impl Default for Settings {
             // engine.u's Teleporter defaults (from NavigationPoint).
             teleporter_radius: 80.0,
             teleporter_height: 100.0,
+            sight_max_view_dist: 3000.0,
+            sight_max_view_angle: 15.0,
         }
     }
 }
@@ -89,6 +95,15 @@ struct File {
     sound: Sound,
     #[serde(default)]
     exits: Exits,
+    #[serde(default)]
+    sight: Sight,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct Sight {
+    max_view_dist: Option<f32>,
+    max_view_angle: Option<f32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -195,6 +210,12 @@ impl Settings {
         }
         if let Some(v) = f.exits.teleporter_height {
             self.teleporter_height = v;
+        }
+        if let Some(v) = f.sight.max_view_dist {
+            self.sight_max_view_dist = v.max(0.0);
+        }
+        if let Some(v) = f.sight.max_view_angle {
+            self.sight_max_view_angle = v.clamp(0.0, 180.0);
         }
         Ok(self)
     }
