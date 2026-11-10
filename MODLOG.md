@@ -9,7 +9,8 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Why:** The user shot an explosive barrel in geo_01b and nothing happened. All 20 of geo_01b's barrels had nothing to hit, so shots flew through them and landed on the sturdier canister behind (the log showed `K_GeoBarrel4` taking the hits).
 - **Tested how:** Read geo_01b, 03a, 03c, 03d, 04c, 04d and 05b with the game files copied read only from the PC and counted breakable props with nothing to hit: geo_01b 21 -> 1 (hidden), geo_04d 15 -> 6 (all hidden; the rock covers only needed their model packages copied), geo_05b 0. `cargo test -p rc_level` passes. `rc_game --script` (cloud, game files copied read only): a geo_01a barrel breaks after 3 shots, explodes 0.3 s later and hurts the stand-in next to it; 108 checks passed, 2 failed (the level sound checks: sound files not copied).
 - **Still broken / not tested:** geo_04c's 89 `K_GEO04_WallComponent`s and geo_03a's `JammingDevice` are props players walk through, which we leave out of collision, so shots still pass through them. Not tested on Windows yet.
-- **Next:** The user shoots a barrel again.
+- **Result:** User playtest on Windows (geo_01b): barrels break, explode, hurt what's near and disappear. The self-test now also checks the broken barrel is hidden.
+- **Next:** The barrel's fireball, sound and broken model.
 
 ## 2026-11-09: Breakable props: barrels, clamps, holo machines, rock cover (rc_level, rc_scripts, rc_scripts_plugin, rc_combat, rc_level_plugin, rc_level_viewer, rc_game)
 
