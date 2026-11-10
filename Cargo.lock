@@ -4428,6 +4428,7 @@ dependencies = [
  "bevy",
  "rc_anim",
  "rc_game_core",
+ "rc_hologram",
  "rc_level",
  "rc_model",
  "rc_movement",
@@ -4519,6 +4520,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_hologram"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_image",
+ "rc_package",
+]
+
+[[package]]
 name = "rc_image"
 version = "0.1.0"
 
@@ -4536,6 +4546,7 @@ dependencies = [
  "bevy",
  "rc_combat",
  "rc_game_core",
+ "rc_hologram",
  "rc_level",
  "rc_level_viewer",
  "rc_model",
@@ -4548,6 +4559,7 @@ name = "rc_level_viewer"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rc_hologram",
  "rc_image",
  "rc_level",
  "rc_package",
