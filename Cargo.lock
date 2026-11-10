@@ -4535,9 +4535,11 @@ name = "rc_level_plugin"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rc_combat",
  "rc_game_core",
  "rc_level",
  "rc_level_viewer",
+ "rc_model",
  "rc_movement",
  "rc_package",
 ]
@@ -4657,6 +4659,7 @@ name = "rc_scripts"
 version = "0.1.0"
 dependencies = [
  "rc_level",
+ "rc_movement",
  "rc_package",
  "serde",
  "toml 0.8.23",

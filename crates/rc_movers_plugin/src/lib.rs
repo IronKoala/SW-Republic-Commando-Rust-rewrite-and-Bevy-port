@@ -170,6 +170,17 @@ impl LevelMovers {
         n
     }
 
+    /// Open the mover with this actor name, even a locked door (see
+    /// [`MoverSet::open_named`]). Returns whether there is one.
+    pub fn open_named(&self, name: &str) -> bool {
+        let mut set = self.shared.set.write().unwrap_or_else(|e| e.into_inner());
+        let mut events = Vec::new();
+        let found = set.open_named(name, &mut events);
+        let t = set.time;
+        self.queue(t, events);
+        found
+    }
+
     /// The event is over (the player left the trigger that sent it), as
     /// the original's `UntriggerEvent`: movers that open only while set off
     /// close again.
