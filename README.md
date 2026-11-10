@@ -540,9 +540,13 @@ copy of the game.
   the colours the original gives them (read from the install). The GAME
   options page's TACTICAL VISOR MODE (ON, OFF, CYCLE: which modes X steps
   through) and TACTICAL MODE INTENSITY (how strong the glow is) work, as in
-  the original. Low light mode only switches on a helmet lamp for now (a
-  placeholder). Checked by `cargo run -p rc_visor --example visor_check`
-  and `rc_game --script`.
+  the original. Low light mode shows the original's night-vision picture:
+  black and white with more contrast, seen through the original's
+  visor-shaped window (widened, not stretched, on wide screens), with its
+  film grain and its distance fog, and the helmet lamp on. The window, grain
+  and numbers are read from the install. Not yet: the original's faint
+  trail of the last picture. Checked by `cargo run -p rc_visor --example
+  visor_check` and `rc_game --script`.
 
 - **Breakable props (since 2026-11-09, tested in the cloud only, not on
   Windows or by playing).** Explosive barrels, geo_05b's fuel dispensers
@@ -578,10 +582,13 @@ copy of the game.
   to their end and go on to the next map. The player is held still with
   the original's look limits, moved between rooms, and the screen fades
   and flashes as the scripts ask; the HUD and helmet frame hide when they
-  say. The squad only comes along in maps that have one (not the
+  say. The characters the map places (Kaminoans, young clones,
+  troopers, Delta at the end) stand, talk and move as the scripts say;
+  the ones brought in during the scene aren't there yet. The squad only
+  comes along in maps that have one (not the
   prologue, briefings or epilogue), and the grown commando's arms are
   hidden while the prologue gives you a child's hands. Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, many cutscene characters, hologram text, the title card,
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't

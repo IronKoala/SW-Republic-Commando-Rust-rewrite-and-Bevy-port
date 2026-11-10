@@ -49,6 +49,9 @@ pub struct VisorFile {
     #[serde(default)]
     pub colour_overrides: BTreeMap<String, [u8; 3]>,
     pub headlamp: Headlamp,
+    /// The low light mode's night-vision picture. Missing: our defaults.
+    #[serde(default)]
+    pub low_light: crate::night_vision::LowLightLook,
 }
 
 impl VisorFile {
@@ -169,6 +172,7 @@ mod tests {
             assert!(f.colours.contains_key(who), "{who}");
         }
         assert!(f.glow.strength_scale > 0.0);
+        assert!(f.low_light.picture && f.low_light.window);
     }
 
     #[test]
