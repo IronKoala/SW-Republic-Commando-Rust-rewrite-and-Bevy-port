@@ -829,6 +829,8 @@ fn ammo_boxes(r: &mut Range) -> (Entity, Entity) {
         respawn: None,
         radius: 40.0,
         height: 15.0,
+        message: "DC-17m Blaster Clips".into(),
+        sound: Some(("GEN_Sound".into(), "GenericWeaponPickup".into())),
     };
     let crate_ = PlacedAmmoBox {
         export: 9,
@@ -840,6 +842,8 @@ fn ammo_boxes(r: &mut Range) -> (Entity, Entity) {
         respawn: Some(0.1),
         radius: 45.0,
         height: 44.0,
+        message: "Thermal Detonators".into(),
+        sound: Some(("GEN_Sound".into(), "GenericWeaponPickup".into())),
     };
     r.app
         .world_mut()
@@ -950,4 +954,42 @@ fn the_grenade_crate_refills_and_comes_back() {
     use rc_game_core::save::SavePart;
     let s = rc_combat::ammo_box::PickupsSave::save(r.app.world_mut()).unwrap();
     assert!(s.taken.is_empty(), "boxes that come back aren't saved");
+}
+
+/// Every `PickedUp` sent, kept for the test to read.
+#[derive(Resource, Default)]
+struct PickedUpLog(Vec<rc_game_core::pickups::PickedUp>);
+
+fn keep_picked_up(
+    mut log: ResMut<PickedUpLog>,
+    mut picked: MessageReader<rc_game_core::pickups::PickedUp>,
+) {
+    log.0.extend(picked.read().cloned());
+}
+
+#[test]
+fn taking_a_box_says_what_it_was_and_plays_its_sound() {
+    let mut r = Range::new();
+    r.app
+        .init_resource::<PickedUpLog>()
+        .add_systems(Update, keep_picked_up);
+    ammo_boxes(&mut r);
+    // Full: touching it says nothing.
+    set_rifle(&mut r, 60.0, 240);
+    move_player(&mut r, -200.0, 0.0);
+    r.run(2, &[]);
+    assert!(r.app.world().resource::<PickedUpLog>().0.is_empty());
+    // Not full: one message, with the box's words and sound.
+    set_rifle(&mut r, 10.0, 0);
+    move_player(&mut r, -500.0, 0.0);
+    r.run(2, &[]);
+    move_player(&mut r, -200.0, 0.0);
+    r.run(2, &[]);
+    let got = &r.app.world().resource::<PickedUpLog>().0;
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].text, "DC-17m Blaster Clips");
+    assert_eq!(
+        got[0].sound,
+        Some(("GEN_Sound".to_string(), "GenericWeaponPickup".to_string()))
+    );
 }

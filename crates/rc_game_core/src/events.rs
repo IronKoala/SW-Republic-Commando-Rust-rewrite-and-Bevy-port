@@ -36,6 +36,13 @@ pub struct RaiseEvent {
 #[derive(Resource, Debug, Default)]
 pub struct LevelScriptsRun;
 
+/// True while the player stands at something the Use button works on
+/// (a bacta dispenser that is switched on). The Use button and the squad's
+/// context order share a key (F, as in the original), so the squad leaves
+/// that press alone: it uses the thing, not orders the squad.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct UseClaimed(pub bool);
+
 /// A script's order to the enemy spawners tagged `tag` (`rc_enemies`
 /// carries it out); sent by the level scripts part.
 #[derive(Message, Debug, Clone, PartialEq)]
@@ -169,3 +176,43 @@ pub struct ShowDebriefing {
 /// player start if there is one, and removes it.
 #[derive(Resource, Debug, Clone, PartialEq)]
 pub struct ArrivalPortal(pub String);
+
+/// How far a job at a squad marker has got (see [`MarkerJob`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerJobStep {
+    /// Someone started on it: placing a charge, slicing a console or a
+    /// door, or taking up a sniper post. The anchor's `EventUnderway`.
+    Started,
+    /// A charge is set and its fuse is burning (a demolition charge's
+    /// `ChargeArmed`).
+    Armed,
+    /// Finished: the charge went off, the console or door is sliced, the
+    /// door is breached.
+    Done,
+}
+
+/// A job at one of the map's squad markers moved on. `anchor` is the map
+/// actor the job is for (`DemolitionCharge2`, `HackTerminalGeo0`,
+/// `BreachDoorGeo2`). The squad part sends it; the level scripts part
+/// sends the anchor's own map events (`ChargeExplode.Event`,
+/// `HackedState.Event`, ...), opens the doors it locks and removes what
+/// it blows up. Anything else that does such a job (the player, later)
+/// sends it the same way.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct MarkerJob {
+    pub anchor: String,
+    pub step: MarkerJobStep,
+    /// Who did it, for the log.
+    pub by: String,
+}
+
+/// Play animation `anim` (the model's own sequence name, such as `Load`)
+/// on the map actor called `actor` (`BactaDispenserGEO0`), for props drawn
+/// with an animated model (`rc_level_plugin::anim_props`). The animation's
+/// own sounds play with it. Sent by whatever uses the prop (the bacta
+/// dispenser when the player starts and stops healing).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct PropAnim {
+    pub actor: String,
+    pub anim: String,
+}

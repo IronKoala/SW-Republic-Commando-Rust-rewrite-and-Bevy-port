@@ -12,6 +12,87 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** On Windows (2026-11-10) the user ran `rc_enemy_look_check`: 36 of 36 passed, all 8 Trandoshan files included. Not seen in a level on Windows or played. Enemy shields not seen taking a hit in a level (the stand-in died first); shield recharge delay is 0 because no class sets one (not sure). Scavengers walk instead of flying, don't blow up, have no hum. Slavers don't go berserk. The player can't pick up the shotgun or heavy repeater. Weapon sounds not listened to (gen_sound not copied). `TrandoshanMercenaryConc` uses the ordinary repeater instead of its concussion rifle. Squad mates and Wookiees not done.
 - **Next:** Play a Kashyyyk level on Windows; flying for scavengers with the Geonosian flying work.
 
+
+## 2026-11-10: Ammo boxes play their pickup sound and show what you took (rc_level, rc_game_core, rc_combat, rc_menus, rc_game)
+
+- **Changed:** `rc_level::pickups::read_box` also reads each box's `PickupMessage` and `PickupSound` (with its `...Defaults` class on top). New message `rc_game_core::pickups::PickedUp { text, sound }`, sent by `take_boxes` for every box taken. New `rc_combat::pickup_sound` reads the sounds a level's boxes use when the level loads and plays them. `rc_menus::hud`: new `{pickup}` text, `pickup` condition and fraction, an element can `fade`, and `[pickup_message]` (seconds 3, fade 1). `data/ui/hud.toml`: a `pickup` line centred 35% down the screen. `rc_game`: the original HUD shows and fades it; the placeholder HUD adds it to its message list. New tests: `taking_a_box_says_what_it_was_and_plays_its_sound` (rc_combat), `the_pickup_message_fades_at_the_end` (rc_menus), and a self-test check in `rc_game --script`. Notes in `docs/DESIGN.md` ("Pickup sound and message") and README.
+- **Why:** Thread "Add pickup sounds and messages": boxes refilled silently with nothing on screen.
+- **Tested how:** In the cloud with the game files copied read only from the PC: `rc_probe --class` for all 7 box classes and their Defaults; `cargo test -p rc_level -p rc_game_core -p rc_menus -p rc_combat -p rc_level_plugin -p rc_game -p rc_probe`; `rc_game --script` on geo_01a; `rc_probe --hud` preview pictures.
+- **Result:** The game's words: "DC-17m Blaster Clips", "DC-17m Sniper", "DC-17m Anti-Armor Charge Packs", "Thermal Detonators", "Sonic Detonators", "EMP Grenades", "Flashbang Detonators". Sound `GEN_Sound.Weapons.GenericWeaponPickup` (EMP box: `GEN_Sound.Interface.int_GEN_wepPickup_01`). Log: `pickups: 1 of 1 pickup sounds read from gen_sound: GenericWeaponPickup`, `pickups: played sound GEN_Sound.GenericWeaponPickup`. Self-test: "taking it shows its pickup message and plays its pickup sound: 20 letters drawn in the pickup line, centred 35% down" PASS; 114 passed, 2 failed (the two level voice checks: RAS_Voice etc. weren't copied, same as before this change). Picture: project files `pickup-feedback/pickup_message_preview_16x9.png`.
+- **Still broken / not tested:** Not tested on Windows, and the sound was not listened to (the cloud has no speakers; it was read and started). The original draws this message in native code, so its exact size and fade are our choice; position, colour, 3 seconds and one-at-a-time come from the game's `PickupMessagePlus`. The EMP box's sound wasn't heard in a level (geo_01a has none).
+- **Next:** User takes a box on Windows and listens. Weapon pickups (another thread) can send the same `PickedUp` message.
+
+## 2026-11-10: Optional squad ammo and box fetching, off by default (rc_squad, rc_squad_plugin, data/squad)
+
+- **Changed:** New `rc_squad/src/ammo.rs` (`AmmoSettings`, `SupplyBox`, `Squad::take_box`, `think_fetch`) and `[ammo]` in `data/squad/squad.toml` (`limited = "no"`). Shots and grenades count down only when `limited` is on; `shoot`, `pick_target`, `throw_on_own` and grenade posts check it. New `rc_squad_plugin/src/ammo.rs` (`gather_boxes`, `take_boxes`) uses the player's touch test and marks a taken box like the player's (hidden, saved). Squad mates' counts saved in `[squad]` (`ammo`). New test `rc_squad_plugin/tests/ammo_room.rs` and 7 tests in `rc_squad`. Notes: `docs/DESIGN.md` "Optional squad ammo", README.
+- **Why:** Thread "Let the squad use ammo boxes": the user picked "optional setting, off" after hearing the original squad never takes boxes.
+- **Tested how:** `cargo test -p rc_squad -p rc_squad_plugin` and clippy in the cloud (no game files). Then `rc_game --map geo_01a --frames 1300` (game files copied read only from the PC) with a mod `squad/squad.toml` holding only `[ammo] limited = "yes"`, `fetch_below = 0.5` (so they go at once with 120 of 300), `fetch_range = 6000`.
+- **Result:** rc_squad 57 pass, ammo_room 2 of 2: switched off, nobody counts shots or goes near the boxes; switched on, Sev (20 of 300) and Fixer (0 grenades) fetch the right box in about 2 s, end with 300 and 5, and are back by the player. geo_01a: the mod is read (`ammo: limited, ...`); the nearest boxes to the start are 3700-3900 uu away, so with the shipped 1500 uu range nobody would go there. With 6000 uu, Scorch walked 2745 uu, took `DC17mBlasterBox6` (+180, 300 of 300) and came back to the player. Sev and Fixer got stuck on the way at about (830, 230) (the squad's usual path finding, not new) and gave up after the time limit; they then hopped from box to box, so a wait after giving up was added (test `after_giving_up_on_a_box_they_go_back_before_trying_another`). Re-run with the wait: all three give up at t=40 s, walk back toward the player, wait 40 s (the mod's give-up time), then try other boxes; Scorch took `DC17mBlasterBox6` at t=95 s and came back to 153 uu from the player; Sev and Fixer got stuck at the same spot again.
+- **Still broken / not tested:** Not tested on Windows or by playing. No HUD for squad ammo. Squad mates don't play a reload or say anything about ammo. Fetching only happens with no job; a squad mate on a sniper or anti-armour post who runs out just stops firing that gun. A box on a shelf the squad can't reach costs `fetch_give_up` seconds.
+- **Next:** If wanted, the user tries it with the mod above on Windows.
+
+## 2026-11-10: Checked how the original squad gets ammo (docs only)
+
+- **Changed:** `docs/RESEARCH.md` gains "Squad ammo and ammo boxes"; `docs/DESIGN.md` no longer lists "the squad taking boxes" as missing and says why. No code changed.
+- **Why:** Thread "Let the squad use ammo boxes": the box work (PR #80) listed squad mates not taking boxes as a gap. Before building it, checked what the original does.
+- **Tested how:** Read the script text and class defaults of Engine.u, CTGame.u, CTCharacters.u, CTInventory.u and Properties.u, copied read only from the PC, with `rc_probe --class` (for example `PlayerCommandoDefaults`, `Commando07DeltaDefaults`, `DC17mBlasterCommando`, every ammo class).
+- **Result:** The original squad never takes boxes: only `PlayerCommando` (and whatever pawn the player controls) has `bCanPickupInventory`. When a squad mate's weapon runs dry, `Weapon.ObtainAmmo` gives a fresh magazine for free (`bInfiniteClipsForNonPlayers`, on for every ammo class). A "take a magazine from the player" rule exists (`bSquadUsesPlayerClips`) but no ammo class turns it on. The port's squad already never runs out, so it matches.
+- **Still broken / not tested:** Nothing to play-test (no game change). Whether squad mates play a reload animation or say "Reloading" after 40 shots was not checked.
+- **Next:** The user chose to add squad box pickups anyway, as a setting that is off by default (next entry).
+
+## 2026-11-10: Dispenser sounds actually play (rc_level_plugin)
+
+- **Changed:** `anim_props::sound_key` keys each sound by package and name only. The animations name sounds with their group (`GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`) but they were stored without it, so none was found and nothing played, silently. Each sound played is now logged (`level: BactaDispenserGEO0 sound ...`) and the self-test checks them.
+- **Why:** User playtest: animations played, no sound.
+- **Tested how:** `rc_game --script` in the cloud with GEN_Sound.uax copied read only.
+- **Result:** Load plays fol_GEN_trapFiddle_01, mach_GEN_Bdroid_Dispense_close and _open; Holster the same three. Check passes; 111 passed, 2 failed (same level-sound checks).
+- **Still broken / not tested:** Not heard on Windows.
+- **Next:** The user listens at the dispenser.
+
+## 2026-11-10: Bacta dispensers play their animation and sounds (rc_model, rc_level_plugin, rc_scripts_plugin)
+
+- **Changed:** `rc_model::Model::sounds`: the sounds an animation names (`AnimNotify_Sound`) and when. New message `rc_game_core::PropAnim` (actor, animation). `rc_level_plugin::anim_props` reads the props' `Load` and `Holster` animations and their sounds, and `animate` plays an asked-for animation once (re-posing the model each frame) with its sounds from the prop. The bacta system sends `Load` when the player starts healing and `Holster` when they stop.
+- **Why:** User playtest: healing worked and the barricade opened, but the dispenser didn't move and made no sound.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_model -p rc_level_plugin`; `rc_game --script` in the cloud with GEN_Sound.uax copied read only from the PC.
+- **Result:** The dispenser's animations name `GEN_Sound` clunks (mach_GEN_Bdroid_Dispense_open/close, fol_GEN_trapFiddle_01); 3 read. New check passes: `played ["Load", "Holster"]`. 111 checks passed, 2 failed (the same level-sound checks: Character_Voice and GEO_Sound not copied).
+- **Still broken / not tested:** Not heard or seen on Windows. Which animation the original plays when is our reading of the names (Load on start, Holster on stop). The zap effect (`DispenserEffectClass` BactaZap_Dispenser, and BactaZap_Dispenser_Body on the player) waits for the particle effects system being built in its own thread. Dispensers still aren't solid.
+- **Next:** The user heals at the dispenser and says whether it looks and sounds right.
+
+## 2026-11-10: Dispensers stand on the floor; F uses them instead of ordering the squad (rc_level, rc_scripts_plugin, rc_squad_plugin)
+
+- **Changed:** Animated props are drawn lower by their `CollisionHeight` (`class_look::anim_mesh_of` returns it; `map_collision` moves them down). New shared resource `rc_game_core::UseClaimed`: the scripts' bacta system sets it while the player stands at a switched-on dispenser, and the squad leaves that F press alone (F is both Use and the squad's context order).
+- **Why:** The user's playtest: the dispenser floated about 2.4 m up (the map places these actors by the middle of their collision cylinder, the model's origin is its base: all five on geo_01a stood 116 to 121 units above the floor, the class height is 120). Their log also showed each F press sent the squad to "secure position" at the aim, and they let go of F at 195/200 health, so the dispenser never finished and the barricade stayed.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_squad_plugin -p rc_level -p rc_game_core`; `rc_game --script` in the cloud.
+- **Result:** Tests pass. 110 checks passed, 2 failed (the same sound checks). The picture shows the dispenser standing on the floor; the log says `context order left alone: the player is using something` when Use is held at it, and the barricade opens 3.7 s later.
+- **Still broken / not tested:** Not tested on Windows. Use still has to be held until health is full (as in the original); nothing shows healing except the health bar. Dispensers aren't solid and don't animate.
+- **Next:** The user holds F at the dispenser until health is full.
+
+## 2026-11-10: Bacta dispensers are drawn (rc_level, rc_level_plugin)
+
+- **Changed:** `rc_level::class_look::anim_mesh_of` finds props the player uses (`ActivateItem`: bacta dispensers) whose class draws an animated model (`DrawType` DT_Mesh). `map_collision::load` lists them (`anim_props`). New `crates/rc_level_plugin/src/anim_props.rs` reads each model once with `rc_model` and draws every copy where the map puts it (`AnimProp` component; `LevelInfo::anim_props`). `rc_game --script` has 2 new checks and a picture `logs/bacta_dispenser.png`.
+- **Why:** The user couldn't find geo_01a's landing-zone bacta dispenser, so the barricade never came down: the port only drew props with a static model, and dispensers have an animated one, so they were invisible. Their log showed the dispenser switched on and "Hold F" shown, but the player never got within reach.
+- **Tested how:** `cargo test --release -p rc_level -p rc_level_plugin`; `rc_game --script` in the cloud with the game's files copied read only from the PC.
+- **Result:** The log says `5 props with an animated model drawn (BactaDispensers.BactaDispenserGEO x5)` on geo_01a; the picture shows the dispenser standing in the landing zone. 110 checks passed, 2 failed (the same level-sound checks, sound packages not copied). A first try drew every actor with an animated model and put frozen clone troopers, droids and a gunship around the level, so it is limited to things the player uses.
+- **Still broken / not tested:** Not tested on Windows. Dispensers stand still (their Load/Holster animations aren't played) and aren't solid. Scripted characters, vehicles and ropes with animated models are still not drawn.
+- **Next:** The user walks up to the dispenser and holds F.
+
+## 2026-11-09: Level prompts name the real Use key (rc_scripts_plugin)
+
+- **Changed:** `crates/rc_scripts_plugin/src/lib.rs`: a script prompt's `@` (the Use button) is now replaced with the button's name on the device used last (`InputPrompts`), not the word "USE".
+- **Why:** The user couldn't use geo_01a's bacta dispenser: the prompt said "Hold USE to use Bacta Dispenser", but Use is F on the keyboard (E does nothing), so the barricade never came down.
+- **Tested how:** `rc_game --script` in the cloud with the game's files.
+- **Result:** The log shows `ShowPrompt: shows "Hold F to use Bacta Dispenser"` at t=47 s, about 16 s after the shell hits the player. 107 checks passed, 2 failed (the same two level-sound checks as before, sound packages not copied).
+- **Still broken / not tested:** Not tested on Windows. Gamepad names come from `button_names.toml` and weren't checked here.
+- **Next:** The user tries the dispenser again with F.
+
+## 2026-11-09: Charges, slicing and breaching set off the level (rc_scripts, rc_scripts_plugin, rc_squad_plugin, rc_movers)
+
+- **Changed:** New shared message `rc_game_core::MarkerJob` (anchor, step Started/Armed/Done). `rc_squad_plugin` sends it when a squad mate starts a marker job or takes a post, lights a fuse, and finishes. New `rc_scripts::markers` reads every squad marker's anchor (DemolitionCharge, HackTerminal*, HackDoor*, BreachDoor*) and the map events it sends; new `rc_scripts_plugin/src/markers.rs` sends them to the level scripts, blows away a charge's `PropToDestroy` (`Director::destroy_prop_named`) and opens the locked double doors (`MoverSet::open_named`, `LevelMovers::open_named`). `rc_script_check` lists each map's anchors. `rc_game --script` has 4 new checks (geo_01a's bunker charge, geo_01b's hangar door).
+- **Why:** An audit of the prologue and all 13 Geonosis maps found this the biggest thing stopping play: the squad did demolition, slicing and breach jobs, but nothing listened (`SquadJobDone` had no reader), so bunker doors, barricades, shields and locked doors never opened and the scripts waiting for them (about 45 places) stood still.
+- **Tested how:** `cargo test --release -p rc_scripts -p rc_scripts_plugin -p rc_movers -p rc_movers_plugin -p rc_squad_plugin -p rc_game_core` (3 new tests in markers.rs). `rc_script_check` on pro and the 13 Geonosis maps with the game's files copied read only from the PC. `rc_game --script` in the cloud (see Result).
+- **Result:** All tests pass. rc_script_check: `57 marker anchors; 61 of their events are waited for by scripts; 38 of 38 doors they open are doors the game moves`. `rc_game --script` (cloud, software drawing): 107 checks passed, 2 failed. The 4 new ones passed: geo_01a's charge sent DemoUnderway, SpawnDemoDroids, DemoChargeArmed and BunkerDoorDestroyed, the bunker door prop (LargeBunker) was blown away and ScriptedTrigger4 moved on; geo_01b's hangar door MoverDB_GEO6 started shut and opened 0.12 s after the lock was sliced. The 2 failures are the level-sound checks: this run didn't have the big sound packages (character_voice, gen_sound, geo_sound) copied over, which those checks need.
+- **Still broken / not tested:** Not tested on Windows or by playing a level through. The charge, console and lock don't change their look or play their sounds. The player can't do these jobs with Use yet. Sliced doors stay open instead of working as automatic doors again. Which steps were sent isn't saved.
+- **Next:** The user orders the squad to blow geo_01a's bunker door. Separate threads handle ammo boxes, breakable objects, missing enemies and squad lifts.
 ## 2026-11-09: Debriefing screen: CONTINUE and the level's text stay inside their frames
 
 - **Changed:** `rc_menus::debriefing`: `fit_continue` widens CONTINUE's bar to fit the word; `fit_text` makes the level's text smaller in 5% steps (not below 60%) until its last line is inside its frame. `rc_game` (`original_menu.rs`) and `rc_probe --menu` use both.

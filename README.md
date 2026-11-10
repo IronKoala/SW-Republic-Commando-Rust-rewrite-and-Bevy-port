@@ -159,6 +159,13 @@ copy of the game.
   compiled code we don't read, so the rules are our own; every number is
   in `data/squad/squad.toml` (`use_specialities = "no"` turns it off).
 
+- **Optional squad ammo, off by default (tested in the cloud sandbox by
+  numbers, not yet on Windows or with eyes).** As in the original, squad
+  mates never run out and never take ammo boxes. A mod can switch on
+  `[ammo] limited = "yes"` in `data/squad/squad.toml`: then squad mates
+  count their shots and grenades and walk to a nearby box when they run
+  low (only once the gun is empty in a fight).
+
 - **Squad context orders (tested in the cloud sandbox by numbers, not yet
   on Windows, in a real level, or with eyes).** Each kind of squad marker
   does its own job: bacta heals the squad mate who uses it; demolition and
@@ -168,8 +175,14 @@ copy of the game.
   anti-armour positions are held until you press F4, the sniper firing
   single long-range shots, the grenadier throwing a grenade every few
   seconds. Every job is a `[job.*]` part of `data/squad/squad.toml`, so
-  mods can change them or add new ones. Doors don't open yet: the squad
-  reports the job done, and the level scripts part will act on it. The
+  mods can change them or add new ones. When a job is
+  done the level hears about it (tested in the cloud sandbox with the
+  game's files, not yet on Windows or by playing): a demolition charge
+  sends its map events and blows away the bunker door or barricade it is
+  on, a sliced console sends its events, and a sliced or breached door
+  lock opens its locked double door, so the level's scripts carry on.
+  The charge, console and lock don't change their look yet, and you can't
+  do these jobs yourself yet (only the squad). The
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
   are the game's; how long the work takes is our guess. Traps, mines and
@@ -214,8 +227,10 @@ copy of the game.
   4, grenades 5, never more than you can carry. A full player leaves the
   box lying. Taken boxes vanish and stay gone after a save and load, except
   geo_01a's grenade crate by the start, which comes back as in the
-  original. Boxes no longer block you like walls. No pickup sound or
-  "picked up" message yet.
+  original. Boxes no longer block you like walls. Taking one plays the
+  game's own pickup sound and shows what you took ("DC-17m Blaster Clips",
+  "Thermal Detonators") in the original font above the middle of the
+  screen for 3 seconds, fading out (not tested on Windows yet).
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,

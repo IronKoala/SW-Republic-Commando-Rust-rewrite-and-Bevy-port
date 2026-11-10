@@ -113,6 +113,8 @@ fn main() {
     let mut arrivals: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut portals: Vec<(String, String, String)> = Vec::new();
     let (mut maps, mut failed, mut scripts, mut actions, mut unreadable) = (0, 0, 0, 0, 0);
+    let (mut anchor_total, mut anchor_unblocks, mut anchor_doors, mut anchor_doors_found) =
+        (0, 0, 0, 0);
     let (mut dest_found, mut dest_missing) = (0, 0);
     for name in &names {
         maps += 1;
@@ -164,14 +166,20 @@ fn main() {
             log.line(format!("   destinations not in the map: {missing:?}"));
         }
         // Triggers with their class defaults, as the movers part reads them.
-        let (triggers, tags) = rc_level::map_collision::load(&path, &data, 84.0)
+        let (triggers, tags, mover_names) = rc_level::map_collision::load(&path, &data, 84.0)
             .map(|l| {
                 let tags = l
                     .arrivals
                     .iter()
                     .map(|a| a.0.to_ascii_lowercase())
                     .collect();
-                (l.movers.triggers, tags)
+                let names: Vec<String> = l
+                    .movers
+                    .movers
+                    .iter()
+                    .map(|m| m.place.name.clone())
+                    .collect();
+                (l.movers.triggers, tags, names)
             })
             .unwrap_or_default();
         arrivals.insert(name.to_ascii_lowercase(), tags);
@@ -197,6 +205,66 @@ fn main() {
         for f in &map.failures {
             log.line(format!("   unreadable: {f}"));
         }
+        // Squad marker anchors: what each job sends, and whether the doors
+        // a breach or slice opens are doors the game moves.
+        let anchors = rc_scripts::markers::read_anchors(&map);
+        let waited: Vec<String> = map
+            .scripts()
+            .flat_map(|s| s.actions.iter())
+            .filter(|a| a.class.eq_ignore_ascii_case("ACTION_WaitForEvent"))
+            .filter_map(|a| a.text("ExternalEvent").map(|e| e.to_ascii_lowercase()))
+            .collect();
+        let mut unblocks = 0;
+        for a in &anchors {
+            let doors: Vec<String> = a
+                .doors
+                .iter()
+                .map(|d| {
+                    let found = mover_names.iter().any(|m| m.eq_ignore_ascii_case(d));
+                    anchor_doors += 1;
+                    if found {
+                        anchor_doors_found += 1;
+                        d.clone()
+                    } else {
+                        format!("{d} (NOT A DOOR THE GAME MOVES)")
+                    }
+                })
+                .collect();
+            let sends: Vec<&String> = a.started.iter().chain(&a.armed).chain(&a.done).collect();
+            unblocks += sends
+                .iter()
+                .filter(|e| waited.contains(&e.to_ascii_lowercase()))
+                .count();
+            log.line(format!(
+                "   marker anchor {} ({}, {}): started {:?}, armed {:?}, done {:?}{}{}",
+                a.name,
+                a.class,
+                a.what(),
+                a.started,
+                a.armed,
+                a.done,
+                a.destroys
+                    .as_ref()
+                    .map(|(p, e)| format!(
+                        ", blows away {p}{}",
+                        if e.is_some() { "" } else { " (NOT IN THE MAP)" }
+                    ))
+                    .unwrap_or_default(),
+                if doors.is_empty() {
+                    String::new()
+                } else {
+                    format!(", opens {doors:?}")
+                }
+            ));
+        }
+        if !anchors.is_empty() {
+            log.line(format!(
+                "   {} marker anchors; {unblocks} of their events are waited for by scripts",
+                anchors.len()
+            ));
+        }
+        anchor_total += anchors.len();
+        anchor_unblocks += unblocks;
         // The sounds the scripts play: where each one lives, and whether
         // that package really has it.
         let mut sound_names: Vec<String> = Vec::new();
@@ -506,6 +574,9 @@ fn main() {
     }
     let ends: Vec<&String> = have.iter().filter(|n| !exits.contains_key(*n)).collect();
     log.line(format!("== maps with no exit: {ends:?}"));
+    log.line(format!(
+        "== squad marker anchors: {anchor_total}; {anchor_unblocks} of their events are waited for by scripts; {anchor_doors_found} of {anchor_doors} doors they open are doors the game moves"
+    ));
     println!("{missing} exits lead to a map that isn't there");
     let line = format!(
         "{maps} maps, {failed} unreadable; {scripts} scripts with {actions} actions; {} action kinds; {unreadable} actors or actions unreadable; {sounds_found} of {sounds_total} script sounds found; {dest_found} places characters are sent to found, {dest_missing} not found",

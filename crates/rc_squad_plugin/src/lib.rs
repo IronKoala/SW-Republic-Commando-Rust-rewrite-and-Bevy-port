@@ -35,6 +35,7 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
+mod ammo;
 pub mod look;
 pub mod save;
 pub mod voice;
@@ -48,7 +49,8 @@ use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
-    LevelCollision, MovingFloors, Player, PlayerCamera, SquadMember, SquadReadout, SquadStatus,
+    LevelCollision, MarkerJob, MarkerJobStep, MovingFloors, Player, PlayerCamera, SquadMember,
+    SquadReadout, SquadStatus,
 };
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
@@ -342,6 +344,7 @@ impl Plugin for SquadPlugin {
         app.add_message::<SquadOrder>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<SquadJobDone>()
+            .add_message::<MarkerJob>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadOptions>()
@@ -371,7 +374,9 @@ impl Plugin for SquadPlugin {
                     ride_movers,
                     take_orders,
                     gather_threats,
+                    ammo::gather_boxes,
                     run_squad,
+                    ammo::take_boxes,
                     carry_out_jobs,
                     voice::load_voices,
                     voice::speak,
@@ -702,7 +707,7 @@ fn take_orders(
     collision: Option<Res<LevelCollision>>,
     options: Option<Res<SquadOptions>>,
     mut heard: ResMut<voice::SquadHeard>,
-    log: Option<Res<GameLog>>,
+    (log, use_claimed): (Option<Res<GameLog>>, Option<Res<rc_game_core::UseClaimed>>),
 ) {
     let (Some(squad), Ok(pt)) = (state.squad.as_mut(), player.single()) else {
         orders.clear();
@@ -753,9 +758,15 @@ fn take_orders(
         }
         // Aimed orders: a marker under the aim takes priority for the
         // context order (and for Use); otherwise the spot aimed at.
-        let context = a.just_pressed(Action::SquadCommand);
+        let mut context = a.just_pressed(Action::SquadCommand);
         let secure = a.just_pressed(Action::SquadSecurePosition);
-        let use_key = a.just_pressed(Action::Use);
+        let mut use_key = a.just_pressed(Action::Use);
+        // At a switched-on bacta dispenser the shared key uses it.
+        if (context || use_key) && use_claimed.is_some_and(|u| u.0) {
+            log_line(&log, "context order left alone: the player is using something");
+            context = false;
+            use_key = false;
+        }
         if context || secure || use_key {
             match aimed() {
                 None => log_line(&log, "aimed order ignored: no player camera"),
@@ -882,6 +893,7 @@ fn run_squad(
     mut fire: MessageWriter<FireShot>,
     mut jobs: ResMut<SquadJobQueue>,
     library: Option<Res<WeaponLibrary>>,
+    mut marker_jobs: MessageWriter<MarkerJob>,
     mut commands: Commands,
     mut heard: ResMut<voice::SquadHeard>,
     log: Option<Res<GameLog>>,
@@ -962,6 +974,26 @@ fn run_squad(
                 }
             }
             SquadEvent::HeldFire { .. } => log_line(&log, format!("t={:.2} {e}", squad.time)),
+            // Tell the level how a marker job is going (its anchor's
+            // "underway" and "armed" events). Done comes with the result.
+            SquadEvent::MarkerStarted { member, marker }
+            | SquadEvent::Posted { member, marker, .. }
+            | SquadEvent::FuseLit { member, marker, .. } => {
+                let step = if matches!(e, SquadEvent::FuseLit { .. }) {
+                    MarkerJobStep::Armed
+                } else {
+                    MarkerJobStep::Started
+                };
+                if let Some((spot, _)) = squad.markers.iter().find(|(s, _)| &s.name == marker) {
+                    if !spot.anchor.is_empty() {
+                        marker_jobs.write(MarkerJob {
+                            anchor: spot.anchor.clone(),
+                            step,
+                            by: member.clone(),
+                        });
+                    }
+                }
+            }
             SquadEvent::JobResult { .. } | SquadEvent::Blast { .. } => {
                 log_line(&log, format!("t={:.2} {e}", squad.time));
                 jobs.0.push(e.clone());
@@ -1050,6 +1082,7 @@ fn carry_out_jobs(
     bodies: Query<(Entity, &Transform, &Hittable), Without<Dead>>,
     mut damage: MessageWriter<Damage>,
     mut done: MessageWriter<SquadJobDone>,
+    mut marker_jobs: MessageWriter<MarkerJob>,
     log: Option<Res<GameLog>>,
 ) {
     for e in jobs.0.drain(..) {
@@ -1080,6 +1113,11 @@ fn carry_out_jobs(
                         &log,
                         format!("{job} done: sets off {anchor_class} {anchor} (SquadJobDone)"),
                     );
+                    marker_jobs.write(MarkerJob {
+                        anchor: anchor.clone(),
+                        step: MarkerJobStep::Done,
+                        by: member.clone(),
+                    });
                     done.write(SquadJobDone {
                         job,
                         marker,
