@@ -518,7 +518,8 @@ copy of the game.
   level sends now ends the level, as in the original. Not done: their
   missiles don't home in, they don't leap onto walls and ceilings, and the
   guard that is only meant to be glimpsed by the tower can't be hurt and
-  stays (the level's "seen it" trigger isn't built yet). Settings:
+  stays until the level's "seen it" trigger is in (draft PR #93), which
+  makes it leave as in the original. Settings:
   `data/enemies/grievous_guard.toml`, `data/weapons/grievous_missile_rack.toml`
   and `data/grenades/grievous_missile.toml`.
 
