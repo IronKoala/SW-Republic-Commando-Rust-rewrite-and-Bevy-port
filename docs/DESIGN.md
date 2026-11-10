@@ -2831,10 +2831,10 @@ display. The player's kinds and their order are `grenades` in
   `CTDamageMelee` (times its table: battle droids take x3). The weapon in
   hand's `[melee]` section wins; `player.toml`'s is the fallback. Walls
   block it.
-- Pickups (`pickup.rs`): a `WeaponPickup` on the ground is collected by
-  walking within 80 uu of it (our choice). A new weapon joins the cycle;
-  one already carried gets the ammo. Enemies drop the weapon file named by
-  `combat.drops` in their settings file.
+- Pickups (`pickup.rs`): see "Weapons lying in the levels" below. Enemies
+  drop the weapon file named by `combat.drops` in their settings file.
+- The ACP array gun uses `shot.pellets` (8) like the Trandoshan shotgun:
+  see "Shotguns" above.
 
 ### Ammo and grenade boxes (`rc_level::pickups`, `rc_combat/src/ammo_box.rs`)
 
@@ -2885,8 +2885,7 @@ amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
   them to come back. Their model is hidden.
 
 The `[pickups]` section of a save file lists the boxes taken, by name.
-`AmmoBoxTaken` is sent for each box taken. Not done yet: weapons lying in the maps
-(`DC17mSniperWeaponPickup` and the like, 40 across the campaign).
+`AmmoBoxTaken` is sent for each box taken.
 
 Squad mates don't take boxes, on purpose: in the original only the player
 can (`bCanPickupInventory`), and anyone else whose weapon runs dry gets a
@@ -2930,13 +2929,73 @@ long it stays and fades is `[pickup_message]` there. The placeholder HUD
 adds it to its message list instead. The log says `pickups: played sound
 GEN_Sound.GenericWeaponPickup` and `original hud` redraws as it fades.
 
+### Weapons lying in the levels (`rc_level::pickups`, `rc_combat/src/pickup.rs`)
+
+The campaign maps place 40 weapons: 14 bowcasters, 9 ACP repeaters
+(`SMG`), 6 rocket launchers, 3 ACP array guns (`Shotgun`), 3 concussion
+rifles, 2 anti-armour and 1 sniper attachment, 1 DC-17m, 1 Elite Beam
+(geo_03d) and 1 LS-150 heavy repeater (`TrandoshanRifleMP`, ras_04b). Each
+is a `CTPickup` whose `InventoryType` is a weapon class. As for the boxes,
+the map stores only the place: the weapon, size (`CollisionRadius`,
+`CollisionHeight`), model and `PickupMessage` come from the pickup class,
+and the shots it holds from the weapon's `PickupAmmoCount` with its
+"...Defaults" class on top (24 for the bowcaster, 160 for the repeater).
+
+**Reading:** `rc_level::pickups::read_weapons` (`PlacedWeapon`).
+`map_collision::load` drops them onto the ground like the boxes; the level
+viewer draws each on its own (`MoverPart`), so it can be hidden.
+`rc_level_plugin` hands them over as
+`rc_game_core::pickups::LevelWeaponPickups`. A weapon class named without a
+package (`Bowcaster` in `CTInventory`) is looked up in the pickup class's
+own package.
+
+**Taking them** (`pickup.rs`): combat makes a `WeaponPickup` entity for
+each one `data/pickups/weapon_pickups.toml` knows (the original's weapon
+class to this port's weapon file). The rules, from the game's `Pickup`,
+`Weapon`, `PlayerController` and `EliteBeamPickup` scripts:
+
+- Touching a weapon you carry takes its ammo when touching starts, up to
+  the most you carry; full, it's left lying. The DC-15s (it recharges)
+  never takes ammo.
+- A weapon you don't carry needs Use while touching it. Meanwhile the
+  display shows the game's "PRESS @ TO PICKUP" (the prompt file's text,
+  `@` replaced by the Use button) and the weapon's name.
+- Weapons in `[carry] one_at_a_time` (the game's secondary slot,
+  `InventoryGroup` 5: everything taken from the enemy) are carried one at
+  a time. Taking another throws the one carried down in front of you with
+  the shots it has left (a dropped `WeaponPickup`).
+- `swap_when_empty` weapons (the Elite Beam) never give ammo; Use swaps one
+  in only once yours is empty.
+- A new weapon goes into your hands. Taking it or its ammo sends
+  `PickedUp` (see "Pickup sound and message" above) with its name
+  (`PickupMessage`) and its own `PickupSound`: `GEN_Sound.GenericWeaponPickup`
+  for the bowcaster, `GEN_Sound.int_GEN_wepPickup_01` for the rest. A
+  dropped weapon uses `[sound]` in `weapon_pickups.toml`.
+
+Weapons an enemy drops, and ones you throw down, follow the same rules,
+with the game's `CTPickup` width (84) and a half-height of 15 (our
+choice). `WeaponTaken` is sent for each. The `[pickups]` section of a save
+lists the map's weapons taken (`weapons_taken`); weapons on the ground
+that the map didn't place are not saved.
+
+The new weapon files (`bowcaster`, `acp_array_gun`, `concussion_rifle`,
+`rocket_launcher`, `elite_beam`, `heavy_repeater_mp`) use the game's
+numbers. Not built: the bowcaster's charged shot, rocket homing, the speed
+penalty of heavy weapons, and the concussion rifle's instant hit (it is a
+very fast round that blasts where it lands, `grenades/concussion_rifle_blast.toml`).
+The sound package names are guesses from the sound names (`wep_GEN_` in
+`gen_sound`, `wep_YYY_` in `yyy_sound`).
+
 ### Modding
 
 Every weapon is one file in `data/weapons`. A mod folder's file with the
 same name replaces it, and a new file is a new weapon. The player's health,
 shield and starting weapons are in `data/combat/player.toml`. What each
 ammo box fills, and its amount if a mod wants another, is in
-`data/pickups/ammo_boxes.toml`. Where and how long the pickup message
+`data/pickups/ammo_boxes.toml`; which weapon file each weapon lying in the
+maps is, which weapons are carried one at a time, the pickup prompt and
+the sound of taking a dropped weapon are in
+`data/pickups/weapon_pickups.toml`. Where and how long the pickup message
 shows is in `data/ui/hud.toml` (the `pickup` element and
 `[pickup_message]`); any element can fade with `fade = "pickup"`.
 
@@ -3677,12 +3736,66 @@ lets the player go. Without it nothing sent `StartBriefing` and the player
 was held for good.
 
 **Not done.** Characters brought in by `PawnFactory`s during a cutscene
-(the prologue's walking young clones), riding vehicles, hologram
-materials (`HsHologram`, drawn plain grey), lighting by zone (a steady
+(the prologue's walking young clones), riding vehicles, lighting by zone (a steady
 `ambient` share of their own colour, as the squad), damage and death (the
 cast can't be hurt), and saving their places (the cutscene maps have no
 checkpoints). In missions, the placed troopers, walkers and the scripted
 spider droid now stand and move as their scripts say but don't fight.
+
+## Holograms, tank liquid and props with no stored light
+
+**Holograms (`HsHologram`).** Republic Commando's own hologram material
+names a `DiffuseTexture` and a `HologramColor`. The game draws it with
+its `DynamicHologram` hardware shader, whose assembly text is stored in
+`GameData/Textures/hardwareshaders.utx` (read to learn what it does,
+not copied): the base picture's brightness x a glow by how squarely the
+surface faces the eye x a scrolling noise picture x a flicker x the
+colour. We do the first and last parts: `rc_image::hologram` turns the
+picture into its brightness in the hologram colour, and it is drawn
+unlit, added to what is behind it, from both sides. Used by the level's
+static meshes (`rc_level_viewer::materials`, `Picture::hologram`) and by
+models (`rc_model`, `Skin::hologram`; `rc_cast` draws them): the
+prologue's hologram rifles (`Holo_DC17m`) and advisor (`Holo_Advisor`, a
+clone trooper with a hologram skin). Without a picture (`Holo_Blank`) it
+is plain glow. The default colour (Engine.u class defaults) is a light
+blue. Not done: the facing glow, noise and flicker, and the shader's
+swelling along the surface.
+
+**Colour settings are stored blue first.** A material's `Color` setting
+(`HologramColor`, `DiffuseTint`) is 4 bytes in the order blue, green,
+red, alpha (`rc_image::unreal_color`). Read the other way the hologram
+default would be orange and the "red team" holograms blue.
+
+**Blended pictures.** A `FinalBlend` with `FrameBufferBlending` 2
+(`FB_AlphaBlend`) now blends by its alpha and is seen from both sides
+(`Picture::blend`), instead of being cut into solid and see-through
+parts. The briefing holograms' grids and text use it.
+
+**Tinted falloff (`HsFalloff`).** Light shafts and the prologue's tank
+liquid multiply their picture by `DiffuseTint` and `GradientTint`
+(white, no change, by default). The game's falloff picture, which fades
+the edges by viewing angle, isn't used yet.
+
+**Props with no stored light.** The map stores light only for props that
+stay put (their `StaticMeshInstance`). Props a script moves or shows
+later, like the clone babies in the prologue's tanks (`bStatic` off),
+have none, and were drawn at full brightness: flat shapes with no
+shading. Unreal lights such props from the lights around them as it
+draws them, so `scene::unbaked_prop_light` does that once, when the
+level loads: zone ambient (as other props) plus each light that doesn't
+move: colour x brightness x facing x a straight fade to nothing at the
+light's radius, x 1.6 for point and spot lights and x 0.8 for suns. Not
+done: shadows, and lighting them again when a script moves them.
+
+How the numbers were found: for the props that do have stored light,
+work out the light this way too and compare corner by corner. On pro
+(lit by lamps) the straight fade lit about as many corners as the
+stored light (58,894 against 57,057) and was 1.58 times too dim with
+little spread (middle half 1.46-1.61); a squared fade or a shorter reach
+lit far too few corners. On geo_01briefing (lit by a sun) ours was 1.23
+times too bright (0.80-0.81), which fits the terrain, lit the same way,
+being 20% brighter than the props. geo_01a's canyon is mostly shadow,
+which this doesn't do, so it wasn't used.
 
 ## The visor: tactical and low light modes (`rc_visor`)
 

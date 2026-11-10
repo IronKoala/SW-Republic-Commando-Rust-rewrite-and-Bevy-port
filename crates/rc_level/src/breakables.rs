@@ -188,6 +188,7 @@ impl Breakable {
             static_mesh: 0,
             skins: Vec::new(),
             hidden: false,
+            unlit: false,
             static_mesh_instance: 0,
         }
         .transform_point(v)
