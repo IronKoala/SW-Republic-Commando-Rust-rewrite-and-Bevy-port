@@ -591,6 +591,13 @@ copy of the game.
   near them. A prop that breaks sends its event to the level scripts (53
   on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
   go on. Broken props are kept in save files.
+- **Particle effects (since 2026-11-10, tested in the cloud only, not on
+  Windows or by playing).** Explosions now show the game's own fireball,
+  smoke, sparks and flying debris, read from its effect classes (all 575
+  read), with the explosion sounds. Where the map gives one, a broken
+  barrel's model is left behind for a few seconds (geo_03a has them;
+  geo_01b's map says its barrels leave none). Settings in
+  `data/effects/effects.toml`.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to
@@ -616,9 +623,11 @@ copy of the game.
   explosion or broken pieces yet). The last level's ending also needs the
   rockets that hit the ship, which aren't done.
 
-- Breakable props just disappear when they break: their broken model,
-  effect and sound aren't shown yet, the burning or electric after-effect
-  some barrels leave isn't done, and loose props aren't pushed by blasts.
+- Breakable props: the damaged step's model isn't swapped in, the
+  burning or electric after-effect some barrels leave isn't done, and
+  loose props aren't pushed by blasts. Effects aren't drawn yet for shots,
+  grenades or anything else besides breaking props, beam and trail
+  effects aren't drawn, and explosion sounds aren't placed in 3D yet.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:

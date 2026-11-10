@@ -99,6 +99,8 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<ChangeLevel>()
+            .add_message::<rc_effects_plugin::SpawnEffect>()
+            .add_message::<rc_effects_plugin::PreloadEffect>()
             .add_message::<TurretOrder>()
             .add_message::<rc_game_core::MarkerJob>()
             .init_resource::<rc_game_core::UseClaimed>()
@@ -117,6 +119,7 @@ impl Plugin for ScriptsPlugin {
                     breakables::explode,
                     sight::look,
                     run,
+                    breakables::show,
                     characters::cast,
                     sounds::play,
                     hide_parts,
@@ -393,6 +396,7 @@ fn build(
     mut gate: ResMut<LoadingGate>,
     paths: Res<GamePaths>,
     audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
+    mut preload: MessageWriter<rc_effects_plugin::PreloadEffect>,
     log: Res<GameLog>,
 ) {
     let (Some(loaded), Some(movers)) = (loaded, movers) else {
@@ -403,6 +407,8 @@ fn build(
     // Props weapons can break get the game's full damage rules.
     let breakable = breakable.map(|b| b.0.clone()).unwrap_or_default();
     director.add_breakables(&breakable);
+    // Their explosions and sounds are read now, not at the first bang.
+    breakables::preload(&breakable, &mut preload);
     // Characters really walk and animate in the game: scripts wait for them.
     director.game_runs_characters = true;
     let places = characters::Places::new(places.clone());
@@ -756,6 +762,7 @@ fn run(
                 // Explosions go off 0.1 to 0.2 s later, as in the game.
                 let delay = 0.1 + 0.1 * ((export as f32 * 0.618).fract());
                 let explodes = script.breaking.broke(export, now, delay);
+                script.breaking.stepped.push((export, true));
                 let sound = script
                     .breaking
                     .get(export)
@@ -763,9 +770,9 @@ fn run(
                 log.line(format!(
                     "{PART}: t={now:.2} prop {name} ({tag}) destroyed: no longer solid or drawn{}{}{}{}",
                     if explodes { "; explodes in a moment" } else { "" },
-                    mesh.map(|m| format!("; should become {m} (not drawn yet)")).unwrap_or_default(),
-                    effect.map(|m| format!("; effect {m} (not shown yet)")).unwrap_or_default(),
-                    sound.map(|m| format!("; sound {m} (not played yet)")).unwrap_or_default()
+                    mesh.map(|m| format!("; becomes {m}")).unwrap_or_default(),
+                    effect.map(|m| format!("; effect {m}")).unwrap_or_default(),
+                    sound.map(|m| format!("; sound {m}")).unwrap_or_default()
                 ));
             }
             Effect::PropDamaged {
@@ -774,6 +781,7 @@ fn run(
                 tag,
                 removed,
             } => {
+                script.breaking.stepped.push((export, false));
                 if removed {
                     if let Some(p) = &parts {
                         p.set_solid_export(export, false);
