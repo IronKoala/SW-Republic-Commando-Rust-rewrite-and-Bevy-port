@@ -463,7 +463,41 @@ second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
   `e5_blaster_pickup.toml` uses plain `CTDamageEnergy` instead.
 - Which class names the maps' spawners actually use for these enemies
   (log line `spawners no enemy file claims`).
-- The other Geonosians (`GeonosianDrone`, `GeonosianElite` with its beam).
+- `GeonosianDrone` (not read yet). `GeonosianElite`: see below.
+
+## Geonosian elite and the Elite Beam (read 2026-11-09)
+
+Read only from the user's install with `rc_probe --class` (ctcharacters.u,
+ctinventory.u, ctgame.u, Properties/properties.u, System/ctaudio.u).
+
+- `GeonosianElite`: Mesh `GeonosianElite` (geonosian.ukx, set
+  `GeonosianEliteSet`, 39 sequences), CollisionRadius 70, CollisionHeight
+  125, CrouchRadius 50, CrouchHeight 75, BaseEyeHeight 60, GroundSpeed 200,
+  WalkSpeedRatio 1, bCanRun false, **Physics 4 (flying)**, bCanFly,
+  bCanDodge, bCanPerch, DodgeDistance 500, AudioTable `EliteAudio`,
+  ControllerClass `GeonosianEliteBot`.
+- `GeonosianEliteDefaults`: Health and MaxHealth 1000, Accuracy 0.7,
+  SightRadius 5000, AirSpeed 1200, AccelRate 15000, MaxAimYaw 90,
+  MyDamageVariance `DV_GeonoshansEliteDamage`, RequiredEquipment
+  `Properties.EliteBeamEnemy`, BestGrenadeAgainst SonicDetonator.
+- `GeonosianEliteBot`: RequiredStates StateIdle, StateInvestigate,
+  StateEliteAttack (a `StateFlyingAttack`, PostFirePauseTime 1);
+  Defaults MinDodgeTime 2.5.
+- `EliteBeam` (a `LaserWeapon`): ChargeUpTime 2, BurstCount -1 (fires
+  without a break), FireMode 2, ShotDelay 0.01, sounds
+  `wep_GEO_elBeamCharge_01`, `wep_GEO_eliteBeam_st_01`, `_lp_01`, `_nd_01`.
+  `EliteBeamEnemy`: ReloadCount and PickupAmmoCount 450. `EliteBeamDefaults`:
+  AimError 0.1, MeleeRange 175, MeleeDamage 220.
+- Ammo `EliteBeamAmmoEnemy`: Damage 18, MyDamageType
+  `CTDamageEnergyBeamEnemy` (player table x0.15), instant hit, Range 10000.
+- `EliteAudio` lines: GEL_SpottedEnemy, GEL_HurtSmallArms, GEL_HurtFire,
+  GEL_DieSmallArms, GEL_DieLargeArms, GEL_DieExplosion, GEL_DieFire,
+  GEL_DieFall, GEL_DieQuiet.
+- Not known: how the original spreads the beam's damage over time (it fires
+  once a frame); we use one hit every 0.1 s.
+- Spawners on the maps (`rc_enemy_spawners`): 19 `GeonosianElite` on
+  geo_03c (3), geo_04a (2), geo_04b (1), geo_04c (2), geo_05a (8),
+  geo_05b (3).
 
 ## Grenade explosion sounds and enemy voices (read 2026-10-30)
 

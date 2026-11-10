@@ -489,6 +489,8 @@ fn land(
         target,
         on_level: hit.is_some() && target.is_none(),
         distance: (point - start).length(),
+        damage: base,
+        damage_type: p.damage_type.clone(),
     });
 }
 
@@ -533,6 +535,8 @@ pub(crate) fn fly_bolts(
                 target: h.entity,
                 on_level: h.entity.is_none(),
                 distance: (point - b.start).length(),
+                damage: b.damage,
+                damage_type: b.damage_type.clone(),
             });
             commands.entity(e).despawn();
         } else if b.bolt.expired() {
@@ -543,6 +547,8 @@ pub(crate) fn fly_bolts(
                 target: None,
                 on_level: false,
                 distance: (to - b.start).length(),
+                damage: 0.0,
+                damage_type: b.damage_type.clone(),
             });
             commands.entity(e).despawn();
         } else {

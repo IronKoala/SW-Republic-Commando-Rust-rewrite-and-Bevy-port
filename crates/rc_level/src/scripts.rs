@@ -209,7 +209,7 @@ impl MapScripts {
     }
 }
 
-fn to_val(pkg: &Package, p: &Property) -> Val {
+pub(crate) fn to_val(pkg: &Package, p: &Property) -> Val {
     match &p.value {
         Value::Bool(b) => Val::Bool(*b),
         Value::Int(i) => Val::Int(*i),

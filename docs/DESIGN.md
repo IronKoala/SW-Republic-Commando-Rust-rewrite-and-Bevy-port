@@ -1593,6 +1593,53 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
 
+### Breakable props (`rc_level::breakables`, `rc_scripts_plugin/src/breakables.rs`)
+
+Explosive barrels, geo_05b's fuel dispensers and their clamps, holo
+machines, consoles, rock cover, drone eggs and wall panels are all `Prop`s
+(or `KarmaProp`, `StaticProp`, `ExplosiveBarrel` ...) with health. The
+values live in the map, or as the class's defaults in the script packages
+(`Properties/StaticPropProperties.u`, `Properties/MarkerProperties.u`,
+`CTMarkers.u`); `rc_level::breakables::read` takes the map's value first
+and then walks the class and its parents (`class_look`). The Geonosis maps
+have 838 of them; 53 send an event the level scripts wait for.
+
+How a prop breaks (our reading of the game, in our words):
+
+- It starts with `Health`. With none (0 or less) nothing can hurt it; only
+  a script can remove it.
+- Damage counts after the prop's damage table, as for characters.
+- `DamagedRatio` above 0: when health falls to that share of the start,
+  it goes to its damaged step (`DamagedState`): sends that step's event,
+  and if the step has no model of its own it simply disappears, *without*
+  its broken event (geo_04d's rock cover works this way). A damaged step
+  with a time limit (`StateLifeSpan`) breaks by itself when it runs out.
+- At no health it breaks (`DestroyedState`): it sends its own `Event`, or
+  if it has none `DestroyedState.Event`. Broken props take no more damage.
+- If it has an explosion (`ExplosionDamage` and `ExplosionRadius`) it goes
+  off 0.1 to 0.2 s later, hurting everything it can see within the radius,
+  falling off with distance (the same rule as grenades).
+
+Who does what: `rc_level::map_collision` keeps every breakable prop's
+triangles apart (as a `LevelParts` part), and the level viewer draws each
+as its own `MoverPart`, so it can go when it breaks. Some models have
+collision switched off on every part (the Geonosian explosive barrels):
+the game blocks shots with the model's simple collision shape, which we
+don't read yet, so a breakable prop like that gets its drawn triangles. `rc_scripts::Director`
+keeps health and steps (`add_breakables`, `hurt_prop`) and sends the
+events, so a script waiting for `Clamp00` carries on. `rc_scripts_plugin`
+turns weapons into damage: a `ShotLanded` on the level hurts the prop whose
+box it landed on (`ShotLanded` now carries the shot's damage and type), a
+grenade `Blast` hurts the props around it, and a prop's own explosion sends
+`rc_combat::Explode` (characters) and hurts the props around it (so barrels
+set each other off). Broken and damaged state are saved with the scripts.
+
+Not done yet: the broken or damaged model (props just disappear), the
+effect and sound, the burning or electric after-effect some barrels leave,
+the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
+through (geo_04c's wall components) aren't in the collision, so shots pass
+through them.
+
 ### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
 
 A `ScriptedSequence` belongs to the characters that run it: a placed pawn
@@ -2428,6 +2475,14 @@ left to other parts and logged. `combat.uses_cover = false` makes an enemy
 walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
+
+To see which file claims each map's spawners, and which classes no file
+claims yet, run `rc_enemy_spawners` (an example in `rc_enemies`, needs the
+game folder in `RC_GAME_DIR`; writes `logs/enemy_spawners.log`). A new
+enemy type that fights like the existing ones (walks, shoots, hits up
+close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
+with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
+beam weapon is an `instant` shot fired as a burst of quick hits.
 
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
@@ -3461,9 +3516,60 @@ compiled renderer (`UFrameFX::GetTacticalSkelMeshShader`), which we can't
 read, so the glow's shape (`[glow]` in the data file: strength scale, edge
 sharpness, fill) is ours, to be compared with the real game. Also not done:
 the faint film grain the original's tactical mode adds over the whole
-picture (`VisionShaderEnhance`), its `EnhancedVisionFade` flag on clones
-(meaning unknown), and the low light mode's night-vision picture
-(`VisionNight`); low light is only the lamp for now (a placeholder).
+picture (`VisionShaderEnhance`) and its `EnhancedVisionFade` flag on clones
+(meaning unknown).
+
+**Low light mode (night vision).** The original's low light view is the
+vision mode object `FrameFX.VisionModes.VisionNight` (class
+`VisionModeSniper`, in `Textures/FrameFX.utx`). Its settings, read at run
+time by `night_original.rs`: `VisionShader` = `VisionShaderNight` (a
+"hardware shader": old Direct3D shader text plus constants and pictures),
+`Noise` 30 (grain strength 30/255), `MotionBlur` 51 (keep 51/255 of the last
+picture), `OverideFog` with `DistanceFogStart` 555 and `DistanceFogEnd` 4500
+(Unreal units, black fog), `BlurPasses` 1. The `VisionMode` class default
+`FlashlightOn` is true, so the lamp stays on. The shader's settings say what
+it does: it reads a blurred copy of the picture, takes red, green and blue
+squared and added up as one brightness (so black and white, darks darker,
+lights brighter), fades in from black, multiplies by the transparency of
+its overlay picture `HUDTextures.Helmet.HUD_GlassNight` (512x512, a
+visor-shaped window: open in the middle, black outside, with notches at the
+middle of each edge) and adds the overlay's colour (a very faint blue,
+10/255), then adds film grain from `FrameFX.FBFX.FilmGrain` (128x128, grey),
+repeated 9.2 times across and 6.5 down a 4:3 screen (its vertex constant 1)
+and moved every frame. We read those pictures and numbers; the shader
+(`night_vision.wesl`) is our own, written from that description, not a copy.
+
+How ours is drawn: in low light mode a `NightVisionView` goes on the
+player's camera, and one full-screen pass runs after tone mapping (the
+original worked on the shown colours, so ours turns the colours back into
+screen values first). The plumbing follows Bevy's `FullscreenMaterial` with
+two pictures added (`night_vision.rs`). The HUD, arms and helmet frame are
+drawn by other cameras afterwards and stay sharp. A `DistanceFog` (marked
+`NightFog`) is added with the mode's fog and taken off again after. Cost:
+six texture reads per pixel, one pass, no extra pictures kept, fine for
+phones.
+
+Wide screens: the window picture is made for 4:3. Stretched across 21:9 or
+32:9 its curved edges and notches would be pulled wide. Instead
+(`rules::window_u`, the same sum in the shader) the middle 0.25 screen
+heights each side of the centre and the outer parts keep their shape, and
+the plain part between them is drawn longer. Narrower than 4:3 it is
+squeezed. The film grain gets more repeats across on wider screens so its
+specks stay square.
+
+`[low_light]` in `data/visor/tactical.toml`: `picture` (off: lamp only),
+`mode` (which vision mode object to read), `boost`, `tint` (white is the
+original), `window` (off for a full-screen picture, which VR will want),
+`window_middle`, `grain_scale`, `fog`, `fade_seconds`, and stand-in values
+used when the install can't be read (then the window is fully open and the
+grain flat).
+
+Not done: the trail (the original blends 80% of the new picture over 20%
+of the last one, `MotionBlur` 51); that needs the last picture kept, a
+second texture per camera. The original's `BloomOverideValue` 100 isn't
+used (its `BloomOveride` switch isn't set). The fade out when leaving the
+mode (`FadeOutTime` 0.2) isn't done; the picture goes off at once. Not
+compared with the real game, which doesn't run on the user's PC right now.
 
 **Plugging in.** `rc_game/src/visor.rs` copies the settings into
 `VisorSettings` and puts `TacticalGlow` on squad mates (by name) and weapon

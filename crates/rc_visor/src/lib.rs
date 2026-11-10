@@ -15,9 +15,12 @@
 //! both eyes), the lamp hangs off whatever `PlayerCamera` is, and the
 //! mode's name goes to the on-screen display as a `HudMessage`.
 
+pub mod night_original;
+pub mod night_vision;
 pub mod original;
 pub mod rules;
 
+pub use night_vision::{LowLightLook, NightVisionImages, NightVisionView};
 pub use rules::{VisorChoice, VisorMode};
 
 use bevy::asset::embedded_asset;
@@ -68,6 +71,8 @@ pub struct VisorReadout {
     pub colours: usize,
     /// Times the mode changed since start.
     pub changes: u32,
+    /// The night-vision picture is on the player's view now.
+    pub night_vision: bool,
 }
 
 /// Glows in tactical mode, in the colour of the named thing.
@@ -131,6 +136,9 @@ impl Material for TacticalGlowMaterial {
 pub struct VisorLook {
     pub file: VisorFile,
     pub original: Original,
+    /// The low light mode's numbers from the install (pictures already
+    /// handed to [`NightVisionImages`]).
+    pub night: night_original::NightOriginal,
 }
 
 #[derive(Resource, Default)]
@@ -146,6 +154,7 @@ impl Plugin for VisorPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "tactical_glow.wesl");
         app.add_plugins(MaterialPlugin::<TacticalGlowMaterial>::default())
+            .add_plugins(night_vision::NightVisionPlugin)
             .init_resource::<VisorSettings>()
             .init_resource::<VisorState>()
             .init_resource::<VisorReadout>()
@@ -160,6 +169,7 @@ impl Plugin for VisorPlugin {
                     attach_shells,
                     update_glow,
                     update_headlamp,
+                    update_night_vision,
                 )
                     .chain()
                     .in_set(VisorSet)
@@ -183,6 +193,8 @@ fn load_look(
     look: Option<Res<VisorLook>>,
     paths: Option<Res<GamePaths>>,
     log: Option<Res<GameLog>>,
+    mut images: Option<ResMut<Assets<Image>>>,
+    mut night_images: Option<ResMut<NightVisionImages>>,
 ) {
     if look.is_some() {
         return;
@@ -229,10 +241,66 @@ fn load_look(
     for p in &found.problems {
         say(&log, format!("visor: {p}"));
     }
+    let mut night = night_original::NightOriginal::default();
+    if file.low_light.picture {
+        match &paths {
+            Some(p) => night = read_low_light(&file, &p.game_data()),
+            None => night.problems.push("no game folder".into()),
+        }
+        say(
+            &log,
+            format!(
+                "visor: low light from the game: window {} {}, grain {} {} x{:.3}, repeats {:?}, keeps {:?} of the last picture (not drawn yet), fog {:?}",
+                night.mask_path.as_deref().unwrap_or("-"),
+                night.mask.as_ref().map_or("missing".to_string(), |m| format!("{}x{}", m.width, m.height)),
+                night.grain_path.as_deref().unwrap_or("-"),
+                night.grain_picture.as_ref().map_or("missing".to_string(), |m| format!("{}x{}", m.width, m.height)),
+                night.grain.unwrap_or(f32::NAN),
+                night.grain_tiles,
+                night.trail,
+                night.fog
+            ),
+        );
+        for p in &night.problems {
+            say(
+                &log,
+                format!("visor: low light: {p}; using the data file's stand-in"),
+            );
+        }
+        if let (Some(images), Some(have)) = (images.as_mut(), night_images.as_mut()) {
+            use_night_pictures(&mut night, images, have);
+        }
+    }
     commands.insert_resource(VisorLook {
         file,
         original: found,
+        night,
     });
+}
+
+/// Read the low light mode's numbers and pictures from the install's
+/// `GameData` folder.
+pub fn read_low_light(
+    file: &VisorFile,
+    game_data: &std::path::Path,
+) -> night_original::NightOriginal {
+    let mut lib = rc_menus::library::Library::new(game_data);
+    night_original::read(&mut lib, &file.low_light.mode)
+}
+
+/// Hand the pictures found in the install to the night-vision pass (they
+/// are taken out of `night`).
+pub fn use_night_pictures(
+    night: &mut night_original::NightOriginal,
+    images: &mut Assets<Image>,
+    have: &mut NightVisionImages,
+) {
+    if let Some(m) = night.mask.take() {
+        have.window = images.add(night_vision::image_from(m.width, m.height, m.pixels));
+    }
+    if let Some(g) = night.grain_picture.take() {
+        have.grain = images.add(night_vision::image_from(g.width, g.height, g.pixels));
+    }
 }
 
 /// A new level or a loaded game: the visor starts in tactical mode unless
@@ -455,8 +523,8 @@ fn update_glow(
     readout.shown = if shown { n } else { 0 };
 }
 
-/// The helmet lamp: on in low light mode. PLACEHOLDER for the original's
-/// low light view, which also changes the whole picture.
+/// The helmet lamp: on in low light mode, together with the night-vision
+/// picture (`update_night_vision`).
 fn update_headlamp(
     mut commands: Commands,
     state: Res<VisorState>,
@@ -497,5 +565,120 @@ fn update_headlamp(
         for (e, _) in &lamps {
             commands.entity(e).despawn();
         }
+    }
+}
+
+/// Marks the distance fog the low light mode put on a camera, so only
+/// that one is taken off again.
+#[derive(Component)]
+struct NightFog;
+
+/// A repeatable random number from 0 to 1.
+fn random(n: u32) -> f32 {
+    let mut x = n.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x & 0xFF_FFFF) as f32 / 16_777_216.0
+}
+
+/// The night-vision picture: on the player's camera in low light mode
+/// (unless `[low_light] picture = false`), off otherwise. It fades in from
+/// black, and the grain moves 30 times a second. The mode's distance fog
+/// goes on and off with it.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn update_night_vision(
+    mut commands: Commands,
+    state: Res<VisorState>,
+    look: Option<Res<VisorLook>>,
+    time: Res<Time>,
+    cameras: Query<(Entity, Option<&NightVisionView>, Has<NightFog>), With<PlayerCamera>>,
+    mut readout: ResMut<VisorReadout>,
+    mut since: Local<f32>,
+    log: Option<Res<GameLog>>,
+) {
+    let wanted = look
+        .as_ref()
+        .filter(|l| l.file.low_light.picture && state.mode == VisorMode::LowLight);
+    let mut on = false;
+    for (e, view, has_fog) in &cameras {
+        let Some(look) = wanted else {
+            if view.is_some() {
+                commands.entity(e).remove::<NightVisionView>();
+            }
+            if has_fog {
+                commands.entity(e).remove::<(NightFog, DistanceFog)>();
+            }
+            *since = 0.0;
+            continue;
+        };
+        on = true;
+        let l = &look.file.low_light;
+        let n = &look.night;
+        *since = if view.is_some() {
+            *since + time.delta_secs()
+        } else {
+            0.0
+        };
+        let [r, g, b] = l.tint;
+        let tint = Color::srgb_u8(r, g, b).to_linear();
+        let step = (time.elapsed_secs_wrapped() * 30.0) as u32;
+        let next = NightVisionView {
+            tint: Vec4::new(tint.red, tint.green, tint.blue, 1.0),
+            boost: l.boost.max(0.0),
+            grain: n.grain.unwrap_or(l.fallback_grain) * l.grain_scale.max(0.0),
+            fade: if l.fade_seconds > 0.0 {
+                (*since / l.fade_seconds).clamp(0.0, 1.0)
+            } else {
+                1.0
+            },
+            window: if l.window { 1.0 } else { 0.0 },
+            window_middle: l.window_middle,
+            blur: 1.5,
+            grain_tiles: Vec2::from(n.grain_tiles.unwrap_or(l.fallback_grain_tiles)),
+            grain_offset: Vec2::new(random(step * 2), random(step * 2 + 1)),
+            unused: Vec2::ZERO,
+        };
+        if view != Some(&next) {
+            commands.entity(e).insert(next);
+        }
+        if l.fog && !has_fog {
+            let (start, end) = n.fog.unwrap_or((l.fallback_fog[0], l.fallback_fog[1]));
+            commands.entity(e).insert((
+                NightFog,
+                DistanceFog {
+                    color: Color::BLACK,
+                    falloff: FogFalloff::Linear {
+                        start: start / UU_PER_UNIT,
+                        end: end / UU_PER_UNIT,
+                    },
+                    ..default()
+                },
+            ));
+        }
+    }
+    if on != readout.night_vision {
+        readout.night_vision = on;
+        say(
+            &log,
+            match (on, wanted) {
+                (true, Some(look)) => {
+                    let l = &look.file.low_light;
+                    let n = &look.night;
+                    format!(
+                        "visor: night-vision picture on (window {}, grain {:.3}, boost x{:.2}, fog {:?})",
+                        if l.window { "on" } else { "off" },
+                        n.grain.unwrap_or(l.fallback_grain) * l.grain_scale,
+                        l.boost,
+                        if l.fog {
+                            Some(n.fog.unwrap_or((l.fallback_fog[0], l.fallback_fog[1])))
+                        } else {
+                            None
+                        }
+                    )
+                }
+                _ => "visor: night-vision picture off".to_string(),
+            },
+        );
     }
 }
