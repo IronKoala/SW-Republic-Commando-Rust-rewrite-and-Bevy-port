@@ -11,6 +11,17 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** Read from the install: window HUD_GlassNight 512x512, grain FilmGrain 128x128, grain strength 0.118, grain repeats 9.22 x 6.54, keeps 0.2 of the last picture, fog 555 to 4500. rc_visor 13 tests pass. visor_check: 20 passed, 0 failed with and without the game folder (low light: colour spread 5.0 against 17.6 in tactical, top left corner 0.9 of 255 behind the window).
 - **Still broken / not tested:** Not tested on Windows or by playing. Not compared with the real game (it doesn't run on the user's PC right now). The original's 20% trail of the last picture and the fade out are not done. The black-and-white sum darkens dim places, as the original's does; whether ours matches its brightness is not checked.
 - **Next:** The user tries low light in a dark place (X twice from the start of a level) and says whether it is too dark; `boost` in the data file brightens it.
+
+## 2026-11-09: The cutscene characters appear (rc_cast, rc_model, rc_game)
+
+- **Changed:** New crate `rc_cast` (`CastPlugin`, `read::find_cast`) and data file `data/cast/cast.toml`. `rc_model::ModelSpec::keep_sets`, `Model::sets`, `Model::named_clip`, `Model::local_clip`. `rc_game` adds `CastPlugin`. `docs/DESIGN.md`: new "The cast" section and crate table row.
+- **Why:** User playtest of the prologue: "no other NPC's of any kind". Characters placed in maps that weren't droids or Delta were never spawned (158 "no character" lines in the prologue's log).
+- **Tested how:** `cargo test -p rc_cast -p rc_model`; `rc_game --map pro` in the cloud with screenshots, run on through geo_01briefing to geo_01a; `rc_game --script`.
+- **Result:** pro: 54 cast members, all drawn with their models: Taun We and the second Kaminoan talking in the nursery, the young clones sitting at their desks and looking about on cue, the holograms hidden and shown on cue, troopers in the helmet room, and Sev, Fixer and Scorch in their own colours at the end. geo_01briefing: 15 (troopers, the gunship, walkers, spider droids); geo_01a: 14 (the gunship troopers, the rope, walkers). "no character" lines in a full prologue-to-geo_01a run: 38, from 192.
+- **Still broken / not tested:** Not tested on Windows. Characters brought in by `PawnFactory`s aren't spawned (the prologue's walking young clones). Hologram materials are plain grey. The cast doesn't collide, fall, fight or get hurt. Lit with a steady ambient share, not the zone's light.
+- **Next:** Characters made by `PawnFactory`s in cutscenes; the player riding the gunship in the briefings.
+
+
 ## 2026-11-09: Geonosian elites appear and fight (data/enemies, data/weapons, rc_enemies)
 
 - **Changed:** New `data/enemies/geonosian_elite.toml` (claims `GeonosianElite*`) and `data/weapons/elite_beam_enemy.toml` (the Elite Beam as an instant-hit weapon fired in one-second bursts of 10 hits). No engine code changed. New tool `rc_enemy_spawners` (example in `rc_enemies`): lists which enemy file claims each map's spawners and which classes no file claims. New test `a_geonosian_elite_burns_the_player_with_its_beam`. `docs/RESEARCH.md` gains the elite's and the beam's numbers; `docs/DESIGN.md` and README updated.

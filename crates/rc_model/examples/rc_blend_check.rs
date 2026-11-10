@@ -163,6 +163,7 @@ fn main() {
                 .map(|a| (a.0.to_string(), a.1.to_string()))
                 .collect(),
             skins: Vec::new(),
+            ..Default::default()
         };
         let model = match Model::load(&|rel| find(&game, rel), &spec) {
             Ok((m, _)) => m,
