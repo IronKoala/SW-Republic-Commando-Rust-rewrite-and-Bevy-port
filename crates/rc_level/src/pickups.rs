@@ -47,6 +47,12 @@ pub struct AmmoBox {
     pub height: f32,
     /// How far it was moved down onto the ground (`rest_on_ground`).
     pub dropped: f32,
+    /// What the game says when it is taken (`PickupMessage`, for example
+    /// "DC-17m Blaster Clips"). Empty if the class has none.
+    pub message: String,
+    /// The sound it makes when taken (`PickupSound`): its sound package
+    /// and its name in that package (`GEN_Sound`, `GenericWeaponPickup`).
+    pub sound: Option<(String, String)>,
 }
 
 /// The class's look and values with its "...Defaults" class on top, if
@@ -138,6 +144,25 @@ pub fn read_box(
         Some(Value::Float(f)) => *f,
         _ => float(&look, "CollisionHeight").unwrap_or(22.0),
     };
+    // Map first (a level designer may change it), then the classes.
+    let message = rc_package::properties::find(map, &props, "PickupMessage")
+        .and_then(rc_package::class::string_value)
+        .or_else(|| {
+            look.find("PickupMessage", 0)
+                .and_then(|(_, p)| rc_package::class::string_value(p))
+        })
+        .unwrap_or_default();
+    let sound = match in_map("PickupSound") {
+        Some(Value::Object(o)) if *o != 0 => Some(object_path(map, *o)),
+        _ => look
+            .find("PickupSound", 0)
+            .and_then(|(l, p)| match p.value {
+                Value::Object(o) if o != 0 => Some(object_path(&l.0, o)),
+                _ => None,
+            }),
+    }
+    .and_then(|path| Some((path.first()?.clone(), path.last()?.clone())))
+    .filter(|(pkg, name)| pkg != name);
     Some(AmmoBox {
         export: actor,
         name: place.name.clone(),
@@ -149,6 +174,8 @@ pub fn read_box(
         radius,
         height,
         dropped: 0.0,
+        message,
+        sound,
     })
 }
 
@@ -236,6 +263,8 @@ mod tests {
             radius: 40.0,
             height: 15.0,
             dropped: 0.0,
+            message: String::new(),
+            sound: None,
         }
     }
 

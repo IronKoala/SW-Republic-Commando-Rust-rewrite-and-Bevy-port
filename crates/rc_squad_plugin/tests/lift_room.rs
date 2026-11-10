@@ -212,7 +212,10 @@ fn settle_on_the_lift(app: &mut App) {
         let f = m.pawn.feet();
         if f.x.abs() > HALF - 60.0 || f.y.abs() > HALF - 60.0 || (f.z - 10.0).abs() > 2.0 {
             let spot = UVec3::new(-150.0 + 150.0 * i as f32, -200.0, 10.0);
-            println!("{} spawned at {f:?}, off the platform; moved to {spot:?}", m.settings.name);
+            println!(
+                "{} spawned at {f:?}, off the platform; moved to {spot:?}",
+                m.settings.name
+            );
             m.pawn.location = spot + UVec3::new(0.0, 0.0, m.pawn.extent().z + 0.5);
             m.pawn.velocity = UVec3::ZERO;
         }
@@ -220,8 +223,14 @@ fn settle_on_the_lift(app: &mut App) {
     run(app, 1.0);
     for (name, f) in feet(app) {
         println!("before the ride: {name} feet {f:?}");
-        assert!((f.z - 10.0).abs() < 2.0, "{name} isn't standing on the lift: {f:?}");
-        assert!(f.x.abs() < HALF && f.y.abs() < HALF, "{name} is off the lift: {f:?}");
+        assert!(
+            (f.z - 10.0).abs() < 2.0,
+            "{name} isn't standing on the lift: {f:?}"
+        );
+        assert!(
+            f.x.abs() < HALF && f.y.abs() < HALF,
+            "{name} is off the lift: {f:?}"
+        );
     }
 }
 
@@ -241,7 +250,11 @@ fn the_squad_rides_the_lift_up_with_the_player() {
     let mut lowest_during = f32::MAX;
     for _ in 0..(4.0 / DT) as usize {
         app.update();
-        let lift_top = app.world().resource::<LevelMovers>().read().movers[0].pose.pos.z + 10.0;
+        let lift_top = app.world().resource::<LevelMovers>().read().movers[0]
+            .pose
+            .pos
+            .z
+            + 10.0;
         for (name, f) in feet(&app) {
             assert!(
                 f.z > lift_top - 2.0,
@@ -262,7 +275,11 @@ fn the_squad_rides_the_lift_up_with_the_player() {
     }
     let state = app.world().resource::<SquadState>();
     for (i, r) in state.riding.iter().enumerate() {
-        assert_eq!(r.as_deref(), Some("Mover37"), "member {i} not on the lift at the top");
+        assert_eq!(
+            r.as_deref(),
+            Some("Mover37"),
+            "member {i} not on the lift at the top"
+        );
     }
     println!("lowest feet relative to the lift top during the ride: {lowest_during:.2} uu");
 }
@@ -275,10 +292,7 @@ fn without_moving_floors_the_squad_is_left_behind() {
     run(&mut app, 4.0);
     let player = app.world().resource::<Body>().0.feet();
     assert!((player.z - (10.0 + RISE)).abs() < 3.0, "player {player:?}");
-    let left = feet(&app)
-        .iter()
-        .filter(|(_, f)| f.z < RISE * 0.5)
-        .count();
+    let left = feet(&app).iter().filter(|(_, f)| f.z < RISE * 0.5).count();
     println!("without MovingFloors: {left} of 3 left at the bottom");
     assert!(left >= 1);
 }
