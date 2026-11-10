@@ -52,6 +52,7 @@ pub mod characters;
 pub mod cutscene;
 pub mod markers;
 pub mod save;
+pub mod sight;
 pub mod sounds;
 
 use bevy::prelude::*;
@@ -109,6 +110,7 @@ impl Plugin for ScriptsPlugin {
                     breakables::shots,
                     breakables::blasts,
                     breakables::explode,
+                    sight::look,
                     run,
                     characters::cast,
                     sounds::play,
@@ -207,6 +209,28 @@ pub struct LevelScript {
     pub props: breakables::PropStats,
 }
 
+impl LevelScript {
+    /// Just the director, with nothing else of a level: for tests.
+    #[cfg(test)]
+    pub(crate) fn bare(director: Director) -> Self {
+        LevelScript {
+            director,
+            dispensers: Vec::new(),
+            hidden: HashSet::new(),
+            held: Vec::new(),
+            calls: Vec::new(),
+            places: characters::Places::new(Vec::new()),
+            sounds: Vec::new(),
+            started: true,
+            scene: cutscene::Scene::default(),
+            stats: PlayStats::default(),
+            breaking: breakables::Breakables::new(&[]),
+            props: breakables::PropStats::default(),
+            anchors: Vec::new(),
+        }
+    }
+}
+
 /// What the scripts did in the game, for the log and the self-tests.
 #[derive(Debug, Clone, Default)]
 pub struct PlayStats {
@@ -240,6 +264,8 @@ pub struct PlayStats {
     pub invulnerable: Vec<String>,
     pub characters_hurt: usize,
     pub squad_orders: Vec<String>,
+    /// Line-of-sight triggers the player set off by looking, by name.
+    pub sight_seen: Vec<String>,
     /// Characters an action named that weren't found.
     pub no_character: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
@@ -384,11 +410,12 @@ fn build(
     }
     let s = &director.stats;
     log.line(format!(
-        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} counters, {} conditions, {} checkpoints, {} props ({} weapons can break), {} level exits; level start sends {:?}",
+        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} line-of-sight triggers, {} counters, {} conditions, {} checkpoints, {} props ({} weapons can break), {} level exits; level start sends {:?}",
         s.scripts,
         s.sequences,
         s.actions,
         s.triggers,
+        s.sight_triggers,
         s.counters,
         s.conditions,
         s.checkpoints,
