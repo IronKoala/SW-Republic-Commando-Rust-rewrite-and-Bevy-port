@@ -324,6 +324,7 @@ lumens_per_range_squared = 2000 # point and spot light power
 sun_lux_at_255 = 10000          # Sunlight brightness
 ambient_at_255 = 2000           # zone ambient brightness
 shadows = false
+live_light_on_props = 1         # real-time light on props and terrain (0 = off)
 ```
 
 - Positions: Bevy (x, y, z) = Unreal (x, z, y) / 50. Swapping Y and Z also
@@ -343,9 +344,18 @@ shadows = false
   its page (`ATTRIBUTE_UV_1`) and a `Lightmap` component. The material is
   lit, so real-time lights add on top. The scene-wide ambient light is off,
   because the baked light already contains each zone's ambient.
-- Props use their per-corner colours as Bevy vertex colours on an unlit
-  material, which multiplies texture and colour directly. Real-time lights
-  don't reach them yet (see below). The colours are stored red, green,
+- Props (and terrain) use their per-corner colours as Bevy vertex colours on
+  our `PropMaterial` (`prop_light.rs` and `prop_light.wesl`): Bevy's
+  standard material with a small shader of ours that draws
+  `texture x corner colour + texture x real-time lights x live_light_on_props`.
+  Bevy's own material would treat vertex colours as paint, so a lamp's light
+  would be multiplied by the dark baked colour; the shader keeps the two
+  apart. With no real-time light near, a prop is drawn exactly as the old
+  unlit material drew it (geo_01a and yyy_06a pictures identical to the
+  pixel). Sky props and `live_light_on_props = 0` still use the plain unlit
+  material. Cost: the same as any lit surface, one pass, no extra textures,
+  so fine for phones and VR. Every app that draws a level adds
+  `PropLightPlugin` (the game's `LevelPlugin` does). The colours are stored red, green,
   blue, alpha (checked against the colour of the lights each prop lists;
   they were read as blue, green, red until 2026-11-01, which drew geo_04a's
   orange canyon blue-grey).
@@ -407,8 +417,9 @@ of real-time lights remain (2 in `geo_01a`, 19 in `pro`). That suits a later
 VR version, which has to draw everything twice (once per eye) at 90 frames
 per second or more.
 
-**Known gaps.** Real-time lights don't light props yet (their baked colours
-are on an unlit material). Shadow bitmaps for the dynamic lights are read
+**Known gaps.** Real-time light on props uses the same placeholder strength
+as on walls, and whether the original lit props per corner or per pixel is
+not known (we light per pixel, which looks smoother). Shadow bitmaps for the dynamic lights are read
 past but not used. What the lightmap pages' alpha channel holds is unknown
 (it is ignored). Lightmaps are sampled with plain linear filtering.
 
@@ -479,9 +490,15 @@ stored colours are turned into linear light per corner and blended across
 the triangle exactly as flat props are, so `bump_strength = 0` draws the
 same picture as the flat props (checked, below). Only opaque, one-sided
 props use it; see-through, glowing and two-sided ones stay flat.
+Real-time lights (moving or switched lights, the helmet lamp) are added on
+top with Bevy's own `apply_pbr_lighting`, using the bump-tilted surface, so
+a lamp shows the bumps too; `BumpParams::live_light` carries
+`live_light_on_props` (0 in the sky). With no real-time light near, that
+adds nothing (yyy_06a start view identical to the pixel with it on or off).
 
 **Cost.** One extra texture read, a few dozen sums and three powers per
-pixel, no loops, no real-time lights: within what phone GPUs and VR
+pixel, no loops, plus Bevy's usual work for the few real-time lights near:
+within what phone GPUs and VR
 headsets manage. Bump maps are decoded to plain RGBA on the CPU like every
 other texture. Settings in `lighting.cfg`:
 
@@ -1493,11 +1510,48 @@ ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
 reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
 script) says one line of speech (a `*_voice` package) at a time, so a new
 line stops its last one unless `bDontOverrideOtherSounds`; effects never
-stop each other; nothing is placed in the world yet (every sound plays at
-full loudness); a group waits for its longest take. Lines pause with the
+stop each other; a group waits for its longest take. Lines pause with the
 game and stop when the level ends. Not done: subtitles (the game's
-`System/subtitles_*.int` files hold them, by sound name), sounds stored
-inside a map, and placing sounds at the speaker.
+`System/subtitles_*.int` files hold them, by sound name) and sounds stored
+inside a map.
+
+**Where a script sound comes from.** Every `Sound` in the game's packages
+names its `Params`: an `AudioParams` object in `Sounds/params_vox.uax`
+(speech) or `params_sfx.uax` (effects). Its PC values that matter here are
+`NonPositional` (heard the same everywhere: the Clone Advisor, most squad
+radio, briefings), `Radius` (Unreal units) and `bDisable3DFalloff` (big
+explosions: from their side, never quieter). The class default `Radius` is
+2000 (engine.u, `rc_probe --class AudioParams`), which is also
+`[sound] default_radius`. `rc_package::sound` reads them,
+`rc_combat::read_sounds` now records each sound's `params` (a group's own,
+else its first take's) and `rc_combat::read_audio_params` reads the
+params packages. At play time `sounds.rs` decides:
+- heard everywhere: `ACTION_PlayLocalSound`, `NonPositional` sounds,
+  `SoundSourceTag=PlayerCommando`, and a tag nothing in the level has;
+- else at the character whose `ScriptTags.tag` is the `SoundSourceTag`
+  (followed as it moves), or the map actor with that tag or name (fixed);
+- with no tag: the character running the `ScriptedSequence`, else the
+  script actor's own spot in the map (UE2 plays a script's sound from the
+  script when it has no pawn).
+
+A placed sound gets `rc_game_core::SoundAt` (3D SOUND makes it heard from
+its side) and a `Placed` component; `sounds::follow` moves it with its
+character and sets its loudness every frame: full out to `Radius`, then
+`Radius / distance` (our reading: OpenAL's reference distance; some radii
+are tiny, enemy footsteps 20 uu, so `Radius` can't be where a sound
+stops). An action `Volume` above 1 (2 to 10000 in a few maps) makes the
+sound carry that many times further. Over the 56 campaign maps
+(`rc_script_check`) the scripts' 1,946 enabled sound actions split as:
+1,404 radio, 58 aimed at the player, 23 local, 391 at the script's spot
+(mostly explosions), 48 at a sequence's character, 9 at a tagged map
+actor, 13 at a tagged character if one is there.
+
+Bevy's own 3D sound (rodio) also divides a placed sound's loudness by the
+distance squared in Bevy units (metres): a droid 10 m away played at 1/100.
+`rc_game/src/sound_options.rs` now shrinks placed sounds' positions by
+1000 (`SpatialScale`) before Bevy sees them, which leaves left and right
+alone and pushes that fading out past a kilometre, so only each part's
+own distance rule applies.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).

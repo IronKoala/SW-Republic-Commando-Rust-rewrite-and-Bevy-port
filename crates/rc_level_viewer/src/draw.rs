@@ -5,6 +5,7 @@
 use crate::bump::{self, BumpLitMaterial};
 use crate::lighting::{self, LightingSettings, SpawnReport};
 use crate::materials;
+use crate::prop_light::{PropLight, PropMaterial};
 use crate::scene::Scene;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -35,6 +36,9 @@ pub struct DrawReport {
     pub coloured: usize,
     /// Of the coloured batches, those drawn with their bump map.
     pub bump_lit: usize,
+    /// Of `coloured`: batches that real-time lights reach too (all but the
+    /// sky's, and none when `live_light_on_props` is 0).
+    pub coloured_live: usize,
     pub full_bright: usize,
     pub lights: SpawnReport,
     /// Batches drawn in the sky (seen only by the sky camera).
@@ -111,6 +115,7 @@ pub fn spawn_level(
     images: &mut Assets<Image>,
     materials: &mut Assets<StandardMaterial>,
     mut bump_materials: Option<&mut Assets<BumpLitMaterial>>,
+    prop_materials: &mut Assets<PropMaterial>,
     scene: &Scene,
     settings: &LightingSettings,
 ) -> DrawReport {
@@ -129,6 +134,10 @@ pub fn spawn_level(
     let mut triangles = 0;
     let mut textured = 0;
     let (mut lightmapped, mut coloured, mut full_bright, mut bump_lit) = (0, 0, 0, 0);
+    let mut coloured_live = 0;
+    let props_live = settings.live_light_on_props > 0.0;
+    // Real-time light on props, for the shaders (0 = none).
+    let live_gain = if props_live { settings.live_light_on_props } else { 0.0 };
     // One image per bump map, shared by every batch that uses it.
     let mut bump_images: HashMap<*const materials::Bump, Handle<Image>> = HashMap::new();
     let mut sky_batches = 0;
@@ -202,7 +211,8 @@ pub fn spawn_level(
                     gain: colour_gain,
                     bump_uv_scale: bump.uv_scale,
                     strength: settings.bump_strength,
-                    unused: 0.0,
+                    // Real-time lights add on top, except in the sky.
+                    live_light: if b.sky { 0.0 } else { live_gain },
                 },
                 diffuse: images.add(to_image(picture)),
                 bump: bump_image,
@@ -222,6 +232,9 @@ pub fn spawn_level(
             entities.push(entity.id());
             coloured += 1;
             bump_lit += 1;
+            if props_live && !b.sky {
+                coloured_live += 1;
+            }
             continue;
         }
         if with_colours {
@@ -247,12 +260,16 @@ pub fn spawn_level(
         } else {
             AlphaMode::Opaque
         };
+        // Props and terrain carry their baked light as vertex colours. Out of
+        // the sky they get `PropMaterial`, which adds real-time lights on
+        // top (see prop_light.rs); in the sky, or with real-time light on
+        // props switched off, a plain unlit material shows just the colours.
+        let prop_live = with_colours && page.is_none() && !b.sky && props_live;
         let material = StandardMaterial {
             // Lightmapped surfaces go through Bevy's lighting (so real-time
-            // lights add to them). Props carry their baked light as vertex
-            // colours, which an unlit material multiplies in directly.
-            // Anything without baked light is drawn at full brightness.
-            unlit: page.is_none(),
+            // lights add to them). Anything without baked light is drawn at
+            // full brightness.
+            unlit: page.is_none() && !prop_live,
             lightmap_exposure,
             perceptual_roughness: 1.0,
             reflectance: 0.0,
@@ -278,11 +295,16 @@ pub fn spawn_level(
             },
             ..default()
         };
-        let mut entity = commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(materials.add(material)),
-            Transform::default(),
-        ));
+        let mut entity = commands.spawn((Mesh3d(meshes.add(mesh)), Transform::default()));
+        if prop_live {
+            entity.insert(MeshMaterial3d(prop_materials.add(PropMaterial {
+                base: material,
+                extension: PropLight::new(settings.live_light_on_props),
+            })));
+            coloured_live += 1;
+        } else {
+            entity.insert(MeshMaterial3d(materials.add(material)));
+        }
         if let Some(m) = b.mover {
             entity.insert(MoverPart(m));
         }
@@ -310,6 +332,7 @@ pub fn spawn_level(
         lightmapped,
         coloured,
         bump_lit,
+        coloured_live,
         full_bright,
         lights: report,
         sky_batches,
