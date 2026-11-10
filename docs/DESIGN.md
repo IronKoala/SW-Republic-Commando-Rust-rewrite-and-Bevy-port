@@ -2621,6 +2621,33 @@ close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
 with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
 beam weapon is an `instant` shot fired as a burst of quick hits.
 
+When a class could match two files, the first file in name order wins, so
+give each file exact class names where they overlap (the Trandoshan
+files list `TrandoshanMercenary`, `TrandoshanMercenaryGrenadier` and so on
+one by one; a test checks each class has exactly one file).
+
+**Shields.** `combat.shields` gives an enemy an energy shield on top of its
+health (the Kashyyyk Trandoshan mercenaries: 100, regaining 10 a second).
+Damage goes to the shield first, as for the player (`rc_combat::Shield`).
+
+**Shotguns.** A weapon's `shot.pellets` fires that many instant hits at
+once, each up to `shot.spread` rotation units off the aim (the slavers'
+shotgun: 8 pellets, 1700, the game's `ProjPerFire` and `Spread`). How the
+original scatters them is our reading.
+
+**The Trandoshans.** Classes that the game builds in
+`Properties/properties.u` straight from a class in `ctcharacters.u` (like
+`TrandoshanMercYYYUp` from `TrandoshanMercenary`) keep that class's own
+values, not its "...Defaults" class's, so the Kashyyyk mercenaries have
+100 health and a shield while the Prosecutor's have 220 and none. The
+evidence: those classes restate every value the Defaults class changes
+that they want (the grenadier repeats Health 220, Shields 0, its damage
+table and sight). The files: `trandoshan` (Prosecutor mercenaries),
+`trandoshan_kashyyyk`, `trandoshan_grenadier`, `trandoshan_slaver`,
+`trandoshan_slaver_berserker`, `trandoshan_slaver_grenadier`,
+`trandoshan_heavy` and `trandoshan_scavenger`, with weapons
+`trandoshan_shotgun`, `trandoshan_rifle` and `scav_beam`.
+
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
 `thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
