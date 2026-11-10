@@ -2993,10 +2993,31 @@ Not done: the anti-armour's grenade digit (`PannerClip`, shown when the
 ammo has `DigitalClipDisplay`) and the DC-15s charge bar (its recharge
 uses other numbers we haven't read); they show their pictures unslid.
 
-**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
+**The arms' sounds** (`arms_sound.rs`). The reload clatter, the click of
+bringing a weapon up, putting it away, the melee swing and the grenade
+throw aren't in the weapon classes. They are `AnimNotify_Sound` events in
+the arms animations: each names a sound and a moment (0 = start, 1 = end).
+`rc_model` reads them into `Model::sounds`; when a weapon's arms are read,
+`ArmsSounds` reads every sound they name (all in `GEN_Sound`). Each frame
+`spans` works out which stretch of which animation the arms went through
+(including the end of a reload or holster that finished this frame, the
+old weapon's holster when switching, and both ends when breathing or
+running goes round), and `play` plays every event in it. List them with
+`cargo run -p rc_combat --example rc_arms_sounds -- <game folder>`. What
+the five arms make (2026-11-10): reload (DC-17m 1, sniper 5, anti-armour 1,
+repeater 2, pistol none, as its charge refills by itself), holster and
+load 1 each, attachment swaps 1 each, idle 1-3, run 2 armour footsteps,
+throw 2-3, melee 1-6. **Our choices:** played for the player only at full
+volume, not placed in the level; quiet while the player is down or a
+cutscene gives them other hands; still played when the sniper's zoom hides
+the arms. A weapon file's `sound.reload` is still read (for a weapon with
+no arms), but the DC-17m's was taken out, since its animation plays it.
+
+**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths), 9
+in `arms_sound.rs`;
 `rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,
 `Holster`, the pistol's `Fire`, and the rifle again after switching back,
-and that the gun corner of the picture is textured; `rc_game --script`
+that the reload played the game's own reload sound, and that the gun corner of the picture is textured; `rc_game --script`
 checks the arms show the weapon in hand after loading a level.
 
 **VR:** the arms are a child of the player camera with their own camera,

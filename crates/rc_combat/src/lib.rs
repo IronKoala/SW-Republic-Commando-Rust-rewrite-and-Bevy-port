@@ -25,6 +25,7 @@
 
 pub mod ammo_box;
 pub mod arms;
+pub mod arms_sound;
 mod arms_view;
 pub mod audio_table;
 pub mod counter;
@@ -208,6 +209,7 @@ impl Plugin for WeaponsPlugin {
             )
             // Pickup sounds (`pickup_sound`).
             .init_resource::<pickup_sound::PickupSounds>()
+            .init_resource::<arms_sound::ArmsSounds>()
             .add_systems(
                 Update,
                 (
@@ -229,7 +231,10 @@ impl Plugin for WeaponsPlugin {
                     .run_if(resource_exists::<WeaponLibrary>),
             )
             .add_systems(Update, ammo_box::show_boxes.in_set(GameSet::View))
-            .add_systems(OnExit(rc_game_core::GameState::InGame), ammo_box::forget_boxes)
+            .add_systems(
+                OnExit(rc_game_core::GameState::InGame),
+                ammo_box::forget_boxes,
+            )
             .add_message::<ThrowGrenade>()
             .add_message::<MeleeAttack>()
             .add_message::<MeleeSwing>()

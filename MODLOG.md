@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Weapons make their handling sounds (rc_combat, data/weapons)
+
+- **Changed:** New `rc_combat/src/arms_sound.rs` (`ArmsSounds`, `spans`, `play`): the first-person arms play the sounds their animations name (`AnimNotify_Sound` in `hudarms.ukx`, already read by `rc_model`). `arms_view` reads each weapon's arms sounds when it reads the arms and plays the ones each frame passes. The DC-17m's `sound.reload` line was removed, as its Reload animation plays the same sound. New example `rc_arms_sounds` lists every arms animation's sounds. New `rc_shoot --script` check that the reload played its game sound. 9 new unit tests. Notes in `docs/DESIGN.md` ("The arms' sounds") and README.
+- **Why:** Thread "Play weapon handling sounds": the user heard no reload sounds on any weapon while testing weapon pickups.
+- **Tested how:** In the cloud with hudarms.ukx, HUDArmsTextures.utx, weapons.usx, gen_sound.uax and the script packages copied read only from the PC. `cargo test -p rc_combat`; `rc_shoot --script` under xvfb; `rc_arms_sounds` on the five arms.
+- **Result:** All sounds found: DC-17m 13 of 13, sniper 13 of 13, anti-armour 11 of 11, pistol 4 of 4. `rc_shoot --script` 20 of 20 passed; the log shows `fol_GEN_dc17Load_01` at the start, `fol_GEN_dc17reload_01` on reload, `fol_GEN_dc17holstr_01` when switching away and `fol_GEN_dc15Load_01` when the pistol comes up. Unit tests 48 pass. The `range` test `real_game_sounds_and_model` fails the same way with and without this change (the Elite Beam's sound is in geo_sound, which wasn't copied).
+- **Still broken / not tested:** Not listened to (the cloud has no speakers) and not tested on Windows. The repeater's arms (HudArmsUzi) weren't in the range test. Running now also plays the game's two armour footstep sounds from the arms' Run animation, as the original does. The pistol's reload has no sound in the game files. Volume is full; the original's per-sound settings aren't read.
+- **Next:** The user reloads, switches weapons, throws and hits in rc_game on Windows and listens.
+
 ## 2026-11-10: Every Trandoshan appears and fights (data/enemies, data/weapons, rc_ai, rc_combat, rc_enemies)
 
 - **Changed:** Seven new enemy files: `trandoshan_kashyyyk`, `trandoshan_grenadier`, `trandoshan_slaver`, `trandoshan_slaver_berserker`, `trandoshan_slaver_grenadier`, `trandoshan_heavy` and `trandoshan_scavenger`, and three weapons: `trandoshan_shotgun`, `trandoshan_rifle`, `scav_beam`. `trandoshan.toml` now names its two classes exactly instead of `TrandoshanMercenary*`. Code: enemies can have a shield (`[combat] shields`, `shield_recharge_rate`, `shield_recharge_delay`, using `rc_combat::Shield`); weapons can fire several pellets at once (`[shot] pellets`, `spread`; `rc_combat::shot::pellet_directions`). Tests: every Trandoshan class has exactly one file, Kashyyyk mercenaries have a shield, pellets stay inside the spread. Numbers in `docs/RESEARCH.md` "The other Trandoshans"; `docs/DESIGN.md` and README updated.
