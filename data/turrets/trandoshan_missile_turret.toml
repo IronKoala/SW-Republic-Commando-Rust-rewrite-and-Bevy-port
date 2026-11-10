@@ -1,0 +1,34 @@
+# The Trandoshan missile turret (the prison ship, ras_03b and ras_03c).
+#
+# See wookiee_heavy_turret.toml for how these files work. "game:" values
+# are TrandoshanMissileTurret (ctcharacters.u), Turret (engine.u) and
+# TrandoshanMissileTurretDefaults (Properties/properties.u) on top.
+
+name = "Trandoshan Missile Turret"
+classes = ["TrandoshanMissileTurret"]
+
+[model]
+mesh = "TranTurret"                # game: Mesh
+pose = "Fire"                      # game: frame 0 is at rest
+muzzles = ["muzzle1", "muzzle2", "muzzle3", "muzzle4"] # the model's four barrels
+
+[aim]
+speed = 15000                      # game: TrandoshanMissileTurretDefaults Speed
+min_yaw = -16384                   # game: TrandoshanMissileTurretDefaults MinYaw
+max_yaw = 16384                    # game: TrandoshanMissileTurretDefaults MaxYaw
+min_pitch = -8194                  # game: Turret MinPitch
+max_pitch = 8194                   # game: Turret MaxPitch
+
+[gunner]
+height = 120                       # game: TurretHeight
+radius = 115                       # game: TrandoshanMissileTurretDefaults CollisionRadius
+half_height = 125                  # game: CollisionHeight
+reach = 100                        # our choice
+exit = [-120, 0, -50]              # game: NavPtLocs offset
+weapon = "missile_turret"          # game: FPWeaponClass MissileTurret
+
+[auto]
+weapon = "missile_turret"
+shot_delay = 1                     # game: TrandoshanMissileTurretDefaults ShotDelay
+range = 5000                       # game: MissileTurretAmmo Range
+muzzles_in_turn = true              # our choice: one barrel after another

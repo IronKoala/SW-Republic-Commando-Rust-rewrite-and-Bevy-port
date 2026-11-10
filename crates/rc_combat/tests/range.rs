@@ -145,6 +145,12 @@ fn every_weapon_file_reads() {
     let r = Range::new();
     let lib = r.app.world().resource::<WeaponLibrary>();
     assert!(lib.errors.is_empty(), "{:?}", lib.errors);
+    // The turrets' weapons: twin barrels, cooling down after a few shots.
+    let heavy = &lib.weapons["heavy_turret"];
+    assert!(heavy.mirror_fire);
+    assert_eq!((heavy.clip_size, heavy.reload_time), (3, 3.0));
+    assert_eq!(heavy.grenade.as_deref(), Some("turret_shell"));
+    assert!(!lib.weapons["missile_turret"].mirror_fire);
     let ids: Vec<_> = lib.weapons.keys().cloned().collect();
     assert_eq!(
         ids,
@@ -157,6 +163,9 @@ fn every_weapon_file_reads() {
             "e5_blaster_pickup",
             "e5_blaster_tm",
             "elite_beam_enemy",
+            "eweb_turret",
+            "heavy_turret",
+            "missile_turret",
             "sbd_blaster",
             "trandoshan_smg"
         ]
@@ -453,7 +462,8 @@ fn every_grenade_file_reads_and_the_player_carries_them() {
             "flash_grenade",
             "sonic_detonator",
             "thermal_detonator",
-            "thermal_detonator_enemy"
+            "thermal_detonator_enemy",
+            "turret_shell"
         ]
     );
     let g = r.app.world().get::<Grenades>(r.player).unwrap();
@@ -864,13 +874,22 @@ fn move_player(r: &mut Range, x: f32, y: f32) {
 
 fn rifle_total(r: &Range) -> u32 {
     let a = r.arsenal();
-    let (_, w) = a.weapons.iter().find(|(id, _)| id == "dc17m_blaster").unwrap();
+    let (_, w) = a
+        .weapons
+        .iter()
+        .find(|(id, _)| id == "dc17m_blaster")
+        .unwrap();
     w.shots_in_clip() + w.reserve
 }
 
 fn set_rifle(r: &mut Range, clip: f32, reserve: u32) {
     let mut a = r.app.world_mut().get_mut::<Arsenal>(r.player).unwrap();
-    let w = &mut a.weapons.iter_mut().find(|(id, _)| id == "dc17m_blaster").unwrap().1;
+    let w = &mut a
+        .weapons
+        .iter_mut()
+        .find(|(id, _)| id == "dc17m_blaster")
+        .unwrap()
+        .1;
     w.clip = clip;
     w.reserve = reserve;
 }
@@ -930,7 +949,11 @@ fn the_grenade_crate_refills_and_comes_back() {
     let mut r = Range::new();
     let (_, part) = ammo_boxes(&mut r);
     let count = |r: &Range| {
-        r.app.world().get::<Grenades>(r.player).unwrap().carried
+        r.app
+            .world()
+            .get::<Grenades>(r.player)
+            .unwrap()
+            .carried
             .iter()
             .find(|(id, _)| id == "thermal_detonator")
             .unwrap()
@@ -940,10 +963,16 @@ fn the_grenade_crate_refills_and_comes_back() {
     move_player(&mut r, -500.0, 300.0);
     r.run(2, &[]);
     assert_eq!(count(&r), 5);
-    assert_eq!(*r.app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+    assert_eq!(
+        *r.app.world().get::<Visibility>(part).unwrap(),
+        Visibility::Hidden
+    );
     // Back 0.1 s later; full now, so it stays.
     r.seconds(0.3, &[]);
-    assert_ne!(*r.app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+    assert_ne!(
+        *r.app.world().get::<Visibility>(part).unwrap(),
+        Visibility::Hidden
+    );
     use rc_game_core::save::SavePart;
     let s = rc_combat::ammo_box::PickupsSave::save(r.app.world_mut()).unwrap();
     assert!(s.taken.is_empty(), "boxes that come back aren't saved");

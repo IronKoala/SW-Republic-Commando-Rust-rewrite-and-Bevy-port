@@ -39,6 +39,7 @@ rc_level_viewer = { path = "../rc_level_viewer" }
 rc_combat = { path = "../rc_combat" }
 rc_enemies = { path = "../rc_enemies" }
 rc_squad_plugin = { path = "../rc_squad_plugin" }
+rc_turrets_plugin = { path = "../rc_turrets_plugin" }
 rc_save = { path = "../rc_save" }
 # The visor's modes and the tactical glow.
 rc_visor = { path = "../rc_visor" }

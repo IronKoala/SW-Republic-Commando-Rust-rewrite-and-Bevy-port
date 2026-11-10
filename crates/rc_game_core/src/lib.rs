@@ -33,6 +33,8 @@
 //!   exit sends the player on to the next map.
 //! - [`save`]: the interface each part fills in so it is saved and loaded
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
+//! - [`turrets`]: [`Manning`] while the player works a mounted turret, and
+//!   the level scripts' [`TurretOrder`]s.
 //!
 //! This crate has no window or renderer in it, so it builds quickly and its
 //! tests run anywhere.
@@ -47,6 +49,7 @@ pub mod pickups;
 pub mod save;
 pub mod sound;
 mod state;
+pub mod turrets;
 pub mod units;
 
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
@@ -59,12 +62,13 @@ pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
 pub use log::GameLog;
-pub use sound::{SoundAt, Voice};
 pub use paths::GamePaths;
+pub use sound::{SoundAt, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, Play, Player, PlayerCamera, PlayerStart,
 };
+pub use turrets::{Manning, TurretOrder};
 
 use bevy::prelude::*;
 
@@ -94,6 +98,7 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
             .add_message::<ChangeLevel>()
+            .add_message::<TurretOrder>()
             .init_resource::<Cutscene>()
             .add_message::<TeleportPlayer>()
             .init_resource::<save::SaveList>()
