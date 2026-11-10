@@ -22,6 +22,18 @@
 //! - **Where the gunner is.** Held `height` above the turret's centre while
 //!   on it, and put at the map's exit spot (`NavPts`) when getting off.
 //!
+//! - **Automatic turrets** ([`Automatic`]: the original's `AutoTurret`,
+//!   such as the core ship's laser turrets). Nobody gets on these. One
+//!   that isn't deployed (`bDeployed`) waits, folded away, until a level
+//!   event with its tag switches it on; the same event again switches it
+//!   off. While on it turns toward the nearest enemy it can see and fires
+//!   every `ShotDelay` seconds; after firing for `TimeUntilCooldown`
+//!   seconds it stops for `CooldownDuration` seconds to cool down. Its
+//!   firing clock is only reset by cooling down, as in the original, so
+//!   coming back to a target after a break can start with a cool-down. It
+//!   sends `FirstDamagedEvent` the first time it is hurt and its `Event`
+//!   when destroyed, after which it does nothing more.
+//!
 //! The Bevy side (`rc_turrets_plugin`) draws the turrets, reads the
 //! player's Use button and look, and fires the turret's weapon.
 
@@ -98,6 +110,49 @@ pub struct Turret {
     /// Where the gunner gets off when the map has no spot: forward, left,
     /// up from the centre, uu.
     pub exit: [f32; 3],
+    /// An automatic turret's state; `None` for one a gunner works.
+    pub automatic: Option<Automatic>,
+}
+
+/// An automatic turret's state (`AutoTurret`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Automatic {
+    /// Switched on (`bDeployed`).
+    pub on: bool,
+    /// How much damage it can still take; `max_health` 0: it can't be hurt.
+    pub health: f32,
+    pub max_health: f32,
+    /// Hurt at least once (its `FirstDamagedEvent` has gone).
+    pub hurt: bool,
+    /// Destroyed.
+    pub dead: bool,
+    /// When it began firing since it last cooled down (`BeginFireTime`).
+    pub firing_since: Option<f32>,
+    /// When it began cooling down (`BeginCooldownTime`).
+    pub cooling_since: Option<f32>,
+    /// When it last fired (`LastFireTime`).
+    pub last_shot: f32,
+    /// How many shots it has fired (picks the next barrel).
+    pub shots: usize,
+    /// When it has finished unfolding after being switched on and starts
+    /// to aim and fire (the original plays `Deploy` to its end first).
+    pub ready_at: f32,
+}
+
+/// What switching an automatic turret did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Switched {
+    On,
+    Off,
+    /// Destroyed, or not an automatic turret: nothing.
+    Nothing,
+}
+
+/// What a hit on an automatic turret did: the events to send.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Hurt {
+    pub events: Vec<String>,
+    pub destroyed: bool,
 }
 
 impl Turret {
@@ -110,7 +165,23 @@ impl Turret {
             max_pitch: place.max_pitch.unwrap_or(p.aim.max_pitch),
             unlimited_yaw: place.unlimited_yaw.unwrap_or(p.aim.unlimited_yaw),
         };
+        let automatic = p.automatic.as_ref().map(|a| {
+            let health = place.health.unwrap_or(a.health).max(0.0);
+            Automatic {
+                on: place.deployed.unwrap_or(a.deployed),
+                health,
+                max_health: health,
+                hurt: false,
+                dead: false,
+                firing_since: None,
+                cooling_since: None,
+                last_shot: f32::NEG_INFINITY,
+                shots: 0,
+                ready_at: f32::NEG_INFINITY,
+            }
+        });
         Turret {
+            automatic,
             player_usable: place.player_usable.unwrap_or(p.gunner.player_usable),
             exit: place.exit_offset.unwrap_or(p.gunner.exit),
             place,
@@ -126,6 +197,34 @@ impl Turret {
     /// The turret's own facing (its placed yaw), radians.
     pub fn base_yaw(&self) -> f32 {
         to_radians(self.place.rotation[1] as f32)
+    }
+
+    /// The turret's own axes in the level, from its placed rotation (pitch,
+    /// yaw and roll; the core ship's wall turrets are on their sides):
+    /// forward, right and up, each a unit vector in Unreal axes. The
+    /// original's rotation matrix (`FRotationMatrix`).
+    pub fn axes(&self) -> [[f32; 3]; 3] {
+        let [p, y, r] = self.place.rotation.map(|u| to_radians(u as f32));
+        let (sp, cp) = p.sin_cos();
+        let (sy, cy) = y.sin_cos();
+        let (sr, cr) = r.sin_cos();
+        [
+            [cp * cy, cp * sy, sp],
+            [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp],
+            [-(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp],
+        ]
+    }
+
+    /// A point given in the turret's own axes (forward, right, up, uu from
+    /// its centre) in the level, uu.
+    pub fn to_level(&self, local: [f32; 3]) -> [f32; 3] {
+        let [f, r, u] = self.axes();
+        let [x, y, z] = self.place.location;
+        [
+            x + local[0] * f[0] + local[1] * r[0] + local[2] * u[0],
+            y + local[0] * f[1] + local[1] * r[1] + local[2] * u[1],
+            z + local[0] * f[2] + local[1] * r[2] + local[2] * u[2],
+        ]
     }
 
     /// Where the gun points, radians in the level (Unreal convention: yaw
@@ -155,9 +254,122 @@ impl Turret {
         [x + f * c - r * s, y + f * s + r * c, z + u]
     }
 
-    /// Can the player get on now?
+    /// Can the player get on now? Never an automatic turret (the
+    /// original's `IsAvailableFor`).
     pub fn usable_by_player(&self) -> bool {
-        self.player_usable && self.gunner == Gunner::Nobody
+        self.player_usable && self.gunner == Gunner::Nobody && self.automatic.is_none()
+    }
+
+    /// An automatic turret that is on and not destroyed.
+    pub fn is_working(&self) -> bool {
+        self.automatic.as_ref().is_some_and(|a| a.on && !a.dead)
+    }
+
+    /// An automatic turret that is on, unfolded and not destroyed at time
+    /// `now`: it aims and fires.
+    pub fn is_ready(&self, now: f32) -> bool {
+        self.automatic
+            .as_ref()
+            .is_some_and(|a| a.on && !a.dead && now >= a.ready_at)
+    }
+
+    /// A level event with the turret's tag (`Trigger`) at time `now`: an
+    /// automatic turret that is off switches on, unfolding for
+    /// `deploy_secs` before it aims; one that is on switches off (it stops
+    /// firing and swings back to rest).
+    pub fn trigger(&mut self, now: f32, deploy_secs: f32) -> Switched {
+        let Some(a) = self.automatic.as_mut() else {
+            return Switched::Nothing;
+        };
+        if a.dead {
+            return Switched::Nothing;
+        }
+        a.on = !a.on;
+        if a.on {
+            a.ready_at = now + deploy_secs.max(0.0);
+            Switched::On
+        } else {
+            Switched::Off
+        }
+    }
+
+    /// An automatic turret, at time `now` (seconds), with or without a
+    /// target in its sights: should it fire now? `shot_delay` is seconds
+    /// between shots, `fire_for` how long it fires before cooling down
+    /// (0: never) and `cool_down` how long that takes. The original's
+    /// `AutoTurret` rules (`Turret.Fire`, `DetectTarget`).
+    pub fn auto_fire(
+        &mut self,
+        now: f32,
+        has_target: bool,
+        shot_delay: f32,
+        fire_for: f32,
+        cool_down: f32,
+    ) -> bool {
+        let Some(a) = self.automatic.as_mut() else {
+            return false;
+        };
+        if !has_target || !a.on || a.dead || now < a.ready_at {
+            return false;
+        }
+        // Firing for the first time since it last cooled down.
+        if a.firing_since.is_none() && a.cooling_since.is_none() {
+            a.firing_since = Some(now);
+        }
+        if now - a.last_shot <= shot_delay {
+            return false;
+        }
+        if let Some(c) = a.cooling_since {
+            if now >= c + cool_down {
+                a.cooling_since = None;
+            }
+            return false;
+        }
+        if fire_for > 0.0 && a.firing_since.is_some_and(|f| now >= f + fire_for) {
+            a.firing_since = None;
+            a.cooling_since = Some(now);
+            return false;
+        }
+        a.last_shot = now;
+        a.shots += 1;
+        true
+    }
+
+    /// Whether an automatic turret is cooling down now.
+    pub fn cooling(&self) -> bool {
+        self.automatic
+            .as_ref()
+            .is_some_and(|a| a.cooling_since.is_some())
+    }
+
+    /// An automatic turret takes `amount` damage (after its damage table).
+    /// Returns the events to send: `FirstDamagedEvent` the first time,
+    /// its `Event` when destroyed.
+    pub fn hurt(&mut self, amount: f32) -> Hurt {
+        let mut out = Hurt::default();
+        let first = self.place.first_damaged_event.clone();
+        let event = self.place.event.clone();
+        let Some(a) = self.automatic.as_mut() else {
+            return out;
+        };
+        if a.dead || a.max_health <= 0.0 || amount <= 0.0 {
+            return out;
+        }
+        if !a.hurt {
+            a.hurt = true;
+            out.events.extend(first);
+        }
+        a.health -= amount;
+        if a.health <= 0.0 {
+            a.health = 0.0;
+            a.dead = true;
+            a.on = false;
+            a.firing_since = None;
+            a.cooling_since = None;
+            out.destroyed = true;
+            out.events.extend(event);
+        }
+        out
     }
 
     /// `who` tries to get on.
@@ -173,6 +385,10 @@ impl Turret {
             };
         }
         if who == Gunner::Player && !self.player_usable {
+            return Mounted::NotUsable;
+        }
+        // Nobody gets on an automatic turret (`IsAvailableFor`).
+        if self.automatic.is_some() {
             return Mounted::NotUsable;
         }
         let mut events = Vec::new();
@@ -226,14 +442,27 @@ impl Turret {
     /// Turn the gun toward pointing at `target` (uu) from `from` (uu, where
     /// it turns: its yaw bone), at its speed. For a character gunner.
     pub fn turn_toward(&mut self, from: [f32; 3], target: [f32; 3], dt: f32) {
+        self.turn_toward_by(from, target, dt, (0.0, 0.0));
+    }
+
+    /// [`Turret::turn_toward`] for a gun whose barrels don't point straight
+    /// along its resting direction: `rest` is where they point at rest
+    /// (yaw, pitch in rotation units, in the turret's own axes), so the
+    /// barrels end up on the target.
+    pub fn turn_toward_by(&mut self, from: [f32; 3], target: [f32; 3], dt: f32, rest: (f32, f32)) {
         let d = [
             target[0] - from[0],
             target[1] - from[1],
             target[2] - from[2],
         ];
-        let flat = (d[0] * d[0] + d[1] * d[1]).sqrt();
-        let want_yaw = to_units(d[1].atan2(d[0]) - self.base_yaw());
-        let want_pitch = to_units(d[2].atan2(flat));
+        // In the turret's own axes, so a turret on its side aims the same
+        // way (the original works in its yaw bone's space).
+        let [f, r, u] = self.axes();
+        let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+        let local = [dot(f), dot(r), dot(u)];
+        let flat = (local[0] * local[0] + local[1] * local[1]).sqrt();
+        let want_yaw = to_units(local[1].atan2(local[0])) - rest.0;
+        let want_pitch = to_units(local[2].atan2(flat)) - rest.1;
         let dy = wrap(want_yaw - self.yaw);
         let dp = want_pitch - self.pitch;
         self.turn(dy, dp, dt);

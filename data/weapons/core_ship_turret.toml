@@ -1,0 +1,36 @@
+# What the core ship's automatic turrets fire (AutoTurretAmmo): blaster
+# bolts, one from each barrel in turn.
+#
+# Numbers marked "game:" are AutoTurretAmmo and its bolt AutoTurretProj
+# (Properties/properties.u, both built on the DC-15s pistol's DC15Ammo and
+# DC15Proj). The ammo's own Damage (55) is used only by weapons that hit
+# instantly; a bolt does its own Damage (10), as the DC-15s does.
+
+name = "Core Ship Turret"
+
+[fire]
+mode = "automatic"
+shot_delay = 0.15         # game: CoreShipTurretDefaults ShotDelay (the turret paces its shots)
+aim_error = 0             # game: CoreShipTurret FireProjectile aims straight at its target (AimAdjustment is the player's auto-aim)
+
+[ammo]
+max_ammo = 10000          # game: Turret AmmoAmount 10000
+recharge_rate = 10000     # never runs dry
+
+[shot]
+kind = "bolt"
+accel = 40000             # game: AutoTurretProj AccelFactor
+max_speed = 8000          # game: AutoTurretProj MaxSpeed
+life_span = 10            # game: DC15Proj LifeSpan
+damage = 10               # game: AutoTurretProj Damage
+damage_kind = "blaster"
+damage_type = "CTDamageEnergy" # game: DC15Proj MyDamageType
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_tieFighter_01"] # game: CoreShipTurretDefaults FireSound (not checked in the package yet)
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: never drawn, the turret is
+bolt_colour = [1.0, 0.35, 0.1] # our choice: the droids' red-orange
