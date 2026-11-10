@@ -455,8 +455,8 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         }
     }
     log.line(format!(
-        "prop baked light: {} drawn props have corner colours, {} have none, {} have a colour list of the wrong length (not used)",
-        s.mesh_actors_with_colours, s.mesh_actors_without_colours, s.colour_count_mismatch
+        "prop baked light: {} drawn props have corner colours, {} have none ({} of those lit from the map's lights), {} have a colour list of the wrong length (not used)",
+        s.mesh_actors_with_colours, s.mesh_actors_without_colours, s.props_lit_from_lights, s.colour_count_mismatch
     ));
     log.line(format!(
         "lights: {} lights read, {} of them real-time (bDynamicLight); {} zones with an ambient light",
@@ -516,8 +516,8 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         s.props_settled, s.settle_drop_max
     ));
     log.line(format!(
-        "ammo and grenade boxes drawn on their own: {}, furthest moved down onto the ground {:.0} units",
-        s.ammo_boxes, s.ammo_box_drop_max
+        "ammo and grenade boxes drawn on their own: {}, furthest moved down onto the ground {:.0} units; weapons lying about drawn on their own: {}",
+        s.ammo_boxes, s.ammo_box_drop_max, s.weapon_pickups
     ));
     log.line(format!(
         "blocking volumes (invisible walls): {} read, {} stop players, {} stop the AI, {} unreadable, {} with a scale not applied; {} PathNodes/PlayerStarts inside one (should be 0 or close), {} volumes within 512 units of a path point",

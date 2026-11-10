@@ -131,6 +131,8 @@ fn bump_square(x: f32) -> Batch {
         has_alpha: false,
         alpha_pixels: false,
         additive: false,
+        blend: false,
+        hologram: false,
         bump: Some(Arc::new(Bump {
             image: solid([128, 128, 255, 255]),
             uv_scale: 1.0,

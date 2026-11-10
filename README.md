@@ -234,6 +234,20 @@ copy of the game.
   "Thermal Detonators") in the original font above the middle of the
   screen for 3 seconds, fading out (not tested on Windows yet).
 
+- **Weapons lying in the levels (since 2026-11-10; tested in the cloud,
+  not yet on Windows or by playing).** The 40 weapons the campaign maps
+  place (bowcasters on Kashyyyk, ACP repeaters and array guns, concussion
+  rifles, rocket launchers, spare DC-17m attachments, an Elite Beam) appear
+  on the floor with their original models. Walk into a weapon you already
+  carry to take its ammo. For one you don't, the screen says "PRESS F TO
+  PICKUP" with its name: press Use (F) to take it. You carry one weapon
+  taken from the enemy at a time; picking up another drops the old one in
+  front of you. Dropped enemy blasters now need Use too, as in the
+  original. Taken weapons stay gone after a save and load. Not built yet:
+  the bowcaster's charged shot, homing rockets, pickup sounds, and the
+  weapons' own first-person models are only as good as the arms loader
+  (not checked for the new ones).
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
@@ -608,8 +622,12 @@ copy of the game.
   the ones brought in during the scene aren't there yet. The squad only
   comes along in maps that have one (not the
   prologue, briefings or epilogue), and the grown commando's arms are
-  hidden while the prologue gives you a child's hands. Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
+  hidden while the prologue gives you a child's hands. Hologram
+  briefings at the start of missions (yyy_04b, ras_03a, geo_03a) start
+  when the projector's throw animation reaches its "start the briefing"
+  moment, and let the player go at their end, as in the original (since
+  2026-11-10; checked in the cloud from the log, not by playing). Not done yet:
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the holograms' flicker and glow, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music
   waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
