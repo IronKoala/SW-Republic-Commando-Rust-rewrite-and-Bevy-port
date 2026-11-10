@@ -48,6 +48,10 @@ fn placed() -> PlacedTurret {
         speed: None,
         exit_spot: None,
         exit_offset: None,
+        event: None,
+        first_damaged_event: None,
+        deployed: None,
+        health: None,
     }
 }
 
@@ -206,4 +210,158 @@ fn wrap_keeps_half_a_turn_each_way() {
     assert_eq!(wrap(32768.0), 32768.0);
     assert_eq!(wrap(32769.0), -32767.0);
     assert_eq!(wrap(-40000.0), 25536.0);
+}
+
+const AUTOMATIC: &str = r#"
+name = "Test automatic turret"
+classes = ["CoreShipTurret"]
+
+[model]
+mesh = "CoreShipTurret"
+pose = "Fire"
+
+[aim]
+speed = 40000
+min_yaw = -65535
+max_yaw = 65535
+min_pitch = -65535
+max_pitch = 65535
+unlimited_yaw = true
+
+[gunner]
+height = 0
+player_usable = false
+reach = 0
+radius = 60
+half_height = 90
+exit = [0, 0, 0]
+
+[auto]
+weapon = "core_ship_turret"
+shot_delay = 0.15
+range = 10000
+
+[automatic]
+fire_for = 4
+cool_down = 1
+health = 256
+damage_table = "DV_TurretsCoreshipAuto"
+"#;
+
+fn automatic() -> Turret {
+    let p = TurretParams::from_text(AUTOMATIC).unwrap();
+    let mut place = placed();
+    place.class = "CoreShipTurret".into();
+    place.tag = "BDTurrets".into();
+    place.event = Some("Security00".into());
+    place.first_damaged_event = Some("TurretsShot".into());
+    Turret::new(place, "core_ship_turret", &p)
+}
+
+#[test]
+fn an_automatic_file_needs_a_weapon_and_a_known_side() {
+    let p = TurretParams::from_text(AUTOMATIC).unwrap();
+    let a = p.automatic.as_ref().unwrap();
+    assert!(!a.deployed);
+    assert_eq!(a.side, "separatist");
+    let no_weapon = AUTOMATIC.replace("weapon = \"core_ship_turret\"\n", "");
+    assert!(TurretParams::from_text(&no_weapon).is_err());
+    let bad_side = AUTOMATIC.replace("[automatic]\n", "[automatic]\nside = \"droids\"\n");
+    assert!(TurretParams::from_text(&bad_side).is_err());
+}
+
+#[test]
+fn an_automatic_turret_waits_for_its_event_and_the_next_one_switches_it_off() {
+    let mut t = automatic();
+    assert!(!t.is_working());
+    // Off: it doesn't fire even with a target.
+    assert!(!t.auto_fire(0.0, true, 0.15, 4.0, 1.0));
+    assert_eq!(t.trigger(1.0, 2.0), Switched::On);
+    assert!(t.is_working());
+    // Unfolding for 2 s: no aiming or firing yet.
+    assert!(!t.is_ready(2.5));
+    assert!(!t.auto_fire(2.5, true, 0.15, 4.0, 1.0));
+    assert!(t.is_ready(3.0));
+    assert!(t.auto_fire(3.0, true, 0.15, 4.0, 1.0));
+    assert_eq!(t.trigger(4.0, 2.0), Switched::Off);
+    assert!(!t.is_working());
+    // A map can deploy it from the start.
+    let p = TurretParams::from_text(AUTOMATIC).unwrap();
+    let mut place = placed();
+    place.deployed = Some(true);
+    assert!(Turret::new(place, "x", &p).is_working());
+}
+
+#[test]
+fn nobody_gets_on_an_automatic_turret() {
+    let mut t = automatic();
+    t.player_usable = true;
+    assert!(!t.usable_by_player());
+    assert_eq!(t.mount(Gunner::Player), Mounted::NotUsable);
+    assert_eq!(t.mount(Gunner::Character("S".into())), Mounted::NotUsable);
+}
+
+#[test]
+fn it_fires_every_shot_delay_then_cools_down() {
+    let mut t = automatic();
+    t.trigger(0.0, 0.0);
+    let dt = 0.01;
+    let mut shots = Vec::new();
+    let mut now = 0.0f32;
+    while now < 6.0 {
+        if t.auto_fire(now, true, 0.15, 4.0, 1.0) {
+            shots.push(now);
+        }
+        now += dt;
+    }
+    // First shot at once, then one every 0.15 s or a frame more.
+    assert_eq!(shots[0], 0.0);
+    let gap = shots[1] - shots[0];
+    assert!((0.15..0.17).contains(&gap), "{gap}");
+    // Nothing between 4 s (cooling down starts) and 5 s (it ends).
+    let quiet: Vec<_> = shots.iter().filter(|&&s| s > 4.01 && s < 4.99).collect();
+    assert!(quiet.is_empty(), "{quiet:?}");
+    assert!(shots.iter().any(|&s| s >= 5.0), "fires again after cooling");
+    let before = shots.iter().filter(|&&s| s < 4.0).count();
+    assert!((24..=27).contains(&before), "{before} shots in 4 s");
+}
+
+#[test]
+fn no_target_no_shots() {
+    let mut t = automatic();
+    t.trigger(0.0, 0.0);
+    assert!(!t.auto_fire(0.0, false, 0.15, 4.0, 1.0));
+    assert!(t.automatic.as_ref().unwrap().firing_since.is_none());
+}
+
+#[test]
+fn the_first_hit_and_destruction_send_their_events_once() {
+    let mut t = automatic();
+    assert_eq!(t.hurt(0.0), Hurt::default(), "no damage, no event");
+    let h = t.hurt(100.0);
+    assert_eq!(h.events, vec!["TurretsShot".to_string()]);
+    assert!(!h.destroyed);
+    assert!(t.hurt(100.0).events.is_empty());
+    let h = t.hurt(100.0);
+    assert!(h.destroyed);
+    assert_eq!(h.events, vec!["Security00".to_string()]);
+    assert!(!t.is_working());
+    assert_eq!(
+        t.trigger(9.0, 0.0),
+        Switched::Nothing,
+        "a destroyed turret stays off"
+    );
+    assert_eq!(t.hurt(100.0), Hurt::default());
+}
+
+#[test]
+fn a_turret_with_no_health_cant_be_hurt() {
+    let p = TurretParams::from_text(AUTOMATIC).unwrap();
+    let mut place = placed();
+    place.health = Some(0.0);
+    let mut t = Turret::new(place, "x", &p);
+    assert_eq!(t.hurt(1000.0), Hurt::default());
+    // A turret a gunner works isn't hurt this way either.
+    let mut g = Turret::new(placed(), "w", &params());
+    assert_eq!(g.hurt(1000.0), Hurt::default());
 }
