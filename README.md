@@ -82,8 +82,19 @@ copy of the game.
   the game's own; every number is in `data/squad/squad.toml`. The
   windowless test run `rc_squad_sim` passes 36 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
-  and stays put until revived. They are in the game program (`rc_game`):
-  start a level and they stand with you.
+  and stays put until revived. They are in the game program (`rc_game`).
+
+- **Squad mates come and go as each level says (tested in the cloud
+  sandbox by numbers, not yet in the full game, on Windows or by
+  playing).** As in the original, each map has its own squad: mates
+  start where the map places them, and the level's scripts take them out
+  of the squad and bring them back (you find Scorch, Fixer and Sev one by
+  one on Geonosis; on ras_02b Fixer turns up at the final door, opens it
+  and rejoins). Out of the squad, a mate stays put or walks where the
+  script sends them. Some maps start you alone because the map does
+  (ras_01a, ras_02b, geo_05a). Squad mates don't play scripted
+  animations yet. `spawn = "with_player"` in `data/squad/squad.toml`
+  brings back the old way (all three with you from the start).
 
 - **Sev, Fixer and Scorch look like themselves (tested in the cloud
   sandbox and on Windows).** Each squad mate is drawn with the

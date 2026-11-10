@@ -53,7 +53,7 @@ pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
-    LevelScriptsRun, RaiseEvent, ScriptEvent, ScriptTags, SquadStanceOrder,
+    LevelScriptsRun, RaiseEvent, ScriptEvent, ScriptTags, SquadMembership, SquadStanceOrder,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
@@ -93,6 +93,7 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
+            .add_message::<SquadMembership>()
             .add_message::<ChangeLevel>()
             .init_resource::<Cutscene>()
             .add_message::<TeleportPlayer>()

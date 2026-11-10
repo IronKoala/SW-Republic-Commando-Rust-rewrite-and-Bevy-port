@@ -279,7 +279,11 @@ impl Squad {
         }
         patients.extend(
             (0..self.members.len())
-                .filter(|&i| self.members[i].down)
+                // Mates away from the squad are the level scripts' to
+                // look after.
+                .filter(|&i| {
+                    self.members[i].down && self.members[i].presence == crate::Presence::InSquad
+                })
                 .map(Patient::Mate),
         );
         for p in patients {
@@ -292,7 +296,7 @@ impl Squad {
                 .iter()
                 .enumerate()
                 .filter(|(j, m)| {
-                    !m.down
+                    m.available()
                         && m.marker.is_none()
                         && m.revive.is_none()
                         && Patient::Mate(*j) != p
@@ -368,7 +372,7 @@ impl Squad {
             return events;
         }
         let near = (0..self.members.len())
-            .filter(|&i| self.members[i].down)
+            .filter(|&i| self.members[i].down && self.members[i].presence != crate::Presence::Gone)
             .map(|i| (i, dist_2d(self.members[i].pawn.feet(), leader.feet)))
             .filter(|(i, d)| {
                 *d <= self.settings.revive.reach
@@ -721,7 +725,7 @@ impl Squad {
         let mut friends: Vec<(String, Vec3, bool)> =
             vec![("the player".into(), leader.feet, self.leader_down)];
         for (j, o) in self.members.iter().enumerate() {
-            if j != i {
+            if j != i && o.presence != crate::Presence::Gone {
                 friends.push((o.settings.name.clone(), o.pawn.feet(), o.down));
             }
         }

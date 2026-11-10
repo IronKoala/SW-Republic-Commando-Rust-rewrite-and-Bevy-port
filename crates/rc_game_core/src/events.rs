@@ -127,6 +127,19 @@ pub enum SquadStanceOrder {
     SearchAndDestroy,
     SecurePosition([f32; 3]),
 }
+/// A level script's `ACTION_ChangeSquadMember`: put the squad mate
+/// `target` in the player's squad (`join`) or take them out of it. Out of
+/// the squad they stop following the player and do what the level's
+/// scripts tell them ([`CharacterOrder`]s); the squad part
+/// (`rc_squad_plugin`) carries it out.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct SquadMembership {
+    pub target: Entity,
+    pub join: bool,
+    /// The script and action, for the log.
+    pub by: String,
+}
+
 /// Leave this map for another one: a level exit was reached (a
 /// `Teleporter` with a `URL`, `ACTION_ChangeLevel`, or the end-of-campaign
 /// debriefing's `NewLevel`). Sent by the level scripts part; the save part

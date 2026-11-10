@@ -89,6 +89,7 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::SquadStanceOrder>()
+            .add_message::<rc_game_core::SquadMembership>()
             .add_message::<ChangeLevel>()
             .add_save_part::<save::ScriptsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
@@ -228,6 +229,8 @@ pub struct PlayStats {
     pub invulnerable: Vec<String>,
     pub characters_hurt: usize,
     pub squad_orders: Vec<String>,
+    /// `ChangeSquadMember`: `WHO joins|leaves`.
+    pub squad_members: Vec<String>,
     /// Characters an action named that weren't found.
     pub no_character: Vec<String>,
 }
