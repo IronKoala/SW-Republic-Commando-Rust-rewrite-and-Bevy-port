@@ -24,6 +24,7 @@
 //! sound lasts, the random seed) are in `data/scripts/scripts.toml`
 //! ([`Settings`]).
 
+pub mod markers;
 pub mod save;
 pub mod settings;
 
@@ -811,6 +812,35 @@ impl Director {
     /// Remove every prop with this tag at once (`ACTION_DestroyActor`).
     pub fn destroy_props(&mut self, tag: &str) -> usize {
         self.hurt_props(tag, f32::INFINITY)
+    }
+
+    /// Blow up the one prop with this actor name (`Prop12`), as a
+    /// demolition charge's `PropToDestroy` does: it comes out as
+    /// [`Effect::PropDestroyed`] on the next step and sends its own
+    /// destroyed event. Returns false if no prop has that name (or it is
+    /// already gone).
+    pub fn destroy_prop_named(&mut self, name: &str) -> bool {
+        let Some(p) = self
+            .props
+            .iter_mut()
+            .find(|p| !p.destroyed && p.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        p.destroyed = true;
+        p.health = 0.0;
+        self.out.push(Effect::PropDestroyed {
+            export: p.export,
+            name: p.name.clone(),
+            tag: p.tag.clone(),
+            mesh: p.mesh.clone(),
+            effect: p.effect.clone(),
+        });
+        if let Some(e) = p.event.clone() {
+            let by = p.name.clone();
+            self.fire(&e, &by);
+        }
+        true
     }
 
     fn random(&mut self) -> f32 {

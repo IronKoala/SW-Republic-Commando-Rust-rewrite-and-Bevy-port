@@ -3,6 +3,59 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Dispenser sounds actually play (rc_level_plugin)
+
+- **Changed:** `anim_props::sound_key` keys each sound by package and name only. The animations name sounds with their group (`GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`) but they were stored without it, so none was found and nothing played, silently. Each sound played is now logged (`level: BactaDispenserGEO0 sound ...`) and the self-test checks them.
+- **Why:** User playtest: animations played, no sound.
+- **Tested how:** `rc_game --script` in the cloud with GEN_Sound.uax copied read only.
+- **Result:** Load plays fol_GEN_trapFiddle_01, mach_GEN_Bdroid_Dispense_close and _open; Holster the same three. Check passes; 111 passed, 2 failed (same level-sound checks).
+- **Still broken / not tested:** Not heard on Windows.
+- **Next:** The user listens at the dispenser.
+
+## 2026-11-10: Bacta dispensers play their animation and sounds (rc_model, rc_level_plugin, rc_scripts_plugin)
+
+- **Changed:** `rc_model::Model::sounds`: the sounds an animation names (`AnimNotify_Sound`) and when. New message `rc_game_core::PropAnim` (actor, animation). `rc_level_plugin::anim_props` reads the props' `Load` and `Holster` animations and their sounds, and `animate` plays an asked-for animation once (re-posing the model each frame) with its sounds from the prop. The bacta system sends `Load` when the player starts healing and `Holster` when they stop.
+- **Why:** User playtest: healing worked and the barricade opened, but the dispenser didn't move and made no sound.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_model -p rc_level_plugin`; `rc_game --script` in the cloud with GEN_Sound.uax copied read only from the PC.
+- **Result:** The dispenser's animations name `GEN_Sound` clunks (mach_GEN_Bdroid_Dispense_open/close, fol_GEN_trapFiddle_01); 3 read. New check passes: `played ["Load", "Holster"]`. 111 checks passed, 2 failed (the same level-sound checks: Character_Voice and GEO_Sound not copied).
+- **Still broken / not tested:** Not heard or seen on Windows. Which animation the original plays when is our reading of the names (Load on start, Holster on stop). The zap effect (`DispenserEffectClass` BactaZap_Dispenser, and BactaZap_Dispenser_Body on the player) waits for the particle effects system being built in its own thread. Dispensers still aren't solid.
+- **Next:** The user heals at the dispenser and says whether it looks and sounds right.
+
+## 2026-11-10: Dispensers stand on the floor; F uses them instead of ordering the squad (rc_level, rc_scripts_plugin, rc_squad_plugin)
+
+- **Changed:** Animated props are drawn lower by their `CollisionHeight` (`class_look::anim_mesh_of` returns it; `map_collision` moves them down). New shared resource `rc_game_core::UseClaimed`: the scripts' bacta system sets it while the player stands at a switched-on dispenser, and the squad leaves that F press alone (F is both Use and the squad's context order).
+- **Why:** The user's playtest: the dispenser floated about 2.4 m up (the map places these actors by the middle of their collision cylinder, the model's origin is its base: all five on geo_01a stood 116 to 121 units above the floor, the class height is 120). Their log also showed each F press sent the squad to "secure position" at the aim, and they let go of F at 195/200 health, so the dispenser never finished and the barricade stayed.
+- **Tested how:** `cargo test --release -p rc_scripts_plugin -p rc_squad_plugin -p rc_level -p rc_game_core`; `rc_game --script` in the cloud.
+- **Result:** Tests pass. 110 checks passed, 2 failed (the same sound checks). The picture shows the dispenser standing on the floor; the log says `context order left alone: the player is using something` when Use is held at it, and the barricade opens 3.7 s later.
+- **Still broken / not tested:** Not tested on Windows. Use still has to be held until health is full (as in the original); nothing shows healing except the health bar. Dispensers aren't solid and don't animate.
+- **Next:** The user holds F at the dispenser until health is full.
+
+## 2026-11-10: Bacta dispensers are drawn (rc_level, rc_level_plugin)
+
+- **Changed:** `rc_level::class_look::anim_mesh_of` finds props the player uses (`ActivateItem`: bacta dispensers) whose class draws an animated model (`DrawType` DT_Mesh). `map_collision::load` lists them (`anim_props`). New `crates/rc_level_plugin/src/anim_props.rs` reads each model once with `rc_model` and draws every copy where the map puts it (`AnimProp` component; `LevelInfo::anim_props`). `rc_game --script` has 2 new checks and a picture `logs/bacta_dispenser.png`.
+- **Why:** The user couldn't find geo_01a's landing-zone bacta dispenser, so the barricade never came down: the port only drew props with a static model, and dispensers have an animated one, so they were invisible. Their log showed the dispenser switched on and "Hold F" shown, but the player never got within reach.
+- **Tested how:** `cargo test --release -p rc_level -p rc_level_plugin`; `rc_game --script` in the cloud with the game's files copied read only from the PC.
+- **Result:** The log says `5 props with an animated model drawn (BactaDispensers.BactaDispenserGEO x5)` on geo_01a; the picture shows the dispenser standing in the landing zone. 110 checks passed, 2 failed (the same level-sound checks, sound packages not copied). A first try drew every actor with an animated model and put frozen clone troopers, droids and a gunship around the level, so it is limited to things the player uses.
+- **Still broken / not tested:** Not tested on Windows. Dispensers stand still (their Load/Holster animations aren't played) and aren't solid. Scripted characters, vehicles and ropes with animated models are still not drawn.
+- **Next:** The user walks up to the dispenser and holds F.
+
+## 2026-11-09: Level prompts name the real Use key (rc_scripts_plugin)
+
+- **Changed:** `crates/rc_scripts_plugin/src/lib.rs`: a script prompt's `@` (the Use button) is now replaced with the button's name on the device used last (`InputPrompts`), not the word "USE".
+- **Why:** The user couldn't use geo_01a's bacta dispenser: the prompt said "Hold USE to use Bacta Dispenser", but Use is F on the keyboard (E does nothing), so the barricade never came down.
+- **Tested how:** `rc_game --script` in the cloud with the game's files.
+- **Result:** The log shows `ShowPrompt: shows "Hold F to use Bacta Dispenser"` at t=47 s, about 16 s after the shell hits the player. 107 checks passed, 2 failed (the same two level-sound checks as before, sound packages not copied).
+- **Still broken / not tested:** Not tested on Windows. Gamepad names come from `button_names.toml` and weren't checked here.
+- **Next:** The user tries the dispenser again with F.
+
+## 2026-11-09: Charges, slicing and breaching set off the level (rc_scripts, rc_scripts_plugin, rc_squad_plugin, rc_movers)
+
+- **Changed:** New shared message `rc_game_core::MarkerJob` (anchor, step Started/Armed/Done). `rc_squad_plugin` sends it when a squad mate starts a marker job or takes a post, lights a fuse, and finishes. New `rc_scripts::markers` reads every squad marker's anchor (DemolitionCharge, HackTerminal*, HackDoor*, BreachDoor*) and the map events it sends; new `rc_scripts_plugin/src/markers.rs` sends them to the level scripts, blows away a charge's `PropToDestroy` (`Director::destroy_prop_named`) and opens the locked double doors (`MoverSet::open_named`, `LevelMovers::open_named`). `rc_script_check` lists each map's anchors. `rc_game --script` has 4 new checks (geo_01a's bunker charge, geo_01b's hangar door).
+- **Why:** An audit of the prologue and all 13 Geonosis maps found this the biggest thing stopping play: the squad did demolition, slicing and breach jobs, but nothing listened (`SquadJobDone` had no reader), so bunker doors, barricades, shields and locked doors never opened and the scripts waiting for them (about 45 places) stood still.
+- **Tested how:** `cargo test --release -p rc_scripts -p rc_scripts_plugin -p rc_movers -p rc_movers_plugin -p rc_squad_plugin -p rc_game_core` (3 new tests in markers.rs). `rc_script_check` on pro and the 13 Geonosis maps with the game's files copied read only from the PC. `rc_game --script` in the cloud (see Result).
+- **Result:** All tests pass. rc_script_check: `57 marker anchors; 61 of their events are waited for by scripts; 38 of 38 doors they open are doors the game moves`. `rc_game --script` (cloud, software drawing): 107 checks passed, 2 failed. The 4 new ones passed: geo_01a's charge sent DemoUnderway, SpawnDemoDroids, DemoChargeArmed and BunkerDoorDestroyed, the bunker door prop (LargeBunker) was blown away and ScriptedTrigger4 moved on; geo_01b's hangar door MoverDB_GEO6 started shut and opened 0.12 s after the lock was sliced. The 2 failures are the level-sound checks: this run didn't have the big sound packages (character_voice, gen_sound, geo_sound) copied over, which those checks need.
+- **Still broken / not tested:** Not tested on Windows or by playing a level through. The charge, console and lock don't change their look or play their sounds. The player can't do these jobs with Use yet. Sliced doors stay open instead of working as automatic doors again. Which steps were sent isn't saved.
+- **Next:** The user orders the squad to blow geo_01a's bunker door. Separate threads handle ammo boxes, breakable objects, missing enemies and squad lifts.
 ## 2026-11-09: Debriefing screen: CONTINUE and the level's text stay inside their frames
 
 - **Changed:** `rc_menus::debriefing`: `fit_continue` widens CONTINUE's bar to fit the word; `fit_text` makes the level's text smaller in 5% steps (not below 60%) until its last line is inside its frame. `rc_game` (`original_menu.rs`) and `rc_probe --menu` use both.
