@@ -618,16 +618,18 @@ fn steps() -> Vec<Step> {
         Press(Action::Flashlight),
         Wait(0.3),
         Check(
-            "CYCLE VISOR MODE (X) switches to low light with the lamp on",
+            "CYCLE VISOR MODE (X) switches to low light: night vision, lamp and fog on",
             |w| {
                 let mode = w.resource::<rc_visor::VisorState>().mode;
                 let shown = w.resource::<rc_visor::VisorReadout>().shown;
                 let lamps = count::<rc_visor::Headlamp>(w);
+                let (night, fog) = night_and_fog(w);
                 let got = format!(
-                    "{} mode, {lamps} lamp, {shown} glowing copies shown",
+                    "{} mode, {lamps} lamp, {shown} glowing copies shown, night vision {night}, fog {fog}",
                     mode.name()
                 );
-                if mode == rc_visor::VisorMode::LowLight && lamps == 1 && shown == 0 {
+                if mode == rc_visor::VisorMode::LowLight && lamps == 1 && shown == 0 && night && fog
+                {
                     Ok(got)
                 } else {
                     Err(got)
@@ -644,8 +646,9 @@ fn steps() -> Vec<Step> {
                 let mode = w.resource::<rc_visor::VisorState>().mode;
                 let r = w.resource::<rc_visor::VisorReadout>().clone();
                 let lamps = count::<rc_visor::Headlamp>(w);
+                let (night, fog) = night_and_fog(w);
                 let got = format!(
-                    "{} mode after {} changes, {lamps} lamp, {} shown",
+                    "{} mode after {} changes, {lamps} lamp, {} shown, night vision {night}, fog {fog}",
                     mode.name(),
                     r.changes,
                     r.shown
@@ -654,6 +657,8 @@ fn steps() -> Vec<Step> {
                     && lamps == 0
                     && r.shown > 0
                     && r.changes >= 3
+                    && !night
+                    && !fog
                 {
                     Ok(got)
                 } else {
@@ -3331,4 +3336,14 @@ fn ammo_box_after_load(w: &mut World) -> Result<String, String> {
     } else {
         Err(got)
     }
+}
+
+/// Whether the player's camera has the low light mode's night-vision
+/// picture and its distance fog.
+fn night_and_fog(w: &mut World) -> (bool, bool) {
+    let mut q = w.query_filtered::<
+        (Has<rc_visor::NightVisionView>, Has<bevy::pbr::DistanceFog>),
+        With<PlayerCamera>,
+    >();
+    q.iter(w).next().unwrap_or((false, false))
 }

@@ -532,9 +532,13 @@ copy of the game.
   the colours the original gives them (read from the install). The GAME
   options page's TACTICAL VISOR MODE (ON, OFF, CYCLE: which modes X steps
   through) and TACTICAL MODE INTENSITY (how strong the glow is) work, as in
-  the original. Low light mode only switches on a helmet lamp for now (a
-  placeholder). Checked by `cargo run -p rc_visor --example visor_check`
-  and `rc_game --script`.
+  the original. Low light mode shows the original's night-vision picture:
+  black and white with more contrast, seen through the original's
+  visor-shaped window (widened, not stretched, on wide screens), with its
+  film grain and its distance fog, and the helmet lamp on. The window, grain
+  and numbers are read from the install. Not yet: the original's faint
+  trail of the last picture. Checked by `cargo run -p rc_visor --example
+  visor_check` and `rc_game --script`.
 
 - **Breakable props (since 2026-11-09, tested in the cloud only, not on
   Windows or by playing).** Explosive barrels, geo_05b's fuel dispensers
