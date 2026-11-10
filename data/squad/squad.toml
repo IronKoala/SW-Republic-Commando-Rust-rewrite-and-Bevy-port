@@ -192,6 +192,38 @@ calm_time = 4
 # Crouch in cover between bursts: "yes" or "no".
 crouch = "yes"
 
+# Squad ammo. In the original, squad mates never run out and never take
+# ammo boxes: only the player can take a box, and a squad mate whose gun
+# runs dry gets a fresh magazine for free (docs/RESEARCH.md, "Squad ammo
+# and ammo boxes"). So `limited` is "no" here, like the original.
+# Set it to "yes" (in a mod) to make squad mates count their shots and walk
+# to the level's ammo and grenade boxes when they run low. Those rules are
+# our own (docs/DESIGN.md, "Optional squad ammo").
+[ammo]
+limited = "no"
+# What they carry: a gun or grenade id (as data/pickups/ammo_boxes.toml
+# names them) = most carried, at the start. Anything not listed never runs
+# out. Game numbers from the squad's own guns (Properties package):
+# DC17mBlasterAmmoCommando MaxAmmo 300 and DC17mBlasterCommando
+# PickupAmmoCount 120; DC17mSniperAmmo 20; DC17mAntiArmorAmmoCommando 4;
+# ThermalDetonator MaxAmmo 5, InitAmmoAmount 2.
+carry_dc17m_blaster = 300, 120
+carry_dc17m_sniper = 20, 20
+carry_dc17m_antiarmor = 4, 4
+carry_thermal_detonator = 5, 2
+# What their grenades (Fixer's own, and grenade posts) use up.
+throws = "thermal_detonator"
+# Go for a box once a gun is at or below this share of the most carried.
+# Our own.
+fetch_below = 0.25
+# Only boxes this close to them and to the spot they're tied to, uu.
+# Our own.
+fetch_range = 1500
+# "no": in a fight they only go once the gun is empty. Our own.
+fetch_in_fights = "no"
+# Seconds before giving up on a box they can't reach. Our own.
+fetch_give_up = 15
+
 # Reviving a downed commando. Squad mates can't die in the original
 # (bCannotDie): at 0 health they go down until someone revives them. Who
 # goes to revive whom is our own rule (docs/DESIGN.md).

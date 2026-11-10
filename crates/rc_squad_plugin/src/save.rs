@@ -65,6 +65,9 @@ pub struct MemberSave {
     /// in order).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spawners_used: Vec<String>,
+    /// Shots and grenades left, only with `[ammo] limited` on.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ammo: std::collections::BTreeMap<String, u32>,
 }
 
 fn in_squad() -> String {
@@ -208,6 +211,7 @@ impl SavePart for SquadSave {
                             .get(i)
                             .map(|t| t.factories_used.clone())
                             .unwrap_or_default(),
+                        ammo: m.ammo.clone(),
                     }
                 })
                 .collect(),
@@ -306,6 +310,14 @@ fn put_back_squad(world: &mut World, d: &SquadSave) -> Vec<String> {
         m.down = s.down;
         m.revive = s.revive.as_deref().and_then(patient);
         m.script_move = None;
+        m.fetching = None;
+        // Only what this squad counts (a save made with `limited` off
+        // has none; one made with it on keeps its counts).
+        for (id, n) in m.ammo.iter_mut() {
+            if let Some(v) = s.ammo.get(id) {
+                *n = *v;
+            }
+        }
         m.presence = Presence::from_name(&s.presence).unwrap_or_else(|| {
             problems.push(format!("{}: unknown presence {:?}", s.name, s.presence));
             Presence::InSquad

@@ -7,6 +7,7 @@
 //! only needs the lines it changes. An unknown section or name, or a bad
 //! value, is an error naming the line, so a typo is reported, not ignored.
 
+use crate::ammo::{set_ammo, AmmoSettings};
 use crate::jobs::{default_jobs, AutoUse, JobKind, JobResult, JobSettings};
 use std::collections::BTreeMap;
 
@@ -217,6 +218,8 @@ pub struct SquadSettings {
     pub fight: FightSettings,
     pub revive: ReviveSettings,
     pub cover: CoverSettings,
+    /// Squad ammo and fetching boxes (off: never run out, as the original).
+    pub ammo: AmmoSettings,
     /// The marked jobs ("context orders"), in the order they're matched.
     pub jobs: Vec<JobSettings>,
     pub members: Vec<MemberSettings>,
@@ -325,6 +328,7 @@ impl Default for SquadSettings {
             fight: FightSettings::default(),
             revive: ReviveSettings::default(),
             cover: CoverSettings::default(),
+            ammo: AmmoSettings::default(),
             jobs: default_jobs(),
             members: vec![
                 MemberSettings {
@@ -420,6 +424,7 @@ impl SquadSettings {
                         | "fight"
                         | "revive"
                         | "cover"
+                        | "ammo"
                 ) {
                     return Err(format!("line {n}: unknown section [{section}]"));
                 }
@@ -525,6 +530,7 @@ impl SquadSettings {
             "fight" => set_fight(&mut self.fight, key, value)?,
             "revive" => set_revive(&mut self.revive, key, value)?,
             "cover" => set_cover(&mut self.cover, key, value)?,
+            "ammo" => set_ammo(&mut self.ammo, key, value)?,
             "formation_secure" => match key {
                 "radius" => self.secure_radius = one(value)?,
                 _ => return Err(unknown()),
@@ -617,6 +623,7 @@ impl SquadSettings {
             c.calm_time,
             if c.crouch { "yes" } else { "no" }
         ));
+        out.push(self.ammo.summary());
         out.extend(self.jobs.iter().map(JobSettings::summary));
         for m in &self.members {
             out.push(format!(

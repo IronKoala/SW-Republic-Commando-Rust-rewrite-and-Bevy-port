@@ -31,6 +31,9 @@ pub struct DirectorSave {
     /// Teleporters (level exits) a script or event switched.
     #[serde(default)]
     pub teleporter: Vec<TeleporterSave>,
+    /// Line-of-sight triggers: switched on, and used.
+    #[serde(default)]
+    pub sight: Vec<SightSave>,
     /// Events sent but not handed out yet (normally none).
     #[serde(default)]
     pub pending: Vec<EventSave>,
@@ -63,6 +66,13 @@ pub struct TriggerSave {
     pub touching: bool,
     pub used: bool,
     pub cooldown: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SightSave {
+    pub name: String,
+    pub enabled: bool,
+    pub triggered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -197,6 +207,15 @@ impl Director {
                     collide: t.collide,
                 })
                 .collect(),
+            sight: self
+                .sight
+                .iter()
+                .map(|t| SightSave {
+                    name: t.name.clone(),
+                    enabled: t.enabled,
+                    triggered: t.triggered,
+                })
+                .collect(),
             pending: self
                 .queue
                 .iter()
@@ -308,6 +327,15 @@ impl Director {
             };
             t.enabled = s.enabled;
             t.collide = s.collide;
+            r.restored += 1;
+        }
+        for s in &save.sight {
+            let Some(t) = self.sight.iter_mut().find(|x| same(&x.name, &s.name)) else {
+                r.unknown.push(s.name.clone());
+                continue;
+            };
+            t.enabled = s.enabled;
+            t.triggered = s.triggered;
             r.restored += 1;
         }
         self.queue = save

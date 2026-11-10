@@ -124,6 +124,7 @@ impl Squad {
                 let m = &mut self.members[i];
                 m.presence = Presence::Away;
                 m.engaging = None;
+                m.fetching = None;
                 m.revive = None;
                 m.fight.target = None;
                 m.state = MemberState::Idle;

@@ -15,6 +15,7 @@
 //! compiled code, which we don't read, so that part is our own. No game
 //! code is copied.
 
+pub mod ammo;
 pub mod cover;
 pub mod fight;
 pub mod jobs;
@@ -25,6 +26,7 @@ pub mod settings;
 pub mod squad;
 pub mod voice;
 
+pub use ammo::{AmmoSettings, SupplyBox};
 pub use cover::TakenCover;
 pub use fight::{FightState, Patient, Threat};
 pub use jobs::{AutoUse, JobKind, JobResult, JobSettings};
