@@ -382,18 +382,34 @@ pub fn anim_mesh_of(
     }
 }
 
-/// Whether an actor stops the player: `bCollideActors` and `bBlockPlayers`
-/// both on. Each comes from the map if the map sets it, otherwise from the
-/// actor's class defaults; if neither says, it counts as on (as before
-/// these flags were read). Props with either off, such as light shafts,
-/// fog cards or foliage, can be walked and shot through in the game.
-pub fn blocks_players(
+/// What an actor stops: players walking, and shots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Blocks {
+    /// `bCollideActors` and `bBlockPlayers` both on.
+    pub players: bool,
+    /// `bCollideActors` and `bBlockZeroExtentTraces` on, and the actor is
+    /// a shot target: `bProjTarget` on, or it blocks both actors and
+    /// players (`bBlockActors`, `bBlockPlayers`). This is how UE2 decides
+    /// whether a line (a hitscan shot, a bolt, a look) stops at an actor
+    /// (`AActor::ShouldTrace` with projectile targets, in the public UE2
+    /// headers' terms). Every `Prop` is a shot target by default.
+    pub shots: bool,
+}
+
+/// What an actor stops (`Blocks`). Each flag comes from the map if the map
+/// sets it, otherwise from the actor's class defaults; if neither says, it
+/// counts as on (as before these flags were read). Props with
+/// `bCollideActors` off, such as light shafts, fog cards or foliage, stop
+/// nothing. Some stop shots but not people: the Geonosian shield wall
+/// pieces of geo_04c (`K_GEO04_WallComponent`) are walked through in the
+/// game but can be shot to pieces.
+pub fn blocks(
     looks: &mut ClassLooks,
     map: &Package,
     map_data: &[u8],
     actor: usize,
     open: &mut dyn FnMut(&str) -> Option<Loaded>,
-) -> bool {
+) -> Blocks {
     let props = crate::actors::read_actor_properties(map, map_data, actor).unwrap_or_default();
     let mut look = None;
     let mut flag = |name: &str| -> bool {
@@ -414,5 +430,22 @@ pub fn blocks_players(
             _ => true,
         }
     };
-    flag("bCollideActors") && flag("bBlockPlayers")
+    let collide = flag("bCollideActors");
+    let players = collide && flag("bBlockPlayers");
+    let target = flag("bProjTarget") || (players && flag("bBlockActors"));
+    Blocks {
+        players,
+        shots: collide && flag("bBlockZeroExtentTraces") && target,
+    }
+}
+
+/// Whether an actor stops the player (`Blocks::players`).
+pub fn blocks_players(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    actor: usize,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> bool {
+    blocks(looks, map, map_data, actor, open).players
 }
