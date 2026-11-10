@@ -62,7 +62,12 @@ pub struct LevelPlugin;
 
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((sky::SkyPlugin, BumpMapPlugin, prop_light::PropLightPlugin))
+        app.add_plugins((
+            sky::SkyPlugin,
+            BumpMapPlugin,
+            prop_light::PropLightPlugin,
+            rc_hologram::HologramPlugin,
+        ))
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
             .add_message::<rc_game_core::PropAnim>()
@@ -298,8 +303,17 @@ impl MoveWorld for WithParts {
 #[derive(Resource)]
 struct Countdown(u32);
 
-fn begin(mut commands: Commands, mut gate: ResMut<LoadingGate>) {
+fn begin(
+    mut commands: Commands,
+    mut gate: ResMut<LoadingGate>,
+    paths: Option<Res<GamePaths>>,
+) {
     gate.wait(PART);
+    // Where rc_hologram reads the game's own hologram glow and noise
+    // pictures from.
+    if let Some(paths) = paths {
+        commands.insert_resource(rc_hologram::HologramGameData(paths.game_data()));
+    }
     commands.insert_resource(Countdown(3));
 }
 
