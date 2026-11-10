@@ -320,6 +320,7 @@ fn draw_layout(
     roots: Query<Entity, With<LayoutRoot>>,
     mut image_assets: ResMut<Assets<Image>>,
     log: Res<GameLog>,
+    use_item: Option<Res<rc_game_core::UseItem>>,
 ) {
     let original = &mut *original;
     if !original.working {
@@ -342,6 +343,12 @@ fn draw_layout(
     if let Some((text, left)) = &original.pickup {
         now.pickup = text.clone();
         now.pickup_fade = layout.pickup_message.strength(*left);
+    }
+    // A use prompt ("PRESS AND HOLD F TO HEAL") goes where the game's
+    // other prompts go, and wins over a pickup message.
+    if let Some(p) = use_item.as_ref().and_then(|u| u.prompt.as_ref()) {
+        now.pickup = p.clone();
+        now.pickup_fade = 1.0;
     }
     let max_aspect = settings.video.hud_max_aspect;
     let key = (now, [w as u32, h as u32], max_aspect.to_bits());

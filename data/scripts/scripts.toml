@@ -75,17 +75,21 @@ pull_speed = 300
 turn_speed = 360
 # The squad marker hologram: a see-through commando at the dispenser's
 # squad spot, showing where a squad mate stands to heal. The model is the
-# game's own (MarkerGetBacta's icon). It shows while the dispenser is
-# switched on and you are within hologram_range units (the game's
-# TargetingDistance). Blue when a squad mate is hurt; red when the squad is
-# at full health ("SQUAD HEALTH CURRENTLY AT MAXIMUM"). The colours are
-# the game's (SquadMarker EnabledColor, OmitColor); the brightness (0 to
-# 1) is our guess. hologram = "" turns it off.
+# game's own (MarkerGetBacta's icon). As in the game, it fades in only
+# while your crosshair is on that spot, within hologram_range units (the
+# game's TargetingDistance), and only when a squad mate needs healing. It
+# is hidden while the dispenser is in use or recharging. The colour is the
+# game's (SquadMarker EnabledColor); the brightness (0 to 1) and the fade
+# time are our guesses. hologram = "" turns it off.
 hologram = "MarkerIcons.Revive.reviveSM1BactaDispenser"
 hologram_range = 3000
 hologram_colour = [122, 206, 255]
-hologram_full_colour = [254, 126, 122]
 hologram_brightness = 0.6
+hologram_fade_seconds = 0.25
+# The line shown while you stand at a dispenser you can use; @ becomes the
+# Use button. Empty means the game's own text (BactaDispenser's
+# ActivatePromptText, read from ctgame.u: "PRESS AND HOLD @ TO HEAL").
+prompt = ""
 # Sounds, from the game's HUD (CTHUDDefaults): the crosshair moving onto a
 # dispenser (TargetMarker), healing (HealthRecharging, repeats while you
 # heal) and health full (HealthCharged). "" for none.

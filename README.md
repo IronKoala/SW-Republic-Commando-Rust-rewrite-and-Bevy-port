@@ -319,9 +319,10 @@ copy of the game.
   with the game's files, not yet on Windows or by playing): holding Use
   pulls you in front of the dispenser, turns you to face it and holds you
   there until you're full or let go; the original's use panel turns round
-  the crosshair as your health fills; the squad marker hologram (a
-  see-through commando) stands where a squad mate would heal, blue when one
-  is hurt and red when the squad is full; and the helmet's own sounds play
+  the crosshair as your health fills; "PRESS AND HOLD F TO HEAL" shows
+  when you can use it (nothing happens at full health); the squad marker
+  hologram (a see-through commando) fades in where a squad mate would heal
+  when you aim at that spot and a squad mate is hurt; and the helmet's own sounds play
   when you aim at it, while healing and when full. When each sound plays
   and how the panel moves are our reading (native code); the arm plugging
   in and the zap effect aren't done. Settings: `[bacta]` in

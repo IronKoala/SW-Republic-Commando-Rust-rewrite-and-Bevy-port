@@ -1608,12 +1608,23 @@ class defaults with `rc_probe --classes`:
   `IconMesh` `MarkerIcons.Revive.reviveSM1BactaDispenser`: a see-through
   commando, 183 units tall, origin at the feet, drawn with a hologram
   shader (`HsHologram` HoloMarkerClone). One is placed at each dispenser's
-  squad spot, on the dispenser's floor, facing it. Shown while the
-  dispenser is switched on, not in use, and the player is within
-  `TargetingDistance` (3000, SquadMarker); tinted `EnabledColor` (blue)
-  when a squad mate is hurt, `OmitColor` (red) when the squad is full
-  (the marker's "SQUAD HEALTH CURRENTLY AT MAXIMUM"). Drawn as a flat
-  additive tint; the flickering hologram shader is `rc_hologram`'s job.
+  squad spot, on the dispenser's floor, facing it. When it shows comes
+  from the game's own scripts (engine.u `SquadMarker`, ctgame.u
+  `BactaDispenser`, `CTPlayerController`): the player's controller tells
+  the marker it is targeted, and `UpdateIcons` shows the icons unless the
+  marker is irrelevant (`MarkerGetBacta::IsRelevantFor`: a squad mate
+  below `HL_Green`, read here as below full health). The dispenser makes
+  its marker obsolete while in use and while recharging. So the hologram
+  fades in only while the crosshair is on the squad spot within
+  `TargetingDistance` (3000), a squad mate is hurt and the dispenser is
+  free, and fades out otherwise (fade time our guess). Tinted
+  `EnabledColor`. Drawn as a flat additive tint; the flickering hologram
+  shader is `rc_hologram`'s job.
+- **Prompt.** BactaDispenser's `ActivatePromptText` ("PRESS AND HOLD @
+  TO HEAL"), read from ctgame.u at load (`[bacta] prompt` overrides it),
+  with `@` as the Use button, drawn where the HUD's pickup message goes
+  while the player stands at a usable dispenser. As in
+  `CTPlayerController::Use`, Use does nothing at full health.
 - **Sounds.** The HUD's own (`CTHUDDefaults`): `TargetMarker`
   (int_GEN_retCrossZoom_01) when the crosshair moves onto a usable
   dispenser's collision cylinder, `HealthRecharging`
@@ -1626,8 +1637,9 @@ class defaults with `rc_probe --classes`:
   `[use_panel] turn` in `data/ui/hud.toml`) while working.
 - **Our readings, not checked against the original** (it doesn't run on
   the user's PC right now): when each sound plays, how the outer panel
-  moves, the pull's speed, that the hologram hides while in use, and its
-  brightness. Not done: the first-person arm plugging in
+  moves (the original draws it in native code; the user says ours doesn't
+  match, being reworked), the pull's speed, the hologram's brightness and
+  fade. Not done: the first-person arm plugging in
   (`BactaHealer`, `HudArms.HudArmsBacta` with BactaLoad/BactaLoop/
   BactaHolster), the zap effects, and `HUDIconX/Y` (an icon over the
   dispenser).

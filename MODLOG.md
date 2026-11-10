@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Bacta dispenser: hologram and prompt as in the original's scripts (rc_scripts, rc_scripts_plugin, rc_game)
+
+- **Changed:** The squad marker hologram now fades in only while the crosshair is on the squad spot, a squad mate is hurt and the dispenser is free (not in use, not recharging); no red "squad full" hologram. The dispenser shows the game's own "PRESS AND HOLD F TO HEAL" (BactaDispenser `ActivatePromptText`, read from ctgame.u). Use at full health does nothing. `[bacta]` gains `hologram_fade_seconds` and `prompt`, loses `hologram_full_colour`.
+- **Why:** User: "there's no clone hologram when self healing, that's also not what the UI looks like. can you look at the original files?" The original's scripts (SquadMarker, BactaDispenser, CTPlayerController in engine.u and ctgame.u) say when the marker icons show and give the prompt text.
+- **Tested how:** `cargo test -p rc_game_core -p rc_scripts -p rc_scripts_plugin -p rc_menus`; `rc_game --script` in the cloud with the game's files.
+- **Result:** 127 passed, 2 failed (the same 2 level-line checks as before). New checks: no hologram with the squad full; `a squad mate is hurt` then `hologram BactaDispenserGEO0 fades in`; prompt `"PRESS AND HOLD F TO HEAL"`; no hologram while healing.
+- **Still broken / not tested:** Not tested on Windows. The ring round the crosshair is still our guess (native code); asked the user what the original shows. The prompt shows when standing near, not only when the crosshair is on the dispenser.
+- **Next:** Rework the use panel from the user's description.
+
 ## 2026-11-10: Bacta dispenser: pull and hold, hologram, heal sounds and use panel (rc_game_core, rc_scripts, rc_scripts_plugin, rc_game, rc_menus)
 
 - **Changed:** New `rc_game_core::UseItem` (a `UseLock` spot and facing, and a `UsePanel` state) and `ActionState::hold_for_use`. New `crates/rc_scripts_plugin/src/bacta.rs` (the bacta system moved here from lib.rs): pulls and holds the player 90 units in front of the dispenser while healing, places the squad marker hologram (`MarkerIcons.Revive.reviveSM1BactaDispenser`) at each dispenser's squad spot, and plays the HUD's aim, healing and health-full sounds. `rc_game/src/player.rs` carries out the pull; `cutscene.rs` holds the controls; `original_hud.rs` draws the original's use panel pictures round the crosshair (`[use_panel]` in `data/ui/hud.toml`). New `[bacta]` values in `data/scripts/scripts.toml`. 3 new `rc_game --script` checks.

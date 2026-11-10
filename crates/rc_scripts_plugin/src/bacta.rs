@@ -13,12 +13,17 @@
 //! - **The hologram.** The squad marker's see-through commando
 //!   (`MarkerIcons.Revive.reviveSM1BactaDispenser`, `MarkerGetBacta`'s
 //!   icon) stands at the dispenser's squad spot (its `NavPts` marker),
-//!   facing it, showing where a squad mate heals. It shows while the
-//!   dispenser is switched on, not in use, and the player is within the
-//!   marker's `TargetingDistance`: blue (`EnabledColor`) when a squad
-//!   mate is hurt, red (`OmitColor`) when the whole squad is at full
-//!   health. Drawn as a flat see-through tint for now; the original's
-//!   flickering hologram shader is another thread's work (`rc_hologram`).
+//!   facing it, showing where a squad mate heals. As in the game's
+//!   `SquadMarker` script, it fades in only while the crosshair is on that
+//!   spot within the marker's `TargetingDistance`, and only when the
+//!   marker is relevant (`MarkerGetBacta`: a squad mate below full
+//!   health). It is hidden while the dispenser is in use or recharging
+//!   (the dispenser's script makes its marker obsolete then). Colour
+//!   `EnabledColor`. Drawn as a flat see-through tint for now; the
+//!   original's flickering hologram shader is another thread's work.
+//! - **The prompt**: "PRESS AND HOLD F TO HEAL" (the dispenser's
+//!   `ActivatePromptText`, read from the game) while you stand at one you
+//!   can use. As in the game, Use does nothing at full health.
 //! - **Sounds** (the game's HUD sounds, `CTHUDDefaults`): `TargetMarker`
 //!   when the crosshair moves onto a usable dispenser, `HealthRecharging`
 //!   over and over while healing, `HealthCharged` at full health. Heard
@@ -36,8 +41,8 @@ use bevy::prelude::*;
 use rc_combat::{GameSound, Health};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
-    Action, ActionState, GameLog, GamePaths, GameState, Player, PlayerCamera, SquadReadout,
-    SquadStatus, UseItem, UseLock, UsePanel,
+    Action, ActionState, GameLog, GamePaths, GameState, InputPrompts, Player, PlayerCamera,
+    SquadReadout, SquadStatus, UseItem, UseLock, UsePanel,
 };
 use rc_level_viewer::materials::Materials;
 use std::collections::HashMap;
@@ -53,10 +58,12 @@ const AIM_RADIUS: f32 = 40.0;
 /// BactaDispenserGEO's `CollisionHeight`.
 const HALF_HEIGHT: f32 = 120.0;
 
-/// The sounds and hologram look, read while the level loads.
+/// The sounds, hologram look and prompt, read while the level loads.
 #[derive(Resource, Default)]
 pub struct BactaAssets {
     sounds: HashMap<String, GameSound>,
+    /// The prompt line, `@` for the Use button.
+    prompt: Option<String>,
     /// The hologram's sections, in the model's own space (Unreal units).
     hologram: Vec<HoloPart>,
     /// Why something couldn't be read.
@@ -71,7 +78,16 @@ type HoloPart = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>);
 #[derive(Component)]
 pub struct BactaHologram {
     pub dispenser: String,
+    /// Where it stands (its feet), Unreal units.
+    pub feet: [f32; 3],
+    /// How far faded in, 0 (gone) to 1.
+    pub alpha: f32,
 }
+
+/// The hologram's size for "the crosshair is on it": the model is about
+/// 180 units tall and 70 across (our reading of its points).
+const HOLO_RADIUS: f32 = 40.0;
+const HOLO_HALF_HEIGHT: f32 = 92.0;
 
 /// The healing sound while it plays.
 #[derive(Component)]
@@ -85,8 +101,11 @@ pub struct BactaStats {
     /// Holograms on screen now, and how many have ever been.
     pub holograms_shown: usize,
     pub holograms_ever_shown: bool,
-    /// The hologram colour shown last (sRGB 0 to 255).
-    pub hologram_colour: Option<[u8; 3]>,
+    /// Times a hologram started to show while the player was healing (it
+    /// never should).
+    pub holograms_while_healing: usize,
+    /// The prompt shown last.
+    pub prompt: Option<String>,
     /// Sounds played, by setting name ("aim", "healing", "full").
     pub sounds: Vec<String>,
     /// Times the player was pulled to a dispenser, and the furthest the
@@ -151,6 +170,17 @@ pub(crate) fn prepare(
             }
         }
     }
+    assets.prompt = if s.bacta_prompt.is_empty() {
+        match read_prompt(&paths) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                assets.problems.push(format!("bacta prompt: {e}"));
+                None
+            }
+        }
+    } else {
+        Some(s.bacta_prompt.clone())
+    };
     if !s.bacta_hologram.is_empty() {
         match read_hologram(&paths, &s.bacta_hologram) {
             Ok(sections) => assets.hologram = sections,
@@ -168,6 +198,26 @@ pub(crate) fn prepare(
         }
     ));
     commands.insert_resource(assets);
+}
+
+/// The game's own prompt for a dispenser: BactaDispenser's
+/// `ActivatePromptText` in ctgame.u ("PRESS AND HOLD @ TO HEAL").
+fn read_prompt(paths: &GamePaths) -> Result<String, String> {
+    use rc_package::class_library::{ClassLibrary, DefaultValue};
+    let mut lib = ClassLibrary::new();
+    for name in ["Core", "Engine", "CTGame"] {
+        let path = paths.game_file(&format!("GameData/System/{name}.u"));
+        let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        lib.add_package(name, data)
+            .map_err(|e| format!("{name}.u: {e}"))?;
+    }
+    let d = lib.defaults("BactaDispenser");
+    match d.get("ActivatePromptText").map(|e| &e.value) {
+        Some(DefaultValue::Raw(b)) => rc_package::Reader::new(b)
+            .fstring()
+            .map_err(|e| e.to_string()),
+        _ => Err("BactaDispenser sets no ActivatePromptText".into()),
+    }
 }
 
 /// The hologram model `Package.Group.Name`, one entry per section.
@@ -271,6 +321,8 @@ pub(crate) fn place_holograms(
             .spawn((
                 BactaHologram {
                     dispenser: d.name.clone(),
+                    feet: base,
+                    alpha: 0.0,
                 },
                 Transform::default(),
                 Visibility::Hidden,
@@ -292,7 +344,7 @@ pub(crate) fn place_holograms(
             )
             .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, tex.clone())
             .with_inserted_indices(Indices::U32(idx.clone()));
-            let material = materials.add(hologram_material(colour, s.bacta_hologram_brightness));
+            let material = materials.add(hologram_material(colour, 0.0));
             let child = commands
                 .spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(material)))
                 .id();
@@ -329,83 +381,96 @@ fn hologram_material(colour: [u8; 3], brightness: f32) -> StandardMaterial {
     }
 }
 
-/// Show each hologram while its dispenser is switched on, not in use, and
-/// the player is near; blue when a squad mate is hurt, red when none is.
+/// Fade each hologram in while the crosshair is on it and a squad mate
+/// could use its dispenser, and out otherwise. See the top of this file.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn show_holograms(
+    time: Res<Time>,
     script: Option<Res<LevelScript>>,
     squad: Res<SquadReadout>,
-    player: Query<&Transform, With<Player>>,
-    mut holos: Query<(&BactaHologram, &mut Visibility, &Children)>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut holos: Query<(&mut BactaHologram, &mut Visibility, &Children)>,
     looks: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut stats: Option<ResMut<BactaStats>>,
-    mut last_colour: Local<Option<[u8; 3]>>,
     log: Res<GameLog>,
 ) {
     let Some(script) = script else { return };
-    let Ok(t) = player.single() else { return };
-    let feet = to_unreal(t.translation);
     let s = &script.director.settings;
-    let hurt = squad
+    let aim = camera
+        .single()
+        .ok()
+        .map(|c| (to_unreal(c.translation()), to_unreal(c.forward().as_vec3())));
+    // MarkerGetBacta is relevant while a squad mate is below full health.
+    let relevant = squad
         .members
         .iter()
         .any(|m| m.health < 0.999 || m.status == SquadStatus::Incapacitated);
-    let colour = if hurt {
-        s.bacta_hologram_colour
+    let healing = script.dispensers.iter().any(|d| d.in_use);
+    let step = if s.bacta_hologram_fade_seconds > 0.0 {
+        time.delta_secs() / s.bacta_hologram_fade_seconds
     } else {
-        s.bacta_hologram_full_colour
+        1.0
     };
-    let recolour = *last_colour != Some(colour);
-    if recolour {
-        *last_colour = Some(colour);
-    }
     let mut shown = 0;
-    for (h, mut vis, children) in &mut holos {
+    for (mut h, mut vis, children) in &mut holos {
         let Some(d) = script.dispensers.iter().find(|d| d.name == h.dispenser) else {
             continue;
         };
-        let dx = feet.x - d.location[0];
-        let dy = feet.y - d.location[1];
-        let dz = feet.z - d.location[2];
-        let near = (dx * dx + dy * dy + dz * dz).sqrt() < s.bacta_hologram_range;
-        let want = if d.enabled && !d.in_use && near {
+        let free = d.enabled && !d.in_use && d.recharge_left <= 0.0;
+        let centre = [h.feet[0], h.feet[1], h.feet[2] + HOLO_HALF_HEIGHT];
+        let targeted = aim.is_some_and(|(eye, dir)| {
+            aims_at_cylinder(
+                eye,
+                dir,
+                centre,
+                HOLO_RADIUS,
+                HOLO_HALF_HEIGHT,
+                s.bacta_hologram_range,
+            )
+        });
+        let want = free && relevant && targeted;
+        let before = h.alpha;
+        h.alpha = if want {
+            (h.alpha + step).min(1.0)
+        } else {
+            (h.alpha - step).max(0.0)
+        };
+        if before <= 0.0 && h.alpha > 0.0 {
+            log.line(format!("{PART}: bacta: hologram {} fades in", h.dispenser));
+            if let Some(stats) = stats.as_mut() {
+                stats.holograms_ever_shown = true;
+                if healing {
+                    stats.holograms_while_healing += 1;
+                }
+            }
+        }
+        let target = if h.alpha > 0.0 {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
-        if want != Visibility::Hidden {
+        if *vis != target {
+            *vis = target;
+        }
+        if h.alpha > 0.0 {
             shown += 1;
         }
-        if *vis != want {
-            *vis = want;
-        }
-        if recolour {
+        if h.alpha != before {
             for c in children.iter() {
                 if let Ok(m) = looks.get(c) {
                     if let Some(mut mat) = materials.get_mut(&m.0) {
-                        mat.base_color =
-                            Color::LinearRgba(tint(colour, s.bacta_hologram_brightness));
+                        mat.base_color = Color::LinearRgba(tint(
+                            s.bacta_hologram_colour,
+                            s.bacta_hologram_brightness * h.alpha,
+                        ));
                     }
                 }
             }
         }
     }
     if let Some(stats) = stats.as_mut() {
-        if stats.holograms_shown != shown {
-            log.line(format!(
-                "{PART}: bacta: {shown} hologram(s) showing ({})",
-                if hurt {
-                    "blue: a squad mate is hurt"
-                } else {
-                    "red: squad at full health"
-                }
-            ));
-        }
         stats.holograms_shown = shown;
-        stats.holograms_ever_shown |= shown > 0;
-        if shown > 0 {
-            stats.hologram_colour = Some(colour);
-        }
     }
 }
 
@@ -421,7 +486,7 @@ pub(crate) fn heal(
     (mut claimed, mut use_item): (ResMut<rc_game_core::UseClaimed>, ResMut<UseItem>),
     mut anims: MessageWriter<rc_game_core::PropAnim>,
     (assets, mut stats): (Option<Res<BactaAssets>>, Option<ResMut<BactaStats>>),
-    healing_sound: Query<Entity, With<HealingSound>>,
+    (healing_sound, prompts): (Query<Entity, With<HealingSound>>, Option<Res<InputPrompts>>),
     mut commands: Commands,
     mut aimed: Local<bool>,
 ) {
@@ -429,6 +494,7 @@ pub(crate) fn heal(
     let Some(mut script) = script else {
         use_item.lock = None;
         use_item.panel = UsePanel::Hidden;
+        use_item.prompt = None;
         return;
     };
     let Ok((t, health)) = player.single_mut() else {
@@ -440,6 +506,9 @@ pub(crate) fn heal(
     let s = script.director.settings.clone();
     let now = script.director.time;
     let mut health = health;
+    // The game's PlayerController: Use at a dispenser does nothing at
+    // full health.
+    let hurt = health.as_deref().is_some_and(|h| h.current < h.max);
     let mut fire = Vec::new();
     let mut healed = 0.0;
     let mut lock = None;
@@ -472,7 +541,7 @@ pub(crate) fn heal(
                 }
             }
         }
-        let can = near && using && ready;
+        let can = near && using && ready && (hurt || d.in_use);
         if can && !d.in_use {
             d.in_use = true;
             log.line(format!(
@@ -572,6 +641,26 @@ pub(crate) fn heal(
         stats.panel_best = stats.panel_best.max(p);
     }
     use_item.panel = panel;
+    // The prompt, while standing at one that can be used.
+    let prompt = (panel == UsePanel::Ready)
+        .then(|| assets.as_ref().and_then(|a| a.prompt.as_deref()))
+        .flatten()
+        .map(|p| {
+            let key = prompts
+                .as_ref()
+                .and_then(|p| p.label(Action::Use))
+                .unwrap_or("USE");
+            p.replace('@', &key.to_uppercase())
+        });
+    if prompt != use_item.prompt {
+        if let Some(p) = &prompt {
+            log.line(format!("{PART}: t={now:.2} bacta: prompt \"{p}\""));
+            if let Some(stats) = stats.as_mut() {
+                stats.prompt = Some(p.clone());
+            }
+        }
+        use_item.prompt = prompt;
+    }
     // Sounds: the healing one repeats while healing.
     let sound_of = |k: &str| {
         assets
@@ -620,6 +709,20 @@ pub fn aims_at(
     centre: [f32; 3],
     range: f32,
 ) -> bool {
+    aims_at_cylinder(eye, dir, centre, AIM_RADIUS, HALF_HEIGHT, range)
+}
+
+/// Whether a line from `eye` along `dir` passes through an upright
+/// cylinder (`radius`, `half_height` above and below `centre`) within
+/// `range`.
+pub fn aims_at_cylinder(
+    eye: rc_movement::Vec3,
+    dir: rc_movement::Vec3,
+    centre: [f32; 3],
+    radius: f32,
+    half_height: f32,
+    range: f32,
+) -> bool {
     let flat = (dir.x * dir.x + dir.y * dir.y).sqrt();
     if flat < 1e-6 {
         return false;
@@ -636,7 +739,7 @@ pub fn aims_at(
     // Height of the line there.
     let z = eye.z + dir.z / flat * along;
     let dist = along * len / flat;
-    side < AIM_RADIUS && (z - centre[2]).abs() < HALF_HEIGHT && dist < range
+    side < radius && (z - centre[2]).abs() < half_height && dist < range
 }
 
 /// Where a dispenser at `location` facing `yaw` holds the player: `offset`

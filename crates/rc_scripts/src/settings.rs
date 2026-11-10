@@ -57,14 +57,17 @@ pub struct Settings {
     /// The squad marker hologram shown at a dispenser's squad spot, as
     /// `Package.Group.Mesh`; empty for none.
     pub bacta_hologram: String,
-    /// How near (uu) the player must be to see the hologram.
+    /// How far (uu) the crosshair reaches to show the hologram.
     pub bacta_hologram_range: f32,
-    /// The hologram's colour (sRGB, 0 to 255) when a squad mate could use
-    /// the dispenser, and when none needs to.
+    /// The hologram's colour (sRGB, 0 to 255).
     pub bacta_hologram_colour: [u8; 3],
-    pub bacta_hologram_full_colour: [u8; 3],
+    /// Seconds the hologram takes to fade in or out.
+    pub bacta_hologram_fade_seconds: f32,
     /// How bright the hologram is drawn, 0 to 1.
     pub bacta_hologram_brightness: f32,
+    /// The line shown while you can use a dispenser; `@` is the Use
+    /// button. Empty: the game's own (BactaDispenser `ActivatePromptText`).
+    pub bacta_prompt: String,
     /// Sounds (`Package.Group.Name`, empty for none): the crosshair moves
     /// onto a dispenser; healing (repeats); health full.
     pub bacta_sound_aim: String,
@@ -107,7 +110,8 @@ impl Default for Settings {
             bacta_hologram_range: 3000.0,
             // SquadMarker's EnabledColor and OmitColor (System/engine.u).
             bacta_hologram_colour: [122, 206, 255],
-            bacta_hologram_full_colour: [254, 126, 122],
+            bacta_hologram_fade_seconds: 0.25,
+            bacta_prompt: String::new(),
             bacta_hologram_brightness: 0.6,
             // CTHUDDefaults (Properties/properties.u): TargetMarker,
             // HealthRecharging, HealthCharged.
@@ -163,7 +167,8 @@ struct Bacta {
     hologram: Option<String>,
     hologram_range: Option<f32>,
     hologram_colour: Option<[u8; 3]>,
-    hologram_full_colour: Option<[u8; 3]>,
+    hologram_fade_seconds: Option<f32>,
+    prompt: Option<String>,
     hologram_brightness: Option<f32>,
     sound_aim: Option<String>,
     sound_healing: Option<String>,
@@ -262,8 +267,11 @@ impl Settings {
         if let Some(v) = b.hologram_colour {
             self.bacta_hologram_colour = v;
         }
-        if let Some(v) = b.hologram_full_colour {
-            self.bacta_hologram_full_colour = v;
+        if let Some(v) = b.hologram_fade_seconds {
+            self.bacta_hologram_fade_seconds = v.max(0.0);
+        }
+        if let Some(v) = b.prompt {
+            self.bacta_prompt = v;
         }
         if let Some(v) = b.hologram_brightness {
             self.bacta_hologram_brightness = v.clamp(0.0, 1.0);

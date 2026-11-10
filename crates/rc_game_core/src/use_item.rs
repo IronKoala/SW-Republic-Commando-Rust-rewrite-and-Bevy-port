@@ -3,8 +3,9 @@
 //!
 //! The level scripts part knows the dispensers and fills in [`UseItem`]
 //! every frame; the player part reads [`UseItem::lock`] to pull the body
-//! into place and hold it there, and the HUD reads [`UseItem::panel`] to
-//! draw the use panel round the crosshair. Nothing here assumes a flat
+//! into place and hold it there, and the HUD reads [`UseItem::panel`] and
+//! [`UseItem::prompt`] to draw the use panel round the crosshair and the
+//! "PRESS AND HOLD" line. Nothing here assumes a flat
 //! screen or a mouse: a VR mod can show the same lock and progress its
 //! own way.
 
@@ -19,6 +20,10 @@ pub struct UseItem {
     pub lock: Option<UseLock>,
     /// The use panel round the crosshair.
     pub panel: UsePanel,
+    /// The line the HUD shows while the crosshair is on something usable
+    /// (the original's `ActivatePromptText`, "PRESS AND HOLD F TO HEAL"),
+    /// with the Use button's name already filled in.
+    pub prompt: Option<String>,
 }
 
 /// Where a used thing holds the player.

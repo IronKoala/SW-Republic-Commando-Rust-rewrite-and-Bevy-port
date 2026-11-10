@@ -868,11 +868,38 @@ fn steps() -> Vec<Step> {
             }
         }),
         Check(
-            "the squad marker hologram stands at the dispenser, and aiming at it plays its sound",
-            bacta_hologram_shown,
+            "the hologram shows only if a squad mate is hurt, and aiming at the dispenser plays its sound",
+            |w| {
+                let hurt = w
+                    .resource::<rc_game_core::SquadReadout>()
+                    .members
+                    .iter()
+                    .any(|m| m.health < 0.999);
+                bacta_hologram_shown(w, hurt)
+            },
+        ),
+        // A squad mate gets hurt: now aiming at the squad spot fades the
+        // hologram in.
+        Note(bacta_hurt_a_squad_mate),
+        Wait(0.5),
+        Check(
+            "with a squad mate hurt, aiming at the squad spot shows the hologram",
+            |w| bacta_hologram_shown(w, true),
         ),
         Note(level_script_stand_at_dispenser),
         Wait(0.5),
+        Check("the game's own prompt shows at the dispenser", |w| {
+            let st = w
+                .get_resource::<rc_scripts_plugin::bacta::BactaStats>()
+                .cloned()
+                .ok_or("no bacta stats")?;
+            match &st.prompt {
+                Some(p) if p.starts_with("PRESS AND HOLD") && p.ends_with("TO HEAL") => {
+                    Ok(format!("\"{p}\""))
+                }
+                other => Err(format!("{other:?}")),
+            }
+        }),
         Check("the use panel shows round the crosshair at the dispenser", |w| {
             let parts = crate::original_hud::use_panel_showing(w);
             if parts.iter().any(|p| p == "Ready") {
@@ -2742,21 +2769,37 @@ fn level_script_view_dispenser(w: &mut World) {
     }
 }
 
-/// The landing zone dispenser's hologram is placed and showing, and the
-/// crosshair moving onto the dispenser played the aim sound.
-fn bacta_hologram_shown(w: &mut World) -> Result<String, String> {
+/// The landing zone dispenser's hologram is placed; it shows only when
+/// `want` (a squad mate is hurt and the crosshair is on the squad spot);
+/// the crosshair on the dispenser played the aim sound.
+fn bacta_hologram_shown(w: &mut World, want: bool) -> Result<String, String> {
     let st = w
         .get_resource::<rc_scripts_plugin::bacta::BactaStats>()
         .cloned()
         .ok_or("no bacta stats")?;
     let msg = format!(
-        "{} placed, {} showing, colour {:?}, sounds {:?}",
-        st.holograms, st.holograms_shown, st.hologram_colour, st.sounds
+        "{} placed, {} showing, sounds {:?}",
+        st.holograms, st.holograms_shown, st.sounds
     );
-    if st.holograms >= 1 && st.holograms_shown >= 1 && st.sounds.iter().any(|s| s == "aim") {
+    let showing = st.holograms_shown >= 1;
+    if st.holograms >= 1 && showing == want && st.sounds.iter().any(|s| s == "aim") {
         Ok(msg)
     } else {
         Err(msg)
+    }
+}
+
+/// Take some health off the first squad mate (the bacta marker is only
+/// for a hurt squad).
+fn bacta_hurt_a_squad_mate(w: &mut World) {
+    let log = w.resource::<GameLog>().clone();
+    let mut q = w.query_filtered::<&mut rc_combat::Health, With<rc_squad_plugin::SquadMate>>();
+    if let Some(mut h) = q.iter_mut(w).next() {
+        h.current = (h.current - h.max * 0.4).max(1.0);
+        log.line(format!(
+            "script: a squad mate is hurt, health {:.0} of {:.0}",
+            h.current, h.max
+        ));
     }
 }
 
@@ -2769,6 +2812,12 @@ fn bacta_pull_and_panel(w: &mut World) -> Result<String, String> {
         .cloned()
         .ok_or("no bacta stats")?;
     let stand = st.last_stand.ok_or("never pulled")?;
+    if st.holograms_while_healing > 0 {
+        return Err(format!(
+            "a hologram showed {} time(s) while the player healed",
+            st.holograms_while_healing
+        ));
+    }
     let at = feet(w).ok_or("no player")?;
     let off = ((at.x - stand[0]).powi(2) + (at.y - stand[1]).powi(2)).sqrt();
     let msg = format!(
@@ -2801,6 +2850,12 @@ fn level_script_stand_at_dispenser(w: &mut World) {
     };
     let spot = d.stand.unwrap_or(d.location);
     let log = w.resource::<GameLog>().clone();
+    // Hurt, so Use at the dispenser does something (at full health it
+    // doesn't, as in the game).
+    let mut q = w.query_filtered::<&mut rc_combat::Health, With<Player>>();
+    for mut h in q.iter_mut(w) {
+        h.current = h.current.min(h.max - 60.0).max(1.0);
+    }
     let mut q = w.query_filtered::<&mut Body, With<Player>>();
     for mut b in q.iter_mut(w) {
         b.pawn.location = rc_movement::Vec3::new(spot[0], spot[1], spot[2] + 10.0);
