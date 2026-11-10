@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-10: Holograms shimmer and flicker like the original (rc_hologram, rc_level_viewer, rc_cast, rc_level_plugin, rc_image)
+
+- **Changed:** New crate `rc_hologram` (`HologramPlugin`, `Hologram`, `HologramMaterial`, `HologramLook`, shader `hologram.wesl`). `draw::spawn_level` and `rc_cast` mark hologram meshes; `rc_level_plugin` and `rc_level_viewer` add the plugin and tell it the `GameData` folder. `rc_image::hologram` uses the shader's brightness weights (0.5, 0.6, 0.5, capped). New check `rc_level_viewer/examples/hologram_check.rs`. `docs/DESIGN.md`: "Shimmer and flicker".
+- **Why:** User: holograms glow now, but don't flicker or shimmer like the original.
+- **Tested how:** Read the game's `DynamicHologram` shader text and constants from `hardwareshaders.utx` (read only, nothing copied). In the cloud: `cargo test -p rc_hologram -p rc_image`; `hologram_check` with and without the game's pictures; `rc_game --map pro --frames 300`.
+- **Result:** `hologram_check`: 6 passed, 0 failed (rim 0.17 of the middle; middle brightness 160 to 224 across 36 pictures; speckle change 0.016). Without game files: 5 passed (speckle not checked). pro: "holograms: 34 more meshes shimmer (34 in all, game pictures: true)". Picture: `holograms/hologram_flicker_three_moments.png` in the project files.
+- **Still broken / not tested:** Not tested on Windows or by playing, and not looked at in the prologue itself (only counted). Not compared with the original game (it doesn't run right now). The flicker's meaning and rate are guesses (see DESIGN). Whether `HologramColor`'s alpha dims them is an open question. Level holograms squash towards their batch's bottom middle, not each prop's own origin.
+- **Next:** The user looks at the prologue's hologram rifles and advisor.
+
 ## 2026-11-10: Clone babies get shading, holograms glow (rc_level_viewer, rc_model, rc_cast, rc_image, rc_level)
 
 - **Changed:** `rc_level_viewer::scene::unbaked_prop_light` lights props that have no stored light from the map's lights (`Stats::props_lit_from_lights`, `Placement::unlit` from `bUnlit`). `rc_image::hologram`, `tint`, `unreal_color`. `materials.rs`: `HsHologram` pictures (`Picture::hologram`), `HsFalloff` tints, `FinalBlend` alpha blending (`Picture::blend`); `draw.rs` draws holograms unlit and added, blended pictures blended and two-sided. `rc_model`: `HsHologram` and other `Hs...` materials (`Skin::hologram`); `rc_cast` draws hologram skins as added light. `docs/DESIGN.md`: new "Holograms, tank liquid and props with no stored light".

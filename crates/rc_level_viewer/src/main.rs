@@ -690,6 +690,8 @@ fn main() -> AppExit {
         .insert_resource(log)
         .add_plugins((sky::SkyPlugin, rc_level_viewer::bump::BumpMapPlugin))
         .add_plugins(prop_light::PropLightPlugin)
+        .add_plugins(rc_hologram::HologramPlugin)
+        .insert_resource(rc_hologram::HologramGameData(game_data.clone()))
         .add_systems(Startup, setup)
         .add_systems(Update, (fly, count_frames))
         .run()

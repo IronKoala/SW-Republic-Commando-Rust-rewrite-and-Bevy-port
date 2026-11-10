@@ -54,6 +54,8 @@ pub struct CastPlugin;
 
 impl Plugin for CastPlugin {
     fn build(&self, app: &mut App) {
+        // Holograms in the cast (the prologue's rifles and advisor) shimmer.
+        app.add_plugins(rc_hologram::HologramPlugin);
         app.init_resource::<CastCache>()
             .init_resource::<CastPlan>()
             .add_message::<CharacterOrder>()
@@ -490,11 +492,15 @@ fn spawn_pieces(
                         ..default()
                     })
                 };
-                c.spawn((
+                let mut piece = c.spawn((
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(material),
                     NoFrustumCulling,
                 ));
+                // rc_hologram swaps in the shimmering, flickering look.
+                if s.skin.as_ref().is_some_and(|k| k.hologram) {
+                    piece.insert(rc_hologram::Hologram { pivot: Vec3::ZERO });
+                }
                 pieces.push((i, handle));
             }
         });
