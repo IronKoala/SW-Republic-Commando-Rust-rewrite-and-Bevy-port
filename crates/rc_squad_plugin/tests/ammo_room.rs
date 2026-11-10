@@ -72,6 +72,8 @@ fn placed(
         respawn: None,
         radius: 40.0,
         height: 15.0,
+        message: String::new(),
+        sound: None,
     }
 }
 

@@ -227,8 +227,10 @@ copy of the game.
   4, grenades 5, never more than you can carry. A full player leaves the
   box lying. Taken boxes vanish and stay gone after a save and load, except
   geo_01a's grenade crate by the start, which comes back as in the
-  original. Boxes no longer block you like walls. No pickup sound or
-  "picked up" message yet.
+  original. Boxes no longer block you like walls. Taking one plays the
+  game's own pickup sound and shows what you took ("DC-17m Blaster Clips",
+  "Thermal Detonators") in the original font above the middle of the
+  screen for 3 seconds, fading out (not tested on Windows yet).
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
