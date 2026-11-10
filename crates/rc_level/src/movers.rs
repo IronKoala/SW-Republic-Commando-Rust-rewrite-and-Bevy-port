@@ -144,7 +144,9 @@ impl MoverInfo {
 
     /// Seconds to go from key 0 to the last key.
     pub fn open_time(&self) -> f32 {
-        (0..self.num_keys.max(1) as usize - 1).map(|k| self.segment_time(k, k + 1)).sum()
+        (0..self.num_keys.max(1) as usize - 1)
+            .map(|k| self.segment_time(k, k + 1))
+            .sum()
     }
 
     /// Longest distance between its keys, Unreal units.
@@ -300,7 +302,9 @@ pub fn read_movers(
         let look = looks.for_actor(map, a, open);
         let class = map.export_class_name(&map.exports[a]).to_string();
         let is_mover = look.as_ref().map_or(class == "Mover", |l| l.is_a("Mover"));
-        let is_trigger = look.as_ref().map_or(class == "Trigger", |l| l.is_a("Trigger"));
+        let is_trigger = look
+            .as_ref()
+            .map_or(class == "Trigger", |l| l.is_a("Trigger"));
         if !is_mover && !is_trigger {
             continue;
         }
@@ -397,7 +401,10 @@ pub fn read_movers(
             _ => Encroach::Return,
         };
         out.movers.push(MoverInfo {
-            chain: look.as_ref().map(|l| l.chain.clone()).unwrap_or_else(|| vec![class.clone()]),
+            chain: look
+                .as_ref()
+                .map(|l| l.chain.clone())
+                .unwrap_or_else(|| vec![class.clone()]),
             base_pos,
             base_rot,
             key_pos,
@@ -412,7 +419,10 @@ pub fn read_movers(
             state: l.name("InitialState").unwrap_or_default(),
             tag: l.event("Tag").unwrap_or_default(),
             opening_event: l.event("OpeningEvent").unwrap_or_default(),
-            opened_event: l.event("OpenedEvent").or_else(|| l.event("Event")).unwrap_or_default(),
+            opened_event: l
+                .event("OpenedEvent")
+                .or_else(|| l.event("Event"))
+                .unwrap_or_default(),
             closing_event: l.event("ClosingEvent").unwrap_or_default(),
             closed_event: l.event("ClosedEvent").unwrap_or_default(),
             auto_door: l.bool("bAutoDoor").unwrap_or(false),

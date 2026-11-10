@@ -1263,10 +1263,24 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     // So do props with a tag of their own, which level scripts may remove
     // (barricades, bunker walls). They are tagged `MoverPart` too.
     mover_exports.extend(rc_level::scripts::tagged_actors(pkg, data, &level).into_keys());
+    // And props weapons can break (barrels, consoles, rock cover).
+    {
+        let mats = &mut *ctx.mats;
+        mover_exports.extend(
+            rc_level::breakables::read(&mut class_looks, pkg, data, &level, &mut |n: &str| {
+                mats.package(n)
+            })
+            .into_iter()
+            .map(|b| b.export),
+        );
+    }
     ctx.stats.movers = movers.movers.len();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
     #[allow(clippy::type_complexity)]
     let mut loose: Vec<LooseProp> = Vec::new();
+    // Ammo boxes, dropped onto the ground like the game drops them
+    // (`rc_level::pickups::rest_on_ground`).
+    let mut boxes: Vec<LooseProp> = Vec::new();
     #[allow(clippy::type_complexity)]
     let mut unbaked: Vec<(
         Placement,
@@ -1274,9 +1288,6 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         Option<u8>,
         Option<usize>,
     )> = Vec::new();
-    // Ammo boxes, dropped onto the ground like the game drops them
-    // (`rc_level::pickups::rest_on_ground`).
-    let mut boxes: Vec<LooseProp> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
         let p = match actors::read_placement(pkg, data, a) {

@@ -384,6 +384,10 @@ fn main() {
                     Effect::Note(n) => n,
                     Effect::Event { .. } => continue,
                     Effect::Untrigger { name, by } => format!("untrigger {name} (by {by})"),
+                    Effect::PropDamaged { name, tag, removed, .. } => format!(
+                        "prop {name} ({tag}) damaged{}",
+                        if removed { ", gone" } else { "" }
+                    ),
                     Effect::Action {
                         script,
                         index,

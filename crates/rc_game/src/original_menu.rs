@@ -520,7 +520,11 @@ fn load(
             }
         }
     }
-    if let Some(plan) = menus.pages.get(original_lists::CAMPAIGNS).map(|p| p.plan.clone()) {
+    if let Some(plan) = menus
+        .pages
+        .get(original_lists::CAMPAIGNS)
+        .map(|p| p.plan.clone())
+    {
         let ok = assets
             .library
             .class(&plan.class)
@@ -537,7 +541,10 @@ fn load(
             .get(k)
             .and_then(|p| assets.library.class(&p.plan.class).ok())
     };
-    let (load_class, save_class) = (class_of(original_saves::LOAD), class_of(original_saves::SAVE));
+    let (load_class, save_class) = (
+        class_of(original_saves::LOAD),
+        class_of(original_saves::SAVE),
+    );
     menus.saves = original_saves::read(load_class.as_deref(), save_class.as_deref());
     let present: Vec<String> = menus.pages.keys().cloned().collect();
     for (k, p) in menus.pages.iter_mut() {
@@ -785,10 +792,11 @@ fn focus_new_page(
         // buttons above it work), so pause and Enter goes back to play.
         if k == "paused" {
             let buttons = screen.buttons();
-            if let Some(r) = buttons
-                .into_iter()
-                .find(|&i| screen.on_select(i).eq_ignore_ascii_case("ResumeGameSelected"))
-            {
+            if let Some(r) = buttons.into_iter().find(|&i| {
+                screen
+                    .on_select(i)
+                    .eq_ignore_ascii_case("ResumeGameSelected")
+            }) {
                 screen.focus = Some(r);
             }
         }
@@ -1724,7 +1732,12 @@ fn draw(
         ));
     }
     // (on top?, pictures, mouse areas by widget index, scroll bar tracks)
-    type Drawn = (bool, Vec<Quad>, Vec<(usize, [f32; 4])>, Vec<(BarHit, [f32; 4])>);
+    type Drawn = (
+        bool,
+        Vec<Quad>,
+        Vec<(usize, [f32; 4])>,
+        Vec<(BarHit, [f32; 4])>,
+    );
     let mut list: Vec<Drawn> = Vec::new();
     let left = fit::left_edge(across);
     let to_area = |b: [f32; 4]| [(b[0] - left) / across, b[1], (b[2] - left) / across, b[3]];
@@ -1872,7 +1885,7 @@ fn draw(
                         ));
                     }
                     // Under the buttons, so the scroll arrows at the
-                        // track's ends still take their clicks.
+                    // track's ends still take their clicks.
                     for (hit, b) in bars {
                         area.spawn((
                             BarHit {
@@ -1938,7 +1951,9 @@ fn drag_bars(
             let n = rel.normalized?;
             let pressed = *i == Interaction::Pressed;
             match want {
-                Some(b) if hit.bar == b => Some((b, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
+                Some(b) if hit.bar == b => {
+                    Some((b, hit.top + (n.y + 0.5) * (hit.bottom - hit.top)))
+                }
                 None if pressed => Some((hit.bar, hit.top + (n.y + 0.5) * (hit.bottom - hit.top))),
                 _ => None,
             }
