@@ -615,7 +615,11 @@ copy of the game.
   the ones brought in during the scene aren't there yet. The squad only
   comes along in maps that have one (not the
   prologue, briefings or epilogue), and the grown commando's arms are
-  hidden while the prologue gives you a child's hands. Not done yet:
+  hidden while the prologue gives you a child's hands. Hologram
+  briefings at the start of missions (yyy_04b, ras_03a, geo_03a) start
+  when the projector's throw animation reaches its "start the briefing"
+  moment, and let the player go at their end, as in the original (since
+  2026-11-10; checked in the cloud from the log, not by playing). Not done yet:
   riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
   the credits, and the logo videos. Not tested on Windows or by playing.
 - Music: the menu and level tracks play, but the switch to battle music

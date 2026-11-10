@@ -3661,6 +3661,21 @@ Between orders a character plays the first of `idle` its sets have (an
 animated prop plays its own `AnimHealthy`). Models are posed on the CPU
 each frame like the squad's; hidden ones aren't posed.
 
+**Animated props that are triggered, and events from animations.** As in
+the original's `AnimProp` class, a level event named by a prop's `Tag`
+triggers it: it plays its `AnimTriggered` (once or looping, as the map
+says), or stops it if it is already playing (`trigger_props`). An
+animation can send events itself (`AnimNotify_Trigger`: `EventName`, or
+`TriggerSelf` to trigger its own prop again). `rc_model::Model::triggers`
+reads them, and `animate_cast` sends each one to the level scripts as a
+`RaiseEvent` when the animation passes its moment. This is how the
+hologram briefings start (yyy_04b, ras_03a, geo_03a): the script holds
+the player, sends `HoloProjector`, the projector plays
+`ThrowHoloProjector`, about 2 s in that animation sends `StartBriefing`,
+and the briefing's `Dispatcher` plays and in the end sends the event that
+lets the player go. Without it nothing sent `StartBriefing` and the player
+was held for good.
+
 **Not done.** Characters brought in by `PawnFactory`s during a cutscene
 (the prologue's walking young clones), riding vehicles, hologram
 materials (`HsHologram`, drawn plain grey), lighting by zone (a steady
