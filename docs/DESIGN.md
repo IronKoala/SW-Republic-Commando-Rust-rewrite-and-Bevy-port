@@ -1710,8 +1710,18 @@ grenade `Blast` hurts the props around it, and a prop's own explosion sends
 `rc_combat::Explode` (characters) and hurts the props around it (so barrels
 set each other off). Broken and damaged state are saved with the scripts.
 
-Not done yet: the broken or damaged model (props just disappear), the
-effect and sound, the burning or electric after-effect some barrels leave,
+When a step starts, `rc_scripts_plugin/src/breakables.rs` (`show`) sends
+its effect (`Effect`, at `EffectOffset`) and sound (`TransitionSound`) to
+the effects plugin, and for a broken step with a model (`Mesh`) puts that
+model where the prop stood, for the step's `StateLifeSpan`. A map that
+writes its own `DestroyedState` replaces the class's one whole: geo_01b's
+barrels say `Mesh=None`, so they leave no broken model there (geo_03a's
+and others' do: `MarkerIcons.SetTrap.GEO_EplBarrel_Dest`). The broken
+model is unlit and tinted by the average vertex colour of the prop it
+replaces (our choice).
+
+Not done yet: the damaged step's model, the broken look in save files,
+the burning or electric after-effect some barrels leave,
 the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
 through (geo_04c's wall components) aren't in the collision, so shots pass
 through them.
@@ -4098,6 +4108,42 @@ the middle, a blue box edge, no glow and a lit floor in low light, the same
 picture after cycling round), and `rc_game --script` (starts in tactical
 with the squad glowing, X goes to low light with the lamp and back, the two
 GAME page rows change the settings).
+
+## Particle effects (`rc_effects`, `rc_effects_plugin`)
+
+The game's fireballs, smoke, sparks and flying debris are `Emitter`
+classes in the script packages (575 of them, mostly in
+`Properties/CTEffects.u`). Each class's defaults list its parts in
+`Emitters`: `SpriteEmitter`s (camera-facing squares with a picture) and
+`MeshEmitter`s (copies of a model), each a block of named values
+(`MaxParticles`, `Lifetime`, `StartVelocityRange`, `SizeScale`,
+`ColorScale`, `Texture`, `TextureUSubdivisions`, `DrawStyle` ...). The
+class also names a `SpawnSound`. `rc_effects` reads these with the engine's
+defaults (`engine.u`'s `ParticleEmitter`) under the class's own values
+(`read.rs`, `tagged.rs`), and runs them with no Bevy (`sim.rs`): spawning
+at the emitter's rate, moving with speed, gravity and drag, growing and
+fading by the scale lists, picking picture frames, bouncing debris off the
+floor. `rc_effect_check` reads every effect in the install.
+
+`rc_effects_plugin` draws them. Any part of the game sends `SpawnEffect`
+(effect class, place, optional floor height and sound); `PreloadEffect`
+reads one ahead of time (the level does this for every breakable prop's
+effect, so the first blast doesn't stall). Sprites become one mesh per
+emitter rebuilt each frame, with the emitter's draw style turned into a
+blend mode (Translucent and Brighten add light, AlphaBlend blends,
+Modulated and Darken multiply). Mesh debris is one entity per piece. The
+sound plays with its loudness falling off with distance
+(`sound_half_distance`). Settings are in `data/effects/effects.toml`
+(on/off, size, a particle cap, volume).
+
+Our choices (not checked against the original): a sprite's size is its
+half-width; both the prop's `TransitionSound` and the effect's
+`SpawnSound` play; added-light sprites ignore the colour list's alpha;
+debris bounces off a flat floor at the prop's base, not the level;
+`UseDirectionAs`, `MaxAbsVelocity` and blending between frames are
+ignored; beam and trail emitters aren't drawn; sounds aren't placed in 3D
+yet, only made quieter with distance (the level scripts' 3D sound in
+`rc_scripts_plugin/src/sounds.rs` could be reused).
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 
