@@ -52,9 +52,16 @@ pub struct Skin {
     /// alpha-tested blend, or a shader with an opacity picture), rather
     /// than alpha holding something else such as shininess.
     pub cutout: bool,
+    /// A hologram (`HsHologram`): `image` is already its glow colour
+    /// (`rc_image::hologram`); draw it as added light, unlit.
+    pub hologram: bool,
     /// How the material led to the picture, for the log.
     pub chain: Vec<String>,
 }
+
+/// `HsHologram`'s default `HologramColor` (its class defaults in the
+/// game's Engine.u), a light blue: red, green, blue, alpha.
+const HOLOGRAM_COLOUR: [u8; 4] = [122, 206, 255, 50];
 
 /// The triangles that use one material.
 #[derive(Debug, Clone)]
@@ -194,7 +201,7 @@ fn find_in(pkg: &Package, path: &str, class: Option<&str>) -> Option<usize> {
         pkg.name(e.object_name).eq_ignore_ascii_case(name)
             && match class {
                 Some(want) => c.eq_ignore_ascii_case(want),
-                None => materials.iter().any(|m| c.eq_ignore_ascii_case(m)),
+                None => materials.iter().any(|m| c.eq_ignore_ascii_case(m)) || c.starts_with("Hs"),
             }
     })
 }
@@ -274,6 +281,8 @@ fn follow(packs: &mut Packages, start: Place) -> Result<Skin, String> {
     let mut at = start;
     let mut chain = Vec::new();
     let mut cutout = false;
+    // Set once an `HsHologram` is passed: its colour, red, green, blue.
+    let mut hologram: Option<[u8; 3]> = None;
     for _ in 0..8 {
         let (pkg, data) = packs
             .get(&at.package)
@@ -286,11 +295,21 @@ fn follow(packs: &mut Packages, start: Place) -> Result<Skin, String> {
             let tex = texture::read_texture(pkg, data, export).map_err(|e| e.to_string())?;
             cutout |= tex.masked(pkg);
             let image = decode_texture(pkg, data, export)?;
-            return Ok(Skin {
-                texture: name,
-                image,
-                cutout,
-                chain,
+            return Ok(match hologram {
+                Some(colour) => Skin {
+                    texture: name,
+                    image: rc_image::hologram(&image, colour),
+                    cutout: false,
+                    hologram: true,
+                    chain,
+                },
+                None => Skin {
+                    texture: name,
+                    image,
+                    cutout,
+                    hologram: false,
+                    chain,
+                },
             });
         }
         let props = export_props(pkg, data, export)?;
@@ -317,6 +336,39 @@ fn follow(packs: &mut Packages, start: Place) -> Result<Skin, String> {
             // here; rc_combat's arms_view slides it by the ammo count.
             "TexModifier" | "TexPanner" | "TexPanner2D" | "TexScaler" | "TexRotator"
             | "TexOscillator" | "TexEnvMap" | "TexCoordSource" => "Material",
+            // A hologram: its picture's brightness in its `HologramColor`
+            // (stored blue first, see `rc_image::unreal_color`; the class
+            // default in Engine.u is a light blue).
+            "HsHologram" => {
+                let c = match properties::find(pkg, &props, "HologramColor").map(|p| &p.value) {
+                    Some(Value::Raw(b)) if b.len() == 4 => {
+                        rc_image::unreal_color([b[0], b[1], b[2], b[3]])
+                    }
+                    _ => HOLOGRAM_COLOUR,
+                };
+                let colour = [c[0], c[1], c[2]];
+                hologram = Some(colour);
+                if object("DiffuseTexture").is_none() {
+                    // No picture (`Holo_Blank`): plain glow.
+                    let white = Rgba {
+                        width: 1,
+                        height: 1,
+                        pixels: vec![255; 4],
+                    };
+                    return Ok(Skin {
+                        texture: name,
+                        image: rc_image::hologram(&white, colour),
+                        cutout: false,
+                        hologram: true,
+                        chain,
+                    });
+                }
+                "DiffuseTexture"
+            }
+            // Republic Commando's other own materials (HsBumpDiffSpec and
+            // the like) name their main picture `DiffuseTexture`.
+            c if c.starts_with("Hs") && object("DiffuseTexture").is_some() => "DiffuseTexture",
+            c if c.starts_with("Hs") => "FallbackMaterial",
             other => return Err(format!("{name} is a {other}, which we can't follow yet")),
         };
         let next = object(setting).ok_or_else(|| format!("{class} {name} has no {setting}"))?;

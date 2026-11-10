@@ -180,6 +180,9 @@ pub struct Stats {
     pub bsp_polygons_unlit: usize,
     pub mesh_actors_with_colours: usize,
     pub mesh_actors_without_colours: usize,
+    /// Of those, props we light ourselves from the map's lights
+    /// (`unbaked_prop_light`) instead of drawing at full brightness.
+    pub props_lit_from_lights: usize,
     /// Colour lists whose length isn't the mesh's vertex count (not used).
     pub colour_count_mismatch: usize,
     pub lights: usize,
@@ -872,6 +875,143 @@ fn terrain_light(normal: [f32; 3], suns: &[(Vec3f, [f32; 3])], ambient: [f32; 3]
 
 type Vec3f = [f32; 3];
 
+/// How a point or spot light fades with distance, for props we light
+/// ourselves (`unbaked_prop_light`): full at the light, nothing at its
+/// radius, in a straight line (see `POINT_LIGHT_SCALE`).
+fn point_falloff(distance: f32, radius: f32) -> f32 {
+    if radius <= 0.0 || distance >= radius {
+        return 0.0;
+    }
+    1.0 - distance / radius
+}
+
+/// Point and spot lights on props we light ourselves: colour x brightness
+/// x facing x `point_falloff` x this. Fitted 2026-11-10 by working out the
+/// light for pro's props that do have stored light and comparing corner
+/// by corner (corners lit in both): with a straight fade the stored light
+/// was 1.58 times ours (middle half 1.46-1.61) and about as many corners
+/// were lit (57,057 stored, 58,894 ours), so the shape fits and only the
+/// strength was off. A fade squared, or a shorter reach, lit too few
+/// corners and spread the ratio out (2.3-4.2). With 1.6: 0.99 (0.91-1.00).
+const POINT_LIGHT_SCALE: f32 = 1.6;
+
+/// Suns on props we light ourselves: colour x brightness x facing x this.
+/// The same comparison on geo_01briefing (sun-lit) gave 0.81 (middle half
+/// 0.80-0.81), which also matches the terrain being about 20% brighter
+/// than the props with the full value (`terrain_light`). On geo_01a the
+/// canyon walls shade much of it (39,519 corners lit there against our
+/// 101,265, no shadows here), so it isn't usable for fitting.
+const SUN_LIGHT_SCALE: f32 = 0.8;
+
+/// Corner light for a prop the map stores no light for, worked out from the
+/// map's lights the way the stored light behaves (0-255 scale, before the
+/// draw gain).
+///
+/// The map only stores light for props that stay put (their
+/// `StaticMeshInstance`). Props a level script moves or shows later, such
+/// as the clone babies in the prologue's tanks (`bStatic` off), have none,
+/// and Unreal lights those as it draws them, from the lights around them.
+/// They used to be drawn at full brightness, which showed them as flat
+/// shapes with no shading at all.
+///
+/// Each corner gets its zone's ambient (the halved value, as on other
+/// props) plus, from each light that doesn't move (moving ones are added
+/// live by `PropMaterial`), the light's colour x brightness x how squarely
+/// the corner faces it x a fade to nothing at its radius. No shadows.
+fn unbaked_prop_light(
+    p: &Placement,
+    mesh: &StaticMesh,
+    lights: &[Light],
+    ambient: [f32; 3],
+) -> Vec<[u8; 4]> {
+    let axes = rotation_axes(p.rotation);
+    let s3 = p.draw_scale_3d;
+    let world_points: Vec<Vec3f> = mesh
+        .vertices
+        .iter()
+        .map(|v| p.transform_point(v.position))
+        .collect();
+    // Only lights that can reach the prop at all.
+    let (lo, hi) = world_points
+        .iter()
+        .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), w| {
+            (
+                [lo[0].min(w[0]), lo[1].min(w[1]), lo[2].min(w[2])],
+                [hi[0].max(w[0]), hi[1].max(w[1]), hi[2].max(w[2])],
+            )
+        });
+    let near: Vec<&Light> = lights
+        .iter()
+        .filter(|l| !l.dynamic)
+        .filter(|l| {
+            l.kind == light::LightKind::Directional || {
+                let d2: f32 = (0..3)
+                    .map(|k| {
+                        let c = l.location[k].clamp(lo[k], hi[k]);
+                        (l.location[k] - c).powi(2)
+                    })
+                    .sum();
+                d2 < l.radius * l.radius
+            }
+        })
+        .collect();
+    mesh.vertices
+        .iter()
+        .zip(&world_points)
+        .map(|(v, w)| {
+            let mut wn = [0.0f32; 3];
+            for (k, axis) in axes.iter().enumerate() {
+                for c in 0..3 {
+                    let sk = if s3[k].abs() < 1e-6 { 1e-6 } else { s3[k] };
+                    wn[c] += v.normal[k] * axis[c] / sk;
+                }
+            }
+            let len = bsp::dot(wn, wn).sqrt().max(1e-6);
+            let n = wn.map(|x| x / len);
+            let mut c = ambient;
+            for l in &near {
+                let colour = l.color().map(|x| x * l.brightness);
+                let strength = match l.kind {
+                    light::LightKind::Directional => {
+                        let dir = rotation_axes(l.rotation)[0];
+                        (-bsp::dot(n, dir)).max(0.0) * SUN_LIGHT_SCALE
+                    }
+                    light::LightKind::Point | light::LightKind::Spot => {
+                        let to = [
+                            l.location[0] - w[0],
+                            l.location[1] - w[1],
+                            l.location[2] - w[2],
+                        ];
+                        let d = bsp::dot(to, to).sqrt().max(1e-3);
+                        let to = to.map(|x| x / d);
+                        let mut k = bsp::dot(n, to).max(0.0)
+                            * point_falloff(d, l.radius)
+                            * POINT_LIGHT_SCALE;
+                        if l.kind == light::LightKind::Spot {
+                            // Same cone reading as the live spotlights
+                            // (`lighting::spawn_lights`): 0-255 is 0-90 degrees.
+                            let axis = rotation_axes(l.rotation)[0];
+                            let outer = (l.cone as f32 / 255.0 * std::f32::consts::FRAC_PI_2)
+                                .clamp(0.02, 1.55);
+                            let along = -bsp::dot(to, axis);
+                            if along < outer.cos() {
+                                k = 0.0;
+                            }
+                        }
+                        k
+                    }
+                };
+                if strength > 0.0 {
+                    for k in 0..3 {
+                        c[k] += colour[k] * strength;
+                    }
+                }
+            }
+            [c[0], c[1], c[2], 255.0].map(|v| v.clamp(0.0, 255.0).round() as u8)
+        })
+        .collect()
+}
+
 /// A terrain's alpha (0-255) at grid point (x, y), read from its alpha map
 /// picture stretched over the whole grid, blending the four nearest pixels
 /// (the maps are often smaller than the grid: 16x16 over 64x64 points).
@@ -1143,6 +1283,13 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     // Ammo boxes, dropped onto the ground like the game drops them
     // (`rc_level::pickups::rest_on_ground`).
     let mut boxes: Vec<LooseProp> = Vec::new();
+    #[allow(clippy::type_complexity)]
+    let mut unbaked: Vec<(
+        Placement,
+        Rc<(StaticMesh, Loaded)>,
+        Option<u8>,
+        Option<usize>,
+    )> = Vec::new();
     for &a in level.actors.iter().flatten() {
         ctx.stats.actors += 1;
         let p = match actors::read_placement(pkg, data, a) {
@@ -1297,6 +1444,12 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                     loose.push((p, m, colours, bump_light, in_sky, mover));
                     continue;
                 }
+                // No stored light (props that can move or appear later):
+                // lit from the map's lights once they are all read.
+                if colours.is_none() && !in_sky && !p.unlit && p.static_mesh_instance == 0 {
+                    unbaked.push((p, m, zone, mover));
+                    continue;
+                }
                 add_mesh_actor(
                     &mut b,
                     &mut ctx,
@@ -1312,6 +1465,26 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             }
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
         }
+    }
+    for (p, m, zone, mover) in unbaked {
+        let ambient = zone
+            .and_then(|z| zone_ambient.get(&z))
+            .copied()
+            .unwrap_or([0.0; 3]);
+        let colours = unbaked_prop_light(&p, &m.0, &lights, ambient);
+        ctx.stats.props_lit_from_lights += 1;
+        add_mesh_actor(
+            &mut b,
+            &mut ctx,
+            false,
+            &p,
+            &m.0,
+            &m.1,
+            Some(&colours),
+            None,
+            mover,
+        );
+        placed.push((p, m));
     }
     let (terrains, terrain_failures) =
         rc_level::terrain::read_terrains(pkg, data, level.actors.iter().flatten().copied());

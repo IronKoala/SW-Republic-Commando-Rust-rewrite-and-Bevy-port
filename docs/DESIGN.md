@@ -3726,12 +3726,66 @@ lets the player go. Without it nothing sent `StartBriefing` and the player
 was held for good.
 
 **Not done.** Characters brought in by `PawnFactory`s during a cutscene
-(the prologue's walking young clones), riding vehicles, hologram
-materials (`HsHologram`, drawn plain grey), lighting by zone (a steady
+(the prologue's walking young clones), riding vehicles, lighting by zone (a steady
 `ambient` share of their own colour, as the squad), damage and death (the
 cast can't be hurt), and saving their places (the cutscene maps have no
 checkpoints). In missions, the placed troopers, walkers and the scripted
 spider droid now stand and move as their scripts say but don't fight.
+
+## Holograms, tank liquid and props with no stored light
+
+**Holograms (`HsHologram`).** Republic Commando's own hologram material
+names a `DiffuseTexture` and a `HologramColor`. The game draws it with
+its `DynamicHologram` hardware shader, whose assembly text is stored in
+`GameData/Textures/hardwareshaders.utx` (read to learn what it does,
+not copied): the base picture's brightness x a glow by how squarely the
+surface faces the eye x a scrolling noise picture x a flicker x the
+colour. We do the first and last parts: `rc_image::hologram` turns the
+picture into its brightness in the hologram colour, and it is drawn
+unlit, added to what is behind it, from both sides. Used by the level's
+static meshes (`rc_level_viewer::materials`, `Picture::hologram`) and by
+models (`rc_model`, `Skin::hologram`; `rc_cast` draws them): the
+prologue's hologram rifles (`Holo_DC17m`) and advisor (`Holo_Advisor`, a
+clone trooper with a hologram skin). Without a picture (`Holo_Blank`) it
+is plain glow. The default colour (Engine.u class defaults) is a light
+blue. Not done: the facing glow, noise and flicker, and the shader's
+swelling along the surface.
+
+**Colour settings are stored blue first.** A material's `Color` setting
+(`HologramColor`, `DiffuseTint`) is 4 bytes in the order blue, green,
+red, alpha (`rc_image::unreal_color`). Read the other way the hologram
+default would be orange and the "red team" holograms blue.
+
+**Blended pictures.** A `FinalBlend` with `FrameBufferBlending` 2
+(`FB_AlphaBlend`) now blends by its alpha and is seen from both sides
+(`Picture::blend`), instead of being cut into solid and see-through
+parts. The briefing holograms' grids and text use it.
+
+**Tinted falloff (`HsFalloff`).** Light shafts and the prologue's tank
+liquid multiply their picture by `DiffuseTint` and `GradientTint`
+(white, no change, by default). The game's falloff picture, which fades
+the edges by viewing angle, isn't used yet.
+
+**Props with no stored light.** The map stores light only for props that
+stay put (their `StaticMeshInstance`). Props a script moves or shows
+later, like the clone babies in the prologue's tanks (`bStatic` off),
+have none, and were drawn at full brightness: flat shapes with no
+shading. Unreal lights such props from the lights around them as it
+draws them, so `scene::unbaked_prop_light` does that once, when the
+level loads: zone ambient (as other props) plus each light that doesn't
+move: colour x brightness x facing x a straight fade to nothing at the
+light's radius, x 1.6 for point and spot lights and x 0.8 for suns. Not
+done: shadows, and lighting them again when a script moves them.
+
+How the numbers were found: for the props that do have stored light,
+work out the light this way too and compare corner by corner. On pro
+(lit by lamps) the straight fade lit about as many corners as the
+stored light (58,894 against 57,057) and was 1.58 times too dim with
+little spread (middle half 1.46-1.61); a squared fade or a shorter reach
+lit far too few corners. On geo_01briefing (lit by a sun) ours was 1.23
+times too bright (0.80-0.81), which fits the terrain, lit the same way,
+being 20% brighter than the props. geo_01a's canyon is mostly shadow,
+which this doesn't do, so it wasn't used.
 
 ## The visor: tactical and low light modes (`rc_visor`)
 
