@@ -229,7 +229,9 @@ pub fn read_terrains(
     let mut ok = Vec::new();
     let mut failed = Vec::new();
     for a in actors {
-        let Some(e) = pkg.exports.get(a) else { continue };
+        let Some(e) = pkg.exports.get(a) else {
+            continue;
+        };
         if pkg.export_class_name(e) != "TerrainInfo" {
             continue;
         }

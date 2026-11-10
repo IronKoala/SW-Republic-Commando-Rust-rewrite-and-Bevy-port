@@ -554,6 +554,39 @@ fn every_enemy_file_reads_and_claims_its_classes() {
         Some("super_battle_droid")
     );
     assert_eq!(who("CloneCommando"), None);
+    // Every Trandoshan kind the campaign's maps place has exactly one file.
+    for (class, id) in [
+        ("TrandoshanMercenary", "trandoshan"),
+        ("TrandoshanMercenaryConc", "trandoshan"),
+        ("TrandoshanMercenaryGrenadier", "trandoshan_grenadier"),
+        ("TrandoshanMercGrenYYYUp", "trandoshan_grenadier"),
+        ("TrandoshanMercGrenYYYLow", "trandoshan_grenadier"),
+        ("TrandoshanMercYYYUp", "trandoshan_kashyyyk"),
+        ("TrandoshanMercYYYLow", "trandoshan_kashyyyk"),
+        ("TrandoshanSlaver", "trandoshan_slaver"),
+        ("TrandoshanSlaverBerserker", "trandoshan_slaver_berserker"),
+        ("TrandoshanSlaverGrenadier", "trandoshan_slaver_grenadier"),
+        ("TrandoshanHeavy", "trandoshan_heavy"),
+        ("TrandoshanScav", "trandoshan_scavenger"),
+        ("TrandoshanScavNoWookiee", "trandoshan_scavenger"),
+    ] {
+        assert_eq!(who(class).as_deref(), Some(id), "{class}");
+    }
+}
+
+#[test]
+fn kashyyyk_mercenaries_have_a_shield() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/enemies/trandoshan_kashyyyk.toml"
+    ))
+    .unwrap();
+    let p = AiParams::battle_droid().with_overrides(&text).unwrap();
+    assert_eq!(p.combat.health, 100.0);
+    assert_eq!(p.combat.shields, 100.0);
+    assert_eq!(p.combat.shield_recharge_rate, 10.0);
+    // Nothing else has one unless its file says so.
+    assert_eq!(AiParams::battle_droid().combat.shields, 0.0);
 }
 
 #[test]

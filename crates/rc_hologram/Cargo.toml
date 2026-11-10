@@ -1,0 +1,15 @@
+[package]
+name = "rc_hologram"
+version = "0.1.0"
+description = "Draws Republic Commando's holograms (HsHologram) the way the game's DynamicHologram shader does: edge fade, jumping noise and flicker"
+edition.workspace = true
+
+[dependencies]
+rc_image = { path = "../rc_image" }
+rc_package = { path = "../rc_package" }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. Only what drawing needs.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_log", "3d_bevy_render"]

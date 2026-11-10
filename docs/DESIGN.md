@@ -18,12 +18,15 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_walk` | Bevy program: walk around a test room or a real map (`--map`) in first person using `rc_movement`. |
 | `rc_level` | Reads maps: the level's own geometry (the BSP), its baked lightmaps, where every actor is placed, each prop's baked corner colours, blocking volumes, models that come from a prop's class, and a map's walking collision (`map_collision`). No Bevy. |
 | `rc_level_viewer` | Bevy program: loads one map, lit with its baked light and real-time lights, with its sky, and lets you fly around it. Also a library (`scene`, `draw`, `lighting`, `materials`, `sky`) that `rc_walk` uses to draw maps. `rc_level_check` loads every map without a window and logs the results. |
-| `rc_movers` | Doors, lifts and hatches: runs a map's movers through their keys, makes their collision move with them, carries the player on lifts, and runs triggers. No Bevy. `rc_mover_check` runs every mover in every map without a window and logs the numbers. |
+| `rc_movers` | Doors, lifts and hatches: runs a map's movers through their keys, makes their collision move with them, carries the player and squad mates on lifts, and runs triggers. No Bevy. `rc_mover_check` runs every mover in every map without a window and logs the numbers. |
 | `rc_anim` | Poses a skeleton from an animation and moves a mesh's points with it ("skinning"). Plain maths, no Bevy. |
 | `rc_character` | 3D Bevy program: shows one character from the game with its skin, playing one animation. |
 | `rc_soundtest` | Bevy program with no window: plays one weapon sound and one ambient loop and logs proof that they played. |
 | `rc_squad` | Delta Squad: Sev, Fixer and Scorch following the player and obeying squad orders, with the game's numbers. No Bevy. |
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
+| `rc_hologram` | `HologramPlugin`: holograms shimmer and flicker like the original's `DynamicHologram` shader, with the game's own glow and noise pictures. Check: `hologram_check` example in `rc_level_viewer`. |
+| `rc_cast` | `CastPlugin`, the characters placed in a map that no other part owns (the Kaminoans, young clones, troopers and commandos of the cutscenes, animated props, troopers and vehicles standing about in missions): drawn with the game's models and moved by the level scripts. |
+| `rc_shadows` | `ShadowsPlugin`, character shadows the way the original draws them: each marked character's shape laid on the floor from a light high above (`CastsShadow`, `data/shadows/shadows.toml`). The `shadow_check` example checks it without the game. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
 | `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
 | `rc_scripts` | Level scripts: runs a map's own scripting (scripted triggers and sequences, touch triggers, counters, true/false conditions, checkpoints, destructible props) as events and tags. No Bevy. `rc_script_check` reads every map's scripts and runs them without a window. |
@@ -234,9 +237,9 @@ small difference compared with a deliberately mismatched pair. Results
 
 Each format has one clear winner. With these layouts all 133 bump maps decode;
 for the 121 that have a mip 1, the median mip difference is 1.8 and only one is
-over 10 (11.2). Not checked: which way "up" points for V. Bevy may need its
-`flip_normal_map_y` setting, which can only be told by lighting a bump-mapped
-wall and comparing with the game.
+over 10 (11.2). Which way each channel points was measured later, see "Drawing bump maps":
+in these two formats the two tilts are the other way round from their
+Direct3D names, so `materials.rs` swaps them before drawing.
 
 ## Lights in maps
 
@@ -324,6 +327,7 @@ lumens_per_range_squared = 2000 # point and spot light power
 sun_lux_at_255 = 10000          # Sunlight brightness
 ambient_at_255 = 2000           # zone ambient brightness
 shadows = false
+live_light_on_props = 1         # real-time light on props and terrain (0 = off)
 ```
 
 - Positions: Bevy (x, y, z) = Unreal (x, z, y) / 50. Swapping Y and Z also
@@ -343,9 +347,18 @@ shadows = false
   its page (`ATTRIBUTE_UV_1`) and a `Lightmap` component. The material is
   lit, so real-time lights add on top. The scene-wide ambient light is off,
   because the baked light already contains each zone's ambient.
-- Props use their per-corner colours as Bevy vertex colours on an unlit
-  material, which multiplies texture and colour directly. Real-time lights
-  don't reach them yet (see below). The colours are stored red, green,
+- Props (and terrain) use their per-corner colours as Bevy vertex colours on
+  our `PropMaterial` (`prop_light.rs` and `prop_light.wesl`): Bevy's
+  standard material with a small shader of ours that draws
+  `texture x corner colour + texture x real-time lights x live_light_on_props`.
+  Bevy's own material would treat vertex colours as paint, so a lamp's light
+  would be multiplied by the dark baked colour; the shader keeps the two
+  apart. With no real-time light near, a prop is drawn exactly as the old
+  unlit material drew it (geo_01a and yyy_06a pictures identical to the
+  pixel). Sky props and `live_light_on_props = 0` still use the plain unlit
+  material. Cost: the same as any lit surface, one pass, no extra textures,
+  so fine for phones and VR. Every app that draws a level adds
+  `PropLightPlugin` (the game's `LevelPlugin` does). The colours are stored red, green,
   blue, alpha (checked against the colour of the lights each prop lists;
   they were read as blue, green, red until 2026-11-01, which drew geo_04a's
   orange canyon blue-grey).
@@ -375,7 +388,8 @@ shadows = false
   floor, far tunnel, both walls, ceiling) are within about 20% of the
   original (middle values 19-47 against 18-44). One screenshot, so it is a
   calibration, not a proof. The bump maps themselves (the pixel-by-pixel
-  shading the direction list is for) are not drawn yet.
+  shading the direction list is for) are drawn since 2026-11-09, see
+  "Drawing bump maps".
 - Colours from hue and saturation follow Unreal's model: hue fades in a
   straight line red to green to blue (so hue 30 is 65% red, 35% green, not
   orange-yellow), checked against the light baked into props on geo_04a,
@@ -406,8 +420,9 @@ of real-time lights remain (2 in `geo_01a`, 19 in `pro`). That suits a later
 VR version, which has to draw everything twice (once per eye) at 90 frames
 per second or more.
 
-**Known gaps.** Real-time lights don't light props yet (their baked colours
-are on an unlit material). Shadow bitmaps for the dynamic lights are read
+**Known gaps.** Real-time light on props uses the same placeholder strength
+as on walls, and whether the original lit props per corner or per pixel is
+not known (we light per pixel, which looks smoother). Shadow bitmaps for the dynamic lights are read
 past but not used. What the lightmap pages' alpha channel holds is unknown
 (it is ignored). Lightmaps are sampled with plain linear filtering.
 
@@ -418,6 +433,105 @@ works on Windows, Linux and Android alike. The cost is memory (4 bytes per
 pixel instead of 0.5-1); re-compressing into a phone-friendly format (ETC2 or
 ASTC) can come later if memory gets tight. Baked lighting with few real-time
 lights is also the cheap option for phone GPUs.
+
+## Drawing bump maps (`rc_level_viewer/src/bump.rs`, `bump_lit.wesl`)
+
+Props whose material has a bump map (`HsBump...` materials name it
+`NormalMap`, with `BumpUVScale` for how often it repeats; a `Shader` names
+it `Bumpmap`) are drawn with it, so walls show their rivets, panels and
+grooves. `materials.rs` finds and decodes the bump map next to the main
+picture (`Picture::bump`).
+
+**What the game gives us.** For these props the map stores, per corner,
+the baked light colour (as for every prop) and the direction the main
+light comes from, with its strength (see "Lights in maps"). The corner's
+colour is 0.75 x strength x how squarely the corner faces that direction.
+So per pixel we draw:
+
+```
+light = stored corner colour (with the zone's ambient)
+      + light colour x (pixel facing - corner facing)
+```
+
+"Facing" is how squarely the surface faces the light (0 to 1): the bump
+map's tilt for the pixel, the plain surface for the corner. The light's
+colour is the corner's own colour where it is lit enough to tell (16 of
+255 or more), else the prop's average lit colour, else white; its
+strength is 0.75 x the stored strength. A pixel the bump map leaves flat
+gets exactly the stored colour, so a surface is on average as bright as
+before and the brightness calibrated against the original game holds.
+How the original's shader mixes these exactly is compiled code we
+haven't read; this rule is ours, built to fit the stored numbers.
+
+**Which way the bump maps point (measured).** Nothing documents it.
+A tilt map is the slope of some height map, and slopes of a height map
+must fit together (how the tilt along the width changes going down equals
+how the tilt along the height changes going across). Trying the four ways
+of reading the two tilt channels shows which is right:
+
+| Bump maps | Best reading | How clear |
+|---|---|---|
+| Colour normal maps on level props (16 used by yyy_06a, geo_01a, ras_01a) | red along the width, green down the picture, as stored | all 16, error 0.05-0.79 of the next best |
+| L6V5U5 (format 14, 104 maps, mostly characters and weapons) | the two swapped | 59 best, 49 clearly (half the error or less); 2 clearly another way |
+| V8U8 (format 12, 29 maps) | mixed: 9 clearly swapped, 4 clearly not | read like L6V5U5 |
+
+Whether a tilt means a bump or a dent comes from the main picture: grooves
+are painted darker, so where tilts point inwards (the height map dips) the
+picture should be darker. For the 13 level bump maps that repeat like their
+picture, 11 agree with "red/green lean towards where the surface faces"
+(correlation +0.2 to +0.6), 1 is about 0, 1 the other way (-0.4). That is
+the usual normal-map convention, with green pointing down the picture
+(Direct3D's way). None of the bump maps on level props in these three maps
+are in the two-byte formats.
+
+**The shader.** Our own, `bump_lit.wesl`, a Bevy `Material`
+(`BumpLitMaterial`). Each corner carries its stored colour, the direction
+along the picture's width (Bevy's tangent attribute, worked out on the CPU
+from positions and picture coordinates, `bump::surface_tangents`), the
+light direction and the light colour (two attributes of our own). The
+stored colours are turned into linear light per corner and blended across
+the triangle exactly as flat props are, so `bump_strength = 0` draws the
+same picture as the flat props (checked, below). Only opaque, one-sided
+props use it; see-through, glowing and two-sided ones stay flat.
+Real-time lights (moving or switched lights, the helmet lamp) are added on
+top with Bevy's own `apply_pbr_lighting`, using the bump-tilted surface, so
+a lamp shows the bumps too; `BumpParams::live_light` carries
+`live_light_on_props` (0 in the sky). With no real-time light near, that
+adds nothing (yyy_06a start view identical to the pixel with it on or off).
+
+**Cost.** One extra texture read, a few dozen sums and three powers per
+pixel, no loops, plus Bevy's usual work for the few real-time lights near:
+within what phone GPUs and VR
+headsets manage. Bump maps are decoded to plain RGBA on the CPU like every
+other texture. Settings in `lighting.cfg`:
+
+```
+bump_maps = true      # false draws bump-mapped props flat
+bump_strength = 1     # 0 flat (through the bump shader), up to 2
+```
+
+**How it is checked (colours, not outlines).** `rc_level_viewer MAP
+--view-bump` puts the camera in front of the bump-mapped surface where the
+stored light is strongest. `rc_capture_compare A.bmp B.bmp --same|--bumped`
+compares two captures by the average colour of each square of a 4 x 4
+grid, by how many pixels changed and by "detail" (how much neighbouring
+pixels differ):
+
+- flat (`bump_maps = false`) vs `bump_strength = 0` must be the same
+  (squares within 2 of 255, 99% of pixels within 3): proves the shader's
+  light maths matches the flat props';
+- flat vs bump maps on must keep every square's colour within 4, change at
+  least 5% of pixels and add at least 3% detail.
+
+Results are in the MODLOG entry of 2026-11-09.
+
+**Not done.** BSP walls with a bump-mapped material (1-50 polygons per map)
+store no light direction, so they stay flat. The bump maps' extra channel
+(alpha, sometimes named "spec") and the materials' shine (`Specularity`,
+`Specular`) are not drawn. `DiffUVScale` and `BlendTexture` on
+`HsBumpDiffBlend...` materials aren't used (that was already so). Characters
+and weapons don't use bump maps yet. Not compared side by side with the
+original game.
 
 ## Showing a texture in Bevy (`rc_viewer`)
 
@@ -706,8 +820,39 @@ read from the mesh's `Materials` list). They are still drawn. Before, every
 visible prop was solid, so you bumped into light shafts, cables and other
 decorations. geo_01b: 32 walk-through props and about 50,000 section
 triangles; its solid triangles went from 227,043 to 190,205. geo_01a: 68
-walk-through props and about 15,000 section triangles. Simplified
-collision models (the data after a mesh's streams) are still not read.
+walk-through props and about 15,000 section triangles.
+
+Simple collision shapes (2026-11-10). After its vertex and index lists a
+static mesh stores a reference to a `Model` (the same kind of object as a
+map's BSP, read by `rc_level::bsp`): a few blocky boxes the artists put
+around it. 1,720 of the game's 2,447 meshes have one. Then comes the
+mesh's collision triangle list, which holds exactly the triangles of the
+sections with collision on (checked on 2,295 meshes), so we don't read it.
+For the 660 meshes with collision off on every section (explosive barrels,
+floor and ceiling pipes on Raxus Prime, the jamming device's wrecked
+model) that list is empty: the simple shape is all the game can collide
+with, so `rc_level::collision::solid_local_triangles` uses it
+(`read_simple_shape` fills `StaticMesh::simple_shape`). Meshes with
+collision on keep their own triangles; the original may use the simple
+shape for walking against those too (UE2's `UseSimpleBoxCollision`), but
+its default lives in the engine's C++ code, so we can't read it and left
+them as they were. Six Karma test meshes' shapes don't read (an older
+layout); they keep no shape.
+
+Shots and people (2026-11-10): `rc_level::class_look::blocks` reads what an
+actor stops. People: `bCollideActors` and `bBlockPlayers`. Shots:
+`bCollideActors` and `bBlockZeroExtentTraces`, and it is a shot target
+(`bProjTarget`, on for every `Prop`, or it blocks actors and players). The
+Geonosian shield wall pieces of geo_04c (`K_GEO04_WallComponent`, 89 of
+them) have `bBlockPlayers`, `bBlockActors` and `bBlockNonZeroExtentTraces`
+off in their class: in the game you walk through them but shots hit them.
+`map_collision` keeps such props in `shot_triangles` (or
+`shot_part_triangles` when they are parts, such as breakable ones), and
+`rc_level_plugin::LevelParts::with_shots_only` puts them in
+`LevelCollision` so that only sweeps with no size (shots, looks, blast
+lines) stop at them; a moving body (any size) passes. A broken piece stops
+nothing. Numbers on 2026-11-10: geo_04c 98 props now collide through their
+simple shape and 89 stop shots only; geo_01a 10 and 5; ras_01a 315 and 0.
 
 ### The test room
 
@@ -1239,6 +1384,37 @@ A `MoverSystems` set (in `GameSet::View`) then logs what happened
 Other parts open a door the way the original's scripts do: by event name.
 `LevelMovers::send("D_Exit")` sets off every mover whose `Tag` is `D_Exit`.
 
+### Squad mates (and other bodies) ride too
+
+In the original every pawn standing on a mover is carried by it, not only
+the player, so the squad rides lifts with you (geo_05a, b and c start on
+one). Here the player's movement steps the movers, and `MoverSet::step`
+remembers which movers moved that step and from where. Any other body is
+then carried with `MoverSet::carry` (in the game: `LevelMovers::carry`, or
+the `MovingFloors` resource in `rc_game_core`, which hides the movers
+behind a small `CarryBodies` trait), called once per body before that
+body's own move:
+
+1. What it stands on is judged where the movers were before this step's
+   move (where its feet still are), with the same short sweep down as for
+   the player.
+2. A mover it stands on moves it by the same amount.
+3. A mover that now overlaps it pushes it along. If it can't be pushed,
+   the mover's "when blocked" rule applies as for the player: it is put
+   back where it was and stops or turns round. It is not put back if it
+   carried the player this step (the player was already moved with it).
+
+Triggers and bump-opened doors still only answer the player. A frame
+where the movers don't step (a cutscene holds the player) carries nobody:
+`MoversPlugin` forgets the last step's moves at the start of every frame.
+
+The squad part calls it in `ride_movers`, just before the squad moves, and
+logs `squad: t=... Sev stands on Mover37` and `... steps off ...`. Test:
+`cargo test -p rc_movers` (a squad mate rides a lift up and down, is left
+behind without `carry`, and a closing door goes back for them) and
+`cargo test -p rc_squad_plugin --test lift_room` (the real squad and
+lifts plugins: all three ride a 400 uu lift with the player).
+
 Where every mover is goes into save files as `[movers]` (see "Saving,
 loading and checkpoints").
 
@@ -1352,6 +1528,49 @@ without waiting stops after 64 actions in a frame and carries on the next
 The level starts by sending the first `PlayerStart`'s `Event` (`levelstart`
 in most campaign maps; `Startup`, `SetupLevel` and others in some).
 
+### Line-of-sight triggers (`LineOfSightTrigger`)
+
+Some scripted moments wait for the player to *see* something: Grievous on
+the tower (yyy_01e `GreivousVerified`), the Trandoshan dragging a clone
+away (ras_03c), the Wookiee about to be killed (yyy_01e `Wookie_Die`), a
+hack terminal ("we need to slice that"). The map places a
+`LineOfSightTrigger` with an `Event`, and usually a `SeenActorTag` naming
+what to look at; with none (or no actor with that tag) it watches its own
+spot. 45 of them in 25 campaign maps
+(`cargo run -p rc_scripts --example sight_triggers` lists them all, what
+each watches, what waits for its event, and whether the line to it is clear
+through the real walls).
+
+The rule, from Unreal Engine 2's public description of the class and the
+values the game's engine.u stores (`rc_probe --class LineOfSightTrigger`:
+`MaxViewDist` 3000, `MaxViewAngle` 15, `bEnabled` true): while switched on
+and not used yet, if the watched thing is within `MaxViewDist` of the
+player's eye, within `MaxViewAngle` degrees of where the player looks, and
+no level geometry is in between, the trigger sends its event, once. An
+event with the trigger's tag switches it on (`bEnabled=False` ones wait for
+that: ras_01a, ras_01b, yyy_05f).
+
+- `rc_scripts::Director::sight_candidates_live` does the distance and
+  angle test; `seen` sends the event; `look` does both with a line check
+  passed in. Switched on and used are kept in saves (`[scripts] sight`).
+- `rc_scripts::sight::clear_line` checks the line through the level's
+  collision (walls, solid props, closed doors), stopping 32 uu short of
+  the watched thing so its own solid shape doesn't hide it.
+- `rc_scripts_plugin::sight::look` runs each frame before the scripts: eye
+  and view from the `PlayerCamera` (so a VR camera works the same), the
+  line through `LevelCollision`. Many triggers watch a character (a
+  Trandoshan, a Wookiee, a Delta mate): where a character with a matching
+  `ScriptTags` tag is now is used (its middle: feet plus `Hittable`'s
+  `center_up`, or 84 uu), else where the map placed it. A dead player sees
+  nothing. Log line: `scripts: ... the player sees what LineOfSightTrigger0
+  watches for`.
+- Data: `[sight]` in `data/scripts/scripts.toml` holds the class defaults
+  for a trigger that gives none.
+
+Not the same as the original: its engine also checks the watched thing was
+drawn recently; ours uses the line check instead. A watched thing hidden
+inside a big solid prop may be missed (the 32 uu allowance is a guess).
+
 ### In the game (`rc_scripts_plugin`)
 
 While loading, the plugin reads the map's scripts and builds the director
@@ -1399,11 +1618,48 @@ ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
 reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
 script) says one line of speech (a `*_voice` package) at a time, so a new
 line stops its last one unless `bDontOverrideOtherSounds`; effects never
-stop each other; nothing is placed in the world yet (every sound plays at
-full loudness); a group waits for its longest take. Lines pause with the
+stop each other; a group waits for its longest take. Lines pause with the
 game and stop when the level ends. Not done: subtitles (the game's
-`System/subtitles_*.int` files hold them, by sound name), sounds stored
-inside a map, and placing sounds at the speaker.
+`System/subtitles_*.int` files hold them, by sound name) and sounds stored
+inside a map.
+
+**Where a script sound comes from.** Every `Sound` in the game's packages
+names its `Params`: an `AudioParams` object in `Sounds/params_vox.uax`
+(speech) or `params_sfx.uax` (effects). Its PC values that matter here are
+`NonPositional` (heard the same everywhere: the Clone Advisor, most squad
+radio, briefings), `Radius` (Unreal units) and `bDisable3DFalloff` (big
+explosions: from their side, never quieter). The class default `Radius` is
+2000 (engine.u, `rc_probe --class AudioParams`), which is also
+`[sound] default_radius`. `rc_package::sound` reads them,
+`rc_combat::read_sounds` now records each sound's `params` (a group's own,
+else its first take's) and `rc_combat::read_audio_params` reads the
+params packages. At play time `sounds.rs` decides:
+- heard everywhere: `ACTION_PlayLocalSound`, `NonPositional` sounds,
+  `SoundSourceTag=PlayerCommando`, and a tag nothing in the level has;
+- else at the character whose `ScriptTags.tag` is the `SoundSourceTag`
+  (followed as it moves), or the map actor with that tag or name (fixed);
+- with no tag: the character running the `ScriptedSequence`, else the
+  script actor's own spot in the map (UE2 plays a script's sound from the
+  script when it has no pawn).
+
+A placed sound gets `rc_game_core::SoundAt` (3D SOUND makes it heard from
+its side) and a `Placed` component; `sounds::follow` moves it with its
+character and sets its loudness every frame: full out to `Radius`, then
+`Radius / distance` (our reading: OpenAL's reference distance; some radii
+are tiny, enemy footsteps 20 uu, so `Radius` can't be where a sound
+stops). An action `Volume` above 1 (2 to 10000 in a few maps) makes the
+sound carry that many times further. Over the 56 campaign maps
+(`rc_script_check`) the scripts' 1,946 enabled sound actions split as:
+1,404 radio, 58 aimed at the player, 23 local, 391 at the script's spot
+(mostly explosions), 48 at a sequence's character, 9 at a tagged map
+actor, 13 at a tagged character if one is there.
+
+Bevy's own 3D sound (rodio) also divides a placed sound's loudness by the
+distance squared in Bevy units (metres): a droid 10 m away played at 1/100.
+`rc_game/src/sound_options.rs` now shrinks placed sounds' positions by
+1000 (`SpatialScale`) before Bevy sees them, which leaves left and right
+alone and pushes that fading out past a kilometre, so only each part's
+own distance rule applies.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).
@@ -1411,6 +1667,54 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 `BactaRecharging.Event` and it rests 10 s (our choice). In geo_01a those
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
+
+### Breakable props (`rc_level::breakables`, `rc_scripts_plugin/src/breakables.rs`)
+
+Explosive barrels, geo_05b's fuel dispensers and their clamps, holo
+machines, consoles, rock cover, drone eggs and wall panels are all `Prop`s
+(or `KarmaProp`, `StaticProp`, `ExplosiveBarrel` ...) with health. The
+values live in the map, or as the class's defaults in the script packages
+(`Properties/StaticPropProperties.u`, `Properties/MarkerProperties.u`,
+`CTMarkers.u`); `rc_level::breakables::read` takes the map's value first
+and then walks the class and its parents (`class_look`). The Geonosis maps
+have 838 of them; 53 send an event the level scripts wait for.
+
+How a prop breaks (our reading of the game, in our words):
+
+- It starts with `Health`. With none (0 or less) nothing can hurt it; only
+  a script can remove it.
+- Damage counts after the prop's damage table, as for characters.
+- `DamagedRatio` above 0: when health falls to that share of the start,
+  it goes to its damaged step (`DamagedState`): sends that step's event,
+  and if the step has no model of its own it simply disappears, *without*
+  its broken event (geo_04d's rock cover works this way). A damaged step
+  with a time limit (`StateLifeSpan`) breaks by itself when it runs out.
+- At no health it breaks (`DestroyedState`): it sends its own `Event`, or
+  if it has none `DestroyedState.Event`. Broken props take no more damage.
+- If it has an explosion (`ExplosionDamage` and `ExplosionRadius`) it goes
+  off 0.1 to 0.2 s later, hurting everything it can see within the radius,
+  falling off with distance (the same rule as grenades).
+
+Who does what: `rc_level::map_collision` keeps every breakable prop's
+triangles apart (as a `LevelParts` part), and the level viewer draws each
+as its own `MoverPart`, so it can go when it breaks. Some models have
+collision switched off on every part (the Geonosian explosive barrels):
+those collide through the model's simple collision shape (see "Simple
+collision shapes"). A breakable prop with neither gets its drawn
+triangles, so it can still be shot. `rc_scripts::Director`
+keeps health and steps (`add_breakables`, `hurt_prop`) and sends the
+events, so a script waiting for `Clamp00` carries on. `rc_scripts_plugin`
+turns weapons into damage: a `ShotLanded` on the level hurts the prop whose
+box it landed on (`ShotLanded` now carries the shot's damage and type), a
+grenade `Blast` hurts the props around it, and a prop's own explosion sends
+`rc_combat::Explode` (characters) and hurts the props around it (so barrels
+set each other off). Broken and damaged state are saved with the scripts.
+
+Not done yet: the broken or damaged model (props just disappear), the
+effect and sound, the burning or electric after-effect some barrels leave,
+the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
+through (geo_04c's wall components) aren't in the collision, so shots pass
+through them.
 
 ### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
 
@@ -1464,6 +1768,50 @@ the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
 `GotoState` on characters, characters the game doesn't spawn yet (placed
 clone troopers and the like are logged and skipped), one sequence run
 separately per character, and `ScriptPriority`.
+
+### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
+
+Every squad marker in a map (`MarkerDemolition`, `MarkerHackTerminal`,
+`MarkerHackDoor`, `MarkerDoorBreach`, `MarkerSnipe`, ...) names an
+**anchor** (`Anchor`): the map actor the job is for. The anchor holds the
+level's side of the job as map settings, and the level's scripts wait for
+the events it sends:
+
+| Anchor class | Started | Armed | Done | Also |
+|---|---|---|---|---|
+| `DemolitionCharge` | `EventUnderway` | `ChargeArmed.Event` | `ChargeExplode.Event` | blows away `PropToDestroy` |
+| `HackTerminal*` (console) | `EventUnderway`, `ActiveState.Event` | | `HackedState.Event` | |
+| `HackDoor*` (lock, sliced) | `EventUnderway` | | `DoorUnlockedState.Event` | opens its door |
+| `BreachDoor*` (lock, blown) | `EventUnderway` | | `DoorDamagedState.Event`, `DoorUnlockedState.Event` | opens `DoorLeft`, `DoorRight` |
+| anything else (a sniper post's anchor) | `EventUnderway` | | | |
+
+The order marker can have its own `EventUnderway` too (geo_01a's
+`MarkerDemolition2` sends `SpawnDemoDroids`), sent with the anchor's.
+A door can have both a slice lock and a breach lock; they name each other
+(`MatchingComponent`) and either one opens the door. The doors are the
+`MoverDB_*` double doors, whose class default state is `Locked`: they
+never open on their own, so the movers part treats them as still until
+`LevelMovers::open_named` opens them. They then stay open (the original
+lets a sliced door work as an automatic door again; not done).
+
+How it flows: the squad part (`rc_squad_plugin`) sends
+`rc_game_core::MarkerJob { anchor, step }` when a squad mate starts a job
+or takes up a post (`Started`), lights a fuse (`Armed`) and finishes
+(`Done`, with the job's result). `markers::run` in the scripts part sends
+the anchor's events into the director, once per step per anchor (a
+`Done` with no `Started` before it sends both), blows away the prop
+(`Director::destroy_prop_named`, which also sends that prop's own
+destroyed event) and opens the doors. Another part can send `MarkerJob`
+too (the player doing a job himself, later).
+
+`rc_script_check` lists every map's anchors and checks that each door they
+open is a door the movers part moves. On the 13 Geonosis maps: 57 anchors,
+61 of their events are ones scripts wait for, and 38 of 38 doors found.
+
+Not done: the anchor's own look changing (a lit charge, a console's
+screen, the blown lock's mesh), its sounds, the player doing a job with
+Use, and saving which steps were sent (after a load a step can be sent
+again if the squad repeats it).
 
 ### geo_01a, worked through
 
@@ -1977,6 +2325,57 @@ that kind nearest the squad, orders it, and checks after 45 s that the job
 was done (or the post taken), that the player asked for it once and that a
 squad mate answered.
 
+### Optional squad ammo (`rc_squad/src/ammo.rs`, `[ammo]` in `squad.toml`)
+
+Off by default, because the original's squad never runs out and never
+takes boxes (docs/RESEARCH.md, "Squad ammo and ammo boxes"). With
+`[ammo] limited = "no"` every squad mate's ammo list is empty, which means
+"never runs out", and none of the code below does anything.
+
+A mod switches it on with a `squad/squad.toml` holding only the lines it
+changes (every other value keeps its built-in default):
+
+```toml
+[ammo]
+limited = "yes"
+```
+
+Then, all our own rules:
+
+- **Counting.** Each squad mate starts with the `start` of each
+  `carry_<id> = most, start` line (the DC-17m 120 of 300, sniper 20 of 20,
+  anti-armour 4 of 4, thermal detonators 2 of 5, from the squad's own guns
+  in the Properties package). Guns or grenades not listed never run out.
+  Every shot (`Squad::shoot`) takes one from the gun fired, every grenade
+  (Fixer's own and grenade posts) one from `throws`. `SquadEvent::OutOfAmmo`
+  when one reaches 0.
+- **Running out.** An empty speciality gun isn't picked (Sev keeps to the
+  rifle with no sniper rounds); with the usual gun empty they hold fire.
+- **Fetching** (`Squad::think_fetch`, before the usual think). A squad mate
+  with no job (no marker, not reviving, not on a post) whose lowest gun is
+  at or below `fetch_below` (25%) of the most walks to the nearest box that
+  fills it, within `fetch_range` (1500 uu) of them and of the spot they're
+  tied to. In a fight (a target, or an enemy within sight) they wait until
+  that gun is empty, unless `fetch_in_fights`. Two squad mates never go for
+  the same box. After `fetch_give_up` (15 s) they leave a box they can't
+  reach alone, and wait as long again (back at their place) before trying
+  another. Events `FetchAmmo` and `FetchStopped` (box gone, full again,
+  busy, enemy to fight first, can't get to it).
+- **Taking** (`rc_squad_plugin/src/ammo.rs`). `gather_boxes` copies the
+  untaken `rc_combat::ammo_box::AmmoBox`es into `Squad::boxes` each frame;
+  `take_boxes` runs after the squad moves and uses the player's touch test
+  (`ammo_box::touches`). `Squad::take_box` fills only what isn't full, up to
+  the most carried, like the player's rule; the box is then marked taken,
+  so it's hidden and saved as taken. A squad mate walking over a box they
+  have room for takes it even if they weren't fetching it.
+- **Saving.** Each squad mate's counts are in the `[squad]` section of a save
+  (`ammo`, left out when empty).
+
+Tests: `cargo test -p rc_squad` (7 ammo tests) and
+`cargo test -p rc_squad_plugin --test ammo_room` (switched off nobody goes
+near the boxes; switched on Sev, low on rifle shots, and Fixer, out of
+grenades, each fetch theirs and come back).
+
 ### Squad voices (`rc_squad/src/voice.rs`, `data/squad/voice.toml`)
 
 The lines are the game's: each member's `audio_table` (squad.toml, like
@@ -2286,6 +2685,41 @@ walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
 
+To see which file claims each map's spawners, and which classes no file
+claims yet, run `rc_enemy_spawners` (an example in `rc_enemies`, needs the
+game folder in `RC_GAME_DIR`; writes `logs/enemy_spawners.log`). A new
+enemy type that fights like the existing ones (walks, shoots, hits up
+close) is only a new file: the Geonosian elite (`geonosian_elite.toml`
+with its weapon `data/weapons/elite_beam_enemy.toml`) needed no code. A
+beam weapon is an `instant` shot fired as a burst of quick hits.
+
+When a class could match two files, the first file in name order wins, so
+give each file exact class names where they overlap (the Trandoshan
+files list `TrandoshanMercenary`, `TrandoshanMercenaryGrenadier` and so on
+one by one; a test checks each class has exactly one file).
+
+**Shields.** `combat.shields` gives an enemy an energy shield on top of its
+health (the Kashyyyk Trandoshan mercenaries: 100, regaining 10 a second).
+Damage goes to the shield first, as for the player (`rc_combat::Shield`).
+
+**Shotguns.** A weapon's `shot.pellets` fires that many instant hits at
+once, each up to `shot.spread` rotation units off the aim (the slavers'
+shotgun: 8 pellets, 1700, the game's `ProjPerFire` and `Spread`). How the
+original scatters them is our reading.
+
+**The Trandoshans.** Classes that the game builds in
+`Properties/properties.u` straight from a class in `ctcharacters.u` (like
+`TrandoshanMercYYYUp` from `TrandoshanMercenary`) keep that class's own
+values, not its "...Defaults" class's, so the Kashyyyk mercenaries have
+100 health and a shield while the Prosecutor's have 220 and none. The
+evidence: those classes restate every value the Defaults class changes
+that they want (the grenadier repeats Health 220, Shields 0, its damage
+table and sight). The files: `trandoshan` (Prosecutor mercenaries),
+`trandoshan_kashyyyk`, `trandoshan_grenadier`, `trandoshan_slaver`,
+`trandoshan_slaver_berserker`, `trandoshan_slaver_grenadier`,
+`trandoshan_heavy` and `trandoshan_scavenger`, with weapons
+`trandoshan_shotgun`, `trandoshan_rifle` and `scav_beam`.
+
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
 `thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The
@@ -2459,16 +2893,173 @@ display. The player's kinds and their order are `grenades` in
   `CTDamageMelee` (times its table: battle droids take x3). The weapon in
   hand's `[melee]` section wins; `player.toml`'s is the fallback. Walls
   block it.
-- Pickups (`pickup.rs`): a `WeaponPickup` on the ground is collected by
-  walking within 80 uu of it (our choice). A new weapon joins the cycle;
-  one already carried gets the ammo. Enemies drop the weapon file named by
-  `combat.drops` in their settings file.
+- Pickups (`pickup.rs`): see "Weapons lying in the levels" below. Enemies
+  drop the weapon file named by `combat.drops` in their settings file.
+- The ACP array gun uses `shot.pellets` (8) like the Trandoshan shotgun:
+  see "Shotguns" above.
+
+### Ammo and grenade boxes (`rc_level::pickups`, `rc_combat/src/ammo_box.rs`)
+
+The campaign maps place 477 boxes of seven kinds (`DC17mBlasterBox` 225,
+`DC17mAntiArmorBox` 64, `ThermalDetonatorBox` 62, `EMPGrenadeBox` 50,
+`DC17mSniperBox` 42, `SonicDetonatorBox` 17, `FlashBangBox` 17). All come
+from the engine's `Ammo` pickup class. A map stores only where each box
+is; everything else is the class's defaults with its "...Defaults" class in
+`Properties/properties.u` on top, as for the weapons:
+
+| Box | Gives | Touch cylinder (radius, half-height) | Model |
+|---|---|---|---|
+| DC-17m | 300 shots (`DC17mBlasterBoxDefaults`; 120 in `CTInventory.u`) | 40, 15 | `PickupMeshes.ClonePickups.DC17mBox` |
+| Sniper | 20 | 50, 30 | `SniperBox` |
+| Anti-armour | 4 (`DC17mAntiArmorBoxDefaults`; 6 in `CTInventory.u`) | 50, 31 | `AntiArmorBox` |
+| Thermal, EMP, flash | 5 | 45, 44 | `ThermalDetonatorBox`, `EMPBox`, `FlashGrenadeBox` |
+| Sonic | 5 | 45, 44 | `GeoGrenadeBox` (the Defaults class swaps it) |
+
+No campaign map changes a box's amount; one box sets `bForceRespawn`
+(geo_01a's grenade crate by the start, back 0.1 s after it's taken).
+
+**Reading** (`rc_level::pickups`, plain Rust): `read_boxes` finds every
+actor whose class comes from `Ammo` and reads its amount, the ammo class it
+fills (`InventoryType`), its cylinder and whether it comes back.
+`map_collision::load` does this, leaves every pickup out of collision (the
+game's pickups don't block: touching one is how you take it; before, the
+boxes were solid), and drops each box onto the ground under it, as the game
+drops pickups at the start. **Our choice:** a box more than 40 uu above
+the ground found stays where the map put it, because it rests on
+something the port doesn't count as ground (ten boxes, 50 to 745 uu up).
+The level viewer draws each box on its own (`MoverPart` with its export
+index) with its "...Defaults" model, dropped the same way.
+
+**Taking them** (`ammo_box.rs`): `rc_level_plugin` hands the boxes over as
+`rc_game_core::pickups::LevelAmmoBoxes`; combat makes an `AmmoBox` entity
+for each. `data/pickups/ammo_boxes.toml` says which weapon or grenade file
+each of the original's ammo classes fills, and can change a box class's
+amount. The rules, from the game's `Pickup` and `Ammunition` scripts:
+
+- A box is tried when the player starts touching it (the two cylinders
+  overlap: the player is 40 wide and 168 tall from the feet). Standing on
+  it doesn't keep trying.
+- It only fills ammo the player already carries, and only if it isn't
+  full; otherwise it's left lying.
+- It adds its whole amount, capped at the most carried, and is used up.
+- If the weapon in hand was empty, it reloads at once.
+- Taken boxes are gone for good in single player, unless the map marks
+  them to come back. Their model is hidden.
+
+The `[pickups]` section of a save file lists the boxes taken, by name.
+`AmmoBoxTaken` is sent for each box taken.
+
+Squad mates don't take boxes, on purpose: in the original only the player
+can (`bCanPickupInventory`), and anyone else whose weapon runs dry gets a
+fresh magazine for free (`bInfiniteClipsForNonPlayers`). The port's squad
+already fires without running out, which matches. Evidence in
+`docs/RESEARCH.md`, "Squad ammo and ammo boxes". A mod can switch on squad
+ammo and box fetching: see "Optional squad ammo" under Delta Squad.
+
+#### Pickup sound and message
+
+Each box class names its own `PickupSound` and `PickupMessage`
+(`CTInventory.u`, with the `...Defaults` class in `properties.u` on top,
+read by `rc_level::pickups::read_box` like the amount):
+
+| Box | Message | Sound |
+| --- | --- | --- |
+| DC-17m | DC-17m Blaster Clips (`...Defaults`; "DC-17m Blaster" in the class) | `GEN_Sound.Weapons.GenericWeaponPickup` |
+| Sniper | DC-17m Sniper | same |
+| Anti-armour | DC-17m Anti-Armor Charge Packs (`...Defaults`) | same |
+| Thermal, sonic, flash | Thermal Detonators, Sonic Detonators, Flashbang Detonators | same |
+| EMP | EMP Grenades | `GEN_Sound.Interface.int_GEN_wepPickup_01` |
+
+What the original does with them (engine.u `Pickup.AnnouncePickup`,
+`PlayerController.HandlePickup`, `PickupMessagePlus`, `LocalMessage`): the
+sound is played for the player only, from where they are
+(`ClientPlaySoundLocally`), and the message is a `PickupMessagePlus`:
+centred, 35% of the way down the screen, white, one at a time (a new one
+replaces the last), 3 seconds, fading. The real drawing is in native code
+(`CTHUD` keeps `LastPickupText` and `fPickupStartTime`), so the exact font
+size and fade are **our choice**.
+
+In this port: `take_boxes` sends `rc_game_core::pickups::PickedUp { text,
+sound }` for each box taken (a full player's touch sends nothing).
+Anything else that can be picked up (weapons on the floor, health) can send
+the same message. `rc_combat::pickup_sound` reads the sounds a level's
+boxes name when the level loads (`PickupSounds`) and plays them, at full
+volume scaled by EFFECTS VOLUME, not placed in the level. The original HUD
+(`rc_game/src/original_hud.rs`) shows the text in the `pickup` element of
+`data/ui/hud.toml` (`{pickup}`, `when = "pickup"`, `fade = "pickup"`); how
+long it stays and fades is `[pickup_message]` there. The placeholder HUD
+adds it to its message list instead. The log says `pickups: played sound
+GEN_Sound.GenericWeaponPickup` and `original hud` redraws as it fades.
+
+### Weapons lying in the levels (`rc_level::pickups`, `rc_combat/src/pickup.rs`)
+
+The campaign maps place 40 weapons: 14 bowcasters, 9 ACP repeaters
+(`SMG`), 6 rocket launchers, 3 ACP array guns (`Shotgun`), 3 concussion
+rifles, 2 anti-armour and 1 sniper attachment, 1 DC-17m, 1 Elite Beam
+(geo_03d) and 1 LS-150 heavy repeater (`TrandoshanRifleMP`, ras_04b). Each
+is a `CTPickup` whose `InventoryType` is a weapon class. As for the boxes,
+the map stores only the place: the weapon, size (`CollisionRadius`,
+`CollisionHeight`), model and `PickupMessage` come from the pickup class,
+and the shots it holds from the weapon's `PickupAmmoCount` with its
+"...Defaults" class on top (24 for the bowcaster, 160 for the repeater).
+
+**Reading:** `rc_level::pickups::read_weapons` (`PlacedWeapon`).
+`map_collision::load` drops them onto the ground like the boxes; the level
+viewer draws each on its own (`MoverPart`), so it can be hidden.
+`rc_level_plugin` hands them over as
+`rc_game_core::pickups::LevelWeaponPickups`. A weapon class named without a
+package (`Bowcaster` in `CTInventory`) is looked up in the pickup class's
+own package.
+
+**Taking them** (`pickup.rs`): combat makes a `WeaponPickup` entity for
+each one `data/pickups/weapon_pickups.toml` knows (the original's weapon
+class to this port's weapon file). The rules, from the game's `Pickup`,
+`Weapon`, `PlayerController` and `EliteBeamPickup` scripts:
+
+- Touching a weapon you carry takes its ammo when touching starts, up to
+  the most you carry; full, it's left lying. The DC-15s (it recharges)
+  never takes ammo.
+- A weapon you don't carry needs Use while touching it. Meanwhile the
+  display shows the game's "PRESS @ TO PICKUP" (the prompt file's text,
+  `@` replaced by the Use button) and the weapon's name.
+- Weapons in `[carry] one_at_a_time` (the game's secondary slot,
+  `InventoryGroup` 5: everything taken from the enemy) are carried one at
+  a time. Taking another throws the one carried down in front of you with
+  the shots it has left (a dropped `WeaponPickup`).
+- `swap_when_empty` weapons (the Elite Beam) never give ammo; Use swaps one
+  in only once yours is empty.
+- A new weapon goes into your hands. Taking it or its ammo sends
+  `PickedUp` (see "Pickup sound and message" above) with its name
+  (`PickupMessage`) and its own `PickupSound`: `GEN_Sound.GenericWeaponPickup`
+  for the bowcaster, `GEN_Sound.int_GEN_wepPickup_01` for the rest. A
+  dropped weapon uses `[sound]` in `weapon_pickups.toml`.
+
+Weapons an enemy drops, and ones you throw down, follow the same rules,
+with the game's `CTPickup` width (84) and a half-height of 15 (our
+choice). `WeaponTaken` is sent for each. The `[pickups]` section of a save
+lists the map's weapons taken (`weapons_taken`); weapons on the ground
+that the map didn't place are not saved.
+
+The new weapon files (`bowcaster`, `acp_array_gun`, `concussion_rifle`,
+`rocket_launcher`, `elite_beam`, `heavy_repeater_mp`) use the game's
+numbers. Not built: the bowcaster's charged shot, rocket homing, the speed
+penalty of heavy weapons, and the concussion rifle's instant hit (it is a
+very fast round that blasts where it lands, `grenades/concussion_rifle_blast.toml`).
+The sound package names are guesses from the sound names (`wep_GEN_` in
+`gen_sound`, `wep_YYY_` in `yyy_sound`).
 
 ### Modding
 
 Every weapon is one file in `data/weapons`. A mod folder's file with the
 same name replaces it, and a new file is a new weapon. The player's health,
-shield and starting weapons are in `data/combat/player.toml`.
+shield and starting weapons are in `data/combat/player.toml`. What each
+ammo box fills, and its amount if a mod wants another, is in
+`data/pickups/ammo_boxes.toml`; which weapon file each weapon lying in the
+maps is, which weapons are carried one at a time, the pickup prompt and
+the sound of taking a dropped weapon are in
+`data/pickups/weapon_pickups.toml`. Where and how long the pickup message
+shows is in `data/ui/hud.toml` (the `pickup` element and
+`[pickup_message]`); any element can fade with `fade = "pickup"`.
 
 ### `rc_shoot`: the firing range
 
@@ -2576,10 +3167,31 @@ Not done: the anti-armour's grenade digit (`PannerClip`, shown when the
 ammo has `DigitalClipDisplay`) and the DC-15s charge bar (its recharge
 uses other numbers we haven't read); they show their pictures unslid.
 
-**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths);
+**The arms' sounds** (`arms_sound.rs`). The reload clatter, the click of
+bringing a weapon up, putting it away, the melee swing and the grenade
+throw aren't in the weapon classes. They are `AnimNotify_Sound` events in
+the arms animations: each names a sound and a moment (0 = start, 1 = end).
+`rc_model` reads them into `Model::sounds`; when a weapon's arms are read,
+`ArmsSounds` reads every sound they name (all in `GEN_Sound`). Each frame
+`spans` works out which stretch of which animation the arms went through
+(including the end of a reload or holster that finished this frame, the
+old weapon's holster when switching, and both ends when breathing or
+running goes round), and `play` plays every event in it. List them with
+`cargo run -p rc_combat --example rc_arms_sounds -- <game folder>`. What
+the five arms make (2026-11-10): reload (DC-17m 1, sniper 5, anti-armour 1,
+repeater 2, pistol none, as its charge refills by itself), holster and
+load 1 each, attachment swaps 1 each, idle 1-3, run 2 armour footsteps,
+throw 2-3, melee 1-6. **Our choices:** played for the player only at full
+volume, not placed in the level; quiet while the player is down or a
+cutscene gives them other hands; still played when the sniper's zoom hides
+the arms. A weapon file's `sound.reload` is still read (for a weapon with
+no arms), but the DC-17m's was taken out, since its animation plays it.
+
+**Checks:** 8 unit tests in `arms.rs` (with the DC-17m's real lengths), 9
+in `arms_sound.rs`;
 `rc_shoot --script` checks the arms play `ActionBreathe`, `Reload`,
 `Holster`, the pistol's `Fire`, and the rifle again after switching back,
-and that the gun corner of the picture is textured; `rc_game --script`
+that the reload played the game's own reload sound, and that the gun corner of the picture is textured; `rc_game --script`
 checks the arms show the weapon in hand after loading a level.
 
 **VR:** the arms are a child of the player camera with their own camera,
@@ -3004,8 +3616,38 @@ of each section, so a round trip can be checked from the log.
   `ACTION_ChangeLevel` (`URL`).
 - The last level of each campaign shows the debriefing,
   `ACTION_ShowDebriefingScreen` with a `NewLevel` (the same action with
-  only `Text` is a hint screen, and doesn't leave). The screen itself isn't
-  shown yet; the game goes straight on to `NewLevel`.
+  only `Text` is a hint screen, and doesn't leave). The game shows the
+  screen first and goes on to `NewLevel` at CONTINUE (see "The debriefing
+  screen" below).
+
+**The debriefing screen.** geo_05c, ras_04d and yyy_06d each end with
+`ACTION_ShowDebriefingScreen`: a menu class (`CTDebriefingInfoGEO`, `RAS`
+or `YYY`), a `Title`, a `Text`, a picture (`PicName`) and `NewLevel`. The
+director puts what the screen shows on its `Effect::ChangeLevel`
+(`debriefing`), and the scripts part sends
+`rc_game_core::ShowDebriefing` with the `ChangeLevel` held inside instead
+of sending the `ChangeLevel` itself. In `rc_game`, `debriefing.rs` pauses
+play and opens the `debriefing` page (`[pages.debriefing]` in
+`data/ui/original_menus.toml`, class `CTDebriefingInfo`).
+`rc_menus::debriefing` fills it in as the original's `SetInfoOptions` and
+`Init` do: title and text into `InfoTitle`/`InfoText`, the picture into
+`InfoPic` (whole picture), CONTINUE (`AButton`) shown on a PC, "YOU HAVE
+UNLOCKED / EXTRAS CONTENT" shown (English). Two maps name the picture
+without its group (`GUIContent.GEO_Debrief` is really
+`GUIContent.LoadInfoScreens.Geo_Debrief`), so `Library::resolve_loose`
+finds a picture by package and name when the full path doesn't match.
+CONTINUE (`act:continue`) sets `Menu::go_on`; `debriefing.rs` then sends
+the held `ChangeLevel` and the save part travels as for any exit. Back
+does nothing on this page (`back = "unavailable"`), as in the original. Our wrapped text came out
+longer than the frame, and CONTINUE wider than its bar, so
+`debriefing::fit_continue` widens the bar and `debriefing::fit_text`
+makes the text smaller in steps (not below 60%) until it fits. The real
+texts end up at 85-90% of their size. If
+the original page can't be drawn, a placeholder page marked as one shows
+the title and text with Continue. Not done: the GEO/RAS/YYY classes differ
+only in the music they play (`musGEO_cadence_lp` and so on); that music
+isn't played yet. Hint screens (`bIsForHintText`) aren't shown: the
+original shows them only with a debug switch.
 
 Following the first exit of each map from `pro` visits all 56 campaign
 maps in order and ends at `epilogue`; no exit names a missing map.
@@ -3050,6 +3692,328 @@ which puts the player into geo_01a's exit with 13 health taken off and
 checks that geo_01b loads with the same health and magazine, the player at
 its start, and its start saved as a checkpoint with that health.
 
+## Cutscenes (`rc_scripts` Dispatchers, `rc_scripts_plugin/src/cutscene.rs`, `rc_game/src/cutscene.rs`)
+
+**What the original's cutscenes are.** Republic Commando has almost no
+films. Its story scenes are the game's own world seen through the player's
+eyes, run by the same level scripts as the missions: the prologue (`pro`,
+the clone growing up on Kamino), the briefings on the gunship
+(`geo_01briefing`, `ras_01briefing`, `yyy_01briefing`, `yyy07briefing`),
+the `epilogue`, and short moments inside missions (geo_01a opens with the
+player held in the gunship while the squad rappels down). The only video
+files are the start-up logos (`Movies/lecintro.avi`, `nvidiaintro.avi`),
+the main menu's background (`menu_bg.avi`) and the EXTRAS menu's
+making-of films (`extras*.mpg`). The `.avi` files are MPEG-4 part 2
+(`MP42`, `MPG4` four-character codes), which no Rust library decodes yet.
+
+**Dispatchers.** Cutscene maps are timed by `Dispatcher` actors: when an
+event with the dispatcher's tag is sent, it sends a list of events one
+after another, each after its own `Delay` (a random time up to `DelayMax`
+when that is longer), optionally playing a `Sound` first (and waiting for
+it with `bWaitForSound`). Its `Events` list is an array of structs written
+as named values; `rc_level::scripts` now reads such arrays into
+`Val::Structs`. Before this, nothing ran them, so the prologue and the
+briefings stopped at their first dispatcher and the player was stuck.
+`rc_scripts::dispatcher_actions` turns each dispatcher into a small script
+of our own making (wait for the tag; for each entry wait, play, send; go
+back to waiting), so its waits are saved like any script's and its tag is
+not heard while it runs, as UE2's Dispatcher ignores triggers while
+dispatching. `rc_script_check pro geo_01briefing epilogue --secs 400`
+shows each map now runs to its end: the prologue leaves for
+geo_01briefing at 166 s, the briefing for geo_01a at 53 s, the epilogue
+reaches its credits (`ShowMenuScreen CTCreditsMenu`) at 75 s.
+
+**What the scripts ask of the player and the screen.** Shared in
+`rc_game_core::cutscene`: the `Cutscene` resource (held view, frozen body,
+screen tint, HUD and helmet frame hidden) and the `TeleportPlayer`
+message. `rc_scripts_plugin/src/cutscene.rs` (`Scene`) fills them in from
+the actions:
+
+- `ACTION_Briefing` holds the player: no walking, jumping, crouching,
+  fighting, using or orders (`ActionState::hold_still`); looking stays,
+  within `MinYaw`..`MaxYaw` and `MinPitch`..`MaxPitch`. The limits are
+  the world's own angles, not angles from where the player faced: in the
+  prologue each room's range is centred on the way that room's arrival
+  point faces (GymTeleporter faces 32640, its range is 28500..38000).
+  Class defaults (read with `rc_probe --class ACTION_Briefing`): the whole
+  circle both ways, `bDrawHUD` on. `bDrawHUD` off hides the HUD;
+  `bEndBriefing` lets go; `bOkToChangeWeapon` keeps weapon changes.
+- `ACTION_TeleportToPoint` on the player moves the middle of the body to
+  the named point, facing the way it faces, with no speed.
+- `ACTION_SetPhysics` on the player: mode 0 (none) freezes the body where
+  it is (the newborn clone doesn't fall); any other mode lets it move.
+- `ACTION_ScreenFade`: a positive `FadeTime` fades to `FadeColor` (default
+  black, 3 s), 0 goes there at once, a negative one fades back from it.
+- `ACTION_AnimateVisorFX`: `AddColor` shown as that colour over the
+  screen, `MultiplyColor` as black over it as strong as the colour is
+  dark, rising over `InTime`, holding `SustainTime`, falling over
+  `OutTime`. This is a stand-in: the original adds and multiplies, we lay
+  a colour over. Bloom is logged as not done.
+- `ACTION_ShowVisor` hides or shows the helmet frame (`bVisor`).
+- `ACTION_Briefing` with `bSetBriefingWeapon` gives the player other
+  hands (`BriefingWeapon`: the prologue's `CTInventory.Baby` and
+  `CTInventory.Boy`). Those hands aren't drawn yet, so the grown
+  commando's arms and gun are hidden while it is set
+  (`Cutscene::briefing_weapon`, read by `rc_combat`'s `arms_view` and
+  `view`); `bEndBriefing` gives them back.
+
+**No squad in cutscene maps.** The playable missions each have a `CTSquad`
+actor; the prologue, the briefings and the epilogue don't. Our squad used
+to come along everywhere (the user saw Delta standing behind a tank in the
+prologue). `rc_squad::map::MapSquadInfo::wants_squad` is true when the map
+has a `CTSquad` actor, a squad marker or a squad-mate spawner; when the
+map was read and none is there, `rc_squad_plugin` brings in no squad mates
+and logs "this map has no squad".
+
+`rc_game/src/cutscene.rs` carries them out: it holds the actions between
+`GameSet::Input` and `GameSet::Simulate`, hides every `HudRoot` (the
+placeholder HUD and the original HUD pictures), and draws a full-screen
+colour layer over the HUD and under the menus (`GlobalZIndex(9)`).
+`player.rs` applies teleports, the look limits and the frozen body;
+`helmet.rs` hides the frame. Everything is cleared when a level loads or
+the game is left. A VR mod reads the same `Cutscene` and shows the tint
+and limits its own way; nothing here assumes a flat screen.
+
+**Our reading, not the game's code.** What each action does comes from
+its name, its values in the maps and its class defaults; the classes
+themselves are compiled code we don't read. Not done yet: the player
+riding the gunship (`ACTION_AttachToGunship` to a bone of the
+`BriefingGunship`, whose `GEO01fly` animation carries the camera through
+the sky), drawing what the player holds (`BriefingWeapon`: the baby's and
+boy's hands, the briefing helmet; for now nothing is drawn), characters brought in by factories during
+a scene (placed ones are the cast, see `rc_cast` below), hiding and
+showing actors that aren't level parts (the hologram text), view shakes,
+the title card, the credits, and the cutscene state in save files (the
+cutscene maps have no checkpoints, so only a quick save mid-scene would
+lose the hold).
+
+## The cast: characters no other part owns (`rc_cast`)
+
+**Why.** The first playtest of the prologue showed an empty Kamino: the
+level scripts ran, but the characters they talk to didn't exist, so the
+log had 158 "no character ... in the game" lines. The droids belong to
+the enemies part and Delta to the squad part; everything else a map
+places was never spawned.
+
+**Who is in the cast.** When a map loads, `rc_cast::read::find_cast`
+looks at every placed actor whose class comes from `Pawn` (characters
+and vehicles) or `AnimProp` (animated props, like the young clones
+sitting in the nursery). Class parents come from the game's script
+packages (`GameData/System/*.u` and `GameData/Properties/*.u`, read with
+`rc_package::class_library`). Left out:
+
+- classes `data/cast/cast.toml` leaves to other parts (`leave_out`: the
+  droids, Geonosians, Trandoshans and turrets the enemies part fights);
+- in a map with a squad (a `CTSquad` actor), commandos that can join the
+  squad (`bCanBeSquadMember`, the squad part's). In the prologue every
+  commando is cast.
+
+Each wears the map's `Mesh` value or its class's default `Mesh`, found by
+name among the skeletal meshes of `GameData/Animations/*.ukx`, and read
+with `rc_model` with every animation set kept (`ModelSpec::keep_sets`,
+`Model::named_clip`), so scripts can play any of its animations by name.
+`[class.*]` in the data file can change a class's mesh or materials: the
+commandos' armour colours come from there (the original swaps them in
+compiled code). Characters stand with their feet `CollisionHeight` below
+their `Location`; props are drawn at theirs.
+
+**What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
+is the class name when the map gives none, as in Unreal, and its
+`AIScriptTag`) with `follows_orders` on, so the level scripts part finds
+it and sends `CharacterOrder`s:
+
+- `MoveTo`, `MoveToPlayer`: a straight line at `GroundSpeed` (walking at
+  `walk_speed_ratio` of it), turning to face the way it goes, playing the
+  first walk or run animation its sets have. No collision and no falling:
+  cutscene walks are short and on clear floors. Arriving puts it on the
+  point.
+- `TurnToPlayer`, `Teleport`, `Hidden`, `Remove`.
+- `PlayAnim` by name from its own sets, looping or once; `WaitForAnimEnd`
+  waits for the one playing. A name its sets don't have is logged and the
+  script carries on.
+- `WaitForPlayer` waits for the player to come within the distance, but
+  only `wait_for_player_limit` seconds (our choice, 20): our player may
+  stand where the original's wouldn't, and a stuck cutscene is worse.
+
+Between orders a character plays the first of `idle` its sets have (an
+animated prop plays its own `AnimHealthy`). Models are posed on the CPU
+each frame like the squad's; hidden ones aren't posed.
+
+**Animated props that are triggered, and events from animations.** As in
+the original's `AnimProp` class, a level event named by a prop's `Tag`
+triggers it: it plays its `AnimTriggered` (once or looping, as the map
+says), or stops it if it is already playing (`trigger_props`). An
+animation can send events itself (`AnimNotify_Trigger`: `EventName`, or
+`TriggerSelf` to trigger its own prop again). `rc_model::Model::triggers`
+reads them, and `animate_cast` sends each one to the level scripts as a
+`RaiseEvent` when the animation passes its moment. This is how the
+hologram briefings start (yyy_04b, ras_03a, geo_03a): the script holds
+the player, sends `HoloProjector`, the projector plays
+`ThrowHoloProjector`, about 2 s in that animation sends `StartBriefing`,
+and the briefing's `Dispatcher` plays and in the end sends the event that
+lets the player go. Without it nothing sent `StartBriefing` and the player
+was held for good.
+
+**Not done.** Characters brought in by `PawnFactory`s during a cutscene
+(the prologue's walking young clones), riding vehicles, lighting by zone (a steady
+`ambient` share of their own colour, as the squad), damage and death (the
+cast can't be hurt), and saving their places (the cutscene maps have no
+checkpoints). In missions, the placed troopers, walkers and the scripted
+spider droid now stand and move as their scripts say but don't fight.
+
+## Character shadows (`rc_shadows`)
+
+**What the original does** (read from its install: the script text and
+class defaults in `Engine.u`, `CTCharacters.u` and
+`XInterfaceCTMenus.u`; nothing copied). Every `Pawn` checks each frame:
+if its `bActorShadows` is set and the "Shadows" option is on (the
+GRAPHICS page's SQUAD SHADOWS row, `EnableShadows`), it makes a
+`ShadowProjector`: a 128x128 picture of the character's shape seen from
+`Normal(vect(1,1,3))` (high above and a little to one side, the same for
+every character), laid on the floors and walls around it, fading over
+`MaxTraceDistance` 350 units and not drawn beyond `CullDistance` 1200
+units from the camera, at full `ShadowDarkness`. Only `CloneCommando`
+(Delta) sets `bActorShadows` in its class; maps set it on chosen actors.
+The prologue marks 7 troopers, 3 young clones and 1 Kaminoan (Kaminoan2,
+in the gym); the two Kaminoans in the opening nursery are not marked, so
+they cast no shadow in the original either. `AnimProp`s carry the flag in
+the prologue but aren't pawns, so they never make a projector.
+
+**What we do.** `rc_cast` reads `bActorShadows` (the map's value, else
+the class's) and puts `rc_shadows::CastsShadow` on each marked character.
+`ShadowsPlugin` gives every mesh under it a "shadow twin": the same mesh
+(same pose, updated with it), drawn with `ShadowMaterial`, whose small
+shader (`shadow.wesl`) slides each point down along the light onto the
+floor at the character's feet and draws it black and see-through by
+`strength`: `darkness x (1 - distance along the light from the middle of
+the body / max_trace_distance)`, about 0.75 for a standing trooper. The
+twin writes depth with a strict "nearer than" test, and rounds its depth,
+so the body's many overlapping triangles darken each floor spot once. No
+extra camera or picture is drawn: one more draw of each body with a
+very small shader, which phones and VR headsets can afford.
+`CharacterShadows` switches all of them; `rc_game` sets it from SQUAD
+SHADOWS (`video.squad_shadows`). Shadows farther than `cull_distance`
+from `PlayerCamera` are hidden. All numbers are in
+`data/shadows/shadows.toml`.
+
+**Differences from the original.** The floor is taken as flat at the
+feet: the shadow doesn't bend onto steps, slopes or walls, and it shows
+under (not on) a prop standing on the floor next to the character. The
+edges are sharp where the original's small picture softens them. How the
+original's blending turns `ShadowDarkness` 255 into a final darkness
+isn't known for sure. The squad and enemies don't use it yet (the squad
+has the old flat round patch under each commando).
+
+**Checking it.** `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p
+rc_shadows --example shadow_check`: two overlapping boxes on a white
+floor, seen from above; checks where the shadow falls, its darkness, that
+overlaps aren't darker, the off switch and the far-away cut-off. In the
+game the log says `shadows: N more shadow copies (C characters, ...)`
+and `shadows: character shadows on/off`.
+
+## Holograms, tank liquid and props with no stored light
+
+**Holograms (`HsHologram`).** Republic Commando's own hologram material
+names a `DiffuseTexture` and a `HologramColor`. The game draws it with
+its `DynamicHologram` hardware shader, whose assembly text is stored in
+`GameData/Textures/hardwareshaders.utx` (read to learn what it does,
+not copied): the base picture's brightness x a glow by how squarely the
+surface faces the eye x a scrolling noise picture x a flicker x the
+colour. `rc_image::hologram` turns the picture into its brightness
+(0.5 x red + 0.6 x green + 0.5 x blue, capped, as the shader does) in
+the hologram colour; the rest is done while drawing by `rc_hologram`
+(next section). Without that part the hologram is drawn as a steady
+glow: unlit, added to what is behind it, from both sides. Used by the level's
+static meshes (`rc_level_viewer::materials`, `Picture::hologram`) and by
+models (`rc_model`, `Skin::hologram`; `rc_cast` draws them): the
+prologue's hologram rifles (`Holo_DC17m`) and advisor (`Holo_Advisor`, a
+clone trooper with a hologram skin). Without a picture (`Holo_Blank`) it
+is plain glow. The default colour (Engine.u class defaults) is a light
+blue.
+
+**Shimmer and flicker (`rc_hologram`).** `HologramPlugin` swaps the steady
+glow for `HologramMaterial` on every mesh with a `Hologram` component
+(`draw::spawn_level` and `rc_cast` add it to hologram meshes). Its
+shader, `hologram.wesl`, does what `DynamicHologram` does, read from the
+shader's assembly text and its constants (`VSConstants`, `PSConstants`,
+each a constant type from Engine.u's `SConstant` enum and four numbers
+stored W, X, Y, Z):
+
+| The original | Ours |
+| --- | --- |
+| Glow picture `GreyHoloFade` looked up at 0.11 x (eye . surface) | the same, read from `hardwareshaders.utx`; edges seen side-on fade out |
+| Noise picture `NoiseDigital` across the model's X and Z at 0.0171 per unit, moved by -flicker x (0.2, 0.5) | the same; the noise jumps somewhere new each step (shimmer) |
+| Vertex colour = facing x flicker (c22) | brightness x facing x small flicker |
+| Height x flicker (c21, "big rare flicker") | the model's height squashes towards its pivot now and then |
+| Position + flicker (c22, "small frequent flicker") | the model is nudged by about 1 unit |
+| Additive, source alpha = glow picture's alpha | added, x the glow's alpha |
+| A "distort" and "scan" swelling | not done: its switch heights (c18, 123,000 units) are never reached, so it's off in the game too |
+
+The flicker values (`EVC_Flicker`) are filled by game code we can't see.
+Their settings come in pairs (0.99/0.3, 0.1/0.4, 0/1); we read them as
+"chance a step stays at 1" and "most it drops", the one reading that fits
+all three. Steps come 30 times a second whatever the frame rate (the
+original changed them every frame); the values come from a hash of the
+step number in the shader, so there's no per-frame work on the CPU.
+`HologramLook` holds every number for mods. The game's pictures are read
+when `HologramGameData` names the `GameData` folder (`rc_level_plugin`
+sets it from `GamePaths`); until then a plain fade and no noise stand in.
+
+Open question: whether the game also multiplies by `HologramColor`'s
+alpha (50 of 255 in every hologram, which would make them about five
+times dimmer). We don't, so holograms stay as bright as the steady glow
+the user has seen; `HologramLook::brightness` can turn them down.
+
+Check: `cargo run -p rc_level_viewer --example hologram_check` (under
+`xvfb-run` in the cloud; set `RC_GAME_DIR` to test the noise too)
+measures a hologram ball on screen over 40 pictures: it got the new
+material, it is light blue, its rim is darker than its middle (0.17 of
+it), its brightness flickers (160 to 224) and its speckle moves.
+
+**Cast skins.** A cast member's materials come from `data/cast/cast.toml`
+if it names any, else the `Skins` the map sets on the actor
+(`rc_cast::read::map_skins`), else its class's default `Skins`
+(`ClassLibrary::object_list`). The briefing holograms rely on the last:
+`Holo_Advisor` is a clone trooper mesh with the `CloneAdvisor`
+hologram skin, `Holo_BattleDroid` a battle droid with
+`Holo_BattleDroidRedShader`.
+
+**Colour settings are stored blue first.** A material's `Color` setting
+(`HologramColor`, `DiffuseTint`) is 4 bytes in the order blue, green,
+red, alpha (`rc_image::unreal_color`). Read the other way the hologram
+default would be orange and the "red team" holograms blue.
+
+**Blended pictures.** A `FinalBlend` with `FrameBufferBlending` 2
+(`FB_AlphaBlend`) now blends by its alpha and is seen from both sides
+(`Picture::blend`), instead of being cut into solid and see-through
+parts. The briefing holograms' grids and text use it.
+
+**Tinted falloff (`HsFalloff`).** Light shafts and the prologue's tank
+liquid multiply their picture by `DiffuseTint` and `GradientTint`
+(white, no change, by default). The game's falloff picture, which fades
+the edges by viewing angle, isn't used yet.
+
+**Props with no stored light.** The map stores light only for props that
+stay put (their `StaticMeshInstance`). Props a script moves or shows
+later, like the clone babies in the prologue's tanks (`bStatic` off),
+have none, and were drawn at full brightness: flat shapes with no
+shading. Unreal lights such props from the lights around them as it
+draws them, so `scene::unbaked_prop_light` does that once, when the
+level loads: zone ambient (as other props) plus each light that doesn't
+move: colour x brightness x facing x a straight fade to nothing at the
+light's radius, x 1.6 for point and spot lights and x 0.8 for suns. Not
+done: shadows, and lighting them again when a script moves them.
+
+How the numbers were found: for the props that do have stored light,
+work out the light this way too and compare corner by corner. On pro
+(lit by lamps) the straight fade lit about as many corners as the
+stored light (58,894 against 57,057) and was 1.58 times too dim with
+little spread (middle half 1.46-1.61); a squared fade or a shorter reach
+lit far too few corners. On geo_01briefing (lit by a sun) ours was 1.23
+times too bright (0.80-0.81), which fits the terrain, lit the same way,
+being 20% brighter than the props. geo_01a's canyon is mostly shadow,
+which this doesn't do, so it wasn't used.
+
 ## The visor: tactical and low light modes (`rc_visor`)
 
 The commando's visor has three modes, stepped through with CYCLE VISOR
@@ -3093,9 +4057,60 @@ compiled renderer (`UFrameFX::GetTacticalSkelMeshShader`), which we can't
 read, so the glow's shape (`[glow]` in the data file: strength scale, edge
 sharpness, fill) is ours, to be compared with the real game. Also not done:
 the faint film grain the original's tactical mode adds over the whole
-picture (`VisionShaderEnhance`), its `EnhancedVisionFade` flag on clones
-(meaning unknown), and the low light mode's night-vision picture
-(`VisionNight`); low light is only the lamp for now (a placeholder).
+picture (`VisionShaderEnhance`) and its `EnhancedVisionFade` flag on clones
+(meaning unknown).
+
+**Low light mode (night vision).** The original's low light view is the
+vision mode object `FrameFX.VisionModes.VisionNight` (class
+`VisionModeSniper`, in `Textures/FrameFX.utx`). Its settings, read at run
+time by `night_original.rs`: `VisionShader` = `VisionShaderNight` (a
+"hardware shader": old Direct3D shader text plus constants and pictures),
+`Noise` 30 (grain strength 30/255), `MotionBlur` 51 (keep 51/255 of the last
+picture), `OverideFog` with `DistanceFogStart` 555 and `DistanceFogEnd` 4500
+(Unreal units, black fog), `BlurPasses` 1. The `VisionMode` class default
+`FlashlightOn` is true, so the lamp stays on. The shader's settings say what
+it does: it reads a blurred copy of the picture, takes red, green and blue
+squared and added up as one brightness (so black and white, darks darker,
+lights brighter), fades in from black, multiplies by the transparency of
+its overlay picture `HUDTextures.Helmet.HUD_GlassNight` (512x512, a
+visor-shaped window: open in the middle, black outside, with notches at the
+middle of each edge) and adds the overlay's colour (a very faint blue,
+10/255), then adds film grain from `FrameFX.FBFX.FilmGrain` (128x128, grey),
+repeated 9.2 times across and 6.5 down a 4:3 screen (its vertex constant 1)
+and moved every frame. We read those pictures and numbers; the shader
+(`night_vision.wesl`) is our own, written from that description, not a copy.
+
+How ours is drawn: in low light mode a `NightVisionView` goes on the
+player's camera, and one full-screen pass runs after tone mapping (the
+original worked on the shown colours, so ours turns the colours back into
+screen values first). The plumbing follows Bevy's `FullscreenMaterial` with
+two pictures added (`night_vision.rs`). The HUD, arms and helmet frame are
+drawn by other cameras afterwards and stay sharp. A `DistanceFog` (marked
+`NightFog`) is added with the mode's fog and taken off again after. Cost:
+six texture reads per pixel, one pass, no extra pictures kept, fine for
+phones.
+
+Wide screens: the window picture is made for 4:3. Stretched across 21:9 or
+32:9 its curved edges and notches would be pulled wide. Instead
+(`rules::window_u`, the same sum in the shader) the middle 0.25 screen
+heights each side of the centre and the outer parts keep their shape, and
+the plain part between them is drawn longer. Narrower than 4:3 it is
+squeezed. The film grain gets more repeats across on wider screens so its
+specks stay square.
+
+`[low_light]` in `data/visor/tactical.toml`: `picture` (off: lamp only),
+`mode` (which vision mode object to read), `boost`, `tint` (white is the
+original), `window` (off for a full-screen picture, which VR will want),
+`window_middle`, `grain_scale`, `fog`, `fade_seconds`, and stand-in values
+used when the install can't be read (then the window is fully open and the
+grain flat).
+
+Not done: the trail (the original blends 80% of the new picture over 20%
+of the last one, `MotionBlur` 51); that needs the last picture kept, a
+second texture per camera. The original's `BloomOverideValue` 100 isn't
+used (its `BloomOveride` switch isn't set). The fade out when leaving the
+mode (`FadeOutTime` 0.2) isn't done; the picture goes off at once. Not
+compared with the real game, which doesn't run on the user's PC right now.
 
 **Plugging in.** `rc_game/src/visor.rs` copies the settings into
 `VisorSettings` and puts `TacticalGlow` on squad mates (by name) and weapon
@@ -3112,6 +4127,70 @@ the middle, a blue box edge, no glow and a lit floor in low light, the same
 picture after cycling round), and `rc_game --script` (starts in tactical
 with the squad glowing, X goes to low light with the lamp and back, the two
 GAME page rows change the settings).
+
+## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
+
+**What the original does.** A `Turret` (the Wookiee heavy turret on
+Kashyyyk, the Trandoshan missile turrets on the ship, the E-Web) holds one
+gunner at a time. The player walks up, looks at it and presses Use
+("PRESS @ TO MOUNT TURRET"); the view moves onto the gun, looking turns it
+(at most `Speed` rotation units a second, inside `MinYaw..MaxYaw` and
+`MinPitch..MaxPitch`, or all the way round with `bUnlimitedYaw`), Fire
+fires the turret's own first-person weapon (`HeavyTurret`,
+`MissileTurret`, `EWebTurret`), and Use again gets off at the map's exit
+spot (`NavPts`, else `NavPtLocs` turned with the turret). Getting on sends
+`PlayerControlEvent` (player only) then `ControlEvent`; getting off sends
+`ReleaseEvent`. Scripts put characters on turrets with
+`ACTION_AttachToTurret` (the first turret with that tag, in map order) and
+change who may use one with `ACTION_SetTurretUsable` (`bPlayerUsable`).
+
+**How we split it.**
+
+- `rc_turrets` (no Bevy): the rules. `Turret::mount`/`leave` return the
+  events to send; `turn` clamps by speed and limits and wraps the yaw to
+  -32768..32768 after the limits, as the original does, so yyy_06d's
+  limits of a whole turn mean no limit; `turn_toward` and `settle` for a
+  character gunner and an empty turret. `map::read` reads each placed
+  turret's tag, events, limits and exit spot. `params` reads
+  `data/turrets/<id>.toml`.
+- `data/turrets/*.toml`: one file per kind, claiming map classes
+  (`classes = ["WookieeHeavyTurret"]`). Model and bones, aim limits and
+  speed, gunner height, reach, exit offset, the player's weapon
+  (`data/weapons/<id>.toml`) and, under `[auto]`, what a character gunner
+  fires. A turret class no file claims is left out and logged
+  (`MarkerTurret`, `RASCeilingTurret`). A mod adds a turret with a new file.
+- `rc_game_core::Manning` (component on the player): which turret, where
+  the body is held, where the gun points. The player's body and camera
+  read it, so the view code doesn't know about turrets (a VR camera reads
+  the same thing). `rc_game_core::TurretOrder` messages carry the script
+  steps from `rc_scripts_plugin` without a dependency.
+- `rc_turrets_plugin` (Bevy): draws the turrets (their `turrets.ukx` model,
+  the yaw and pitch bones turned in the model's own axes), offers the
+  prompt, reads `Action::Use` and `ActionState::look` (so mouse, pad, gyro
+  and touch all aim it), swaps the turret's weapon into the player's
+  `Arsenal` while on (and back after), sends the turret's events as
+  `RaiseEvent`s, moves the player to the exit spot with `TeleportPlayer`,
+  holds character gunners on the gun and fires `FireShot`s at the nearest
+  enemy in range. Saves aim, gunner and usable flag (`turrets` save part).
+- `rc_combat`: `fire.mirror = true` in a weapon file fires a second shot
+  from the mirrored offset (the Wookiee turret's two barrels). While on a
+  turret the player can't switch weapons or reload by hand.
+
+**Checked against the maps** with `rc_turret_check` (reads only):
+yyy_06d has four Wookiee turrets; `WookieeHeavyTurret0` is the player's
+(sends `MountedTurret4`, `MaxPitch 16384`), and getting on it moves
+`ScriptedTrigger11` (the ending) on to waiting for the targets to die.
+The other three are tagged for `ACTION_AttachToTurret` (two share
+`WookieeCannon1`; the first in the map, `WookieeHeavyTurret4`, wins, as in
+the original). ras_03b's missile turret sends `TurretResponseDudes` and
+`SpawnPerch3`; ras_03c's two missile turrets and E-Web send theirs.
+`rc_turrets_plugin`'s test turns each model and checks the muzzles move
+the way the gun aims (needs the game files).
+
+**Our choices.** Facing the turret within 1.2 radians counts as looking at
+it (the original asks for the crosshair on it). The Trandoshan turret's
+four barrels fire one after another for a character gunner. The turret
+weapons' first-person offsets and the E-Web's reload time are guesses.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

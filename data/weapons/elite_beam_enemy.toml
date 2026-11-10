@@ -1,0 +1,44 @@
+# The Geonosian elite's Elite Beam (class EliteBeam, a LaserWeapon), as the
+# elites carry it (EliteBeamEnemy). An instant-hit beam.
+#
+# The values are the original game's: class EliteBeam (ctinventory.u) with
+# EliteBeamEnemy (Properties/properties.u) on top, and its ammo
+# EliteBeamAmmoEnemy, unless marked otherwise.
+#
+# The original's beam fires every frame while held (ShotDelay 0.01) and we
+# don't know how the game spreads its damage over time. We use one hit a
+# tenth of a second at the full Damage (18): against the player (who takes
+# x0.15 of this damage type) that is about 27 health a second.
+
+name = "Elite Beam"
+
+[fire]
+mode = "automatic"        # LaserWeapon FireMode 2
+shot_delay = 0.1          # our choice (the game's ShotDelay 0.01 is once a frame)
+aim_error = 0.1           # EliteBeamDefaults AimError
+
+[ammo]
+clip_size = 450           # EliteBeamEnemy ReloadCount
+max_ammo = 450            # EliteBeamAmmoEnemy MaxAmmo
+start_ammo = 450          # EliteBeamEnemy PickupAmmoCount
+
+[shot]
+kind = "instant"          # LaserWeaponAmmo bInstantHit
+range = 10000             # LaserWeaponAmmo Range
+damage = 18               # EliteBeamAmmoEnemy Damage
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyBeamEnemy" # EliteBeamAmmoEnemy MyDamageType
+
+[melee]
+range = 175               # EliteBeamDefaults MeleeRange
+damage = 220              # EliteBeamDefaults MeleeDamage
+
+[sound]
+package = "geo_sound"     # guess: the GEO sounds' package
+fire = ["wep_GEO_eliteBeam_st_01"] # EliteBeam FireStartSound (its loop is wep_GEO_eliteBeam_lp_01)
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the beam's own model isn't looked up yet
+offset = [40, 12, -14]
+bolt_colour = [0.4, 1.0, 0.3]  # our choice: the elite beam is green

@@ -11,7 +11,7 @@ use crate::{Arsenal, Hittable};
 use bevy::audio::AudioSource;
 use bevy::prelude::*;
 use rc_game_core::{GameLog, GamePaths, Player};
-use rc_package::sound::{read_multiple, read_sound};
+use rc_package::sound::{params_of, read_multiple, read_sound, AudioParams};
 use rc_package::{ObjectRef, Package};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -40,6 +40,10 @@ pub struct WeaponLibrary {
 #[derive(Debug, Clone, Default)]
 pub struct GameSound {
     pub variants: Vec<Handle<AudioSource>>,
+    /// The `AudioParams` the game plays it with, as `package.name` in
+    /// lower case (`params_vox.voice_ca1_2d`): a group's own, else its
+    /// first member's. Look it up with [`read_audio_params`].
+    pub params: Option<String>,
 }
 
 impl GameSound {
@@ -400,8 +404,9 @@ pub fn read_sounds(
         }
     };
     // Each export's sound, read at most once even when groups share it.
-    let mut cache: HashMap<usize, Handle<AudioSource>> = HashMap::new();
-    let mut one = |i: usize, notes: &mut Vec<String>| -> Option<Handle<AudioSource>> {
+    type One = (Handle<AudioSource>, Option<String>);
+    let mut cache: HashMap<usize, One> = HashMap::new();
+    let mut one = |i: usize, notes: &mut Vec<String>| -> Option<One> {
         if let Some(h) = cache.get(&i) {
             return Some(h.clone());
         }
@@ -412,8 +417,9 @@ pub fn read_sounds(
                 let h = audio.add(AudioSource {
                     bytes: rc_audio::for_quality(snd.bytes(&data)).into_owned().into(),
                 });
-                cache.insert(i, h.clone());
-                Some(h)
+                let v = (h, params_of(&pkg, &snd.properties, package));
+                cache.insert(i, v.clone());
+                Some(v)
             }
             Err(e) => {
                 notes.push(format!(
@@ -438,17 +444,26 @@ pub fn read_sounds(
         };
         let mut sound = GameSound::default();
         if pkg.export_class_name(&pkg.exports[i]) == "Sound" {
-            sound.variants.extend(one(i, &mut notes));
+            if let Some((h, p)) = one(i, &mut notes) {
+                sound.variants.push(h);
+                sound.params = p;
+            }
         } else {
             match read_multiple(&pkg, &data, &pkg.exports[i]) {
                 Ok(group) => {
+                    sound.params = params_of(&pkg, &group.properties, package);
                     for r in group.sounds {
                         match ObjectRef::from_index(r) {
                             ObjectRef::Export(j)
                                 if j < pkg.exports.len()
                                     && pkg.export_class_name(&pkg.exports[j]) == "Sound" =>
                             {
-                                sound.variants.extend(one(j, &mut notes));
+                                if let Some((h, p)) = one(j, &mut notes) {
+                                    sound.variants.push(h);
+                                    if sound.params.is_none() {
+                                        sound.params = p;
+                                    }
+                                }
                             }
                             ObjectRef::Import(j) if j < pkg.imports.len() => {
                                 match top_package(&pkg, pkg.imports[j].package_index) {
@@ -510,6 +525,9 @@ pub fn read_sounds(
         for (p, m) in list {
             if let Some(s) = members.get(&(p.to_ascii_lowercase(), m.to_ascii_lowercase())) {
                 sound.variants.extend(s.variants.iter().cloned());
+                if sound.params.is_none() {
+                    sound.params = s.params.clone();
+                }
             }
         }
         if sound.variants.is_empty() {
@@ -518,6 +536,36 @@ pub fn read_sounds(
         }
     }
     (found, notes)
+}
+
+/// Every `AudioParams` in the named sound packages (`params_vox`,
+/// `params_sfx`), by `package.name` in lower case, as
+/// [`GameSound::params`] names them. Packages that don't read are noted.
+pub fn read_audio_params(
+    paths: &GamePaths,
+    packages: &[String],
+) -> (HashMap<String, AudioParams>, Vec<String>) {
+    let mut out = HashMap::new();
+    let mut notes = Vec::new();
+    for package in packages {
+        let path = paths.game_file(&format!("GameData/Sounds/{package}.uax"));
+        let read = std::fs::read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|d| {
+                Package::parse(&d)
+                    .map(|p| (p, d))
+                    .map_err(|e| e.to_string())
+            });
+        match read {
+            Ok((pkg, data)) => {
+                for (name, p) in rc_package::sound::read_all_audio_params(&pkg, &data) {
+                    out.insert(format!("{package}.{name}").to_ascii_lowercase(), p);
+                }
+            }
+            Err(e) => notes.push(format!("no sound settings from {}: {e}", path.display())),
+        }
+    }
+    (out, notes)
 }
 
 /// The outermost package an object reference sits in (`GEO_Voice` for

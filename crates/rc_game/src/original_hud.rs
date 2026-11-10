@@ -24,8 +24,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 use rc_game_core::{
-    GameLog, GamePaths, GameSet, GameState, HudMessage, PlayerVitals, SquadReadout, SquadStatus,
-    WeaponReadout,
+    pickups::PickedUp, GameLog, GamePaths, GameSet, GameState, HudMessage, PlayerVitals,
+    SquadReadout, SquadStatus, WeaponReadout,
 };
 use rc_menus::gpu;
 use rc_menus::hud::{HudLayout, HudValues, SquadLine};
@@ -46,6 +46,8 @@ pub struct HudPlan {
     layout: Option<toml::Value>,
     #[serde(default)]
     element: Option<toml::Value>,
+    #[serde(default)]
+    pickup_message: Option<toml::Value>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -116,6 +118,9 @@ struct OriginalLayout {
     working: bool,
     /// Short messages and their seconds left.
     messages: Vec<(String, f32)>,
+    /// What was just picked up and its seconds left (one at a time: a new
+    /// one replaces the last, as in the original).
+    pickup: Option<(String, f32)>,
 }
 
 #[derive(Component)]
@@ -192,15 +197,33 @@ fn forget_drawn(mut original: ResMut<OriginalLayout>) {
     original.drawn_for = None;
     original.drawn.clear();
     original.messages.clear();
+    original.pickup = None;
 }
 
-/// Keep the short messages for as long as they asked.
+/// Keep the short messages for as long as they asked, and the pickup
+/// message for as long as `[pickup_message]` says.
 fn collect_messages(
     mut original: ResMut<OriginalLayout>,
     mut incoming: MessageReader<HudMessage>,
+    mut picked: MessageReader<PickedUp>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
+    let seconds = original
+        .layout
+        .as_ref()
+        .map_or(3.0, |l| l.pickup_message.seconds);
+    if let Some(p) = &mut original.pickup {
+        p.1 -= dt;
+        if p.1 <= 0.0 {
+            original.pickup = None;
+        }
+    }
+    for p in picked.read() {
+        if !p.text.is_empty() {
+            original.pickup = Some((p.text.clone(), seconds));
+        }
+    }
     original.messages.retain_mut(|m| {
         m.1 -= dt;
         m.1 > 0.0
@@ -248,6 +271,7 @@ fn values(
             })
             .collect(),
         messages: messages.iter().map(|m| m.0.clone()).collect(),
+        ..Default::default()
     }
 }
 
@@ -281,7 +305,11 @@ fn draw_layout(
     if w < 1.0 || h < 1.0 {
         return;
     }
-    let now = values(&vitals, &weapon, &squad, &original.messages);
+    let mut now = values(&vitals, &weapon, &squad, &original.messages);
+    if let Some((text, left)) = &original.pickup {
+        now.pickup = text.clone();
+        now.pickup_fade = layout.pickup_message.strength(*left);
+    }
     let max_aspect = settings.video.hud_max_aspect;
     let key = (now, [w as u32, h as u32], max_aspect.to_bits());
     if original.drawn_for.as_ref() == Some(&key) && !roots.is_empty() {
@@ -336,6 +364,7 @@ fn draw_layout(
     commands
         .spawn((
             LayoutRoot,
+            crate::cutscene::HudRoot,
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),

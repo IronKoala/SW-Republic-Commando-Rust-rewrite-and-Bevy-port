@@ -31,6 +31,9 @@ pub struct DirectorSave {
     /// Teleporters (level exits) a script or event switched.
     #[serde(default)]
     pub teleporter: Vec<TeleporterSave>,
+    /// Line-of-sight triggers: switched on, and used.
+    #[serde(default)]
+    pub sight: Vec<SightSave>,
     /// Events sent but not handed out yet (normally none).
     #[serde(default)]
     pub pending: Vec<EventSave>,
@@ -66,6 +69,13 @@ pub struct TriggerSave {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SightSave {
+    pub name: String,
+    pub enabled: bool,
+    pub triggered: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CounterSave {
     pub name: String,
     pub left: i32,
@@ -82,6 +92,9 @@ pub struct PropSave {
     pub name: String,
     pub health: f32,
     pub destroyed: bool,
+    /// In its damaged step (breakable props). Older saves don't have it.
+    #[serde(default)]
+    pub damaged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -182,6 +195,7 @@ impl Director {
                     name: p.name.clone(),
                     health: p.health,
                     destroyed: p.destroyed,
+                    damaged: p.breaks.as_ref().is_some_and(|b| b.damaged),
                 })
                 .collect(),
             teleporter: self
@@ -191,6 +205,15 @@ impl Director {
                     name: t.name.clone(),
                     enabled: t.enabled,
                     collide: t.collide,
+                })
+                .collect(),
+            sight: self
+                .sight
+                .iter()
+                .map(|t| SightSave {
+                    name: t.name.clone(),
+                    enabled: t.enabled,
+                    triggered: t.triggered,
                 })
                 .collect(),
             pending: self
@@ -285,6 +308,12 @@ impl Director {
             };
             p.health = s.health;
             p.destroyed = s.destroyed;
+            if let Some(b) = p.breaks.as_mut() {
+                b.damaged = s.damaged;
+                // A damaged step on a clock starts its clock again.
+                b.break_at = (s.damaged && !s.destroyed && b.damaged_span > 0.0)
+                    .then_some(self.time + b.damaged_span);
+            }
             r.restored += 1;
         }
         for s in &save.teleporter {
@@ -298,6 +327,15 @@ impl Director {
             };
             t.enabled = s.enabled;
             t.collide = s.collide;
+            r.restored += 1;
+        }
+        for s in &save.sight {
+            let Some(t) = self.sight.iter_mut().find(|x| same(&x.name, &s.name)) else {
+                r.unknown.push(s.name.clone());
+                continue;
+            };
+            t.enabled = s.enabled;
+            t.triggered = s.triggered;
             r.restored += 1;
         }
         self.queue = save

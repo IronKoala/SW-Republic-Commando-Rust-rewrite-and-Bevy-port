@@ -1,0 +1,53 @@
+# The Wookiee homing rocket launcher (class RocketLauncher).
+#
+# Numbers marked "game:" are RocketLauncher's class defaults
+# (ctinventory.u, with RocketLauncherDefaults in Properties/properties.u on
+# top), its ammo RocketLauncherAmmo(+Defaults) and rocket
+# RocketLauncherMissile(+Defaults).
+#
+# NOT BUILT: homing (the game locks on to a target in 0.3 s and the rocket
+# steers to it) and the player slowing to PlayerSpeedModifier 0.75 while
+# carrying it. Rockets fly straight.
+
+name = "Wookiee Homing Rocket Launcher"
+
+[fire]
+mode = "semi_auto"        # game: FireMode (the Weapon default)
+shot_delay = 4            # game: ShotDelay
+aim_error = 0
+offset = [95.4, 22, 6.56] # game: FPFireOffset
+
+[ammo]
+clip_size = 5             # game: ReloadCount
+max_ammo = 5              # game: RocketLauncherAmmoDefaults MaxAmmo
+start_ammo = 5            # game: RocketLauncherDefaults PickupAmmoCount
+reload_time = 1.7         # game: the arms' Reload animation (HudArmsRocket), 51 frames at 30 fps
+
+[shot]
+kind = "lobbed"
+speed = 1500              # game: RocketLauncherMissileDefaults Speed
+grenade = "rocket_launcher_rocket"
+
+[melee]
+range = 175               # game: RocketLauncherDefaults MeleeRange
+damage = 220              # game: RocketLauncherDefaults MeleeDamage
+
+[recoil]
+kick = [1000, 0, 0]       # game: WeaponKick
+spring = 3                # game: RecoilConstant
+damping = 0.1             # game: RecoilDampening
+
+[sound]
+package = "yyy_sound"     # guess: wep_YYY_ sounds are in yyy_sound.uax
+fire = ["wep_YYY_wookRcktLnch_02"] # game: RocketLauncherDefaults FireSound
+empty = "wep_GEN_empty_01"
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: shown only if the arms can't load
+offset = [40, 12, -14]
+
+[arms]
+mesh = "HudArmsRocket"    # game: RocketLauncher's Mesh
+fov = 85                  # game: DisplayFOV
+brightness = 0.75         # our choice, as the other weapons

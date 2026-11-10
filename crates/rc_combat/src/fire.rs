@@ -165,7 +165,10 @@ pub(crate) fn player_trigger(
     actions: Res<ActionState>,
     time: Res<Time>,
     lib: Res<WeaponLibrary>,
-    mut players: Query<(Entity, &mut Arsenal), (With<Player>, Without<Dead>)>,
+    mut players: Query<
+        (Entity, &mut Arsenal, Has<rc_game_core::Manning>),
+        (With<Player>, Without<Dead>),
+    >,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     targets_q: Query<(Entity, &GlobalTransform, &Hittable), Without<Dead>>,
     teams: Query<&crate::Team>,
@@ -176,7 +179,7 @@ pub(crate) fn player_trigger(
     log: Option<Res<GameLog>>,
 ) {
     let dt = time.delta_secs();
-    let Ok((me, mut arsenal)) = players.single_mut() else {
+    let Ok((me, mut arsenal, on_turret)) = players.single_mut() else {
         return;
     };
     let n = arsenal.weapons.len();
@@ -189,16 +192,19 @@ pub(crate) fn player_trigger(
     };
     // Switching. **Not done:** the game's holster and draw animations take
     // time (0.37 s and 0.67 s for the DC-17m); here the switch is instant.
+    // On a mounted turret the turret's weapon stays in hand (the
+    // original ignores weapon switching there).
     let before = arsenal.current;
-    if actions.just_pressed(Action::NextWeapon) {
+    let switch = |a: Action| !on_turret && actions.just_pressed(a);
+    if switch(Action::NextWeapon) {
         arsenal.current = (arsenal.current + 1) % n;
     }
-    if actions.just_pressed(Action::PrevWeapon) {
+    if switch(Action::PrevWeapon) {
         arsenal.current = (arsenal.current + n - 1) % n;
     }
     // The number keys go straight to one weapon, found by its file name.
     for (action, part) in WEAPON_KEYS {
-        if actions.just_pressed(action) {
+        if switch(action) {
             if let Some(i) = weapon_with(&arsenal.weapons, part) {
                 arsenal.current = i;
             }
@@ -252,7 +258,7 @@ pub(crate) fn player_trigger(
         .is_some_and(|t| *t == crate::Team::Separatist);
     commands.insert_resource(crate::fire::Crosshair { on_target });
 
-    if actions.just_pressed(Action::Reload) && state.start_reload(p) {
+    if actions.just_pressed(Action::Reload) && !on_turret && state.start_reload(p) {
         say(format!("weapons: {id} reloading ({} s)", p.reload_time));
         if let Some(s) = &p.reload_sound {
             play(&mut commands, &lib, s, 1.0);
@@ -280,20 +286,29 @@ pub(crate) fn player_trigger(
             }
         }
         Trigger::Fired => {
-            let mut start = shot::fire_start(eye, axes, p.fire_offset);
-            // If something is between the eye and the muzzle (standing
-            // against a wall or a droid), fire from the eye so the shot
-            // hits it, like the game's `CreateProximityProjectile`.
-            if trace(level, &targets, eye, start, Some(me)).is_some() {
-                start = eye;
+            // Twin barrels (`fire.mirror`) fire from both sides at once.
+            let [f, r, u] = p.fire_offset;
+            let barrels: &[[f32; 3]] = if p.mirror_fire {
+                &[[f, r, u], [f, -r, u]]
+            } else {
+                &[[f, r, u]]
+            };
+            for &offset in barrels {
+                let mut start = shot::fire_start(eye, axes, offset);
+                // If something is between the eye and the muzzle (standing
+                // against a wall or a droid), fire from the eye so the shot
+                // hits it, like the game's `CreateProximityProjectile`.
+                if trace(level, &targets, eye, start, Some(me)).is_some() {
+                    start = eye;
+                }
+                let aim_point = shot::aim_at_crosshair(start, view, crosshair);
+                shots.write(FireShot {
+                    shooter: me,
+                    origin: to_bevy(start),
+                    direction: dir_to_bevy((aim_point - start).normalize_or_zero()),
+                    weapon: id.clone(),
+                });
             }
-            let aim_point = shot::aim_at_crosshair(start, view, crosshair);
-            shots.write(FireShot {
-                shooter: me,
-                origin: to_bevy(start),
-                direction: dir_to_bevy((aim_point - start).normalize_or_zero()),
-                weapon: id.clone(),
-            });
             let turn = std::f32::consts::TAU / ROTATION_UNITS;
             kicks.write(ViewKick {
                 pitch: p.kick[0] * turn,
@@ -389,24 +404,28 @@ pub(crate) fn launch_shots(
                 });
             }
             ShotKind::Instant { range } => {
-                let end = start + dir * range;
-                let hit = trace(level, targets, start, end, Some(f.shooter));
-                let t = hit.as_ref().map_or(1.0, |h| h.t);
-                let point = start + (end - start) * t;
-                land(
-                    p,
-                    base,
-                    &lib,
-                    &tables,
-                    &log,
-                    f.shooter,
-                    start,
-                    point,
-                    dir,
-                    hit.as_ref().map(|h| (h.entity, true)),
-                    &mut damage,
-                    &mut landed,
-                );
+                // A shotgun fires several pellets, each a little off the
+                // aim; everything else fires one shot straight along it.
+                for dir in shot::pellet_directions(dir, p.pellets, p.spread, &mut rng.0) {
+                    let end = start + dir * range;
+                    let hit = trace(level, targets, start, end, Some(f.shooter));
+                    let t = hit.as_ref().map_or(1.0, |h| h.t);
+                    let point = start + (end - start) * t;
+                    land(
+                        p,
+                        base,
+                        &lib,
+                        &tables,
+                        &log,
+                        f.shooter,
+                        start,
+                        point,
+                        dir,
+                        hit.as_ref().map(|h| (h.entity, true)),
+                        &mut damage,
+                        &mut landed,
+                    );
+                }
             }
             ShotKind::Bolt {
                 accel,
@@ -489,6 +508,8 @@ fn land(
         target,
         on_level: hit.is_some() && target.is_none(),
         distance: (point - start).length(),
+        damage: base,
+        damage_type: p.damage_type.clone(),
     });
 }
 
@@ -533,6 +554,8 @@ pub(crate) fn fly_bolts(
                 target: h.entity,
                 on_level: h.entity.is_none(),
                 distance: (point - b.start).length(),
+                damage: b.damage,
+                damage_type: b.damage_type.clone(),
             });
             commands.entity(e).despawn();
         } else if b.bolt.expired() {
@@ -543,6 +566,8 @@ pub(crate) fn fly_bolts(
                 target: None,
                 on_level: false,
                 distance: (to - b.start).length(),
+                damage: 0.0,
+                damage_type: b.damage_type.clone(),
             });
             commands.entity(e).despawn();
         } else {
