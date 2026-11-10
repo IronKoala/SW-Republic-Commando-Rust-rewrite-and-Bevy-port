@@ -14,11 +14,17 @@
 // (draw.rs), the change is added back on the game's curve, and the result
 // multiplies the picture.
 //
-// Cheap on purpose (one extra texture read, no loops, no real-time
-// lights) so phones and VR headsets can draw it.
+// Real-time lights (moving or switched lights, the helmet lamp) are added
+// on top with Bevy's own lighting, using the bump-tilted surface, times
+// params.live_light (0 = none). With none near, that adds nothing.
+//
+// Cheap on purpose (one extra texture read, Bevy's usual work for the few
+// real-time lights near) so phones and VR headsets can draw it.
 
 import bevy_pbr::render::{
     mesh_functions,
+    pbr_functions::{apply_pbr_lighting, calculate_view},
+    pbr_types::pbr_input_new,
     view_transformations::position_world_to_clip,
 };
 
@@ -26,7 +32,7 @@ struct Params {
     gain: f32,
     bump_uv_scale: f32,
     strength: f32,
-    unused: f32,
+    live_light: f32,
 };
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> params: Params;
@@ -57,6 +63,7 @@ struct Corner {
     @location(3) color: vec4<f32>,
     @location(4) light_dir: vec3<f32>,
     @location(5) light_colour: vec3<f32>,
+    @location(6) world_position: vec4<f32>,
 };
 
 @vertex
@@ -65,6 +72,7 @@ fn vertex(v: Vertex) -> Corner {
     let world_from_local = mesh_functions::get_world_from_local(v.instance_index);
     let world = mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(v.position, 1.0));
     out.clip_position = position_world_to_clip(world.xyz);
+    out.world_position = world;
     out.uv = v.uv;
     out.normal = mesh_functions::mesh_normal_local_to_world(v.normal, v.instance_index);
     out.tangent = mesh_functions::mesh_tangent_local_to_world(world_from_local, v.tangent, v.instance_index);
@@ -110,5 +118,20 @@ fn fragment(in: Corner) -> @location(0) vec4<f32> {
         light = to_linear(on_curve);
     }
     let picture = textureSample(diffuse_texture, diffuse_sampler, in.uv);
-    return vec4<f32>(picture.rgb * light * params.gain, 1.0);
+    var shown = picture.rgb * light * params.gain;
+
+    // Real-time lights on top (Bevy's lighting: plain diffuse, no shine).
+    if params.live_light > 0.0 {
+        var pbr = pbr_input_new();
+        pbr.material.base_color = vec4<f32>(picture.rgb, 1.0);
+        pbr.material.perceptual_roughness = 1.0;
+        pbr.material.reflectance = vec3<f32>(0.0);
+        pbr.frag_coord = in.clip_position;
+        pbr.world_position = in.world_position;
+        pbr.world_normal = n;
+        pbr.N = pixel;
+        pbr.V = calculate_view(in.world_position, false);
+        shown += apply_pbr_lighting(pbr).rgb * params.live_light;
+    }
+    return vec4<f32>(shown, 1.0);
 }

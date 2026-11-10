@@ -35,7 +35,7 @@ use rc_level_viewer::bump::{BumpLitMaterial, BumpMapPlugin};
 use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
 use rc_level_viewer::sky::{self, SkyViewer};
-use rc_level_viewer::{materials, scene};
+use rc_level_viewer::{materials, prop_light, scene};
 use rc_movement::{Hit, MoveParams, TriangleWorld, Vec3, World as MoveWorld};
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -60,7 +60,7 @@ pub struct LevelPlugin;
 
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((sky::SkyPlugin, BumpMapPlugin))
+        app.add_plugins((sky::SkyPlugin, BumpMapPlugin, prop_light::PropLightPlugin))
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
             .add_systems(
@@ -226,6 +226,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelInfo>();
     commands.remove_resource::<LevelMoverData>();
     commands.remove_resource::<LevelParts>();
+    commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -342,6 +343,31 @@ fn load(world: &mut World) {
     ));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(parts);
+    // Ammo and grenade boxes, for the combat part to hand out.
+    let boxes: Vec<_> = lvl
+        .ammo_boxes
+        .iter()
+        .map(|b| rc_game_core::pickups::PlacedAmmoBox {
+            export: b.export,
+            name: b.name.clone(),
+            class: b.class.clone(),
+            at: bevy::math::Vec3::new(b.location[0], b.location[2], b.location[1])
+                / rc_game_core::units::UU_PER_UNIT,
+            ammo: b.ammo.clone(),
+            amount: b.amount,
+            respawn: b.respawn,
+            radius: b.radius,
+            height: b.height,
+        })
+        .collect();
+    log.line(format!(
+        "{PART}: {} ammo and grenade boxes ({} moved down onto the ground, the furthest {:.0} uu); {} pickups of all kinds left out of collision",
+        boxes.len(),
+        lvl.ammo_boxes.iter().filter(|b| b.dropped > 0.0).count(),
+        lvl.ammo_boxes.iter().map(|b| b.dropped).fold(0.0f32, f32::max),
+        lvl.pickups_not_solid
+    ));
+    world.insert_resource(rc_game_core::pickups::LevelAmmoBoxes(boxes));
 
     // The look. If it can't be built the level is still solid, just
     // invisible, so the game goes on and says so in the log.
@@ -355,6 +381,7 @@ fn load(world: &mut World) {
                 world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
                     world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
                         world.resource_scope(|world, mut bumps: Mut<Assets<BumpLitMaterial>>| {
+                          world.resource_scope(|world, mut props: Mut<Assets<prop_light::PropMaterial>>| {
                             let mut commands = world.commands();
                             draw::spawn_level(
                                 &mut commands,
@@ -362,9 +389,11 @@ fn load(world: &mut World) {
                                 &mut images,
                                 &mut mats,
                                 Some(&mut bumps),
+                                &mut props,
                                 &sc,
                                 &settings,
                             )
+                          })
                         })
                     })
                 })
@@ -399,11 +428,13 @@ fn load(world: &mut World) {
             info.drawn_triangles = report.triangles;
             info.draw_ms = t.elapsed().as_secs_f64() * 1000.0;
             log.line(format!(
-                "{PART}: drawn in {:.0} ms: {} triangles, {} textured batches, {} lightmapped, {} lights",
+                "{PART}: drawn in {:.0} ms: {} triangles, {} textured batches, {} lightmapped, {} props/terrain lit by real-time lights too (strength {}), {} lights",
                 info.draw_ms,
                 report.triangles,
                 report.textured,
                 report.lightmapped,
+                report.coloured_live,
+                settings.live_light_on_props,
                 report.lights.point + report.lights.spot + report.lights.directional
             ));
         }

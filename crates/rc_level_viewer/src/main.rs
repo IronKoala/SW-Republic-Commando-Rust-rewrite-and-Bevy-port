@@ -31,7 +31,7 @@ use bevy::window::WindowResolution;
 use rc_level_viewer::camera::{fly, yaw_from_unreal, FlyCamera};
 use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
-use rc_level_viewer::{materials, scene, sky};
+use rc_level_viewer::{materials, prop_light, scene, sky};
 use rc_package::Package;
 use std::collections::HashSet;
 use std::fs;
@@ -138,6 +138,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut bump_materials: ResMut<Assets<rc_level_viewer::bump::BumpLitMaterial>>,
+    mut prop_materials: ResMut<Assets<prop_light::PropMaterial>>,
     loaded: Res<LoadedScene>,
     settings: Res<LightingSettings>,
     log: Res<RunLog>,
@@ -153,6 +154,7 @@ fn setup(
         &mut images,
         &mut materials,
         Some(&mut bump_materials),
+        &mut prop_materials,
         &scene,
         &settings,
     );
@@ -191,9 +193,11 @@ fn setup(
         }
     };
     log.line(format!(
-        "lighting: baked light {}; draw batches: {lightmapped} with a lightmap, {coloured} with baked corner colours ({} of them with bump maps), {full_bright} at full brightness; lightmap gain {} (x{:.2} in linear light), corner colour gain {}; real-time lights: {} point, {} spot, {} sun, {} left to the baked light",
+        "lighting: baked light {}; draw batches: {lightmapped} with a lightmap, {coloured} with baked corner colours ({} of them with bump maps, {} also lit by real-time lights at strength {}), {full_bright} at full brightness; lightmap gain {} (x{:.2} in linear light), corner colour gain {}; real-time lights: {} point, {} spot, {} sun, {} left to the baked light",
         if baked { "on" } else { "off" },
         r.bump_lit,
+        r.coloured_live,
+        settings.live_light_on_props,
         settings.lightmap_gain,
         LightingSettings::linear_gain(settings.lightmap_gain),
         settings.vertex_colour_gain,
@@ -512,6 +516,10 @@ fn log_stats(log: &RunLog, s: &scene::Stats) {
         s.props_settled, s.settle_drop_max
     ));
     log.line(format!(
+        "ammo and grenade boxes drawn on their own: {}, furthest moved down onto the ground {:.0} units",
+        s.ammo_boxes, s.ammo_box_drop_max
+    ));
+    log.line(format!(
         "blocking volumes (invisible walls): {} read, {} stop players, {} stop the AI, {} unreadable, {} with a scale not applied; {} PathNodes/PlayerStarts inside one (should be 0 or close), {} volumes within 512 units of a path point",
         s.blocking_volumes,
         s.volumes_block_players,
@@ -681,6 +689,7 @@ fn main() -> AppExit {
         .insert_resource(ScreenCheck::default())
         .insert_resource(log)
         .add_plugins((sky::SkyPlugin, rc_level_viewer::bump::BumpMapPlugin))
+        .add_plugins(prop_light::PropLightPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (fly, count_frames))
         .run()

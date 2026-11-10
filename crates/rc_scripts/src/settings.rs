@@ -11,6 +11,9 @@ pub struct Settings {
     /// Loudness of the sounds and lines scripts play, 0 to 1 (times the
     /// action's own `Volume`).
     pub sound_volume: f32,
+    /// Unreal units: how far a placed sound carries at full loudness when
+    /// the game's own settings for it (`AudioParams`) give no `Radius`.
+    pub sound_radius: f32,
     /// How long an animation lasts when a script waits for its end.
     pub anim_seconds: f32,
     /// How long a character takes to walk where a script sends it, when
@@ -51,6 +54,8 @@ impl Default for Settings {
         Settings {
             sound_seconds: 3.0,
             sound_volume: 1.0,
+            // Engine.u's AudioParams default Radius.
+            sound_radius: 2000.0,
             anim_seconds: 1.5,
             move_seconds: 2.0,
             move_timeout_seconds: 30.0,
@@ -90,6 +95,7 @@ struct File {
 #[serde(deny_unknown_fields)]
 struct Sound {
     volume: Option<f32>,
+    default_radius: Option<f32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -180,6 +186,9 @@ impl Settings {
         }
         if let Some(v) = f.sound.volume {
             self.sound_volume = v.clamp(0.0, 1.0);
+        }
+        if let Some(v) = f.sound.default_radius {
+            self.sound_radius = v.max(1.0);
         }
         if let Some(v) = f.exits.teleporter_radius {
             self.teleporter_radius = v;

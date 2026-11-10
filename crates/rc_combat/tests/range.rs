@@ -810,3 +810,141 @@ fn a_flash_on_the_player_sends_no_damage_and_the_shield_recharges() {
     let s = r.app.world().get::<Shield>(r.player).unwrap().current;
     assert!(s > 70.0, "shield {s}");
 }
+
+/// Put a level's ammo boxes in: a DC-17m box 300 uu ahead and the
+/// grenade crate that comes back 300 uu to the side, each with a drawn
+/// model part to hide.
+fn ammo_boxes(r: &mut Range) -> (Entity, Entity) {
+    use rc_game_core::pickups::{LevelAmmoBoxes, PlacedAmmoBox};
+    let rifle = PlacedAmmoBox {
+        export: 7,
+        name: "DC17mBlasterBox3".into(),
+        class: "DC17mBlasterBox".into(),
+        at: b(-200.0, 0.0, 15.0),
+        ammo: "DC17mBlasterAmmo".into(),
+        amount: 300,
+        respawn: None,
+        radius: 40.0,
+        height: 15.0,
+    };
+    let crate_ = PlacedAmmoBox {
+        export: 9,
+        name: "ThermalDetonatorBox3".into(),
+        class: "ThermalDetonatorBox".into(),
+        at: b(-500.0, 300.0, 44.0),
+        ammo: "ThermalDetonatorAmmo".into(),
+        amount: 5,
+        respawn: Some(0.1),
+        radius: 45.0,
+        height: 44.0,
+    };
+    r.app
+        .world_mut()
+        .insert_resource(LevelAmmoBoxes(vec![rifle, crate_]));
+    let a = r
+        .app
+        .world_mut()
+        .spawn((rc_level_viewer::draw::MoverPart(7), Visibility::default()))
+        .id();
+    let c = r
+        .app
+        .world_mut()
+        .spawn((rc_level_viewer::draw::MoverPart(9), Visibility::default()))
+        .id();
+    r.run(2, &[]);
+    (a, c)
+}
+
+fn move_player(r: &mut Range, x: f32, y: f32) {
+    r.app
+        .world_mut()
+        .entity_mut(r.player)
+        .insert(Transform::from_translation(b(x, y, 0.0)));
+}
+
+fn rifle_total(r: &Range) -> u32 {
+    let a = r.arsenal();
+    let (_, w) = a.weapons.iter().find(|(id, _)| id == "dc17m_blaster").unwrap();
+    w.shots_in_clip() + w.reserve
+}
+
+fn set_rifle(r: &mut Range, clip: f32, reserve: u32) {
+    let mut a = r.app.world_mut().get_mut::<Arsenal>(r.player).unwrap();
+    let w = &mut a.weapons.iter_mut().find(|(id, _)| id == "dc17m_blaster").unwrap().1;
+    w.clip = clip;
+    w.reserve = reserve;
+}
+
+#[test]
+fn walking_into_an_ammo_box_refills_the_rifle() {
+    let mut r = Range::new();
+    let (part, _) = ammo_boxes(&mut r);
+    // Full at the start? The rifle starts with 120 of 300.
+    assert_eq!(rifle_total(&r), 120);
+    // 300 uu away: nothing.
+    r.run(2, &[]);
+    assert_eq!(rifle_total(&r), 120);
+    // Walk into it: topped up to the most carried, the box gone.
+    move_player(&mut r, -260.0, 0.0);
+    r.run(2, &[]);
+    assert_eq!(rifle_total(&r), 300);
+    let vis = *r.app.world().get::<Visibility>(part).unwrap();
+    assert_eq!(vis, Visibility::Hidden, "the box's model is hidden");
+    // The save lists it.
+    use rc_game_core::save::SavePart;
+    let s = rc_combat::ammo_box::PickupsSave::save(r.app.world_mut()).unwrap();
+    assert_eq!(s.taken, vec!["DC17mBlasterBox3".to_string()]);
+    // Walk off and back: it's gone for good.
+    set_rifle(&mut r, 10.0, 0);
+    move_player(&mut r, -500.0, 0.0);
+    r.run(2, &[]);
+    move_player(&mut r, -200.0, 0.0);
+    r.run(2, &[]);
+    assert_eq!(rifle_total(&r), 10);
+}
+
+#[test]
+fn a_full_rifle_leaves_the_box_lying() {
+    let mut r = Range::new();
+    let (part, _) = ammo_boxes(&mut r);
+    set_rifle(&mut r, 60.0, 240);
+    move_player(&mut r, -200.0, 0.0);
+    r.run(2, &[]);
+    let vis = *r.app.world().get::<Visibility>(part).unwrap();
+    assert_ne!(vis, Visibility::Hidden);
+    // Using ammo while standing on it doesn't take it: the game tries a box
+    // when touching starts.
+    set_rifle(&mut r, 30.0, 240);
+    r.run(2, &[]);
+    assert_eq!(rifle_total(&r), 270);
+    // Step off and back on: now it's taken.
+    move_player(&mut r, -500.0, 0.0);
+    r.run(2, &[]);
+    move_player(&mut r, -200.0, 0.0);
+    r.run(2, &[]);
+    assert_eq!(rifle_total(&r), 300);
+}
+
+#[test]
+fn the_grenade_crate_refills_and_comes_back() {
+    let mut r = Range::new();
+    let (_, part) = ammo_boxes(&mut r);
+    let count = |r: &Range| {
+        r.app.world().get::<Grenades>(r.player).unwrap().carried
+            .iter()
+            .find(|(id, _)| id == "thermal_detonator")
+            .unwrap()
+            .1
+    };
+    assert_eq!(count(&r), 2);
+    move_player(&mut r, -500.0, 300.0);
+    r.run(2, &[]);
+    assert_eq!(count(&r), 5);
+    assert_eq!(*r.app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+    // Back 0.1 s later; full now, so it stays.
+    r.seconds(0.3, &[]);
+    assert_ne!(*r.app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+    use rc_game_core::save::SavePart;
+    let s = rc_combat::ammo_box::PickupsSave::save(r.app.world_mut()).unwrap();
+    assert!(s.taken.is_empty(), "boxes that come back aren't saved");
+}
