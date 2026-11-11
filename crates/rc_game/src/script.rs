@@ -102,8 +102,9 @@ struct ShotStats {
     /// Amber pixels within 3% of the screen height of the centre (the
     /// crosshair).
     centre_amber: u32,
-    /// Near-white pixels within 7% of the screen height of the centre
-    /// (the original's reticle picture, which is white and grey).
+    /// Near-white or pale blue pixels within 7% of the screen height of
+    /// the centre (the original's reticle picture, white and grey, drawn
+    /// with the helmet's light blue tint).
     centre_white: u32,
 }
 
@@ -1357,7 +1358,11 @@ fn steps() -> Vec<Step> {
                 // differ; the two checks above compare what matters.
                 // Effect spawners are switched on and off by those same
                 // looping scripts (geo_01a's BattleExplosions toggle).
-                if matches!(k.as_str(), "movers" | "scripts" | "effect_spawners") {
+                if k == "effect_spawners" {
+                    notes.push(format!("[{k}] skipped (switched by looping scripts)"));
+                    continue;
+                }
+                if matches!(k.as_str(), "movers" | "scripts") {
                     notes.push(format!("[{k}] checked above"));
                     continue;
                 }
@@ -2354,8 +2359,12 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
             lit += 1;
         }
         let min = pr.min(pg).min(pb);
-        if min > 170
-            && pr.max(pg).max(pb) - min < 40
+        // The reticle is tinted (200,240,255) at opacity 110 (#101), so
+        // over dark rock it shows as a pale blue-grey rather than white;
+        // count both. The arena's rock and sand are never bluish.
+        let whitish = min > 170 && pr.max(pg).max(pb) - min < 40;
+        let tinted = min > 80 && pb > pr + 20 && pg > pr + 10;
+        if (whitish || tinted)
             && (x - w as i64 / 2).abs() <= r_white
             && (y - h as i64 / 2).abs() <= r_white
         {
