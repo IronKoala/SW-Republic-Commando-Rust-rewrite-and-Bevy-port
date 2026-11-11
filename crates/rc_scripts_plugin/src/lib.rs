@@ -56,6 +56,7 @@ pub mod characters;
 pub mod cutscene;
 pub mod fx_factories;
 pub mod markers;
+pub mod projectiles;
 pub mod music;
 pub mod save;
 pub mod sight;
@@ -105,6 +106,9 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_effects_plugin::SpawnEffect>()
             .add_message::<rc_effects_plugin::PreloadEffect>()
             .add_message::<rc_effects_plugin::EffectEnded>()
+            .add_message::<projectiles::SpawnProjectile>()
+            .add_message::<projectiles::RemoveProjectiles>()
+            .init_resource::<projectiles::Projectiles>()
             .add_message::<TurretOrder>()
             .add_message::<rc_game_core::MarkerJob>()
             .init_resource::<rc_game_core::UseClaimed>()
@@ -138,6 +142,7 @@ impl Plugin for ScriptsPlugin {
                     sight::look,
                     run,
                     fx_factories::run,
+                    projectiles::fly,
                     breakables::show,
                     characters::cast,
                     sounds::play,
@@ -153,7 +158,7 @@ impl Plugin for ScriptsPlugin {
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
-                (forget, sounds::forget, cutscene::forget),
+                (forget, sounds::forget, cutscene::forget, projectiles::forget),
             );
     }
 }
@@ -549,7 +554,11 @@ fn build(
     // stall the game.
     let fx = fx_factories::read(map);
     fx_factories::log_list(&fx, &log);
-    let mut wanted: Vec<&str> = fx.iter().map(|f| f.prototype.as_str()).collect();
+    let mut wanted: Vec<&str> = fx
+        .iter()
+        .filter(|f| f.kind == rc_effects::factory::Kind::Effect)
+        .map(|f| f.prototype.as_str())
+        .collect();
     wanted.sort_unstable_by_key(|n| n.to_ascii_lowercase());
     wanted.dedup_by_key(|n| n.to_ascii_lowercase());
     for w in wanted {

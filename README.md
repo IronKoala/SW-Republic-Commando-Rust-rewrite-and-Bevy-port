@@ -681,6 +681,13 @@ copy of the game.
   opening briefing, Republic gunships and Geonosian fighters fly over the
   arena, and battle explosions go off near you. 397 such spawners on 55
   maps. Their on/off state is kept in save files.
+- **Projectile spawners (since 2026-11-11, tested in the cloud only, not
+  on Windows or by playing).** The maps' `ProjectileFactory` actors now
+  run too: in geo_01a the air bombardment falls on the arena and the
+  bunkers fire missiles, each with the game's own model, smoke trail and
+  explosion, and the blasts hurt what is near. Only explosive missiles
+  fly so far; bullets, bolts and grenades from spawners are logged and
+  skipped. The trails' ribbon part isn't drawn yet.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to

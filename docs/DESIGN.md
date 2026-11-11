@@ -4471,6 +4471,46 @@ is not applied (which way each part turns a model is not known); a lit model sta
 (0.5); fades are not applied to models; the field of view for `bCovert`
 is the camera's 4:3 one.
 
+### Projectile spawners (`ProjectileFactory`, `rc_effects::projectile`)
+
+**What the original does** (ctgame.u's `Factory` and `ProjectileFactory`,
+engine.u's `Projectile`, ctinventory.u's `CTProjExplosive`). A
+`ProjectileFactory` runs by the same rules as an effect spawner but makes
+a projectile class. With `SpawnMode` 2 the projectile starts with the
+factory's `InitialPhysicsFromFactory`/`InitialSpeedFromFactory` and turn;
+otherwise with its spawn point's `InitialPhysics`/`InitialSpeed` (default
+2, falling, and 0) and turn. Physics 6 flies straight; 2 falls with the
+zone's gravity (`PhysicsVolume` default Z -1100, `TerminalVelocity`
+12000). The class's `ProjectileEffect` is spawned and carried along; when
+the projectile goes, the trail fades out (`Emitter.FadeOut`: no new
+particles, the old ones finish). An explosive projectile blows up when
+its `FuseTime` runs out, on hitting the world with `bWorldDetonate`
+(the class's hit effect is spawned first, then `Explode` spawns it
+again) or on touching an actor with `bActorDetonate`; `Explode` spawns the
+`HitEffectsByMaterial` effect and hurts everything within
+`DamageRadius` (`HurtRadius`). `ACTION_StopFactorySpawning` turns a
+factory off (for good with `PermanentlyDisableFactory`) and can destroy
+what it made (`DestroyFactoryOffspring`). geo_01a has six: air
+bombardment (`GEO_01AProj`, Speed 8000, from Z 21244 at 10000 straight
+down), missiles from the bunkers (`GEO_01A_BunkerMissile`, falling, 4000)
+and the end-of-level bombardment; 52 on 15 maps in all.
+
+**How we split it.** `rc_effects::projectile` (no Bevy) reads a class
+and its parents from properties.u, physicalmaterials.u, ctinventory.u and
+engine.u (`ClassPackages`), and moves a `Flight` with a hit test the game
+passes in. `rc_effects::factory` gained `Kind::Projectile`, spawn-point
+physics and speed, and `stop(tag, for_good, remove_offspring)`.
+`rc_scripts_plugin/src/projectiles.rs` draws the model, carries the trail
+(`SpawnEffect.follow`, moved each frame by `rc_effects_plugin`, faded when
+the carrier goes), sweeps against `LevelCollision`, and on a blast spawns
+the effect and sends `rc_combat::Explode`.
+
+**Not done yet:** projectiles that aren't explosive or are laser bolts
+(logged "isn't flown yet"), bouncing and sticking, touching actors
+(`bActorDetonate`), zone gravity other than the default, decals and
+per-surface effects (the default material effect is used), and the trails'
+ribbon emitters (not drawn).
+
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 
 **What the original does.** A `Turret` (the Wookiee heavy turret on

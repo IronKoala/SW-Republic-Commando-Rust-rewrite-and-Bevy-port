@@ -136,6 +136,9 @@ pub struct EffectState {
     pub floor: Option<f32>,
     pub age: f32,
     pub emitters: Vec<EmitterState>,
+    /// Faded out (`Emitter.FadeOut`): no new particles; done when the last
+    /// one dies.
+    pub fading: bool,
     rng: Rng,
 }
 
@@ -187,7 +190,33 @@ impl EffectState {
             floor: None,
             age: 0.0,
             emitters,
+            fading: false,
             rng,
+        }
+    }
+
+    /// `Emitter.FadeOut` (what a projectile's trail gets when the
+    /// projectile is gone): every emitter stops sending particles and the
+    /// effect ends when its last particle dies.
+    pub fn fade_out(&mut self) {
+        self.fading = true;
+    }
+
+    /// Move the effect to `origin` (an effect carried by something that
+    /// moves, as a projectile's trail is). Particles already sent stay
+    /// where they are, except those of `PTCS_Relative` emitters, which
+    /// move with it.
+    pub fn move_to(&mut self, def: &EffectDef, origin: [f32; 3]) {
+        let delta = [0, 1, 2].map(|k| origin[k] - self.origin[k]);
+        self.origin = origin;
+        for (d, s) in def.emitters.iter().zip(&mut self.emitters) {
+            if d.coordinate_system == CoordinateSystem::Relative {
+                for p in &mut s.particles {
+                    for k in 0..3 {
+                        p.position[k] += delta[k];
+                    }
+                }
+            }
         }
     }
 
@@ -210,6 +239,9 @@ impl EffectState {
     pub fn done(&self, def: &EffectDef) -> bool {
         if def.life_span > 0.0 && self.age >= def.life_span {
             return true;
+        }
+        if self.fading {
+            return self.live() == 0;
         }
         def.emitters.iter().zip(&self.emitters).all(|(d, s)| {
             d.disabled || (!d.respawn && s.sent >= d.max_particles && s.particles.is_empty())
@@ -347,6 +379,9 @@ impl EffectState {
                 }
             }
             s.particles.retain(|p| p.age < p.lifetime);
+            if self.fading {
+                continue;
+            }
             // Send new ones.
             let mut dt_left = dt;
             if s.delay > 0.0 {
@@ -474,6 +509,37 @@ mod tests {
             life_span: 0.0,
             lit: false,
         }
+    }
+
+    #[test]
+    fn a_carried_trail_moves_and_fades_out() {
+        // A trail that keeps sending (respawns), as a missile's does.
+        let mut def = burst();
+        def.emitters[0].respawn = true;
+        def.emitters[0].start_velocity = RangeVector::fixed(0.0);
+        let mut e = EffectState::new(&def, [0.0; 3], 3);
+        e.step(&def, 0.1);
+        let first = e.emitters[0].particles[0].position;
+        // Carried 1000 uu: old particles stay (independent emitter), new
+        // ones start at the new place.
+        e.move_to(&def, [1000.0, 0.0, 0.0]);
+        assert_eq!(e.emitters[0].particles[0].position, first);
+        // Faded out: nothing new, done once the last dies.
+        e.fade_out();
+        let sent = e.emitters[0].sent;
+        assert!(!e.done(&def));
+        for _ in 0..40 {
+            e.step(&def, 0.05);
+        }
+        assert_eq!(e.emitters[0].sent, sent);
+        assert!(e.done(&def));
+        // A relative one's particles move with it.
+        def.emitters[0].coordinate_system = crate::def::CoordinateSystem::Relative;
+        let mut e = EffectState::new(&def, [0.0; 3], 3);
+        e.step(&def, 0.1);
+        let x = e.emitters[0].particles[0].position[0];
+        e.move_to(&def, [1000.0, 0.0, 0.0]);
+        assert_eq!(e.emitters[0].particles[0].position[0], x + 1000.0);
     }
 
     #[test]
