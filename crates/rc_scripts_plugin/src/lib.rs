@@ -54,6 +54,7 @@ pub mod breakables;
 pub mod characters;
 pub mod cutscene;
 pub mod markers;
+pub mod music;
 pub mod save;
 pub mod sight;
 pub mod sounds;
@@ -260,6 +261,8 @@ pub struct PlayStats {
     pub sounds_started: usize,
     /// Sounds asked for that weren't loaded.
     pub sounds_missing: Vec<String>,
+    /// Music actions passed on to the music.
+    pub music_cues: usize,
     /// The sounds played from a place in the level (not heard everywhere).
     pub sounds_placed: Vec<String>,
     pub not_done: usize,
@@ -651,10 +654,11 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief): (
+    (mut checkpoints, mut change, mut debrief, mut music): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
+        MessageWriter<rc_game_core::MusicCue>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -888,6 +892,15 @@ fn run(
                 }
                 if characters::KINDS.contains(&call.kind.as_str()) {
                     script.calls.push(call);
+                    continue;
+                }
+                if let Some(cue) = music::cue(&call.action) {
+                    log.line(format!(
+                        "{PART}: t={now:.2} {} #{} {}: music {cue:?}",
+                        call.script, call.index, call.kind
+                    ));
+                    script.stats.music_cues += 1;
+                    music.write(cue);
                     continue;
                 }
                 carry_out(

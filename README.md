@@ -383,8 +383,9 @@ copy of the game.
   Hive`, ...), shows a loading screen with the mission text, and drops you
   into the level with an on-screen display (shield, health, crosshair, ammo,
   squad, messages). Escape pauses; the pause menu resumes, opens options or
-  quits to the main menu. It plays the game's own music (the main menu
-  theme, then each campaign's calm tracks). It reads a settings file
+  quits to the main menu. It plays the game's own music by the
+  original's rules (the main menu theme, then each room's music, battle
+  music when enemies come close, a victory flourish when the fight ends). It reads a settings file
   (`settings.toml`: game folder, mods, screen, volumes, mouse) and a controls
   file (`data/input/bindings.toml`: the original PC keys, plus gamepad and
   touch). `rc_game --script` drives itself through the menus and a level and
@@ -649,7 +650,7 @@ copy of the game.
   (the droid, gunship or spot it belongs to) and gets quieter with
   distance, unless the game's own settings for that sound say it is radio
   (most dialogue is). Tested in the cloud on a silent sound card, not yet
-  listened to or run on Windows. No subtitles yet. Music cues, characters walking or animating, the squad
+  listened to or run on Windows. No subtitles yet. Music actions are carried out. Characters walking or animating, the squad
   joining and leaving and camera moves are logged as "not done yet". At the
   end of each campaign the original debriefing screen shows (its own
   picture, frame and texts, with the level's title, words and picture);
@@ -683,8 +684,14 @@ copy of the game.
   in the prologue's gym in the cloud; not tested on Windows. The shadow
   stays flat at the feet (not on steps, slopes or walls) and has sharp
   edges. The squad and enemies don't have these yet.
-- Music: the menu and level tracks play, but the switch to battle music
-  waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
+- Music: follows the original's rules, read from the game's files
+  (`cargo run --release -p rc_music --bin rc_music_check` checks every
+  level's music against your install). Heard on Windows on 2026-11-09:
+  the menu theme, room music and its overlays, and pausing. Our guesses:
+  exactly when a fight starts and ends, and the fade curves. Not done:
+  battle volumes, the death stinger, debriefing, credits and title-card
+  music, music in save games.
+- 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
   picks from) are played for weapons, grenades and enemy voices. With 3D
   SOUND on, enemy and scripted sounds are heard from their side. Before

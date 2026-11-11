@@ -4514,11 +4514,13 @@ dependencies = [
  "rc_enemies",
  "rc_game_core",
  "rc_image",
+ "rc_level",
  "rc_level_plugin",
  "rc_level_viewer",
  "rc_menus",
  "rc_movement",
  "rc_movers_plugin",
+ "rc_music",
  "rc_package",
  "rc_pads",
  "rc_panini",
@@ -4634,6 +4636,14 @@ dependencies = [
  "rc_movers",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_music"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_package",
 ]
 
 [[package]]
