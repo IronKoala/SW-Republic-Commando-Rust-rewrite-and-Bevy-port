@@ -22,6 +22,7 @@
 //! of each part's section, so a save and load can be checked from the log.
 
 pub mod file;
+pub mod profiles;
 
 use bevy::prelude::*;
 use file::{Header, SaveFile};
@@ -159,6 +160,11 @@ impl Plugin for SavePlugin {
             )
             .add_systems(Startup, (set_up_folder, refresh_list, read_travel).chain())
             .add_systems(OnEnter(GameState::MainMenu), (forget_pending, refresh_list))
+            // Choosing another profile points the save folder at its saves.
+            .add_systems(
+                Update,
+                refresh_list.run_if(resource_exists_and_changed::<SaveFolder>),
+            )
             .add_systems(OnEnter(GameState::InGame), level_started)
             .add_systems(
                 Update,

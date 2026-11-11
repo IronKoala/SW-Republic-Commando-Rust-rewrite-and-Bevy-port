@@ -3603,6 +3603,21 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   the new `DeleteSave` messages, asking first with the original question
   box where the original does (`OriginalMenus::ask`, `Asking`). A page
   button that opens a load or save page that can't be drawn is greyed out.
+- The PROFILES pages are the original's too (`MenuSelectProfile`,
+  `MenuPCNewProfileName`, `MenuLoadingProfile`, `MenuWarning` in
+  `XInterfaceCommon.u`). `rc_game/src/original_profiles.rs` follows their
+  scripts: the list (`< NEW >` then the profile folders, capitalised),
+  must-pick-one when there is no profile (BACK hidden and ignored), DELETE
+  hidden on `< NEW >`, the name checks and messages, the one-second
+  "CREATING/LOADING PROFILE" box. `rc_save::profiles` keeps each profile as
+  a `Profile_<name>` folder in the save folder with its saves inside; the
+  profile in use is `settings.save.profile`, and `SaveFolder` points into
+  its folder. Typing boxes are `rc_menus::edit::EditBox` (the original's
+  `MenuEditBox`): its filter, length limit, backspace and blinking cursor
+  follow `XInterface.dll`'s native code, read by disassembly; the cursor is
+  drawn from the layout's `WhiteTexture`. `OriginalMenus::show_box` shows a
+  warning or wait box with the question box's machinery (`Asking::Warning`,
+  `Asking::Wait`).
 - The pause menu's rows follow the original's own rules each time it
   opens (`rc_menus::pause`, rewritten by hand from the script in
   `XInterfaceCTMenus.u`): which of the eleven rows show depends on health,

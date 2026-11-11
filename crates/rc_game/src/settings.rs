@@ -240,6 +240,12 @@ pub struct SaveSection {
     /// on Linux, `saves` next to the settings file elsewhere). Never the
     /// game's install.
     pub folder: String,
+    /// The profile chosen last on the PROFILES page. Its saves are in the
+    /// folder `Profile_<name>` inside the save folder, as the original
+    /// keeps `GameData/Save/Profile_<name>`. Empty (or a profile whose
+    /// folder is gone): the game opens on the PROFILES page, as the
+    /// original does when no profile is loaded.
+    pub profile: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

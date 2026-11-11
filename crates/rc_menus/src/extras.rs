@@ -120,6 +120,7 @@ mod tests {
             movie_widget: None,
             music: None,
             lists: Default::default(),
+            white_texture: None,
         };
         for i in 0..NUM_EXTRAS {
             let mut b = Button::default();

@@ -287,7 +287,8 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
     for i in candidates {
         let w = &layout.widgets[i];
         let Kind::Button(b) = &w.kind else { continue };
-        if b.disabled {
+        // An edit box is typed into; the game's code for the page reads it.
+        if b.disabled || b.edit.is_some() {
             continue;
         }
         if let Some(e) = plan.extra_buttons.iter().find(|e| e.name == w.name) {
@@ -485,6 +486,7 @@ mod tests {
             movie_widget: None,
             music: None,
             lists: Default::default(),
+            white_texture: None,
         }
     }
 

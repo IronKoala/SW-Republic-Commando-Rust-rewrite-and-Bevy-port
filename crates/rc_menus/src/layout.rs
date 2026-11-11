@@ -138,6 +138,9 @@ pub struct Button {
     /// Only the mouse can use it (`bIgnoreController`): the arrows beside
     /// a chooser. Keys and controllers skip it.
     pub mouse_only: bool,
+    /// A box the player types into (`MenuEditBox`, see `edit.rs`); `None`
+    /// for an ordinary button.
+    pub edit: Option<crate::edit::EditBox>,
 }
 
 impl Button {
@@ -229,6 +232,9 @@ pub struct MenuLayout {
     pub music: Option<String>,
     /// Scrolling lists, their scroll bars and wheel areas (`lists.rs`).
     pub lists: crate::lists::Lists,
+    /// The picture text cursors are drawn with (`MenuBase`'s
+    /// `WhiteTexture`, "For text cursors").
+    pub white_texture: Option<String>,
 }
 
 impl MenuLayout {
@@ -270,6 +276,7 @@ const DRAWN: &[&str] = &[
     "MenuButtonText",
     "MenuButtonSprite",
     "MenuButtonEnum",
+    "MenuEditBox",
 ];
 /// Kinds that make up scrolling lists (`lists.rs`).
 const LISTS: &[&str] = &[
@@ -393,6 +400,7 @@ pub fn build(class: &ClassData) -> MenuLayout {
         }),
         music: obj("BackgroundMusic"),
         lists,
+        white_texture: obj("WhiteTexture"),
     };
     crate::lists::refresh(&mut layout);
     layout
@@ -704,7 +712,7 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
     let kind = match v.kind() {
         "MenuSprite" => Kind::Sprite(sprite(v)),
         "MenuText" => Kind::Text(text(v)),
-        "MenuButtonText" | "MenuButtonEnum" => {
+        "MenuButtonText" | "MenuButtonEnum" | "MenuEditBox" => {
             let e = empty();
             let mut background_blurred = sprite(v.get("BackgroundBlurred").unwrap_or(&e));
             let mut background_focused = sprite(v.get("BackgroundFocused").unwrap_or(&e));
@@ -734,6 +742,9 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
             };
             if b.is_chooser() {
                 b.choose(v.int("Current").max(0) as usize);
+            }
+            if v.kind() == "MenuEditBox" {
+                b.edit = Some(crate::edit::EditBox::from_value(v));
             }
             Kind::Button(b)
         }

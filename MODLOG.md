@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The PROFILES page, the original's (rc_game, rc_menus, rc_save, data/ui/original_menus.toml)
+
+- **Changed:** PROFILES on the main menu is no longer greyed out. It opens the original's `MenuSelectProfile` page; `< NEW >` opens `MenuPCNewProfileName` (type a name), creating or choosing a profile shows `MenuLoadingProfile` for its one second, and the active-profile and name-in-use messages use `MenuWarning`. With no profile chosen the game opens on PROFILES and BACK is hidden, as `CTMenuMain.Init` does. New `rc_menus::edit` (the original's `MenuEditBox`: typing filter, length limit, backspace, blinking cursor), `rc_save::profiles` (profile folders), `rc_game/src/original_profiles.rs`, setting `save.profile`.
+- **Why:** User asked for the missing pages ("all").
+- **Tested how:** Script texts and defaults from `XInterfaceCommon.u` and `XInterfaceCTMenus.u` (`strings`); the edit box's typing, cursor and blink rules from `XInterface.dll` by disassembly (scratch folder, nothing copied). `cargo test -p rc_menus -p rc_save -p rc_game`; `rc_game --script` in the cloud with the install's menu files (new profile checks: forced first page, BACK ignored, typing, create, warnings, in-use name, delete with question).
+- **Result:** See the PR; profile checks pass in the cloud.
+- **Still broken / not tested:** Not tested on Windows. Guesses: Enter in the name box moves to OK (the original picks the "nearest" widget; which of BACK and OK it lands on wasn't worked out); the warning and loading boxes borrow the page's background as the question box does; the original's fade before the loading box isn't drawn; name match ignores capitals. Profiles hold only saves: settings and unlocked levels stay shared (the original keeps them per profile in `User.ini`). Saves made before this stay in the save folder's top and don't show under any profile. No on-screen keyboard, so a name can only be typed with a keyboard (the original PC page has none either).
+
 ## 2026-11-11: The EXTRAS page and the rolling credits (rc_menus, rc_game, data/ui/original_menus.toml)
 
 - **Changed:** EXTRAS on the main menu now opens the original `CTExtrasMenu` page (new page `extras`), set up by its own `Init` rule for locked rows (`rc_menus::extras`). VIEW CREDITS opens the original `CTCreditsMenu` (page `credits`): the lines of the install's `Credits.int` roll up at the class's speed and gap and the page goes back to EXTRAS at the end (`rc_menus::credits`, `rc_game/src/original_credits.rs`); the credits play their own music (`ASH_Track4_Clones`), and the main menu music starts again after. New page option `keep_together` (`fit::together`): EXTRAS stays one block in the middle of a wide screen. New `Page::Extras`, `Page::Credits`. Script steps for EXTRAS and the credits.

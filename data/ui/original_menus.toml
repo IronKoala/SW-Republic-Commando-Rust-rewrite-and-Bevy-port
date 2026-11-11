@@ -393,3 +393,32 @@ back = "unavailable"
 
 [pages.debriefing.buttons]
 OnAButton = "act:continue"
+
+# The profile pages (checked 2026-11-11 with the install). PROFILES on the
+# main menu opens the list (the original's ProfilesSelected); with no
+# profile loaded the main menu opens it by itself and BACK is hidden.
+# "< NEW >" goes to the name page; OK there makes the profile. What the
+# buttons do is in rc_game/src/original_profiles.rs; every text shown is
+# the classes' own. Each profile keeps its own saves (a Profile_<name>
+# folder in the save folder).
+[pages.profiles]
+class = "XInterfaceCommon.MenuSelectProfile"
+back = "act:profiles_back"
+
+[pages.profiles.buttons]
+OnBButton = "act:profiles_back"
+SelectCurrentProfile = "act:select_profile"
+OnXButton = "act:delete_profile"
+ProfileListOnSelect = "list_pick"
+OnListScrollUp = "scroll_up"
+OnListScrollDown = "scroll_down"
+
+# BACK goes back to the list (the original's GotoMenuClass of
+# MenuSelectProfile, so it takes the name page's place).
+[pages.new_profile]
+class = "XInterfaceCommon.MenuPCNewProfileName"
+back = "switch:profiles"
+
+[pages.new_profile.buttons]
+OnBButton = "switch:profiles"
+OnAButton = "act:create_profile"

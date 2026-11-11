@@ -334,6 +334,7 @@ mod tests {
             movie_widget: None,
             music: None,
             lists: Default::default(),
+            white_texture: None,
         };
         let c = campaign();
         let green = |l: &MenuLayout| -> Vec<bool> {
