@@ -265,7 +265,11 @@ fn move_body(
     collision: Res<LevelCollision>,
     movers: Option<Res<rc_movers_plugin::LevelMovers>>,
     mut kicks: MessageReader<ViewKick>,
-    (cut, mut teleports): (Res<Cutscene>, MessageReader<TeleportPlayer>),
+    (cut, mut teleports, use_item): (
+        Res<Cutscene>,
+        MessageReader<TeleportPlayer>,
+        Res<rc_game_core::UseItem>,
+    ),
     mut body: Query<
         (
             &mut Body,
@@ -276,6 +280,7 @@ fn move_body(
         With<Player>,
     >,
     log: Res<GameLog>,
+    mut faced: Local<bool>,
 ) {
     let Ok((mut body, mut t, down, manning)) = body.single_mut() else {
         return;
@@ -333,9 +338,41 @@ fn move_body(
         t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
         return;
     }
+    // Using something that holds the player (a bacta dispenser): pulled
+    // to its spot and turned to face it, then held there. Looking around
+    // stays; the body only falls or rides a lift.
+    // Once turned to face it, the player may look around again.
+    if let Some(lock) = &use_item.lock {
+        let pawn = &body.pawn;
+        let (to, yaw, there) = lock.pull(
+            [pawn.location.x, pawn.location.y],
+            body.yaw,
+            lock.speed * dt,
+            if *faced { 0.0 } else { lock.turn * dt },
+        );
+        body.pawn.location.x = to[0];
+        body.pawn.location.y = to[1];
+        body.pawn.velocity.x = 0.0;
+        body.pawn.velocity.y = 0.0;
+        if !*faced {
+            body.yaw = yaw;
+        }
+        if there && !*faced {
+            *faced = true;
+            log.line(format!(
+                "player: t={:.2} pulled into place at ({:.1}, {:.1}) facing {:.0} deg",
+                body.time,
+                to[0],
+                to[1],
+                yaw.to_degrees()
+            ));
+        }
+    } else {
+        *faced = false;
+    }
     // Down (health at 0, waiting for a squad mate to revive): can look
     // around but not move.
-    let input = if down {
+    let input = if down || use_item.lock.is_some() {
         MoveInput {
             yaw: body.yaw,
             ..Default::default()

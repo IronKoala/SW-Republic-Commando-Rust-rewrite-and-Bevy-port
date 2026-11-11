@@ -62,6 +62,43 @@ range = 256
 heal_per_second = 50
 # Seconds before a used dispenser works again. Our choice.
 recharge_seconds = 10
+# While you use a dispenser you are pulled to a spot this many units in
+# front of it, turned to face it, and held there until you let go of Use
+# or your health is full. 90 and the hold are the game's own
+# (BactaDispenserDefaults PlayerOffset, BactaDispenser bLockPlayerLocation).
+# lock_player = false lets you walk away while healing.
+player_offset = 90
+lock_player = true
+# How fast the pull moves you (units a second) and turns you (degrees a
+# second). Our guesses: the game does this in native code.
+pull_speed = 300
+turn_speed = 360
+# The squad marker hologram: a see-through commando at the dispenser's
+# squad spot, showing where a squad mate stands to heal. The model is the
+# game's own (MarkerGetBacta's icon). As in the game, it fades in only
+# while your crosshair is on that spot, within hologram_range units (the
+# game's TargetingDistance), and only when a squad mate needs healing. It
+# is hidden while the dispenser is in use or recharging. The colour is the
+# game's (SquadMarker EnabledColor); the brightness (0 to 1) and the fade
+# time are our guesses. hologram = "" turns it off.
+hologram = "MarkerIcons.Revive.reviveSM1BactaDispenser"
+hologram_range = 3000
+hologram_colour = [122, 206, 255]
+hologram_brightness = 0.6
+hologram_fade_seconds = 0.25
+# The line shown while you stand at a dispenser you can use; @ becomes the
+# Use button. Empty means the game's own text (BactaDispenser's
+# ActivatePromptText, read from ctgame.u: "PRESS AND HOLD @ TO HEAL").
+prompt = ""
+# Sounds, from the game's HUD (CTHUDDefaults): the crosshair moving onto a
+# dispenser (TargetPanel), healing starting (HealingTarget, the use ring's
+# timer sound), healing (HealthRecharging, repeats while you heal) and
+# health full (HealthCharged). When each plays is our reading: the HUD
+# plays them in native code. "" for none.
+sound_aim = "GEN_Sound.Interface.int_GEN_retCrossZoom_01"
+sound_timer = "GEN_Sound.Interface.int_GEN_hudTimer_01"
+sound_healing = "GEN_Sound.Interface.int_GEN_hudHlthChrgng_02"
+sound_full = "GEN_Sound.Interface.int_GEN_hudHlthChrgd_01"
 
 [exits]
 # Most maps end where the player walks into a "Teleporter" with a URL (the

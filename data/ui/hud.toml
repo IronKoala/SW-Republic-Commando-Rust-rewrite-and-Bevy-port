@@ -20,6 +20,48 @@ scale = 1.0
 [crosshair.weapons]
 "DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistolPC"
 
+# The use panel round the crosshair, while you stand at something you use by
+# holding Use (a bacta dispenser). The pictures are the original's; when
+# the original shows which, and how the outer part moves, is native code,
+# so that part is our reading: `ready` shows at the dispenser, `inside`
+# and `outside` while you heal, the outer part turning `turn` degrees
+# (clockwise) from empty to full health. Remove this part to turn it off.
+[use_panel]
+# The use panel at the crosshair while you aim at a bacta dispenser, in
+# place of the crosshair. All pictures are the game's own. How the original
+# draws them was read from its engine code (Engine.dll, the helmet HUD's
+# DrawTimerRing and the part of DrawHelmet that calls it for a "panel"
+# target), 2026-11-11, and is written here as numbers:
+#
+# The ring (HUD_EventTimer) is centred on the screen at its picture's own
+# size on the original's 600-line HUD (so 0.8 on our 480 lines). It is cut
+# into a 4 by 4 grid of pieces: the whole ring is drawn faint first, then
+# the pieces lit so far on top, one more step per twelfth of the value,
+# from just left of the top, down the left, along the bottom and up the
+# right; the piece just right of the top only lights at full. For a bacta
+# dispenser the value is your health. At full health only the icon shows.
+ring = "HUDTextures.Reticles.HUD_EventTimer"
+ring_scale = 0.8
+ring_colour = [200, 240, 255]
+ring_alpha = 255
+ring_alpha_unlit = 92
+# The icon: the target's HUDIconX/HUDIconY square (BactaDispenser: 1, 7) of
+# the helmet's LargeVisorIcons sheet, 40-pixel squares counted from the
+# bottom right of a 3 by 10 grid, drawn 40x40 at the screen centre. Its
+# colour follows the same value: red-pink at 0, green at 1, mixed in a
+# straight line between.
+icon_sheet = "HUDTextures.Icons.LargeVisorIcons"
+icon_cell = 40
+icon_grid = [3, 10]
+icon = [1, 7]
+icon_scale = 0.8
+icon_colour_empty = [255, 140, 180]
+icon_colour_full = [140, 255, 180]
+icon_alpha = 240
+# The prompt (the [[element]]s with {prompt1} and {prompt2} below) breaks
+# onto a second line after about this many letters, as in the original.
+prompt_wrap = 21
+
 # ---------------------------------------------------------------------------
 # The rest of the HUD: shield, health, ammunition, grenades, squad and
 # messages, from the original's pictures (HUDTextures.Icons.CloneIcons and
@@ -46,10 +88,12 @@ scale = 1.0
 # to 32:9 (phones held upright are not supported).
 #
 # Texts: {weapon} {clip} {reserve} {grenade} {grenades} {message1}
-# (newest) {message2} {message3} {pickup}; for squad rows {number} {name}
+# (newest) {message2} {message3} {pickup} {prompt1} {prompt2} (the use
+# prompt's two lines); for squad rows {number} {name}
 # {order}.
 # Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
-# clip, reserve, grenade, shield_low, health_low, squad_down, pickup.
+# clip, reserve, grenade, shield_low, health_low, health_full, squad_down, pickup,
+# prompt.
 # Bars (`fill`): shield, health, clip, squad_health.
 # Fading (`fade`, 1 shown to 0 gone): pickup.
 
@@ -107,10 +151,15 @@ colour = [110, 235, 95, 255]
 alert_when = "squad_down"
 alert_colour = [255, 80, 60, 255]
 
-# --- Shield and health: the stepped meter left of the middle (pinned to
-# the bottom middle, like the magazine meter) ------------------------------
-# A dim empty meter with the bright full one over it, emptying from the
-# top. Health is the column of ticks beside it.
+# --- Health: the stepped meters either side of the middle ----------------
+# From the user's video of the original healing at a bacta dispenser
+# (2026-11-10): both stepped meters show health, mirrored, lit from the
+# bottom up (8 of 12 steps lit when hurt, all 12 at full); yellow while
+# hurt, green at full health. The pictures are the game's
+# (CloneVisorIcons); the original tints them in engine code, so the
+# colours were measured from the video (yellow 214,208,98; green
+# 72,212,68). OUR GUESS, not in the video: red when health is low.
+# Shield: the column of ticks beside the left meter (our guess).
 
 [[element]]
 group = "vitals"
@@ -126,13 +175,26 @@ group = "vitals"
 anchor = "bottom"
 at = [-172, -80]
 size = [50, 39]
+when = "health_full"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 180, 241, 237]
-fill = "shield"
+fill = "health"
 fill_toward = "down"
-colour = [110, 235, 95, 255]
-alert_when = "shield_low"
-alert_colour = [255, 210, 90, 255]
+colour = [72, 212, 68, 255]
+
+[[element]]
+group = "vitals"
+anchor = "bottom"
+at = [-172, -80]
+size = [50, 39]
+when = "!health_full"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 180, 241, 237]
+fill = "health"
+fill_toward = "down"
+colour = [214, 208, 98, 255]
+alert_when = "health_low"
+alert_colour = [255, 80, 60, 255]
 
 [[element]]
 group = "vitals"
@@ -141,20 +203,19 @@ at = [-120, -80]
 size = [9, 39]
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [233, 38, 251, 94]
-fill = "health"
+fill = "shield"
 fill_toward = "down"
 colour = [110, 235, 95, 255]
-alert_when = "health_low"
-alert_colour = [255, 80, 60, 255]
+alert_when = "shield_low"
+alert_colour = [255, 210, 90, 255]
 
-# --- Ammunition: the same meter, mirrored, right of the middle -----------
+# The same health meter, mirrored, right of the middle.
 
 [[element]]
 group = "ammo"
 anchor = "bottom"
 at = [118, -80]
 size = [50, 39]
-when = "clip"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 36, 239, 94]
 mirror = true
@@ -165,13 +226,28 @@ group = "ammo"
 anchor = "bottom"
 at = [118, -80]
 size = [50, 39]
-when = "clip"
+when = "health_full"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 180, 241, 237]
 mirror = true
-fill = "clip"
+fill = "health"
 fill_toward = "down"
-colour = [110, 235, 95, 255]
+colour = [72, 212, 68, 255]
+
+[[element]]
+group = "ammo"
+anchor = "bottom"
+at = [118, -80]
+size = [50, 39]
+when = "!health_full"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 180, 241, 237]
+mirror = true
+fill = "health"
+fill_toward = "down"
+colour = [214, 208, 98, 255]
+alert_when = "health_low"
+alert_colour = [255, 80, 60, 255]
 
 # Shots in the magazine, and spare ammo, over the meter.
 [[element]]
@@ -280,3 +356,33 @@ text = "{pickup}"
 align = "centre"
 colour = [255, 255, 255, 255]
 fade = "pickup"
+
+# --- The use prompt, near the top ---------------------------------------------
+# "PRESS AND HOLD 'F' TO HEAL" while you aim at a bacta dispenser you can
+# use (the dispenser's ActivatePromptText, read from the game). The original
+# draws it in native code; place and size were matched to the user's
+# screenshots of the original (1600x1200): two centred lines whose middles
+# are 190 and 247 pixels down. Colour read from Engine.dll (below); the
+# original also fades it in over the helmet's PromptFadeInTime (0.5 s),
+# which we don't do yet.
+[[element]]
+group = "prompt"
+anchor = "centre"
+at = [-160, -173]
+size = [320, 18]
+when = "prompt"
+text = "{prompt1}"
+align = "centre"
+# The original's activate-prompt colour, read from Engine.dll
+# (DrawActivateText): (164, 200, 208), fading in to 220 opacity.
+colour = [164, 200, 208, 220]
+
+[[element]]
+group = "prompt"
+anchor = "centre"
+at = [-160, -150]
+size = [320, 18]
+when = "prompt"
+text = "{prompt2}"
+align = "centre"
+colour = [164, 200, 208, 220]

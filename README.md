@@ -355,6 +355,19 @@ copy of the game.
   and blows the barricade so you can reach the fight. `rc_game --script`
   checks that whole chain (37 of 37 checks). `rc_script_check` runs every
   map's scripts without a window.
+  Bacta dispensers work like the original's (tested in the cloud sandbox
+  with the game's files, not yet on Windows or by playing): holding Use
+  pulls you in front of the dispenser, turns you to face it and holds you
+  there until you're full or let go; the original's use panel (the
+  dispenser's + icon and a ring that lights in twelve steps with your health, drawn the way the original's engine code draws it) takes the
+  crosshair's place, with the HUD's own timer sound; "PRESS AND HOLD 'F' TO HEAL" shows
+  when you can use it (nothing happens at full health); the squad marker
+  hologram (a see-through commando) fades in where a squad mate would heal
+  when you aim at that spot and a squad mate is hurt; and the helmet's own sounds play
+  when you aim at it, while healing and when full. When each sound plays
+  and how the panel moves are our reading (native code); the arm plugging
+  in and the zap effect aren't done. Settings: `[bacta]` in
+  `data/scripts/scripts.toml`, `[use_panel]` in `data/ui/hud.toml`.
   Enemy spawners now follow the scripts too (tested in the cloud sandbox
   with the real files, not yet on Windows or by playing): the level's
   events switch them on and off, scripts can stop or refill them, and

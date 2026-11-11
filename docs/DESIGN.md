@@ -1717,6 +1717,86 @@ Starting sends the dispenser's `BactaActive.Event`; full health sends its
 are `BactaDispenserActive` (a condition the reminder lines check) and
 `BactaUsed`, which is what opens the landing zone.
 
+The rest of the dispenser (`rc_scripts_plugin/src/bacta.rs`, numbers and
+names in `[bacta]` of `data/scripts/scripts.toml`), read from the game's
+class defaults with `rc_probe --classes`:
+- **Pull and hold.** `BactaDispenser` has `bLockPlayerLocation` and
+  `BactaDispenserDefaults` `PlayerOffset` 90. While healing, the bacta
+  system fills in `rc_game_core::UseItem::lock` (a spot 90 units in front
+  of the dispenser, along its own facing, and the way back to it); the
+  player part (`rc_game/src/player.rs`) pulls the body there and turns it
+  to face the dispenser, then holds it (`ActionState::hold_for_use`: like
+  a cutscene hold, but Use still counts, so letting go stops). After the
+  turn, looking around is free. The front was checked on geo_01a: each
+  dispenser's squad spot (`NavPts`) lies along its facing, 135 units out.
+- **Hologram.** `MarkerGetBacta` (CTGame.u) names its participant's
+  `IconMesh` `MarkerIcons.Revive.reviveSM1BactaDispenser`: a see-through
+  commando, 183 units tall, origin at the feet, drawn with a hologram
+  shader (`HsHologram` HoloMarkerClone). One is placed at each dispenser's
+  squad spot, on the dispenser's floor, facing it. When it shows comes
+  from the game's own scripts (engine.u `SquadMarker`, ctgame.u
+  `BactaDispenser`, `CTPlayerController`): the player's controller tells
+  the marker it is targeted, and `UpdateIcons` shows the icons unless the
+  marker is irrelevant (`MarkerGetBacta::IsRelevantFor`: a squad mate
+  below `HL_Green`, read here as below full health). The dispenser makes
+  its marker obsolete while in use and while recharging. So the hologram
+  fades in only while the crosshair is on the squad spot within
+  `TargetingDistance` (3000), a squad mate is hurt and the dispenser is
+  free, and fades out otherwise (fade time our guess). Tinted
+  `EnabledColor`. Drawn as a flat additive tint; the flickering hologram
+  shader is `rc_hologram`'s job.
+- **Prompt.** BactaDispenser's `ActivatePromptText` ("PRESS AND HOLD @
+  TO HEAL"), read from ctgame.u at load (`[bacta] prompt` overrides it),
+  with `@` as the Use button, drawn where the HUD's pickup message goes
+  while the player stands at a usable dispenser. As in
+  `CTPlayerController::Use`, Use does nothing at full health.
+- **Sounds.** The HUD's own (`CTHUDDefaults`): `TargetMarker`
+  (int_GEN_retCrossZoom_01) when the crosshair moves onto a usable
+  dispenser's collision cylinder, `HealthRecharging`
+  (int_GEN_hudHlthChrgng_02) looping while healing, `HealthCharged`
+  (int_GEN_hudHlthChrgd_01) at full. Heard from the helmet (no `SoundAt`).
+- **Use panel** (how it is drawn was read from the original's engine
+  code, `Engine.dll`, 2026-11-11: the helmet HUD's `DrawTimerRing` and the
+  part of `DrawHelmet` that calls it when the player's `TargetType` is
+  `TGT_Panel`; only behaviour and numbers were taken, no code). In place
+  of the crosshair while aiming at a dispenser, centred on the screen on
+  the original's 600-line HUD:
+  - The ring `HUDTextures.Reticles.HUD_EventTimer` (the helmet's
+    `EventTimer`) at its own size. It is cut into a 4 by 4 grid of
+    pieces. The whole ring is drawn first in (200,240,255) at opacity
+    92/255, then the lit pieces on top in the same colour, fully opaque:
+    one more step for each full twelfth of the value, from just left of
+    the top, down the left, along the bottom, up the right; the piece
+    just right of the top only lights at full, when the whole picture is
+    drawn (`original_hud::ring_pixels`, `RING_STEPS`).
+  - For a bacta dispenser (the panel kind the engine checks for) the
+    value is the player's `Health / HealthMax`. At full health the ring
+    is left out and only the icon shows (`UsePanel::Icon`).
+  - The icon: square `HUDIconX` 1, `HUDIconY` 7 of the helmet's
+    `HUDTextures.Icons.LargeVisorIcons`, 40-pixel squares counted from
+    the bottom right of a 3 by 10 grid, drawn 40x40. Its colour follows
+    the same value: red (255 - 115v), green (140 + 115v), blue 180,
+    opacity 240.
+  - The prompt (`DrawActivateText`) is (164,200,208), fading in to
+    opacity 220 (the fade-in, the helmet's `PromptFadeInTime` 0.5 s by our
+    reading, is not done). Its place, near the top in two lines ("PRESS
+    AND HOLD 'F' TO" / "HEAL"), is still matched to the user's
+    screenshots: the `{prompt1}`/`{prompt2}` elements of
+    `data/ui/hud.toml`.
+  - Not read yet: other panels show a "%02i:%02i" countdown under the
+    ring when the panel has time left; the healing sound is the
+    `HealingTarget` HUD sound (int_GEN_hudTimer_01), but when the engine
+    plays it was not found in this part of the code.
+- **Our readings, not checked against the original** (it doesn't run on
+  the user's PC right now): when each sound plays, where the prompt sits
+  (matched by eye to screenshots), the
+  pull's speed, the hologram's brightness and fade. The dispenser's zap
+  effect and its hum (`BactaZap_Dispenser`, `Bacta_Body`) come next, with
+  the effects plugin. Not done: the first-person arm plugging in
+  (`BactaHealer`, `HudArms.HudArmsBacta` with BactaLoad/BactaLoop/
+  BactaHolster), the zap effects, and `HUDIconX/Y` (an icon over the
+  dispenser).
+
 ### Breakable props (`rc_level::breakables`, `rc_scripts_plugin/src/breakables.rs`)
 
 Explosive barrels, geo_05b's fuel dispensers and their clamps, holo

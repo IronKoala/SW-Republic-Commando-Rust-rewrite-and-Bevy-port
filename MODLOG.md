@@ -3,6 +3,48 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Bacta use panel ring and icon read from the original's engine code (rc_game, rc_game_core, data/ui/hud.toml)
+
+- **Changed:** The ring now lights in twelve steps, piece by piece of a 4 by 4 grid of the `HUD_EventTimer` picture, over a faint whole ring, as the original's `Engine.dll` (`UHelmet::DrawTimerRing`) draws it; colour (200,240,255), faint part at 92/255. The icon is now from `LargeVisorIcons` (40-pixel squares, 3 by 10 grid, drawn 40x40) and its colour follows your health from red-pink to green (255-115v, 140+115v, 180, opacity 240). Prompt colour (164,200,208) at opacity 220 (`DrawActivateText`). `UsePanel::Icon` now carries the value. `[use_panel]` keys changed: `ring_alpha`, `ring_alpha_unlit`, `icon_grid`, `icon_colour_empty`, `icon_colour_full`, `icon_alpha`.
+- **Why:** User asked to read the compiled code that decides how the ring fills and its colour, instead of guessing from video. The quarter-at-a-time fill and the colours from before were our readings of the video and were wrong in the details.
+- **Tested how:** Machine code read in a scratch folder outside the repo (nothing of it is committed); `cargo test -p rc_game --bin rc_game original_hud`; `rc_game --script` in the cloud.
+- **Result:** 6 HUD unit tests pass (2 new: twelve-step ring, icon colour). `rc_game --script`: 127 passed, 2 failed (the same 2 old level-line checks); the use panel check passes and its screenshot shows 7 of 12 steps lit at 62% health.
+- **Still broken / not tested:** Not tested on Windows. The prompt's fade-in and the countdown text other panels show are not done. Where the original's HUD canvas sits on wide screens wasn't checked (we keep it centred and sized by screen height).
+
+## 2026-11-11: Health meters as in the original's video (data/ui/hud.toml, rc_menus)
+
+- **Changed:** Both stepped meters beside the bottom middle now show health (mirrored), lit from the bottom up; yellow while hurt, green at full; red when low stays our guess. The tick column shows shield (our guess). The right meter no longer shows the magazine. Ring and prompt colour are the HUD's own `DefaultTextColor` (198,232,255). New HUD condition `health_full`.
+- **Why:** User: "the health bar filling is not vanilla ... RE-USE THE GAME FILES". Their video shows both meters at 8 of 12 steps in yellow while hurt, rising to 12 and turning green at full.
+- **Tested how:** `cargo test -p rc_menus`; `rc_game --script` in the cloud; side-by-side with the user's screenshot.
+- **Result:** 127 passed, 2 failed (the same 2 old level-line checks).
+- **Still broken / not tested:** Not tested on Windows. The meter colours were measured from the video (the original tints them in engine code). What shows shield in the original isn't in the video.
+
+## 2026-11-11: Bacta dispenser: the original's use panel and its sound (rc_game, rc_menus, rc_scripts_plugin)
+
+- **Changed:** The guessed turning panel is gone. In place of the crosshair: the dispenser's icon (CloneVisorIcons square 1,7, the dispenser's own HUDIconX/Y) and the `HUD_EventTimer` ring showing your health, filling a quarter at a time with the rest faint; icon only at full health or while recharging. The prompt moved near the top in two lines, with the key in quotes ("PRESS AND HOLD 'F' TO / HEAL"). Healing starting plays the HUD's `HealingTarget` sound (int_GEN_hudTimer_01). New `UsePanel::Icon`/`Ready(fill)`, `{prompt1}`/`{prompt2}` HUD texts, `[use_panel]` rewritten.
+- **Why:** User: "don't try to re-create it. find the original files. there's also a sound that goes with it", with 4 screenshots and a 5-second video of the original.
+- **Tested how:** `cargo test -p rc_menus`, `cargo test -p rc_game --bin rc_game original_hud` (ring fill order, prompt break); `rc_game --script` in the cloud; our picture `bacta_use_panel` side by side with the user's screenshot.
+- **Result:** 127 passed, 2 failed (the same 2 level-line checks as before). Ring, icon and prompt line up with the original's screenshot.
+- **Still broken / not tested:** Not tested on Windows or by ear. Which sound plays exactly when couldn't be told from the video (the zap's hum covers it); the timer sound at the start is our reading of the HUD's settings. Sizes and colours matched by eye. The zap effect and hum not done yet.
+- **Next:** The dispenser's zap effect and hum (`BactaZap_Dispenser`), now the effects plugin is in main.
+
+## 2026-11-10: Bacta dispenser: hologram and prompt as in the original's scripts (rc_scripts, rc_scripts_plugin, rc_game)
+
+- **Changed:** The squad marker hologram now fades in only while the crosshair is on the squad spot, a squad mate is hurt and the dispenser is free (not in use, not recharging); no red "squad full" hologram. The dispenser shows the game's own "PRESS AND HOLD F TO HEAL" (BactaDispenser `ActivatePromptText`, read from ctgame.u). Use at full health does nothing. `[bacta]` gains `hologram_fade_seconds` and `prompt`, loses `hologram_full_colour`.
+- **Why:** User: "there's no clone hologram when self healing, that's also not what the UI looks like. can you look at the original files?" The original's scripts (SquadMarker, BactaDispenser, CTPlayerController in engine.u and ctgame.u) say when the marker icons show and give the prompt text.
+- **Tested how:** `cargo test -p rc_game_core -p rc_scripts -p rc_scripts_plugin -p rc_menus`; `rc_game --script` in the cloud with the game's files.
+- **Result:** 127 passed, 2 failed (the same 2 level-line checks as before). New checks: no hologram with the squad full; `a squad mate is hurt` then `hologram BactaDispenserGEO0 fades in`; prompt `"PRESS AND HOLD F TO HEAL"`; no hologram while healing.
+- **Still broken / not tested:** Not tested on Windows. The ring round the crosshair is still our guess (native code); asked the user what the original shows. The prompt shows when standing near, not only when the crosshair is on the dispenser.
+- **Next:** Rework the use panel from the user's description.
+
+## 2026-11-10: Bacta dispenser: pull and hold, hologram, heal sounds and use panel (rc_game_core, rc_scripts, rc_scripts_plugin, rc_game, rc_menus)
+
+- **Changed:** New `rc_game_core::UseItem` (a `UseLock` spot and facing, and a `UsePanel` state) and `ActionState::hold_for_use`. New `crates/rc_scripts_plugin/src/bacta.rs` (the bacta system moved here from lib.rs): pulls and holds the player 90 units in front of the dispenser while healing, places the squad marker hologram (`MarkerIcons.Revive.reviveSM1BactaDispenser`) at each dispenser's squad spot, and plays the HUD's aim, healing and health-full sounds. `rc_game/src/player.rs` carries out the pull; `cutscene.rs` holds the controls; `original_hud.rs` draws the original's use panel pictures round the crosshair (`[use_panel]` in `data/ui/hud.toml`). New `[bacta]` values in `data/scripts/scripts.toml`. 3 new `rc_game --script` checks.
+- **Why:** User playtest of PR #77: still missing the hologram, its sounds, the "pulls and locks player into position" feature and the healing progress on screen.
+- **Tested how:** `cargo test -p rc_game_core -p rc_scripts -p rc_scripts_plugin -p rc_menus -p rc_game`; `rc_game --script` in the cloud with the game's files copied read only from the PC. Values read with `rc_probe --classes` (BactaDispenser, BactaDispenserDefaults, MarkerGetBacta, SquadMarker, CTHUDDefaults).
+- **Result:** Tests pass. Self-test 124 passed, 2 failed (the 2 level-line checks that failed before this change too). New checks: `5 placed, 1 showing, colour [254, 126, 122], sounds ["aim"]`; `showing ["Ready"]`; `pulled 1 time(s) to (-1058, -297), player now 0.0 uu from it; panel reached 100%; sounds ["aim", "healing", "full"]`. The picture shows the red hologram commando in front of the dispenser. First try drew nothing: the hologram's picture went through the additive blend as invisible, so it is a plain tint now.
+- **Still broken / not tested:** Not tested on Windows, not heard, not compared with the original (it doesn't run on the PC right now). Our readings: when each sound plays, how the outer panel moves (turns 90 degrees as health fills), pull speed, the hologram hiding while in use, and its brightness. The hologram is a flat tint, not the original's flickering shader. Not done: the first-person arm plugging in (BactaHealer / HudArmsBacta), the zap effects, the HUD icon over the dispenser, dispensers being solid.
+- **Next:** The user heals at geo_01a's landing-zone dispenser and says what looks or sounds different from the original.
 ## 2026-11-09: The squad keeps their health and order on the next map (rc_squad_plugin, rc_save)
 
 - **Changed:** New `crates/rc_squad_plugin/src/carry.rs`: a `[squad_carry]` save section with each squad mate's health and the squad's order, carried to the next map and put back once the squad appears there. `data/levels/travel.toml` (and `rc_save`'s default) now carries `["combat", "squad_carry"]`. `rc_game_core::save::CarryingOver` exists while `rc_save` writes the carried sections, so the squad's section stays out of ordinary save files. New test `crates/rc_squad_plugin/tests/carry_over.rs`.

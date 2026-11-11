@@ -867,9 +867,53 @@ fn steps() -> Vec<Step> {
                 Err(format!("only {:.0}% of the picture lit", s.lit * 100.0))
             }
         }),
+        Check(
+            "the hologram shows only if a squad mate is hurt, and aiming at the dispenser plays its sound",
+            |w| {
+                let hurt = w
+                    .resource::<rc_game_core::SquadReadout>()
+                    .members
+                    .iter()
+                    .any(|m| m.health < 0.999);
+                bacta_hologram_shown(w, hurt)
+            },
+        ),
+        // A squad mate gets hurt: now aiming at the squad spot fades the
+        // hologram in.
+        Note(bacta_hurt_a_squad_mate),
+        Wait(0.5),
+        Check(
+            "with a squad mate hurt, aiming at the squad spot shows the hologram",
+            |w| bacta_hologram_shown(w, true),
+        ),
         Note(level_script_stand_at_dispenser),
         Wait(0.5),
+        Check("the game's own prompt shows at the dispenser", |w| {
+            let st = w
+                .get_resource::<rc_scripts_plugin::bacta::BactaStats>()
+                .cloned()
+                .ok_or("no bacta stats")?;
+            match &st.prompt {
+                Some(p) if p.starts_with("PRESS AND HOLD") && p.ends_with("TO HEAL") => {
+                    Ok(format!("\"{p}\""))
+                }
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Shot("bacta_use_panel"),
+        Check("the original's use panel (icon and ring) shows at the crosshair", |w| {
+            let parts = crate::original_hud::use_panel_showing(w);
+            if parts.iter().any(|p| p == "Ring") && parts.iter().any(|p| p == "Icon") {
+                Ok(format!("showing {parts:?}"))
+            } else {
+                Err(format!("showing {parts:?}"))
+            }
+        }),
         Hold(Action::Use, 5.0),
+        Check(
+            "healing pulled the player in front of the dispenser and held them, the use panel filled, and the heal sounds played",
+            bacta_pull_and_panel,
+        ),
         Until("the barricade opens", level_script_barricade_gone, 60.0),
         Wait(3.0),
         Check(
@@ -2782,6 +2826,73 @@ fn level_script_view_dispenser(w: &mut World) {
     }
 }
 
+/// The landing zone dispenser's hologram is placed; it shows only when
+/// `want` (a squad mate is hurt and the crosshair is on the squad spot);
+/// the crosshair on the dispenser played the aim sound.
+fn bacta_hologram_shown(w: &mut World, want: bool) -> Result<String, String> {
+    let st = w
+        .get_resource::<rc_scripts_plugin::bacta::BactaStats>()
+        .cloned()
+        .ok_or("no bacta stats")?;
+    let msg = format!(
+        "{} placed, {} showing, sounds {:?}",
+        st.holograms, st.holograms_shown, st.sounds
+    );
+    let showing = st.holograms_shown >= 1;
+    if st.holograms >= 1 && showing == want && st.sounds.iter().any(|s| s == "aim") {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// Take some health off the first squad mate (the bacta marker is only
+/// for a hurt squad).
+fn bacta_hurt_a_squad_mate(w: &mut World) {
+    let log = w.resource::<GameLog>().clone();
+    let mut q = w.query_filtered::<&mut rc_combat::Health, With<rc_squad_plugin::SquadMate>>();
+    if let Some(mut h) = q.iter_mut(w).next() {
+        h.current = (h.current - h.max * 0.4).max(1.0);
+        log.line(format!(
+            "script: a squad mate is hurt, health {:.0} of {:.0}",
+            h.current, h.max
+        ));
+    }
+}
+
+/// After holding Use at the dispenser: the player was pulled to the spot
+/// in front of it and is standing there, the use panel reached full, and
+/// the healing and "health full" sounds played.
+fn bacta_pull_and_panel(w: &mut World) -> Result<String, String> {
+    let st = w
+        .get_resource::<rc_scripts_plugin::bacta::BactaStats>()
+        .cloned()
+        .ok_or("no bacta stats")?;
+    let stand = st.last_stand.ok_or("never pulled")?;
+    if st.holograms_while_healing > 0 {
+        return Err(format!(
+            "a hologram showed {} time(s) while the player healed",
+            st.holograms_while_healing
+        ));
+    }
+    let at = feet(w).ok_or("no player")?;
+    let off = ((at.x - stand[0]).powi(2) + (at.y - stand[1]).powi(2)).sqrt();
+    let msg = format!(
+        "pulled {} time(s) to ({:.0}, {:.0}), player now {off:.1} uu from it; panel reached {:.0}%; sounds {:?}",
+        st.pulls,
+        stand[0],
+        stand[1],
+        st.panel_best * 100.0,
+        st.sounds
+    );
+    let heard = |k: &str| st.sounds.iter().any(|s| s == k);
+    if st.pulls >= 1 && off < 2.0 && st.panel_best > 0.99 && heard("healing") && heard("full") {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
 /// Put the player where a squad mate would stand to use the dispenser.
 fn level_script_stand_at_dispenser(w: &mut World) {
     let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
@@ -2796,6 +2907,12 @@ fn level_script_stand_at_dispenser(w: &mut World) {
     };
     let spot = d.stand.unwrap_or(d.location);
     let log = w.resource::<GameLog>().clone();
+    // Hurt, so Use at the dispenser does something (at full health it
+    // doesn't, as in the game).
+    let mut q = w.query_filtered::<&mut rc_combat::Health, With<Player>>();
+    for mut h in q.iter_mut(w) {
+        h.current = h.current.min(h.max - 60.0).max(1.0);
+    }
     let mut q = w.query_filtered::<&mut Body, With<Player>>();
     for mut b in q.iter_mut(w) {
         b.pawn.location = rc_movement::Vec3::new(spot[0], spot[1], spot[2] + 10.0);
@@ -2890,7 +3007,12 @@ fn marker_job(w: &mut World, anchor: &str) {
 /// Whether the level's scripts have had this event.
 fn marker_heard(w: &mut World, event: &str) -> bool {
     w.get_resource::<rc_scripts_plugin::LevelScript>()
-        .is_some_and(|s| s.director.history.iter().any(|(_, e)| e.eq_ignore_ascii_case(event)))
+        .is_some_and(|s| {
+            s.director
+                .history
+                .iter()
+                .any(|(_, e)| e.eq_ignore_ascii_case(event))
+        })
 }
 
 /// Whether the door with this actor name is shut (`None`: no such door).
@@ -2913,9 +3035,14 @@ fn marker_demo_summary(w: &mut World) -> Result<String, String> {
         .iter()
         .map(|(_, e)| e.as_str())
         .filter(|e| {
-            ["DemoUnderway", "SpawnDemoDroids", "DemoChargeArmed", DEMO_DONE_EVENT]
-                .iter()
-                .any(|x| x.eq_ignore_ascii_case(e))
+            [
+                "DemoUnderway",
+                "SpawnDemoDroids",
+                "DemoChargeArmed",
+                DEMO_DONE_EVENT,
+            ]
+            .iter()
+            .any(|x| x.eq_ignore_ascii_case(e))
         })
         .collect();
     // ScriptedTrigger4 waits for BunkerDoorDestroyed at its action 1.
@@ -3655,7 +3782,10 @@ fn ammo_boxes_placed(w: &mut World) -> Result<String, String> {
     let mut parts = w.query::<&rc_level_viewer::draw::MoverPart>();
     let drawn: HashSet<usize> = parts.iter(w).map(|p| p.0).collect();
     let with_model = boxes.iter().filter(|b| drawn.contains(&b.export)).count();
-    let rifle = boxes.iter().filter(|b| b.class == "DC17mBlasterBox").count();
+    let rifle = boxes
+        .iter()
+        .filter(|b| b.class == "DC17mBlasterBox")
+        .count();
     let usable = boxes.iter().filter(|b| b.gives.is_some()).count();
     let amounts: HashSet<u32> = boxes
         .iter()
@@ -3666,7 +3796,12 @@ fn ammo_boxes_placed(w: &mut World) -> Result<String, String> {
         "{} boxes ({rifle} DC-17m, giving {amounts:?}), {with_model} with a drawn model, {usable} usable",
         boxes.len()
     );
-    if boxes.len() == 22 && rifle == 21 && with_model == 22 && usable == 22 && amounts == HashSet::from([300]) {
+    if boxes.len() == 22
+        && rifle == 21
+        && with_model == 22
+        && usable == 22
+        && amounts == HashSet::from([300])
+    {
         Ok(got)
     } else {
         Err(got)
@@ -3741,10 +3876,15 @@ fn box_state(w: &mut World, name: &str) -> Option<(bool, bool)> {
 }
 
 fn ammo_box_taken(w: &mut World) -> Result<String, String> {
-    let name = w.resource::<Noted>().ammo_box.clone().ok_or("no box moved")?;
+    let name = w
+        .resource::<Noted>()
+        .ammo_box
+        .clone()
+        .ok_or("no box moved")?;
     let total = rifle_total(w).ok_or("no rifle")?;
     let (taken, hidden) = box_state(w, &name).ok_or("box gone")?;
-    let got = format!("{name}: rifle has {total} (was 20), box taken {taken}, model hidden {hidden}");
+    let got =
+        format!("{name}: rifle has {total} (was 20), box taken {taken}, model hidden {hidden}");
     if total == 300 && taken && hidden {
         Ok(got)
     } else {
@@ -3799,7 +3939,12 @@ fn grenade_crate(w: &mut World) -> Result<String, String> {
     let n = q
         .iter(w)
         .next()
-        .and_then(|g| g.carried.iter().find(|(i, _)| i == "thermal_detonator").map(|c| c.1))
+        .and_then(|g| {
+            g.carried
+                .iter()
+                .find(|(i, _)| i == "thermal_detonator")
+                .map(|c| c.1)
+        })
         .ok_or("no thermal detonators carried")?;
     let mut b = w.query::<&rc_combat::ammo_box::AmmoBox>();
     let c = b
@@ -3807,7 +3952,10 @@ fn grenade_crate(w: &mut World) -> Result<String, String> {
         .find(|b| b.class == "ThermalDetonatorBox")
         .cloned()
         .ok_or("no crate")?;
-    let got = format!("{n} thermal detonators (was 0); {} back: {}", c.name, !c.taken);
+    let got = format!(
+        "{n} thermal detonators (was 0); {} back: {}",
+        c.name, !c.taken
+    );
     if n == 5 && !c.taken && c.respawn.is_some() {
         Ok(got)
     } else {
@@ -3816,7 +3964,11 @@ fn grenade_crate(w: &mut World) -> Result<String, String> {
 }
 
 fn ammo_box_after_load(w: &mut World) -> Result<String, String> {
-    let name = w.resource::<Noted>().ammo_box.clone().ok_or("no box moved")?;
+    let name = w
+        .resource::<Noted>()
+        .ammo_box
+        .clone()
+        .ok_or("no box moved")?;
     let (taken, hidden) = box_state(w, &name).ok_or("box gone")?;
     let got = format!("{name}: taken {taken}, model hidden {hidden}");
     if taken && hidden {

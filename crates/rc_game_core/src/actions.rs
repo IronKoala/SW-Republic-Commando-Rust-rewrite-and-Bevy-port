@@ -230,6 +230,17 @@ impl ActionState {
     /// around, menus, saving, screenshots and the gyro stay. With
     /// `weapon_change`, changing weapons stays too.
     pub fn hold_still(&mut self, weapon_change: bool) {
+        self.hold(weapon_change, false);
+    }
+
+    /// Hold the player at something they are using (a bacta dispenser):
+    /// as [`hold_still`](Self::hold_still), but the Use button keeps
+    /// working, so letting go of it stops the use.
+    pub fn hold_for_use(&mut self) {
+        self.hold(false, true);
+    }
+
+    fn hold(&mut self, weapon_change: bool, keep_use: bool) {
         use Action::*;
         let keep = |a: &Action| {
             matches!(
@@ -248,16 +259,17 @@ impl ActionState {
                     | Screenshot
                     | GyroRatchet
                     | GyroToggle
-            ) || (weapon_change
-                && matches!(
-                    a,
-                    NextWeapon
-                        | PrevWeapon
-                        | WeaponPistol
-                        | WeaponBlaster
-                        | WeaponSniper
-                        | WeaponAntiArmor
-                ))
+            ) || (keep_use && *a == Use)
+                || (weapon_change
+                    && matches!(
+                        a,
+                        NextWeapon
+                            | PrevWeapon
+                            | WeaponPistol
+                            | WeaponBlaster
+                            | WeaponSniper
+                            | WeaponAntiArmor
+                    ))
         };
         self.pressed.retain(keep);
         self.just_pressed.retain(keep);
