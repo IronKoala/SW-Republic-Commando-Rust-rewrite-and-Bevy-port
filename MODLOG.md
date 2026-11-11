@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Clone troopers and other cast lit by where they stand (rc_cast, data/cast/cast.toml)
+
+- **Changed:** Characters and props the cast part draws (troopers standing about in missions, cutscene characters) now take the level's light where they stand (`rc_game_core::LitByPlace`), as the squad and droids already do, instead of one fixed brightness. New setting `light_scale` in `data/cast/cast.toml` (1.1, the squad's and droids' value, which was matched to two original screenshots). Holograms keep their own glow.
+- **Why:** User's side-by-side screenshots of geo_01a: the port's clone troopers were plain bright white wherever they stood.
+- **Tested how:** `rc_game --script` in the cloud with geo_01a; the bacta dispenser picture (two troopers) before and after.
+- **Result:** 137 passed, 0 failed. The trooper standing in shade is now dark and the one in light stays light.
+- **Still broken / not tested:** Not tested on Windows or by playing. Troopers hold no rifles yet (no character in the port draws a held weapon yet); that and their fighting the droids are next. Not compared with the original from the same spot.
+
 ## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
 
 - **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).
