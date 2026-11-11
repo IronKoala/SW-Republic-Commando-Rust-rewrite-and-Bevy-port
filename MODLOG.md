@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Light shafts and god rays with the game's falloff shader (rc_level_viewer, rc_level_plugin)
+
+- **Changed:** New `rc_level_viewer::falloff` (+ `falloff.wesl`): `HsFalloff` materials get the game's own shader maths: picture x `DiffuseTint` x falloff gradient (by viewing angle) x `GradientTint` x the mesh's painted colours, squared when `SrcBlend` is `SRCCOLOR`, panned and oscillated by the material's rates, added on top, no baked light and no fog. Settings and defaults read at load from Engine.u; `FalloffPlugin` comes with `PropLightPlugin`. Logs `light shafts ... N prop parts`.
+- **Why:** User's side-by-side screenshot of geo_01a: "the god rays aren't implemented". The sun rays (`SunBeam`, `rayfalloff`) were drawn as a flat block under the zone fog, or not seen.
+- **Tested how:** `falloff_check` with the game's files (cloud); `cargo test -p rc_level_viewer --lib falloff` (3 tests); `rc_level_viewer geo_01a --capture` before and after from the same spot (cloud).
+- **Result:** falloff_check 11 passed, 0 failed (9 prop parts on geo_01a). The capture shows streaky shafts fading along the beam, over the haze, where there was a flat light block (fog on) or nothing visible.
+- **Still broken / not tested:** Not tested on Windows. Our choices: the mesh's painted colours as the vertex colour; no fog on shafts; the shaft colour added as it is (the game adds on its brightness curve). The prologue's tank liquid also uses `HsFalloff`; not looked at.
+- **Next:** User check against the original on geo_01a.
+
 ## 2026-11-11: Squad, grenade and health meters as the original draws them (rc_menus, rc_game, rc_game_core, rc_squad_plugin, data/ui/hud.toml)
 
 - **Changed:** The bottom-left squad panels, the two health meters and the bottom-right grenade panel now use the exact places, sizes, pictures and colours from the original's Engine.dll (`UHelmet::DrawHUD`, helmet on), drawn through the helmet's glass. Squad panels show only for mates actually in the squad (new `SquadMember::in_squad`). Meter and squad colours follow the original's four health levels (`APawn::CalcHealthLevel`: below half, below 0.91, above); the meter bar drops in elevenths. Grenade pictures by class fixed (thermal, sonic, EC, flash were mixed up); the count turns red at zero. The ammo numbers under the crosshair's right are gone: the original shows them only on the gun. The guessed shield tick column is gone (the original's shield bars come next). New HUD keys `colour_by`, `colours`, `fill_steps`, `fill_least_gap`; texts `{health_level}`, `{squad_health_level}`; condition `grenades_left`. `GlassMap::place` now carries points past the glass edge on with the nearest glass piece.

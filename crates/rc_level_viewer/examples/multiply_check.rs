@@ -110,6 +110,7 @@ fn square(x: f32, multiply: bool) -> Batch {
                     name: "test layer".into(),
                 })
             }),
+            falloff: None,
         }),
         ..default()
     }

@@ -212,6 +212,13 @@ fn setup(
         "multiplying materials (Combiner CO_Multiply: light picture x texture on a second texture coordinate set): {} prop parts, {} draw batches",
         scene.stats.prop_parts_multiplied, r.multiplied
     ));
+    log.line(match &scene.stats.falloff_error {
+        None => format!(
+            "light shafts (the game's HsFalloff shader: view-angle fade, tints, painted beam colours): {} prop parts, {} draw batches",
+            scene.stats.prop_parts_falloff, r.falloff
+        ),
+        Some(e) => format!("light shafts drawn as plain added light: HsFalloff's settings couldn't be read ({e})"),
+    });
     let s = &scene.spawn;
     let mut position = Vec3::from(s.position);
     let mut from = s.from.to_string();
