@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Bacta dispenser: the original's use panel and its sound (rc_game, rc_menus, rc_scripts_plugin)
+
+- **Changed:** The guessed turning panel is gone. In place of the crosshair: the dispenser's icon (CloneVisorIcons square 1,7, the dispenser's own HUDIconX/Y) and the `HUD_EventTimer` ring showing your health, filling a quarter at a time with the rest faint; icon only at full health or while recharging. The prompt moved near the top in two lines, with the key in quotes ("PRESS AND HOLD 'F' TO / HEAL"). Healing starting plays the HUD's `HealingTarget` sound (int_GEN_hudTimer_01). New `UsePanel::Icon`/`Ready(fill)`, `{prompt1}`/`{prompt2}` HUD texts, `[use_panel]` rewritten.
+- **Why:** User: "don't try to re-create it. find the original files. there's also a sound that goes with it", with 4 screenshots and a 5-second video of the original.
+- **Tested how:** `cargo test -p rc_menus`, `cargo test -p rc_game --bin rc_game original_hud` (ring fill order, prompt break); `rc_game --script` in the cloud; our picture `bacta_use_panel` side by side with the user's screenshot.
+- **Result:** 127 passed, 2 failed (the same 2 level-line checks as before). Ring, icon and prompt line up with the original's screenshot.
+- **Still broken / not tested:** Not tested on Windows or by ear. Which sound plays exactly when couldn't be told from the video (the zap's hum covers it); the timer sound at the start is our reading of the HUD's settings. Sizes and colours matched by eye. The zap effect and hum not done yet.
+- **Next:** The dispenser's zap effect and hum (`BactaZap_Dispenser`), now the effects plugin is in main.
+
 ## 2026-11-10: Bacta dispenser: hologram and prompt as in the original's scripts (rc_scripts, rc_scripts_plugin, rc_game)
 
 - **Changed:** The squad marker hologram now fades in only while the crosshair is on the squad spot, a squad mate is hurt and the dispenser is free (not in use, not recharging); no red "squad full" hologram. The dispenser shows the game's own "PRESS AND HOLD F TO HEAL" (BactaDispenser `ActivatePromptText`, read from ctgame.u). Use at full health does nothing. `[bacta]` gains `hologram_fade_seconds` and `prompt`, loses `hologram_full_colour`.

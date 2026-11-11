@@ -91,9 +91,12 @@ hologram_fade_seconds = 0.25
 # ActivatePromptText, read from ctgame.u: "PRESS AND HOLD @ TO HEAL").
 prompt = ""
 # Sounds, from the game's HUD (CTHUDDefaults): the crosshair moving onto a
-# dispenser (TargetMarker), healing (HealthRecharging, repeats while you
-# heal) and health full (HealthCharged). "" for none.
+# dispenser (TargetPanel), healing starting (HealingTarget, the use ring's
+# timer sound), healing (HealthRecharging, repeats while you heal) and
+# health full (HealthCharged). When each plays is our reading: the HUD
+# plays them in native code. "" for none.
 sound_aim = "GEN_Sound.Interface.int_GEN_retCrossZoom_01"
+sound_timer = "GEN_Sound.Interface.int_GEN_hudTimer_01"
 sound_healing = "GEN_Sound.Interface.int_GEN_hudHlthChrgng_02"
 sound_full = "GEN_Sound.Interface.int_GEN_hudHlthChrgd_01"
 

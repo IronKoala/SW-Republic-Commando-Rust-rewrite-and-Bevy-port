@@ -298,6 +298,9 @@ pub struct HudValues {
     pub pickup: String,
     /// How much of the pickup message is still shown, 0..1 (it fades out).
     pub pickup_fade: f32,
+    /// The use prompt ("PRESS AND HOLD 'F' TO HEAL"), as lines; empty
+    /// when none is shown.
+    pub prompt: Vec<String>,
 }
 
 impl HudValues {
@@ -334,6 +337,7 @@ impl HudValues {
             "health_low" => self.health < 0.25,
             "squad_down" => member?.down,
             "pickup" => !self.pickup.is_empty(),
+            "prompt" => !self.prompt.is_empty(),
             _ => return None,
         };
         Some(v != not)
@@ -366,6 +370,8 @@ impl HudValues {
             "grenade" => self.grenade.as_ref()?.0.to_uppercase(),
             "grenades" => self.grenade.as_ref()?.1.to_string(),
             "pickup" => self.pickup.clone(),
+            "prompt1" => self.prompt.first().cloned().unwrap_or_default(),
+            "prompt2" => self.prompt.get(1).cloned().unwrap_or_default(),
             "number" => member?.number.clone(),
             "name" => member?.name.to_uppercase(),
             "order" => {

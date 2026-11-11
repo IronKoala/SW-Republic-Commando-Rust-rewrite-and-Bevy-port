@@ -27,10 +27,33 @@ scale = 1.0
 # and `outside` while you heal, the outer part turning `turn` degrees
 # (clockwise) from empty to full health. Remove this part to turn it off.
 [use_panel]
-ready = "HUDTextures.Reticles.HUD_Use"
-inside = "HUDTextures.Reticles.HUD_UsePanelInside"
-outside = "HUDTextures.Reticles.HUD_UsePanelOutside"
-turn = 90
+# The use panel at the crosshair while you aim at a bacta dispenser, in
+# place of the crosshair. All pictures are the game's own; the original
+# draws them in native code, so sizes and colours were matched to the
+# user's screenshots and video of the original (2026-11-10, 1600x1200):
+# the ring's outer edge is 206 pixels across there, the icon's circle 74.
+#
+# The ring (HUD_EventTimer) shows your health while the dispenser can heal
+# you, filling a quarter at a time from the top round to the left; the
+# part still to fill shows at ring_unfilled strength. At full health (or
+# while the dispenser recharges) only the icon shows.
+ring = "HUDTextures.Reticles.HUD_EventTimer"
+ring_scale = 0.8
+ring_colour = [199, 235, 255]
+ring_unfilled = 0.4
+# The dispenser's icon: square icon (counted from the bottom right, the
+# game's BactaDispenser HUDIconX 1, HUDIconY 7) of the CloneVisorIcons
+# sheet, whose squares are icon_cell pixels. Paler before use, greener in
+# use.
+icon_sheet = "HUDTextures.Icons.CloneVisorIcons"
+icon_cell = 27
+icon = [1, 7]
+icon_scale = 1.23
+icon_colour = [170, 205, 172]
+icon_colour_working = [138, 240, 176]
+# The prompt (the [[element]]s with {prompt1} and {prompt2} below) breaks
+# onto a second line after about this many letters, as in the original.
+prompt_wrap = 21
 
 # ---------------------------------------------------------------------------
 # The rest of the HUD: shield, health, ammunition, grenades, squad and
@@ -58,10 +81,12 @@ turn = 90
 # to 32:9 (phones held upright are not supported).
 #
 # Texts: {weapon} {clip} {reserve} {grenade} {grenades} {message1}
-# (newest) {message2} {message3} {pickup}; for squad rows {number} {name}
+# (newest) {message2} {message3} {pickup} {prompt1} {prompt2} (the use
+# prompt's two lines); for squad rows {number} {name}
 # {order}.
 # Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
-# clip, reserve, grenade, shield_low, health_low, squad_down, pickup.
+# clip, reserve, grenade, shield_low, health_low, squad_down, pickup,
+# prompt.
 # Bars (`fill`): shield, health, clip, squad_health.
 # Fading (`fade`, 1 shown to 0 gone): pickup.
 
@@ -292,3 +317,29 @@ text = "{pickup}"
 align = "centre"
 colour = [255, 255, 255, 255]
 fade = "pickup"
+
+# --- The use prompt, near the top ---------------------------------------------
+# "PRESS AND HOLD 'F' TO HEAL" while you aim at a bacta dispenser you can
+# use (the dispenser's ActivatePromptText, read from the game). The original
+# draws it in native code; place, size and colour were matched to the
+# user's screenshots of the original (1600x1200): two centred lines whose
+# middles are 190 and 247 pixels down, light grey-blue.
+[[element]]
+group = "prompt"
+anchor = "centre"
+at = [-160, -173]
+size = [320, 18]
+when = "prompt"
+text = "{prompt1}"
+align = "centre"
+colour = [215, 228, 235, 255]
+
+[[element]]
+group = "prompt"
+anchor = "centre"
+at = [-160, -150]
+size = [320, 18]
+when = "prompt"
+text = "{prompt2}"
+align = "centre"
+colour = [215, 228, 235, 255]

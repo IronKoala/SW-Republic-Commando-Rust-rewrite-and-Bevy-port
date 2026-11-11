@@ -1630,16 +1630,26 @@ class defaults with `rc_probe --classes`:
   dispenser's collision cylinder, `HealthRecharging`
   (int_GEN_hudHlthChrgng_02) looping while healing, `HealthCharged`
   (int_GEN_hudHlthChrgd_01) at full. Heard from the helmet (no `SoundAt`).
-- **Use panel.** `UseItem::panel` is `Ready` at a usable dispenser and
-  `Working(health fraction)` while healing; `rc_game/src/original_hud.rs`
-  draws `HUDTextures.Reticles.HUD_Use` for Ready and `HUD_UsePanelInside`
-  plus `HUD_UsePanelOutside` (turned clockwise by the fraction times
-  `[use_panel] turn` in `data/ui/hud.toml`) while working.
+- **Use panel** (matched to the user's screenshots and video of the
+  original, 2026-11-10; the original draws it in native code). In place of
+  the crosshair while aiming at a dispenser: its icon (square `HUDIconX`
+  1, `HUDIconY` 7 of `HUDTextures.Icons.CloneVisorIcons`, 27-pixel
+  squares counted from the bottom right) and round it the ring
+  `HUDTextures.Reticles.HUD_EventTimer`, showing the player's health
+  while the dispenser can heal them. The ring fills a quarter at a time
+  from the top round to the left (top left, bottom left, bottom right,
+  top right), each quarter uncovered by a straight edge, with the rest
+  drawn faint (`original_hud::ring_pixels`). At full health or while
+  recharging only the icon shows (`UsePanel::Icon`). The prompt sits near
+  the top in two lines ("PRESS AND HOLD 'F' TO" / "HEAL"), the
+  `{prompt1}`/`{prompt2}` elements of `data/ui/hud.toml`. Healing
+  starting plays the HUD's `HealingTarget` (int_GEN_hudTimer_01).
 - **Our readings, not checked against the original** (it doesn't run on
   the user's PC right now): when each sound plays, how the outer panel
-  moves (the original draws it in native code; the user says ours doesn't
-  match, being reworked), the pull's speed, the hologram's brightness and
-  fade. Not done: the first-person arm plugging in
+  and prompt are sized and coloured (matched by eye to screenshots), the
+  pull's speed, the hologram's brightness and fade. The dispenser's zap
+  effect and its hum (`BactaZap_Dispenser`, `Bacta_Body`) come next, with
+  the effects plugin. Not done: the first-person arm plugging in
   (`BactaHealer`, `HudArms.HudArmsBacta` with BactaLoad/BactaLoop/
   BactaHolster), the zap effects, and `HUDIconX/Y` (an icon over the
   dispenser).

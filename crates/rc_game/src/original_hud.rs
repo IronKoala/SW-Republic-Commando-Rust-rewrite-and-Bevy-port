@@ -69,25 +69,56 @@ pub struct CrosshairPlan {
     pub weapons: BTreeMap<String, String>,
 }
 
-/// `[use_panel]`: pictures drawn round the crosshair while the player
-/// stands at something they use by holding Use (a bacta dispenser).
+/// `[use_panel]`: the original's use panel at the crosshair while the
+/// player aims at something they use by holding Use (a bacta
+/// dispenser): its icon, and round it a ring that fills a quarter at a
+/// time. See `data/ui/hud.toml`.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct UsePanelPlan {
-    /// Standing at it, not using it yet.
-    pub ready: String,
-    /// While using it: the still part, and the part that turns as the use
-    /// goes on.
-    pub inside: String,
-    pub outside: String,
-    /// How far the turning part turns from start to done, degrees
-    /// (clockwise).
-    #[serde(default = "quarter")]
-    pub turn: f32,
+    /// The ring picture, and its size (1 = one picture pixel per line of
+    /// a 480-line screen).
+    pub ring: String,
+    pub ring_scale: f32,
+    /// The ring's colour (sRGB 0 to 255), and how strongly the part still
+    /// to fill shows (0 to 1).
+    pub ring_colour: [u8; 3],
+    pub ring_unfilled: f32,
+    /// The sheet of icons, its square size in pixels, and which square
+    /// (counted from the bottom right, as the game's `HUDIconX`/`Y`).
+    pub icon_sheet: String,
+    pub icon_cell: u32,
+    pub icon: [u32; 2],
+    pub icon_scale: f32,
+    /// The icon's colour before use and while in use.
+    pub icon_colour: [u8; 3],
+    pub icon_colour_working: [u8; 3],
+    /// The prompt above ("PRESS AND HOLD 'F' TO HEAL") breaks onto a
+    /// second line after about this many letters.
+    pub prompt_wrap: usize,
 }
 
-fn quarter() -> f32 {
-    90.0
+/// Break `text` into at most two lines of about `wrap` letters, at spaces.
+pub fn wrap_prompt(text: &str, wrap: usize) -> Vec<String> {
+    let mut first = String::new();
+    let mut words = text.split_whitespace().peekable();
+    while let Some(w) = words.peek() {
+        let len = first.chars().count() + usize::from(!first.is_empty()) + w.chars().count();
+        if !first.is_empty() && len > wrap {
+            break;
+        }
+        if !first.is_empty() {
+            first.push(' ');
+        }
+        first.push_str(w);
+        words.next();
+    }
+    let rest: Vec<&str> = words.collect();
+    let mut out = vec![first];
+    if !rest.is_empty() {
+        out.push(rest.join(" "));
+    }
+    out
 }
 
 fn yes() -> bool {
@@ -156,9 +187,19 @@ struct CrossPicture;
 /// One picture of the use panel.
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 enum UsePart {
-    Ready,
-    Inside,
-    Outside,
+    Icon,
+    Ring,
+}
+
+/// The use panel's pictures: the ring's own pixels (to redraw it filled
+/// to a new amount) and the image it is drawn into, and the icon.
+#[derive(Resource, Default)]
+struct UsePanelPictures {
+    tried: bool,
+    ring: Option<(rc_image::Rgba, Handle<Image>)>,
+    /// The fill the ring image shows now, in 1/200ths.
+    ring_fill: Option<u32>,
+    icon: Option<(Handle<Image>, Vec2)>,
 }
 
 pub struct OriginalHudPlugin;
@@ -167,6 +208,7 @@ impl Plugin for OriginalHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OriginalHud>()
             .init_resource::<OriginalLayout>()
+            .init_resource::<UsePanelPictures>()
             .add_systems(Startup, read_plan)
             .add_systems(OnExit(GameState::InGame), forget_drawn)
             .add_systems(
@@ -321,6 +363,7 @@ fn draw_layout(
     mut image_assets: ResMut<Assets<Image>>,
     log: Res<GameLog>,
     use_item: Option<Res<rc_game_core::UseItem>>,
+    hud: Res<OriginalHud>,
 ) {
     let original = &mut *original;
     if !original.working {
@@ -344,11 +387,15 @@ fn draw_layout(
         now.pickup = text.clone();
         now.pickup_fade = layout.pickup_message.strength(*left);
     }
-    // A use prompt ("PRESS AND HOLD F TO HEAL") goes where the game's
-    // other prompts go, and wins over a pickup message.
+    // The use prompt ("PRESS AND HOLD 'F' TO HEAL"), in its own place
+    // near the top (the `prompt` elements).
     if let Some(p) = use_item.as_ref().and_then(|u| u.prompt.as_ref()) {
-        now.pickup = p.clone();
-        now.pickup_fade = 1.0;
+        let wrap = hud
+            .plan
+            .as_ref()
+            .and_then(|p| p.use_panel.as_ref())
+            .map_or(usize::MAX, |u| u.prompt_wrap);
+        now.prompt = wrap_prompt(p, wrap);
     }
     let max_aspect = settings.video.hud_max_aspect;
     let key = (now, [w as u32, h as u32], max_aspect.to_bits());
@@ -502,7 +549,7 @@ fn spawn_picture(
         ))
         .id();
     commands.entity(centre).add_child(picture);
-    for part in [UsePart::Ready, UsePart::Inside, UsePart::Outside] {
+    for part in [UsePart::Ring, UsePart::Icon] {
         let p = commands
             .spawn((
                 part,
@@ -519,25 +566,54 @@ fn spawn_picture(
     }
 }
 
-/// The use panel round the crosshair: shown while the player stands at
-/// something they use by holding Use, its outer part turning as the use
-/// goes on. What the original draws when is native code; the pictures are
-/// its own (`HUDTextures.Reticles.HUD_Use*`), the rest our reading.
+/// The ring drawn filled to `fill` (0 to 1): the game's ring fills a
+/// quarter at a time going round from the top to the left (top left,
+/// bottom left, bottom right, top right), each quarter uncovered by a
+/// straight edge from its start; what is still to fill shows faintly.
+/// Read from the original's screenshots and video (it draws this in
+/// native code).
+pub fn ring_pixels(src: &rc_image::Rgba, fill: f32, unfilled: f32) -> Vec<u8> {
+    let (w, h) = (src.width, src.height);
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let r = cx.min(cy);
+    let steps = fill.clamp(0.0, 1.0) * 4.0;
+    let mut out = src.pixels.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            // Which quarter, in filling order, and how far along it this
+            // pixel lies (0 at its start edge, 1 at its end).
+            let (q, along) = match (dx < 0.0, dy < 0.0) {
+                (true, true) => (0.0, -dx / r),
+                (true, false) => (1.0, dy / r),
+                (false, false) => (2.0, dx / r),
+                (false, true) => (3.0, -dy / r),
+            };
+            let part = (steps - q).clamp(0.0, 1.0);
+            let filled = part >= 1.0 || (part > 0.0 && along <= part);
+            if !filled {
+                let a = &mut out[(y * w + x) * 4 + 3];
+                *a = (*a as f32 * unfilled).round() as u8;
+            }
+        }
+    }
+    out
+}
+
+/// The use panel at the crosshair: the icon, and round it the ring filled
+/// to the use's progress. See [`UsePanelPlan`].
 #[allow(clippy::type_complexity)]
 fn update_use_panel(
     mut hud: ResMut<OriginalHud>,
+    mut pics: ResMut<UsePanelPictures>,
     use_item: Res<rc_game_core::UseItem>,
     mut images: ResMut<Assets<Image>>,
-    mut parts: Query<(
-        &UsePart,
-        &mut ImageNode,
-        &mut Node,
-        &mut UiTransform,
-        &mut Visibility,
-    )>,
+    mut parts: Query<(&UsePart, &mut ImageNode, &mut Node, &mut Visibility)>,
     log: Res<GameLog>,
     mut last: Local<Option<rc_game_core::UsePanel>>,
 ) {
+    use rc_game_core::UsePanel;
     let hud = &mut *hud;
     let (Some(plan), Some(library)) = (&hud.plan, hud.library.as_mut()) else {
         return;
@@ -545,38 +621,126 @@ fn update_use_panel(
     let Some(panel) = plan.use_panel.clone() else {
         return;
     };
-    let scale = plan.crosshair.scale;
     let state = use_item.panel;
-    let changed = |a: &rc_game_core::UsePanel, b: &rc_game_core::UsePanel| {
-        std::mem::discriminant(a) != std::mem::discriminant(b)
-    };
+    let changed =
+        |a: &UsePanel, b: &UsePanel| std::mem::discriminant(a) != std::mem::discriminant(b);
     if last.as_ref().is_none_or(|l| changed(l, &state)) {
-        if last.is_some() || state != rc_game_core::UsePanel::Hidden {
+        if last.is_some() || state != UsePanel::Hidden {
             log.line(format!("original hud: use panel {state:?}"));
         }
         *last = Some(state);
     }
-    for (part, mut image, mut node, mut transform, mut shown) in &mut parts {
-        let (path, angle) = match (part, state) {
-            (UsePart::Ready, rc_game_core::UsePanel::Ready) => (&panel.ready, 0.0),
-            (UsePart::Inside, rc_game_core::UsePanel::Working(_)) => (&panel.inside, 0.0),
-            (UsePart::Outside, rc_game_core::UsePanel::Working(p)) => {
-                (&panel.outside, p.clamp(0.0, 1.0) * panel.turn)
+    if state != UsePanel::Hidden && !pics.tried {
+        pics.tried = true;
+        match library.texture(&panel.ring) {
+            Ok(src) => {
+                let image = Image::new(
+                    Extent3d {
+                        width: src.width as u32,
+                        height: src.height as u32,
+                        depth_or_array_layers: 1,
+                    },
+                    TextureDimension::D2,
+                    src.pixels.clone(),
+                    TextureFormat::Rgba8UnormSrgb,
+                    RenderAssetUsages::all(),
+                );
+                log.line(format!(
+                    "original hud: use ring {}: {}x{}",
+                    panel.ring, src.width, src.height
+                ));
+                pics.ring = Some((src, images.add(image)));
             }
-            _ => {
-                if *shown != Visibility::Hidden {
-                    *shown = Visibility::Hidden;
+            Err(e) => log.line(format!(
+                "original hud: use ring {}: {e}; not drawn",
+                panel.ring
+            )),
+        }
+        match library.texture(&panel.icon_sheet) {
+            Ok(sheet) => {
+                let c = panel.icon_cell as usize;
+                let (ix, iy) = (panel.icon[0] as usize, panel.icon[1] as usize);
+                if (ix + 1) * c <= sheet.width && (iy + 1) * c <= sheet.height && c > 0 {
+                    let x0 = sheet.width - (ix + 1) * c;
+                    let y0 = sheet.height - (iy + 1) * c;
+                    let mut px = Vec::with_capacity(c * c * 4);
+                    for y in y0..y0 + c {
+                        let i = (y * sheet.width + x0) * 4;
+                        px.extend_from_slice(&sheet.pixels[i..i + c * 4]);
+                    }
+                    let image = Image::new(
+                        Extent3d {
+                            width: c as u32,
+                            height: c as u32,
+                            depth_or_array_layers: 1,
+                        },
+                        TextureDimension::D2,
+                        px,
+                        TextureFormat::Rgba8UnormSrgb,
+                        RenderAssetUsages::RENDER_WORLD,
+                    );
+                    log.line(format!(
+                        "original hud: use icon {} square {:?} ({c} px from the bottom right)",
+                        panel.icon_sheet, panel.icon
+                    ));
+                    pics.icon = Some((images.add(image), Vec2::splat(c as f32)));
+                } else {
+                    log.line(format!(
+                        "original hud: use icon square {:?} is outside {}",
+                        panel.icon, panel.icon_sheet
+                    ));
                 }
-                continue;
             }
+            Err(e) => log.line(format!(
+                "original hud: use icon {}: {e}; not drawn",
+                panel.icon_sheet
+            )),
+        }
+    }
+    let fill = match state {
+        UsePanel::Ready(f) | UsePanel::Working(f) => Some(f),
+        _ => None,
+    };
+    // Redraw the ring when its fill changes.
+    if let (Some(f), Some((src, handle))) = (fill, pics.ring.as_ref()) {
+        let step = (f.clamp(0.0, 1.0) * 200.0).round() as u32;
+        if pics.ring_fill != Some(step) {
+            let px = ring_pixels(src, step as f32 / 200.0, panel.ring_unfilled);
+            if let Some(mut img) = images.get_mut(handle) {
+                img.data = Some(px);
+            }
+            pics.ring_fill = Some(step);
+        }
+    }
+    let size_of = |picture_px: Vec2, scale: f32| picture_px * scale * 100.0 / BASE_LINES;
+    let rgb = |c: [u8; 3]| Color::srgb_u8(c[0], c[1], c[2]);
+    for (part, mut image, mut node, mut shown) in &mut parts {
+        let drawn = match part {
+            UsePart::Ring => fill.and_then(|_| {
+                pics.ring.as_ref().map(|(src, h)| {
+                    (
+                        h.clone(),
+                        size_of(
+                            Vec2::new(src.width as f32, src.height as f32),
+                            panel.ring_scale,
+                        ),
+                        rgb(panel.ring_colour),
+                    )
+                })
+            }),
+            UsePart::Icon => (state != UsePanel::Hidden)
+                .then(|| pics.icon.clone())
+                .flatten()
+                .map(|(h, px)| {
+                    let colour = if matches!(state, UsePanel::Working(_)) {
+                        panel.icon_colour_working
+                    } else {
+                        panel.icon_colour
+                    };
+                    (h, size_of(px, panel.icon_scale), rgb(colour))
+                }),
         };
-        let key = path.to_ascii_lowercase();
-        let picture = hud
-            .pictures
-            .entry(key)
-            .or_insert_with(|| load_picture(library, path, &mut images, &log))
-            .clone();
-        let Some((handle, size)) = picture else {
+        let Some((handle, size, colour)) = drawn else {
             if *shown != Visibility::Hidden {
                 *shown = Visibility::Hidden;
             }
@@ -588,18 +752,15 @@ fn update_use_panel(
         if image.image != handle {
             image.image = handle;
         }
-        // Sized like the crosshair: by screen height.
-        let s = scale * 100.0 / BASE_LINES;
-        let (w, h) = (Val::Vh(size.x * s), Val::Vh(size.y * s));
+        if image.color != colour {
+            image.color = colour;
+        }
+        let (w, h) = (Val::Vh(size.x), Val::Vh(size.y));
         if node.width != w || node.height != h {
             node.width = w;
             node.height = h;
-            node.left = Val::Vh(-size.x * s / 2.0);
-            node.top = Val::Vh(-size.y * s / 2.0);
-        }
-        let r = Rot2::degrees(angle);
-        if transform.rotation != r {
-            transform.rotation = r;
+            node.left = Val::Vh(-size.x / 2.0);
+            node.top = Val::Vh(-size.y / 2.0);
         }
     }
 }
@@ -657,6 +818,7 @@ fn update_crosshair(
     mut pictures: Query<(&mut ImageNode, &mut Node, &mut Visibility), With<CrossPicture>>,
     mut bars: Query<&mut Visibility, (With<CrossBar>, Without<CrossPicture>)>,
     log: Res<GameLog>,
+    use_item: Option<Res<rc_game_core::UseItem>>,
 ) {
     let hud = &mut *hud;
     let Ok((mut image, mut node, mut shown)) = pictures.single_mut() else {
@@ -698,7 +860,15 @@ fn update_crosshair(
         }
         return;
     };
-    *shown = Visibility::Inherited;
+    // The use panel takes the crosshair's place, as in the original.
+    let want = if use_item.is_some_and(|u| u.panel != rc_game_core::UsePanel::Hidden) {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    if *shown != want {
+        *shown = want;
+    }
     if image.image != handle {
         image.image = handle;
     }
@@ -729,6 +899,40 @@ pub fn reticle_showing(w: &mut World) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The ring fills top left, bottom left, bottom right, top right; the
+    /// quarter being filled is uncovered from its start edge.
+    #[test]
+    fn ring_fills_a_quarter_at_a_time() {
+        let src = rc_image::Rgba {
+            width: 4,
+            height: 4,
+            pixels: vec![255; 64],
+        };
+        let alpha = |px: &[u8], x: usize, y: usize| px[(y * 4 + x) * 4 + 3];
+        // Half full: both left quarters full, the right ones faint.
+        let half = ring_pixels(&src, 0.5, 0.4);
+        assert_eq!(alpha(&half, 0, 0), 255);
+        assert_eq!(alpha(&half, 0, 3), 255);
+        assert_eq!(alpha(&half, 3, 3), 102);
+        assert_eq!(alpha(&half, 3, 0), 102);
+        // Five eighths: the bottom right quarter half uncovered, from the
+        // bottom middle outwards.
+        let more = ring_pixels(&src, 0.625, 0.4);
+        assert_eq!(alpha(&more, 2, 3), 255);
+        assert_eq!(alpha(&more, 3, 3), 102);
+        assert_eq!(alpha(&more, 3, 0), 102);
+    }
+
+    /// The prompt breaks where the original's does.
+    #[test]
+    fn prompt_breaks_like_the_original() {
+        assert_eq!(
+            wrap_prompt("PRESS AND HOLD 'F' TO HEAL", 21),
+            vec!["PRESS AND HOLD 'F' TO".to_string(), "HEAL".to_string()]
+        );
+        assert_eq!(wrap_prompt("SHORT", 21), vec!["SHORT".to_string()]);
+    }
 
     #[test]
     fn shipped_hud_file_reads() {

@@ -142,6 +142,7 @@ pub(crate) fn prepare(
     let mut wanted: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for (key, path) in [
         ("aim", &s.bacta_sound_aim),
+        ("timer", &s.bacta_sound_timer),
         ("healing", &s.bacta_sound_healing),
         ("full", &s.bacta_sound_full),
     ] {
@@ -509,6 +510,9 @@ pub(crate) fn heal(
     // The game's PlayerController: Use at a dispenser does nothing at
     // full health.
     let hurt = health.as_deref().is_some_and(|h| h.current < h.max);
+    let health_now = health
+        .as_deref()
+        .map_or(1.0, |h| (h.current / h.max.max(1.0)).clamp(0.0, 1.0));
     let mut fire = Vec::new();
     let mut healed = 0.0;
     let mut lock = None;
@@ -528,20 +532,19 @@ pub(crate) fn heal(
         let near =
             (dx * dx + dy * dy).sqrt() < s.bacta_range && (feet.z - d.location[2]).abs() < 256.0;
         let ready = d.enabled && d.recharge_left <= 0.0;
-        claimed.0 |= near && ready;
-        if ready {
-            if let Some((from, dir)) = aim {
-                if aims_at(
+        // The crosshair on it, near enough to use (the game's TGT_Panel).
+        let targeted = d.enabled
+            && aim.is_some_and(|(from, dir)| {
+                aims_at(
                     to_unreal(from),
                     to_unreal(dir),
                     d.location,
-                    s.bacta_hologram_range,
-                ) {
-                    aim_on = true;
-                }
-            }
-        }
-        let can = near && using && ready && (hurt || d.in_use);
+                    s.bacta_range + AIM_RADIUS,
+                )
+            });
+        claimed.0 |= (near || targeted) && ready;
+        aim_on |= targeted;
+        let can = using && ((ready && hurt && (near || targeted)) || d.in_use);
         if can && !d.in_use {
             d.in_use = true;
             log.line(format!(
@@ -556,12 +559,21 @@ pub(crate) fn heal(
                 actor: d.name.clone(),
                 anim: "Load".into(),
             });
+            play.push("timer");
             if let Some(stats) = stats.as_mut() {
                 stats.pulls += 1;
             }
         }
-        if near && ready && !d.in_use {
-            panel = UsePanel::Ready;
+        if (targeted || near) && !d.in_use && panel == UsePanel::Hidden {
+            // The ring shows the player's health while it can heal them;
+            // otherwise (health full, recharging) only its icon.
+            panel = if ready && hurt {
+                UsePanel::Ready(health_now)
+            } else if targeted {
+                UsePanel::Icon
+            } else {
+                UsePanel::Hidden
+            };
         }
         if d.in_use {
             let (full, fraction) = match health.as_deref_mut() {
@@ -642,7 +654,7 @@ pub(crate) fn heal(
     }
     use_item.panel = panel;
     // The prompt, while standing at one that can be used.
-    let prompt = (panel == UsePanel::Ready)
+    let prompt = matches!(panel, UsePanel::Ready(_))
         .then(|| assets.as_ref().and_then(|a| a.prompt.as_deref()))
         .flatten()
         .map(|p| {
@@ -650,7 +662,8 @@ pub(crate) fn heal(
                 .as_ref()
                 .and_then(|p| p.label(Action::Use))
                 .unwrap_or("USE");
-            p.replace('@', &key.to_uppercase())
+            // The original shows the button in quotes: 'F'.
+            p.replace('@', &format!("'{}'", key.to_uppercase()))
         });
     if prompt != use_item.prompt {
         if let Some(p) = &prompt {

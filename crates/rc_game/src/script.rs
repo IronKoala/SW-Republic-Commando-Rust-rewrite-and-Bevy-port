@@ -900,9 +900,10 @@ fn steps() -> Vec<Step> {
                 other => Err(format!("{other:?}")),
             }
         }),
-        Check("the use panel shows round the crosshair at the dispenser", |w| {
+        Shot("bacta_use_panel"),
+        Check("the original's use panel (icon and ring) shows at the crosshair", |w| {
             let parts = crate::original_hud::use_panel_showing(w);
-            if parts.iter().any(|p| p == "Ready") {
+            if parts.iter().any(|p| p == "Ring") && parts.iter().any(|p| p == "Icon") {
                 Ok(format!("showing {parts:?}"))
             } else {
                 Err(format!("showing {parts:?}"))

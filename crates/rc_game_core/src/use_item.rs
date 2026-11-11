@@ -40,15 +40,20 @@ pub struct UseLock {
     pub turn: f32,
 }
 
-/// The use panel round the crosshair.
+/// The use panel at the crosshair (the original's, for a bacta
+/// dispenser: the thing's icon, and round it a ring that fills).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum UsePanel {
     /// Nothing to use here.
     #[default]
     Hidden,
-    /// Standing at something that can be used: hold Use to start.
-    Ready,
-    /// Being used, `0` to `1` done (a bacta dispenser: the player's health).
+    /// The crosshair is on something usable that can't be used now (a
+    /// dispenser at full health or recharging): its icon only.
+    Icon,
+    /// It can be used: the icon, and the ring `0` to `1` full (a bacta
+    /// dispenser: the player's health). Hold Use to start.
+    Ready(f32),
+    /// Being used, `0` to `1` full.
     Working(f32),
 }
 

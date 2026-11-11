@@ -71,6 +71,8 @@ pub struct Settings {
     /// Sounds (`Package.Group.Name`, empty for none): the crosshair moves
     /// onto a dispenser; healing (repeats); health full.
     pub bacta_sound_aim: String,
+    /// Healing starts (the HUD's `HealingTarget`, the ring's sound).
+    pub bacta_sound_timer: String,
     pub bacta_sound_healing: String,
     pub bacta_sound_full: String,
     /// Size (uu) of a level exit (`Teleporter`) the map gives none.
@@ -116,6 +118,7 @@ impl Default for Settings {
             // CTHUDDefaults (Properties/properties.u): TargetMarker,
             // HealthRecharging, HealthCharged.
             bacta_sound_aim: "GEN_Sound.Interface.int_GEN_retCrossZoom_01".into(),
+            bacta_sound_timer: "GEN_Sound.Interface.int_GEN_hudTimer_01".into(),
             bacta_sound_healing: "GEN_Sound.Interface.int_GEN_hudHlthChrgng_02".into(),
             bacta_sound_full: "GEN_Sound.Interface.int_GEN_hudHlthChrgd_01".into(),
             // engine.u's Teleporter defaults (from NavigationPoint).
@@ -171,6 +174,7 @@ struct Bacta {
     prompt: Option<String>,
     hologram_brightness: Option<f32>,
     sound_aim: Option<String>,
+    sound_timer: Option<String>,
     sound_healing: Option<String>,
     sound_full: Option<String>,
 }
@@ -278,6 +282,9 @@ impl Settings {
         }
         if let Some(v) = b.sound_aim {
             self.bacta_sound_aim = v;
+        }
+        if let Some(v) = b.sound_timer {
+            self.bacta_sound_timer = v;
         }
         if let Some(v) = b.sound_healing {
             self.bacta_sound_healing = v;
