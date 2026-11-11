@@ -20,6 +20,10 @@ use std::path::Path;
 #[serde(deny_unknown_fields)]
 pub struct CastFile {
     pub ambient: f32,
+    /// How strongly the level's light where a cast member stands shows on
+    /// it (see `rc_game_core::place_light`), as for the squad and droids.
+    #[serde(default = "light_scale")]
+    pub light_scale: f32,
     pub walk_speed_ratio: f32,
     pub idle: Vec<String>,
     pub walk: Vec<String>,
@@ -29,6 +33,10 @@ pub struct CastFile {
     pub leave_out: Vec<String>,
     #[serde(default)]
     pub class: BTreeMap<String, ClassOverride>,
+}
+
+fn light_scale() -> f32 {
+    1.1
 }
 
 /// A class's model, changed by the data file.
