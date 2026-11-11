@@ -18,6 +18,7 @@ mod cutscene;
 mod debriefing;
 mod display;
 mod graphics;
+mod graphics_presets;
 mod helmet;
 mod hud;
 mod input;

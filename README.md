@@ -478,14 +478,24 @@ copy of the game.
   GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
   sensitivity, invert mouse, difficulty, effects and music volume, screen
   size and vsync work; key rows open the original's REASSIGN BUTTON box.
-  The GRAPHICS rows (quality presets, brightness, texture and character
-  detail, blur, bloom, squad shadows, FSAA) and SOUND rows (voices volume,
-  sound quality, 3D sound, audio channels) work too (checked in a stand-in
-  scene and by tests; brightness checked by the user on the PC). So do
+  The GRAPHICS page follows the original's own script (tested in the
+  cloud sandbox with the install, not yet on Windows): GRAPHICS QUALITY
+  uses the five presets in the install's `System.ini` and shows CUSTOM when
+  no preset matches; SET RECOMMENDED uses the preset the install
+  recommends; BRIGHTNESS is the original's gamma (default 3); BUMPMAPPING
+  QUALITY, BLOOM (NONE, LOW, HIGH) and PROJECTORS can be changed;
+  PROJECTORS off greys out SQUAD SHADOWS and VSYNC off greys out FSAA;
+  FSAA lists NONE plus what the graphics card offers. Not the same as the
+  original yet: brightness changes the 3D view only and is matched at mid
+  grey; presets don't change the screen size; bump quality and bloom LOW
+  against HIGH look the same; no APPLY / "keep these settings?" step.
+  SOUND rows (voices volume,
+  sound quality, 3D sound, audio channels) work too (checked by tests;
+  brightness checked by the user on the PC). So do
   SUBTITLES (checked by the user), PROMPT TEXT, the turn keys, the
   screenshot key (F12) and the weapon keys (1 to 4). HELMET shows or hides
-  the helmet frame (see below). Rows the port can't do yet (tactical
-  visor, bump mapping, projectors, EAX) are greyed out. Values change with the arrows; the screen size
+  the helmet frame (see below). Rows the port can't do yet (EAX) are
+  greyed out. Values change with the arrows; the screen size
   also has a drop-down list of the sizes that fit your monitor. Our own
   extra settings (field of view, display mode, controller and gyro) are on
   a fifth tab, "PORT +", in the same original look.
