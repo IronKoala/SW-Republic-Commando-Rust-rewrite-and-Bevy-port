@@ -1,7 +1,8 @@
 //! Bacta dispensers: hold Use near one that is switched on to heal.
 //!
 //! - **Healing.** Starting sends the dispenser's "in use" event
-//!   (`BactaActive.Event`) and plays its `Load` animation; full health
+//!   (`BactaActive.Event`) and plays its `Load` animation; health goes up
+//!   only once `Load` has finished, as in the game's script; full health
 //!   sends its "used" event (`BactaRecharging.Event`); stopping plays
 //!   `Holster`.
 //! - **The pull and hold** (the game's `bLockPlayerLocation`): while
@@ -31,6 +32,19 @@
 //!   them is native code we don't read; this timing is our reading.
 //! - **The use panel** round the crosshair: [`UseItem::panel`], drawn by
 //!   the HUD.
+//! - **The zap and its hum** ([`zap`]), as the game's `BactaDispenser`
+//!   script (ctgame.u) does it: once the dispenser's `Load` animation has
+//!   finished, its `DispenserEffectClass` effect (`BactaZap_Dispenser` for
+//!   every dispenser class, set in `Properties/MarkerProperties.u`) is
+//!   hung on the model's `Eye` bone (`SpawnAttachment('Eye', ...)`), with
+//!   the bone's turn. The effect's own `AmbientSound`
+//!   (`GEO_Sound.GEO_03.ele_GEO_genEnrgy_lp_01`) is the hum, looping while
+//!   it is there. When healing stops the script removes it at once
+//!   (`DestroyAttachment('Eye')`), so the hum stops too. The game also
+//!   puts `PawnEffectClass` (`BactaZap_Dispenser_Body`) on the player's
+//!   body; that isn't shown yet, because its particles start from the
+//!   bones of the player's own body model, which the game doesn't have in
+//!   first person here.
 //!
 //! Every number and name is in `[bacta]` of `data/scripts/scripts.toml`.
 
@@ -66,6 +80,9 @@ pub struct BactaAssets {
     prompt: Option<String>,
     /// The hologram's sections, in the model's own space (Unreal units).
     hologram: Vec<HoloPart>,
+    /// Each dispenser class's zap effect (`DispenserEffectClass`), by
+    /// class name in lower case; `None` when the class names none.
+    pub zap_effects: HashMap<String, Option<String>>,
     /// Why something couldn't be read.
     pub problems: Vec<String>,
 }
@@ -115,6 +132,22 @@ pub struct BactaStats {
     pub last_stand: Option<[f32; 2]>,
     /// Most progress the use panel showed (0 to 1).
     pub panel_best: f32,
+    /// Zap effects hung on a dispenser: (effect, dispenser, where the
+    /// `Eye` bone was, Unreal units).
+    pub zaps: Vec<(String, String, [f32; 3])>,
+    /// Zaps taken away again when healing stopped.
+    pub zaps_removed: usize,
+}
+
+/// The bone the game hangs the zap on (`SpawnAttachment('Eye', ...)` in
+/// `BactaDispenser`'s `Active` state).
+pub const ZAP_BONE: &str = "Eye";
+
+/// Carries a dispenser's zap effect: it stands on the `Eye` bone, and the
+/// effect goes with it when it is removed.
+#[derive(Component)]
+pub struct BactaZap {
+    pub dispenser: String,
 }
 
 /// Read the hologram model and the sounds, once the level's dispensers
@@ -125,6 +158,7 @@ pub(crate) fn prepare(
     paths: Res<GamePaths>,
     mut audio: ResMut<Assets<AudioSource>>,
     mut commands: Commands,
+    mut preload: MessageWriter<rc_effects_plugin::PreloadEffect>,
     log: Res<GameLog>,
 ) {
     let Some(script) = script else { return };
@@ -182,6 +216,26 @@ pub(crate) fn prepare(
     } else {
         Some(s.bacta_prompt.clone())
     };
+    // Each dispenser class's zap effect, from the game's class defaults.
+    let classes: Vec<String> = script.dispensers.iter().map(|d| d.class.clone()).collect();
+    match zap_effects(&paths, &classes) {
+        Ok(found) => {
+            for (class, effect) in &found {
+                log.line(format!(
+                    "{PART}: bacta: {class} DispenserEffectClass = {}",
+                    effect.as_deref().unwrap_or("none")
+                ));
+                if let Some(e) = effect {
+                    preload.write(rc_effects_plugin::PreloadEffect {
+                        effect: Some(e.clone()),
+                        sound: None,
+                    });
+                }
+            }
+            assets.zap_effects = found;
+        }
+        Err(e) => assets.problems.push(format!("bacta zap: {e}")),
+    }
     if !s.bacta_hologram.is_empty() {
         match read_hologram(&paths, &s.bacta_hologram) {
             Ok(sections) => assets.hologram = sections,
@@ -218,6 +272,140 @@ fn read_prompt(paths: &GamePaths) -> Result<String, String> {
             .fstring()
             .map_err(|e| e.to_string()),
         _ => Err("BactaDispenser sets no ActivatePromptText".into()),
+    }
+}
+
+/// Each class's `DispenserEffectClass`, read from the game's class
+/// defaults (`BactaDispenserGEO` and the others are in
+/// `Properties/MarkerProperties.u`, below `BactaDispenser` in ctgame.u).
+/// Keys are lower case; the effect is its class name alone
+/// (`BactaZap_Dispenser`).
+fn zap_effects(
+    paths: &GamePaths,
+    classes: &[String],
+) -> Result<HashMap<String, Option<String>>, String> {
+    use rc_package::class_library::ClassLibrary;
+    let mut lib = ClassLibrary::new();
+    for (name, rel) in [
+        ("Core", "GameData/System/Core.u"),
+        ("Engine", "GameData/System/Engine.u"),
+        ("CTGame", "GameData/System/CTGame.u"),
+        ("MarkerProperties", "GameData/Properties/MarkerProperties.u"),
+    ] {
+        let path = paths.game_file(rel);
+        let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        lib.add_package(name, data)
+            .map_err(|e| format!("{name}: {e}"))?;
+    }
+    let mut out = HashMap::new();
+    for class in classes {
+        let key = class.to_ascii_lowercase();
+        if out.contains_key(&key) {
+            continue;
+        }
+        let effect = lib
+            .defaults(class)
+            .object("DispenserEffectClass")
+            .map(|o| o.rsplit('.').next().unwrap_or(o).to_string())
+            .filter(|o| !o.is_empty() && !o.eq_ignore_ascii_case("None"));
+        out.insert(key, effect);
+    }
+    Ok(out)
+}
+
+/// The dispenser's zap and hum (see the top of this file): hung on the
+/// `Eye` bone once `Load` has played, while the player heals; taken away
+/// at once when they stop.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn zap(
+    script: Option<Res<LevelScript>>,
+    assets: Option<Res<BactaAssets>>,
+    props: Query<&rc_level_plugin::anim_props::AnimProp>,
+    mut zaps: Query<(Entity, &BactaZap, &mut Transform)>,
+    mut effects: MessageWriter<rc_effects_plugin::SpawnEffect>,
+    mut stats: Option<ResMut<BactaStats>>,
+    mut commands: Commands,
+    log: Res<GameLog>,
+) {
+    let Some(script) = script else { return };
+    let now = script.director.time;
+    // Remove the zaps of dispensers no longer in use (`EndState`:
+    // `DestroyAttachment('Eye')`).
+    for (e, z, _) in &zaps {
+        let in_use = script
+            .dispensers
+            .iter()
+            .any(|d| d.in_use && d.name.eq_ignore_ascii_case(&z.dispenser));
+        if !in_use {
+            commands.entity(e).despawn();
+            log.line(format!(
+                "{PART}: t={now:.2} bacta: {}'s zap taken away",
+                z.dispenser
+            ));
+            if let Some(st) = stats.as_mut() {
+                st.zaps_removed += 1;
+            }
+        }
+    }
+    for d in script.dispensers.iter().filter(|d| d.in_use) {
+        let Some(prop) = props.iter().find(|p| p.name.eq_ignore_ascii_case(&d.name)) else {
+            continue;
+        };
+        let have = zaps
+            .iter_mut()
+            .find(|(_, z, _)| z.dispenser.eq_ignore_ascii_case(&d.name));
+        if let Some((_, _, mut t)) = have {
+            // It stays on the bone.
+            if let Some((at, _)) = prop.bone(ZAP_BONE) {
+                t.translation = to_bevy(rc_movement::Vec3::new(at[0], at[1], at[2]));
+            }
+            continue;
+        }
+        // `Begin: FinishAnim(); ... SpawnAttachment('Eye', ...)`: only once
+        // the `Load` animation has played to its end.
+        if prop.playing.is_some() || prop.last.as_deref() != Some("Load") {
+            continue;
+        }
+        let Some(Some(effect)) = assets
+            .as_ref()
+            .and_then(|a| a.zap_effects.get(&d.class.to_ascii_lowercase()))
+        else {
+            continue;
+        };
+        let Some((at, axes)) = prop.bone(ZAP_BONE) else {
+            log.line(format!(
+                "{PART}: t={now:.2} bacta: {} has no {ZAP_BONE} bone for its zap",
+                d.name
+            ));
+            continue;
+        };
+        let pos = to_bevy(rc_movement::Vec3::new(at[0], at[1], at[2]));
+        let carrier = commands
+            .spawn((
+                BactaZap {
+                    dispenser: d.name.clone(),
+                },
+                Transform::from_translation(pos),
+                GlobalTransform::from_translation(pos),
+                DespawnOnExit(GameState::InGame),
+            ))
+            .id();
+        effects.write(rc_effects_plugin::SpawnEffect {
+            effect: effect.clone(),
+            at: pos,
+            by: d.name.clone(),
+            follow: Some(carrier),
+            vanish_with_carrier: true,
+            axes: Some(axes),
+            ..default()
+        });
+        log.line(format!(
+            "{PART}: t={now:.2} bacta: {effect} hung on {}'s {ZAP_BONE} bone at ({:.0}, {:.0}, {:.0}), forward ({:.2}, {:.2}, {:.2}), up ({:.2}, {:.2}, {:.2})",
+            d.name, at[0], at[1], at[2], axes[0][0], axes[0][1], axes[0][2], axes[2][0], axes[2][1], axes[2][2]
+        ));
+        if let Some(st) = stats.as_mut() {
+            st.zaps.push((effect.clone(), d.name.clone(), at));
+        }
     }
 }
 
@@ -488,6 +676,7 @@ pub(crate) fn heal(
     mut anims: MessageWriter<rc_game_core::PropAnim>,
     (assets, mut stats): (Option<Res<BactaAssets>>, Option<ResMut<BactaStats>>),
     (healing_sound, prompts): (Query<Entity, With<HealingSound>>, Option<Res<InputPrompts>>),
+    props: Query<&rc_level_plugin::anim_props::AnimProp>,
     mut commands: Commands,
     mut aimed: Local<bool>,
 ) {
@@ -576,10 +765,23 @@ pub(crate) fn heal(
             };
         }
         if d.in_use {
+            // The game's `state Active` heals only once `bActivated` is set,
+            // after `Load` has played (`Begin: FinishAnim(); bActivated =
+            // true`), the moment the zap appears. A dispenser drawn without
+            // its model heals at once.
+            let activated = props
+                .iter()
+                .find(|p| p.name.eq_ignore_ascii_case(&d.name))
+                .is_none_or(|p| p.playing.is_none() && p.last.as_deref() == Some("Load"));
+            let rate = if activated {
+                s.bacta_heal_per_second
+            } else {
+                0.0
+            };
             let (full, fraction) = match health.as_deref_mut() {
                 Some(h) => {
                     let before = h.current;
-                    h.current = (h.current + s.bacta_heal_per_second * dt).min(h.max);
+                    h.current = (h.current + rate * dt).min(h.max);
                     healed += h.current - before;
                     (
                         h.current >= h.max,

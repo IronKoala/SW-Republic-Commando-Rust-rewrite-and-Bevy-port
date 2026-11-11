@@ -382,8 +382,11 @@ copy of the game.
   hologram (a see-through commando) fades in where a squad mate would heal
   when you aim at that spot and a squad mate is hurt; and the helmet's own sounds play
   when you aim at it, while healing and when full. When each sound plays
-  and how the panel moves are our reading (native code); the arm plugging
-  in and the zap effect aren't done. Settings: `[bacta]` in
+  and how the panel moves are our reading (native code). Once the
+  dispenser's canister has swung in, the game's own zap effect appears on
+  it with its hum, and both vanish when you stop, as the game's script
+  does (not yet seen or heard on Windows); the arm plugging in and the
+  effect on your own body aren't done. Settings: `[bacta]` in
   `data/scripts/scripts.toml`, `[use_panel]` in `data/ui/hud.toml`.
   Enemy spawners now follow the scripts too (tested in the cloud sandbox
   with the real files, not yet on Windows or by playing): the level's

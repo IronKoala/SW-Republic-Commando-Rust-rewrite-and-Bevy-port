@@ -1790,12 +1790,29 @@ class defaults with `rc_probe --classes`:
 - **Our readings, not checked against the original** (it doesn't run on
   the user's PC right now): when each sound plays, where the prompt sits
   (matched by eye to screenshots), the
-  pull's speed, the hologram's brightness and fade. The dispenser's zap
-  effect and its hum (`BactaZap_Dispenser`, `Bacta_Body`) come next, with
-  the effects plugin. Not done: the first-person arm plugging in
-  (`BactaHealer`, `HudArms.HudArmsBacta` with BactaLoad/BactaLoop/
-  BactaHolster), the zap effects, and `HUDIconX/Y` (an icon over the
-  dispenser).
+  pull's speed, the hologram's brightness and fade. Not done: the
+  first-person arm plugging in (`BactaHealer`, `HudArms.HudArmsBacta` with
+  BactaLoad/BactaLoop/BactaHolster), the body effect, and `HUDIconX/Y`
+  (an icon over the dispenser).
+- **The zap and hum** (`bacta::zap`), read from the game's
+  `BactaDispenser` script (ctgame.u, `state Active`): after `Load` has
+  finished (`FinishAnim`) the script sets `bActivated` (healing starts only
+  then; `heal` waits for it too) and does `SpawnAttachment('Eye',
+  DispenserEffectClass)`; every dispenser class in
+  `Properties/MarkerProperties.u` sets `BactaZap_Dispenser`. A small
+  carrier entity (`BactaZap`) stands on the model's `Eye` bone
+  (`AnimProp::bone`, from `rc_model::Model::bone_from_origin`) and the
+  effect follows it, turned by the bone's axes (`SpawnEffect::axes`). The
+  hum is that effect's own `AmbientSound`
+  (`GEO_Sound.GEO_03.ele_GEO_genEnrgy_lp_01`), which the effects plugin
+  loops while the effect is there. `EndState` does
+  `DestroyAttachment('Eye')`, so when healing stops the carrier goes and
+  the effect with its hum vanishes at once (`vanish_with_carrier`), not a
+  fade. Our choices: the hum's loudness follows the effects plugin's
+  distance rule (worked out when the zap starts), and it isn't placed in
+  3D. Not done: `PawnEffectClass` (`BactaZap_Dispenser_Body`), whose
+  particles start at the bones of the player's own body model
+  (`UseSkeletalLocationAs`), which first person here doesn't have.
 
 ### Breakable props (`rc_level::breakables`, `rc_scripts_plugin/src/breakables.rs`)
 

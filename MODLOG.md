@@ -3,6 +3,23 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Fix: the game quit with a graphics error as geo_01a started (rc_level_viewer)
+
+- **Changed:** The light-shaft material (`FalloffMaterial`, from the god rays work) now leaves Bevy's own vertex layout alone in the depth-only pipeline (shadow maps, prepass), as the bump-mapped props already do.
+- **Why:** On main, `rc_game --script` in the cloud quit right after geo_01a loaded: "prepass_pipeline ... Location[7] ... not provided". The light shafts' material swapped in its own layout (colours at place 3) for every pipeline, but Bevy's depth-only shader wants colours at place 7. Found while testing the bacta zap; it would likely hit Windows too whenever shadows draw a light shaft.
+- **Tested how:** `rc_game --script` in the cloud before (quits at 9.8 s, on main too) and after (runs through geo_01a).
+- **Result:** No more graphics error.
+- **Still broken / not tested:** Not tested on Windows.
+
+## 2026-11-11: The bacta dispenser's zap and hum (rc_scripts_plugin, rc_effects, rc_effects_plugin, rc_model, rc_level_plugin)
+
+- **Changed:** Health now goes up only once the dispenser's `Load` animation (the canister swinging in) has finished, as the game's script does (`bActivated` is set after `FinishAnim`). Before, healing started at once and was nearly over when the zap appeared. While you heal, the dispenser shows the game's own zap effect (`BactaZap_Dispenser`: mist, beams, glow, the little hologram clone, power bars, the BACTA text, lightning) hung on its `Eye` bone, and its hum (`ele_GEO_genEnrgy_lp_01`, the effect's `AmbientSound`) loops. Both start when the `Load` animation has finished and vanish at once when you stop. New: `rc_effects::def::EffectDef::ambient_sound`; `SpawnEffect::axes` and `vanish_with_carrier`; ambient sounds loop in the effects plugin; `rc_model::Model::bone_from_origin`; `AnimProp::bone` and `pose_now`; `bacta::zap`, `BactaZap`, `BactaStats::zaps`.
+- **Why:** Follow-up to the bacta dispenser work (PR #96); the user asked for it.
+- **Where it comes from:** the timing and the bone are the game's `BactaDispenser` script text in ctgame.u (`state Active`: `FinishAnim(); SpawnAttachment('Eye', DispenserEffectClass)`; `EndState`: `DestroyAttachment('Eye')`). The effect class is each dispenser class's `DispenserEffectClass` default in `Properties/MarkerProperties.u` (all five set `BactaZap_Dispenser`). The hum is `BactaZap_Dispenser`'s `AmbientSound` default in `Properties/CTEffects.u`. All read with `rc_probe --classes` and `rc_effect_check`; nothing copied into the repo.
+- **Tested how:** `cargo test` for the changed crates; `rc_game --script` in the cloud with the game's files copied read only from the PC (new check "the game's zap effect hung on the dispenser's Eye bone while healing, with its hum, and was taken away after").
+- **Result:** All the bacta checks pass, including the new one: `BactaZap_Dispenser` hung on BactaDispenserGEO0's Eye bone at (-1025, -321, -2241), its hum `ele_GEO_genEnrgy_lp_01` started, and both were gone when health was full. Picture from a slowed-down run: the blue beam stands in the dispenser while healing (`/mnt/project-files/bacta-dispenser/zap_while_healing.png`, not in the repo). Other checks that fail in this cloud run fail on main too: maps not copied (geo_01b, pro), and timed checks (the game runs slowly in the cloud).
+- **Still broken / not tested:** Not seen or heard on Windows. The player's body effect (`BactaZap_Dispenser_Body`) is not shown: its particles start at the bones of the player's own body model, which first person here doesn't have. The hum's loudness is the effects plugin's distance rule (our choice), not 3D. Found while reading: the game heals at `MaxHealth / BactaRate` per second (BactaRate 4, so a full heal takes 4 seconds); our `heal_per_second = 50` is a separate setting and was not changed here.
+
 ## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
 
 - **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).

@@ -136,6 +136,7 @@ impl Plugin for ScriptsPlugin {
                 Update,
                 (
                     bacta::heal,
+                    bacta::zap,
                     markers::run,
                     breakables::shots,
                     breakables::blasts,
@@ -197,6 +198,8 @@ impl Objectives {
 
 struct Dispenser {
     name: String,
+    /// Its class (`BactaDispenserGEO`), whose defaults name its effects.
+    class: String,
     tag: String,
     location: [f32; 3],
     /// Which way it faces, radians (Unreal yaw): its front, where the
@@ -504,6 +507,7 @@ fn build(
         })
         .map(|a| Dispenser {
             name: a.obj.name.clone(),
+            class: a.obj.class.clone(),
             tag: a.obj.tag().to_string(),
             location: a.location,
             yaw: match a.obj.get("Rotation") {

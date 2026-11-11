@@ -867,6 +867,36 @@ impl Model {
             .collect()
     }
 
+    /// Where bone `bone` is at `frame` of animation `key` (the mesh's own
+    /// pose if `key` isn't read), and which way its three axes point, in
+    /// Unreal units relative to the mesh's own origin, as
+    /// [`Model::posed_from_origin`] places the points (nothing lifted). The
+    /// axes are unit length. `None` if the model has no such bone. Used to
+    /// hang things on a bone, as the game's `AttachToBone` does (the bacta
+    /// dispenser's zap effect sits on its `Eye` bone).
+    pub fn bone_from_origin(
+        &self,
+        key: &str,
+        frame: f32,
+        bone: &str,
+    ) -> Option<([f32; 3], [[f32; 3]; 3])> {
+        let i = self.skeleton.find(bone)?;
+        let local = match self.clips.get(key) {
+            Some(clip) => clip.sample(&self.skeleton, frame),
+            None => self.skeleton.local.clone(),
+        };
+        let pose = globals(&self.skeleton.parents, &local);
+        let g = pose.get(i)?;
+        let at = mesh_point(&self.mesh, g.pos);
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|d| {
+            let tip = mesh_point(&self.mesh, g.apply(d));
+            let v = [tip[0] - at[0], tip[1] - at[1], tip[2] - at[2]];
+            let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+            v.map(|c| c / len)
+        });
+        Some((at, axes))
+    }
+
     /// Points posed at `frame` of animation `key`, in Bevy units relative
     /// to the feet, before the character's facing is applied.
     pub fn posed(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {

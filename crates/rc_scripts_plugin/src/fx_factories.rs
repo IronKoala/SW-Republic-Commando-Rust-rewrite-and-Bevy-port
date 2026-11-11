@@ -376,6 +376,7 @@ pub fn run(
                 draw_scale: s.draw_scale,
                 id: Some(id),
                 follow: None,
+                ..default()
             });
         }
         for (event, by) in st.events {
