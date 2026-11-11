@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The menu background video no longer slows the game to a crawl (rc_video build settings, rc_game)
+
+- **Changed:** The video decoder (`rc_video`) and the oxideav crates it uses are built optimised in debug builds too (root `Cargo.toml`, `[profile.dev.package.*]`). `menu_video::play` decodes at most 3 frames per game frame (`MAX_DECODES_PER_UPDATE`); when it is further behind, the video runs late instead (logged once, counted in `MenuVideo::frames_late`, shown in the script's video check).
+- **Why:** The cloud's `rc_game --script` run fell from about 5 frames a second to under 1 after the menu video (#102) merged. A debug build decoded one 512x512 frame in about 70 ms, so it could never keep up with 30 a second, and `play` decoded every missed frame to catch up, so each game frame took longer than the last (gdb showed the time inside `rc_video::msmpeg4v2` called from `menu_video::play`, catching up to frame 401).
+- **Tested how:** `rc_video_check menu_bg.avi` before and after; `cargo test -p rc_game --bins menu_video` (new `a_slow_computer_lets_the_video_run_late_instead_of_catching_up`); `rc_game --script` in the cloud with the game's files.
+- **Result:** Debug decode 69.6 ms a frame before, 7.6 ms after; release 4.8 ms (unchanged). Main menu in the cloud script: under 1 frame a second (frames up to 55 s long) before, 6 to 11 frames a second after.
+- **Still broken / not tested:** Not tested on Windows. The user's PC runs a release build, which already decoded fast enough, so it should see no change. Inside geo_01a the cloud run is still slow (about 1 frame a second); that is the software renderer drawing the new default graphics settings and other new effects, looked at separately.
+
 ## 2026-11-11: Fix the crash on geo_01a's load with BLUR EFFECTS on (rc_level_viewer)
 
 - **Changed:** `FalloffMaterial` (the light shafts and god rays from the game's falloff shader) no longer takes part in Bevy's depth/motion prepass or in shadows (`enable_prepass` and `enable_shadows` return false, as `rc_visor` and `rc_shadows` already do).

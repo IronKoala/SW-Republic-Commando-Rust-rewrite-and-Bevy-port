@@ -51,8 +51,32 @@ pub struct MenuVideo {
     pub frames_shown: u64,
     pub last_frame: Option<usize>,
     logged_loops: u32,
+    /// Frames counted from the start (not wrapped) of the picture on
+    /// screen, to know how far behind the clock the video is.
+    decoded_to: Option<u64>,
+    /// Frames let go late because the computer couldn't decode them in
+    /// time (see [`MAX_DECODES_PER_UPDATE`]); logged once.
+    pub frames_late: u64,
     /// True while a menu that shows the video is drawn.
     pub wanted: bool,
+}
+
+/// Most video frames decoded in one game frame. On a computer that can't
+/// decode 30 pictures a second (an unoptimised build on the cloud's
+/// software renderer), decoding every missed frame to catch up made each
+/// game frame longer than the last, until the whole game ran at under one
+/// frame a second. Past this many, the video runs late instead: it still
+/// shows every picture in order, just slower. A computer that keeps up
+/// (the user's PC, any release build) never reaches it.
+pub const MAX_DECODES_PER_UPDATE: u64 = 3;
+
+/// How many frames to skip in time (shown late, not dropped) when the
+/// clock says `frame` and the picture on screen is `decoded_to`.
+fn frames_to_let_go(frame: u64, decoded_to: Option<u64>) -> u64 {
+    match decoded_to {
+        Some(done) => frame.saturating_sub(done + MAX_DECODES_PER_UPDATE),
+        None => 0,
+    }
 }
 
 /// The `.avi` the PC game plays for an Xbox `.xmv` name: the same name
@@ -149,6 +173,7 @@ impl MenuVideo {
         self.started = None;
         self.frames_shown = 1;
         self.last_frame = Some(0);
+        self.decoded_to = Some(0);
         self.logged_loops = 0;
         Some(handle)
     }
@@ -230,6 +255,7 @@ pub fn play(
                 p.restart();
             }
             video.last_frame = None;
+            video.decoded_to = None;
             video.frames_shown = 0;
             video.logged_loops = 0;
         }
@@ -244,7 +270,20 @@ pub fn play(
     if fps <= 0.0 {
         return;
     }
-    let frame = ((now - started) * fps).floor().max(0.0) as u64;
+    let mut frame = ((now - started) * fps).floor().max(0.0) as u64;
+    let late = frames_to_let_go(frame, video.decoded_to);
+    if late > 0 {
+        // Too far behind: move the start later so the video carries on
+        // from here, instead of decoding every frame it missed.
+        video.started = Some(started + late as f64 / fps);
+        if video.frames_late == 0 {
+            log.line(format!(
+                "menu video: this computer can't decode {fps:.1} frames a second; the video runs late instead of slowing the game ({late} frames let go)"
+            ));
+        }
+        video.frames_late += late;
+        frame -= late;
+    }
     let target = (frame % player.frame_count() as u64) as usize;
     if Some(target) == video.last_frame {
         return;
@@ -255,6 +294,7 @@ pub fn play(
         return;
     }
     video.last_frame = Some(target);
+    video.decoded_to = Some(frame);
     video.frames_shown += 1;
     player.rgba(&mut video.rgba);
     tint(&mut video.rgba, video.color);
@@ -292,6 +332,17 @@ mod tests {
             "{}",
             p.display()
         );
+    }
+
+    #[test]
+    fn a_slow_computer_lets_the_video_run_late_instead_of_catching_up() {
+        // Keeping up, or a little behind: decode every frame, as before.
+        assert_eq!(frames_to_let_go(10, Some(9)), 0);
+        assert_eq!(frames_to_let_go(12, Some(9)), 0);
+        // 100 frames behind: decode only the next 3, let the rest run late.
+        assert_eq!(frames_to_let_go(109, Some(9)), 97);
+        // Nothing on screen yet (just started): nothing to let go.
+        assert_eq!(frames_to_let_go(50, None), 0);
     }
 
     #[test]
