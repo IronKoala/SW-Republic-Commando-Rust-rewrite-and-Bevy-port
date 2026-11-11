@@ -271,7 +271,8 @@ fn place_player(
     next.set(GameState::InGame);
 }
 
-/// Walk the route; look at, and later shoot, the nearest droid in sight.
+/// Walk the route; look at, and later shoot, the nearest droid in sight
+/// (not clone troopers, who are on its side).
 #[allow(clippy::too_many_arguments)]
 fn stand_in(
     time: Res<Time>,
@@ -292,6 +293,8 @@ fn stand_in(
     let target = fight
         .battle
         .alive()
+        // Clone troopers are on its side.
+        .filter(|f| !f.params.kind.republic())
         .filter(|f| (f.pawn.location - eye).length() < 6000.0)
         .filter(|f| rc_ai::brain::clear_line(world, eye, f.eye()))
         .min_by(|a, b| {
@@ -571,11 +574,20 @@ fn finish(
     verdict(s.spawned > 0, format!("droids spawned ({})", s.spawned));
     verdict(s.first_spotted.is_some(), "a droid saw the stand-in".into());
     verdict(s.shots > 0, format!("droids fired ({} shots)", s.shots));
+    // Hits on the stand-in or, where clone troopers fight, on them.
+    let hits = s.hits_on_player + s.droid_bolts_on_clones;
     verdict(
-        s.hits_on_player > 0 && s.hits_on_player < s.shots,
+        hits > 0 && hits < s.shots,
         format!(
-            "some droid shots hit, not all ({} of {})",
-            s.hits_on_player, s.shots
+            "some droid shots hit, not all ({} of {}: {} on the stand-in, {} on clone troopers)",
+            hits, s.shots, s.hits_on_player, s.droid_bolts_on_clones
+        ),
+    );
+    verdict(
+        s.clone_bolts_on_clones * 20 <= s.clone_shots,
+        format!(
+            "clone troopers rarely shoot each other ({} of {} bolts hit a trooper)",
+            s.clone_bolts_on_clones, s.clone_shots
         ),
     );
     verdict(

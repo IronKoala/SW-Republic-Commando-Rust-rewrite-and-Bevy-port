@@ -635,6 +635,40 @@ ctinventory.u, ctgame.u, Properties/properties.u, System/ctaudio.u).
   geo_03c (3), geo_04a (2), geo_04b (1), geo_04c (2), geo_05a (8),
   geo_05b (3).
 
+## Clone troopers (read 2026-11-11)
+
+Read only from the user's install with `rc_probe --class` (ctcharacters.u,
+ctgame.u, ctinventory.u, engine.u, Properties/properties.u).
+
+- `CloneTrooper` (parent `Republic`, then `CTPawn`, `Pawn`): Health 100,
+  TeamIndex 2, Accuracy 0.6, GroundSpeed 450, AccelRate 1024,
+  CollisionHeight 84, CrouchHeight 56, BaseEyeHeight 60, bCanCrouch false,
+  bCanStrafe false, bCanSideStep true, Mesh `CloneTrooper`,
+  RequiredEquipment `CTInventory.DC17mBlaster`, ControllerClass
+  `CloneTrooperBot`. No AudioTable, no MyDamageVariance, no Skins.
+- `CloneTrooperTM` (Properties): Accuracy 0.4, RequiredEquipment
+  `Properties.DC15BlasterCloneTM`, FootstepInfoClass `CloneCommando_FS`,
+  BurntMaterial `CloneTrooper_Burn`.
+- `CloneTrooperBot` (parent `CTBot`): BurstCount 15, RequiredStates
+  `StateTrandoshanAttack`, `StateIdle`, `StateInvestigate`.
+  `StateTrandoshanAttack`: CoverHideTime 0.5 to 2, MinStepInterval 10,
+  AllySearchRadius 1000 (ReadyDistance 800, SafeDistance 1200 from
+  `StateAbstractAttack`). How these are used is compiled code.
+- `DC15BlasterCloneTM` (parents `DC15BlasterClone`, `CTWeaponRecharging`):
+  ShotDelay 0.1, FireMode 2, BurstCount 4, FireSound `wep_GEN_DC17_PRO`,
+  AttachmentClass `DC15AttachmentCloneTM` (StaticMesh `DC15Blaster`, no
+  muzzle flash). Ammo `DC15BlasterCloneAmmoTM`: RechargeRate 100, MaxAmmo
+  100, bolt `DC17BlasterProjTM`: Damage 2, MaxSpeed 10000, Speed 6000,
+  MyDamageType `CTDamageEnergy`.
+- Pawn defaults the troopers keep: SightRadius 10000, PeripheralVision
+  0.2, AutoDetectRadius 200, CollisionRadius 40, CrouchRadius 40,
+  WalkSpeedRatio 0.5, MaxAimYaw 80, RotationRate yaw 20000.
+- geo_01a spawners (`rc_enemy_spawners`): `CloneTrooper` 7 (tags
+  SpawnWalkerGuys, SpawnBarricadeTroopers, SpawnGunshipArea,
+  SpawnDeadTrooper01), `CloneTrooperTM` 9 (SpawnTrench01, SpawnTrench02,
+  SpawnTrenchRim01Troops, SpawnBattleFieldTroopers,
+  SpawnFieldChargeTrooper, SpawnGunshipArea).
+
 ## Weapons lying in the levels (read 2026-11-10)
 
 Read from the class defaults with `rc_probe --class` and the scripts'

@@ -353,6 +353,14 @@ impl Fighter {
         self.pawn.eye()
     }
 
+    /// Itself as something another fighter can aim at.
+    pub fn as_target(&self) -> Target {
+        Target {
+            centre: self.pawn.location,
+            eye: self.eye(),
+        }
+    }
+
     pub fn is_moving(&self) -> bool {
         self.pawn.velocity.length_2d() > 20.0
     }
@@ -428,6 +436,14 @@ impl Fighter {
         self.alerted_at = time;
         self.follower = None;
         self.set_mode(Mode::Alerted, events);
+    }
+
+    /// Back in a fight it was already in (a loaded save): attacking at once,
+    /// without the first sighting's reaction time again.
+    pub fn resume_attack(&mut self, at: Vec3, time: f32, events: &mut Vec<AiEvent>) {
+        self.alert(at, time, events);
+        self.set_mode(Mode::Attack, events);
+        self.next_decision = time;
     }
 
     pub fn kill(&mut self, events: &mut Vec<AiEvent>) {
@@ -1221,7 +1237,8 @@ impl Fighter {
         let to = t.centre - self.pawn.location;
         let dist = to.length();
         let off = angle_diff(to.y.atan2(to.x), self.facing).abs().to_degrees();
-        let in_cover = matches!(self.maneuver, Maneuver::InCover(_));
+        // Only a fighter that can crouch ducks down in cover.
+        let in_cover = matches!(self.maneuver, Maneuver::InCover(_)) && c.can_crouch;
         if dist > c.weapon_range || off > c.max_aim_yaw {
             self.crouch = in_cover;
             return;
@@ -1244,7 +1261,8 @@ impl Fighter {
         } else {
             t.eye
         };
-        if ally_in_line(origin, aim, allies, self.pawn.location) {
+        let max_err = (1.0 - c.accuracy).clamp(0.0, 1.0) * c.max_aim_error;
+        if ally_in_line(origin, aim, allies, self.pawn.location, max_err) {
             // Hold fire rather than shoot a friend; `decide` moves it if
             // this lasts.
             self.ally_in_way_since.get_or_insert(now);
@@ -1252,7 +1270,6 @@ impl Fighter {
         }
         self.ally_in_way_since = None;
         let perfect = (aim - origin).normalize_or_zero();
-        let max_err = (1.0 - c.accuracy).clamp(0.0, 1.0) * c.max_aim_error;
         let (direction, aim_error) = scatter(perfect, max_err, &mut self.rng);
         events.push(AiEvent::Fire {
             origin,
@@ -1275,8 +1292,11 @@ impl Fighter {
 const ALLY_CLEARANCE: f32 = 50.0;
 
 /// Does a friend (other than the one at `me`) stand in the line from `a`
-/// to `b`?
-pub fn ally_in_line(a: Vec3, b: Vec3, allies: &[Vec3], me: Vec3) -> bool {
+/// to `b`? A shot strays up to `max_err` degrees off the line, so the
+/// farther along the friend stands, the wider the line it must keep clear
+/// of. Our choice: the original's rules for this are in its compiled code.
+pub fn ally_in_line(a: Vec3, b: Vec3, allies: &[Vec3], me: Vec3, max_err: f32) -> bool {
+    let spread = max_err.to_radians().tan();
     let d = b - a;
     let len2 = d.dot(d);
     if len2 < 1.0 {
@@ -1292,7 +1312,9 @@ pub fn ally_in_line(a: Vec3, b: Vec3, allies: &[Vec3], me: Vec3) -> bool {
         }
         let closest = a + d * t;
         let off = p - closest;
-        (off.x * off.x + off.y * off.y).sqrt() < ALLY_CLEARANCE && off.z.abs() < 90.0
+        let clearance = ALLY_CLEARANCE + (closest - a).length() * spread;
+        (off.x * off.x + off.y * off.y).sqrt() < clearance
+            && off.z.abs() < 90.0 + (clearance - ALLY_CLEARANCE)
     })
 }
 

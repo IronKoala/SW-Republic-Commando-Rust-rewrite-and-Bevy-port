@@ -23,6 +23,17 @@ pub struct EnemyType {
     pub classes: Vec<String>,
     /// "droid" or "organic": for damage tables and stuns (EMP, flash).
     pub body: String,
+    /// Whose side it fights on: "separatist" (the player's enemies, the
+    /// default) or "republic" (clone troopers: they fight the separatist
+    /// fighters and leave the player and squad alone).
+    pub side: String,
+}
+
+impl EnemyType {
+    /// Fights on the player's side (`side = "republic"`).
+    pub fn republic(&self) -> bool {
+        self.side == "republic"
+    }
 }
 
 impl EnemyType {
@@ -81,6 +92,9 @@ pub struct Combat {
     pub lost_sight_reposition: f32,
     /// Looks for cover when shot in the open. Super battle droids don't.
     pub uses_cover: bool,
+    /// Crouches (in cover, between bursts). The original's Pawn
+    /// `bCanCrouch`; clone troopers have it off.
+    pub can_crouch: bool,
     /// The weapon file left on the ground when it falls, for the player to
     /// pick up. Empty for none.
     pub drops: String,
@@ -264,6 +278,7 @@ impl AiParams {
                 name: "battle droid".into(),
                 classes: vec!["BattleDroid*".into()],
                 body: "droid".into(),
+                side: "separatist".into(),
             },
             sounds: Sounds {
                 package: "character_voice".into(),
@@ -317,6 +332,7 @@ impl AiParams {
                 cover_search_radius: 1500.0,
                 lost_sight_reposition: 2.0,
                 uses_cover: true,
+                can_crouch: true,
                 drops: "e5_blaster_pickup".into(),
                 damage_table: "DV_DroidsBattleDroidDamage".into(),
                 melee_range: 0.0,
@@ -470,7 +486,14 @@ impl AiParams {
                     return Err("body should be \"droid\" or \"organic\"".into());
                 }
             }
+            ("type", "side") => {
+                k.side = text();
+                if !matches!(k.side.as_str(), "separatist" | "republic") {
+                    return Err("side should be \"separatist\" or \"republic\"".into());
+                }
+            }
             ("combat", "uses_cover") => c.uses_cover = boolean()?,
+            ("combat", "can_crouch") => c.can_crouch = boolean()?,
             ("combat", "drops") => c.drops = text(),
             ("combat", "damage_table") => c.damage_table = text(),
             ("combat", "melee_range") => c.melee_range = num()?,
