@@ -4447,9 +4447,12 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "rc_anim",
+ "rc_effects",
+ "rc_effects_plugin",
  "rc_game_core",
  "rc_hologram",
  "rc_level",
+ "rc_level_viewer",
  "rc_model",
  "rc_movement",
  "rc_package",

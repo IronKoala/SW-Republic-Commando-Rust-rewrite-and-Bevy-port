@@ -215,6 +215,19 @@ pub mod view {
             AlphaMode::Add
         }
 
+        // Added light only: no depth/motion prepass and no shadows. With
+        // a prepass on (BLUR EFFECTS adds one for motion blur), Bevy's
+        // prepass pipeline would take the vertex layout from `specialize`
+        // below, which lacks its colour slot, and the graphics card
+        // refuses the pipeline (the game quits on geo_01a's load).
+        fn enable_prepass() -> bool {
+            false
+        }
+
+        fn enable_shadows() -> bool {
+            false
+        }
+
         fn specialize(
             _pipeline: &MaterialPipeline,
             descriptor: &mut RenderPipelineDescriptor,

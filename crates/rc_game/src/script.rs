@@ -276,10 +276,11 @@ fn steps() -> Vec<Step> {
                     }
                 }
                 Some(p) if v.wanted && v.frames_shown >= 3 => Ok(format!(
-                    "{movie:?}: {} frames shown, now frame {:?} of {}",
+                    "{movie:?}: {} frames shown, now frame {:?} of {}, {} frames let go late",
                     v.frames_shown,
                     v.last_frame,
-                    p.frame_count()
+                    p.frame_count(),
+                    v.frames_late
                 )),
                 Some(_) => Err(format!(
                     "{movie:?}: only {} frames shown (drawn: {})",
@@ -939,6 +940,7 @@ fn steps() -> Vec<Step> {
         // `bAlignBottom` off, so it is drawn from its map place, not
         // stood on the ground.
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
+        Check("the clone troopers hold their rifles", troopers_hold_rifles),
         Note(view_gunship),
         Wait(0.5),
         Shot("gunship"),
@@ -3018,6 +3020,26 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
 
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
+/// geo_01a's clone troopers hold the game's DC-17m model (their class's
+/// `RequiredEquipment`), hung on their weapon bone.
+fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<&rc_cast::Cast>();
+    let troopers: Vec<_> = q
+        .iter(w)
+        .filter(|c| c.class.eq_ignore_ascii_case("CloneTrooper"))
+        .collect();
+    let armed = troopers
+        .iter()
+        .filter(|c| c.held_weapon() == Some("DC17mBlaster"))
+        .count();
+    let msg = format!("{armed} of {} clone troopers hold a DC17mBlaster", troopers.len());
+    if !troopers.is_empty() && armed == troopers.len() {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
 /// geo_01a's landing gunship (`GunshipHigh1`, the cast part draws it).
 fn gunship_hovers(w: &mut World) -> Result<String, String> {
     let mut q = w.query::<(&rc_cast::Cast, &GlobalTransform)>();

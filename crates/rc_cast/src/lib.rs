@@ -94,6 +94,10 @@ fn log_line(log: &Option<Res<GameLog>>, line: impl AsRef<str>) {
 #[derive(Resource, Default)]
 pub struct CastCache {
     classes: Option<Arc<rc_package::class_library::ClassLibrary>>,
+    /// The weapon classes, for the models characters hold.
+    weapon_classes: Option<Result<Arc<rc_effects::projectile::ClassPackages>, String>>,
+    /// Held weapon models by weapon class (lower case); `None`: not drawn.
+    weapons: HashMap<String, Option<Arc<HeldModel>>>,
     meshes: Option<Arc<HashMap<String, (String, String)>>>,
     models: HashMap<String, Result<Arc<Model>, String>>,
 }
@@ -102,8 +106,74 @@ pub struct CastCache {
 #[derive(Resource, Default)]
 pub struct CastPlan {
     pub members: Vec<(CastMember, Option<Arc<Model>>)>,
+    /// Held weapon models by weapon class (lower case).
+    pub weapons: HashMap<String, Arc<HeldModel>>,
     pub settings: Option<Arc<CastFile>>,
     pub spawned: bool,
+}
+
+/// The bone a character's weapon hangs on (engine.u's
+/// `Pawn.GetWeaponBoneFor` returns it for every weapon).
+pub const WEAPON_BONE: &str = "weaponAttach_R";
+
+/// The model a character shows for the weapon it holds: the weapon's
+/// `AttachmentClass` and its static mesh, read from the game's files.
+pub struct HeldModel {
+    pub info: rc_effects::projectile::HeldWeapon,
+    sections: Vec<(Mesh, Option<rc_level_viewer::materials::Picture>)>,
+}
+
+/// Read the model for weapon class `weapon`, once per game.
+fn held_model(
+    cache: &mut CastCache,
+    game_data: &std::path::Path,
+    weapon: &str,
+    log: &Option<Res<GameLog>>,
+) -> Option<Arc<HeldModel>> {
+    let key = weapon.to_ascii_lowercase();
+    if let Some(m) = cache.weapons.get(&key) {
+        return m.clone();
+    }
+    let classes = cache
+        .weapon_classes
+        .get_or_insert_with(|| {
+            rc_effects::projectile::ClassPackages::open(game_data).map(Arc::new)
+        })
+        .clone();
+    let made = classes.and_then(|c| c.held_weapon(weapon)).and_then(|info| {
+        let mut mats = rc_level_viewer::materials::Materials::new(game_data);
+        let sections = rc_effects_plugin::static_mesh(&mut mats, &info.mesh)?;
+        Ok(HeldModel { info, sections })
+    });
+    let out = match made {
+        Ok(m) => {
+            log_line(
+                log,
+                format!(
+                    "held weapon {weapon}: {} with model {} ({} parts), on bone {WEAPON_BONE}",
+                    m.info.attachment,
+                    m.info.mesh.join("."),
+                    m.sections.len()
+                ),
+            );
+            if m.info.relative_location != [0.0; 3] || m.info.relative_rotation != [0; 3] {
+                log_line(
+                    log,
+                    format!(
+                        "held weapon {weapon}: its RelativeLocation/Rotation {:?} {:?} aren't applied yet",
+                        m.info.relative_location, m.info.relative_rotation
+                    ),
+                );
+            }
+            Some(Arc::new(m))
+        }
+        Err(e) => {
+            log_line(log, format!("held weapon {weapon} not drawn: {e}"));
+            None
+        }
+    };
+    cache.weapons.insert(key, out.clone());
+    out
 }
 
 /// The settings file, or the built-in one (logged why).
@@ -258,6 +328,13 @@ fn load_cast(
                 }
             ),
         );
+        if let Some(w) = &m.weapon {
+            if model.is_some() {
+                if let Some(h) = held_model(&mut cache, &game_data, w, &log) {
+                    plan.weapons.insert(w.to_ascii_lowercase(), h);
+                }
+            }
+        }
         list.push((m, model));
     }
     log_line(&log, format!("{} in the cast of {map}", list.len()));
@@ -317,6 +394,14 @@ pub struct Cast {
 }
 
 impl Cast {
+    /// The weapon class whose model it holds, when one is drawn.
+    pub fn held_weapon(&self) -> Option<&str> {
+        self.look
+            .as_ref()
+            .and_then(|l| l.weapon.as_ref())
+            .map(|(_, h)| h.info.weapon.as_str())
+    }
+
     /// The original's `AnimProp.Trigger`: stop `AnimTriggered` if it is
     /// playing, else start it. What happened, for the log.
     fn trigger(&mut self) -> Option<String> {
@@ -342,6 +427,9 @@ impl Cast {
 struct Look {
     model: Arc<Model>,
     pieces: Vec<(usize, Handle<Mesh>)>,
+    /// The held weapon's entity (moved to the weapon bone each pose) and
+    /// its model.
+    weapon: Option<(Entity, Arc<HeldModel>)>,
     idle: Option<Clip>,
     walk: Option<Clip>,
     run: Option<Clip>,
@@ -349,6 +437,22 @@ struct Look {
     playing: Option<String>,
     frame: f32,
     posed_once: bool,
+}
+
+/// Where the held weapon's model goes for bones placed at `local`, in the
+/// body's own space: on the weapon bone, as the original's `AttachToBone`
+/// (`None` when the model has no such bone). The static mesh's points are
+/// Unreal's X, Z, Y (see `rc_effects_plugin::static_mesh`), in Unreal units.
+fn weapon_transform(
+    model: &Model,
+    local: &[rc_anim::math::Transform],
+    held: &HeldModel,
+) -> Option<Transform> {
+    let [o, x, y, z] = model.bone_frame(local, WEAPON_BONE)?;
+    let s = held.info.draw_scale;
+    let col = |v: [f32; 3]| Vec4::new(v[0] * s, v[1] * s, v[2] * s, 0.0);
+    let m = Mat4::from_cols(col(x), col(z), col(y), Vec4::new(o[0], o[1], o[2], 1.0));
+    Some(Transform::from_matrix(m))
 }
 
 fn first_clip(model: &Model, names: &[String]) -> Option<Clip> {
@@ -406,6 +510,10 @@ fn spawn_cast(
                     model.clone(),
                     m,
                     file.ambient,
+                    file.light_scale,
+                    m.weapon
+                        .as_ref()
+                        .and_then(|w| plan.weapons.get(&w.to_ascii_lowercase())),
                     &mut e,
                     meshes,
                     materials,
@@ -456,6 +564,8 @@ fn spawn_pieces(
     model: Arc<Model>,
     m: &CastMember,
     ambient: f32,
+    light_scale: f32,
+    held: Option<&Arc<HeldModel>>,
     parent: &mut EntityCommands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -465,6 +575,7 @@ fn spawn_pieces(
     let normals = model.normals(&points);
     let a = ambient.max(0.0);
     let mut pieces = Vec::new();
+    let mut weapon = None;
     // A prop's origin is where the map put it, and so is a character's
     // whose class turns `bAlignBottom` off (the gunship); any other
     // character stands on its feet (the model is lifted to the floor, see
@@ -552,14 +663,65 @@ fn spawn_pieces(
                 // rc_hologram swaps in the shimmering, flickering look.
                 if s.skin.as_ref().is_some_and(|k| k.hologram) {
                     piece.insert(rc_hologram::Hologram { pivot: Vec3::ZERO });
+                } else {
+                    // Drawn by the level's light where it stands, as the
+                    // squad and the droids are (the original lights
+                    // characters by where they are, not at one level).
+                    piece.insert(rc_game_core::LitByPlace {
+                        target: rc_game_core::LightTarget::Emissive,
+                        own: 0.0,
+                        scale: light_scale,
+                        height: 1.0,
+                        made_at: a.powf(1.0 / 2.2),
+                    });
                 }
                 pieces.push((i, handle));
+            }
+            // The weapon it holds, hung on its weapon bone (placed again
+            // each time the body is posed).
+            if let Some(h) = held {
+                let at = weapon_transform(&model, &model.skeleton.local, h);
+                let mut w = c.spawn((at.unwrap_or_default(), Visibility::default()));
+                w.with_children(|g| {
+                    for (mesh, pic) in &h.sections {
+                        let texture = pic
+                            .as_ref()
+                            .map(|p| images.add(rc_level_viewer::draw::to_image(p)));
+                        let material = materials.add(StandardMaterial {
+                            base_color: Color::WHITE,
+                            emissive: LinearRgba::rgb(a, a, a),
+                            emissive_texture: texture.clone(),
+                            base_color_texture: texture,
+                            perceptual_roughness: 0.7,
+                            // The mesh is mirrored into Bevy's axes.
+                            double_sided: true,
+                            cull_mode: None,
+                            ..default()
+                        });
+                        g.spawn((
+                            Mesh3d(meshes.add(mesh.clone())),
+                            MeshMaterial3d(material),
+                            rc_game_core::LitByPlace {
+                                target: rc_game_core::LightTarget::Emissive,
+                                own: 0.0,
+                                scale: light_scale,
+                                height: 1.0,
+                                made_at: a.powf(1.0 / 2.2),
+                            },
+                        ));
+                    }
+                });
+                if at.is_none() {
+                    w.insert(Visibility::Hidden);
+                }
+                weapon = Some((w.id(), h.clone()));
             }
         });
     });
     Look {
         model,
         pieces,
+        weapon,
         idle: None,
         walk: None,
         run: None,
@@ -894,6 +1056,7 @@ fn animate_cast(
     time: Res<Time>,
     plan: Res<CastPlan>,
     mut cast: Query<(Entity, &mut Cast, &InheritedVisibility, &Transform)>,
+    mut held: Query<&mut Transform, Without<Cast>>,
     player: Query<&GlobalTransform, With<PlayerCamera>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     mut raise: MessageWriter<RaiseEvent>,
@@ -907,6 +1070,8 @@ fn animate_cast(
     let eye = player.single().ok().map(|t| t.translation());
     // Props whose animation triggers them again (`TriggerSelf`).
     let mut again = Vec::new();
+    // Held weapons to put on their bones.
+    let mut weapons_moved = Vec::new();
     for (entity, mut c, shown, at) in &mut cast {
         let name_of = c.name.clone();
         let Cast {
@@ -991,6 +1156,11 @@ fn animate_cast(
             Some(k) => look.model.local_clip(k, look.frame),
             None => look.model.skeleton.local.clone(),
         };
+        if let Some((w, h)) = &look.weapon {
+            if let Some(t) = weapon_transform(&look.model, &local, h) {
+                weapons_moved.push((*w, t));
+            }
+        }
         let points = look.model.posed_local(&local);
         let normals = look.model.normals(&points);
         for (section, handle) in &look.pieces {
@@ -1001,6 +1171,11 @@ fn animate_cast(
                 m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
             }
+        }
+    }
+    for (w, t) in weapons_moved {
+        if let Ok(mut at) = held.get_mut(w) {
+            *at = t;
         }
     }
     for e in again {

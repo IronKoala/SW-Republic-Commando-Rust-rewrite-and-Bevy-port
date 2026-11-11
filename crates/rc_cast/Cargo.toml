@@ -6,6 +6,10 @@ edition.workspace = true
 
 [dependencies]
 rc_anim = { path = "../rc_anim" }
+# Weapon classes (which model a character holds) and reading static meshes.
+rc_effects = { path = "../rc_effects" }
+rc_effects_plugin = { path = "../rc_effects_plugin" }
+rc_level_viewer = { path = "../rc_level_viewer" }
 rc_game_core = { path = "../rc_game_core" }
 rc_hologram = { path = "../rc_hologram" }
 # Reading the map's actors.

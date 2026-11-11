@@ -86,6 +86,18 @@ impl Defaults {
         }
     }
 
+    /// A string value (stored raw as the package's string form), such as
+    /// `RequiredEquipment = "CTInventory.DC17mBlaster"`.
+    pub fn string(&self, name: &str) -> Option<String> {
+        match &self.get(name)?.value {
+            DefaultValue::Raw(b) => crate::Reader::new(b)
+                .fstring()
+                .ok()
+                .filter(|t| !t.is_empty()),
+            _ => None,
+        }
+    }
+
     /// A `Range` struct (Min, Max as two floats).
     pub fn range(&self, name: &str) -> Option<(f32, f32)> {
         match &self.get(name)?.value {
