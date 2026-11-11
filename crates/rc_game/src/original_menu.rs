@@ -24,6 +24,7 @@ use crate::input::{BaseBindings, Bindings};
 use crate::menu::{GamePathsFound, Menu, Page};
 use crate::option_settings;
 use crate::original_lists;
+use crate::original_pause;
 use crate::original_saves;
 use crate::rebind::{RebindDone, StartRebind, UserBindingsPath};
 use crate::settings::Settings;
@@ -33,6 +34,7 @@ use bevy::audio::{AudioSource, PlaybackSettings};
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use rc_game_core::save::SaveList;
 use rc_game_core::{
     Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, InputDevice,
     InputPrompts, LoadingGate, Play,
@@ -144,6 +146,9 @@ pub struct PageScreen {
     pub pristine: MenuLayout,
     pub plan: PagePlan,
     pub buttons: PageButtons,
+    /// The layout as first shown, for pages the original sets up afresh
+    /// each time they open (the pause menu, `original_pause.rs`).
+    pub base: Option<MenuLayout>,
 }
 
 /// Which original screen is showing.
@@ -159,6 +164,9 @@ pub const DEBRIEFING_PAGE: &str = "debriefing";
 
 /// What the debriefing's CONTINUE button does (`act:continue`).
 const CONTINUE: &str = "continue";
+
+/// What the pause menu's ENABLE HINTS does (`act:enable_hints`).
+const ENABLE_HINTS: &str = "enable_hints";
 
 /// What [`OriginalMenus::show_debriefing`] did.
 pub struct DebriefingShown {
@@ -251,6 +259,8 @@ enum OptionWork {
     RebindCancel,
     /// CLEAR: forget the key pressed and wait for another.
     RebindAgain,
+    /// The pause menu's ENABLE HINTS: hint screens back on.
+    EnableHints,
 }
 
 /// What the question box is asking.
@@ -590,6 +600,7 @@ fn load(
                         },
                         plan,
                         buttons,
+                        base: None,
                     },
                 );
             }
@@ -854,6 +865,7 @@ fn focus_new_page(
     settings: Res<Settings>,
     prompts: Res<InputPrompts>,
     monitor: Res<crate::display::Desktop>,
+    pause: PauseInputs,
     log: Res<GameLog>,
 ) {
     if menus.desktop != monitor.size {
@@ -874,7 +886,7 @@ fn focus_new_page(
         }
         return;
     }
-    *last = shown.clone();
+    let before = std::mem::replace(&mut *last, shown.clone());
     menus.question = None;
     menus.rebind = None;
     menus.list = None;
@@ -891,16 +903,40 @@ fn focus_new_page(
         if k == "options_graphics" {
             screen.focus = None;
         }
-        // The pause menu opens on RESUME GAME (now that the save and load
-        // buttons above it work), so pause and Enter goes back to play.
-        if k == "paused" {
-            let buttons = screen.buttons();
-            if let Some(r) = buttons.into_iter().find(|&i| {
-                screen
-                    .on_select(i)
-                    .eq_ignore_ascii_case("ResumeGameSelected")
-            }) {
-                screen.focus = Some(r);
+        if k == original_pause::PAUSED {
+            let p = menus.pages.get_mut(k).unwrap();
+            let s = pause.state(&settings);
+            match &before {
+                // Back from a page the pause menu opened: the original's
+                // menu stayed open under it, so its rows stay as they
+                // were; closing the load or save page may hide the
+                // rows whose saves are gone.
+                Some(Shown::Page(from)) => {
+                    let p_focus = p.screen.focus;
+                    if (from == original_saves::LOAD || from == original_saves::SAVE)
+                        && rc_menus::pause::after_save_pages(
+                            &mut p.screen.layout,
+                            !pause.saves.0.is_empty(),
+                            s.has_quick_save,
+                        )
+                    {
+                        log.line(
+                            "pause menu: rows hidden after the save pages: their saves are gone",
+                        );
+                    }
+                    p.screen.focus = p_focus.filter(|f| p.screen.buttons().contains(f));
+                    if p.screen.focus.is_none() {
+                        p.screen.focus = p.screen.buttons().first().copied();
+                    }
+                }
+                // Opening: the original's rules for which rows show.
+                _ => match original_pause::open(p, &s) {
+                    Some((focus, line)) => {
+                        p.screen.focus = Some(focus);
+                        log.line(format!("pause menu: {line}"));
+                    }
+                    None => log.line("pause menu: not the original's eleven rows; all rows shown"),
+                },
             }
         }
         original_lists::focus_first(&mut menus, k);
@@ -909,6 +945,29 @@ fn focus_new_page(
             "original menus: page {k} opened, focus on {}",
             screen.focused_name().unwrap_or("none")
         ));
+    }
+}
+
+/// What the pause menu's rules read about the game (`original_pause.rs`).
+#[derive(bevy::ecs::system::SystemParam)]
+struct PauseInputs<'w> {
+    vitals: Option<Res<'w, rc_game_core::PlayerVitals>>,
+    cutscene: Option<Res<'w, rc_game_core::Cutscene>>,
+    current: Res<'w, CurrentLevel>,
+    saves: Res<'w, SaveList>,
+    hints: Res<'w, original_pause::LevelHasHints>,
+}
+
+impl PauseInputs<'_> {
+    fn state(&self, settings: &Settings) -> rc_menus::pause::PauseState {
+        original_pause::state_now(
+            self.vitals.as_deref(),
+            self.cutscene.as_deref(),
+            &self.current,
+            &self.saves,
+            settings,
+            &self.hints,
+        )
     }
 }
 
@@ -1375,6 +1434,22 @@ fn navigate(
     menus.used_input = true;
     let s = menus.select_sound.clone();
     play_sound(&mut commands, menus, &mut sources, s, &log);
+    // The pause menu's ENABLE HINTS: hint screens back on (saved with
+    // the settings by `apply_options`), then resume as RESUME GAME does
+    // (only when that row shows, as in the original).
+    if cmd == PageCmd::Act(ENABLE_HINTS.into()) {
+        menus.work.push(OptionWork::EnableHints);
+        let resume_shows = menus.pages.get(original_pause::PAUSED).is_some_and(|p| {
+            rc_menus::pause::row(&p.screen.layout, rc_menus::pause::RESUME_GAME)
+                .is_some_and(|w| !p.screen.layout.widgets[w].hidden)
+        });
+        if resume_shows {
+            if let Some(n) = next_play.as_mut() {
+                n.set(Play::Running);
+            }
+        }
+        return;
+    }
     // The debriefing's CONTINUE: `debriefing.rs` goes on to the next map.
     if cmd == PageCmd::Act(CONTINUE.into()) {
         log.line("original menus: debriefing CONTINUE");
@@ -1509,7 +1584,17 @@ fn apply_options(
     prompts: Res<InputPrompts>,
     log: Res<GameLog>,
 ) {
-    let work = std::mem::take(&mut menus.work);
+    let mut work = std::mem::take(&mut menus.work);
+    // ENABLE HINTS closes the pause menu as it is chosen, so it is done
+    // here whatever shows next.
+    if work.contains(&OptionWork::EnableHints) {
+        work.retain(|w| *w != OptionWork::EnableHints);
+        if !settings.game.hint_screens {
+            settings.game.hint_screens = true;
+            crate::menu::save_settings(&settings, &settings_path, &log);
+        }
+        log.line("pause menu: ENABLE HINTS: hint screens are on");
+    }
     let results: Vec<RebindDone> = done.read().cloned().collect();
     let Some(Shown::Page(k)) = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu)
     else {
@@ -1650,6 +1735,8 @@ fn apply_options(
                 }
                 menus.dirty = true;
             }
+            // Done above.
+            OptionWork::EnableHints => {}
             OptionWork::RebindAgain => {
                 if let Some(r) = menus.rebind.as_mut() {
                     *bindings = r.before.clone();
@@ -1739,11 +1826,22 @@ fn draw(
     area: Option<Res<crate::display::PlayArea>>,
     log: Res<GameLog>,
 ) {
-    let aspect = area.map_or(4.0 / 3.0, |a| a.aspect());
+    let aspect = area.as_ref().map_or(4.0 / 3.0, |a| a.aspect());
     let across = fit::across_for(aspect, menus.widest);
     if (across - menus.across).abs() > 1e-4 {
         menus.across = across;
         menus.dirty = true;
+    }
+    // Stretched pictures' corners are drawn one texel to one screen pixel
+    // (as the original does), so the quads depend on the menu's height in
+    // pixels: the whole picture's height, or on a screen narrower than
+    // 4:3, the height of the centred 4:3 area.
+    if let Some(a) = area.as_ref() {
+        let high = (a.size.y as f32).min(a.size.x as f32 * 0.75);
+        if (high - quads::pixels_high()).abs() > 0.5 {
+            quads::set_pixels_high(high);
+            menus.dirty = true;
+        }
     }
     let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
     let Some(shown) = shown else {

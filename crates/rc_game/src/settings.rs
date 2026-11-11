@@ -46,6 +46,12 @@ pub struct GameSection {
     /// anti-armour posts. Off, the order is refused until you recall the
     /// squad. On by default, as in the original's `User.ini`.
     pub auto_pull_maneuvers: bool,
+    /// Hint screens show (the original's `bKeepHintMenusAwfulHack` in
+    /// `User.ini`, true there by default). Turning hints off happens on a
+    /// hint screen, and the pause menu's ENABLE HINTS turns them back on
+    /// (it shows only while they are off, in a level that has hints). The
+    /// hint screens themselves aren't built yet.
+    pub hint_screens: bool,
     /// TACTICAL VISOR MODE: which visor modes CYCLE VISOR MODE (X) steps
     /// through (see rc_visor).
     pub tactical_visor: TacticalVisor,
@@ -277,6 +283,7 @@ impl Default for Settings {
                 prompt_text: true,
                 helmet: true,
                 auto_pull_maneuvers: true,
+                hint_screens: true,
                 tactical_visor: TacticalVisor::Cycle,
                 tactical_intensity: 0.2,
             },
