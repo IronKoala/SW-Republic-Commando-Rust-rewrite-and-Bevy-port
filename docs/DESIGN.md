@@ -3490,6 +3490,16 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   (`rc_menus::layout::MovieWidget`) and keeps a Bevy image on the frame
   for the real time since it started; `original_menu::draw` places it
   under the menu, cut to the screen's shape by `MenuVideo::crop`.
+  Decoding is on the CPU: about 5 ms a 512x512 frame in a release build,
+  so 30 frames a second cost little. Two guards keep a slow computer from
+  dragging the game down: the decoder and the oxideav crates are built
+  optimised even in debug builds (`[profile.dev.package.*]` in the root
+  `Cargo.toml`; unoptimised they took about 70 ms a frame), and `play`
+  decodes at most `MAX_DECODES_PER_UPDATE` frames per game frame. When
+  the clock is further ahead, the video's start moves later, so it shows
+  every picture in order but runs late, instead of each game frame
+  decoding more catch-up frames than the last (logged once,
+  `MenuVideo::frames_late` counts them).
 - `rc_menus::pages` handles the pages behind the main menu (pause,
   campaign, options) as data. `data/ui/original_menus.toml` names each
   page's menu class and maps each button's function name (the original's
