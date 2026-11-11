@@ -4,13 +4,22 @@
 //! the game can be compared with a picture made straight from the
 //! original's textures.
 //!
-//! Units: the menu area is 0..1 across and 0..1 down. The original lays
-//! menus out for a 640x480 screen: a picture drawn at scale 1 covers as
-//! many of those 640x480 pixels as it has texels, and fonts work the same
-//! way. We checked that base size against the main menu: each planet
-//! (64 or 128 texels) sits inside its ring, which is sized as a fraction of
-//! the screen; at 640x480 every planet fits its ring with a small margin,
-//! at 1024x768 the Kamino ring would be twice the planet's size.
+//! Units: the menu area is 0..1 across and 0..1 down. The original sizes
+//! pictures and letters for an 800x600 screen: a picture drawn at scale 1
+//! covers as many of those 800x600 pixels as it has texels, and fonts work
+//! the same way. That base comes from the original's own code: when a menu
+//! is drawn, XInterface.dll sets the menu's ResScaleX to the screen width
+//! times 1/800 and ResScaleY to the screen height times 1/600 (the two
+//! numbers are stored in the DLL). An earlier guess of 640x480, made by
+//! fitting planets into their rings, drew every letter and picture a
+//! quarter too big; the user's side-by-side screenshots of the original at
+//! 1600x1200 (2026-11-11) match 800x600: "OPTIONS", the menu buttons'
+//! letters and the main menu's planets are all 0.8 times the old size.
+//!
+//! On a wider screen the original stretches ResScaleX (up to 1.5 times
+//! ResScaleY). This port keeps letters and pictures their 4:3 size and
+//! spreads the menu out instead (`fit.rs`), so both directions use the
+//! height.
 //!
 //! How each `EMenuScaleMode` sizes a picture is native code in the
 //! original, so it is our reading of the enum's own comments:
@@ -19,16 +28,41 @@
 //! - Stretch / FitStretch: the same sizes, but the picture is cut into a
 //!   3x3 grid; the corners keep their size and the middle row and column
 //!   stretch ("split texture and fill in gaps with stretched blocks of the
-//!   middle texels").
+//!   middle texels"). How big the corners are is the original's own code
+//!   (XInterface.dll, AMenuBase::DrawMenuSpriteStretched): each corner is
+//!   half the picture's texels, drawn one texel to one screen pixel at any
+//!   screen size (not scaled like the rest of the menu), and no more than
+//!   half the box. So `set_pixels_high` must be told how many pixels high
+//!   the menu's 4:3 area is.
 
 use crate::layout::{
     pivot_fraction, Kind, MenuLayout, Sprite, Text, MSCM_FIT, MSCM_FIT_STRETCH, MSCM_STRETCH,
 };
 use crate::library::FontData;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-/// The screen size the original's menu numbers are written for.
-pub const BASE_WIDTH: f32 = 640.0;
-pub const BASE_HEIGHT: f32 = 480.0;
+/// The screen size the original sizes menu pictures and letters for
+/// (XInterface.dll: ResScaleX = width / 800, ResScaleY = height / 600).
+pub const BASE_WIDTH: f32 = 800.0;
+pub const BASE_HEIGHT: f32 = 600.0;
+
+/// How many screen pixels high the menu's 4:3 area is (see
+/// `set_pixels_high`). Starts at the base height, where a texel is one
+/// base pixel either way.
+static PIXELS_HIGH: AtomicU32 = AtomicU32::new(0x4416_0000); // 600.0
+
+/// Tell the quad builder how many screen pixels high the menu's 4:3 area
+/// is, so stretched pictures' corners come out one texel to one pixel, as
+/// in the original. Menus built before a change keep their old corners.
+pub fn set_pixels_high(pixels: f32) {
+    if pixels.is_finite() && pixels >= 1.0 {
+        PIXELS_HIGH.store(pixels.to_bits(), Ordering::Relaxed);
+    }
+}
+
+pub fn pixels_high() -> f32 {
+    f32::from_bits(PIXELS_HIGH.load(Ordering::Relaxed))
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quad {
@@ -129,11 +163,13 @@ fn sprite_quads(s: &Sprite, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Q
         out.push(quad(src, dst));
         return;
     }
-    // Nine pieces. Corners are half the picture, at the original's pixel
-    // size, shrunk when the box is too small to hold two of them.
+    // Nine pieces. Corners are half the picture, one texel to one screen
+    // pixel (the original's DrawMenuSpriteStretched), shrunk when the box
+    // is too small to hold two of them.
     let (cw, ch) = ((src[2] - src[0]) / 2.0, (src[3] - src[1]) / 2.0);
-    let corner_w = (cw / BASE_WIDTH).min((dst[2] - dst[0]) / 2.0);
-    let corner_h = (ch / BASE_HEIGHT).min((dst[3] - dst[1]) / 2.0);
+    let high = pixels_high();
+    let corner_w = (cw / (high * 4.0 / 3.0)).min((dst[2] - dst[0]) / 2.0);
+    let corner_h = (ch / high).min((dst[3] - dst[1]) / 2.0);
     // The middle strip is the two centre texels (whole texels: the GPU
     // path drops pieces cut through the middle of a texel).
     let sx = [src[0], src[0] + cw - 1.0, src[0] + cw + 1.0, src[2]];

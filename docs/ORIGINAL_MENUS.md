@@ -34,9 +34,15 @@ How it works:
   comments: positions interpolated down arrays, other values copied down
   arrays, a widget's `Style` filled from its template, and the
   `DefaultMenu...` blocks filling the rest, never overwriting a value that's
-  set. Then it turns the widgets into textured rectangles for a 640x480
-  menu area (checked: the planets only fit inside their rings at that
-  size). Pictures with the "stretch" scale modes are drawn in nine pieces.
+  set. Then it turns the widgets into textured rectangles for an 800x600
+  menu area: the original's `XInterface.dll` sets `ResScaleX` to the
+  screen width / 800 and `ResScaleY` to the height / 600 when it draws a
+  menu. (Until 2026-11-11 this said 640x480, a guess from the planets
+  fitting their rings; it drew everything a quarter too big, which the
+  user's screenshots of the original at 1600x1200 showed.) Pictures with
+  the "stretch" scale modes are drawn in nine pieces; each corner is half
+  the picture, one texel to one screen pixel at any screen size, as the
+  DLL's `DrawMenuSpriteStretched` does.
   Text supports `MaxSizeX` with "..." or word wrap.
 - `rc_menus::screens` has what the main menu's script does on a PC,
   rewritten by hand: the border grows by one row for QUIT, Xbox Live and

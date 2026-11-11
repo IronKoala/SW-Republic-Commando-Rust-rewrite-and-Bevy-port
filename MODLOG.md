@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Menu letters and pictures at the original's size (rc_menus, rc_game, rc_probe)
+
+- **Changed:** Menu pictures and letters are now sized for an 800x600 screen instead of 640x480 (`rc_menus::quads` BASE_WIDTH/BASE_HEIGHT), so everything is 0.8 times its old size. Stretched pictures' corners (frames, button bar ends) are drawn one texel to one screen pixel; the game tells the quad builder the menu's height in pixels (`quads::set_pixels_high`, set in `original_menu::draw`). `rc_probe --menu` can paint at another height with `RC_PROBE_MENU_HIGH` (e.g. 1200, to compare with a screenshot).
+- **Why:** User's side-by-side screenshots: logo cut off at the left, OPTIONS title running into the box, frames too heavy, letters too big. The original's `XInterface.dll` sets ResScaleX = width x 1/800 and ResScaleY = height x 1/600 (both numbers are in the DLL), and its `DrawMenuSpriteStretched` makes each corner half the picture's texels at one texel per pixel. The old 640x480 was a guess from planets fitting their rings.
+- **Tested how:** `rc_probe --menu` at 1200 pixels high next to the user's 1600x1200 shots of the original (options and main menu); `cargo test -p rc_menus`, `cargo test -p rc_game --bin rc_game original_menu`; `rc_game --script` in the cloud with the menu files only.
+- **Result:** Title, tabs, rows, frame corners, bar ends, planets and logo line up with the original to a pixel or two. Script: every menu check passes (main menu matches its software picture: mean difference 3.3/255; campaign page 4.4/255); level checks fail only because no maps were staged.
+- **Still broken / not tested:** Not tested on Windows. Pause and options pages not run through the GPU in the cloud this time (same drawing code). The original stretches menus sideways on wide screens; we keep the 4:3 size and spread them out, as before. Background video, pause menu rows, options values and PROFILES/EXTRAS are separate jobs.
+
 ## 2026-11-11: Bacta use panel ring and icon read from the original's engine code (rc_game, rc_game_core, data/ui/hud.toml)
 
 - **Changed:** The ring now lights in twelve steps, piece by piece of a 4 by 4 grid of the `HUD_EventTimer` picture, over a faint whole ring, as the original's `Engine.dll` (`UHelmet::DrawTimerRing`) draws it; colour (200,240,255), faint part at 92/255. The icon is now from `LargeVisorIcons` (40-pixel squares, 3 by 10 grid, drawn 40x40) and its colour follows your health from red-pink to green (255-115v, 140+115v, 180, opacity 240). Prompt colour (164,200,208) at opacity 220 (`DrawActivateText`). `UsePanel::Icon` now carries the value. `[use_panel]` keys changed: `ring_alpha`, `ring_alpha_unlit`, `icon_grid`, `icon_colour_empty`, `icon_colour_full`, `icon_alpha`.

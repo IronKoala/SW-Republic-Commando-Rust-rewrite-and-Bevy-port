@@ -135,6 +135,15 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
         log.line(format!("  [{shown}] pass {} {}: {line}", w.pass, w.name));
     }
     let focus = focus.or_else(|| layout.buttons_on_pc().first().copied());
+    // Painted 480 pixels high, or RC_PROBE_MENU_HIGH (to compare with a
+    // screenshot of the original). Stretched pictures' corners are one
+    // texel to one pixel, so the quads depend on it.
+    let high: usize = std::env::var("RC_PROBE_MENU_HIGH")
+        .ok()
+        .and_then(|h| h.parse().ok())
+        .filter(|&h| h >= 120)
+        .unwrap_or(480);
+    quads::set_pixels_high(high as f32);
     let quads = quads::menu_quads(&layout, focus, &mut assets);
     log.line(format!("{} quads to draw", quads.len()));
     for q in &quads {
@@ -164,7 +173,7 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             }
         }
     }
-    let picture = render::render(&quads, &mut assets, 640, 480, [0, 0, 0, 255]);
+    let picture = render::render(&quads, &mut assets, high * 4 / 3, high, [0, 0, 0, 255]);
     let name = class.rsplit('.').next().unwrap_or(class);
     let _ = std::fs::create_dir_all(out_dir);
     let path = out_dir.join(format!("{name}.png"));
@@ -185,7 +194,7 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             quad.dst[0] = (quad.dst[0] - left) / screen;
             quad.dst[2] = (quad.dst[2] - left) / screen;
         }
-        let picture = render::render(&q, &mut assets, (480.0 * aspect).round() as usize, 480, [0, 0, 0, 255]);
+        let picture = render::render(&q, &mut assets, (high as f32 * aspect).round() as usize, high, [0, 0, 0, 255]);
         let path = out_dir.join(format!("{name}_{shape}.png"));
         let _ = std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f));
         log.line(format!(

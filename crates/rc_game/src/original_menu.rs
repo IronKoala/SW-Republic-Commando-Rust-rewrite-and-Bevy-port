@@ -1708,11 +1708,22 @@ fn draw(
     area: Option<Res<crate::display::PlayArea>>,
     log: Res<GameLog>,
 ) {
-    let aspect = area.map_or(4.0 / 3.0, |a| a.aspect());
+    let aspect = area.as_ref().map_or(4.0 / 3.0, |a| a.aspect());
     let across = fit::across_for(aspect, menus.widest);
     if (across - menus.across).abs() > 1e-4 {
         menus.across = across;
         menus.dirty = true;
+    }
+    // Stretched pictures' corners are drawn one texel to one screen pixel
+    // (as the original does), so the quads depend on the menu's height in
+    // pixels: the whole picture's height, or on a screen narrower than
+    // 4:3, the height of the centred 4:3 area.
+    if let Some(a) = area.as_ref() {
+        let high = (a.size.y as f32).min(a.size.x as f32 * 0.75);
+        if (high - quads::pixels_high()).abs() > 0.5 {
+            quads::set_pixels_high(high);
+            menus.dirty = true;
+        }
     }
     let shown = menus.shown(state.get(), play.as_deref().map(|p| p.get()), &menu);
     let Some(shown) = shown else {
