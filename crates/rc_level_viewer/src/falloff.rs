@@ -221,6 +221,14 @@ pub mod view {
             layout: &MeshVertexBufferLayoutRef,
             _key: MaterialPipelineKey<Self>,
         ) -> Result<(), SpecializedMeshPipelineError> {
+            // The depth-only drawing (shadow maps, any prepass) uses Bevy's
+            // own vertex shader, which wants the mesh's own layout (colours
+            // at place 7, not 3), as for the bump-mapped props
+            // (`crate::bump`). Changing it there made rc_game quit with a
+            // graphics error as soon as geo_01a started.
+            if descriptor.label.as_deref() == Some(crate::bump::PREPASS_LABEL) {
+                return Ok(());
+            }
             let vertex_layout = layout.0.get_layout(&[
                 Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
                 Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
