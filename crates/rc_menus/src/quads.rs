@@ -78,6 +78,20 @@ pub fn menu_quads(layout: &MenuLayout, focused: Option<usize>, sizes: &mut dyn S
     out
 }
 
+/// The box (x0, y0, x1, y1 in 0..1 of the menu area) of a widget sized
+/// by `MSCM_Fit`, which needs no picture size: its scale is its size.
+/// `None` for the other scale modes.
+pub fn fit_box(s: &Sprite) -> Option<[f32; 4]> {
+    if s.scale_mode != MSCM_FIT {
+        return None;
+    }
+    let (w, h) = (s.scale[0], s.scale[1]);
+    let (px, py) = pivot_fraction(s.pivot);
+    let x0 = s.pos[0] - w * px;
+    let y0 = s.pos[1] - h * py;
+    Some([x0, y0, x0 + w, y0 + h])
+}
+
 /// The box a sprite covers, without drawing it (used for mouse areas).
 pub fn sprite_box(s: &Sprite, sizes: &mut dyn Sizes) -> Option<[f32; 4]> {
     let path = s.texture.as_ref()?;

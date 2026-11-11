@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The menus' moving background video, played from the original file (rc_video, rc_game, rc_menus)
+
+- **Changed:** New crate `rc_video` reads AVI files and decodes Microsoft MPEG-4 v2 (`MP42`) pictures, built on the MIT-licensed `oxideav-msmpeg4` with four fixes of ours (picture header, macroblock codes, slices, AC prediction). New tool `rc_video_check`. `rc_game` plays `GameData/Movies/menu_bg.avi` behind the original menus that name it (main menu, options, campaign, load), looping at its own 29.97 frames a second and darkened to 192/255 like the original's `BackgroundMovie` widget; not in the pause menu. `rc_menus` now reads the `BackgroundMovie` widget (`MovieWidget`) and has `render_over` and `quads::fit_box`. New script check "the main menu's background video plays"; the menu picture checks now paint over the same video frame.
+- **Why:** User sent 9 side-by-side screenshots of the original and the port; the port's menus had a black background where the original shows this video.
+- **Tested how:** `rc_video_check menu_bg.avi --compare` against ffmpeg's decode of all 475 frames; `cargo test -p rc_video -p rc_menus -p rc_game`; `rc_game --script` in the cloud with the game's menu files and video.
+- **Result:** 95.86% of decoded numbers equal ffmpeg's, largest difference 4 of 255, average 0.04, no drift over the loop; about 3 to 4 ms a frame. Script: the original main menu, the video (20 frames shown in half a second, loops every 15.9 s) and the menu picture comparisons pass. The level checks failed in this run only because no maps were staged.
+- **Still broken / not tested:** Not tested on Windows. In-mission menus don't draw the original's dark layer in place of the video yet. On non-4:3 screens the video's top and bottom (or sides) are cut off; that's our choice, the original only drew 4:3. Needs Rust 1.95 or newer.
+
 ## 2026-11-11: Bacta use panel ring and icon read from the original's engine code (rc_game, rc_game_core, data/ui/hud.toml)
 
 - **Changed:** The ring now lights in twelve steps, piece by piece of a 4 by 4 grid of the `HUD_EventTimer` picture, over a faint whole ring, as the original's `Engine.dll` (`UHelmet::DrawTimerRing`) draws it; colour (200,240,255), faint part at 92/255. The icon is now from `LargeVisorIcons` (40-pixel squares, 3 by 10 grid, drawn 40x40) and its colour follows your health from red-pink to green (255-115v, 140+115v, 180, opacity 240). Prompt colour (164,200,208) at opacity 220 (`DrawActivateText`). `UsePanel::Icon` now carries the value. `[use_panel]` keys changed: `ring_alpha`, `ring_alpha_unlit`, `icon_grid`, `icon_colour_empty`, `icon_colour_full`, `icon_alpha`.

@@ -499,6 +499,7 @@ pub fn drop_down(
         skipped: Vec::new(),
         sounds: page.sounds.clone(),
         background_movie: String::new(),
+        movie_widget: None,
         music: None,
         lists: Default::default(),
     })

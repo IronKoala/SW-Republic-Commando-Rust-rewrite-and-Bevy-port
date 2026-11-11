@@ -472,6 +472,7 @@ pub struct OriginalMenuPlugin;
 impl Plugin for OriginalMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OriginalMenus>()
+            .init_resource::<crate::menu_video::MenuVideo>()
             .add_systems(OnEnter(GameState::MainMenu), (load, reset).chain())
             .add_systems(OnEnter(Play::Paused), load)
             .add_systems(
@@ -484,6 +485,7 @@ impl Plugin for OriginalMenuPlugin {
                     drag_bars,
                     draw,
                     fit_area,
+                    crate::menu_video::play,
                 )
                     .chain()
                     .in_set(GameSet::Hud)
@@ -888,6 +890,10 @@ fn focus_new_page(
 
 #[derive(Component)]
 struct MenuArea;
+
+/// The menu's moving background picture (`menu_video.rs`).
+#[derive(Component)]
+pub struct MenuVideoPicture;
 
 #[derive(Component)]
 struct OriginalRoot;
@@ -1707,6 +1713,8 @@ fn draw(
     mut image_assets: ResMut<Assets<Image>>,
     area: Option<Res<crate::display::PlayArea>>,
     log: Res<GameLog>,
+    mut video: ResMut<crate::menu_video::MenuVideo>,
+    paths: Res<GamePaths>,
 ) {
     let aspect = area.map_or(4.0 / 3.0, |a| a.aspect());
     let across = fit::across_for(aspect, menus.widest);
@@ -1720,6 +1728,7 @@ fn draw(
             commands.entity(r).despawn();
         }
         menus.dirty = true;
+        video.wanted = false;
         return;
     };
     if !menus.dirty && !roots.is_empty() {
@@ -1892,6 +1901,32 @@ fn draw(
             ));
         }
     }
+    // The moving background the bottom screen names (its
+    // `BackgroundMovieName`, drawn by its `BackgroundMovie` widget), under
+    // everything. The original plays it only on the front end, never in a
+    // mission (`MenuBase.Init`), see `menu_video.rs`.
+    let bottom = &fitted[0].1;
+    let movie = match &bottom.movie_widget {
+        Some(w) if !w.hidden && *state.get() == GameState::MainMenu => {
+            let box_ = rc_menus::quads::fit_box(&w.sprite);
+            if box_ == Some([0.0, 0.0, 1.0, 1.0]) {
+                Some((bottom.background_movie.clone(), w.sprite.color))
+            } else {
+                if !menus.fit_logged.iter().any(|(p, _)| p == "movie") {
+                    menus.fit_logged.push(("movie".into(), 0));
+                    log.line(format!(
+                        "original menus: {page_name}: background video box {box_:?} is not the whole screen; not drawn (only the whole-screen case is known)"
+                    ));
+                }
+                None
+            }
+        }
+        _ => None,
+    };
+    let movie_image = movie
+        .and_then(|(name, color)| video.picture_for(&name, color, &paths, &mut image_assets, &log));
+    let movie_crop = movie_image.as_ref().and_then(|_| video.crop(aspect));
+    video.wanted = movie_image.is_some();
     menus.drawn = list.iter().flat_map(|l| l.1.clone()).collect();
     for q in &menus.drawn {
         let key = (
@@ -1932,6 +1967,26 @@ fn draw(
             GlobalZIndex(10),
         ))
         .with_children(|root| {
+            if let Some(image) = &movie_image {
+                // Fills the play area, under the menu pictures.
+                root.spawn((
+                    MenuVideoPicture,
+                    ImageNode {
+                        image: image.clone(),
+                        rect: movie_crop,
+                        image_mode: NodeImageMode::Stretch,
+                        ..default()
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                ));
+            }
             root.spawn((
                 MenuArea,
                 Node {
@@ -2121,10 +2176,14 @@ fn fit_area(
 
 /// Paint what the menu shows without the GPU, at `width` x `height`, from
 /// the original's own pictures (for the script's colour check).
+///
+/// `background` is what is under the menu pictures: the background
+/// video's current frame (already cut and sized), or black.
 pub fn software_picture(
     menus: &mut OriginalMenus,
     width: usize,
     height: usize,
+    background: Option<rc_image::Rgba>,
 ) -> Option<rc_image::Rgba> {
     let quads = menus.drawn.clone();
     let assets = menus.assets.as_mut()?;
@@ -2132,13 +2191,15 @@ pub fn software_picture(
     for q in &quads {
         assets.texture_size(&q.texture);
     }
-    Some(rc_menus::render::render(
-        &quads,
-        assets,
-        width,
-        height,
-        [0, 0, 0, 255],
-    ))
+    let base = match background {
+        Some(b) if b.width == width && b.height == height => b,
+        _ => rc_image::Rgba {
+            width,
+            height,
+            pixels: [0, 0, 0, 255].repeat(width * height),
+        },
+    };
+    Some(rc_menus::render::render_over(&quads, assets, base))
 }
 
 #[cfg(test)]
