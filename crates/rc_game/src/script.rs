@@ -279,10 +279,11 @@ fn steps() -> Vec<Step> {
                     }
                 }
                 Some(p) if v.wanted && v.frames_shown >= 3 => Ok(format!(
-                    "{movie:?}: {} frames shown, now frame {:?} of {}",
+                    "{movie:?}: {} frames shown, now frame {:?} of {}, {} frames let go late",
                     v.frames_shown,
                     v.last_frame,
-                    p.frame_count()
+                    p.frame_count(),
+                    v.frames_late
                 )),
                 Some(_) => Err(format!(
                     "{movie:?}: only {} frames shown (drawn: {})",

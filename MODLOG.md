@@ -12,6 +12,38 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** 136 checks passed, 4 failed (the 4 are the level lines and objective text timing out, which happens because the cloud game runs slowly; not related). Check "the gun went down, the hands plugged into the dispenser ... then the gun came back up" PASS: `dc17m_blaster Holster`, `hands:bacta BactaLoad`, `BactaLoop`, `BactaHolster`, `dc17m_blaster Load`. Finding: in the shipped hudarms.ukx the three bacta moves are 3-frame (0.1 s) poses with every point of the hands below and behind the eye, out of view (the keypad and squad-order moves in the same set do come into view). So on screen the gun goes down, no hands show, and the gun comes back. No visible arm-plugging animation exists in the game's files.
 - **Still broken / not tested:** Not tested on Windows or by playing. The hands' brightness numbers are copied from the DC-17m arms (not from the game). The test ran with a local, uncommitted fix for the god-ray shader crash on main (fixed separately in PR #112).
 - **Next:** The heal speed: ctgame.u's `BactaDispenser.BeginActivating` heals `MaxHealth / BactaRate` per second (BactaRate 4: a full heal takes 4 s); ours is 50 health a second from `scripts.toml`. Separate change.
+## 2026-11-11: The bacta dispenser's prompt fades in as in the original (rc_menus, rc_game, data/ui/hud.toml)
+
+- **Changed:** "PRESS AND HOLD 'F' TO HEAL" now fades in instead of popping up: opacity from 0 to 220 in a straight line over 0.5 s, starting again each time the prompt comes back or its words change. New fade name `prompt` for HUD elements (`HudValues::prompt_fade`, `LayoutSettings::prompt_faded_in`); the two prompt elements in `hud.toml` use it and are drawn see-through. The game log notes when the prompt starts fading in and when it is fully shown.
+- **Why:** Follow-up from the bacta dispenser work (PR #96): the original fades the prompt in, ours didn't.
+- **Tested how:** Read from the original's Engine.dll (`UHelmet::DrawActivateText` and the call in `DrawTextInfo`, disassembled in the cloud scratch folder, nothing committed) and `rc_probe --classes Engine.u Helmet` (`PromptFadeInTime = 0.5`); new test `the_use_prompt_fades_in_like_the_original` in `cargo test -p rc_menus`.
+- **Result:** rc_menus tests pass (47) and rc_game program tests pass (67); clippy shows nothing new. The numbers match the original's formula: 0 at the start, 44 at 0.1 s, 110 at 0.25 s, 220 from 0.5 s.
+- **Still broken / not tested:** Not tested on Windows, and not seen in a game run (the cloud game runs at about 1 frame a second). The see-through drawing is taken from the advisor's words, which the original draws with the same text call. Found but not done: at full health the original swaps the dispenser's prompt for another of the helmet's texts (most likely `FullHealthText`, "YOU ARE AT FULL HEALTH", but which text it is was not confirmed); not checked what the port shows then.
+- **Next:** User check on Windows.
+
+## 2026-11-11: The menu background video no longer slows the game to a crawl (rc_video build settings, rc_game)
+
+- **Changed:** The video decoder (`rc_video`) and the oxideav crates it uses are built optimised in debug builds too (root `Cargo.toml`, `[profile.dev.package.*]`). `menu_video::play` decodes at most 3 frames per game frame (`MAX_DECODES_PER_UPDATE`); when it is further behind, the video runs late instead (logged once, counted in `MenuVideo::frames_late`, shown in the script's video check).
+- **Why:** The cloud's `rc_game --script` run fell from about 5 frames a second to under 1 after the menu video (#102) merged. A debug build decoded one 512x512 frame in about 70 ms, so it could never keep up with 30 a second, and `play` decoded every missed frame to catch up, so each game frame took longer than the last (gdb showed the time inside `rc_video::msmpeg4v2` called from `menu_video::play`, catching up to frame 401).
+- **Tested how:** `rc_video_check menu_bg.avi` before and after; `cargo test -p rc_game --bins menu_video` (new `a_slow_computer_lets_the_video_run_late_instead_of_catching_up`); `rc_game --script` in the cloud with the game's files.
+- **Result:** Debug decode 69.6 ms a frame before, 7.6 ms after; release 4.8 ms (unchanged). Main menu in the cloud script: under 1 frame a second (frames up to 55 s long) before, 6 to 11 frames a second after.
+- **Still broken / not tested:** Not tested on Windows. The user's PC runs a release build, which already decoded fast enough, so it should see no change. Inside geo_01a the cloud run is still slow (about 1 frame a second); that is the software renderer drawing the new default graphics settings and other new effects, looked at separately.
+
+## 2026-11-11: Fix the crash on geo_01a's load with BLUR EFFECTS on (rc_level_viewer)
+
+- **Changed:** `FalloffMaterial` (the light shafts and god rays from the game's falloff shader) no longer takes part in Bevy's depth/motion prepass or in shadows (`enable_prepass` and `enable_shadows` return false, as `rc_visor` and `rc_shadows` already do).
+- **Why:** With BLUR EFFECTS on (the default since the GRAPHICS page change), motion blur turns on a prepass. Bevy's prepass pipeline for this material took the vertex layout set in `specialize`, which has no slot for the colours the prepass shader reads, so the graphics card refused it and the game quit as geo_01a loaded: `graphics error (Validation) ... 'prepass_pipeline' ... Location[7] Float32x4 ... not provided by the previous stage`.
+- **Tested how:** `rc_game --script` in the cloud with the game's files, before (main at 5edb977) and after.
+- **Result:** Before: the run quit at 32.9 s with the error above, as geo_01a finished loading. After: geo_01a loaded and the script played on in the level for 2.5 minutes with no graphics error (the run was then stopped; its slowness is a separate fix).
+- **Still broken / not tested:** Not tested on Windows. The shafts are added light, so leaving them out of the prepass and shadows changes nothing on screen (motion blur doesn't smear them; it didn't before either, since the game quit).
+
+## 2026-11-11: Clone troopers and other cast lit by where they stand (rc_cast, data/cast/cast.toml)
+
+- **Changed:** Characters and props the cast part draws (troopers standing about in missions, cutscene characters) now take the level's light where they stand (`rc_game_core::LitByPlace`), as the squad and droids already do, instead of one fixed brightness. New setting `light_scale` in `data/cast/cast.toml` (1.1, the squad's and droids' value, which was matched to two original screenshots). Holograms keep their own glow.
+- **Why:** User's side-by-side screenshots of geo_01a: the port's clone troopers were plain bright white wherever they stood.
+- **Tested how:** `rc_game --script` in the cloud with geo_01a; the bacta dispenser picture (two troopers) before and after.
+- **Result:** 137 passed, 0 failed. The trooper standing in shade is now dark and the one in light stays light.
+- **Still broken / not tested:** Not tested on Windows or by playing. Troopers hold no rifles yet (no character in the port draws a held weapon yet); that and their fighting the droids are next. Not compared with the original from the same spot.
 
 ## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
 
