@@ -12,6 +12,22 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not tested on Windows, and not seen in a game run (the cloud game runs at about 1 frame a second). The see-through drawing is taken from the advisor's words, which the original draws with the same text call. Found but not done: at full health the original swaps the dispenser's prompt for another of the helmet's texts (most likely `FullHealthText`, "YOU ARE AT FULL HEALTH", but which text it is was not confirmed); not checked what the port shows then.
 - **Next:** User check on Windows.
 
+## 2026-11-11: Fix the crash on geo_01a's load with BLUR EFFECTS on (rc_level_viewer)
+
+- **Changed:** `FalloffMaterial` (the light shafts and god rays from the game's falloff shader) no longer takes part in Bevy's depth/motion prepass or in shadows (`enable_prepass` and `enable_shadows` return false, as `rc_visor` and `rc_shadows` already do).
+- **Why:** With BLUR EFFECTS on (the default since the GRAPHICS page change), motion blur turns on a prepass. Bevy's prepass pipeline for this material took the vertex layout set in `specialize`, which has no slot for the colours the prepass shader reads, so the graphics card refused it and the game quit as geo_01a loaded: `graphics error (Validation) ... 'prepass_pipeline' ... Location[7] Float32x4 ... not provided by the previous stage`.
+- **Tested how:** `rc_game --script` in the cloud with the game's files, before (main at 5edb977) and after.
+- **Result:** Before: the run quit at 32.9 s with the error above, as geo_01a finished loading. After: geo_01a loaded and the script played on in the level for 2.5 minutes with no graphics error (the run was then stopped; its slowness is a separate fix).
+- **Still broken / not tested:** Not tested on Windows. The shafts are added light, so leaving them out of the prepass and shadows changes nothing on screen (motion blur doesn't smear them; it didn't before either, since the game quit).
+
+## 2026-11-11: Clone troopers and other cast lit by where they stand (rc_cast, data/cast/cast.toml)
+
+- **Changed:** Characters and props the cast part draws (troopers standing about in missions, cutscene characters) now take the level's light where they stand (`rc_game_core::LitByPlace`), as the squad and droids already do, instead of one fixed brightness. New setting `light_scale` in `data/cast/cast.toml` (1.1, the squad's and droids' value, which was matched to two original screenshots). Holograms keep their own glow.
+- **Why:** User's side-by-side screenshots of geo_01a: the port's clone troopers were plain bright white wherever they stood.
+- **Tested how:** `rc_game --script` in the cloud with geo_01a; the bacta dispenser picture (two troopers) before and after.
+- **Result:** 137 passed, 0 failed. The trooper standing in shade is now dark and the one in light stays light.
+- **Still broken / not tested:** Not tested on Windows or by playing. Troopers hold no rifles yet (no character in the port draws a held weapon yet); that and their fighting the droids are next. Not compared with the original from the same spot.
+
 ## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
 
 - **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).

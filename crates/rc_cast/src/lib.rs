@@ -406,6 +406,7 @@ fn spawn_cast(
                     model.clone(),
                     m,
                     file.ambient,
+                    file.light_scale,
                     &mut e,
                     meshes,
                     materials,
@@ -456,6 +457,7 @@ fn spawn_pieces(
     model: Arc<Model>,
     m: &CastMember,
     ambient: f32,
+    light_scale: f32,
     parent: &mut EntityCommands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -552,6 +554,17 @@ fn spawn_pieces(
                 // rc_hologram swaps in the shimmering, flickering look.
                 if s.skin.as_ref().is_some_and(|k| k.hologram) {
                     piece.insert(rc_hologram::Hologram { pivot: Vec3::ZERO });
+                } else {
+                    // Drawn by the level's light where it stands, as the
+                    // squad and the droids are (the original lights
+                    // characters by where they are, not at one level).
+                    piece.insert(rc_game_core::LitByPlace {
+                        target: rc_game_core::LightTarget::Emissive,
+                        own: 0.0,
+                        scale: light_scale,
+                        height: 1.0,
+                        made_at: a.powf(1.0 / 2.2),
+                    });
                 }
                 pieces.push((i, handle));
             }

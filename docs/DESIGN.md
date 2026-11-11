@@ -4175,7 +4175,10 @@ their `Location`; props are drawn at theirs, and so are characters whose
 class turns `bAlignBottom` off (engine.u: "Actor aligned to bottom of
 cylinder", true on `Pawn`; ctcharacters.u's `Gunship` sets it false), so
 geo_01a's landing gunship hovers from its map place over the player
-start instead of being stood on the ground.
+start instead of being stood on the ground. Cast members are drawn by
+the level's light where they stand (`rc_game_core::LitByPlace`, the
+data file's `light_scale`, 1.1 as the squad and droids), so a trooper in
+shade is dark; holograms keep their own glow.
 
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its
