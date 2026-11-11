@@ -3483,6 +3483,28 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   otherwise the placeholder page stays and every reason is logged. So a
   mod can switch a page to another class, or teach it a button, without
   code, and an unfinished page never shows half-working.
+- The GRAPHICS page follows its own script, `CTGraphicsOptionsPCMenu` in
+  `XInterfaceCTMenus.u`, read from the install. Its presets aren't in the
+  menu: it names five `System.ini` sections (`GraphicsQualityLowest` to
+  `GraphicsQualityHighest`), and `rc_game/src/graphics_presets.rs` reads
+  them at start from `GameData/System/System.ini` with
+  `GameData/Save/System.ini` on top (only its lines that aren't commented
+  out), plus `[VideoSettings] DefaultConfig`, the preset SET RECOMMENDED
+  uses. GRAPHICS QUALITY isn't stored: as the original's
+  `MatchSettingsToPreset`, it shows the first preset every row matches, or
+  CUSTOM. The arrows never stop on CUSTOM (GRAPHICS QUALITY goes to
+  LOWEST; TEXTURE QUALITY to HIGHEST going left, LOWEST going right).
+  PROJECTORS off turns SQUAD SHADOWS off and greys it out; VSYNC off sets
+  FSAA to NONE and greys it out (`option_settings::row_enabled`,
+  `screens::disable_row` / `enable_row`). BRIGHTNESS is the original's
+  `Gamma`: row = int((Gamma - 0.5) / 2 x 10 + 0.5), set as row / 10 x 2 + 0.5
+  (`Engine.dll`); its screen curve is x ^ (1 / Gamma) (`D3DDrv.dll`), which
+  the port matches at mid grey with Bevy's exposure on the 3D view. FSAA's
+  list is NONE plus the sample counts the graphics card supports for
+  every format the cameras use. Presets leave the screen size alone
+  (`PRESETS_SET_SCREEN_SIZE`), since the original's hold only 4:3 sizes up
+  to 1024x768. The page opens with nothing lit, as in the user's
+  screenshots of the original.
 - The options pages (GAME, SOUND, GRAPHICS, CONTROLS) are original too.
   `rc_menus::layout` draws the original's choosers (`MenuButtonEnum`: a
   row with a list of values and arrows) and its picture buttons

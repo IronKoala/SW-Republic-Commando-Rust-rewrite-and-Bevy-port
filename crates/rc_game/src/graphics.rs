@@ -19,18 +19,59 @@ use bevy::post_process::bloom::Bloom;
 use bevy::post_process::motion_blur::MotionBlur;
 use bevy::prelude::*;
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, Msaa};
-use rc_game_core::{GameLog, PlayerCamera};
+use rc_game_core::{GameLog, GamePaths, PlayerCamera};
 use rc_package::texture::{set_skip_mips, Detail};
 
 pub struct GraphicsOptionsPlugin;
 
 impl Plugin for GraphicsOptionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (apply_detail, apply_to_cameras, apply_shadows, squad_blobs),
-        )
-        .add_observer(match_new_camera);
+        app.add_systems(Startup, load_presets)
+            .add_systems(
+                Update,
+                (
+                    find_fsaa_levels,
+                    apply_detail,
+                    apply_to_cameras,
+                    apply_shadows,
+                    squad_blobs,
+                ),
+            )
+            .add_observer(match_new_camera);
+    }
+}
+
+/// Read the GRAPHICS QUALITY presets from the install's `System.ini`
+/// (`graphics_presets.rs`) and say in the log what they are.
+fn load_presets(paths: Option<Res<GamePaths>>, log: Res<GameLog>) {
+    let Some(paths) = paths else {
+        return;
+    };
+    let shipped = paths.game_file("GameData/System/System.ini");
+    let own = paths.game_file("GameData/Save/System.ini");
+    match crate::graphics_presets::Presets::from_install(&shipped, &own) {
+        Ok(p) => {
+            for (i, x) in p.list.iter().enumerate() {
+                log.line(format!(
+                    "graphics: preset {i} {}: textures {:?}, DropLODBy {}, shadows {}, bump {}, blur {}, bloom {}, projectors {}, FSAA {}, size {}x{}",
+                    x.key, x.textures, x.drop_lod_by, x.shadows, x.bump, x.blur, x.bloom, x.projectors, x.fsaa, x.windowed.0, x.windowed.1
+                ));
+            }
+            if p.list.is_empty() {
+                log.line("graphics: the install's System.ini has no GRAPHICS QUALITY presets; the row will show CUSTOM");
+            }
+            log.line(format!(
+                "graphics: SET RECOMMENDED uses {:?}{}",
+                p.recommended,
+                if p.recommended().is_some() {
+                    ""
+                } else {
+                    " (no such preset: SET RECOMMENDED does nothing)"
+                }
+            ));
+            crate::graphics_presets::set(p);
+        }
+        Err(e) => log.line(format!("graphics: no GRAPHICS QUALITY presets: {e}")),
     }
 }
 
@@ -38,7 +79,7 @@ impl Plugin for GraphicsOptionsPlugin {
 /// change.
 #[derive(Clone, PartialEq, Debug)]
 struct Look {
-    brightness: f32,
+    gamma: f32,
     blur: bool,
     bloom: bool,
     fsaa: u32,
@@ -47,38 +88,103 @@ struct Look {
 impl Look {
     fn of(v: &VideoSection) -> Look {
         Look {
-            brightness: v.brightness,
+            gamma: v.gamma,
             blur: v.blur,
-            bloom: v.bloom,
+            bloom: v.bloom_quality > 0,
             fsaa: v.fsaa,
         }
     }
 }
 
 /// How many mipmap steps (halvings) to skip for a detail setting of 0
-/// (lowest) to 1 (full detail): 2, 1 or 0.
+/// (lowest) to 1 (full detail): 2, 1 or 0. The port's own sizes: what the
+/// original's names (Lower, Normal, High, UltraHigh) do to each picture is
+/// inside its engine, not in its files.
 pub fn skipped_halvings(detail: f32) -> u8 {
     ((1.0 - detail.clamp(0.0, 1.0)) * 2.0).round() as u8
 }
 
 /// BRIGHTNESS as an exposure change on the 3D view, in stops (each stop
-/// doubles or halves the light): 0.5 changes nothing, 0 is one stop
-/// darker, 1 one stop brighter. Our own range, not measured against the
-/// original. (A gamma curve would only work with bloom on: Bevy grades
-/// colours as it draws only by exposure.)
-pub fn brightness_stops(brightness: f32) -> f32 {
-    (brightness.clamp(0.0, 1.0) - 0.5) * 2.0
+/// doubles or halves the light), for the original's Gamma (1.0 changes
+/// nothing).
+///
+/// The original sets the screen's gamma ramp: each output level x (0 to 1)
+/// becomes x ^ (1 / Gamma) (its D3DDrv.dll, UpdateGamma). Bevy can't bend
+/// the whole screen like that yet, so this is the exposure that gives a
+/// middle grey (output level 0.5) the same brightness as the original's
+/// curve does. Darker and lighter parts differ a little from the original,
+/// and the menus and display aren't changed (the original's are).
+pub fn brightness_stops(gamma: f32) -> f32 {
+    let gamma = gamma.clamp(0.5, 2.5);
+    let lin = |x: f32| {
+        if x <= 0.04045 {
+            x / 12.92
+        } else {
+            ((x + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    (lin(0.5f32.powf(1.0 / gamma)) / lin(0.5)).log2()
 }
 
 fn msaa(samples: u32) -> Msaa {
-    match samples {
+    // Only counts the graphics card offered are in the FSAA list
+    // ([`find_fsaa_levels`]); a count it can't do (from an edited settings
+    // file, or another PC) falls back to the most it can.
+    let offered = crate::graphics_presets::fsaa_levels();
+    let best = offered
+        .iter()
+        .copied()
+        .filter(|&n| n <= samples)
+        .max()
+        .unwrap_or(1);
+    match best {
         0 | 1 => Msaa::Off,
         2 | 3 => Msaa::Sample2,
-        // 8 isn't supported by every graphics card for the wide colour
-        // range bloom needs (the cloud test's isn't), and 4 is: every card
-        // and phone can do 4.
-        _ => Msaa::Sample4,
+        4..=7 => Msaa::Sample4,
+        _ => Msaa::Sample8,
     }
+}
+
+/// The picture formats every camera may draw to: the window's, the wide
+/// colour range bloom uses, and depth.
+const DRAWN_FORMATS: [bevy::render::render_resource::TextureFormat; 4] = [
+    bevy::render::render_resource::TextureFormat::Bgra8UnormSrgb,
+    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+    bevy::render::render_resource::TextureFormat::Rgba16Float,
+    bevy::render::render_resource::TextureFormat::Depth32Float,
+];
+
+/// FSAA's list, as the original's: ask the graphics card which sample
+/// counts it can draw with (the original asks for 1 to 16; Bevy draws 2, 4
+/// or 8). Only counts every format above supports are offered.
+fn find_fsaa_levels(
+    adapter: Option<Res<bevy::render::renderer::RenderAdapter>>,
+    mut done: Local<bool>,
+    log: Res<GameLog>,
+) {
+    let Some(adapter) = adapter else {
+        return;
+    };
+    if *done {
+        return;
+    }
+    *done = true;
+    let levels: Vec<u32> = [2, 4, 8]
+        .into_iter()
+        .filter(|&n| {
+            DRAWN_FORMATS.iter().all(|&f| {
+                adapter
+                    .get_texture_format_features(f)
+                    .flags
+                    .sample_count_supported(n)
+            })
+        })
+        .collect();
+    log.line(format!(
+        "graphics: the graphics card offers FSAA {:?}",
+        levels
+    ));
+    crate::graphics_presets::set_fsaa_levels(levels);
 }
 
 /// Gives a camera the edge smoothing (and wide colour range) the others
@@ -94,7 +200,7 @@ fn match_new_camera(add: On<Add<Camera>>, settings: Option<Res<Settings>>, mut c
     };
     let mut c = commands.entity(add.entity);
     c.insert(msaa(settings.video.fsaa));
-    if settings.video.bloom {
+    if settings.video.bloom_quality > 0 {
         c.insert(Hdr);
     }
 }
@@ -133,9 +239,9 @@ fn apply_to_cameras(
     }
     if changed {
         log.line(format!(
-            "graphics: brightness {:.2} ({:+.2} stops), blur {}, bloom {}, fsaa {}x",
-            look.brightness,
-            brightness_stops(look.brightness),
+            "graphics: gamma {:.2} ({:+.2} stops), blur {}, bloom {}, fsaa {}x",
+            look.gamma,
+            brightness_stops(look.gamma),
             look.blur,
             look.bloom,
             look.fsaa.max(1)
@@ -144,7 +250,7 @@ fn apply_to_cameras(
     }
     let grading = ColorGrading {
         global: ColorGradingGlobal {
-            exposure: brightness_stops(look.brightness),
+            exposure: brightness_stops(look.gamma),
             ..default()
         },
         ..default()
@@ -301,9 +407,12 @@ fn apply_shadows(
     let on = settings.video.squad_shadows;
     // The original's "Shadows" option (this row) is what switches its
     // character shadows on and off.
+    // Those shadows are projectors in the original, so PROJECTORS off
+    // switches them off too.
     if let Some(mut c) = characters {
-        if c.on != on {
-            c.on = on;
+        let shadows = on && settings.video.projectors;
+        if c.on != shadows {
+            c.on = shadows;
         }
     }
     if *last != Some(on) {
@@ -335,11 +444,12 @@ mod tests {
     /// setting's edge smoothing straight away, not a frame later.
     #[test]
     fn a_new_camera_matches_the_others_at_once() {
+        crate::graphics_presets::set_fsaa_levels(vec![2, 4, 8]);
         for (fsaa, bloom, want) in [(1, false, Msaa::Off), (4, true, Msaa::Sample4)] {
             let mut world = World::new();
             let mut settings = Settings::default();
             settings.video.fsaa = fsaa;
-            settings.video.bloom = bloom;
+            settings.video.bloom_quality = if bloom { 2 } else { 0 };
             world.insert_resource(settings);
             world.add_observer(match_new_camera);
             let e = world.spawn(Camera::default()).id();
@@ -357,9 +467,9 @@ mod tests {
     }
 
     #[test]
-    fn middle_brightness_changes_nothing() {
-        assert_eq!(brightness_stops(0.5), 0.0);
-        assert_eq!(brightness_stops(1.0), 1.0);
-        assert_eq!(brightness_stops(0.0), -1.0);
+    fn gamma_one_changes_nothing() {
+        assert!(brightness_stops(1.0).abs() < 1e-6);
+        assert!(brightness_stops(2.5) > 1.0);
+        assert!(brightness_stops(0.5) < -1.0);
     }
 }

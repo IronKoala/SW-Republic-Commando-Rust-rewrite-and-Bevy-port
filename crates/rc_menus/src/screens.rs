@@ -107,6 +107,26 @@ pub fn disable_row(layout: &mut MenuLayout, name: &str) {
     }
 }
 
+/// Undo [`disable_row`]: give the row's widgets back their colours and
+/// let them be chosen again, from `pristine`, the page as first set up (the
+/// original's `EnableOption` puts back its styles' colours).
+pub fn enable_row(layout: &mut MenuLayout, pristine: &MenuLayout, name: &str) {
+    for i in row_widgets(layout, name) {
+        let Some(before) = pristine.widget(&layout.widgets[i].name) else {
+            continue;
+        };
+        match (&mut layout.widgets[i].kind, &before.kind) {
+            (Kind::Button(b), Kind::Button(p)) => {
+                b.disabled = p.disabled;
+                b.blurred.color = p.blurred.color;
+                b.background_blurred.color = p.background_blurred.color;
+            }
+            (Kind::Text(t), Kind::Text(p)) => t.color = p.color,
+            _ => {}
+        }
+    }
+}
+
 /// The chooser an arrow belongs to (the chooser in the same row).
 pub fn chooser_for(layout: &MenuLayout, widget: usize) -> Option<usize> {
     (0..layout.widgets.len()).find(|&c| {

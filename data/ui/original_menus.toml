@@ -218,18 +218,18 @@ OnLeft = "option_left"
 OnRight = "option_right"
 
 [pages.options_graphics.choosers]
-"Options[0]" = "graphics_quality"   # sets the rows below (CUSTOM after a change)
-"Options[1]" = "brightness"
+"Options[0]" = "graphics_quality"   # presets from the install's System.ini; CUSTOM when none matches
+"Options[1]" = "brightness"         # the original's Gamma: row / 10 * 2 + 0.5
 "Options[2]" = "video_resolution"
 "Options[3]" = "texture_detail"     # from the next level load
 "Options[4]" = "character_detail"   # from the next level load
-"Options[5]" = "unavailable"        # BUMPMAPPING QUALITY: bump maps aren't drawn yet
+"Options[5]" = "bump_quality"       # LOW, MEDIUM, HIGH
 "Options[6]" = "blur"               # motion blur
-"Options[7]" = "bloom"
-"Options[8]" = "unavailable"        # PROJECTORS: no projected decals or blob shadows yet
+"Options[7]" = "bloom"              # NONE, LOW, HIGH
+"Options[8]" = "projectors"         # off also turns SQUAD SHADOWS off and greys it out
 "Options[9]" = "squad_shadows"      # moving lights cast shadows
-"Options[10]" = "vsync"
-"Options[11]" = "fsaa"              # edge smoothing (MSAA)
+"Options[10]" = "vsync"             # off also sets FSAA to NONE and greys it out
+"Options[11]" = "fsaa"              # NONE + what the graphics card offers
 
 [pages.options_graphics.extra_buttons.PortSettings]
 copy_of = "Controls"

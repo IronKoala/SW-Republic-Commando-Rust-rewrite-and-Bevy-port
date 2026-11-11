@@ -125,11 +125,13 @@ impl Screen {
         if list.is_empty() {
             return false;
         }
-        let at = self
-            .focus
-            .and_then(|f| list.iter().position(|&b| b == f))
-            .unwrap_or(0) as i32;
-        let next = list[(at + step).rem_euclid(list.len() as i32) as usize];
+        let at = self.focus.and_then(|f| list.iter().position(|&b| b == f));
+        let next = match at {
+            Some(at) => list[(at as i32 + step).rem_euclid(list.len() as i32) as usize],
+            // Nothing focused yet: down goes to the first, up to the last.
+            None if step >= 0 => list[0],
+            None => list[list.len() - 1],
+        };
         let changed = self.focus != Some(next);
         self.focus = Some(next);
         changed
@@ -139,6 +141,9 @@ impl Screen {
 /// A page behind the main menu drawn from its original menu.
 pub struct PageScreen {
     pub screen: Screen,
+    /// The page as first set up, for putting a greyed-out row's colours
+    /// back (`screens::enable_row`).
+    pub pristine: MenuLayout,
     pub plan: PagePlan,
     pub buttons: PageButtons,
     /// The layout as first shown, for pages the original sets up afresh
@@ -588,6 +593,7 @@ fn load(
                 menus.pages.insert(
                     plan.page.clone(),
                     PageScreen {
+                        pristine: layout.clone(),
                         screen: Screen {
                             layout,
                             focus: None,
@@ -797,6 +803,19 @@ fn refresh_page(
         if let Some(at) = option_settings::read(name, settings, &b.items) {
             b.choose(at);
         }
+        // Rows another row switches off, as the original's Refresh
+        // (DisableOption / EnableOption).
+        match option_settings::row_enabled(name, settings) {
+            Some(false) => {
+                let n = p.screen.layout.widgets[*i].name.clone();
+                screens::disable_row(&mut p.screen.layout, &n);
+            }
+            Some(true) => {
+                let n = p.screen.layout.widgets[*i].name.clone();
+                screens::enable_row(&mut p.screen.layout, &p.pristine, &n);
+            }
+            None => {}
+        }
     }
     for (i, name) in &p.buttons.keys {
         let Some(action) = Action::from_name(name) else {
@@ -877,6 +896,13 @@ fn focus_new_page(
         refresh_page(p, &settings, &prompts, desktop);
         let screen = &mut p.screen;
         screen.focus = screen.buttons().first().copied();
+        // The original's GRAPHICS page opens with nothing lit (the menu's
+        // script picks nothing, and the user's screenshots of the original
+        // show only what the mouse is over); the first key press lights the
+        // first row.
+        if k == "options_graphics" {
+            screen.focus = None;
+        }
         if k == original_pause::PAUSED {
             let p = menus.pages.get_mut(k).unwrap();
             let s = pause.state(&settings);
@@ -1596,6 +1622,11 @@ fn apply_options(
                 };
                 if !b.step(step) {
                     continue;
+                }
+                // Values the original's arrows skip (CUSTOM).
+                let landed = option_settings::stepped_to(&name, b.current, step, &b.items);
+                if landed != b.current {
+                    b.choose(landed);
                 }
                 let (at, text, items) = (b.current, b.items[b.current].clone(), b.items.clone());
                 if option_settings::write(&name, &mut settings, at, &items, desktop) {
