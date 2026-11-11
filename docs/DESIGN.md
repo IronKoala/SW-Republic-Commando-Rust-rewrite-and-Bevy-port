@@ -3473,6 +3473,15 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   gives the original's sRGB result over black.
 - `rc_menus::screens` holds what each menu's script does, rewritten by
   hand (the main menu and the yes/no question so far).
+- `rc_video` (no Bevy) plays the original's AVI videos: `avi::parse`
+  finds the size, rate and frame chunks; `msmpeg4v2::Decoder` decodes
+  Microsoft MPEG-4 v2 with the oxideav crates' tables and block decoding
+  plus our own picture loop; `VideoPlayer` steps, loops and gives YUV or
+  RGBA. `rc_game::menu_video` (resource `MenuVideo`, system `play`) opens
+  the video a menu's `BackgroundMovie` widget names
+  (`rc_menus::layout::MovieWidget`) and keeps a Bevy image on the frame
+  for the real time since it started; `original_menu::draw` places it
+  under the menu, cut to the screen's shape by `MenuVideo::crop`.
 - `rc_menus::pages` handles the pages behind the main menu (pause,
   campaign, options) as data. `data/ui/original_menus.toml` names each
   page's menu class and maps each button's function name (the original's

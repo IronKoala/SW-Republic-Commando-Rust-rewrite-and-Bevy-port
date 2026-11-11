@@ -24,6 +24,7 @@ mod hud;
 mod input;
 mod levels;
 mod menu;
+mod menu_video;
 mod music;
 mod option_settings;
 mod original_hud;
