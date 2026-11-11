@@ -600,7 +600,7 @@ pub(crate) fn equip_player(
             .filter_map(|id| {
                 lib.weapons
                     .get(id)
-                    .map(|p| (id.clone(), WeaponState::given(p)))
+                    .map(|p| (id.clone(), WeaponState::new(p)))
             })
             .collect();
         say(

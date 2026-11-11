@@ -3,14 +3,6 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
-## 2026-11-11: The rifle starts full, 300 shots, as in the original (rc_combat, data/weapons/dc17m_blaster.toml)
-
-- **Changed:** Weapons the player is given at the level's start now carry the most they can (`MaxAmmo`: 300 for the DC-17m) instead of a lying pickup's `PickupAmmoCount` (120). New `WeaponState::given`, used by `equip_player`. Weapons picked up in the level still hold `PickupAmmoCount`.
-- **Why:** User's screenshots: the original's gun counter reads 300 at geo_01a's start, ours 120.
-- **Tested how:** Read from the original's engine.u script text (`Weapon.GiveAmmo`: in single player a non-secondary weapon gets `InitAmmoAmount`, and when that is -1, as for every weapon here, `MaxAmmo`; only a secondary weapon gets `PickupAmmoCount`) and `rc_probe --class` for the numbers; `cargo test -p rc_combat --test range`.
-- **Result:** Tests pass (updated for the full start).
-- **Still broken / not tested:** Not tested on Windows or in a full level run.
-
 ## 2026-11-11: Squad, grenade and health meters as the original draws them (rc_menus, rc_game, rc_game_core, rc_squad_plugin, data/ui/hud.toml)
 
 - **Changed:** The bottom-left squad panels, the two health meters and the bottom-right grenade panel now use the exact places, sizes, pictures and colours from the original's Engine.dll (`UHelmet::DrawHUD`, helmet on), drawn through the helmet's glass. Squad panels show only for mates actually in the squad (new `SquadMember::in_squad`). Meter and squad colours follow the original's four health levels (`APawn::CalcHealthLevel`: below half, below 0.91, above); the meter bar drops in elevenths. Grenade pictures by class fixed (thermal, sonic, EC, flash were mixed up); the count turns red at zero. The ammo numbers under the crosshair's right are gone: the original shows them only on the gun. The guessed shield tick column is gone (the original's shield bars come next). New HUD keys `colour_by`, `colours`, `fill_steps`, `fill_least_gap`; texts `{health_level}`, `{squad_health_level}`; condition `grenades_left`. `GlassMap::place` now carries points past the glass edge on with the nearest glass piece.

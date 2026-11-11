@@ -199,17 +199,16 @@ fn player_gets_the_games_numbers() {
     );
     let a = r.arsenal();
     assert_eq!(a.weapons[0].0, "dc17m_blaster");
-    // Given full at the start, as the original's Weapon.GiveAmmo does.
     assert_eq!(
         (a.weapons[0].1.shots_in_clip(), a.weapons[0].1.reserve),
-        (60, 240)
+        (60, 60)
     );
     let v = w.resource::<PlayerVitals>();
     assert_eq!((v.health, v.shield), (200.0, 100.0));
     let ro = w.resource::<WeaponReadout>();
     assert_eq!(
         (ro.clip, ro.clip_size, ro.reserve),
-        (Some(60), Some(60), Some(240))
+        (Some(60), Some(60), Some(60))
     );
     assert!(ro.on_target, "the crosshair is on the droid");
 }
@@ -308,10 +307,10 @@ fn magazine_empties_and_reloads() {
     let a = r.arsenal();
     assert_eq!(
         (a.weapons[0].1.shots_in_clip(), a.weapons[0].1.reserve),
-        (60, 180)
+        (60, 0)
     );
     let ro = r.app.world().resource::<WeaponReadout>();
-    assert_eq!((ro.clip, ro.reserve), (Some(60), Some(180)));
+    assert_eq!((ro.clip, ro.reserve), (Some(60), Some(0)));
 }
 
 #[test]
@@ -1108,9 +1107,8 @@ fn set_rifle(r: &mut Range, clip: f32, reserve: u32) {
 fn walking_into_an_ammo_box_refills_the_rifle() {
     let mut r = Range::new();
     let (part, _) = ammo_boxes(&mut r);
-    // The player is given the rifle full, as the original does.
-    assert_eq!(rifle_total(&r), 300);
-    set_rifle(&mut r, 60.0, 60);
+    // Full at the start? The rifle starts with 120 of 300.
+    assert_eq!(rifle_total(&r), 120);
     // 300 uu away: nothing.
     r.run(2, &[]);
     assert_eq!(rifle_total(&r), 120);
