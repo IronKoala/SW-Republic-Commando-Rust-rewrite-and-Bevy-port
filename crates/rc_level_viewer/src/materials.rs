@@ -69,7 +69,47 @@ pub struct Picture {
     /// The material's bump map, if it has one (`HsBump...` materials'
     /// `NormalMap`, or a `Shader`'s `Bumpmap`).
     pub bump: Option<Arc<Bump>>,
+    /// Which of the mesh's texture coordinate sets the picture is laid on
+    /// (0 = the first). A `TexCoordSource` (or another texture modifier)
+    /// with `TexCoordSource` set to `TCS_StreamN` moves it to set N.
+    pub uv_channel: usize,
+    /// A second picture multiplied over this one, on its own texture
+    /// coordinate set: a `Combiner` with `CombineOperation` `CO_Multiply`
+    /// (see `Layer`).
+    pub multiply: Option<Arc<Layer>>,
 }
+
+/// The second picture of a multiplying `Combiner`.
+///
+/// Republic Commando's big unlit backdrop meshes (geo_01a's arena tiers,
+/// spires and upper rocks, 1 to 7 props per map) are drawn with
+/// materials like `Arena_Textures.Unique.TierWallLM`: a `Combiner` whose
+/// `Material1` is a painted light picture (`upperStairLM`, laid once over
+/// the whole mesh on texture coordinate set 0) and whose `Material2` is
+/// the stone texture (`TierWall`, repeating, on set 1 through a
+/// `TexCoordSource`), with `CombineOperation` 2. The enum in the game's
+/// Engine.u (`EColorOperation`) names 2 `CO_Multiply`, so the game shows
+/// light picture x stone. Drawing only `Material1`, as before, showed the
+/// light picture alone: grey-white shapes.
+pub struct Layer {
+    pub image: Rgba,
+    pub uv_channel: usize,
+    /// The `Combiner`'s `Modulate2X` / `Modulate4X`: 1, 2 or 4.
+    pub scale: f32,
+    /// Where the layer came from, for the log.
+    pub name: String,
+}
+
+/// The `EColorOperation` values a `Combiner` uses, as listed in the game's
+/// Engine.u: `CO_Use_Color_From_Material1`, `CO_Use_Color_From_Material2`,
+/// `CO_Multiply`, `CO_Add`, `CO_Subtract`, `CO_AlphaBlend_With_Mask`,
+/// `CO_Add_With_Mask_Modulation`, `CO_Use_Color_From_Mask`.
+const CO_USE_COLOR_FROM_MATERIAL2: u8 = 1;
+const CO_MULTIPLY: u8 = 2;
+
+/// `ETexCoordSrc` in Engine.u starts `TCS_Stream0` .. `TCS_Stream7`: the
+/// mesh's texture coordinate sets.
+const TCS_STREAMS: u8 = 8;
 
 /// A bump map ready for drawing: which way each pixel of the surface tilts.
 ///
@@ -226,6 +266,8 @@ fn decode_texture(pkg: &Package, data: &[u8], index: usize) -> Result<Picture, F
         blend: false,
         hologram: false,
         bump: None,
+        uv_channel: 0,
+        multiply: None,
     })
 }
 
@@ -348,6 +390,17 @@ impl Materials {
         let bytes = &data[start..start + e.serial_size as usize];
         let mut r = rc_package::Reader::new(bytes);
         let props = properties::read_properties(pkg, &mut r).map_err(|e| e.to_string())?;
+        if class == "Combiner" {
+            if let Some(found) = self.combiner(pkg, data, &props, depth) {
+                return found;
+            }
+        }
+        // A texture modifier that moves its material onto another texture
+        // coordinate set (`TexCoordSource`, `TCS_Stream1`, ...).
+        let uv_channel = match properties::find(pkg, &props, "TexCoordSource").map(|p| &p.value) {
+            Some(Value::Byte(n)) if *n < TCS_STREAMS => Some(*n as usize),
+            _ => None,
+        };
         if class == "HsHologram" {
             return self.hologram(pkg, data, &props, depth);
         }
@@ -392,6 +445,9 @@ impl Materials {
                     if bump.is_some() {
                         p.bump = bump;
                     }
+                    if let Some(c) = uv_channel {
+                        p.uv_channel = c;
+                    }
                     p
                 });
             }
@@ -402,6 +458,81 @@ impl Materials {
 }
 
 impl Materials {
+    /// The material an object link points at, if the link is set.
+    fn link(
+        &mut self,
+        pkg: &Package,
+        data: &[u8],
+        props: &[properties::Property],
+        name: &str,
+        depth: usize,
+    ) -> Option<Result<Picture, Failure>> {
+        let o = match properties::find(pkg, props, name).map(|p| &p.value) {
+            Some(Value::Object(o)) if *o != 0 => *o,
+            _ => return None,
+        };
+        match ObjectRef::from_index(o) {
+            ObjectRef::Export(j) => Some(self.follow(pkg, data, j, depth + 1)),
+            ObjectRef::Import(_) => Some(self.resolve_path(&object_path(pkg, o), depth + 1)),
+            ObjectRef::None => None,
+        }
+    }
+
+    /// A `Combiner` we can show more faithfully than "its `Material1`":
+    /// `CO_Use_Color_From_Material2` shows `Material2`, and `CO_Multiply`
+    /// multiplies the two (see `Layer`). `None` for the other operations
+    /// (they keep the old "first material" picture) and when a side can't
+    /// be read or already multiplies by a layer of its own.
+    fn combiner(
+        &mut self,
+        pkg: &Package,
+        data: &[u8],
+        props: &[properties::Property],
+        depth: usize,
+    ) -> Option<Result<Picture, Failure>> {
+        let op = match properties::find(pkg, props, "CombineOperation").map(|p| &p.value) {
+            Some(Value::Byte(b)) => *b,
+            // Not stored: the enum's first value, CO_Use_Color_From_Material1.
+            _ => 0,
+        };
+        let flag = |name: &str| {
+            matches!(
+                properties::find(pkg, props, name).map(|p| &p.value),
+                Some(Value::Bool(true))
+            )
+        };
+        match op {
+            CO_USE_COLOR_FROM_MATERIAL2 => self.link(pkg, data, props, "Material2", depth),
+            CO_MULTIPLY => {
+                let a = self.link(pkg, data, props, "Material1", depth)?.ok()?;
+                let b = self.link(pkg, data, props, "Material2", depth)?.ok()?;
+                if a.multiply.is_some() || b.multiply.is_some() {
+                    return None;
+                }
+                let scale = if flag("Modulate4X") {
+                    4.0
+                } else if flag("Modulate2X") {
+                    2.0
+                } else {
+                    1.0
+                };
+                let name = match properties::find(pkg, props, "Material2").map(|p| &p.value) {
+                    Some(Value::Object(o)) => object_path(pkg, *o).join("."),
+                    _ => String::new(),
+                };
+                let mut out = a;
+                out.multiply = Some(Arc::new(Layer {
+                    image: b.image,
+                    uv_channel: b.uv_channel,
+                    scale,
+                    name,
+                }));
+                Some(Ok(out))
+            }
+            _ => None,
+        }
+    }
+
     /// An `HsHologram`: its `DiffuseTexture` (or plain white if it has
     /// none, like `Holo_Blank`) turned into glow of its `HologramColor`.
     fn hologram(
@@ -436,6 +567,8 @@ impl Materials {
             blend: false,
             hologram: true,
             bump: None,
+            uv_channel: 0,
+            multiply: None,
         })
     }
 }
@@ -630,5 +763,7 @@ fn constant_colour(pkg: &Package, data: &[u8], k: usize, name: &str) -> Result<P
         blend: false,
         hologram: false,
         bump: None,
+        uv_channel: 0,
+        multiply: None,
     })
 }

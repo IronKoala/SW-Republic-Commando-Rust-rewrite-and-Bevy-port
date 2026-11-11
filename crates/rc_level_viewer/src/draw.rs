@@ -40,6 +40,10 @@ pub struct DrawReport {
     /// sky's, and none when `live_light_on_props` is 0).
     pub coloured_live: usize,
     pub full_bright: usize,
+    /// Batches whose texture is multiplied by a second picture (a
+    /// multiplying `Combiner`, `materials::Layer`); counted in the others
+    /// too.
+    pub multiplied: usize,
     pub lights: SpawnReport,
     /// Batches drawn in the sky (seen only by the sky camera).
     pub sky_batches: usize,
@@ -49,7 +53,12 @@ pub struct DrawReport {
 }
 
 pub fn to_image(p: &materials::Picture) -> Image {
-    let mut image = to_image_with(&p.image, TextureFormat::Rgba8UnormSrgb);
+    repeating_image(&p.image)
+}
+
+/// Decoded level pixels as a Bevy image that repeats across a surface.
+fn repeating_image(p: &rc_image::Rgba) -> Image {
+    let mut image = to_image_with(p, TextureFormat::Rgba8UnormSrgb);
     // Level textures repeat across big surfaces.
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
@@ -149,6 +158,7 @@ pub fn spawn_level(
     let mut textured = 0;
     let (mut lightmapped, mut coloured, mut full_bright, mut bump_lit) = (0, 0, 0, 0);
     let mut coloured_live = 0;
+    let mut multiplied = 0;
     let props_live = settings.live_light_on_props > 0.0;
     // Real-time light on props, for the shaders (0 = none).
     let live_gain = if props_live { settings.live_light_on_props } else { 0.0 };
@@ -173,6 +183,16 @@ pub fn spawn_level(
             .and_then(|p| pages.get(p).cloned());
         if page.is_some() {
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, b.lightmap_uvs.clone());
+        }
+        // A multiplying Combiner's second picture, on its own texture
+        // coordinates (props only; walls with a lightmap never have one).
+        let layer = b
+            .picture
+            .as_ref()
+            .and_then(|p| p.multiply.clone())
+            .filter(|_| page.is_none() && b.layer_uvs.len() == b.positions.len());
+        if layer.is_some() {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, b.layer_uvs.clone());
         }
         // Holograms glow by themselves: the level's light isn't put on them.
         let hologram = b.picture.as_ref().is_some_and(|p| p.hologram);
@@ -281,13 +301,16 @@ pub fn spawn_level(
         // top (see prop_light.rs); in the sky, or with real-time light on
         // props switched off, a plain unlit material shows just the colours.
         let prop_live = with_colours && page.is_none() && !b.sky && props_live;
+        // Multiplying props always use `PropMaterial` (it does the
+        // multiply); real-time light only where `prop_live` allows it.
+        let prop_shader = prop_live || layer.is_some();
         let two_sided =
             b.two_sided || hologram || b.picture.as_ref().is_some_and(|p| p.blend);
         let material = StandardMaterial {
             // Lightmapped surfaces go through Bevy's lighting (so real-time
             // lights add to them). Anything without baked light is drawn at
             // full brightness.
-            unlit: page.is_none() && !prop_live,
+            unlit: page.is_none() && !prop_shader,
             lightmap_exposure,
             perceptual_roughness: 1.0,
             reflectance: 0.0,
@@ -317,12 +340,20 @@ pub fn spawn_level(
             ..default()
         };
         let mut entity = commands.spawn((Mesh3d(meshes.add(mesh)), Transform::default()));
-        if prop_live {
+        if prop_shader {
+            let gain = if prop_live { settings.live_light_on_props } else { 0.0 };
+            let extension = match &layer {
+                Some(l) => {
+                    multiplied += 1;
+                    PropLight::with_layer(gain, images.add(repeating_image(&l.image)), l.scale)
+                }
+                None => PropLight::new(gain),
+            };
             entity.insert(MeshMaterial3d(prop_materials.add(PropMaterial {
                 base: material,
-                extension: PropLight::new(settings.live_light_on_props),
+                extension,
             })));
-            coloured_live += 1;
+            coloured_live += prop_live as usize;
         } else {
             entity.insert(MeshMaterial3d(materials.add(material)));
         }
@@ -363,6 +394,7 @@ pub fn spawn_level(
         bump_lit,
         coloured_live,
         full_bright,
+        multiplied,
         lights: report,
         sky_batches,
         entities,

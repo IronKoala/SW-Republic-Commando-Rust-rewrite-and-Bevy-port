@@ -139,6 +139,8 @@ fn bump_square(x: f32) -> Batch {
             two_byte_format: false,
             name: "flat test bump".into(),
         })),
+        uv_channel: 0,
+        multiply: None,
     });
     b.bump_lit = true;
     b.light_dirs = vec![[0.0, 0.0, 1.0]; 4];

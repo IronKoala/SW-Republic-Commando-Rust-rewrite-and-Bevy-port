@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Geonosis arena tiers drawn as stone, not grey-white (rc_level_viewer)
+
+- **Changed:** Materials that are a `Combiner` with `CombineOperation` 2 (`CO_Multiply` in Engine.u's `EColorOperation`) now multiply their two pictures, each on its own texture coordinate set (`materials::Layer`, `Batch::layer_uvs`, `PropMaterial` binding 101/102). `TexCoordSource` (`TCS_Stream0`-`7`) now picks the coordinate set; `CO_Use_Color_From_Material2` shows `Material2`. New check `examples/multiply_check.rs`; the viewer logs `multiplying materials: N prop parts`.
+- **Why:** User's side-by-side screenshots of geo_01a: the arena's far tiers, spires and rocks were flat grey-white in the port, brown stone in the original. Those props (`EntireArena`, `RezSpires`, `UpperRock`, `upperStair`, bUnlit) use materials like `Arena_Textures.Unique.TierWallLM` = painted light picture (set 0) x stone (`TierWall`, set 1); we drew only the light picture.
+- **Tested how:** `multiply_check` (cloud); `rc_level_viewer geo_01a --capture` before and after (cloud, the game's files); `prop_light_check`; `rc_game --script` in the cloud.
+- **Result:** multiply_check 4 passed, 0 failed (plain 200, multiplied 48 against 50 expected, on both halves). geo_01a: 28 prop parts, 14 batches multiplied; the tiers show stone, dark brown as in the original. prop_light_check 9 passed. Script: 132 passed, 2 failed (the 2 level-line checks that already failed).
+- **Still broken / not tested:** Not tested on Windows. Combiners that blend two pictures by vertex alpha (`CO_AlphaBlend_With_Mask`, rock and plaster on `RezSpires`, `RubbleBlend`) still show the first picture only. Combiners on walls (BSP) and terrain not done.
+- **Next:** The arena zone's distance fog (next entry).
+
 ## 2026-11-11: Bacta use panel ring and icon read from the original's engine code (rc_game, rc_game_core, data/ui/hud.toml)
 
 - **Changed:** The ring now lights in twelve steps, piece by piece of a 4 by 4 grid of the `HUD_EventTimer` picture, over a faint whole ring, as the original's `Engine.dll` (`UHelmet::DrawTimerRing`) draws it; colour (200,240,255), faint part at 92/255. The icon is now from `LargeVisorIcons` (40-pixel squares, 3 by 10 grid, drawn 40x40) and its colour follows your health from red-pink to green (255-115v, 140+115v, 180, opacity 240). Prompt colour (164,200,208) at opacity 220 (`DrawActivateText`). `UsePanel::Icon` now carries the value. `[use_panel]` keys changed: `ring_alpha`, `ring_alpha_unlit`, `icon_grid`, `icon_colour_empty`, `icon_colour_full`, `icon_alpha`.

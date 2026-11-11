@@ -4124,6 +4124,34 @@ overlaps aren't darker, the off switch and the far-away cut-off. In the
 game the log says `shadows: N more shadow copies (C characters, ...)`
 and `shadows: character shadows on/off`.
 
+## Multiplying materials (geo_01a's arena)
+
+**Multiplying `Combiner`s.** Most materials are one picture, perhaps
+wrapped in shaders and modifiers, and we follow the wrapper links down to
+it (`materials.rs`, `links_for`). A `Combiner` mixes two materials, and
+for most of them we still show only `Material1`. The exception that
+matters: `CombineOperation` 2, which the game's Engine.u enum
+`EColorOperation` names `CO_Multiply`. geo_01a's big unlit backdrop meshes
+(`EntireArena`, `RezSpires`, `UpperRock`, `upperStair`, all `bUnlit`) use
+such materials (`Arena_Textures.Unique.TierWallLM` and 23 more in
+arena_textures.utx): `Material1` is a painted light picture laid once over
+the whole mesh (texture coordinate set 0), `Material2` a repeating stone
+texture moved to set 1 by a `TexCoordSource` (`TexCoordSource` =
+`TCS_Stream1`). Showing `Material1` alone drew the light picture: the
+grey-white arena tiers. Now `Picture::multiply` carries the second picture
+(`materials::Layer`) with its own coordinate set, the static mesh batch
+gets those coordinates as `layer_uvs` (Bevy's `UV_1`), and `PropMaterial`
+multiplies (`prop_light.wesl`, binding 101/102, scale in `settings.y`: 1,
+or 2 / 4 for the Combiner's `Modulate2X` / `Modulate4X`). Multiplying in
+linear light equals multiplying the stored values, as the game does, on a
+pure power curve. A `TexCoordSource` (or any texture modifier storing
+`TexCoordSource` 0-7) now also picks which coordinate set a plain picture
+uses. `CO_Use_Color_From_Material2` (1) shows `Material2`. Not done: the
+other operations (`CO_AlphaBlend_With_Mask` 5 with a `VertexColor` mask
+blends rock and plaster on `RezSpires` and `RubbleBlend`; we show the
+first), Combiners on walls (BSP) and on terrain.
+Check: `cargo run -p rc_level_viewer --example multiply_check`.
+
 ## Holograms, tank liquid and props with no stored light
 
 **Holograms (`HsHologram`).** Republic Commando's own hologram material

@@ -206,6 +206,10 @@ fn setup(
         report.directional,
         report.skipped
     ));
+    log.line(format!(
+        "multiplying materials (Combiner CO_Multiply: light picture x texture on a second texture coordinate set): {} prop parts, {} draw batches",
+        scene.stats.prop_parts_multiplied, r.multiplied
+    ));
     let s = &scene.spawn;
     let mut position = Vec3::from(s.position);
     let mut from = s.from.to_string();

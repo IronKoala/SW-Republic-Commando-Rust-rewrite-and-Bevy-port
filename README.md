@@ -260,6 +260,15 @@ copy of the game.
   weapons' own first-person models are only as good as the arms loader
   (not checked for the new ones).
 
+- **Geonosis arena look: stone tiers (not tested on Windows).**
+  The arena's far tiers, spires and upper rocks on geo_01a used to show as
+  flat grey-white shapes. Their materials multiply a painted light picture by
+  a stone texture (a `Combiner` with `CO_Multiply`), and we drew only the
+  light picture; now both are drawn and multiplied as the game does. Checked with cloud
+  renders of geo_01a's start and `multiply_check`. Not done: the
+  rock-and-plaster blends (`CO_AlphaBlend_With_Mask`), and the original's
+  bloom and blur.
+
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
   textured, and lets you fly around it. Tested on `geo_01a` (the first Geonosis
