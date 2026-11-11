@@ -1,0 +1,49 @@
+# The missile fired by a Grievous bodyguard's missile rack
+# (grievous_missile_rack.toml in data/weapons). It flies straight and goes
+# off on touching anything.
+#
+# Numbers marked "game:" are the original's: GrievousHomingMissile
+# (ctinventory.u, parents HomingMissile and CTProjExplosive) with
+# GrievousHomingMissileDefaults (Properties/properties.u) on top.
+#
+# Not done: homing (the original steers towards its target), its own
+# blast effect and light.
+
+name = "Grievous Missile"
+
+[ammo]
+max_count = 1             # not carried by hand; the rack's ammo counts
+
+[throw]
+speed = 2000              # game: Projectile MaxSpeed (the rack's shot.speed sets it)
+
+[fuse]
+time = 10                 # game: HomingMissile FuseTime
+after_impact = 0          # our choice: a missile goes off as it hits
+on_actor = true           # game: HomingMissile bActorDetonate
+on_world = true           # game: HomingMissile bWorldDetonate
+
+[flight]
+bounce = 0.1              # game: CTProjExplosive BounceDampening
+actor_bounce = 0.05       # game: CTProjExplosive ActorBounceDampening
+rest_speed = 20           # game: CTProjExplosive RestSpeed
+gravity = 0               # game: a missile flies under its own power (Physics 6, projectile)
+
+[blast]
+damage = 250              # game: GrievousHomingMissileDefaults Damage
+radius = 1024             # game: GrievousHomingMissileDefaults DamageRadius
+damage_type = "CTDamageExplosion" # game: HomingMissileAmmo MyDamageType
+damage_kind = "explosion"
+
+[status]
+# game: ExplosionStatusEffect StatusEffect_Stun
+max_time = 9              # game: StatusEffectMaxDuration
+damage_type = "CTDamageStun" # game: StatusEffect_Stun DamageType
+
+[sound]
+package = "gen_sound"
+blast = "exp_GEN_ship_01" # placeholder: the impact effect (GREVG_Missile_Impact) and its sound aren't read yet
+
+[model]
+mesh = "GrievousMissile"  # game: GrievousHomingMissileDefaults StaticMesh (not drawn yet)
+blast_colour = [1.0, 0.7, 0.3]   # our choice (the missile's light is hue 38, orange)

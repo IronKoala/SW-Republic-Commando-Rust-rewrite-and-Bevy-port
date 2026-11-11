@@ -4498,6 +4498,7 @@ dependencies = [
  "rc_movement",
  "rc_nav",
  "rc_package",
+ "rc_scripts",
  "serde",
 ]
 

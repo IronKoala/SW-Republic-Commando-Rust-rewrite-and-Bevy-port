@@ -2775,6 +2775,16 @@ table and sight). The files: `trandoshan` (Prosecutor mercenaries),
 `trandoshan_heavy` and `trandoshan_scavenger`, with weapons
 `trandoshan_shotgun`, `trandoshan_rifle` and `scav_beam`.
 
+Grievous's bodyguards have 250 shield, which never recharges.
+**Missiles.** An enemy weapon with a
+`lobbed` shot and a grenade file with `flight.gravity = 0` flies straight
+and goes off on touching anything: the bodyguards' missile rack
+(`grievous_missile_rack.toml` with `data/grenades/grievous_missile.toml`).
+To check that a level's own scripts and its spawners work together without
+a window, `rc_guard_check` (an example in `rc_enemies`) runs yyy_01e's
+scripts and spawners with a stand-in player that kills each bodyguard 3 s
+after it appears, and checks the level ends.
+
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
 `thermal_detonator_enemy`, the original's `ThermalDetonatorEnemy`). The

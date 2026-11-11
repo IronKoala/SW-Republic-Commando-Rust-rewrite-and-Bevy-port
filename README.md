@@ -562,6 +562,18 @@ copy of the game.
   wherever the original puts them (685 more spawners on the Prosecutor and
   Kashyyyk levels), with the game's own models, skins, animations, voice
   lines, health and damage tables. Settings: `data/enemies/trandoshan_*.toml`.
+- **Grievous's bodyguards (tested in the cloud sandbox with automatic
+  tests, not yet in the real game on Windows).** The tall droid guards on
+  Kashyyyk now appear where the original puts them, with the game's model,
+  skin, animations, 2000 health, a 250-point shield and their damage table.
+  Up close they hit with their staff; further off they fire missiles that
+  explode (250 damage, can stun you). On yyy_01e, killing the guards the
+  level sends now ends the level, as in the original. Not done: their
+  missiles don't home in, they don't leap onto walls and ceilings, and the
+  guard that is only meant to be glimpsed by the tower can't be hurt; it
+  leaves once you have seen Grievous, as in the original. Settings:
+  `data/enemies/grievous_guard.toml`, `data/weapons/grievous_missile_rack.toml`
+  and `data/grenades/grievous_missile.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
