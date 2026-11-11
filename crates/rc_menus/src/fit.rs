@@ -452,6 +452,40 @@ pub fn spread(layout: &mut MenuLayout, sizes: &mut dyn Sizes, across: f32) -> Sp
     out
 }
 
+/// Fit `layout` to a screen `across` 4:3 menus wide without spreading it:
+/// everything keeps its place round the middle, as one block, and only
+/// full-screen backdrops widen to cover the screen. For pages whose parts
+/// overlap so much that spreading would pull them apart (the EXTRAS page:
+/// its top rows sit under the planet rings, and the small bars beside
+/// each row would be pulled to the box's edges).
+pub fn together(layout: &mut MenuLayout, sizes: &mut dyn Sizes, across: f32) -> Spread {
+    let n = layout.widgets.len();
+    let out = Spread {
+        moved: vec![0.0; n],
+        groups: 1,
+        ..Default::default()
+    };
+    if across <= 1.0 + 1e-4 {
+        return out;
+    }
+    let p = |x: f32| 0.5 + (x - 0.5) * across;
+    for w in &mut layout.widgets {
+        if !w.shown_on_pc() {
+            continue;
+        }
+        let Some(b) = widget_box(&w.kind, sizes) else {
+            continue;
+        };
+        if role(&w.kind, b) != Role::Backdrop {
+            continue;
+        }
+        if let Kind::Sprite(s) = &mut w.kind {
+            set_sprite_box(s, sizes, [p(b[0]), p(b[1]), p(b[2]), p(b[3])]);
+        }
+    }
+    out
+}
+
 /// Move a widget `dx` across.
 pub fn shift(kind: &mut Kind, dx: f32) {
     match kind {
@@ -591,6 +625,7 @@ mod tests {
             movie_widget: None,
             music: None,
             lists: Default::default(),
+            white_texture: None,
         }
     }
 

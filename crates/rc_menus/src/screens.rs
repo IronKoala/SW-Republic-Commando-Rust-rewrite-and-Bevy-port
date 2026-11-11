@@ -522,6 +522,7 @@ pub fn drop_down(
         movie_widget: None,
         music: None,
         lists: Default::default(),
+        white_texture: None,
     })
 }
 

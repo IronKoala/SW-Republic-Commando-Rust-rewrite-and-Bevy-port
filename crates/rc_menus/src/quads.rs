@@ -106,10 +106,50 @@ pub fn menu_quads(layout: &MenuLayout, focused: Option<usize>, sizes: &mut dyn S
                 sprite_quads(under, &w.name, sizes, &mut out);
                 sprite_quads(bg, &w.name, sizes, &mut out);
                 text_quads(t, &w.name, sizes, &mut out);
+                if let (Some(e), true) = (&b.edit, focused == Some(i)) {
+                    if e.show_cursor {
+                        let white = layout.white_texture.as_deref();
+                        out.extend(cursor_quad(t, e, white, &w.name, sizes));
+                    }
+                }
             }
         }
     }
     out
+}
+
+/// An edit box's text cursor, as the original's
+/// `AMenuBase::DrawMenuEditBox` draws it (read from `XInterface.dll`, see
+/// `edit.rs`): the `WhiteTexture` picture, as wide and high as the letter
+/// "A" in the text's font and size times `CursorScale`, its left edge where
+/// the text ends (where the text would start when there is none) and its
+/// middle at the text's middle, in the text's colour and render style.
+fn cursor_quad(
+    t: &Text,
+    e: &crate::edit::EditBox,
+    white: Option<&str>,
+    widget: &str,
+    sizes: &mut dyn Sizes,
+) -> Option<Quad> {
+    let white = white?;
+    let (tw, th) = sizes.texture_size(white)?;
+    let font = sizes.font(t.font.as_deref()?)?;
+    let w = line_width(&font, "A", t.kerning) * t.scale[0] / BASE_WIDTH * e.cursor_scale;
+    let h = font.line_height as f32 * t.scale[1] / BASE_HEIGHT * e.cursor_scale;
+    let (x, mid) = if t.text.is_empty() {
+        (t.pos[0], t.pos[1])
+    } else {
+        let b = text_box(t, sizes)?;
+        (b[2], (b[1] + b[3]) / 2.0)
+    };
+    Some(Quad {
+        texture: white.to_string(),
+        src: [0.0, 0.0, tw, th],
+        dst: [x, mid - h / 2.0, x + w, mid + h / 2.0],
+        color: t.color,
+        render_style: t.render_style,
+        widget: widget.to_string(),
+    })
 }
 
 /// The box (x0, y0, x1, y1 in 0..1 of the menu area) of a widget sized

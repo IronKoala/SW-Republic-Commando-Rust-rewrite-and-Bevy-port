@@ -394,8 +394,11 @@ copy of the game.
   gun goes down and the game's own "hands" moves for the dispenser play
   (`BactaLoad`, `BactaLoop`, `BactaHolster` from `hudarms.ukx`), then the
   gun comes back up; in the game's files those hand moves sit out of view,
-  so no hands show on screen (tested in the cloud, not on Windows). The
-  zap effect isn't done. Settings: `[bacta]` in
+  so no hands show on screen (tested in the cloud, not on Windows). Once
+  the dispenser's canister has swung in, the game's own zap effect appears
+  on it with its hum, and both vanish when you stop, as the game's script
+  does (not yet seen or heard on Windows); the effect on your own body
+  isn't done. Settings: `[bacta]` in
   `data/scripts/scripts.toml`, `[use_panel]` in `data/ui/hud.toml`.
   Enemy spawners now follow the scripts too (tested in the cloud sandbox
   with the real files, not yet on Windows or by playing): the level's
@@ -470,8 +473,18 @@ copy of the game.
   select sounds. QUIT asks the original's "are you sure?" question. Keyboard,
   gamepad and mouse move the focus. A screenshot of it matches a picture
   painted straight from the original's textures (mean difference 3.4 of
-  255). PROFILES and EXTRAS are greyed out until they're built;
-  MULTIPLAYER is greyed out for good (offline only).
+  255). MULTIPLAYER is greyed out for good (offline only).
+
+  **PROFILES is the original's page** (tested in the cloud sandbox with the
+  install, not yet on Windows). The first time the game starts with no
+  profile it opens the PROFILES page and you must pick or make one, as the
+  original does. `< NEW >` opens the original's EDIT PROFILE NAME page:
+  type a name (letters, numbers and spaces, at most 15; spaces become
+  `_`), the original's blinking cursor, OK. SELECT loads a profile and
+  DELETE removes a profile and all of its saves after the original's
+  question (you can't delete the one you're using). Each profile is a
+  `Profile_<name>` folder inside the save folder holding that profile's
+  saves; settings and unlocked levels are still shared by all profiles.
 
   **The menus' moving background is the original's video (tested in the
   cloud sandbox, not yet on Windows).** The main menu, options, campaign
@@ -502,7 +515,11 @@ copy of the game.
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
   OVERWRITE and DELETE, with the original's questions. LOAD GAME is on the
   main menu and the pause menu; the pause menu's QUICK SAVE, QUICK LOAD and
-  LOAD LAST SAVE work too. **The options pages are the original's too** (tested in
+  LOAD LAST SAVE work too. **EXTRAS is the original's page** (tested in
+  the cloud sandbox with the install, not yet on Windows): VIEW CREDITS
+  rolls the game's own credits with their own music and goes back to
+  EXTRAS at the end. The five videos are greyed out: this port can't play
+  their MPEG-1 files yet. **The options pages are the original's too** (tested in
   the cloud sandbox with the install, not yet on Windows): GAME, SOUND,
   GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
   sensitivity, invert mouse, difficulty, effects and music volume, screen

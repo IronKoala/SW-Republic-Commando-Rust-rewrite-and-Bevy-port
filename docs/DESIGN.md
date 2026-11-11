@@ -1798,12 +1798,27 @@ class defaults with `rc_probe --classes`:
 - **Our readings, not checked against the original** (it doesn't run on
   the user's PC right now): when each sound plays, where the prompt sits
   (matched by eye to screenshots), the
-  pull's speed, the hologram's brightness and fade. The dispenser's zap
-  effect and its hum (`BactaZap_Dispenser`, `Bacta_Body`) come next, with
-  the effects plugin. Not done: the first-person arm plugging in
-  (`BactaHealer`, `HudArms.HudArmsBacta` with BactaLoad/BactaLoop/
-  BactaHolster), the zap effects, and `HUDIconX/Y` (an icon over the
-  dispenser).
+  pull's speed, the hologram's brightness and fade. Not done: the
+  body effect and `HUDIconX/Y` (an icon over the dispenser).
+- **The zap and hum** (`bacta::zap`), read from the game's
+  `BactaDispenser` script (ctgame.u, `state Active`): after `Load` has
+  finished (`FinishAnim`) the script sets `bActivated` (healing starts only
+  then; `heal` waits for it too) and does `SpawnAttachment('Eye',
+  DispenserEffectClass)`; every dispenser class in
+  `Properties/MarkerProperties.u` sets `BactaZap_Dispenser`. A small
+  carrier entity (`BactaZap`) stands on the model's `Eye` bone
+  (`AnimProp::bone`, from `rc_model::Model::bone_from_origin`) and the
+  effect follows it, turned by the bone's axes (`SpawnEffect::axes`). The
+  hum is that effect's own `AmbientSound`
+  (`GEO_Sound.GEO_03.ele_GEO_genEnrgy_lp_01`), which the effects plugin
+  loops while the effect is there. `EndState` does
+  `DestroyAttachment('Eye')`, so when healing stops the carrier goes and
+  the effect with its hum vanishes at once (`vanish_with_carrier`), not a
+  fade. Our choices: the hum's loudness follows the effects plugin's
+  distance rule (worked out when the zap starts), and it isn't placed in
+  3D. Not done: `PawnEffectClass` (`BactaZap_Dispenser_Body`), whose
+  particles start at the bones of the player's own body model
+  (`UseSkeletalLocationAs`), which first person here doesn't have.
 
 ### Breakable props (`rc_level::breakables`, `rc_scripts_plugin/src/breakables.rs`)
 
@@ -3622,6 +3637,21 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   the new `DeleteSave` messages, asking first with the original question
   box where the original does (`OriginalMenus::ask`, `Asking`). A page
   button that opens a load or save page that can't be drawn is greyed out.
+- The PROFILES pages are the original's too (`MenuSelectProfile`,
+  `MenuPCNewProfileName`, `MenuLoadingProfile`, `MenuWarning` in
+  `XInterfaceCommon.u`). `rc_game/src/original_profiles.rs` follows their
+  scripts: the list (`< NEW >` then the profile folders, capitalised),
+  must-pick-one when there is no profile (BACK hidden and ignored), DELETE
+  hidden on `< NEW >`, the name checks and messages, the one-second
+  "CREATING/LOADING PROFILE" box. `rc_save::profiles` keeps each profile as
+  a `Profile_<name>` folder in the save folder with its saves inside; the
+  profile in use is `settings.save.profile`, and `SaveFolder` points into
+  its folder. Typing boxes are `rc_menus::edit::EditBox` (the original's
+  `MenuEditBox`): its filter, length limit, backspace and blinking cursor
+  follow `XInterface.dll`'s native code, read by disassembly; the cursor is
+  drawn from the layout's `WhiteTexture`. `OriginalMenus::show_box` shows a
+  warning or wait box with the question box's machinery (`Asking::Warning`,
+  `Asking::Wait`).
 - The pause menu's rows follow the original's own rules each time it
   opens (`rc_menus::pause`, rewritten by hand from the script in
   `XInterfaceCTMenus.u`): which of the eleven rows show depends on health,

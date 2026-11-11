@@ -3,7 +3,7 @@
 //! An effect is an `Emitter` class (for example `Explosion_Barrel_GEO` in
 //! `Properties/cteffects.u`). Its defaults hold `Emitters`, a list of
 //! emitter objects stored in the same package (`SpriteEmitter476`,
-//! `MeshEmitter2`, ...), each with its own named values, and `SpawnSound`.
+//! `MeshEmitter2`, ...), each with its own named values, `SpawnSound` and `AmbientSound`.
 //!
 //! An emitter only stores what differs from its class's defaults. Those
 //! (in `engine.u`, `ParticleEmitter`, `SpriteEmitter`, `MeshEmitter`) were
@@ -107,10 +107,15 @@ impl EffectPackage {
             Some(Tagged::Object(p)) if !p.is_empty() => Some(p.clone()),
             _ => None,
         };
+        let ambient_sound = match get(&own, "AmbientSound") {
+            Some(Tagged::Object(p)) if !p.is_empty() => Some(p.clone()),
+            _ => None,
+        };
         Ok(EffectDef {
             name: self.pkg.name(e.object_name).to_string(),
             emitters,
             sound,
+            ambient_sound,
             life_span: float(&own, "LifeSpan").unwrap_or(0.0),
             // `Emitter`'s default bUnlit is on (Engine.u).
             lit: !boolean(&own, "bUnlit").unwrap_or(true),

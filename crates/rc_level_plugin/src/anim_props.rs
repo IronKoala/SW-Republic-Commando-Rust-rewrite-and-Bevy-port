@@ -9,8 +9,9 @@
 //! player starts healing and `Holster` when they stop); the animation then
 //! plays once and the prop keeps its last frame. The sounds the animation
 //! names (`AnimNotify_Sound`: the dispenser's clunks and hiss) play from
-//! the prop. They aren't solid yet, and their particle effects
-//! (`DispenserEffectClass`) wait for the effects system.
+//! the prop. They aren't solid yet. [`AnimProp::bone`] says where one of
+//! the model's bones is, for things hung on it (the bacta dispenser's zap
+//! effect, on its `Eye` bone).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -61,6 +62,39 @@ pub struct AnimProp {
     /// Every sound its animations played, by dotted path ("(not
     /// loaded)" added when it couldn't be read).
     pub heard: Vec<String>,
+}
+
+impl AnimProp {
+    /// The animation and frame it is posed at now: the one playing, else
+    /// the last frame of the last one played, else the model's own pose.
+    pub fn pose_now(&self) -> (String, f32) {
+        if let Some((a, f)) = &self.playing {
+            return (a.clone(), *f);
+        }
+        if let Some(a) = &self.last {
+            if let Some(c) = self.model.clip(a) {
+                return (a.clone(), (c.num_frames - 1.0).max(0.0));
+            }
+        }
+        (String::new(), 0.0)
+    }
+
+    /// Where bone `bone` is now, in the level (Unreal units), and its three
+    /// axes (unit length, in the level's axes): what the game's
+    /// `AttachToBone` hangs an attachment on. `None` if the model has no
+    /// such bone.
+    pub fn bone(&self, bone: &str) -> Option<([f32; 3], [[f32; 3]; 3])> {
+        let (anim, frame) = self.pose_now();
+        let (at, axes) = self.model.bone_from_origin(&anim, frame, bone)?;
+        let world = self.place.transform_point(at);
+        let axes = axes.map(|a| {
+            let tip = self.place.transform_point([at[0] + a[0], at[1] + a[1], at[2] + a[2]]);
+            let v = [tip[0] - world[0], tip[1] - world[1], tip[2] - world[2]];
+            let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+            v.map(|c| c / len)
+        });
+        Some((world, axes))
+    }
 }
 
 /// The sounds the props' animations play, by [`sound_key`].
