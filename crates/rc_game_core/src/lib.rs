@@ -60,7 +60,7 @@ pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
     LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
-    ShowDebriefing, SquadStanceOrder, UseClaimed,
+    ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
@@ -105,6 +105,7 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
+            .add_message::<SquadMembership>()
             .add_message::<MarkerJob>()
             .add_message::<PropAnim>()
             .add_message::<ChangeLevel>()

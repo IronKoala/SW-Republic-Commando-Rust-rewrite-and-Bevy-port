@@ -2078,12 +2078,57 @@ slicing, Sev sniping, as in the original). Mods can change a job or add a new on
   the weapons part's attachments. If a post's weapon file isn't there, the
   squad mate uses the usual DC-17m and the log says so once.
 
-### Where the squad comes from
+### Where the squad comes from, leaving and rejoining (`rc_squad/src/presence.rs`, `rc_squad_plugin/src/membership.rs`)
 
-`spawn = "with_player"` puts all three in their form-up slots at the
-start. The original brings them in through each map's scripts: on geo_01a
-only Scorch, from `PawnFactory14` on the `levelstart` event. The log lists
-these (`the map would bring in ...`) for later.
+As in the original, each map has its own squad (`spawn = "from_map"`, the
+default). Most mission maps place `Commando07Delta`, `Commando40Delta` and
+`Commando62Delta` actors; those squad mates start where they are placed,
+in the squad. A few come later from a `PawnFactory` whose `Prototype` is
+one of those classes, when its event is sent, out of the squad (Scorch on
+geo_01a at `levelstart`, Fixer on ras_02b at `PlayerAtFinalDoor`, Sev and
+Scorch on yyy_01d). A map with neither has no squad mates: the player
+starts ras_01a, ras_01c, ras_02a, ras_02b and geo_05a alone. Mates are not
+carried from map to map; the original only carries their health
+(`SaveSquadTravelInfo`). `spawn = "with_player"` (all three around the
+player, the old way) is still there, and is what a map that can't be read
+gets. `rc_game --script` and `rc_squad_sim` use it through
+`SquadSpawnOverride`, because their checks are about all three.
+
+Level scripts take mates out and put them back with
+`ACTION_ChangeSquadMember` (`MemberTag`, `bAddMember`, default add; the
+class's own script calls `RemoveFromSquad` / `AddToSquad` for every pawn
+with that tag). Scripts name a mate by its `Tag`: the class name unless
+the map gives another (`Seven`, `Delta07`, `Delta40` from a factory's
+`PawnTagFromFactory`). The scripts part resolves the tag to the mate's
+entity (`ScriptTags`) and sends `rc_game_core::SquadMembership`; the squad
+part carries it out.
+
+Each `rc_squad::Member` has a `Presence`: `InSquad`, `Away` (in the level,
+out of the squad) or `Gone` (not in the level). Away and gone members are
+skipped by orders, marked jobs, cover, fighting and reviving
+(`Member::available`). An away member stands where they are unless a
+script sends them somewhere: they follow `CharacterOrder`s (walk or run
+to a point or to the player, turn to the player, wait for the player, be
+put somewhere, hide, leave the level) using the squad's own path finding
+and steering, and the script hears back (`CharacterOrderDone`) when they
+get there. In the squad, orders that would walk or turn them are answered
+at once (the squad leads them). Bodies come and go with presence
+(`sync_bodies`). A save keeps each mate's presence and which spawners went
+off (`presence`, `spawners_used` in `[squad]`).
+
+yyy_06d's `NewSquad` spawners make second copies of Fixer and Scorch while
+the first ones are still in the level. We have one body per squad mate,
+so the one in the level moves to the spawner and takes the new name.
+
+Not done: scripted animations on squad mates (`PlayAnim` is logged and
+skipped), scripted walks for mates who are in the squad (the original
+lets a high-priority script take over a squad member), and squad mates
+other than Delta (clone troopers, "Fred" on ras_01c) joining.
+
+Checked by `cargo test -p rc_squad_plugin --test rejoin_room` (no game
+files) and `cargo run --release -p rc_squad_plugin --example rejoin_survey
+-- <Maps folder>`, which lists every map's mates and checks every
+`ChangeSquadMember` names one of them.
 
 ### Finding the way
 

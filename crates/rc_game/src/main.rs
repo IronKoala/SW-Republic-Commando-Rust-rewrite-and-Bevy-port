@@ -539,6 +539,10 @@ fn main() -> AppExit {
     // Changing a key (the controls page); the script uses it too.
     app.add_plugins(rebind::RebindPlugin);
     if use_script {
+        // The self-test's checks expect all three squad mates with the
+        // player from the start; the squad from the map is checked by
+        // rc_squad_plugin's rejoin tests.
+        app.insert_resource(rc_squad_plugin::SquadSpawnOverride::with_player());
         app.add_plugins(script::ScriptPlugin);
         // The scripted run has no real devices, but the controls page still
         // shows the keyboard's names.

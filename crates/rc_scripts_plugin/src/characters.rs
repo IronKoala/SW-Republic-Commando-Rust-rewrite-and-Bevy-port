@@ -11,7 +11,9 @@
 //! - Done here, for any character: `MakeInvulnerable` (rc_combat
 //!   `Invulnerable` on or off), `SetCannotDie` (`CannotDie`), `HurtActor`
 //!   on characters (`Damage`), `ChangeSquadStance` (a
-//!   [`SquadStanceOrder`] for the squad part).
+//!   [`SquadStanceOrder`] for the squad part), `ChangeSquadMember` (a
+//!   [`SquadMembership`] for the squad part: a squad mate leaves the
+//!   player's squad or rejoins it).
 //! - Sent as a [`CharacterOrder`] to the part that owns the character
 //!   (only characters whose `ScriptTags::follows_orders` is set; enemies
 //!   for now): `MoveToPoint`, `MoveToPlayer`, `TurnTowardPlayer`,
@@ -31,7 +33,9 @@ use crate::{LevelScript, PART};
 use bevy::prelude::*;
 use rc_combat::{CannotDie, Damage, DamageKind, Invulnerable};
 use rc_game_core::units::to_unreal;
-use rc_game_core::{CharacterAct, CharacterOrder, GameLog, Player, ScriptTags, SquadStanceOrder};
+use rc_game_core::{
+    CharacterAct, CharacterOrder, GameLog, Player, ScriptTags, SquadMembership, SquadStanceOrder,
+};
 use rc_level::scripts::{Place, ScriptObject};
 use std::collections::{HashMap, HashSet};
 
@@ -64,6 +68,7 @@ pub const KINDS: &[&str] = &[
     "setcannotdie",
     "destroypawn",
     "changesquadstance",
+    "changesquadmember",
 ];
 
 /// Where scripts can send characters, by lower-case tag and by name.
@@ -117,6 +122,7 @@ fn tag_field(kind: &str) -> Option<&'static str> {
         "hurtactor" => "TargetTag",
         "destroyactor" => "DestroyTag",
         "sethidden" => "HideActorTag",
+        "changesquadmember" => "MemberTag",
         _ => return None,
     })
 }
@@ -152,6 +158,7 @@ pub(crate) fn cast(
     mut orders: MessageWriter<CharacterOrder>,
     mut damage: MessageWriter<Damage>,
     mut squad: MessageWriter<SquadStanceOrder>,
+    mut membership: MessageWriter<SquadMembership>,
     log: Res<GameLog>,
 ) {
     let Some(mut script) = script else { return };
@@ -199,6 +206,12 @@ pub(crate) fn cast(
                     log.line(format!("{at}: squad stance {stance} (not done yet)"));
                 }
             }
+            continue;
+        }
+        // `ChangeSquadMember` with no `MemberTag` does nothing in the
+        // original (it doesn't fall back on the sequence's own character).
+        if call.kind == "changesquadmember" && named(a, "MemberTag").is_none() {
+            log.line(format!("{at}: no MemberTag; nothing to do"));
             continue;
         }
         // Who it means.
@@ -259,6 +272,28 @@ pub(crate) fn cast(
         let n = targets.len();
         // Done here, for any character.
         match call.kind.as_str() {
+            "changesquadmember" => {
+                // The original adds to the player's squad unless `SquadTag`
+                // names another `Squad` actor; the maps only ever name the
+                // player's own (`CTSquad`) or no squad at all.
+                let join = a.flag("bAddMember", true);
+                for (e, _, _) in &targets {
+                    membership.write(SquadMembership {
+                        target: *e,
+                        join,
+                        by: format!("{} #{}", call.script, call.index),
+                    });
+                }
+                log.line(format!(
+                    "{at}: {who} ({n}) {} the squad",
+                    if join { "joins" } else { "leaves" }
+                ));
+                script
+                    .stats
+                    .squad_members
+                    .push(format!("{who} {}", if join { "joins" } else { "leaves" }));
+                continue;
+            }
             "makeinvulnerable" => {
                 let on = a.flag("bMakeGod", true);
                 for (e, _, _) in &targets {
