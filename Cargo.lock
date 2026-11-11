@@ -4090,6 +4090,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideav-core"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce90bfbe978dfc46d0c98d137b7c4566ac8eaae8c9209585eb53a8aedb0ef53c"
+dependencies = [
+ "bytemuck",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "oxideav-msmpeg4"
+version = "0.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "752d238e6c8677c2a43e99d2127217666c788364151936cc82ee4aac6e1264d6"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4531,6 +4551,7 @@ dependencies = [
  "rc_shadows",
  "rc_squad_plugin",
  "rc_turrets_plugin",
+ "rc_video",
  "rc_visor",
  "serde",
  "toml 0.8.23",
@@ -4812,6 +4833,14 @@ dependencies = [
  "rc_squad_plugin",
  "rc_turrets",
  "serde",
+]
+
+[[package]]
+name = "rc_video"
+version = "0.1.0"
+dependencies = [
+ "oxideav-core",
+ "oxideav-msmpeg4",
 ]
 
 [[package]]

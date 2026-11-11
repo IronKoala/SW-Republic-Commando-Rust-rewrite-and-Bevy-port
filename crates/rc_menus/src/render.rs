@@ -20,11 +20,21 @@ pub fn render(
     height: usize,
     clear: [u8; 4],
 ) -> Rgba {
-    let mut out = Rgba {
-        width,
-        height,
-        pixels: clear.repeat(width * height),
-    };
+    render_over(
+        quads,
+        textures,
+        Rgba {
+            width,
+            height,
+            pixels: clear.repeat(width * height),
+        },
+    )
+}
+
+/// [`render`] onto a picture already there (such as the menu's
+/// background video frame).
+pub fn render_over(quads: &[Quad], textures: &mut dyn Textures, base: Rgba) -> Rgba {
+    let mut out = base;
     for q in quads {
         let Some(tex) = textures.get(&q.texture) else {
             continue;

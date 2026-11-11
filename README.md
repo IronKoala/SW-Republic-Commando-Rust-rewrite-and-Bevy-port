@@ -444,13 +444,30 @@ copy of the game.
   255). PROFILES and EXTRAS are greyed out until they're built;
   MULTIPLAYER is greyed out for good (offline only).
 
+  **The menus' moving background is the original's video (tested in the
+  cloud sandbox, not yet on Windows).** The main menu, options, campaign
+  and load pages play the install's own `GameData/Movies/menu_bg.avi`
+  behind everything else, looping, at the file's 29.97 frames a second
+  and at three quarters brightness, as the original's `BackgroundMovie`
+  widget does. The pause menu doesn't (the original's names no video).
+  The new `rc_video` crate decodes the file (Microsoft MPEG-4 version 2);
+  `rc_video_check` checks it: against ffmpeg, 95.9% of the numbers are
+  identical and none is off by more than 4 of 255. It needs Rust 1.95 or
+  newer (`rustup update`).
+
   **The other menus and the on-screen display are still placeholders.**
   The loading screen and most of the HUD are our own
   amber stand-ins, and the amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on
-  Windows): its eleven buttons; only ENABLE HINTS is greyed out until built.
+  Windows): its eleven buttons. Each time it opens it shows only the rows
+  the original shows, centred the original's way (read from the game's own
+  pause menu script; tested in the cloud, not yet on Windows): LOAD LAST
+  SAVE only while you are down, QUICK LOAD only with a quicksave, no saving
+  during a briefing or in the prologue, and ENABLE HINTS only when hint
+  screens are off in a level that has them. The hint screens themselves
+  aren't built yet, so ENABLE HINTS only switches the setting back on.
   **LOAD GAME and SAVE GAME are the original's pages** (tested in the
   cloud sandbox with the install, and by the user on Windows on 2026-11-09): the saves in a list
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
@@ -461,14 +478,24 @@ copy of the game.
   GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
   sensitivity, invert mouse, difficulty, effects and music volume, screen
   size and vsync work; key rows open the original's REASSIGN BUTTON box.
-  The GRAPHICS rows (quality presets, brightness, texture and character
-  detail, blur, bloom, squad shadows, FSAA) and SOUND rows (voices volume,
-  sound quality, 3D sound, audio channels) work too (checked in a stand-in
-  scene and by tests; brightness checked by the user on the PC). So do
+  The GRAPHICS page follows the original's own script (tested in the
+  cloud sandbox with the install, not yet on Windows): GRAPHICS QUALITY
+  uses the five presets in the install's `System.ini` and shows CUSTOM when
+  no preset matches; SET RECOMMENDED uses the preset the install
+  recommends; BRIGHTNESS is the original's gamma (default 3); BUMPMAPPING
+  QUALITY, BLOOM (NONE, LOW, HIGH) and PROJECTORS can be changed;
+  PROJECTORS off greys out SQUAD SHADOWS and VSYNC off greys out FSAA;
+  FSAA lists NONE plus what the graphics card offers. Not the same as the
+  original yet: brightness changes the 3D view only and is matched at mid
+  grey; presets don't change the screen size; bump quality and bloom LOW
+  against HIGH look the same; no APPLY / "keep these settings?" step.
+  SOUND rows (voices volume,
+  sound quality, 3D sound, audio channels) work too (checked by tests;
+  brightness checked by the user on the PC). So do
   SUBTITLES (checked by the user), PROMPT TEXT, the turn keys, the
   screenshot key (F12) and the weapon keys (1 to 4). HELMET shows or hides
-  the helmet frame (see below). Rows the port can't do yet (tactical
-  visor, bump mapping, projectors, EAX) are greyed out. Values change with the arrows; the screen size
+  the helmet frame (see below). Rows the port can't do yet (EAX) are
+  greyed out. Values change with the arrows; the screen size
   also has a drop-down list of the sizes that fit your monitor. Our own
   extra settings (field of view, display mode, controller and gyro) are on
   a fifth tab, "PORT +", in the same original look.
@@ -824,9 +851,11 @@ copy of the game.
   uses our own times; the original's are in its compiled engine.
 - Android: the game compiles for Android phones but is not an app yet;
   see `docs/ANDROID.md` for what's missing. Wayland: built, not tested.
-- Original menus: the main menu's moving background video isn't played
-  (it uses a video format with no Rust decoder yet), and the sides of
-  screens wider than 4:3 stay black. On the options pages, rows the port can't
+- Original menus: menus opened in a mission don't yet draw the
+  original's dark see-through layer in place of the video
+  (`InLevelBackgroundMovieReplacement`). On screens wider than 4:3 the
+  video fills the screen by cutting off its top and bottom (our choice;
+  the original only drew 4:3). On the options pages, rows the port can't
   do yet are greyed out, and the original's "keep these settings?" timer
   after changing screen size isn't there (changes apply at once). Mouse use wasn't tested by the
   script.
@@ -1168,6 +1197,9 @@ cargo run -p rc_model --example rc_model_list -- "C:\Games\Steam\steamapps\commo
 - [Bevy](https://bevy.org) game engine, MIT or Apache-2.0 license. Its audio
   uses [rodio](https://github.com/RustAudio/rodio) and
   [hound](https://github.com/ruuda/hound) (both MIT or Apache-2.0).
+- [oxideav](https://github.com/OxideAV) `oxideav-msmpeg4` and `oxideav-core`,
+  MIT license: the MPEG-4 v2 decoding parts `rc_video` builds on (with
+  four fixes of ours, listed in `crates/rc_video/src/msmpeg4v2.rs`).
 
 The package and sound formats were learned from these. No code was copied from them.
 

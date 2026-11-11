@@ -18,16 +18,19 @@ mod cutscene;
 mod debriefing;
 mod display;
 mod graphics;
+mod graphics_presets;
 mod helmet;
 mod hud;
 mod input;
 mod levels;
 mod menu;
+mod menu_video;
 mod music;
 mod option_settings;
 mod original_hud;
 mod original_lists;
 mod original_menu;
+mod original_pause;
 mod original_saves;
 mod panini;
 mod player;
@@ -450,6 +453,7 @@ fn main() -> AppExit {
         menu::MenuPlugin,
         display::DisplayPlugin,
         original_menu::OriginalMenuPlugin,
+        original_pause::OriginalPausePlugin,
         hud::HudPlugin,
         original_hud::OriginalHudPlugin,
         music::MusicPlugin,

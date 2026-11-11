@@ -12,7 +12,15 @@
 //! sensitivity is the chosen number times 0.5, with 3.0 (number 6) as the
 //! default, and its volumes are the chosen number divided by 10.
 
+use crate::graphics_presets::{self, Preset, Presets};
 use crate::settings::{Difficulty, DisplayMode, Settings};
+
+/// Whether a GRAPHICS QUALITY preset also sets the screen size, as in the
+/// original (its presets hold 640x480, 800x600 or 1024x768). Off: presets set
+/// the detail rows only and the screen size is left as it is, so a wide
+/// screen keeps its size, and the screen size doesn't count when the row
+/// works out which preset the settings match.
+const PRESETS_SET_SCREEN_SIZE: bool = false;
 
 /// Every setting a chooser can show.
 pub const ALL: &[&str] = &[
@@ -37,8 +45,10 @@ pub const ALL: &[&str] = &[
     "brightness",
     "texture_detail",
     "character_detail",
+    "bump_quality",
     "blur",
     "bloom",
+    "projectors",
     "squad_shadows",
     "fsaa",
     // The port's own settings, on its PORT + page.
@@ -169,9 +179,18 @@ pub fn items(name: &str, s: &Settings, desktop: Option<(u32, u32)>) -> Option<Ve
     match name {
         "display_mode" => Some(DISPLAY_MODES.iter().map(|(_, t)| t.to_string()).collect()),
         "gyro_mode" => Some(vec!["OFF".into(), "ALWAYS".into(), "WHEN AIMING".into()]),
-        // The original fills these from the graphics card while it runs;
-        // ours are what this game can do.
-        "fsaa" | "vsync" => fallback_items(name),
+        // As the original's (its Init): NONE, then each number of samples
+        // the graphics card can draw with.
+        "fsaa" => Some(
+            std::iter::once("NONE".to_string())
+                .chain(
+                    graphics_presets::fsaa_levels()
+                        .iter()
+                        .map(|n| format!("{n}X")),
+                )
+                .collect(),
+        ),
+        "vsync" => fallback_items(name),
         "video_resolution" => {
             let fits = |&(w, h): &(u32, u32)| desktop.is_none_or(|(dw, dh)| w <= dw && h <= dh);
             let mut sizes: Vec<(u32, u32)> = RESOLUTIONS.iter().copied().filter(fits).collect();
@@ -224,55 +243,125 @@ fn level_index(v: f32, n: usize) -> usize {
     ((v.clamp(0.0, 1.0) * (n.max(1) - 1) as f32).round() as usize).min(n.max(1) - 1)
 }
 
-/// FSAA values: "2X", "4X" and so on are that many samples; OFF and NONE
-/// are 1. We draw 1, 2 or 4 (8 isn't supported by every graphics card),
-/// so a higher value draws 4.
+/// FSAA values: "2X", "4X" and so on are that many samples; NONE is 1.
 fn fsaa_samples(text: &str) -> u32 {
     let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
-    match digits.parse::<u32>().unwrap_or(1) {
-        0 | 1 => 1,
-        2 | 3 => 2,
-        _ => 4,
-    }
-}
-
-/// What a GRAPHICS QUALITY value sets: texture and character detail,
-/// blur, bloom, shadows and FSAA. `f` is the value's place in the list,
-/// 0 (lowest) to 1 (highest). Our own choice: the original's presets set
-/// its own engine's options, which don't all exist here.
-fn quality_preset(f: f32) -> (f32, f32, bool, bool, bool, u32) {
-    if f < 0.25 {
-        (0.0, 0.0, false, false, false, 1)
-    } else if f < 0.75 {
-        (0.5, 0.5, false, false, false, 1)
-    } else if f < 1.0 {
-        (1.0, 1.0, false, false, false, 1)
-    } else {
-        (1.0, 1.0, false, true, true, 4)
-    }
-}
-
-fn quality_now(s: &Settings) -> (f32, f32, bool, bool, bool, u32) {
-    let v = &s.video;
-    (
-        v.texture_detail,
-        v.character_detail,
-        v.blur,
-        v.bloom,
-        v.squad_shadows,
-        v.fsaa,
-    )
+    digits.parse::<u32>().unwrap_or(1).max(1)
 }
 
 fn is_custom(text: &str) -> bool {
     text.to_ascii_uppercase().contains("CUSTOM")
 }
 
-/// The GRAPHICS QUALITY values that are presets (not CUSTOM), in order.
-fn presets(items: &[String]) -> Vec<usize> {
-    (0..items.len())
-        .filter(|&i| !is_custom(&items[i]))
-        .collect()
+/// The original's DropLODBy for CHARACTER DETAIL (0 HIGH, 1 MEDIUM, 2 LOW).
+fn drop_lod_by(s: &Settings) -> u8 {
+    ((1.0 - s.video.character_detail.clamp(0.0, 1.0)) * 2.0).round() as u8
+}
+
+/// The preset whose texture sizes TEXTURE QUALITY uses (0 LOWEST to 4
+/// HIGHEST).
+fn texture_preset(s: &Settings) -> usize {
+    level_index(s.video.texture_detail, graphics_presets::PRESET_KEYS.len())
+}
+
+/// The first preset with the same texture sizes as the ones in use, as the
+/// original's MatchTextureDetailSettingsToPreset (two presets could name
+/// the same sizes).
+fn texture_row(s: &Settings, presets: &Presets) -> usize {
+    let k = texture_preset(s);
+    let Some(now) = presets.list.get(k) else {
+        return k;
+    };
+    presets
+        .list
+        .iter()
+        .position(|p| p.textures == now.textures)
+        .unwrap_or(k)
+}
+
+/// The original's MatchSettingsToPreset: the first preset every row
+/// matches, or None (CUSTOM).
+pub fn matching_preset(s: &Settings, presets: &Presets) -> Option<usize> {
+    let v = &s.video;
+    let textures = presets.list.get(texture_preset(s)).map(|p| &p.textures);
+    presets.list.iter().position(|p| {
+        (!PRESETS_SET_SCREEN_SIZE || (v.width, v.height) == p.windowed)
+            && p.drop_lod_by == drop_lod_by(s)
+            && p.shadows == v.squad_shadows
+            && p.bump == v.bump_quality
+            && p.blur == v.blur
+            && p.bloom == v.bloom_quality
+            && p.projectors == v.projectors
+            && p.fsaa.max(1) == v.fsaa.max(1)
+            && textures == Some(&p.textures)
+    })
+}
+
+/// The original's UsePreset: set every row a preset holds.
+pub fn use_preset(s: &mut Settings, presets: &Presets, i: usize) -> bool {
+    let Some(p) = presets.list.get(i) else {
+        return false;
+    };
+    set_from_preset(s, p, i, presets.list.len());
+    true
+}
+
+fn set_from_preset(s: &mut Settings, p: &Preset, i: usize, n: usize) {
+    let v = &mut s.video;
+    if PRESETS_SET_SCREEN_SIZE {
+        (v.width, v.height) = p.windowed;
+    }
+    v.texture_detail = level_value(i, n);
+    v.character_detail = 1.0 - p.drop_lod_by.min(2) as f32 / 2.0;
+    v.squad_shadows = p.shadows;
+    v.bump_quality = p.bump.min(2);
+    v.blur = p.blur;
+    v.bloom_quality = p.bloom.min(2);
+    v.projectors = p.projectors;
+    v.fsaa = p.fsaa.max(1);
+}
+
+/// BRIGHTNESS row for a gamma, as the original's
+/// `int(GetNormalizedGamma() * 10 + 0.5)`, where GetNormalizedGamma is
+/// (Gamma - 0.5) * 0.5 (read from its Engine.dll).
+pub fn brightness_row(gamma: f32) -> i32 {
+    (((gamma - 0.5) * 0.5) * 10.0 + 0.5).floor() as i32
+}
+
+/// The gamma a BRIGHTNESS row sets: SetNormalizedGamma(row / 10), which
+/// sets Gamma to row / 10 * 2 + 0.5.
+pub fn brightness_gamma(row: usize) -> f32 {
+    row as f32 / 10.0 * 2.0 + 0.5
+}
+
+/// Where a step with the arrows really lands, for rows where the original
+/// skips a value: GRAPHICS QUALITY and TEXTURE QUALITY never stop on CUSTOM
+/// (its ChangeOption: GRAPHICS QUALITY goes to LOWEST; TEXTURE QUALITY to
+/// HIGHEST going left and LOWEST going right).
+pub fn stepped_to(name: &str, to: usize, step: i32, items: &[String]) -> usize {
+    let Some(t) = items.get(to) else {
+        return to;
+    };
+    if !is_custom(t) {
+        return to;
+    }
+    match name {
+        "graphics_quality" => 0,
+        "texture_detail" if step < 0 => to.saturating_sub(1),
+        "texture_detail" => 0,
+        _ => to,
+    }
+}
+
+/// Whether a row can be changed now, for rows another row switches off (as
+/// the original's Refresh): SQUAD SHADOWS needs PROJECTORS, FSAA needs
+/// VSYNC. None for rows that are always available.
+pub fn row_enabled(name: &str, s: &Settings) -> Option<bool> {
+    match name {
+        "squad_shadows" => Some(s.video.projectors),
+        "fsaa" => Some(s.video.vsync),
+        _ => None,
+    }
 }
 
 /// The number in a value's text ("32 CHANNELS" is 32), if it has one.
@@ -295,18 +384,21 @@ fn says_low(text: &str) -> bool {
 pub fn fallback_items(name: &str) -> Option<Vec<String>> {
     let l = |v: &[&str]| Some(v.iter().map(|s| s.to_string()).collect());
     match name {
-        "fsaa" => l(&["OFF", "2X", "4X"]),
+        "fsaa" => l(&["NONE"]),
         "vsync"
         | "subtitles"
         | "prompt_text"
         | "helmet"
         | "auto_pull_maneuvers"
         | "blur"
-        | "bloom"
+        | "projectors"
         | "squad_shadows"
         | "sound_3d" => l(&["ON", "OFF"]),
-        "graphics_quality" => l(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST"]),
-        "texture_detail" | "character_detail" | "sound_quality" => l(&["LOW", "MEDIUM", "HIGH"]),
+        "bloom" => l(&["NONE", "LOW", "HIGH"]),
+        "graphics_quality" | "texture_detail" => {
+            l(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST", "CUSTOM"])
+        }
+        "character_detail" | "bump_quality" | "sound_quality" => l(&["LOW", "MEDIUM", "HIGH"]),
         "audio_channels" => l(&["16", "32", "64"]),
         "brightness" | "voices_volume" | "effects_volume" | "music_volume" => {
             l(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"])
@@ -397,44 +489,23 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
             rc_visor::rules::intensity_step(s.game.tactical_intensity).min(n - 1)
         }
         "blur" => on_off_index(items, s.video.blur),
-        "bloom" => on_off_index(items, s.video.bloom),
+        "bloom" => (s.video.bloom_quality as usize).min(n - 1),
+        "bump_quality" => (s.video.bump_quality as usize).min(n - 1),
+        "projectors" => on_off_index(items, s.video.projectors),
         "squad_shadows" => on_off_index(items, s.video.squad_shadows),
-        "brightness" => level_index(s.video.brightness, n),
-        "texture_detail" => level_index(s.video.texture_detail, n),
+        "brightness" => (brightness_row(s.video.gamma).max(0) as usize).min(n - 1),
+        "texture_detail" => texture_row(s, &graphics_presets::get()).min(n - 1),
         "character_detail" => level_index(s.video.character_detail, n),
         "fsaa" => {
-            let want = s.video.fsaa;
+            let want = s.video.fsaa.max(1);
             (0..n)
-                .min_by_key(|&i| fsaa_samples(&items[i]).abs_diff(want))
+                .find(|&i| fsaa_samples(&items[i]) == want)
                 .unwrap_or(0)
         }
-        "graphics_quality" => {
-            let p = presets(items);
-            let now = quality_now(s);
-            // The value last chosen, if the rows still match it. Several
-            // values can set the same rows (LOW and MEDIUM on a five-value
-            // list), so the choice itself is kept, not worked out from the
-            // rows, or the arrows would get stuck on the first of them.
-            let chosen = level_index(s.video.quality, p.len());
-            if quality_preset(level_value(chosen, p.len())) == now {
-                return p.get(chosen).copied();
-            }
-            match p
-                .iter()
-                .enumerate()
-                .find(|(k, _)| quality_preset(level_value(*k, p.len())) == now)
-                .map(|(_, &i)| i)
-            {
-                Some(i) => i,
-                // Changed by hand: CUSTOM if the list has it, else the
-                // preset with the nearest texture detail.
-                None => items.iter().position(|t| is_custom(t)).unwrap_or_else(|| {
-                    p.get(level_index(s.video.texture_detail, p.len()))
-                        .copied()
-                        .unwrap_or(0)
-                }),
-            }
-        }
+        "graphics_quality" => match matching_preset(s, &graphics_presets::get()) {
+            Some(i) => i.min(n - 1),
+            None => items.iter().position(|t| is_custom(t)).unwrap_or(n - 1),
+        },
         _ => return None,
     })
 }
@@ -511,7 +582,13 @@ pub fn write(
                 s.video.display_mode = DisplayMode::Windowed;
             }
         }
-        "vsync" => s.video.vsync = first,
+        "vsync" => {
+            s.video.vsync = first;
+            // The original: FSAA needs vsync, and goes to NONE without it.
+            if !s.video.vsync {
+                s.video.fsaa = 1;
+            }
+        }
         "subtitles" => s.game.subtitles = on_off_value(items, i),
         "prompt_text" => s.game.prompt_text = on_off_value(items, i),
         "helmet" => s.game.helmet = on_off_value(items, i),
@@ -522,28 +599,29 @@ pub fn write(
         }
         "tactical_intensity" => s.game.tactical_intensity = rc_visor::rules::intensity_from_step(i),
         "blur" => s.video.blur = on_off_value(items, i),
-        "bloom" => s.video.bloom = on_off_value(items, i),
+        "bloom" => s.video.bloom_quality = i.min(2) as u8,
+        "bump_quality" => s.video.bump_quality = i.min(2) as u8,
+        "projectors" => {
+            s.video.projectors = on_off_value(items, i);
+            // The original: projectors off also turns character shadows off.
+            if !s.video.projectors {
+                s.video.squad_shadows = false;
+            }
+        }
         "squad_shadows" => s.video.squad_shadows = on_off_value(items, i),
-        "brightness" => s.video.brightness = level_value(i, items.len()),
-        "texture_detail" => s.video.texture_detail = level_value(i, items.len()),
+        "brightness" => s.video.gamma = brightness_gamma(i),
+        "texture_detail" => {
+            if is_custom(text) {
+                return true;
+            }
+            s.video.texture_detail = level_value(i, graphics_presets::PRESET_KEYS.len());
+        }
         "character_detail" => s.video.character_detail = level_value(i, items.len()),
         "fsaa" => s.video.fsaa = fsaa_samples(text),
         "graphics_quality" => {
-            let p = presets(items);
-            // CUSTOM leaves everything as it is.
-            let Some(k) = p.iter().position(|&j| j == i) else {
-                return true;
-            };
-            let place = level_value(k, p.len());
-            let (tex, chars, blur, bloom, shadows, fsaa) = quality_preset(place);
-            let v = &mut s.video;
-            v.quality = place;
-            v.texture_detail = tex;
-            v.character_detail = chars;
-            v.blur = blur;
-            v.bloom = bloom;
-            v.squad_shadows = shadows;
-            v.fsaa = fsaa;
+            // CUSTOM can't be chosen: stepping onto it gives LOWEST.
+            let i = if is_custom(text) { 0 } else { i };
+            return use_preset(s, &graphics_presets::get(), i);
         }
         _ => return false,
     }
@@ -570,31 +648,24 @@ pub fn restore(name: &str, s: &mut Settings) {
         "sound_quality" => s.audio.low_quality = d.audio.low_quality,
         "sound_3d" => s.audio.sound_3d = d.audio.sound_3d,
         "audio_channels" => s.audio.channels = d.audio.channels,
-        "video_resolution" => {
-            s.video.width = d.video.width;
-            s.video.height = d.video.height;
-        }
-        "vsync" => s.video.vsync = d.video.vsync,
-        "brightness" => s.video.brightness = d.video.brightness,
-        "texture_detail" => s.video.texture_detail = d.video.texture_detail,
-        "character_detail" => s.video.character_detail = d.video.character_detail,
-        "blur" => s.video.blur = d.video.blur,
-        "bloom" => s.video.bloom = d.video.bloom,
-        "squad_shadows" => s.video.squad_shadows = d.video.squad_shadows,
-        "fsaa" => s.video.fsaa = d.video.fsaa,
+        // The screen size changes only with the preset (see
+        // PRESETS_SET_SCREEN_SIZE).
+        "video_resolution" => {}
+        // SET RECOMMENDED on the GRAPHICS page is the original's: it uses the
+        // preset the install recommends ([VideoSettings] DefaultConfig) and
+        // leaves BRIGHTNESS and VSYNC as they are. The other rows are all
+        // part of the preset.
         "graphics_quality" => {
-            s.video.quality = d.video.quality;
-            for name in [
-                "texture_detail",
-                "character_detail",
-                "blur",
-                "bloom",
-                "squad_shadows",
-                "fsaa",
-            ] {
-                restore(name, s);
+            let presets = graphics_presets::get();
+            if let Some(i) = presets
+                .recommended()
+                .and_then(|r| presets.list.iter().position(|p| p == r))
+            {
+                use_preset(s, &presets, i);
             }
         }
+        "vsync" | "brightness" | "texture_detail" | "character_detail" | "bump_quality"
+        | "blur" | "bloom" | "projectors" | "squad_shadows" | "fsaa" => {}
         "display_mode" => s.video.display_mode = d.video.display_mode,
         "gyro_mode" => s.gyro.mode = d.gyro.mode,
         _ if numeric(name).is_some() => set_numeric(name, s, numeric_value(name, &d)),
@@ -610,6 +681,42 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    /// Made-up presets in the shape of the install's (every test sets the
+    /// same ones, so tests running at once agree). LOWEST to HIGHEST, with
+    /// the last one recommended.
+    fn test_presets() -> Presets {
+        let p = |i: u8, tex: &str, shadows: bool, bloom: u8, projectors: bool| Preset {
+            key: graphics_presets::PRESET_KEYS[i as usize].into(),
+            windowed: (640 + 100 * i as u32, 480),
+            fullscreen: (640 + 100 * i as u32, 480),
+            textures: std::array::from_fn(|_| tex.to_string()),
+            drop_lod_by: 2u8.saturating_sub(i),
+            shadows,
+            bump: 0,
+            blur: i > 0,
+            bloom,
+            projectors,
+            fsaa: 0,
+        };
+        let presets = Presets {
+            list: vec![
+                p(0, "LOWER", false, 0, false),
+                p(1, "LOW", false, 1, true),
+                p(2, "NORMAL", true, 1, true),
+                p(3, "HIGH", true, 1, true),
+                p(4, "ULTRAHIGH", true, 2, true),
+            ],
+            recommended: Some("GraphicsQualityHighest".into()),
+        };
+        graphics_presets::set(presets.clone());
+        graphics_presets::set_fsaa_levels(vec![2, 4, 8]);
+        presets
+    }
+
+    fn quality_items() -> Vec<String> {
+        list(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST", "CUSTOM"])
+    }
+
     #[test]
     fn mouse_sensitivity_default_is_number_six() {
         let ten = list(&["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
@@ -622,28 +729,20 @@ mod tests {
 
     #[test]
     fn short_lists_get_a_working_one() {
-        // FSAA and VSYNC came up with one value (or none) on the user's
-        // install, so they couldn't be changed.
-        assert_eq!(fallback_items("fsaa").unwrap(), list(&["OFF", "2X", "4X"]));
         assert_eq!(fallback_items("vsync").unwrap(), list(&["ON", "OFF"]));
         assert!(fallback_items("unavailable").is_none());
-        let s = Settings::default();
-        let fsaa = fallback_items("fsaa").unwrap();
-        let mut t = s.clone();
-        write("fsaa", &mut t, 2, &fsaa, None);
-        assert_eq!(t.video.fsaa, 4);
-        assert_eq!(read("fsaa", &t, &fsaa), Some(2));
     }
 
     #[test]
     fn every_setting_reads_back_what_was_written() {
+        test_presets();
         let s0 = Settings::default();
         for name in ALL {
             let items = items(name, &s0, None).unwrap_or_else(|| match *name {
-                "fsaa" => list(&["OFF", "2X", "4X"]),
-                "graphics_quality" => list(&["LOW", "MEDIUM", "HIGH", "CUSTOM"]),
+                "graphics_quality" | "texture_detail" => quality_items(),
+                "bloom" | "character_detail" | "bump_quality" => list(&["LOW", "MEDIUM", "HIGH"]),
                 "blur"
-                | "bloom"
+                | "projectors"
                 | "squad_shadows"
                 | "sound_3d"
                 | "subtitles"
@@ -665,8 +764,12 @@ mod tests {
                     "{name} {i} {back:?}"
                 );
             }
-            restore(name, &mut s);
-            assert_eq!(read(name, &s, &items), read(name, &s0, &items), "{name}");
+            // SET RECOMMENDED leaves the GRAPHICS rows to the preset (tested
+            // below), and the screen size alone.
+            if !GRAPHICS_PAGE.contains(name) {
+                restore(name, &mut s);
+                assert_eq!(read(name, &s, &items), read(name, &s0, &items), "{name}");
+            }
         }
     }
 
@@ -734,53 +837,126 @@ mod tests {
         assert_eq!(read("display_mode", &s, &modes), Some(2));
     }
 
+    const GRAPHICS_PAGE: &[&str] = &[
+        "graphics_quality",
+        "brightness",
+        "video_resolution",
+        "texture_detail",
+        "character_detail",
+        "bump_quality",
+        "blur",
+        "bloom",
+        "projectors",
+        "squad_shadows",
+        "vsync",
+        "fsaa",
+    ];
+
     #[test]
     fn on_off_follows_the_words_not_the_order() {
         let off_first = list(&["OFF", "ON"]);
         let mut s = Settings::default();
-        assert!(write("bloom", &mut s, 1, &off_first, None));
-        assert!(s.video.bloom);
-        assert_eq!(read("bloom", &s, &off_first), Some(1));
-        assert!(write("bloom", &mut s, 0, &off_first, None));
-        assert!(!s.video.bloom);
+        assert!(write("blur", &mut s, 1, &off_first, None));
+        assert!(s.video.blur);
+        assert_eq!(read("blur", &s, &off_first), Some(1));
+        assert!(write("blur", &mut s, 0, &off_first, None));
+        assert!(!s.video.blur);
     }
 
     #[test]
     fn graphics_quality_sets_the_detail_rows_and_shows_custom_after_a_change() {
-        let q = list(&["LOW", "MEDIUM", "HIGH", "CUSTOM"]);
+        let presets = test_presets();
+        let q = quality_items();
         let mut s = Settings::default();
+        // The defaults are the HIGHEST preset's rows.
+        assert_eq!(read("graphics_quality", &s, &q), Some(4));
         assert!(write("graphics_quality", &mut s, 0, &q, None));
         assert_eq!(s.video.texture_detail, 0.0);
+        assert_eq!(s.video.character_detail, 0.0);
+        assert!(!s.video.projectors && !s.video.squad_shadows && !s.video.blur);
+        assert_eq!(s.video.bloom_quality, 0);
         assert_eq!(read("graphics_quality", &s, &q), Some(0));
-        assert!(write("graphics_quality", &mut s, 2, &q, None));
-        assert!(s.video.bloom && s.video.squad_shadows);
-        assert_eq!(s.video.fsaa, 4);
-        assert_eq!(read("graphics_quality", &s, &q), Some(2));
-        // Changing one row by hand makes it CUSTOM.
-        s.video.bloom = false;
-        s.video.fsaa = 2;
-        assert_eq!(read("graphics_quality", &s, &q), Some(3));
-        // Choosing CUSTOM changes nothing.
-        let before = s.clone();
+        for i in 0..5 {
+            assert!(write("graphics_quality", &mut s, i, &q, None));
+            assert_eq!(read("graphics_quality", &s, &q), Some(i), "{}", q[i]);
+            assert_eq!(read("texture_detail", &s, &q), Some(i), "{}", q[i]);
+        }
+        // Changing one row by hand makes it CUSTOM, as the original.
+        s.video.bloom_quality = 1;
+        assert_eq!(read("graphics_quality", &s, &q), Some(5));
+        // CUSTOM is never chosen: the original goes to LOWEST.
+        assert!(write("graphics_quality", &mut s, 5, &q, None));
+        assert_eq!(read("graphics_quality", &s, &q), Some(0));
+        // The screen size isn't part of it (PRESETS_SET_SCREEN_SIZE).
+        let size = (s.video.width, s.video.height);
         assert!(write("graphics_quality", &mut s, 3, &q, None));
-        assert_eq!(s, before);
+        assert_eq!((s.video.width, s.video.height), size);
+        // SET RECOMMENDED: the install's recommended preset; BRIGHTNESS and
+        // VSYNC stay.
+        s.video.gamma = 2.1;
+        s.video.vsync = false;
+        for name in GRAPHICS_PAGE {
+            restore(name, &mut s);
+        }
+        assert_eq!(matching_preset(&s, &presets), Some(4));
+        assert_eq!((s.video.gamma, s.video.vsync), (2.1, false));
     }
 
     #[test]
-    fn fsaa_reads_the_sample_count_from_the_text() {
-        let f = list(&["NONE", "2X", "4X"]);
+    fn arrows_never_stop_on_custom() {
+        let q = quality_items();
+        assert_eq!(stepped_to("graphics_quality", 5, 1, &q), 0);
+        assert_eq!(stepped_to("graphics_quality", 5, -1, &q), 0);
+        assert_eq!(stepped_to("texture_detail", 5, -1, &q), 4);
+        assert_eq!(stepped_to("texture_detail", 5, 1, &q), 0);
+        assert_eq!(stepped_to("graphics_quality", 3, 1, &q), 3);
+    }
+
+    #[test]
+    fn projectors_and_vsync_switch_rows_off() {
+        test_presets();
+        let on_off = list(&["ON", "OFF"]);
         let mut s = Settings::default();
-        assert_eq!(read("fsaa", &s, &f), Some(0));
-        assert!(write("fsaa", &mut s, 2, &f, None));
-        assert_eq!(s.video.fsaa, 4);
-        assert_eq!(read("fsaa", &s, &f), Some(2));
+        assert_eq!(row_enabled("squad_shadows", &s), Some(true));
+        assert!(write("projectors", &mut s, 1, &on_off, None));
+        assert!(!s.video.squad_shadows);
+        assert_eq!(row_enabled("squad_shadows", &s), Some(false));
+        s.video.fsaa = 4;
+        assert!(write("vsync", &mut s, 1, &on_off, None));
+        assert_eq!(s.video.fsaa, 1);
+        assert_eq!(row_enabled("fsaa", &s), Some(false));
+        assert_eq!(row_enabled("blur", &s), None);
     }
 
     #[test]
-    fn brightness_middle_value_is_the_default() {
-        let eleven = list(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+    fn fsaa_lists_what_the_graphics_card_offers() {
+        test_presets();
         let s = Settings::default();
-        assert_eq!(read("brightness", &s, &eleven), Some(5));
+        let f = items("fsaa", &s, None).unwrap();
+        assert_eq!(f, list(&["NONE", "2X", "4X", "8X"]));
+        let mut s = s;
+        assert_eq!(read("fsaa", &s, &f), Some(0));
+        assert!(write("fsaa", &mut s, 3, &f, None));
+        assert_eq!(s.video.fsaa, 8);
+        assert_eq!(read("fsaa", &s, &f), Some(3));
+    }
+
+    #[test]
+    fn brightness_rows_are_the_originals_gamma() {
+        let eleven = list(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+        let mut s = Settings::default();
+        // The original's own Gamma 1.0 shows 3, and the user's 1.1 too.
+        assert_eq!(read("brightness", &s, &eleven), Some(3));
+        s.video.gamma = 1.1;
+        assert_eq!(read("brightness", &s, &eleven), Some(3));
+        assert!(write("brightness", &mut s, 0, &eleven, None));
+        assert_eq!(s.video.gamma, 0.5);
+        assert!(write("brightness", &mut s, 10, &eleven, None));
+        assert_eq!(s.video.gamma, 2.5);
+        for i in 0..11 {
+            assert!(write("brightness", &mut s, i, &eleven, None));
+            assert_eq!(read("brightness", &s, &eleven), Some(i));
+        }
     }
 
     #[test]
@@ -803,23 +979,5 @@ mod tests {
         assert!(write("sound_3d", &mut s, 1, &kinds, None));
         assert!(s.audio.sound_3d);
         assert_eq!(read("sound_3d", &s, &kinds), Some(0));
-    }
-
-    #[test]
-    fn graphics_quality_steps_through_values_that_share_a_preset() {
-        // Found by the user: on a five-value list LOW and MEDIUM set the same
-        // rows, and the arrows got stuck on LOW.
-        let q = list(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST"]);
-        let mut s = Settings::default();
-        assert_eq!(read("graphics_quality", &s, &q), Some(3));
-        for i in [4, 0, 1, 2, 3, 4, 3, 2, 1, 0] {
-            assert!(write("graphics_quality", &mut s, i, &q, None));
-            assert_eq!(
-                read("graphics_quality", &s, &q),
-                Some(i),
-                "step to {}",
-                q[i]
-            );
-        }
     }
 }

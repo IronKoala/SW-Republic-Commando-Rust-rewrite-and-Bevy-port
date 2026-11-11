@@ -253,6 +253,38 @@ fn steps() -> Vec<Step> {
             }
         }),
         Wait(0.5),
+        Check("the main menu's background video plays", |w| {
+            let v = w.resource::<crate::menu_video::MenuVideo>();
+            let movie = w
+                .resource::<OriginalMenus>()
+                .main
+                .as_ref()
+                .map(|m| m.layout.background_movie.clone())
+                .unwrap_or_default();
+            if movie.is_empty() {
+                return Err("the main menu names no background video".into());
+            }
+            match &v.player {
+                None => {
+                    let path = crate::menu_video::avi_for(w.resource::<rc_game_core::GamePaths>(), &movie);
+                    if path.exists() {
+                        Err(format!("{} is there but didn't play (see the log)", path.display()))
+                    } else {
+                        Ok(format!("{movie:?}: no {} in this install, skipped", path.display()))
+                    }
+                }
+                Some(p) if v.wanted && v.frames_shown >= 3 => Ok(format!(
+                    "{movie:?}: {} frames shown, now frame {:?} of {}",
+                    v.frames_shown,
+                    v.last_frame,
+                    p.frame_count()
+                )),
+                Some(_) => Err(format!(
+                    "{movie:?}: only {} frames shown (drawn: {})",
+                    v.frames_shown, v.wanted
+                )),
+            }
+        }),
         Shot("main_menu"),
         Check("main menu matches the original's pictures", |w| {
             compare(w, "main_menu", 0.2)
@@ -1419,6 +1451,47 @@ fn steps() -> Vec<Step> {
                 }
             },
         ),
+        Check(
+            "the pause menu shows the original's rows for a living player, centred",
+            |w| {
+                let m = w.resource::<OriginalMenus>();
+                let Some(p) = m.pages.get("paused") else {
+                    return Ok("no original pause menu".into());
+                };
+                let l = &p.screen.layout;
+                if !rc_menus::pause::is_pause_menu(l) {
+                    return Ok("not the original's eleven rows".into());
+                }
+                let shown: Vec<usize> = (0..rc_menus::pause::NUM_OPTIONS)
+                    .filter(|&i| {
+                        rc_menus::pause::row(l, i).is_some_and(|x| !l.widgets[x].hidden)
+                    })
+                    .collect();
+                // Alive: never LOAD LAST SAVE; RESUME and QUIT always.
+                for (i, want) in [(0, false), (3, true), (10, true)] {
+                    if shown.contains(&i) != want {
+                        return Err(format!("row {i} shown {}, want {want}", !want));
+                    }
+                }
+                let ys: Vec<f32> = shown
+                    .iter()
+                    .filter_map(|&i| rc_menus::pause::row(l, i))
+                    .filter_map(|x| match &l.widgets[x].kind {
+                        rc_menus::layout::Kind::Button(b) => Some(b.blurred.pos[1]),
+                        _ => None,
+                    })
+                    .collect();
+                let steps: Vec<f32> = ys.windows(2).map(|p| p[1] - p[0]).collect();
+                if steps.iter().any(|d| (d - steps[0]).abs() > 1e-4) {
+                    return Err(format!("rows not evenly spaced: {ys:?}"));
+                }
+                let focus = p.screen.focused_name().unwrap_or("none").to_string();
+                if focus != "MenuOptions[3]" {
+                    return Err(format!("focus on {focus}, want RESUME GAME"));
+                }
+                Ok(format!("rows {shown:?} from {:.4}, focus on RESUME GAME", ys[0]))
+            },
+        ),
         Shot("paused"),
         // The original save and load pages, from the pause menu.
         FocusPauseItem("SaveGameSelected", 0),
@@ -2035,8 +2108,17 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
     let across = w.resource::<OriginalMenus>().across;
     let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32), across);
     let ours = shrink(&shot, area, W, H);
+    let video = {
+        let v = w.resource::<crate::menu_video::MenuVideo>();
+        if v.wanted {
+            v.software_frame(W, H, area.width() / area.height().max(1.0))
+        } else {
+            None
+        }
+    };
     let mut menus = w.resource_mut::<OriginalMenus>();
-    let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let reference =
+        original_menu::software_picture(&mut menus, W, H, video).ok_or("no original menu")?;
     let mut total = 0.0f64;
     let mut worst = 0.0f64;
     let mut far = 0usize;
@@ -3540,11 +3622,9 @@ fn props_effect_over(w: &mut World) -> bool {
             .count()
     };
     running == 0
-        && w
-            .get_resource::<rc_effects_plugin::EffectStats>()
+        && w.get_resource::<rc_effects_plugin::EffectStats>()
             .is_some_and(|s| s.finished >= 1)
 }
-
 
 fn props_simple_shapes(w: &mut World) -> Result<String, String> {
     let info = w

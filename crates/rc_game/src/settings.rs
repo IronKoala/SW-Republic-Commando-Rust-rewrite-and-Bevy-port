@@ -46,6 +46,12 @@ pub struct GameSection {
     /// anti-armour posts. Off, the order is refused until you recall the
     /// squad. On by default, as in the original's `User.ini`.
     pub auto_pull_maneuvers: bool,
+    /// Hint screens show (the original's `bKeepHintMenusAwfulHack` in
+    /// `User.ini`, true there by default). Turning hints off happens on a
+    /// hint screen, and the pause menu's ENABLE HINTS turns them back on
+    /// (it shows only while they are off, in a level that has hints). The
+    /// hint screens themselves aren't built yet.
+    pub hint_screens: bool,
     /// TACTICAL VISOR MODE: which visor modes CYCLE VISOR MODE (X) steps
     /// through (see rc_visor).
     pub tactical_visor: TacticalVisor,
@@ -159,28 +165,37 @@ pub struct VideoSection {
     /// 3D view so things near the sides aren't stretched; the middle keeps
     /// its size.
     pub panini: f32,
-    /// GRAPHICS QUALITY last chosen, as its place in the list: 0 lowest, 1
-    /// highest. It sets the detail options below; changing one of those by
-    /// hand makes it CUSTOM.
-    pub quality: f32,
-    /// BRIGHTNESS: 0 (one stop darker) to 1 (one stop brighter); 0.5
-    /// changes nothing.
-    pub brightness: f32,
-    /// TEXTURE QUALITY for walls, floors and props: 0 (lowest, quarter-size
-    /// pictures) to 1 (full size). Used from the next level load.
+    /// BRIGHTNESS, as the original's own `Gamma` (its `[WinDrv.WindowsClient]`
+    /// setting): 1.0 changes nothing, 0.5 (row 0) to 2.5 (row 10). The row
+    /// shows (gamma - 0.5) / 2 in tenths, rounded, as the original's
+    /// GetNormalizedGamma does, so the default 1.0 shows 3.
+    pub gamma: f32,
+    /// TEXTURE QUALITY, as the GRAPHICS QUALITY preset whose texture sizes
+    /// are used: 0 (LOWEST) to 1 (HIGHEST) in quarters. Used from the next
+    /// level load.
     pub texture_detail: f32,
-    /// CHARACTER DETAIL: the same for the squad, enemies, arms and weapons.
+    /// CHARACTER DETAIL: 0 (LOW), 0.5 (MEDIUM) or 1 (HIGH); the original's
+    /// `DropLODBy` 2, 1 or 0.
     pub character_detail: f32,
+    /// BUMPMAPPING QUALITY: 0 LOW, 1 MEDIUM, 2 HIGH (the original's
+    /// `BumpmappingQuality`).
+    pub bump_quality: u8,
     /// BLUR EFFECTS: motion blur when turning and moving quickly.
     pub blur: bool,
-    /// BLOOM EFFECTS: a glow around bright lights.
-    pub bloom: bool,
+    /// BLOOM EFFECTS: 0 NONE, 1 LOW, 2 HIGH (the original's `BloomQuality`):
+    /// a glow around bright lights.
+    pub bloom_quality: u8,
+    /// PROJECTORS: pictures thrown onto the world, such as the characters'
+    /// shadows. Off also turns SQUAD SHADOWS off and greys that row out, as
+    /// the original does.
+    pub projectors: bool,
     /// SQUAD SHADOWS: the level's moving lights cast shadows (the squad,
     /// droids and props in the light), and characters the map marks cast
     /// the original's shadow on the floor (rc_shadows). Off is faster.
     pub squad_shadows: bool,
-    /// FSAA: smooths jagged edges by drawing this many samples per pixel
-    /// (1 is off, 2 or 4; more counts as 4).
+    /// FSAA: smooths jagged edges by drawing this many samples per pixel:
+    /// 1 is NONE, else one the graphics card offers (2, 4 or 8). Needs
+    /// VSYNC on, as in the original.
     pub fsaa: u32,
 }
 
@@ -268,6 +283,7 @@ impl Default for Settings {
                 prompt_text: true,
                 helmet: true,
                 auto_pull_maneuvers: true,
+                hint_screens: true,
                 tactical_visor: TacticalVisor::Cycle,
                 tactical_intensity: 0.2,
             },
@@ -286,13 +302,17 @@ impl Default for Settings {
                 widest_shape: 2.0,
                 hud_max_aspect: 16.0 / 9.0,
                 panini: 0.0,
-                quality: 0.75,
-                brightness: 0.5,
+                // The GRAPHICS rows start as the original's GraphicsQualityHighest
+                // preset in its System.ini (what it recommends for any card
+                // made since), and the original's own Gamma of 1.0.
+                gamma: 1.0,
                 texture_detail: 1.0,
                 character_detail: 1.0,
-                blur: false,
-                bloom: false,
-                squad_shadows: false,
+                bump_quality: 0,
+                blur: true,
+                bloom_quality: 2,
+                projectors: true,
+                squad_shadows: true,
                 fsaa: 1,
             },
             audio: AudioSection {
@@ -415,15 +435,18 @@ hud_max_aspect = 1.7777778
 # view), up to 1. Around 0.3 to 0.5 takes the stretching out of the sides on
 # 21:9 and 32:9; the middle stays the same size, a little softer.
 panini = 0.0
-# The GRAPHICS options page sets these.
-quality = 0.75           # GRAPHICS QUALITY chosen: 0 lowest, 1 highest (sets the rows below)
-brightness = 0.5         # 0 darkest, 0.5 unchanged, 1 brightest
-texture_detail = 1.0     # walls and props: 0 quarter-size pictures, 1 full size (next level load)
-character_detail = 1.0   # squad, enemies, arms and weapons: the same
-blur = false             # motion blur
-bloom = false            # glow around bright lights
-squad_shadows = false    # character shadows, and moving lights cast shadows
-fsaa = 1                 # edge smoothing: 1 (off), 2 or 4 samples
+# The GRAPHICS options page sets these. GRAPHICS QUALITY isn't stored: as
+# in the original, it shows the preset (from the game's System.ini) that
+# matches the rows below, or CUSTOM.
+gamma = 1.0              # BRIGHTNESS, the original's Gamma: 0.5 darkest, 1.0 unchanged, 2.5 brightest
+texture_detail = 1.0     # walls and props: 0 lowest, 1 highest, in quarters (next level load)
+character_detail = 1.0   # squad, enemies, arms and weapons: 0 low, 0.5 medium, 1 high
+bump_quality = 0         # 0 low, 1 medium, 2 high
+blur = true              # motion blur
+bloom_quality = 2        # glow around bright lights: 0 none, 1 low, 2 high
+projectors = true        # pictures thrown onto the world, such as character shadows
+squad_shadows = true     # character shadows, and moving lights cast shadows
+fsaa = 1                 # edge smoothing: 1 (none) or the samples the graphics card offers (2, 4, 8)
 
 [audio]
 master_volume = 1.0   # 0 is silent, 1 is full

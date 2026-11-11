@@ -475,6 +475,7 @@ mod tests {
             skipped: vec![],
             sounds: Sounds::default(),
             background_movie: String::new(),
+            movie_widget: None,
             music: None,
             lists: Default::default(),
         }
