@@ -461,7 +461,13 @@ copy of the game.
   files can't be read. The plan is to replace them with the original's in
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on
-  Windows): its eleven buttons; only ENABLE HINTS is greyed out until built.
+  Windows): its eleven buttons. Each time it opens it shows only the rows
+  the original shows, centred the original's way (read from the game's own
+  pause menu script; tested in the cloud, not yet on Windows): LOAD LAST
+  SAVE only while you are down, QUICK LOAD only with a quicksave, no saving
+  during a briefing or in the prologue, and ENABLE HINTS only when hint
+  screens are off in a level that has them. The hint screens themselves
+  aren't built yet, so ENABLE HINTS only switches the setting back on.
   **LOAD GAME and SAVE GAME are the original's pages** (tested in the
   cloud sandbox with the install, and by the user on Windows on 2026-11-09): the saves in a list
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,

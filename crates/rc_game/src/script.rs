@@ -1404,6 +1404,47 @@ fn steps() -> Vec<Step> {
                 }
             },
         ),
+        Check(
+            "the pause menu shows the original's rows for a living player, centred",
+            |w| {
+                let m = w.resource::<OriginalMenus>();
+                let Some(p) = m.pages.get("paused") else {
+                    return Ok("no original pause menu".into());
+                };
+                let l = &p.screen.layout;
+                if !rc_menus::pause::is_pause_menu(l) {
+                    return Ok("not the original's eleven rows".into());
+                }
+                let shown: Vec<usize> = (0..rc_menus::pause::NUM_OPTIONS)
+                    .filter(|&i| {
+                        rc_menus::pause::row(l, i).is_some_and(|x| !l.widgets[x].hidden)
+                    })
+                    .collect();
+                // Alive: never LOAD LAST SAVE; RESUME and QUIT always.
+                for (i, want) in [(0, false), (3, true), (10, true)] {
+                    if shown.contains(&i) != want {
+                        return Err(format!("row {i} shown {}, want {want}", !want));
+                    }
+                }
+                let ys: Vec<f32> = shown
+                    .iter()
+                    .filter_map(|&i| rc_menus::pause::row(l, i))
+                    .filter_map(|x| match &l.widgets[x].kind {
+                        rc_menus::layout::Kind::Button(b) => Some(b.blurred.pos[1]),
+                        _ => None,
+                    })
+                    .collect();
+                let steps: Vec<f32> = ys.windows(2).map(|p| p[1] - p[0]).collect();
+                if steps.iter().any(|d| (d - steps[0]).abs() > 1e-4) {
+                    return Err(format!("rows not evenly spaced: {ys:?}"));
+                }
+                let focus = p.screen.focused_name().unwrap_or("none").to_string();
+                if focus != "MenuOptions[3]" {
+                    return Err(format!("focus on {focus}, want RESUME GAME"));
+                }
+                Ok(format!("rows {shown:?} from {:.4}, focus on RESUME GAME", ys[0]))
+            },
+        ),
         Shot("paused"),
         // The original save and load pages, from the pause menu.
         FocusPauseItem("SaveGameSelected", 0),
@@ -3480,11 +3521,9 @@ fn props_effect_over(w: &mut World) -> bool {
         q.iter(w).count()
     };
     running == 0
-        && w
-            .get_resource::<rc_effects_plugin::EffectStats>()
+        && w.get_resource::<rc_effects_plugin::EffectStats>()
             .is_some_and(|s| s.finished >= 1)
 }
-
 
 fn props_simple_shapes(w: &mut World) -> Result<String, String> {
     let info = w
