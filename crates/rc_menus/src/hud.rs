@@ -161,6 +161,10 @@ const ELEMENT_KEYS: &[&str] = &[
     "choices",
     "fill",
     "fill_toward",
+    "fill_steps",
+    "fill_least_gap",
+    "colour_by",
+    "colours",
     "mirror",
     "text",
     "align",
@@ -236,6 +240,13 @@ pub struct Element {
     pub alert_colour: Option<[u8; 4]>,
     #[serde(default)]
     pub alert_when: Option<String>,
+    /// Other colours by the value of a text (see `HudValues::text`), for
+    /// example `colour_by = "{health_level}"` with `colours = { "3" =
+    /// [72, 255, 72, 255] }`. Falls back to `colour`; `alert_colour` wins.
+    #[serde(default)]
+    pub colour_by: Option<String>,
+    #[serde(default)]
+    pub colours: BTreeMap<String, [u8; 4]>,
     /// "alpha" (default for pictures) or "add" (glowing; default for text).
     #[serde(default)]
     pub blend: Option<String>,
@@ -285,6 +296,14 @@ pub struct Picture {
     /// or "up".
     #[serde(default)]
     pub fill_toward: Option<String>,
+    /// Empty the bar in this many steps instead of smoothly (the
+    /// original's meters drop in elevenths).
+    #[serde(default)]
+    pub fill_steps: Option<u32>,
+    /// While the value is below 1, hide at least this fraction of the
+    /// bar, so any hurt shows.
+    #[serde(default)]
+    pub fill_least_gap: f32,
     /// Flip the picture left to right (to reuse one side's art).
     #[serde(default)]
     pub mirror: bool,
@@ -353,6 +372,34 @@ pub struct HudValues {
     pub objective_fade: f32,
 }
 
+/// How hurt, as the original sorts it (Engine.dll
+/// `APawn::CalcHealthLevel`, health over the most health): 0 dead, 1 below
+/// half, 2 below 0.91, 3 above.
+pub fn health_level(health: f32) -> u8 {
+    if health <= 0.0 {
+        0
+    } else if health < 0.5 {
+        1
+    } else if health < 0.91 {
+        2
+    } else {
+        3
+    }
+}
+
+/// `v` (0..1) as a bar that drops in `steps` steps and, while below 1,
+/// hides at least `least_gap` of itself.
+fn stepped(v: f32, steps: Option<u32>, least_gap: f32) -> f32 {
+    let mut gap = 1.0 - v;
+    if let Some(n) = steps.filter(|n| *n > 0) {
+        gap = (gap * n as f32).floor() / n as f32;
+    }
+    if v < 1.0 && gap < least_gap {
+        gap = least_gap;
+    }
+    (1.0 - gap).clamp(0.0, 1.0)
+}
+
 impl HudValues {
     /// A 0..1 value by name, `None` if unknown.
     pub fn fraction(&self, name: &str, member: Option<&SquadLine>) -> Option<f32> {
@@ -385,6 +432,7 @@ impl HudValues {
             "clip" => !self.weapon.is_empty() && self.clip_size.is_some(),
             "reserve" => !self.weapon.is_empty() && self.reserve.is_some(),
             "grenade" => self.grenade.is_some(),
+            "grenades_left" => self.grenade.as_ref().is_some_and(|g| g.1 > 0),
             "shield_low" => self.shield < 0.25,
             "health_low" => self.health < 0.25,
             "health_full" => self.health >= 0.999,
@@ -424,6 +472,11 @@ impl HudValues {
             "reserve" => self.reserve.map_or("--".into(), |r| r.to_string()),
             "grenade" => self.grenade.as_ref()?.0.to_uppercase(),
             "grenades" => self.grenade.as_ref()?.1.to_string(),
+            "health_level" => health_level(self.health).to_string(),
+            "squad_health_level" => {
+                let m = member?;
+                health_level(if m.down { 0.0 } else { m.health }).to_string()
+            }
             "pickup" => self.pickup.clone(),
             "subtitle" => self.subtitle.clone(),
             "objective" => self.objective.clone(),
@@ -658,9 +711,13 @@ pub fn hud_quads(
                 .alert_when
                 .as_deref()
                 .is_some_and(|w| values.flag(w, member) == Some(true));
+            let chosen = e
+                .colour_by
+                .as_deref()
+                .and_then(|k| e.colours.get(&values.text(k, member)).copied());
             let mut colour = match (alert, e.alert_colour) {
                 (true, Some(c)) => c,
-                _ => e.colour,
+                _ => chosen.unwrap_or(e.colour),
             };
             if let Some(f) = &e.fade {
                 let v = values.fraction(f, member).unwrap_or(1.0);
@@ -686,6 +743,7 @@ pub fn hud_quads(
                     let mut dst = rect;
                     if let Some(f) = &p.fill {
                         let v = values.fraction(f, member).unwrap_or(1.0);
+                        let v = stepped(v, p.fill_steps, p.fill_least_gap);
                         if v <= 0.0 {
                             continue;
                         }
@@ -1034,6 +1092,21 @@ mod tests {
         assert_eq!(v.flag("!reserve", None), Some(true));
         assert_eq!(v.flag("squad_down", Some(&m)), Some(true));
         assert_eq!(v.flag("nonsense", None), None);
+        assert_eq!(v.flag("grenades_left", None), Some(true));
+        assert_eq!(v.text("{squad_health_level}", Some(&m)), "0");
+    }
+
+    #[test]
+    fn health_levels_and_stepped_bars_as_the_original() {
+        assert_eq!(
+            [0.0, 0.2, 0.5, 0.9, 0.91, 1.0].map(health_level),
+            [0, 1, 2, 2, 3, 3]
+        );
+        // Elevenths, and at least 5/55 gone while hurt at all.
+        assert_eq!(stepped(1.0, Some(11), 5.0 / 55.0), 1.0);
+        assert_eq!(stepped(0.99, Some(11), 5.0 / 55.0), 1.0 - 5.0 / 55.0);
+        assert!((stepped(0.5, Some(11), 5.0 / 55.0) - 6.0 / 11.0).abs() < 1e-6);
+        assert_eq!(stepped(0.3, None, 0.0), 0.3);
     }
 
     #[test]

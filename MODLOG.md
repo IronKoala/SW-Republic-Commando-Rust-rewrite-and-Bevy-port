@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Squad, grenade and health meters as the original draws them (rc_menus, rc_game, rc_game_core, rc_squad_plugin, data/ui/hud.toml)
+
+- **Changed:** The bottom-left squad panels, the two health meters and the bottom-right grenade panel now use the exact places, sizes, pictures and colours from the original's Engine.dll (`UHelmet::DrawHUD`, helmet on), drawn through the helmet's glass. Squad panels show only for mates actually in the squad (new `SquadMember::in_squad`). Meter and squad colours follow the original's four health levels (`APawn::CalcHealthLevel`: below half, below 0.91, above); the meter bar drops in elevenths. Grenade pictures by class fixed (thermal, sonic, EC, flash were mixed up); the count turns red at zero. The ammo numbers under the crosshair's right are gone: the original shows them only on the gun. The guessed shield tick column is gone (the original's shield bars come next). New HUD keys `colour_by`, `colours`, `fill_steps`, `fill_least_gap`; texts `{health_level}`, `{squad_health_level}`; condition `grenades_left`. `GlassMap::place` now carries points past the glass edge on with the nearest glass piece.
+- **Why:** User's side-by-side screenshots: squad icons, "58 60" and "2" showed when the original's didn't; meters looked dim and different.
+- **Tested how:** Numbers read from Engine.dll in a scratch folder outside the repo (nothing of it committed); `cargo test -p rc_menus -p rc_game -p rc_game_core`; `rc_probe --hud` compared with the user's screenshot of the original (meters and grenade panel land within a few pixels); `rc_game --script` in the cloud.
+- **Result:** Tests pass; "the original HUD is drawn in its own colours" passes (3771 of 9138 meter pixels in a health colour).
+- **Still broken / not tested:** Not tested on Windows. Pulsing, the arrow pointing to each squad mate, the timer ring, and which order uses which squad picture are not done. In our geo_01a two squad mates are already in the squad at the start, so their panels show; in the original you start alone (a squad question, not the HUD).
+
 ## 2026-11-11: The original's crosshair pictures and colours (rc_game, rc_combat, rc_game_core, data/ui/hud.toml)
 
 - **Changed:** Each weapon now uses its class's own `Reticle` from ctinventory.u (DC-17m: `HUD_WeaponDefault`, the ring without the dot; we used the "PC" pictures, which no weapon names). Drawn at 0.8 of our old size (the picture's size on the original's 600-line HUD). Tinted as the original's helmet does (Engine.dll `UHelmet::DrawHelmet`, by target type): (200,240,255) at opacity 110 normally, (130,255,130) at 220 over a squad mate, (255,130,130) at 220 over an enemy. New `WeaponReadout::on_friend`; `[crosshair]` keys `colour`, `friend_colour`, `enemy_colour`.

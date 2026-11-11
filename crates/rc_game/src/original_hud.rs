@@ -375,6 +375,7 @@ fn values(
         squad: squad
             .members
             .iter()
+            .filter(|m| m.in_squad)
             .map(|m| SquadLine {
                 number: m.number.clone(),
                 name: m.name.clone(),

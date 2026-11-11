@@ -66,6 +66,10 @@ pub struct SquadMember {
     pub status: SquadStatus,
     /// What they're doing, in a few words ("Form up", "Sniping").
     pub order: String,
+    /// With the player's squad. Squad mates the level's scripts have
+    /// taken away, or who haven't arrived yet, are listed but not in it;
+    /// the original helmet only shows the squad.
+    pub in_squad: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

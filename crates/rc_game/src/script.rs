@@ -529,12 +529,16 @@ fn steps() -> Vec<Step> {
                 .get("in_game")
                 .cloned()
                 .ok_or("no screenshot")?;
-            // The shield meter is tinted the original's green: count
-            // pixels inside it that are clearly greener than red and blue
-            // (a missing picture shows black, white or magenta).
+            // The health meters are tinted in the original's health
+            // colour (green, yellow, orange or red): count pixels inside
+            // the tinted pieces that clearly have that colour (a missing
+            // picture shows black, white or magenta).
             let (pw, ph) = (pic.width as f32, pic.height as f32);
             let (mut inside, mut green) = (0u32, 0u32);
-            for q in quads.iter().filter(|q| q.widget == "vitals") {
+            for q in quads
+                .iter()
+                .filter(|q| q.widget == "vitals" && q.color[..3] != [255, 255, 255])
+            {
                 let x0 = (q.dst[0] * pw) as usize;
                 let x1 = ((q.dst[2] * pw) as usize).min(pic.width);
                 let y0 = (q.dst[1] * ph) as usize;
@@ -548,7 +552,8 @@ fn steps() -> Vec<Step> {
                             pic.pixels[i + 2] as i32,
                         );
                         inside += 1;
-                        if g > r + 30 && g > b + 30 {
+                        let hi = r.max(g);
+                        if hi - b > 60 && g > b + 15 {
                             green += 1;
                         }
                     }
@@ -557,7 +562,7 @@ fn steps() -> Vec<Step> {
             let groups: std::collections::BTreeSet<_> =
                 quads.iter().map(|q| q.widget.as_str()).collect();
             let got = format!(
-                "{} pictures in {groups:?}; {green} of {inside} shield/health pixels are green",
+                "{} pictures in {groups:?}; {green} of {inside} health meter pixels are in a health colour",
                 quads.len()
             );
             if inside > 0 && green * 5 >= inside {

@@ -292,9 +292,13 @@ impl GlassMap {
     }
 
     /// Where a point of the HUD picture (screen fractions) shows on the
-    /// screen. Points outside the glass are left where they are.
+    /// screen. A point outside the glass moves as the nearest piece of
+    /// glass would carry it on, so a picture lying across the glass's
+    /// edge keeps its shape (the original shows only what is on the
+    /// glass; the rest is behind the helmet).
     pub fn place(&self, p: [f32; 2]) -> [f32; 2] {
-        for tri in &self.tris {
+        let mut best: Option<(f32, usize, [f32; 3])> = None;
+        for (n, tri) in self.tris.iter().enumerate() {
             let [a, b, c] = [tri[0].0, tri[1].0, tri[2].0];
             let d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
             if d.abs() < 1e-9 {
@@ -303,16 +307,22 @@ impl GlassMap {
             let l0 = ((b[1] - c[1]) * (p[0] - c[0]) + (c[0] - b[0]) * (p[1] - c[1])) / d;
             let l1 = ((c[1] - a[1]) * (p[0] - c[0]) + (a[0] - c[0]) * (p[1] - c[1])) / d;
             let l2 = 1.0 - l0 - l1;
-            let e = -1e-5;
-            if l0 >= e && l1 >= e && l2 >= e {
-                let s = [tri[0].1, tri[1].1, tri[2].1];
-                return [
-                    l0 * s[0][0] + l1 * s[1][0] + l2 * s[2][0],
-                    l0 * s[0][1] + l1 * s[1][1] + l2 * s[2][1],
-                ];
+            let inside = l0.min(l1).min(l2);
+            if best.is_none_or(|(b, _, _)| inside > b) {
+                best = Some((inside, n, [l0, l1, l2]));
+            }
+            if inside >= -1e-5 {
+                break;
             }
         }
-        p
+        let Some((_, n, l)) = best else {
+            return p;
+        };
+        let s = [self.tris[n][0].1, self.tris[n][1].1, self.tris[n][2].1];
+        [
+            l[0] * s[0][0] + l[1] * s[1][0] + l[2] * s[2][0],
+            l[0] * s[0][1] + l[1] * s[1][1] + l[2] * s[2][1],
+        ]
     }
 }
 
@@ -635,8 +645,12 @@ mod tests {
             (p[0] - 0.5).abs() < 1e-4 && (p[1] - 0.4).abs() < 1e-4,
             "{p:?}"
         );
-        // Outside the glass nothing moves.
-        assert_eq!(g.place([0.01, 0.99]), [0.01, 0.99]);
+        // Outside the glass the nearest piece carries it on.
+        let q = g.place([0.01, 0.99]);
+        assert!(
+            (q[0] - 0.01).abs() < 1e-4 && (q[1] - 1.09).abs() < 1e-4,
+            "{q:?}"
+        );
     }
 
     #[test]
