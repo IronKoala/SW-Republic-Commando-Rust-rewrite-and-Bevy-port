@@ -240,6 +240,12 @@ pub struct Stats {
     /// Prop parts (one mesh section on one prop) whose material multiplies
     /// two pictures (`Combiner` with `CO_Multiply`, see `materials::Layer`).
     pub prop_parts_multiplied: usize,
+    /// Prop parts drawn with the game's falloff shader (`HsFalloff`: light
+    /// shafts and god rays, see `crate::falloff`).
+    pub prop_parts_falloff: usize,
+    /// Why `HsFalloff`'s class defaults couldn't be read, if they couldn't
+    /// (then falloff materials are plain added light).
+    pub falloff_error: Option<String>,
     /// Zones with an ambient light found (by where their ZoneInfo stands),
     /// and props that had it added to their stored light.
     pub zones_with_ambient: usize,
@@ -641,6 +647,22 @@ fn add_mesh_actor(
         if layer_set.is_some() {
             ctx.stats.prop_parts_multiplied += 1;
         }
+        // The falloff shader multiplies by the mesh's own painted colours,
+        // not the baked light (see `crate::falloff`); white if it has none.
+        let falloff = pic.as_ref().is_some_and(|p| p.falloff.is_some());
+        let painted: Option<Vec<[u8; 4]>> = falloff.then(|| {
+            (0..mesh.vertices.len())
+                .map(|i| {
+                    mesh.colors
+                        .get(i)
+                        .map_or([255; 4], |c| rc_image::unreal_color(*c))
+                })
+                .collect()
+        });
+        if falloff {
+            ctx.stats.prop_parts_falloff += 1;
+        }
+        let colours = painted.as_deref().or(colours);
         let batch = b.batch(
             &key,
             &pic,
@@ -1212,6 +1234,17 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     let model = level.model.ok_or("the level has no BSP model")?;
     let bsp = bsp::read_model(pkg, data, &pkg.exports[model]).map_err(|e| format!("BSP: {e}"))?;
 
+    let falloff_error = if mats.falloff_defaults.is_none() {
+        match crate::falloff::FalloffDefaults::read(mats) {
+            Ok(d) => {
+                mats.falloff_defaults = Some(d);
+                None
+            }
+            Err(e) => Some(e),
+        }
+    } else {
+        None
+    };
     let (fog, fog_error) = match crate::fog::FogDefaults::read(mats) {
         Ok(d) => (crate::fog::ZoneFogs::read(pkg, data, &level, &bsp, &d), None),
         Err(e) => (crate::fog::ZoneFogs::default(), Some(e)),
@@ -1220,7 +1253,10 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     let mut b = Builder::default();
     let mut ctx = Ctx {
         mats,
-        stats: Stats::default(),
+        stats: Stats {
+            falloff_error,
+            ..Stats::default()
+        },
         seen: HashMap::new(),
         pkg,
         data,

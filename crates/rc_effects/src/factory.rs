@@ -1,9 +1,11 @@
-//! Effect spawners (`FXFactory` in the map): actors that put a particle
-//! effect into the level when a level event switches them on, once or
-//! again and again. geo_01a's gunships and Geonosian fighters flying
-//! overhead, its random battle explosions, steam jets and sparks in other
-//! levels all come from them. Plain Rust, Unreal units; the level scripts
-//! part (`rc_scripts_plugin`) reads them from the map and runs them.
+//! Effect and projectile spawners (`FXFactory` and `ProjectileFactory` in
+//! the map): actors that put a particle effect or a flying projectile into
+//! the level when a level event switches them on, once or again and again.
+//! geo_01a's gunships and Geonosian fighters flying overhead, its random
+//! battle explosions, the bombardment falling on the arena and the
+//! bunkers' missiles, steam jets and sparks in other levels all come from
+//! them. Plain Rust, Unreal units; the level scripts part
+//! (`rc_scripts_plugin`) reads them from the map and runs them.
 //!
 //! How the original works, from the script source in `CTGame.u`
 //! (`Factory` and `FXFactory`; read only, described in our own words):
@@ -35,14 +37,22 @@
 //!   moved by a random `SpawnOffset` (the level's axes).
 //! - `ACTION_ResetFactory` gives back the whole capacity (it doesn't
 //!   switch the spawner on or off).
+//! - `ACTION_StopFactorySpawning` switches it off; with
+//!   `PermanentlyDisableFactory` for good (its event no longer switches it
+//!   on); with `DestroyFactoryOffspring` what it made is removed.
+//! - What it makes is given a physics mode and a speed along its turn:
+//!   `InitialPhysicsFromFactory`/`InitialSpeedFromFactory` when it makes
+//!   them at itself (mode 2), else the spawn point's
+//!   `InitialPhysics`/`InitialSpeed` (`SpawnPoint` defaults: falling, 0).
+//!   A projectile spawner's projectiles fly by these; `ProjectileFactory`
+//!   adds nothing else.
 //!
 //! Not done (no campaign map's effect spawner uses them; checked with all
 //! 55 campaign maps on 2026-11-11): `bStartTimerAfterDeath`,
 //! `bWaitForIllegalSpawns`, `MaxInWorld`, `EmitterDrawScale3D` (one map
 //! sets it, to its default), and the physics and speed an effect is given
-//! (`InitialPhysicsFromFactory`/`InitialSpeedFromFactory`: 8 spawners set a
-//! speed, all with `PHYS_Trailer`, which follows an owner they don't
-//! have).
+//! (8 effect spawners set a speed, all with `PHYS_Trailer`, which follows
+//! an owner they don't have).
 
 use crate::def::Range;
 use crate::sim::Rng;
@@ -53,17 +63,49 @@ pub struct Spot {
     pub location: [f32; 3],
     /// Unreal pitch, yaw, roll.
     pub rotation: [i32; 3],
+    /// `InitialPhysics` (an Unreal `EPhysics` number) and `InitialSpeed`
+    /// for what is made here.
+    pub physics: u8,
+    pub speed: f32,
 }
 
-/// One `FXFactory` as the map sets it, with the class defaults for what it
-/// doesn't.
+impl Spot {
+    /// A spawn point with the class defaults (`SpawnPoint` in `CTGame.u`:
+    /// falling, no speed).
+    pub fn at(location: [f32; 3], rotation: [i32; 3]) -> Self {
+        Spot {
+            location,
+            rotation,
+            physics: PHYS_FALLING,
+            speed: 0.0,
+        }
+    }
+}
+
+/// Unreal's `EPhysics` numbers used here.
+pub const PHYS_FALLING: u8 = 2;
+pub const PHYS_PROJECTILE: u8 = 6;
+
+/// What a spawner makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Kind {
+    /// A particle effect (`FXFactory`).
+    #[default]
+    Effect,
+    /// A projectile (`ProjectileFactory`).
+    Projectile,
+}
+
+/// One `FXFactory` or `ProjectileFactory` as the map sets it, with the
+/// class defaults for what it doesn't.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FxFactory {
     /// Its name in the map (`FXFactory19`).
     pub name: String,
+    pub kind: Kind,
     /// The event that switches it on and off.
     pub tag: String,
-    /// The effect class (`cFX_Gunships`).
+    /// The effect or projectile class (`cFX_Gunships`, `GEO_01AProj`).
     pub prototype: String,
     pub location: [f32; 3],
     pub rotation: [i32; 3],
@@ -81,6 +123,9 @@ pub struct FxFactory {
     pub exhausted_event: Option<String>,
     pub draw_scale: Range,
     pub spawn_offset: [Range; 3],
+    /// `InitialPhysicsFromFactory`, `InitialSpeedFromFactory` (mode 2).
+    pub physics: u8,
+    pub speed: f32,
 }
 
 impl Default for FxFactory {
@@ -88,6 +133,7 @@ impl Default for FxFactory {
     fn default() -> Self {
         FxFactory {
             name: String::new(),
+            kind: Kind::Effect,
             tag: String::new(),
             prototype: String::new(),
             location: [0.0; 3],
@@ -106,11 +152,13 @@ impl Default for FxFactory {
             exhausted_event: None,
             draw_scale: Range::fixed(1.0),
             spawn_offset: [Range::fixed(0.0); 3],
+            physics: PHYS_FALLING,
+            speed: 0.0,
         }
     }
 }
 
-/// "Put this effect here now."
+/// "Put this effect (or projectile) here now."
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spawn {
     /// Which spawner (its index in [`Spawners::list`]).
@@ -121,6 +169,9 @@ pub struct Spawn {
     pub location: [f32; 3],
     pub rotation: [i32; 3],
     pub draw_scale: f32,
+    /// Physics mode and speed along `rotation` (see [`Spot`]).
+    pub physics: u8,
+    pub speed: f32,
 }
 
 /// What happened in one step.
@@ -152,6 +203,8 @@ pub struct State {
     pub timer: f32,
     pub next_spot: usize,
     pub was_once_online: bool,
+    /// Switched off for good (`PermanentlyDisableFactory`).
+    pub disabled: bool,
 }
 
 /// Every effect spawner in a level.
@@ -174,6 +227,7 @@ impl Spawners {
                 timer: 0.0,
                 next_spot: 0,
                 was_once_online: false,
+                disabled: false,
             })
             .collect();
         Spawners {
@@ -195,7 +249,7 @@ impl Spawners {
     pub fn trigger(&mut self, event: &str, player: &dyn PlayerView) -> Step {
         let mut out = Step::default();
         for i in 0..self.list.len() {
-            if !self.list[i].tag.eq_ignore_ascii_case(event) {
+            if !self.list[i].tag.eq_ignore_ascii_case(event) || self.states[i].disabled {
                 continue;
             }
             if self.states[i].online {
@@ -231,16 +285,24 @@ impl Spawners {
         n
     }
 
-    /// `ACTION_StopFactorySpawning`: switch the spawners tagged `tag` off.
-    pub fn stop(&mut self, tag: &str) -> usize {
+    /// `ACTION_StopFactorySpawning`: switch the spawners tagged `tag` off,
+    /// for good when `for_good`. With `remove_offspring` what they made is
+    /// to be removed: returned by number (they no longer count as alive).
+    /// Returns how many spawners there were, and those numbers.
+    pub fn stop(&mut self, tag: &str, for_good: bool, remove_offspring: bool) -> (usize, Vec<u64>) {
         let mut n = 0;
+        let mut removed = Vec::new();
         for (f, s) in self.list.iter().zip(&mut self.states) {
             if f.tag.eq_ignore_ascii_case(tag) {
                 s.online = false;
+                s.disabled |= for_good;
+                if remove_offspring {
+                    removed.append(&mut s.alive);
+                }
                 n += 1;
             }
         }
-        n
+        (n, removed)
     }
 
     /// The effect numbered `id` is over (its life ended).
@@ -325,6 +387,8 @@ impl Spawners {
             2 => Some(Spot {
                 location: f.location,
                 rotation: f.rotation,
+                physics: f.physics,
+                speed: f.speed,
             }),
             3 => player.location().and_then(|at| {
                 f.spots
@@ -357,6 +421,8 @@ impl Spawners {
                 location: [0, 1, 2].map(|k| p.location[k] + offset[k]),
                 rotation: p.rotation,
                 draw_scale,
+                physics: p.physics,
+                speed: p.speed,
             });
             spawned = true;
         }
@@ -500,14 +566,8 @@ mod tests {
             prototype: "Dirt_Explo_Lrg".into(),
             spawn_mode: 3,
             spots: vec![
-                Spot {
-                    location: [1000.0, 0.0, 0.0],
-                    rotation: [0; 3],
-                },
-                Spot {
-                    location: [100.0, 0.0, 0.0],
-                    rotation: [0, 16384, 0],
-                },
+                Spot::at([1000.0, 0.0, 0.0], [0; 3]),
+                Spot::at([100.0, 0.0, 0.0], [0, 16384, 0]),
             ],
             ..FxFactory::default()
         };
@@ -533,6 +593,39 @@ mod tests {
         };
         let mut s = Spawners::new(vec![f], 1);
         assert!(s.trigger("T", &NOWHERE).spawns.is_empty());
+        assert!(!s.states[0].online);
+    }
+
+    #[test]
+    fn spawn_points_give_physics_and_speed_and_stop_for_good() {
+        // geo_01a's ProjectileFactory11 and one of its spawn points.
+        let f = FxFactory {
+            name: "ProjectileFactory11".into(),
+            kind: Kind::Projectile,
+            tag: "ArialBombardment01".into(),
+            prototype: "GEO_01AProj".into(),
+            spawn_mode: 0,
+            max_alive: 2,
+            spawn_interval: 0.2,
+            physics: PHYS_PROJECTILE,
+            speed: 10000.0,
+            spots: vec![Spot {
+                physics: PHYS_PROJECTILE,
+                speed: 10000.0,
+                ..Spot::at([-13904.0, 967.0, 21244.0], [-12000, 0, 0])
+            }],
+            ..FxFactory::default()
+        };
+        let mut s = Spawners::new(vec![f], 5);
+        let st = s.trigger("ArialBombardment01", &NOWHERE);
+        assert_eq!(st.spawns[0].physics, PHYS_PROJECTILE);
+        assert_eq!(st.spawns[0].speed, 10000.0);
+        assert_eq!(st.spawns[0].rotation, [-12000, 0, 0]);
+        // Stopped for good, its projectiles removed: the event no longer
+        // switches it on.
+        let (n, gone) = s.stop("arialbombardment01", true, true);
+        assert_eq!((n, gone), (1, vec![1]));
+        assert!(s.trigger("ArialBombardment01", &NOWHERE).spawns.is_empty());
         assert!(!s.states[0].online);
     }
 }

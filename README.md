@@ -260,6 +260,12 @@ copy of the game.
   weapons' own first-person models are only as good as the arms loader
   (not checked for the new ones).
 
+- **Light shafts and god rays (not tested on Windows).** geo_01a's sun rays
+  and tunnel light cones are drawn with the game's own falloff shader
+  (`HsFalloff`), read from its files: they fade by viewing angle and along
+  the beam, and stand out from the haze instead of showing as a flat block
+  or not at all. Check: `cargo run -p rc_level_viewer --example falloff_check`.
+
 - **Geonosis arena look: stone tiers and brown haze (not tested on Windows).**
   The arena's far tiers, spires and upper rocks on geo_01a used to show as
   flat grey-white shapes. Their materials multiply a painted light picture by
@@ -692,6 +698,13 @@ copy of the game.
   opening briefing, Republic gunships and Geonosian fighters fly over the
   arena, and battle explosions go off near you. 397 such spawners on 55
   maps. Their on/off state is kept in save files.
+- **Projectile spawners (since 2026-11-11, tested in the cloud only, not
+  on Windows or by playing).** The maps' `ProjectileFactory` actors now
+  run too: in geo_01a the air bombardment falls on the arena and the
+  bunkers fire missiles, each with the game's own model, smoke trail and
+  explosion, and the blasts hurt what is near. Only explosive missiles
+  fly so far; bullets, bolts and grenades from spawners are logged and
+  skipped. The trails' ribbon part isn't drawn yet.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to

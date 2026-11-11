@@ -4310,6 +4310,51 @@ in the sky box (geo_01a's `SkyZoneInfo` doesn't turn it on); `bClearToFogColor`
 unused; fog mixed in linear light (Direct3D mixes on screen values), and
 by distance rather than depth.
 
+## Light shafts and god rays (`HsFalloff`, `rc_level_viewer::falloff`)
+
+geo_01a's sun rays are one mesh (`Arena_HR.ArenaWalls.SunBeam`, material
+`Arena_Textures.Unique.rayfalloff`), and its tunnels have light cones
+(`Arena_GM.DecapTunels.VolumetricLight`, `Shader.VolumnLightTex`). Both
+materials are `HsFalloff`. We drew them as their picture added on top,
+darkened by the baked light and covered by the zone fog, so the rays were
+a flat block in the haze or not seen at all.
+
+What the game does, all read from its files:
+
+| Read from | What it says |
+| --- | --- |
+| Engine.u, `HsFalloff` | settings `DiffuseTexture`, `FalloffGradient`, `UPanRate`, `VPanRate`, `UOscilationRate`, `VOscilationRate`, `DiffuseTint`, `GradientTint`, `SrcBlend`, `DestBlend`; defaults: tints white, `SrcBlend` 3, `DestBlend` 2 (`ED3DBLEND`: `SRCCOLOR`, `ONE`); shader `HardwareShaders.Falloff.FalloffImpl` |
+| hardwareshaders.utx, `FalloffImpl` | vertex shader: picture place = texture place + c0 x sin(time) + c1 x time; facing = max(0, eye direction . normal) picks the gradient's U; vertex colour from the `FVF_Specular` stream; no fog value written. Pixel shader: picture x c0 x gradient x c1 x vertex colour |
+| Engine.dll, `UHsFalloff`'s setup | copies the oscillation rates to vertex constant 0, the pan rates to 1, `DiffuseTint` and `GradientTint` (each byte / 255) to pixel constants 0 and 1, and the blend settings to the shader |
+
+So the frame buffer gets colour x colour + what was there with the
+defaults (the sun rays), or colour + what was there with `SrcBlend` `ONE`
+(the light cones, which also pan down at 0.1 a second).
+
+`materials::Materials::falloff` reads these into `falloff::Falloff` on
+the picture; `draw::spawn_level` gives such batches the mesh's painted
+colours and a `falloff::view::FalloffSurface`; `FalloffPlugin` (added by
+`PropLightPlugin`) swaps in `FalloffMaterial` (`falloff.wesl`).
+
+Our choices, not confirmed in the files:
+- The vertex colour is the mesh's own painted colour stream (the sun
+  beams are painted white at the bright end and black at the far end). We
+  did not find which stream the game feeds to `FVF_Specular`.
+- No distance fog on these surfaces: the shader writes no fog value (the
+  game's projector shaders do), and in the user's screenshot the rays
+  stand out from the haze.
+- The game adds on its brightness curve, we add in linear light. The
+  shader's result is added as it is: over mid-grey ground (0.45 on the
+  curve) that is close to what adding on the curve does (0.84 x); over
+  dark ground ours is brighter, over bright ground fainter. Turned into
+  linear light first it was about five times too faint to see.
+- The gradient is read at V 0 (the shader sets only U); the game's
+  gradients are the same down every column.
+
+Check: `cargo run -p rc_level_viewer --example falloff_check` with the
+game's files (11 checks on geo_01a). The level viewer and the game log
+`light shafts ... N prop parts, M draw batches`.
+
 ## Holograms, tank liquid and props with no stored light
 
 **Holograms (`HsHologram`).** Republic Commando's own hologram material
@@ -4389,8 +4434,9 @@ parts. The briefing holograms' grids and text use it.
 
 **Tinted falloff (`HsFalloff`).** Light shafts and the prologue's tank
 liquid multiply their picture by `DiffuseTint` and `GradientTint`
-(white, no change, by default). The game's falloff picture, which fades
-the edges by viewing angle, isn't used yet.
+(white, no change, by default). Now drawn with the game's own falloff
+shader: see "Light shafts and god rays" below. The tinted picture is
+still the fallback when `HsFalloff`'s class defaults can't be read.
 
 **Props with no stored light.** The map stores light only for props that
 stay put (their `StaticMeshInstance`). Props a script moves or shows
@@ -4609,6 +4655,46 @@ the effect's full rotation; only the X part of `StartSpinRange` and
 is not applied (which way each part turns a model is not known); a lit model starts from the same light level the droids use
 (0.5); fades are not applied to models; the field of view for `bCovert`
 is the camera's 4:3 one.
+
+### Projectile spawners (`ProjectileFactory`, `rc_effects::projectile`)
+
+**What the original does** (ctgame.u's `Factory` and `ProjectileFactory`,
+engine.u's `Projectile`, ctinventory.u's `CTProjExplosive`). A
+`ProjectileFactory` runs by the same rules as an effect spawner but makes
+a projectile class. With `SpawnMode` 2 the projectile starts with the
+factory's `InitialPhysicsFromFactory`/`InitialSpeedFromFactory` and turn;
+otherwise with its spawn point's `InitialPhysics`/`InitialSpeed` (default
+2, falling, and 0) and turn. Physics 6 flies straight; 2 falls with the
+zone's gravity (`PhysicsVolume` default Z -1100, `TerminalVelocity`
+12000). The class's `ProjectileEffect` is spawned and carried along; when
+the projectile goes, the trail fades out (`Emitter.FadeOut`: no new
+particles, the old ones finish). An explosive projectile blows up when
+its `FuseTime` runs out, on hitting the world with `bWorldDetonate`
+(the class's hit effect is spawned first, then `Explode` spawns it
+again) or on touching an actor with `bActorDetonate`; `Explode` spawns the
+`HitEffectsByMaterial` effect and hurts everything within
+`DamageRadius` (`HurtRadius`). `ACTION_StopFactorySpawning` turns a
+factory off (for good with `PermanentlyDisableFactory`) and can destroy
+what it made (`DestroyFactoryOffspring`). geo_01a has six: air
+bombardment (`GEO_01AProj`, Speed 8000, from Z 21244 at 10000 straight
+down), missiles from the bunkers (`GEO_01A_BunkerMissile`, falling, 4000)
+and the end-of-level bombardment; 52 on 15 maps in all.
+
+**How we split it.** `rc_effects::projectile` (no Bevy) reads a class
+and its parents from properties.u, physicalmaterials.u, ctinventory.u and
+engine.u (`ClassPackages`), and moves a `Flight` with a hit test the game
+passes in. `rc_effects::factory` gained `Kind::Projectile`, spawn-point
+physics and speed, and `stop(tag, for_good, remove_offspring)`.
+`rc_scripts_plugin/src/projectiles.rs` draws the model, carries the trail
+(`SpawnEffect.follow`, moved each frame by `rc_effects_plugin`, faded when
+the carrier goes), sweeps against `LevelCollision`, and on a blast spawns
+the effect and sends `rc_combat::Explode`.
+
+**Not done yet:** projectiles that aren't explosive or are laser bolts
+(logged "isn't flown yet"), bouncing and sticking, touching actors
+(`bActorDetonate`), zone gravity other than the default, decals and
+per-surface effects (the default material effect is used), and the trails'
+ribbon emitters (not drawn).
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 

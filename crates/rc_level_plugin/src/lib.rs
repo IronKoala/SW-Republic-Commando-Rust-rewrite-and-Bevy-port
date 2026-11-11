@@ -644,6 +644,15 @@ fn load(world: &mut World) {
                 settings.live_light_on_props,
                 report.lights.point + report.lights.spot + report.lights.directional
             ));
+            log.line(match &sc.stats.falloff_error {
+                None => format!(
+                    "{PART}: light shafts with the game's falloff shader (HsFalloff): {} prop parts, {} draw batches",
+                    sc.stats.prop_parts_falloff, report.falloff
+                ),
+                Some(e) => format!(
+                    "{PART}: light shafts drawn as plain added light: HsFalloff's settings couldn't be read ({e})"
+                ),
+            });
         }
         Err(e) => log.line(format!("{PART}: map look not built ({e}); it will be invisible")),
     }
