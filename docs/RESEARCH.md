@@ -512,6 +512,52 @@ second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
   (log line `spawners no enemy file claims`).
 - `GeonosianDrone` (not read yet). `GeonosianElite`: see below.
 
+## Grievous's bodyguards (read 2026-11-10)
+
+Read only from the user's install with `rc_probe --class` (ctcharacters.u,
+ctinventory.u, Properties/properties.u) and `rc_character --list`
+(Animations/droid.ukx).
+
+- `GrievousGuard` (parent `Droid`): Mesh `GrievousGuard` (droid.ukx, set
+  `GrievousGuardSet`, 44 sequences, skin DroidTextures
+  `GrievousGuard_Shader`), CollisionRadius 60, CollisionHeight 105,
+  CrouchRadius 60, CrouchHeight 70, BaseEyeHeight 60, WalkSpeedRatio 0.375,
+  CrouchSpeedRatio 0, BackSpeedRatio 0.5, SideSpeedRatio 1, JumpZ 2000,
+  DodgeDistance 300, bCanJump, bCanPerch, RequiredEquipment
+  `GrievousStaff` and `GrievousMissileRack`, ControllerClass
+  `GrievousGuardBot`. GroundSpeed is Pawn's 600. No AudioTable (no voice).
+- `GrievousGuardDefaults`: Health and MaxHealth 2000, **Shields and
+  MaxShields 250** (no ShieldRechargeRate), Accuracy 0.95, SightRadius 5000,
+  MyDamageVariance `DV_DroidsGrievousGuardDamage`, DeathEffect
+  `GREVG_DeathExplo_Beam`, BestGrenadeAgainst EMPGrenade.
+- `GrievousGuardBot`: BurstCount 3 (Defaults: 2), RequiredStates StateIdle,
+  StateInvestigate, StateGrievousGuardAttack.
+- `GrievousStaff` (melee): MeleeRange 250, MeleeDamage 50, MeleeDamageType
+  CTDamageMelee; Defaults add StatusEffect_ElectrocuteGrievousGuard, 20 a
+  second for 0.5 s (not done in the port).
+- `GrievousMissileRack` (parent `MissileRack`): ValidRange 600-2500,
+  Defaults OptimalDist 1500, FireSound `wep_GEN_dSpidMisFire_01`. Ammo
+  `GrievousMissileAmmo` fires `GrievousHomingMissile` (parent
+  `HomingMissile`: Speed 200, EngineThrust 10000, FuseTime 10, bActorDetonate,
+  bWorldDetonate; Projectile MaxSpeed 2000). Defaults: Damage 250,
+  DamageRadius 1024, ExplosionStatusEffect StatusEffect_Stun (up to 9 s),
+  StaticMesh `GrievousMissile`.
+- Animations used: ActionBreathe, WalkForward, RunForward, WalkBackward,
+  DodgeLeft/Right, FireRockets (79 frames), MeleeAttack (35 frames), Death.
+  Also there: Lunge, Lunge2, shield, wall and ceiling perch sets, Wookiee
+  finishing moves.
+- yyy_01e: 4 `GrievousGuard` factories. `Spawn_Guard` (PawnFactory9, tag
+  Guard1, death event `GrievousGuard_dead`) is switched on by the landing pad
+  door markers' EventUnderway. Counter1 turns `GrievousGuard_dead` into
+  `Spawn_Guard_Three` (PawnFactory35, tag Guard3, death event
+  `ThreeDeadGuards`). Dispatcher7 `ThreeDeadGuards` plays 7 lines and sends
+  `EndLevel`; ScriptedTrigger7 then changes level to YYY_35A. The other two
+  factories are cutscene guards: `SeeGrievousGuard` (Mover_Enter_Tower,
+  invulnerable, removed after `GreivousVerified`, sent by a
+  LineOfSightTrigger) and `ThrownGrievousGuard` (SpawnThrow, a body a
+  Wookiee throws). Two more guards (`GrievousGuardOne/Two`) are placed in
+  the map for the Tarfful rescue scene.
+
 ## The other Trandoshans (read 2026-11-10)
 
 Read only from the user's install with `rc_probe --class` (ctcharacters.u,
@@ -589,6 +635,49 @@ ctinventory.u, ctgame.u, Properties/properties.u, System/ctaudio.u).
   geo_03c (3), geo_04a (2), geo_04b (1), geo_04c (2), geo_05a (8),
   geo_05b (3).
 
+## Weapons lying in the levels (read 2026-11-10)
+
+Read from the class defaults with `rc_probe --class` and the scripts'
+text in `Engine.u`, `CTGame.u` and `CTInventory.u` (read only, in our own
+words here; nothing copied).
+
+- **Classes:** every weapon pickup is a `CTPickup` (CTGame, a `Pickup` with
+  `bUsableBySquad`): `BowcasterPickup`, `ShotgunPickup`, `SMGPickup`,
+  `ConcussionRiflePickup`, `RocketLauncherPickup`, `EliteBeamPickup`,
+  `DC17mBlasterWeaponPickup`, `DC17mSniperWeaponPickup`,
+  `DC17mAntiArmorWeaponPickup` (CTInventory) and `TrandoshanRifleMPPickup`
+  (properties.u). `InventoryType` names the weapon. `CTPickup`
+  `CollisionRadius` 84, `CollisionHeight` 8; pickup classes override
+  (bowcaster 60 x 15, SMG 40 x 8, shotgun 65 x 8, concussion 75 x 10).
+- **Shots held:** the weapon's `PickupAmmoCount`, Defaults on top
+  (Bowcaster 24, SMG 160, Shotgun 16, ConcussionRifle 10, RocketLauncher 5,
+  EliteBeam 450, TrandoshanRifleMP 160, DC17mSniper 20, DC17mAntiArmor 4,
+  DC17mBlaster 120).
+- **Rules** (`Pickup` state `Pickup`, `Weapon.HandlePickupQuery`,
+  `PlayerController.ServerUse`): touching only does anything if the pawn
+  already has the `InventoryType`; then the weapon adds the pickup's
+  `PickupAmmoCount` to its ammo unless full (recharging weapons refuse).
+  Otherwise the player's Use key calls `PickupUsedBy` on touched pickups.
+  `Weapon.GiveTo` asks `ShouldTossWeapon`: a player may carry
+  `NumWeaponsAllowed` per inventory group (not set: 0, so always "full"),
+  and if full the current tossable weapon (`WeaponType` 2 = secondary with
+  `bCanThrow`) is thrown down (`TossWeapon`, 0.8 x radius ahead, 0.5 x
+  radius to the left) with its ammo as the pickup's. The new weapon is
+  switched to. Every enemy weapon has `InventoryGroup` 5; the DC-17m modes
+  are `WeaponType` 1 (primary) in groups 1-3.
+- **Elite Beam:** `EliteBeamPickup` ignores touch and refuses Use while the
+  carried beam has ammo.
+- **Prompt:** the HUD's string "PRESS @ TO PICKUP" (Engine.u, next to
+  "PRESS @ TO MOUNT TURRET"), `@` being the key. The message on taking is
+  the pickup's `PickupMessage` ("Wookiee Bowcaster", "ACP Repeater Gun",
+  "LJ-50 Concussion Rifle", ...); sound `PickupSound`
+  (`GenericWeaponPickup` or `int_GEN_wepPickup_01`).
+- **Reload animations** (hudarms.ukx, 30 fps): HudArmsBow Reload 53 frames,
+  HudArmsShotgun 73, HudArmsConc 122, HudArmsRocket 51, HudArmsTranRifle
+  213. HudArmsEliteBeam has none.
+- **Shotgun:** `ShotgunAmmo` `ProjPerFire` 8, `Spread` 1700 (Defaults),
+  `Damage` 28 per pellet, `Range` 3500.
+
 ## Grenade explosion sounds and enemy voices (read 2026-10-30)
 
 Read only from the user's install with `rc_probe --class` and the package
@@ -635,3 +724,59 @@ mean the character has no line for that event. The groups are
 `SoundMultiple`s in `character_voice.uax` (prefixes `BD1_`, `SBD_`, `TMC_`,
 `GWR_`), each holding 2 to 10 takes. Which take plays, and how often a
 character may speak, is in compiled code we don't read.
+
+## Particle effects (read 2026-11-10)
+
+Effects are `Emitter` subclasses (575 in the install, most in
+`Properties/CTEffects.u`). Their defaults hold `Emitters`, a list (compact
+count, then object references) of the package's own `SpriteEmitter`,
+`MeshEmitter`, `SparkEmitter`, `BeamEmitter` or `TrailEmitter` objects,
+each with no outer, whose data is a plain list of named values. Unset
+values come from `ParticleEmitter`'s defaults in `engine.u` (checked:
+`MaxParticles` 10, `DrawStyle` 3 Translucent, `StartSize` 100, `Lifetime`
+4, `RespawnDeadParticles` and `AutomaticInitialSpawning` on; a
+`MeshEmitter`'s `StartSize` is 1). `Range` is `{Min, Max}`, `RangeVector`
+is three ranges, and `Color` is stored blue, green, red, alpha. `DrawStyle`
+bytes: 0 Regular, 1 AlphaBlend, 2 Modulated, 3 Translucent, 4
+AlphaModulate, 5 Darken, 6 Brighten. Example: `Explosion_Barrel_GEO` has 7
+emitters (smoke column, smoke, a 5x5-frame fireball drawn Brighten, specks,
+`AssaultShip_PR.Debris.DebriB` debris that collides, spray, a blue flare),
+`SpawnSound` `GEN_Sound.Impacts_Explos.exp_barrels`. Breakable props name
+their effect in `DestroyedState.Effect`, their sound in
+`TransitionSound` (`exp_GEN_barrel_01` for the barrel) and their broken
+model in `Mesh` (`MarkerIcons.SetTrap.GEO_EplBarrel_Dest`), with
+`StateLifeSpan` 5 s. A map that writes `DestroyedState` writes every field,
+so it replaces the class's (geo_01b: `Mesh=None`). Checked with
+`rc_effect_check` and `cargo test -p rc_effects` / `-p rc_level` with
+`RC_GAME_DIR` set.
+
+## Gunship cannons and core ship turrets (read 2026-11-10)
+
+Read from the script text and defaults in `ctcharacters.u`, `engine.u`,
+`ctinventory.u` and the maps, for understanding only (nothing copied).
+
+- `AutoTurret` (`engine.u`): state `Inactive` until `Trigger`, then state
+  `AutoTurret` plays `Deploy` and sets `bDeployed`. `Trigger` again goes to
+  `Resetting` (off). `Fire()` counts `TimeUntilCooldown` from the first shot
+  and then waits `CooldownDuration`. `IsAvailableFor` is false (nobody gets
+  on). Pawn `Event` on death, `FirstDamagedEvent` on the first damage.
+- `CoreShipTurret`: `Speed` 40000, yaw unlimited, `Health` 256,
+  `ShotDelay` 0.15, `TimeUntilCooldown` 4, `CooldownDuration` 1,
+  `NumMuzzles` 3 (`muzzle1..3` in turn, aimed from the muzzle at
+  `Enemy.Location`), `BaseEyeHeight` -80, collision radius 60 and height
+  90, `MyDamageVariance` `DV_TurretsCoreshipAuto`, team 5 (Separatist).
+  Weapon ammo `AutoTurretAmmo`, bolt `AutoTurretProj` (damage 10,
+  `CTDamageEnergy`, acceleration 40000, top speed 8000). Animations
+  `ClosedBreathe`, `Deploy`, `Death`, `Fire` (`CoreShipTurretSet`).
+- `GunshipCannon`: `Speed` 20000, yaw +-16384, pitch +-8194, `TurretHeight`
+  -50, `SitToUse`, radius 100, height 110, `NavPtLocs` (0, 127, -50),
+  first-person weapon `GunshipTurret` (`HudArmsGunshipTurret`, ammo
+  `GunshipTurretAmmo`: damage 50, `CTDamageEnergyGunshipTurret`, instant,
+  range 10000).
+- Maps: geo_04a `GunshipCannon0` (`ControlEvent` `ClearTurretTracker`,
+  waited for by `ScriptedTrigger14`); geo_04d `GunshipCannon0`
+  (`Conversation1454`); geo_04b two wall turrets tagged `CoreShipTurret00`
+  (rotation -16383, 0, -32763); geo_05a `CoreShipTurret1` (tag `BDTurrets`,
+  `Event` `Security00`, `FirstDamagedEvent` `TurretsShot`, which
+  `ScriptedTrigger42` waits for before `EliteStart`) and `CoreShipTurret2`
+  (`SBDTurret00`); geo_05c three tagged `Lasers01`.

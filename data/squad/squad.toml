@@ -32,11 +32,14 @@ marker_work_time = 3
 # Search and destroy: how far from the squad's anchor members look for
 # enemies. Original: Squad.DefaultSearchAndDestroyRadius.
 search_radius = 768
-# Where the squad comes from. "with_player": all three start in their
-# form-up slots around the player. "none": no squad. (The original brings
-# them in through each map's scripts, one by one on Geonosis; the log lists
-# where each map would have spawned them.)
-spawn = "with_player"
+# Where the squad comes from. "from_map" (as the original): the squad mates
+# the map places, where it places them, in the squad; the ones the map's
+# spawners make, when the spawner goes off, out of the squad until a level
+# script adds them (Scorch on geo_01a, Fixer on ras_02b). Each map has its
+# own squad: on ras_02b the player starts alone. A map that can't be read
+# falls back to "with_player". "with_player": all three start in their
+# form-up slots around the player. "none": no squad.
+spawn = "from_map"
 
 # Where each member stands while following, measured from the leader:
 # `forward` along the way the leader faces (negative is behind), `right`
@@ -369,6 +372,13 @@ burst_pause_max = 3       # guess
 auto = "armoured"         # Scorch (the original's Commando62: auto anti-armour)
 auto_range = 600          # our own: out of the blast
 auto_clearance = 400      # our own: the round's 800 uu blast falls off; keep friends out of its harder half
+
+[job.turret]
+name = "Man turret"
+match = "turret"          # MarkerTurret, and spots whose anchor is a turret (yyy_06d's Wookiee heavy turrets)
+kind = "post"
+pullable = "yes"          # game: MarkerTurretNative bCancelIfMembersNeeded
+mount = "yes"             # gets on the anchor and fires the turret (data/turrets/*.toml [auto]), not their own gun
 
 # The squad. `class` is the original's character class (CTCharacters),
 # `number` and `name` are what its HUD shows, `hud_slot` its place on the

@@ -138,6 +138,9 @@ enum Check {
     Arms(&'static str, &'static str),
     /// The ammo counter on the gun shows these digits and a bar this full.
     Counter(&'static str, f32),
+    /// This weapon's arms played a sound from this animation (the game's
+    /// own `AnimNotify_Sound` events, see `rc_combat::arms_sound`).
+    ArmsSound(&'static str, &'static str),
 }
 
 #[derive(Resource)]
@@ -174,6 +177,7 @@ fn script_steps() -> Vec<Step> {
         Expect(Reloading),
         Expect(Arms("dc17m_blaster", "Reload")),
         Hold(&[], 1.5),
+        Expect(ArmsSound("dc17m_blaster", "Reload")),
         Expect(Magazine("DC-17m Blaster", 60, 50)),
         Expect(Counter("110", 1.0)),
         // The droid to the right, with the pistol: one shot per press,
@@ -712,6 +716,7 @@ fn run_script(
     tally: Res<Tally>,
     weapon: Res<WeaponReadout>,
     arms: Option<Res<rc_combat::ArmsReadout>>,
+    arms_sounds: Option<Res<rc_combat::arms_sound::ArmsSounds>>,
     players: Query<(&Health, &Shield, &Arsenal), With<Player>>,
     frames: Res<FrameCount>,
     log: Res<GameLog>,
@@ -830,6 +835,19 @@ fn run_script(
                             format!(
                                 "the gun's ammo counter shows {digits}, bar {:.0}% full; it shows {now:?}",
                                 bar * 100.0
+                            ),
+                        )
+                    }
+                    Check::ArmsSound(id, anim) => {
+                        let played = arms_sounds
+                            .as_deref()
+                            .map(|s| s.played.clone())
+                            .unwrap_or_default();
+                        let want = format!("{id} {anim} ");
+                        (
+                            played.iter().any(|p| p.starts_with(&want)),
+                            format!(
+                                "the {id} arms played a sound from {anim} (the game's own); played {played:?}"
                             ),
                         )
                     }

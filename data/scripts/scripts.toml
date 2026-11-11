@@ -108,3 +108,12 @@ sound_full = "GEN_Sound.Interface.int_GEN_hudHlthChrgd_01"
 # NavigationPoint), read with `rc_probe --class Teleporter`.
 teleporter_radius = 80
 teleporter_height = 100
+
+[sight]
+# A LineOfSightTrigger sends its event the first time the player looks at
+# it (or at the thing it names) from near enough, nearly straight on, with
+# nothing in the way. Most maps give each trigger its own distance and
+# angle; these are for one that gives none. Unreal units (about 2 cm
+# each) and degrees from straight ahead.
+max_view_dist = 3000
+max_view_angle = 15

@@ -490,10 +490,14 @@ fn main() -> AppExit {
     app.add_plugins(rc_level_plugin::LevelPlugin);
     app.add_plugins(rc_movers_plugin::MoversPlugin);
     app.add_plugins(rc_scripts_plugin::ScriptsPlugin);
+    // Explosions, smoke and debris (the game's own effects).
+    app.add_plugins(rc_effects_plugin::EffectsPlugin);
     app.add_plugins(rc_combat::CombatPlugin);
     app.add_plugins(rc_enemies::EnemiesPlugin);
     app.add_plugins(rc_squad_plugin::SquadPlugin);
+    app.add_plugins(rc_turrets_plugin::TurretsPlugin);
     app.add_plugins(rc_cast::CastPlugin);
+    app.add_plugins(rc_shadows::ShadowsPlugin);
     app.add_plugins(rc_save::SavePlugin);
     // The end-of-campaign debriefing screen (after the scripts part, which
     // asks for it).
@@ -507,6 +511,19 @@ fn main() -> AppExit {
     app.configure_sets(
         Update,
         rc_scripts_plugin::ScriptSystems.after(player::PlayerMoveSet),
+    );
+    // The turret the player is on sets where the player is and looks
+    // before the player's body moves.
+    app.configure_sets(
+        Update,
+        rc_turrets_plugin::TurretSet.before(player::PlayerMoveSet),
+    );
+    // Use at a turret is the turret's, not a squad order.
+    app.configure_sets(
+        Update,
+        rc_turrets_plugin::TurretUseSet
+            .after(rc_scripts_plugin::ScriptSystems)
+            .before(rc_squad_plugin::SquadSet),
     );
 
     #[cfg(all(feature = "sdl", not(target_os = "android")))]
@@ -522,6 +539,10 @@ fn main() -> AppExit {
     // Changing a key (the controls page); the script uses it too.
     app.add_plugins(rebind::RebindPlugin);
     if use_script {
+        // The self-test's checks expect all three squad mates with the
+        // player from the start; the squad from the map is checked by
+        // rc_squad_plugin's rejoin tests.
+        app.insert_resource(rc_squad_plugin::SquadSpawnOverride::with_player());
         app.add_plugins(script::ScriptPlugin);
         // The scripted run has no real devices, but the controls page still
         // shows the keyboard's names.

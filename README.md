@@ -82,8 +82,19 @@ copy of the game.
   the game's own; every number is in `data/squad/squad.toml`. The
   windowless test run `rc_squad_sim` passes 36 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
-  and stays put until revived. They are in the game program (`rc_game`):
-  start a level and they stand with you.
+  and stays put until revived. They are in the game program (`rc_game`).
+
+- **Squad mates come and go as each level says (tested in the cloud
+  sandbox by numbers, not yet in the full game, on Windows or by
+  playing).** As in the original, each map has its own squad: mates
+  start where the map places them, and the level's scripts take them out
+  of the squad and bring them back (you find Scorch, Fixer and Sev one by
+  one on Geonosis; on ras_02b Fixer turns up at the final door, opens it
+  and rejoins). Out of the squad, a mate stays put or walks where the
+  script sends them. Some maps start you alone because the map does
+  (ras_01a, ras_02b, geo_05a). Squad mates don't play scripted
+  animations yet. `spawn = "with_player"` in `data/squad/squad.toml`
+  brings back the old way (all three with you from the start).
 
 - **Sev, Fixer and Scorch look like themselves (tested in the cloud
   sandbox and on Windows).** Each squad mate is drawn with the
@@ -107,8 +118,9 @@ copy of the game.
   (`HUDMeshes`, `HUDTextures`), drawn over the world and the gun. On
   screens wider than 4:3 the frame's sides keep their shape and move out to
   the screen's edges; only the bars across the top stretch. The GAME
-  page's HELMET row turns it on and off. Its brightness is a guess (the
-  original lights it with lights inside the helmet, not copied yet), and
+  page's HELMET row turns it on and off. Its brightness follows the light
+  where you are (see "Characters, the gun and the helmet lit by where they
+  are" below), and
   the visor's cracks, blood and wipe effects aren't drawn. Check it with
   `rc_probe --helmet` (pictures in `extracted/menus/`).
 
@@ -185,8 +197,8 @@ copy of the game.
   do these jobs yourself yet (only the squad). The
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
-  are the game's; how long the work takes is our guess. Traps, mines and
-  turrets aren't done yet. With "auto pull maneuvers" on (the default,
+  are the game's; how long the work takes is our guess. Traps and mines
+  aren't done yet. With "auto pull maneuvers" on (the default,
   as in the original), ordering a new job when everyone is busy takes
   the squad mate who has held a sniper, grenade or anti-armour position
   longest off it; switch it off in `settings.toml`
@@ -202,7 +214,7 @@ copy of the game.
   rifle hits or 2 pistol hits. One droid fires back, and its hits take your
   shield before your health. The firing and reload sounds are the game's.
   Every weapon is a text file in `data/weapons`, which mods can edit.
-  `rc_shoot --script` drives itself through 17 checks and passed all of them.
+  `rc_shoot --script` drives itself through 20 checks and passed all of them.
 
 - **First-person arms and weapon animations (tested in the cloud sandbox,
   not yet on Windows or by playing).** The player holds the original
@@ -212,7 +224,9 @@ copy of the game.
   stand still, sway when you walk or run, kick on each shot, play the full
   reload, holster the old weapon and bring up the new one when you switch
   (with the attachment swap between DC-17m attachments), and play the
-  grenade throw and melee hit. They're drawn by their own camera, so the gun
+  grenade throw and melee hit, with the game's own handling sounds for
+  each (reload, bringing up, putting away, attachment swaps, melee, throw;
+  heard in the log in the cloud, not yet listened to on Windows). They're drawn by their own camera, so the gun
   never pokes into walls. The sniper's arms hide while zoomed, as in the
   game. The little screen on the DC-17m and its sniper shows the ammo you
   carry (three digits, like "120") and a bar that empties with the
@@ -231,6 +245,20 @@ copy of the game.
   game's own pickup sound and shows what you took ("DC-17m Blaster Clips",
   "Thermal Detonators") in the original font above the middle of the
   screen for 3 seconds, fading out (not tested on Windows yet).
+
+- **Weapons lying in the levels (since 2026-11-10; tested in the cloud,
+  not yet on Windows or by playing).** The 40 weapons the campaign maps
+  place (bowcasters on Kashyyyk, ACP repeaters and array guns, concussion
+  rifles, rocket launchers, spare DC-17m attachments, an Elite Beam) appear
+  on the floor with their original models. Walk into a weapon you already
+  carry to take its ammo. For one you don't, the screen says "PRESS F TO
+  PICKUP" with its name: press Use (F) to take it. You carry one weapon
+  taken from the enemy at a time; picking up another drops the old one in
+  front of you. Dropped enemy blasters now need Use too, as in the
+  original. Taken weapons stay gone after a save and load. Not built yet:
+  the bowcaster's charged shot, homing rockets, pickup sounds, and the
+  weapons' own first-person models are only as good as the arms loader
+  (not checked for the new ones).
 
 - **Loading a whole level (tested on Windows).**
   `rc_level_viewer` loads a map with its walls, floors and every placed prop,
@@ -283,6 +311,16 @@ copy of the game.
   were read in the wrong byte order) and their zone's ambient light; GEO_04A's
   start now matches the original's brightness (tested in the cloud only).
 
+- **Characters, the gun and the helmet lit by where they are (tested in
+  the cloud against two original screenshots, not on Windows).** Squad
+  mates, droids, the first-person gun and the helmet frame are drawn by the
+  level's baked light around them, so they are dim in a dark tunnel and
+  bright in the sun, instead of always at one fixed brightness. In
+  YYY_06A's start tunnel the gun and helmet are now within about 15% of the
+  original (the gun was 2 to 3 times too bright). How strongly each shows
+  the light is in its data file (`light_scale`). It has no direction yet:
+  the sunny side of a character isn't brighter than the other.
+
 - **Every level loads (tested in the cloud on all 79 maps, not on Windows).**
   `rc_level_check` loads every map in the game without a window and logs
   each one: `79 of 79 maps loaded, 0 failed`. Lightmaps now read on 78 of
@@ -308,7 +346,9 @@ copy of the game.
   Windows).** The game reads each map's own scripting (79 of 79 maps, 2,842
   scripts, 19,041 actions, nothing unreadable) and runs it: scripts wait
   for events and timers, touch triggers, counters and conditions send
-  events on, doors open by event, checkpoints ask for a save, and
+  events on, line-of-sight triggers go off when you look at what they
+  watch (45 in 25 maps, such as seeing Grievous on yyy_01e; since
+  2026-11-10, not tested by playing), doors open by event, checkpoints ask for a save, and
   barricades come down. On geo_01a the landing zone now plays like the
   original: after the intro you are hit by a shell, the advisor tells you
   to heal, the bacta dispenser switches on, and holding Use at it heals you
@@ -346,7 +386,10 @@ copy of the game.
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the
   next map in the campaign, and you keep your health, shield, weapons and
-  ammo. You arrive where the original puts you, and the new map's start is
+  ammo. The squad keeps their health and your last order, as in the
+  original; a squad mate who was down gets up on the next map with a
+  quarter of their health (tested in the cloud with a test, not yet by
+  playing). You arrive where the original puts you, and the new map's start is
   saved as your checkpoint. Following the exits from the prologue goes
   through all 56 campaign maps to the epilogue. `rc_game --script` walks
   into geo_01a's exit and checks geo_01b (56 of 56 checks).
@@ -367,8 +410,9 @@ copy of the game.
   Hive`, ...), shows a loading screen with the mission text, and drops you
   into the level with an on-screen display (shield, health, crosshair, ammo,
   squad, messages). Escape pauses; the pause menu resumes, opens options or
-  quits to the main menu. It plays the game's own music (the main menu
-  theme, then each campaign's calm tracks). It reads a settings file
+  quits to the main menu. It plays the game's own music by the
+  original's rules (the main menu theme, then each room's music, battle
+  music when enemies come close, a victory flourish when the fight ends). It reads a settings file
   (`settings.toml`: game folder, mods, screen, volumes, mouse) and a controls
   file (`data/input/bindings.toml`: the original PC keys, plus gamepad and
   touch). `rc_game --script` drives itself through the menus and a level and
@@ -545,6 +589,18 @@ copy of the game.
   wherever the original puts them (685 more spawners on the Prosecutor and
   Kashyyyk levels), with the game's own models, skins, animations, voice
   lines, health and damage tables. Settings: `data/enemies/trandoshan_*.toml`.
+- **Grievous's bodyguards (tested in the cloud sandbox with automatic
+  tests, not yet in the real game on Windows).** The tall droid guards on
+  Kashyyyk now appear where the original puts them, with the game's model,
+  skin, animations, 2000 health, a 250-point shield and their damage table.
+  Up close they hit with their staff; further off they fire missiles that
+  explode (250 damage, can stun you). On yyy_01e, killing the guards the
+  level sends now ends the level, as in the original. Not done: their
+  missiles don't home in, they don't leap onto walls and ceilings, and the
+  guard that is only meant to be glimpsed by the tower can't be hurt; it
+  leaves once you have seen Grievous, as in the original. Settings:
+  `data/enemies/grievous_guard.toml`, `data/weapons/grievous_missile_rack.toml`
+  and `data/grenades/grievous_missile.toml`.
 
 - **Saving and loading (tested in the cloud sandbox on geo_01a; not yet on Windows).**
   Quicksave with F5 and quickload with F9. The start of each level and each
@@ -585,12 +641,51 @@ copy of the game.
   near them. A prop that breaks sends its event to the level scripts (53
   on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
   go on. Broken props are kept in save files.
+- **Particle effects (since 2026-11-10, tested in the cloud only, not on
+  Windows or by playing).** Explosions now show the game's own fireball,
+  smoke, sparks and flying debris, read from its effect classes (all 575
+  read), with the explosion sounds. Where the map gives one, a broken
+  barrel's model is left behind for a few seconds (geo_03a has them;
+  geo_01b's map says its barrels leave none). Settings in
+  `data/effects/effects.toml`.
+
+- Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
+  missile turret or an E-Web and press Use. You get on, look around to
+  turn the gun (only as fast and as far as the original's turret turns),
+  fire its own weapon, and press Use again to get off. Getting on and off
+  sends the map's turret events, so the last level's ending can go on
+  once you man its turret. Level scripts can put characters on turrets,
+  and they shoot at enemies on their own. Each kind is a file in
+  `data/turrets/`, so mods can add more. Not tried in a running game yet.
+- Squad mates man turrets: aim at a "Man turret" marker (like the Wookiee
+  turrets at the start of yyy_06d) and order it. A squad mate walks to
+  it, gets on, and fires the turret at enemies in range until you recall
+  the squad (F4), give them another job, or they go down. If you're on
+  that turret yourself they wait and get on once you're off. Checked in a
+  test room with no game files; not tried in a running game yet.
+
+- Gunship ball turrets (geo_04a, geo_04d) can be used like the other
+  turrets, and the core ship's own turrets (geo_04b, geo_05a, geo_05c)
+  unfold when the level switches them on, shoot at you and the squad,
+  and can be shot to pieces, which tells the level scripts (geo_05a's
+  elites come in after you shoot its turret). Not tried in a running
+  game yet.
 
 ## What doesn't work yet
 
-- Breakable props just disappear when they break: their broken model,
-  effect and sound aren't shown yet, the burning or electric after-effect
-  some barrels leave isn't done, and loose props aren't pushed by blasts.
+- Turrets: squad mates on turrets say nothing (no turret voice lines
+  yet), stand still in their usual pose, and are held where the player's
+  body goes on that turret (not compared with the original); the Rishi
+  ceiling turrets and Geonosis anti-air turrets aren't done, and only the
+  core ship turrets can be destroyed (no explosion or broken pieces yet).
+  The last level's ending also needs the
+  rockets that hit the ship, which aren't done.
+
+- Breakable props: the damaged step's model isn't swapped in, the
+  burning or electric after-effect some barrels leave isn't done, and
+  loose props aren't pushed by blasts. Effects aren't drawn yet for shots,
+  grenades or anything else besides breaking props, beam and trail
+  effects aren't drawn, and explosion sounds aren't placed in 3D yet.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
@@ -602,7 +697,7 @@ copy of the game.
   (the droid, gunship or spot it belongs to) and gets quieter with
   distance, unless the game's own settings for that sound say it is radio
   (most dialogue is). Tested in the cloud on a silent sound card, not yet
-  listened to or run on Windows. No subtitles yet. Music cues, characters walking or animating, the squad
+  listened to or run on Windows. No subtitles yet. Music actions are carried out. Characters walking or animating, the squad
   joining and leaving and camera moves are logged as "not done yet". At the
   end of each campaign the original debriefing screen shows (its own
   picture, frame and texts, with the level's title, words and picture);
@@ -617,11 +712,33 @@ copy of the game.
   the ones brought in during the scene aren't there yet. The squad only
   comes along in maps that have one (not the
   prologue, briefings or epilogue), and the grown commando's arms are
-  hidden while the prologue gives you a child's hands. Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, hologram text, the title card,
-  the credits, and the logo videos. Not tested on Windows or by playing.
-- Music: the menu and level tracks play, but the switch to battle music
-  waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
+  hidden while the prologue gives you a child's hands. Hologram
+  briefings at the start of missions (yyy_04b, ras_03a, geo_03a) start
+  when the projector's throw animation reaches its "start the briefing"
+  moment, and let the player go at their end, as in the original (since
+  2026-11-10; checked in the cloud from the log, not by playing). Not done yet:
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the title card,
+  the credits, and the logo videos. Holograms shimmer and flicker like
+  the original's (edges fade, a speckle that jumps about, brightness
+  flicker, now and then a squash in height), and the briefing holograms
+  wear their hologram skins; checked in the cloud, not yet looked at on
+  Windows. Not tested on Windows or by playing.
+- Character shadows (since 2026-11-10, needs SQUAD SHADOWS on in the
+  GRAPHICS options, as in the original): the characters the map marks
+  (in the prologue 7 troopers, 3 young clones and the Kaminoan in the
+  gym) cast their shape onto the floor from a light high above, as the
+  original's shadow projectors do. Checked in a stand-in scene and seen
+  in the prologue's gym in the cloud; not tested on Windows. The shadow
+  stays flat at the feet (not on steps, slopes or walls) and has sharp
+  edges. The squad and enemies don't have these yet.
+- Music: follows the original's rules, read from the game's files
+  (`cargo run --release -p rc_music --bin rc_music_check` checks every
+  level's music against your install). Heard on Windows on 2026-11-09:
+  the menu theme, room music and its overlays, and pausing. Our guesses:
+  exactly when a fight starts and ends, and the fade curves. Not done:
+  battle volumes, the death stinger, debriefing, credits and title-card
+  music, music in save games.
+- 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
   picks from) are played for weapons, grenades and enemy voices. With 3D
   SOUND on, enemy and scripted sounds are heard from their side. Before
@@ -630,8 +747,12 @@ copy of the game.
   sounds a few metres away are louder than before (not yet listened to).
 - Collision follows each prop's "can be walked through" settings and
   each mesh part's collision switch (since 2026-10-30; before, every prop
-  was solid). Simplified collision shapes aren't read, so solid props
-  block by their drawn shape. Not tested on Windows or by playing.
+  was solid). Since 2026-11-10 models with collision off on every part
+  (barrels, Raxus Prime's floor and ceiling pipes) collide through the
+  simple box shape the game stores with them, instead of not at all. Props
+  the game lets you walk through but shoot (geo_04c's shield wall pieces)
+  now stop shots but still not people. Other solid props block by their
+  drawn shape. Not tested on Windows or by playing.
 - Levels are drawn without characters or effects. Door and lift sounds are
   logged, not played, and doors opened by the game's scripts or squad
   orders don't open yet. The gunship isn't solid. 9 maps have windows onto a sky but no sky box, so they show a flat

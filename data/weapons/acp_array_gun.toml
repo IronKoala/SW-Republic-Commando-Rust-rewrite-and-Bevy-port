@@ -1,0 +1,53 @@
+# The Trandoshan ACP array gun (class Shotgun): eight pellets per shot.
+#
+# Numbers marked "game:" are Shotgun's class defaults (ctinventory.u, with
+# ShotgunDefaults in Properties/properties.u on top) and its ammo
+# ShotgunAmmo(+Defaults).
+
+name = "ACP Array Gun"
+
+[fire]
+mode = "semi_auto"        # game: FireMode (the Weapon default)
+shot_delay = 1.1          # game: ShotgunDefaults ShotDelay
+aim_error = 0
+offset = [127.4, 10, -7.56] # placeholder: the ACP repeater's FPFireOffset
+
+[ammo]
+clip_size = 8             # game: ReloadCount
+max_ammo = 24             # game: ShotgunAmmoDefaults MaxAmmo
+start_ammo = 16           # game: ShotgunDefaults PickupAmmoCount
+reload_time = 2.43        # game: the arms' Reload animation (HudArmsShotgun), 73 frames at 30 fps
+
+[shot]
+kind = "instant"          # game: ShotgunAmmo bInstantHit
+range = 3500              # game: ShotgunAmmoDefaults Range
+damage = 28               # game: ShotgunAmmoDefaults Damage (each pellet)
+pellets = 8               # game: ShotgunAmmo ProjPerFire
+spread = 1700             # game: ShotgunAmmoDefaults Spread (rotation units; how the game scatters them is our reading)
+damage_kind = "blaster"
+damage_type = "CTDamageBallisticShotgun" # game: ShotgunAmmoDefaults MyDamageType
+
+[melee]
+range = 150               # game: ShotgunDefaults MeleeRange
+damage = 220              # game: ShotgunDefaults MeleeDamage
+
+[recoil]
+kick = [2000, 0, 0]       # game: WeaponKick
+spring = 3                # game: RecoilConstant
+damping = 0.1             # game: RecoilDampening
+
+[sound]
+package = "gen_sound"     # guess: wep_GEN_ sounds are in gen_sound.uax
+fire = ["wep_GEN_tranShotgun_03"] # game: Shotgun FireSound
+empty = "wep_GEN_empty_01"
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: shown only if the arms can't load
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.6, 0.2]
+
+[arms]
+mesh = "HudArmsShotgun"   # game: Shotgun's Mesh
+fov = 85                  # game: DisplayFOV
+brightness = 0.75         # our choice, as the other weapons

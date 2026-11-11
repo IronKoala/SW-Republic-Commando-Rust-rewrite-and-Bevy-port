@@ -14,6 +14,7 @@ use crate::fight::{FightState, Patient, Rng, Threat};
 use crate::jobs::{JobKind, JobResult, JobSettings};
 use crate::map::MarkerSpot;
 use crate::nav::Navigator;
+use crate::presence::{Presence, ScriptMove};
 use crate::settings::{MemberSettings, SquadSettings, StanceSettings, Tether};
 use rc_movement::{axes, MoveInput, MoveParams, Pawn, Vec3, World};
 use std::f32::consts::{PI, TAU};
@@ -134,6 +135,15 @@ pub struct Member {
     pub(crate) cover_retry_in: f32,
     /// Crouching this frame (in cover, between bursts).
     pub crouch: bool,
+    /// On a turret (a `mount` post): the game holds the body's centre here
+    /// and turns them with the turret (radians). They don't move, think or
+    /// fire their own gun meanwhile; the game fires the turret.
+    pub mounted: Option<(Vec3, f32)>,
+    /// With the squad, away from it (a level script took them out), or
+    /// not in the level at all. See `presence.rs`.
+    pub presence: Presence,
+    /// Where a level script sends them while away from the squad.
+    pub script_move: Option<ScriptMove>,
     /// Shots or grenades left, by gun or grenade id. Empty unless
     /// `[ammo] limited` is on; anything not listed never runs out.
     pub ammo: std::collections::BTreeMap<String, u32>,
@@ -145,13 +155,20 @@ pub struct Member {
     pub(crate) skip_boxes: Vec<u64>,
     /// Seconds before they look for another box after giving up on one.
     pub(crate) fetch_wait: f32,
-    path: Vec<Vec3>,
+    pub(crate) path: Vec<Vec3>,
     pub(crate) planned_for: Option<Vec3>,
     pub(crate) think_in: f32,
-    input: MoveInput,
-    slow_time: f32,
-    tried_jump: bool,
-    stuck_reported: bool,
+    pub(crate) input: MoveInput,
+    pub(crate) slow_time: f32,
+    pub(crate) tried_jump: bool,
+    pub(crate) stuck_reported: bool,
+}
+
+impl Member {
+    /// With the squad and on their feet: can take orders and jobs.
+    pub fn available(&self) -> bool {
+        !self.down && self.presence == Presence::InSquad
+    }
 }
 
 /// Something that happened, for the log.
@@ -377,6 +394,18 @@ pub enum SquadEvent {
         on: bool,
         why: String,
     },
+    /// Left the squad (a level script's `ChangeSquadMember`): they stop
+    /// following and do what the level's scripts tell them.
+    LeftSquad { member: String, at: Vec3 },
+    /// Back in the squad (or in it for the first time).
+    JoinedSquad { member: String, at: Vec3 },
+    /// Came into the level (placed in the map, or made by a spawner),
+    /// `in_squad` or not.
+    CameIn { member: String, at: Vec3, in_squad: bool },
+    /// Taken out of the level (a script's `DestroyPawn`).
+    Removed { member: String },
+    /// Got where a level script sent them (away from the squad).
+    ScriptArrived { member: String, index: usize, at: Vec3 },
     /// A grenade thrown from a grenade post, or on their own (`own`); it
     /// goes off in `fuse` seconds.
     Throw {
@@ -506,6 +535,18 @@ impl fmt::Display for SquadEvent {
                 p(at)
             ),
             SquadEvent::CoverLeft { member, why } => write!(f, "{member} leaves cover: {why}"),
+            SquadEvent::LeftSquad { member, at } => write!(f, "{member} LEAVES the squad at {}", p(at)),
+            SquadEvent::JoinedSquad { member, at } => write!(f, "{member} JOINS the squad at {}", p(at)),
+            SquadEvent::CameIn { member, at, in_squad } => write!(
+                f,
+                "{member} comes into the level at {}{}",
+                p(at),
+                if *in_squad { ", in the squad" } else { ", not in the squad yet" }
+            ),
+            SquadEvent::Removed { member } => write!(f, "{member} is taken out of the level"),
+            SquadEvent::ScriptArrived { member, at, .. } => {
+                write!(f, "{member} got where the level's script sent them, {}", p(at))
+            }
             SquadEvent::Speciality { member, job, weapon, on: true, why } => {
                 write!(f, "{member} uses their speciality ({job}, {weapon}): {why}")
             }
@@ -537,6 +578,7 @@ pub struct MemberStatus {
     pub speed: f32,
     pub on_ground: bool,
     pub down: bool,
+    pub presence: Presence,
 }
 
 pub struct Squad {
@@ -667,6 +709,9 @@ impl Squad {
                     cover_time: 0.0,
                     cover_retry_in: 0.0,
                     crouch: false,
+                    mounted: None,
+                    presence: Presence::InSquad,
+                    script_move: None,
                     ammo: settings.ammo.starting(),
                     fetching: None,
                     fetch_time: 0.0,
@@ -728,6 +773,38 @@ impl Squad {
             if let Some(name) = self.job_of(k).map(|j| j.name.clone()) {
                 self.markers[k].0.job = name;
             }
+        }
+    }
+
+    /// The turret post member `i` holds: the marker of a `mount` job they're
+    /// posted at (and so should be on its turret), if any.
+    pub fn turret_post(&self, i: usize) -> Option<usize> {
+        let m = self.members.get(i)?;
+        if m.down || m.state != MemberState::Posted {
+            return None;
+        }
+        let k = m.marker?;
+        self.job_of(k).filter(|j| j.mount).map(|_| k)
+    }
+
+    /// The game has member `i` on a turret: hold the body's centre at
+    /// `centre`, facing `yaw` (radians).
+    pub fn hold_on_turret(&mut self, i: usize, centre: Vec3, yaw: f32) {
+        if let Some(m) = self.members.get_mut(i) {
+            m.mounted = Some((centre, yaw));
+        }
+    }
+
+    /// Member `i` is off their turret: back on their feet at `feet`.
+    pub fn off_turret(&mut self, i: usize, feet: Vec3) {
+        let Some(m) = self.members.get_mut(i) else {
+            return;
+        };
+        if m.mounted.take().is_some() {
+            let up = m.pawn.location - m.pawn.feet();
+            m.pawn.location = feet + up;
+            m.pawn.velocity = Vec3::ZERO;
+            m.think_in = 0.0;
         }
     }
 
@@ -850,7 +927,7 @@ impl Squad {
                 }
                 let order_name = format!("{} ({})", spot.name, spot.job);
                 self.pull_for(k, &mut events);
-                if !self.members.iter().any(|m| m.marker.is_none() && !m.down) {
+                if !self.members.iter().any(|m| m.marker.is_none() && m.available()) {
                     events.push(SquadEvent::OrderIgnored {
                         order: order_name,
                         why: if self.auto_pull {
@@ -876,7 +953,7 @@ impl Squad {
                         continue;
                     }
                     let stand = self.markers[g].0.stand;
-                    let free = |m: &Member| m.marker.is_none() && !m.down;
+                    let free = |m: &Member| m.marker.is_none() && m.available();
                     let wanted = (g == k && !preferred.is_empty())
                         .then(|| {
                             self.members.iter().position(|m| {
@@ -932,7 +1009,7 @@ impl Squad {
             },
         );
         for i in 0..self.members.len() {
-            if self.members[i].marker.is_none() && !self.members[i].down {
+            if self.members[i].marker.is_none() && self.members[i].available() {
                 self.set_off_now(i, leader, world, &mut events);
             }
         }
@@ -959,7 +1036,7 @@ impl Squad {
         let free = self
             .members
             .iter()
-            .filter(|m| m.marker.is_none() && !m.down)
+            .filter(|m| m.marker.is_none() && m.available())
             .count();
         if free >= needed {
             return;
@@ -967,7 +1044,7 @@ impl Squad {
         let mut pullable: Vec<usize> = (0..self.members.len())
             .filter(|&i| {
                 let m = &self.members[i];
-                !m.down
+                m.available()
                     && m.marker.is_some_and(|j| {
                         j != k
                             && self.job_of(j).is_some_and(|job| {
@@ -1324,6 +1401,12 @@ impl Squad {
         self.start_groups(&mut events);
         self.burn_fuses(dt, &mut events);
         for i in 0..self.members.len() {
+            // Away from the squad (a level script has them) or not in
+            // the level: the squad leaves them be.
+            if self.members[i].presence != Presence::InSquad {
+                self.step_away(i, dt, leader, world, nav, &mut events);
+                continue;
+            }
             self.tick_revive(i, dt, &mut events);
             // Marked jobs count down.
             if let MemberState::Working { left } = self.members[i].state {
@@ -1342,6 +1425,19 @@ impl Squad {
                 let m = &mut self.members[i];
                 m.input = MoveInput::default();
                 m.pawn.step(dt, &m.input, world);
+                continue;
+            }
+            if let Some((centre, yaw)) = self.members[i].mounted {
+                // On a turret: held there, turned with it.
+                let m = &mut self.members[i];
+                m.pawn.location = centre;
+                m.pawn.velocity = Vec3::ZERO;
+                m.yaw = yaw.rem_euclid(TAU);
+                m.crouch = false;
+                m.input = MoveInput {
+                    yaw: m.yaw,
+                    ..Default::default()
+                };
                 continue;
             }
             self.members[i].think_in -= dt;
@@ -1369,7 +1465,7 @@ impl Squad {
 
     /// Turn the member's state into this frame's `MoveInput`.
     #[allow(clippy::too_many_arguments)]
-    fn steer(
+    pub(crate) fn steer(
         &mut self,
         i: usize,
         dt: f32,
@@ -1765,6 +1861,7 @@ impl Squad {
                     speed: m.pawn.velocity.length_2d(),
                     on_ground: m.pawn.mode == rc_movement::Mode::Walking,
                     down: m.down,
+                    presence: m.presence,
                 }
             })
             .collect()
@@ -1793,7 +1890,7 @@ impl Squad {
 }
 
 /// Seconds stuck before a member gives up on a marked job. Our own.
-const MARKER_GIVE_UP: f32 = 10.0;
+pub(crate) const MARKER_GIVE_UP: f32 = 10.0;
 
 /// Where a body can stand for a wanted spot `want`, measured from `from`
 /// (both feet positions): pulled back if a wall is in the way, then

@@ -10,15 +10,16 @@
 //! display 3.
 //!
 //! The model is posed on the CPU each frame like the squad's (`rc_anim`
-//! moves its points). It's drawn unlit at the weapon's `arms.brightness`:
-//! the game lights it by the zone the player stands in, which we don't read
-//! yet.
+//! moves its points). It's drawn unlit, at the level's light where the
+//! player is times the weapon's `arms.light_scale` (see
+//! `rc_game_core::place_light`), or at `arms.brightness` without a level.
 //!
 //! The DC-17m's ammo counter (see `counter`) is pieces of the model whose
 //! materials slide their picture sideways (`uv_transform`), set each frame
 //! from the weapon's ammo.
 
 use crate::arms::{Arms, ArmsAnim, ArmsClips, ArmsInput};
+use crate::arms_sound::{moment, play as play_sounds, spans, ArmsSounds, Moment};
 use crate::counter::{bar_shift, digit_of_shift, digit_shift, CounterReading};
 use crate::library::WeaponLibrary;
 use crate::melee::{MeleeSwing, Zoom};
@@ -180,6 +181,7 @@ pub(crate) fn add_arms_camera(
 }
 
 /// Read the arms of every weapon the player carries, once each.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn load_arms(
     lib: Res<WeaponLibrary>,
     paths: Option<Res<GamePaths>>,
@@ -187,6 +189,8 @@ pub(crate) fn load_arms(
     models: Option<ResMut<ArmsModels>>,
     mut commands: Commands,
     log: Option<Res<GameLog>>,
+    mut sounds: Option<ResMut<ArmsSounds>>,
+    mut audio: Option<ResMut<Assets<AudioSource>>>,
 ) {
     let Some(mut models) = models else {
         commands.insert_resource(ArmsModels::default());
@@ -237,6 +241,12 @@ pub(crate) fn load_arms(
                 for n in notes.iter().filter(|n| !n.contains("no animation called")) {
                     say(format!("arms: {id}: {n}"));
                 }
+                // The sounds its animations make (see `arms_sound`).
+                if let (Some(sounds), Some(audio)) = (sounds.as_deref_mut(), audio.as_deref_mut()) {
+                    for line in sounds.read(id, m, &paths, audio) {
+                        say(line);
+                    }
+                }
             }
             Err(e) => say(format!(
                 "arms: {id}: {} not shown ({e}); the plain model instead",
@@ -256,6 +266,8 @@ pub(crate) struct Watch {
     reloading: bool,
     feet: Option<Vec3>,
     logged: Option<(Option<String>, ArmsAnim)>,
+    /// Where the arms were last frame, for the animations' sounds.
+    heard: Option<Moment>,
 }
 
 /// Pick the animation, swap the model when the weapon changes, and pose it.
@@ -279,6 +291,7 @@ pub(crate) fn animate_arms(
     ),
     log: Option<Res<GameLog>>,
     cutscene: Option<Res<rc_game_core::Cutscene>>,
+    mut sounds: Option<ResMut<ArmsSounds>>,
 ) {
     let (Some(models), Ok((me, arsenal, body, down)), Ok((camera, mut projection))) =
         (models, players.single(), cameras.single_mut())
@@ -336,6 +349,22 @@ pub(crate) fn animate_arms(
     };
     watch.arms.step(&input, &clips);
     let arms = watch.arms.clone();
+    // A cutscene gives the player other hands (the prologue's baby and
+    // boy), not drawn yet: no grown commando's arms meanwhile.
+    let other_hands = cutscene.is_some_and(|c| c.briefing_weapon.is_some());
+
+    // The sounds the animations passed this frame (see `arms_sound`).
+    let now_at = moment(&arms);
+    if let Some(sounds) = sounds.as_deref_mut() {
+        if !down && !other_hands {
+            let due = spans(watch.heard.as_ref(), &now_at, dt, &|w, a| {
+                clips.length(w, a)
+            });
+            let model = |w: &str| models.0.get(w).and_then(|m| m.as_ref().ok()).cloned();
+            play_sounds(&due, &model, sounds, &mut commands, &log);
+        }
+    }
+    watch.heard = Some(now_at);
     let now = (arms.shown.clone(), arms.anim);
     if watch.logged.as_ref() != Some(&now) {
         let line = format!(
@@ -359,9 +388,6 @@ pub(crate) fn animate_arms(
     if let (Some(a), Projection::Perspective(p)) = (params, &mut *projection) {
         p.fov = vertical_fov(a.fov);
     }
-    // A cutscene gives the player other hands (the prologue's baby and
-    // boy), not drawn yet: no grown commando's arms meanwhile.
-    let other_hands = cutscene.is_some_and(|c| c.briefing_weapon.is_some());
     let hidden = down || other_hands || (zoomed && params.is_some_and(|a| a.hide_zoomed));
     // The shown weapon's ammo (while switching, the shown one may not be
     // the current one yet).
@@ -423,6 +449,7 @@ pub(crate) fn animate_arms(
         }
         None => {
             let brightness = params.map_or(1.0, |a| a.brightness);
+            let light_scale = params.map_or(0.0, |a| a.light_scale);
             let made = spawn_pieces(
                 model,
                 &points,
@@ -473,13 +500,23 @@ pub(crate) fn animate_arms(
                 ))
                 .with_children(|h| {
                     for (_, mesh, material) in made {
-                        h.spawn((
+                        let mut piece = h.spawn((
                             Mesh3d(mesh),
                             MeshMaterial3d(material),
                             RenderLayers::layer(ARMS_LAYER),
                             // Posed on the CPU: the stored bounds don't follow.
                             NoFrustumCulling,
                         ));
+                        // Drawn by the level's light where the player is.
+                        if light_scale > 0.0 {
+                            piece.insert(rc_game_core::LitByPlace {
+                                target: rc_game_core::LightTarget::BaseColor,
+                                own: 0.0,
+                                scale: light_scale,
+                                height: 0.0,
+                                made_at: brightness.clamp(0.0, 1.0),
+                            });
+                        }
                     }
                 });
             });

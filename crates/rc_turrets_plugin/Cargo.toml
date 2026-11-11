@@ -1,0 +1,42 @@
+[package]
+name = "rc_turrets_plugin"
+version = "0.1.0"
+edition.workspace = true
+description = "Mounted turrets in the game: a Bevy plugin that places and draws the map's turrets, lets the player get on and off with Use, aims them with the look input, hands the player the turret's weapon, and carries out the level scripts' turret orders."
+
+[dependencies]
+rc_turrets = { path = "../rc_turrets" }
+rc_anim = { path = "../rc_anim" }
+rc_ai = { path = "../rc_ai" }
+rc_combat = { path = "../rc_combat" }
+# The turret's model is drawn like a droid's (rc_enemies::look).
+rc_enemies = { path = "../rc_enemies" }
+rc_game_core = { path = "../rc_game_core" }
+rc_level = { path = "../rc_level" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }
+# The [turrets] section of save files. serde (MIT OR Apache-2.0),
+# https://serde.rs.
+serde = { version = "1", features = ["derive"] }
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. The same features as
+# rc_combat and rc_enemies, so the game builds one copy of Bevy.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = [
+    "default_app",
+    "std",
+    "bevy_state",
+    "bevy_winit",
+    "multi_threaded",
+    "x11",
+    "3d_bevy_render",
+    "bevy_audio",
+    "wav",
+]
+
+[dev-dependencies]
+# Only for the squad_turret test: a squad mate sent to a turret marker.
+rc_squad = { path = "../rc_squad" }
+rc_squad_plugin = { path = "../rc_squad_plugin" }

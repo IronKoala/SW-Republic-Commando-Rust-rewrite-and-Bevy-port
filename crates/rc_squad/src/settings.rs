@@ -183,6 +183,12 @@ impl Default for ReviveSettings {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Spawn {
+    /// As the original: the mates the map places, where it places them
+    /// (in the squad), and the ones its spawners make, when they go off
+    /// (out of the squad until a script adds them). A map that can't be
+    /// read gets `WithPlayer` instead.
+    FromMap,
+    /// All three in their form-up slots around the player.
     WithPlayer,
     None,
 }
@@ -283,7 +289,7 @@ impl Default for SquadSettings {
             turn_rate: 360f32.to_radians(),
             marker_work_time: 3.0,
             search_radius: 768.0,
-            spawn: Spawn::WithPlayer,
+            spawn: Spawn::FromMap,
             formation: [[-130.0, -110.0], [-130.0, 110.0], [-180.0, 0.0]],
             formation_search: [[200.0, -220.0], [200.0, 220.0], [320.0, 0.0]],
             secure_radius: 110.0,
@@ -468,14 +474,17 @@ impl SquadSettings {
             "squad" => {
                 if key == "spawn" {
                     let Value::Text(t) = value else {
-                        return Err("spawn must be \"with_player\" or \"none\"".into());
+                        return Err(
+                            "spawn must be \"from_map\", \"with_player\" or \"none\"".into()
+                        );
                     };
                     self.spawn = match t.as_str() {
+                        "from_map" => Spawn::FromMap,
                         "with_player" => Spawn::WithPlayer,
                         "none" => Spawn::None,
                         _ => {
                             return Err(format!(
-                                "spawn must be \"with_player\" or \"none\", not \"{t}\""
+                                "spawn must be \"from_map\", \"with_player\" or \"none\", not \"{t}\""
                             ))
                         }
                     };
@@ -854,6 +863,13 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                     ))
                 }
             }
+        }
+        "mount" => {
+            j.mount = match text(value)?.as_str() {
+                "yes" => true,
+                "no" => false,
+                _ => return Err("mount must be \"yes\" or \"no\"".into()),
+            };
         }
         "pullable" => {
             j.pullable = match text(value)?.as_str() {

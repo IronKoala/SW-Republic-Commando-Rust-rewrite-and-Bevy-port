@@ -208,7 +208,7 @@ impl Squad {
     pub fn take_box(&mut self, i: usize, b: &SupplyBox) -> Option<SquadEvent> {
         let room = self.ammo_room(i, &b.gives);
         let m = self.members.get_mut(i)?;
-        if m.down {
+        if m.down || m.presence == crate::Presence::Gone {
             return None;
         }
         if room == 0 {

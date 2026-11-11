@@ -51,4 +51,5 @@ bolt_colour = [1.0, 0.6, 0.2]  # our choice, from the tracer light's hue 18
 # plain [model] in view instead.
 mesh = "HudArmsUzi"        # game: SMG's Mesh
 fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
-brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet
+brightness = 0.75         # used only when the level's light can't be measured
+light_scale = 0.85        # how strongly the light where you stand shows on the arms; matched to two original screenshots

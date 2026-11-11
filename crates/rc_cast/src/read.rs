@@ -113,8 +113,15 @@ pub struct CastMember {
     pub hidden: bool,
     /// A prop's own animation and whether it loops.
     pub prop_anim: Option<(String, bool)>,
+    /// What a prop plays when a level event named by its tag triggers it
+    /// (`AnimTriggered`), and whether it loops: the hologram projector's
+    /// `ThrowHoloProjector`, which starts the briefings.
+    pub prop_trigger: Option<(String, bool)>,
     /// Running speed, Unreal units a second (`GroundSpeed`).
     pub ground_speed: f32,
+    /// Casts a shadow (`bActorShadows`, from the map or the class). Only
+    /// characters: in the original only a `Pawn` makes a shadow projector.
+    pub shadow: bool,
 }
 
 /// Every skeletal mesh in the animation packages, by lower-case name: the
@@ -192,6 +199,54 @@ pub fn class_library(game_data: &Path) -> (ClassLibrary, Vec<String>) {
     (lib, notes)
 }
 
+/// The `Skins` a map sets on its actors, by export index, each as a full
+/// dotted path with its package first. Only actors that set them.
+pub fn map_skins(
+    pkg: &Package,
+    data: &[u8],
+    actors: &[ScriptActor],
+) -> HashMap<usize, Vec<Option<String>>> {
+    use rc_package::properties::Value;
+    use rc_package::ObjectRef;
+    let mut out = HashMap::new();
+    for a in actors {
+        if a.obj.get("Skins").is_none() {
+            continue;
+        }
+        let Ok(props) = rc_level::actors::read_actor_properties(pkg, data, a.obj.export) else {
+            continue;
+        };
+        let Some(Value::Raw(b)) = props
+            .iter()
+            .find(|p| pkg.name(p.name).eq_ignore_ascii_case("Skins"))
+            .map(|p| &p.value)
+        else {
+            continue;
+        };
+        let mut r = rc_package::Reader::new(b);
+        let Ok(n) = r.compact_index() else {
+            continue;
+        };
+        let mut list = Vec::new();
+        for _ in 0..n.max(0) {
+            let Ok(o) = r.compact_index() else {
+                break;
+            };
+            list.push(match ObjectRef::from_index(o) {
+                ObjectRef::None => None,
+                ObjectRef::Import(_) => Some(rc_package::class::object_path(pkg, o)),
+                // Made inside the map itself: not something we can load.
+                ObjectRef::Export(_) => Some(format!(
+                    "myLevel.{}",
+                    rc_package::class::object_path(pkg, o)
+                )),
+            });
+        }
+        out.insert(a.obj.export, list);
+    }
+    out
+}
+
 /// Yaw from an actor's stored `Rotation` (pitch, yaw, roll as Unreal
 /// angle units), radians.
 fn yaw_of(a: &ScriptActor) -> f32 {
@@ -211,6 +266,7 @@ pub fn find_cast(
     lib: &ClassLibrary,
     meshes: &HashMap<String, (String, String)>,
     file: &CastFile,
+    map_skins: &HashMap<usize, Vec<Option<String>>>,
 ) -> (Vec<CastMember>, Vec<String>) {
     let mut out = Vec::new();
     let mut notes = Vec::new();
@@ -272,6 +328,15 @@ pub fn find_cast(
                 }
                 _ => None,
             });
+        let prop_trigger = o
+            .structure("AnimTriggered")
+            .and_then(|s| match s.get("Anim") {
+                Some(Val::Text(t)) if !t.is_empty() && !t.eq_ignore_ascii_case("None") => {
+                    Some((t.clone(), matches!(s.get("bLoop"), Some(Val::Bool(true)))))
+                }
+                _ => None,
+            })
+            .filter(|_| is_prop && !is_pawn);
         out.push(CastMember {
             name: o.name.clone(),
             class: o.class.clone(),
@@ -286,13 +351,19 @@ pub fn find_cast(
             scale: number("DrawScale", 1.0),
             package,
             mesh,
+            // Skins: our cast file first, then what the map sets on this
+            // actor, then the class's own (the briefing holograms' advisor
+            // is a clone trooper mesh in a hologram skin).
             skins: over
                 .map(|v| {
                     v.skins
                         .iter()
                         .map(|s| Some(s.clone()).filter(|s| !s.is_empty()))
-                        .collect()
+                        .collect::<Vec<_>>()
                 })
+                .filter(|s| !s.is_empty())
+                .or_else(|| map_skins.get(&o.export).cloned())
+                .or_else(|| lib.object_list(&o.class, "Skins"))
                 .unwrap_or_default(),
             tag: o.tag().to_string(),
             script: o.text("AIScriptTag").map(str::to_string),
@@ -301,7 +372,12 @@ pub fn find_cast(
                 .map(|v| matches!(v, Val::Bool(true)))
                 .unwrap_or_else(|| defaults.bool("bHidden").unwrap_or(false)),
             prop_anim,
+            prop_trigger,
             ground_speed: number("GroundSpeed", 440.0),
+            shadow: is_pawn
+                && o.get("bActorShadows")
+                    .map(|v| matches!(v, Val::Bool(true)))
+                    .unwrap_or_else(|| defaults.bool("bActorShadows").unwrap_or(false)),
         });
     }
     (out, notes)

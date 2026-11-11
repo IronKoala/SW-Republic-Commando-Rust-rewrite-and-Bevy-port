@@ -4428,10 +4428,12 @@ dependencies = [
  "bevy",
  "rc_anim",
  "rc_game_core",
+ "rc_hologram",
  "rc_level",
  "rc_model",
  "rc_movement",
  "rc_package",
+ "rc_shadows",
  "serde",
  "toml 0.8.23",
 ]
@@ -4461,6 +4463,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc_effects"
+version = "0.1.0"
+dependencies = [
+ "rc_package",
+]
+
+[[package]]
+name = "rc_effects_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_combat",
+ "rc_effects",
+ "rc_game_core",
+ "rc_level_viewer",
+ "rc_movement",
+ "rc_package",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "rc_enemies"
 version = "0.1.0"
 dependencies = [
@@ -4475,6 +4498,7 @@ dependencies = [
  "rc_movement",
  "rc_nav",
  "rc_package",
+ "rc_scripts",
  "serde",
 ]
 
@@ -4487,21 +4511,26 @@ dependencies = [
  "rc_audio",
  "rc_cast",
  "rc_combat",
+ "rc_effects_plugin",
  "rc_enemies",
  "rc_game_core",
  "rc_image",
+ "rc_level",
  "rc_level_plugin",
  "rc_level_viewer",
  "rc_menus",
  "rc_movement",
  "rc_movers_plugin",
+ "rc_music",
  "rc_package",
  "rc_pads",
  "rc_panini",
  "rc_save",
  "rc_scripts",
  "rc_scripts_plugin",
+ "rc_shadows",
  "rc_squad_plugin",
+ "rc_turrets_plugin",
  "rc_visor",
  "serde",
  "toml 0.8.23",
@@ -4515,6 +4544,15 @@ dependencies = [
  "rc_movement",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_hologram"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_image",
+ "rc_package",
 ]
 
 [[package]]
@@ -4535,6 +4573,7 @@ dependencies = [
  "bevy",
  "rc_combat",
  "rc_game_core",
+ "rc_hologram",
  "rc_level",
  "rc_level_viewer",
  "rc_model",
@@ -4547,6 +4586,7 @@ name = "rc_level_viewer"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rc_hologram",
  "rc_image",
  "rc_level",
  "rc_package",
@@ -4597,6 +4637,14 @@ dependencies = [
  "rc_movers",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_music"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_package",
 ]
 
 [[package]]
@@ -4657,6 +4705,7 @@ name = "rc_scripts"
 version = "0.1.0"
 dependencies = [
  "rc_level",
+ "rc_movement",
  "rc_package",
  "serde",
  "toml 0.8.23",
@@ -4669,6 +4718,7 @@ dependencies = [
  "bevy",
  "rc_audio",
  "rc_combat",
+ "rc_effects_plugin",
  "rc_game_core",
  "rc_level",
  "rc_level_plugin",
@@ -4677,6 +4727,17 @@ dependencies = [
  "rc_movers_plugin",
  "rc_package",
  "rc_scripts",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_shadows"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_game_core",
+ "rc_image",
  "serde",
  "toml 0.8.23",
 ]
@@ -4716,9 +4777,40 @@ dependencies = [
  "rc_movers_plugin",
  "rc_nav",
  "rc_package",
+ "rc_save",
  "rc_squad",
  "serde",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_turrets"
+version = "0.1.0"
+dependencies = [
+ "rc_level",
+ "rc_package",
+ "rc_scripts",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "rc_turrets_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rc_ai",
+ "rc_anim",
+ "rc_combat",
+ "rc_enemies",
+ "rc_game_core",
+ "rc_level",
+ "rc_movement",
+ "rc_package",
+ "rc_squad",
+ "rc_squad_plugin",
+ "rc_turrets",
+ "serde",
 ]
 
 [[package]]

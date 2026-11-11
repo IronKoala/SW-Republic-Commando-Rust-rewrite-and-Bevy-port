@@ -1,0 +1,22 @@
+[package]
+name = "rc_effects_plugin"
+version = "0.1.0"
+edition.workspace = true
+description = "Particle effects in the game: draws the game's own explosions, smoke and debris (rc_effects) with Bevy, and plays their sounds."
+
+[dependencies]
+rc_combat = { path = "../rc_combat" }
+rc_effects = { path = "../rc_effects" }
+rc_game_core = { path = "../rc_game_core" }
+rc_level_viewer = { path = "../rc_level_viewer" }
+rc_movement = { path = "../rc_movement" }
+rc_package = { path = "../rc_package" }
+# Reading data/effects/effects.toml. toml (MIT OR Apache-2.0),
+# https://github.com/toml-rs/toml.
+toml = "0.8"
+
+# Bevy (MIT OR Apache-2.0), https://bevy.org. No window of its own.
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+features = ["std", "bevy_state", "3d_bevy_render", "bevy_audio", "wav"]

@@ -24,6 +24,8 @@ rc_movement = { path = "../rc_movement" }
 rc_package = { path = "../rc_package" }
 # Sound quality (lower sample rate) for the SOUND options.
 rc_audio = { path = "../rc_audio" }
+rc_level = { path = "../rc_level" }
+rc_music = { path = "../rc_music" }
 # Reading our TOML settings files. serde (MIT OR Apache-2.0),
 # https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
 serde = { version = "1", features = ["derive"] }
@@ -35,12 +37,16 @@ rc_level_plugin = { path = "../rc_level_plugin" }
 rc_movers_plugin = { path = "../rc_movers_plugin" }
 rc_scripts = { path = "../rc_scripts" }
 rc_scripts_plugin = { path = "../rc_scripts_plugin" }
+rc_effects_plugin = { path = "../rc_effects_plugin" }
 rc_level_viewer = { path = "../rc_level_viewer" }
 rc_combat = { path = "../rc_combat" }
 rc_enemies = { path = "../rc_enemies" }
 rc_squad_plugin = { path = "../rc_squad_plugin" }
+rc_turrets_plugin = { path = "../rc_turrets_plugin" }
 # The characters placed in maps that no other part owns (cutscene casts).
 rc_cast = { path = "../rc_cast" }
+# Character shadows (cutscene characters).
+rc_shadows = { path = "../rc_shadows" }
 rc_save = { path = "../rc_save" }
 # The visor's modes and the tactical glow.
 rc_visor = { path = "../rc_visor" }

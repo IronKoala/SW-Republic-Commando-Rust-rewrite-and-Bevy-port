@@ -37,3 +37,6 @@ features = [
     "bevy_audio",
     "wav",
 ]
+
+[dev-dependencies]
+rc_scripts = { path = "../rc_scripts" }

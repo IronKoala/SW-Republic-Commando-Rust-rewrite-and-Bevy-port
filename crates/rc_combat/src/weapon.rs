@@ -89,6 +89,10 @@ pub struct WeaponParams {
     pub melee: Option<(f32, f32)>,
     /// Where shots start, from the eye: forward, right, up (`FPFireOffset`).
     pub fire_offset: [f32; 3],
+    /// Twin barrels: every shot also fires from the mirror of
+    /// `fire_offset` (left for right), at the same time (`fire.mirror`;
+    /// the Wookiee heavy turret's `muzzle_l` and `muzzle_r`).
+    pub mirror_fire: bool,
     /// The camera kick per shot, in rotation units: up, sideways
     /// (`WeaponKick`). Sideways is random between minus and plus this.
     pub kick: [f32; 2],
@@ -129,8 +133,12 @@ pub struct ArmsParams {
     pub attachment_group: Option<String>,
     /// Hidden while zoomed in (`bZoomedUsesNoHUDArms`: the sniper scope).
     pub hide_zoomed: bool,
-    /// How bright the arms are drawn, 0 to 1.
+    /// How bright the arms are drawn, 0 to 1, when the level's light can't
+    /// be measured.
     pub brightness: f32,
+    /// How strongly the level's light where the player is shows on the
+    /// arms (`rc_game_core::place_light`); 0 keeps `brightness` always.
+    pub light_scale: f32,
     /// The ammo counter on the gun (see `counter`): the model's digit
     /// pieces, hundreds first, by material name (the ammo class's
     /// `PannerDigit100`, `PannerDigit10`, `PannerDigit1`). Empty: none.
@@ -214,6 +222,7 @@ impl WeaponParams {
             },
             damage_kind,
             fire_offset: t.vec3("fire.offset")?.unwrap_or([0.0; 3]),
+            mirror_fire: t.boolean("fire.mirror")?.unwrap_or(false),
             kick: [kick[0], kick[1]],
             recoil_spring: t.number("recoil.spring")?.unwrap_or(0.0),
             recoil_damping: t.number("recoil.damping")?.unwrap_or(0.0),
@@ -240,6 +249,7 @@ impl WeaponParams {
                     attachment_group: t.text("arms.attachment_group")?,
                     hide_zoomed: t.boolean("arms.hide_zoomed")?.unwrap_or(false),
                     brightness: t.number("arms.brightness")?.unwrap_or(0.75),
+                    light_scale: t.number("arms.light_scale")?.unwrap_or(0.85).max(0.0),
                     counter_digits: t.texts("arms.counter_digits")?.unwrap_or_default(),
                     counter_bar: t.text("arms.counter_bar")?,
                 }),

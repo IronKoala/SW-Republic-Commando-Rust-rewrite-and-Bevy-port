@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 rc_anim = { path = "../rc_anim" }
 rc_game_core = { path = "../rc_game_core" }
+rc_hologram = { path = "../rc_hologram" }
 # Reading the map's actors.
 rc_level = { path = "../rc_level" }
 # The original models, read from the game.
@@ -14,6 +15,8 @@ rc_model = { path = "../rc_model" }
 rc_movement = { path = "../rc_movement" }
 # The game's script classes (each character's default model).
 rc_package = { path = "../rc_package" }
+# Shadows under the characters the map marks (bActorShadows).
+rc_shadows = { path = "../rc_shadows" }
 # Reading data/cast/cast.toml. serde (MIT OR Apache-2.0), https://serde.rs;
 # toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
 serde = { version = "1", features = ["derive"] }

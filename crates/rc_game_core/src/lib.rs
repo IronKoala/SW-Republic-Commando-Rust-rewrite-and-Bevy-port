@@ -23,8 +23,9 @@
 //!   the player's eyes.
 //! - [`MovingFloors`]: lifts and doors that carry or push bodies other than
 //!   the player (squad mates, droids).
-//! - [`MusicMood`]: calm or battle music; whoever knows a fight started
-//!   sets it.
+//! - [`MusicMood`]: whether the enemies are fighting. [`music`]: the level
+//!   scripts' music actions ([`MusicCue`]) and the enemies the music watches
+//!   ([`MusicThreats`]).
 //! - [`Voice`] and [`SoundAt`]: tags for a sound a part plays (speech;
 //!   where it comes from), for the VOICES volume and 3D SOUND options.
 //! - [`GameLog`]: one shared log file, `logs/rc_game.log`.
@@ -37,6 +38,10 @@
 //!   progress round the crosshair.
 //! - [`save`]: the interface each part fills in so it is saved and loaded
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
+//! - [`PlaceLight`] and [`LitByPlace`]: the level's light at any point, and
+//!   the tag that draws a character, the gun or the helmet by it.
+//! - [`turrets`]: [`Manning`] while the player works a mounted turret, and
+//!   the level scripts' [`TurretOrder`]s.
 //!
 //! This crate has no window or renderer in it, so it builds quickly and its
 //! tests run anywhere.
@@ -46,11 +51,14 @@ pub mod cutscene;
 pub mod events;
 mod hud;
 mod log;
+pub mod music;
 pub mod paths;
+pub mod place_light;
 pub mod pickups;
 pub mod save;
 pub mod sound;
 mod state;
+pub mod turrets;
 pub mod units;
 pub mod use_item;
 
@@ -59,18 +67,21 @@ pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
     LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
-    ShowDebriefing, SquadStanceOrder, UseClaimed,
+    ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
 pub use log::GameLog;
+pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
+pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use sound::{SoundAt, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, Play, Player, PlayerCamera, PlayerStart,
 };
+pub use turrets::{Manning, OnTurret, TurretOrder};
 pub use use_item::{UseItem, UseLock, UsePanel};
 
 use bevy::prelude::*;
@@ -92,6 +103,8 @@ impl Plugin for CorePlugin {
             .init_resource::<WeaponReadout>()
             .init_resource::<SquadReadout>()
             .init_resource::<MusicMood>()
+            .init_resource::<MusicThreats>()
+            .add_message::<MusicCue>()
             .add_message::<HudMessage>()
             .add_message::<pickups::PickedUp>()
             .add_message::<ViewKick>()
@@ -101,9 +114,11 @@ impl Plugin for CorePlugin {
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()
             .add_message::<SquadStanceOrder>()
+            .add_message::<SquadMembership>()
             .add_message::<MarkerJob>()
             .add_message::<PropAnim>()
             .add_message::<ChangeLevel>()
+            .add_message::<TurretOrder>()
             .add_message::<ShowDebriefing>()
             .init_resource::<Cutscene>()
             .init_resource::<UseItem>()

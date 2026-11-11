@@ -26,8 +26,8 @@ pub mod file;
 use bevy::prelude::*;
 use file::{Header, SaveFile};
 use rc_game_core::save::{
-    CheckpointReached, DeleteSave, LoadGame, RestoringSave, SaveAppExt, SaveGame, SaveList, SavePart,
-    SaveParts, SaveResult, SaveSlot,
+    CarryingOver, CheckpointReached, DeleteSave, LoadGame, RestoringSave, SaveAppExt, SaveGame, SaveList,
+    SavePart, SaveParts, SaveResult, SaveSlot,
 };
 use rc_game_core::{
     playing, Action, ActionState, ArrivalPortal, ChangeLevel, CurrentLevel, GameLog, GamePaths,
@@ -84,7 +84,7 @@ pub struct TravelSettings {
 impl Default for TravelSettings {
     fn default() -> Self {
         TravelSettings {
-            carry: vec!["combat".into()],
+            carry: vec!["combat".into(), "squad_carry".into()],
         }
     }
 }
@@ -555,6 +555,27 @@ fn start_load(world: &mut World, slot: &SaveSlot) -> Result<(), String> {
     Ok(())
 }
 
+/// Write each carried part's section into `sections`.
+fn carry_sections(
+    world: &mut World,
+    carry: &[String],
+    parts: &SaveParts,
+    sections: &mut toml::Table,
+) -> Result<(), String> {
+    for key in carry {
+        let Some(p) = parts.0.iter().find(|p| p.key == key) else {
+            world.resource::<GameLog>().line(format!(
+                "save: {TRAVEL_FILE} carries [{key}], but no part saves that; skipped"
+            ));
+            continue;
+        };
+        if let Some(t) = (p.save)(world)? {
+            sections.insert(key.clone(), toml::Value::Table(t));
+        }
+    }
+    Ok(())
+}
+
 /// Leave this map for `c.map`: keep the sections that travel, then load
 /// the map fresh, as the menu would.
 fn start_travel(world: &mut World, c: &ChangeLevel) -> Result<(), String> {
@@ -572,17 +593,10 @@ fn start_travel(world: &mut World, c: &ChangeLevel) -> Result<(), String> {
         .cloned()
         .unwrap_or_default();
     let mut sections = toml::Table::new();
-    for key in &carry {
-        let Some(p) = parts.0.iter().find(|p| p.key == key) else {
-            world.resource::<GameLog>().line(format!(
-                "save: {TRAVEL_FILE} carries [{key}], but no part saves that; skipped"
-            ));
-            continue;
-        };
-        if let Some(t) = (p.save)(world)? {
-            sections.insert(key.clone(), toml::Value::Table(t));
-        }
-    }
+    world.insert_resource(CarryingOver);
+    let written = carry_sections(world, &carry, &parts, &mut sections);
+    world.remove_resource::<CarryingOver>();
+    written?;
     let carried = SaveFile {
         header: Header {
             format: file::FORMAT,

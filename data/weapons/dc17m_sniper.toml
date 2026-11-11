@@ -57,7 +57,8 @@ mesh = "HudArmsSniper"     # game: DC17mSniper's Mesh
 fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
 attachment_group = "dc17m" # our name: weapons that swap with AttachHolster/AttachLoad
 hide_zoomed = true        # game: bZoomedUsesNoHUDArms (the scope covers the view)
-brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet
+brightness = 0.75         # used only when the level's light can't be measured
+light_scale = 0.85        # how strongly the light where you stand shows on the arms; matched to two original screenshots
 # The ammo counter on the gun: pieces of the model whose picture slides to
 # show the ammo carried (three digits) and how full the magazine is (a bar).
 counter_digits = ["DC17mDigit100", "DC17mDigit10", "DC17mDigit1"] # game: DC17mSniperAmmo PannerDigit100, PannerDigit10, PannerDigit1

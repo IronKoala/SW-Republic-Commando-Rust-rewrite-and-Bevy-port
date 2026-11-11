@@ -30,6 +30,9 @@
 //!   `ACTION_StopFactorySpawning` and `ACTION_ResetFactory` become
 //!   [`FactoryOrder`]s for them, and what they send back (a droid's death
 //!   event, a spawner running out) arrives as a `RaiseEvent`.
+//! - turrets: `ACTION_AttachToTurret` and `ACTION_SetTurretUsable` become
+//!   [`TurretOrder`]s for the turret part (`rc_turrets_plugin`), whose
+//!   events (a turret taken or let go) arrive as a `RaiseEvent`.
 //!
 //! - lines of dialogue and sounds (`ACTION_PlaySound`,
 //!   `ACTION_PlayLocalSound`) play from the game's own sound packages, read
@@ -52,16 +55,18 @@ pub mod breakables;
 pub mod characters;
 pub mod cutscene;
 pub mod markers;
+pub mod music;
 pub mod save;
+pub mod sight;
 pub mod sounds;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ChangeLevel, CurrentLevel, GameLog, GamePaths, GameSet,
-    GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player, PlayerVitals,
-    RaiseEvent,
+    playing, units::to_unreal, Action, ChangeLevel, CurrentLevel, GameLog,
+    GamePaths, GameSet, GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player,
+    PlayerVitals, RaiseEvent, TurretOrder,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
@@ -94,7 +99,11 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::SquadStanceOrder>()
+            .add_message::<rc_game_core::SquadMembership>()
             .add_message::<ChangeLevel>()
+            .add_message::<rc_effects_plugin::SpawnEffect>()
+            .add_message::<rc_effects_plugin::PreloadEffect>()
+            .add_message::<TurretOrder>()
             .add_message::<rc_game_core::MarkerJob>()
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
@@ -123,7 +132,9 @@ impl Plugin for ScriptsPlugin {
                     breakables::shots,
                     breakables::blasts,
                     breakables::explode,
+                    sight::look,
                     run,
+                    breakables::show,
                     characters::cast,
                     sounds::play,
                     hide_parts,
@@ -224,6 +235,28 @@ pub struct LevelScript {
     pub props: breakables::PropStats,
 }
 
+impl LevelScript {
+    /// Just the director, with nothing else of a level: for tests.
+    #[cfg(test)]
+    pub(crate) fn bare(director: Director) -> Self {
+        LevelScript {
+            director,
+            dispensers: Vec::new(),
+            hidden: HashSet::new(),
+            held: Vec::new(),
+            calls: Vec::new(),
+            places: characters::Places::new(Vec::new()),
+            sounds: Vec::new(),
+            started: true,
+            scene: cutscene::Scene::default(),
+            stats: PlayStats::default(),
+            breaking: breakables::Breakables::new(&[]),
+            props: breakables::PropStats::default(),
+            anchors: Vec::new(),
+        }
+    }
+}
+
 /// What the scripts did in the game, for the log and the self-tests.
 #[derive(Debug, Clone, Default)]
 pub struct PlayStats {
@@ -245,6 +278,8 @@ pub struct PlayStats {
     pub sounds_started: usize,
     /// Sounds asked for that weren't loaded.
     pub sounds_missing: Vec<String>,
+    /// Music actions passed on to the music.
+    pub music_cues: usize,
     /// The sounds played from a place in the level (not heard everywhere).
     pub sounds_placed: Vec<String>,
     pub not_done: usize,
@@ -257,8 +292,15 @@ pub struct PlayStats {
     pub invulnerable: Vec<String>,
     pub characters_hurt: usize,
     pub squad_orders: Vec<String>,
+    /// `ChangeSquadMember`: `WHO joins|leaves`.
+    pub squad_members: Vec<String>,
+    /// Line-of-sight triggers the player set off by looking, by name.
+    pub sight_seen: Vec<String>,
     /// Characters an action named that weren't found.
     pub no_character: Vec<String>,
+    /// Orders sent to turrets: `attach TAG`, `detach TAG`, `usable TAG`,
+    /// `unusable TAG`.
+    pub turret_orders: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
@@ -376,6 +418,7 @@ fn build(
     mut gate: ResMut<LoadingGate>,
     paths: Res<GamePaths>,
     audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
+    mut preload: MessageWriter<rc_effects_plugin::PreloadEffect>,
     log: Res<GameLog>,
 ) {
     let (Some(loaded), Some(movers)) = (loaded, movers) else {
@@ -386,6 +429,8 @@ fn build(
     // Props weapons can break get the game's full damage rules.
     let breakable = breakable.map(|b| b.0.clone()).unwrap_or_default();
     director.add_breakables(&breakable);
+    // Their explosions and sounds are read now, not at the first bang.
+    breakables::preload(&breakable, &mut preload);
     // Characters really walk and animate in the game: scripts wait for them.
     director.game_runs_characters = true;
     let places = characters::Places::new(places.clone());
@@ -403,11 +448,12 @@ fn build(
     }
     let s = &director.stats;
     log.line(format!(
-        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} counters, {} conditions, {} checkpoints, {} props ({} weapons can break), {} level exits; level start sends {:?}",
+        "{PART}: {} scripted triggers and {} sequences with {} actions, {} triggers, {} line-of-sight triggers, {} counters, {} conditions, {} checkpoints, {} props ({} weapons can break), {} level exits; level start sends {:?}",
         s.scripts,
         s.sequences,
         s.actions,
         s.triggers,
+        s.sight_triggers,
         s.counters,
         s.conditions,
         s.checkpoints,
@@ -546,14 +592,15 @@ fn run(
         MessageReader<RaiseEvent>,
         MessageReader<rc_game_core::CharacterOrderDone>,
     ),
-    mut factories: MessageWriter<FactoryOrder>,
+    (mut factories, mut turrets): (MessageWriter<FactoryOrder>, MessageWriter<TurretOrder>),
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief): (
+    (mut checkpoints, mut change, mut debrief, mut music): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
+        MessageWriter<rc_game_core::MusicCue>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -660,6 +707,7 @@ fn run(
                 // Explosions go off 0.1 to 0.2 s later, as in the game.
                 let delay = 0.1 + 0.1 * ((export as f32 * 0.618).fract());
                 let explodes = script.breaking.broke(export, now, delay);
+                script.breaking.stepped.push((export, true));
                 let sound = script
                     .breaking
                     .get(export)
@@ -667,9 +715,9 @@ fn run(
                 log.line(format!(
                     "{PART}: t={now:.2} prop {name} ({tag}) destroyed: no longer solid or drawn{}{}{}{}",
                     if explodes { "; explodes in a moment" } else { "" },
-                    mesh.map(|m| format!("; should become {m} (not drawn yet)")).unwrap_or_default(),
-                    effect.map(|m| format!("; effect {m} (not shown yet)")).unwrap_or_default(),
-                    sound.map(|m| format!("; sound {m} (not played yet)")).unwrap_or_default()
+                    mesh.map(|m| format!("; becomes {m}")).unwrap_or_default(),
+                    effect.map(|m| format!("; effect {m}")).unwrap_or_default(),
+                    sound.map(|m| format!("; sound {m}")).unwrap_or_default()
                 ));
             }
             Effect::PropDamaged {
@@ -678,6 +726,7 @@ fn run(
                 tag,
                 removed,
             } => {
+                script.breaking.stepped.push((export, false));
                 if removed {
                     if let Some(p) = &parts {
                         p.set_solid_export(export, false);
@@ -787,6 +836,15 @@ fn run(
                     script.calls.push(call);
                     continue;
                 }
+                if let Some(cue) = music::cue(&call.action) {
+                    log.line(format!(
+                        "{PART}: t={now:.2} {} #{} {}: music {cue:?}",
+                        call.script, call.index, call.kind
+                    ));
+                    script.stats.music_cues += 1;
+                    music.write(cue);
+                    continue;
+                }
                 carry_out(
                     script,
                     call,
@@ -797,6 +855,7 @@ fn run(
                     &mut hud,
                     &mut damage,
                     &mut factories,
+                    &mut turrets,
                     &use_key,
                     &log,
                 );
@@ -826,6 +885,7 @@ fn carry_out(
     hud: &mut MessageWriter<HudMessage>,
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
+    turrets: &mut MessageWriter<TurretOrder>,
     use_key: &str,
     log: &GameLog,
 ) {
@@ -977,6 +1037,43 @@ fn carry_out(
                 tag,
                 for_good,
                 remove_offspring,
+            });
+        }
+        // Turrets are the turret part's (rc_turrets_plugin).
+        "attachtoturret" => {
+            let turret = a.text("DestinationTag").unwrap_or("").to_string();
+            let attach = a.flag("Attach", true);
+            log.line(format!(
+                "{at}: the characters running {} get {} turret {turret}",
+                call.owner.as_deref().unwrap_or("(no sequence)"),
+                if attach { "on" } else { "off" }
+            ));
+            script.stats.turret_orders.push(format!(
+                "{} {turret}",
+                if attach { "attach" } else { "detach" }
+            ));
+            turrets.write(TurretOrder::Attach {
+                turret,
+                attach,
+                owner: call.owner.clone(),
+                by: format!("{} #{}", call.script, call.index),
+            });
+        }
+        "setturretusable" => {
+            let turret = a.text("TurretTag").unwrap_or("").to_string();
+            let usable = a.flag("IsPlayerUsable", true);
+            log.line(format!(
+                "{at}: turrets {turret} {} by the player",
+                if usable { "usable" } else { "not usable" }
+            ));
+            script.stats.turret_orders.push(format!(
+                "{} {turret}",
+                if usable { "usable" } else { "unusable" }
+            ));
+            turrets.write(TurretOrder::SetUsable {
+                turret,
+                usable,
+                by: format!("{} #{}", call.script, call.index),
             });
         }
         "resetfactory" => {
