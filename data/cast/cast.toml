@@ -18,6 +18,12 @@
 # zone's ambient light, which we don't read yet.
 ambient = 0.5
 
+# How strongly the level's light where a cast member stands shows on it, so
+# a trooper in shade is dark and one in the sun is bright, as the original
+# draws characters. The same as the squad's and the droids', which were
+# matched to two original screenshots.
+light_scale = 1.1
+
 # Walking speed as a share of the class's GroundSpeed. Guess: the original
 # decides this in compiled code.
 walk_speed_ratio = 0.5
