@@ -109,7 +109,7 @@ prompt_wrap = 21
 # clip, reserve, grenade, shield_low, health_low, health_full, squad_down, pickup,
 # prompt, subtitle, objective.
 # Bars (`fill`): shield, health, clip, squad_health.
-# Fading (`fade`, 1 shown to 0 gone): pickup, subtitle, objective.
+# Fading (`fade`, 1 shown to 0 gone): pickup, prompt, subtitle, objective.
 # Sliding (`scroll`, in picture widths, the picture repeating): compass.
 # Colours by a text (`colour_by` with `colours`): {health_level} and
 # {squad_health_level} are 0 to 3, the original's `CalcHealthLevel`.
@@ -493,9 +493,13 @@ fade = "pickup"
 # use (the dispenser's ActivatePromptText, read from the game). The original
 # draws it in native code; place and size were matched to the user's
 # screenshots of the original (1600x1200): two centred lines whose middles
-# are 190 and 247 pixels down. Colour read from Engine.dll (below); the
-# original also fades it in over the helmet's PromptFadeInTime (0.5 s),
-# which we don't do yet.
+# are 190 and 247 pixels down. Colour read from Engine.dll (below). It
+# fades in exactly as Engine.dll's DrawActivateText does: opacity from 0
+# up to 220 in a straight line over the helmet's PromptFadeInTime (0.5 s
+# in engine.u, our [layout] text_fade_in), starting again whenever the
+# prompt comes back after a frame without it or its words change
+# (`fade = "prompt"`). Drawn see-through like the advisor's words, which
+# the original draws with the same text call.
 [[element]]
 group = "prompt"
 anchor = "centre"
@@ -506,7 +510,9 @@ text = "{prompt1}"
 align = "centre"
 # The original's activate-prompt colour, read from Engine.dll
 # (DrawActivateText): (164, 200, 208), fading in to 220 opacity.
+blend = "alpha"
 colour = [164, 200, 208, 220]
+fade = "prompt"
 
 [[element]]
 group = "prompt"
@@ -516,4 +522,6 @@ size = [320, 18]
 when = "prompt"
 text = "{prompt2}"
 align = "centre"
+blend = "alpha"
 colour = [164, 200, 208, 220]
+fade = "prompt"

@@ -65,6 +65,10 @@ enum Step {
     /// Capture the window, save it to `logs/<name>.png` and measure its
     /// colours (retried while the capture comes back black).
     Shot(&'static str),
+    /// Hold an action for some seconds, then keep holding it while the
+    /// window is captured as in `Shot` (the next step starts in the same
+    /// frame, so a following `Hold` of the same action never lets go).
+    ShotHolding(&'static str, Action, f32),
     /// Log the result so far, and make the exit code an error if anything
     /// failed (before Quit closes the game with success).
     Summary,
@@ -275,10 +279,11 @@ fn steps() -> Vec<Step> {
                     }
                 }
                 Some(p) if v.wanted && v.frames_shown >= 3 => Ok(format!(
-                    "{movie:?}: {} frames shown, now frame {:?} of {}",
+                    "{movie:?}: {} frames shown, now frame {:?} of {}, {} frames let go late",
                     v.frames_shown,
                     v.last_frame,
-                    p.frame_count()
+                    p.frame_count(),
+                    v.frames_late
                 )),
                 Some(_) => Err(format!(
                     "{movie:?}: only {} frames shown (drawn: {})",
@@ -938,6 +943,7 @@ fn steps() -> Vec<Step> {
         // `bAlignBottom` off, so it is drawn from its map place, not
         // stood on the ground.
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
+        Check("the clone troopers hold their rifles", troopers_hold_rifles),
         Note(view_gunship),
         Wait(0.5),
         Shot("gunship"),
@@ -999,7 +1005,10 @@ fn steps() -> Vec<Step> {
                 Err(format!("showing {parts:?}"))
             }
         }),
-        Hold(Action::Use, 5.0),
+        // Hold Use through the whole heal, with a picture of the hands
+        // plugged in on the way.
+        ShotHolding("bacta_hands", Action::Use, 0.5),
+        Hold(Action::Use, 4.5),
         Check(
             "healing pulled the player in front of the dispenser and held them, the use panel filled, and the heal sounds played",
             bacta_pull_and_panel,
@@ -1034,6 +1043,10 @@ fn steps() -> Vec<Step> {
                 && p.heard.iter().all(|h| !h.ends_with("(not loaded)"));
             if ok { Ok(msg) } else { Err(msg) }
         }),
+        Check(
+            "the gun went down, the hands plugged into the dispenser (BactaLoad, BactaLoop) and came away (BactaHolster), then the gun came back up",
+            bacta_hands_played,
+        ),
         Check(
             "the scripts' events, damage, healing and checkpoint",
             level_script_chain,
@@ -2612,6 +2625,34 @@ fn run(world: &mut World) {
                     }
                 }
             }
+            Step::ShotHolding(name, a, secs) => {
+                held.insert(a);
+                if t < secs {
+                    done = false;
+                } else {
+                    let mut shots = world.resource_mut::<Shots>();
+                    if shots.stats.contains_key(name) {
+                        shots.attempts = 0;
+                    } else {
+                        done = false;
+                        if shots.pending.is_none() && (shots.attempts == 0 || frames % 10 == 0) {
+                            shots.attempts += 1;
+                            if shots.attempts > 6 {
+                                log.line(format!(
+                                    "CHECK screenshot {name}: no usable capture -> FAIL"
+                                ));
+                                world.resource_mut::<Script>().failed += 1;
+                                done = true;
+                            } else {
+                                shots.pending = Some(name);
+                                world
+                                    .spawn(Screenshot::primary_window())
+                                    .observe(measure_shot);
+                            }
+                        }
+                    }
+                }
+            }
             Step::Summary => {
                 let s = world.resource::<Script>();
                 let (p, f) = (s.passed, s.failed);
@@ -2947,6 +2988,26 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
 
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
+/// geo_01a's clone troopers hold the game's DC-17m model (their class's
+/// `RequiredEquipment`), hung on their weapon bone.
+fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<&rc_cast::Cast>();
+    let troopers: Vec<_> = q
+        .iter(w)
+        .filter(|c| c.class.eq_ignore_ascii_case("CloneTrooper"))
+        .collect();
+    let armed = troopers
+        .iter()
+        .filter(|c| c.held_weapon() == Some("DC17mBlaster"))
+        .count();
+    let msg = format!("{armed} of {} clone troopers hold a DC17mBlaster", troopers.len());
+    if !troopers.is_empty() && armed == troopers.len() {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
 /// geo_01a's landing gunship (`GunshipHigh1`, the cast part draws it).
 fn gunship_hovers(w: &mut World) -> Result<String, String> {
     let mut q = w.query::<(&rc_cast::Cast, &GlobalTransform)>();
@@ -2979,7 +3040,8 @@ fn view_gunship(w: &mut World) {
     };
     let (Some(g), Some(world)) = (
         gunship,
-        w.get_resource::<rc_game_core::LevelCollision>().map(|c| c.0.clone()),
+        w.get_resource::<rc_game_core::LevelCollision>()
+            .map(|c| c.0.clone()),
     ) else {
         return;
     };
@@ -3150,6 +3212,40 @@ fn bacta_zap(w: &mut World) -> Result<String, String> {
         && still.is_empty()
         && carriers == 0;
     if ok { Ok(msg) } else { Err(msg) }
+}
+
+/// The arms' moves while healing at the dispenser, in the game's order
+/// (`HandSignal` with `SetupBactaHealer`): the gun's `Holster`, the hands'
+/// `BactaLoad`, `BactaLoop` while Use is held, `BactaHolster`, the gun's
+/// `Load`.
+fn bacta_hands_played(w: &mut World) -> Result<String, String> {
+    let seen = w
+        .get_resource::<rc_combat::ArmsHistory>()
+        .map(|h| h.0.clone())
+        .ok_or("no arms history")?;
+    let from = seen
+        .iter()
+        .position(|s| s.starts_with("hands:bacta"))
+        .ok_or_else(|| format!("the hands never showed: {seen:?}"))?;
+    let gun = |s: &String| !s.starts_with("hands:") && !s.starts_with("nothing");
+    let before = from.checked_sub(1).map(|i| &seen[i]);
+    let ours: Vec<&str> = seen[from..]
+        .iter()
+        .take_while(|s| s.starts_with("hands:"))
+        .map(|s| s.as_str())
+        .collect();
+    let after = seen.get(from + ours.len());
+    let msg = format!("before {before:?}, hands {ours:?}, after {after:?}");
+    let ok = before.is_some_and(|b| gun(b) && b.ends_with(" Holster"))
+        && ours.first() == Some(&"hands:bacta BactaLoad")
+        && ours.get(1) == Some(&"hands:bacta BactaLoop")
+        && ours.last() == Some(&"hands:bacta BactaHolster")
+        && after.is_some_and(|a| gun(a) && a.ends_with(" Load"));
+    if ok {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
 }
 
 /// Put the player where a squad mate would stand to use the dispenser.

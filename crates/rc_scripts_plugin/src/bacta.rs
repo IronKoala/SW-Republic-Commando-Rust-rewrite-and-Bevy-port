@@ -32,6 +32,10 @@
 //!   them is native code we don't read; this timing is our reading.
 //! - **The use panel** round the crosshair: [`UseItem::panel`], drawn by
 //!   the HUD.
+//! - **The hands.** While healing, [`UseItem::hands`] is `"bacta"`: the
+//!   first-person arms put the weapon away and the commando's hands plug
+//!   into the dispenser (the game's `HandSignal`, `SetupBactaHealer`),
+//!   played by `rc_combat`'s arms.
 //! - **The zap and its hum** ([`zap`]), as the game's `BactaDispenser`
 //!   script (ctgame.u) does it: once the dispenser's `Load` animation has
 //!   finished, its `DispenserEffectClass` effect (`BactaZap_Dispenser` for
@@ -685,6 +689,7 @@ pub(crate) fn heal(
         use_item.lock = None;
         use_item.panel = UsePanel::Hidden;
         use_item.prompt = None;
+        use_item.hands = None;
         return;
     };
     let Ok((t, health)) = player.single_mut() else {
@@ -855,6 +860,20 @@ pub(crate) fn heal(
         stats.panel_best = stats.panel_best.max(p);
     }
     use_item.panel = panel;
+    // The hands plug into the dispenser while it heals (the game's
+    // HandSignal: `SetupBactaHealer`), whether or not the body is held.
+    let hands = healing.then(|| "bacta".to_string());
+    if hands != use_item.hands {
+        log.line(format!(
+            "{PART}: t={now:.2} bacta: hands {}",
+            if hands.is_some() {
+                "plug in"
+            } else {
+                "come away"
+            }
+        ));
+        use_item.hands = hands;
+    }
     // The prompt, while standing at one that can be used.
     let prompt = matches!(panel, UsePanel::Ready(_))
         .then(|| assets.as_ref().and_then(|a| a.prompt.as_deref()))

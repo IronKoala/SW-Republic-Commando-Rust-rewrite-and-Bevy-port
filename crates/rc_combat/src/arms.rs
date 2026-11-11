@@ -125,6 +125,10 @@ pub struct ArmsInput {
     pub reload_started: bool,
     pub threw: bool,
     pub melee: bool,
+    /// Keep firing: play `Fire` again each time it ends, once the weapon
+    /// is up (the hands at a bacta dispenser: the game's `UsingItem`
+    /// fires the hands each time they go back to idle while Use is held).
+    pub hold_fire: bool,
 }
 
 /// What the arms are doing: which weapon is drawn, which animation plays,
@@ -141,6 +145,10 @@ pub struct Arms {
     pending: Option<String>,
     /// Seconds standing still, for `Idle`.
     still: f32,
+    /// Every animation started since [`Arms::take_started`] was last
+    /// called, with the weapon shown, in order: a short one (the hands'
+    /// 0.1 s moves) can start and end within one frame.
+    started: Vec<(Option<String>, ArmsAnim)>,
 }
 
 impl Default for Arms {
@@ -151,6 +159,7 @@ impl Default for Arms {
             time: 0.0,
             pending: None,
             still: 0.0,
+            started: vec![],
         }
     }
 }
@@ -204,13 +213,14 @@ impl Arms {
         let putting_away = matches!(self.anim, ArmsAnim::Holster | ArmsAnim::AttachHolster);
         if !putting_away {
             // One thing per frame, the most important first.
+            let up = self.anim.movement();
             let event = if input.melee {
                 Some(ArmsAnim::Melee)
             } else if input.threw {
                 Some(ArmsAnim::Throw)
             } else if input.reload_started {
                 Some(ArmsAnim::Reload)
-            } else if input.fired {
+            } else if input.fired || (input.hold_fire && up) {
                 Some(if input.zoomed && has(&self.shown, ArmsAnim::AimFire) {
                     ArmsAnim::AimFire
                 } else {
@@ -246,6 +256,10 @@ impl Arms {
                 let attach = self.anim == ArmsAnim::AttachHolster;
                 let next = self.pending.take();
                 self.bring_up(next, attach, clips);
+            } else if input.hold_fire && self.pending.is_none() && has(&self.shown, ArmsAnim::Fire)
+            {
+                // Straight on into the next one, with no frame between.
+                self.play(ArmsAnim::Fire);
             } else {
                 self.play(self.idle_choice(input, clips));
             }
@@ -297,6 +311,12 @@ impl Arms {
     fn play(&mut self, anim: ArmsAnim) {
         self.anim = anim;
         self.time = 0.0;
+        self.started.push((self.shown.clone(), anim));
+    }
+
+    /// The animations started since the last call, oldest first.
+    pub fn take_started(&mut self) -> Vec<(Option<String>, ArmsAnim)> {
+        std::mem::take(&mut self.started)
     }
 }
 
@@ -365,7 +385,7 @@ mod tests {
                 .map(|(_, l)| *l)
         }
         fn group(&self, weapon: &str) -> Option<&str> {
-            (weapon != "pistol").then_some("dc17m")
+            matches!(weapon, "rifle" | "sniper").then_some("dc17m")
         }
     }
 
@@ -496,6 +516,69 @@ mod tests {
             (a.anim, a.shown.as_deref()),
             (ArmsAnim::Holster, Some("rifle"))
         );
+    }
+
+    #[test]
+    fn hands_come_up_loop_while_held_then_the_gun_returns() {
+        // The bacta hands: BactaLoad 1 s, BactaLoop 0.5 s, BactaHolster
+        // 0.5 s under the usual names (made-up lengths for the test).
+        let mut c = Clips::new();
+        for (a, l) in [
+            (ArmsAnim::Load, 1.0),
+            (ArmsAnim::Fire, 0.5),
+            (ArmsAnim::Holster, 0.5),
+        ] {
+            c.0.insert(("hands:bacta", a), l);
+        }
+        let mut a = Arms::default();
+        run(&mut a, &c, &input("rifle"), 1.0);
+        let held = ArmsInput {
+            hold_fire: true,
+            ..input("hands:bacta")
+        };
+        let seen = run(&mut a, &c, &held, 2.7);
+        assert_eq!(
+            seen,
+            [ArmsAnim::Holster, ArmsAnim::Load, ArmsAnim::Fire],
+            "rifle down, hands up, then the loop"
+        );
+        assert_eq!(a.shown.as_deref(), Some("hands:bacta"));
+        // The loop starts over with no frame of anything else between.
+        let mut fires = 0;
+        for _ in 0..60 {
+            let was = a.time;
+            a.step(&held, &c);
+            assert_eq!(a.anim, ArmsAnim::Fire);
+            if a.time < was {
+                fires += 1;
+            }
+        }
+        assert!(fires >= 3, "{fires}");
+        // Let go: the hands go down with their holster, the rifle comes up.
+        let seen = run(&mut a, &c, &input("rifle"), 1.5);
+        assert_eq!(seen, [ArmsAnim::Holster, ArmsAnim::Load, ArmsAnim::Breathe]);
+        assert_eq!(a.shown.as_deref(), Some("rifle"));
+    }
+
+    #[test]
+    fn letting_go_while_the_hands_come_up_puts_them_straight_down() {
+        let mut c = Clips::new();
+        for (a, l) in [
+            (ArmsAnim::Load, 1.0),
+            (ArmsAnim::Fire, 0.5),
+            (ArmsAnim::Holster, 0.5),
+        ] {
+            c.0.insert(("hands:bacta", a), l);
+        }
+        let mut a = Arms::default();
+        let held = ArmsInput {
+            hold_fire: true,
+            ..input("hands:bacta")
+        };
+        run(&mut a, &c, &held, 0.3);
+        assert_eq!(a.anim, ArmsAnim::Load);
+        let seen = run(&mut a, &c, &input("rifle"), 0.4);
+        assert_eq!(seen, [ArmsAnim::Holster]);
     }
 
     #[test]
