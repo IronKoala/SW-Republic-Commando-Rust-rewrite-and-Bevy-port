@@ -3723,6 +3723,72 @@ helmet, `AmbientGlow` 20, its bump map); the visor's effects that the
 seconds late on the cloud's software graphics while its shaders are
 prepared.
 
+**The HUD through the glass.** The model's other part (`HelmetFinalBlend`,
+24 triangles) has no picture of its own: the original (Engine.dll,
+`FPlayerSceneNode::Render` and `UHelmet::DrawHelmet`) draws the whole HUD
+into a screen-sized picture and then draws this glass with that picture
+on it. Each glass corner's texture place is a place in the HUD, but the
+corner sits a little lower on the screen, so the original's HUD comes out
+lower and slightly curved: text drawn 45 down on its 600-line HUD shows
+about 1/7 of the way down. `helmet::GlassMap` works this move out from the
+model for any screen shape (on wide screens the glass moves like the
+frame and each corner keeps its move measured in screen heights) and
+`rc_menus::hud` applies it to elements marked `glass = true`, moving each
+picture's corners (the pictures themselves aren't bent). The crosshair and
+the markers are drawn after the glass in the original, so they aren't
+moved. Without the helmet (HELMET off) nothing is moved; the original
+then bends its flat HUD a different way, which we don't copy yet.
+
+**The advisor's words and the objective** (Engine.dll
+`UHelmet::DrawTextInfo`): one text box near the top (218, 45, 364 wide
+on the 800 x 600 HUD) in `OrbitFonts.OrbitBold15`. The words of whoever
+speaks (`subtitles.rs` keeps the newest in `Spoken`) are left aligned at
+0.8 of the font's size in (200, 200, 64) and win over everything else in
+the box. Otherwise the current objective is centred at full size in
+(164, 200, 208), when no short message or use prompt is in the box. Both
+are at opacity 220, fading in over the helmet's `PromptFadeInTime`
+(0.5 s) when they change. The objectives themselves are the map's
+`MissionObjectives` list, kept as the original's script keeps them
+(`rc_scripts_plugin::objectives`): its tag event reveals the next one,
+`ACTION_ObjectiveUpdate` completes, fails or changes one, and the first
+one not yet done shows, in capitals. Not done: Ctrl (`ShowGameStats`)
+turning the objective off and on, objectives in other languages (the
+words are the map's English ones).
+
+**The bottom corners and meters** (Engine.dll `UHelmet::DrawHUD`, the
+helmet-on drawing; `data/ui/hud.toml` has every number, times 0.8 of the
+800 x 600 page, all `glass = true`):
+
+- *Squad*, bottom left: one panel per squad mate who is in the squad
+  (`SquadMember::in_squad`; mates away or not yet arrived aren't shown),
+  40 apart. Their number above it in `OrbitBold15`, (164, 200, 208) at
+  220; the panel picture (148, 354 to 192, 396 in `CloneVisorIcons`) at
+  240; the order picture inside, tinted by how hurt they are.
+- *Health meters* either side of the middle, mirrored: a white back at
+  130, the top piece and a bar in the health colour. The bar drops in
+  elevenths, and by at least 5/55 while hurt at all (`fill_steps`,
+  `fill_least_gap`).
+- *How hurt* is the original's `APawn::CalcHealthLevel`: 0 at no health,
+  1 below half, 2 below 0.91, 3 above (`rc_menus::hud::health_level`, texts
+  `{health_level}` and `{squad_health_level}`, used with `colour_by` and
+  `colours`). Player meter colours: red (255, 94, 72), orange (246, 139,
+  31), yellow (255, 250, 110), green (72, 255, 72); squad pictures: (255,
+  73, 43), (246, 139, 31), (255, 251, 44), (81, 213, 67), at 200.
+- *Grenades*, bottom right: the panel mirrored, the grenade's picture by
+  its class, the count centred above, (200, 240, 255) at 192, red (255,
+  128, 128) when none are left.
+- *No ammo numbers*: the gun's own counter shows them. The original writes
+  "clip / spare" only zoomed in with the sniper rifle or bowcaster, and in
+  split screen.
+- Through the glass, a point past the glass's edge moves as the nearest
+  piece of glass carries it on (`GlassMap::place`), so pictures lying
+  across the edge keep their shape.
+
+Not done yet: the pulsing (squad mates down, no grenades, low health),
+the arrow round each squad panel pointing to that mate, the timer ring
+while a mate works on something, which order uses which picture (ours),
+the shield bars and visor frame.
+
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
 The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:

@@ -561,12 +561,16 @@ fn steps() -> Vec<Step> {
                 .get("in_game")
                 .cloned()
                 .ok_or("no screenshot")?;
-            // The shield meter is tinted the original's green: count
-            // pixels inside it that are clearly greener than red and blue
-            // (a missing picture shows black, white or magenta).
+            // The health meters are tinted in the original's health
+            // colour (green, yellow, orange or red): count pixels inside
+            // the tinted pieces that clearly have that colour (a missing
+            // picture shows black, white or magenta).
             let (pw, ph) = (pic.width as f32, pic.height as f32);
             let (mut inside, mut green) = (0u32, 0u32);
-            for q in quads.iter().filter(|q| q.widget == "vitals") {
+            for q in quads
+                .iter()
+                .filter(|q| q.widget == "vitals" && q.color[..3] != [255, 255, 255])
+            {
                 let x0 = (q.dst[0] * pw) as usize;
                 let x1 = ((q.dst[2] * pw) as usize).min(pic.width);
                 let y0 = (q.dst[1] * ph) as usize;
@@ -580,7 +584,8 @@ fn steps() -> Vec<Step> {
                             pic.pixels[i + 2] as i32,
                         );
                         inside += 1;
-                        if g > r + 30 && g > b + 30 {
+                        let hi = r.max(g);
+                        if hi - b > 60 && g > b + 15 {
                             green += 1;
                         }
                     }
@@ -589,7 +594,7 @@ fn steps() -> Vec<Step> {
             let groups: std::collections::BTreeSet<_> =
                 quads.iter().map(|q| q.widget.as_str()).collect();
             let got = format!(
-                "{} pictures in {groups:?}; {green} of {inside} shield/health pixels are green",
+                "{} pictures in {groups:?}; {green} of {inside} health meter pixels are in a health colour",
                 quads.len()
             );
             if inside > 0 && green * 5 >= inside {
@@ -898,6 +903,16 @@ fn steps() -> Vec<Step> {
         // The dispenser is drawn with its animated model (it used to be
         // invisible, so a player couldn't find it).
         Check("the level's animated props are drawn", level_anim_props),
+        Until(
+            "the current objective is drawn at the top, as in the original",
+            |w| objective_line(w).is_ok(),
+            60.0,
+        ),
+        Shot("objective"),
+        Check(
+            "the current objective is drawn at the top, as in the original",
+            objective_line,
+        ),
         Note(level_script_view_dispenser),
         Wait(0.5),
         Shot("bacta_dispenser"),
@@ -4026,6 +4041,45 @@ fn ammo_box_taken(w: &mut World) -> Result<String, String> {
     let got =
         format!("{name}: rifle has {total} (was 20), box taken {taken}, model hidden {hidden}");
     if total == 300 && taken && hidden {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The map's current objective on the original HUD: its letters in the
+/// original's colour (164, 200, 208), centred across the screen and
+/// moved through the helmet's glass to about 1/7 down (the original
+/// draws it 45 down its 600-line HUD).
+fn objective_line(w: &mut World) -> Result<String, String> {
+    let shown = w
+        .get_resource::<rc_scripts_plugin::Objectives>()
+        .and_then(|o| o.shown())
+        .unwrap_or_default();
+    let quads = crate::original_hud::layout_drawn(w);
+    let letters: Vec<_> = quads
+        .iter()
+        .filter(|q| q.widget == "messages" && q.color[..3] == [164, 200, 208])
+        .collect();
+    let n = letters.len().max(1) as f32;
+    let top = letters.iter().map(|q| q.dst[1]).fold(1.0f32, f32::min);
+    let middle = letters
+        .iter()
+        .map(|q| (q.dst[0] + q.dst[2]) / 2.0)
+        .sum::<f32>()
+        / n;
+    let got = format!(
+        "objective {shown:?}: {} letters, top {:.1}% down, centred {:.1}% across",
+        letters.len(),
+        top * 100.0,
+        middle * 100.0
+    );
+    let wanted = shown.chars().filter(|c| !c.is_whitespace()).count();
+    if wanted > 0
+        && letters.len() >= wanted
+        && (0.10..0.20).contains(&top)
+        && (0.40..0.60).contains(&middle)
+    {
         Ok(got)
     } else {
         Err(got)

@@ -13,12 +13,20 @@
 //! the same file, and drawn here as pictures. While it is drawn, the
 //! placeholder's own drawings are hidden; if any of its pictures or fonts
 //! can't be read, the placeholder stays and the log says why.
+//!
+//! The advisor's words (`subtitles.rs`) and the current objective are
+//! drawn as the original's helmet draws them (Engine.dll `UHelmet`
+//! `DrawSubtitleText` and `DrawCurrentObjectiveText`): in one box near the
+//! top, the words winning over everything else in it. Elements marked
+//! `glass` are moved where the helmet's glass shows them, as the original
+//! draws its HUD onto the glass (`rc_menus::helmet::GlassMap`).
 #![allow(deprecated)]
 
+use crate::helmet::{Helmet, HelmetReadout};
 use crate::hud::{CrossBar, PlaceholderPart};
 use crate::menu::GamePathsFound;
 use crate::settings::Settings;
-use crate::theme::Theme;
+use crate::subtitles::Spoken;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -67,6 +75,26 @@ pub struct CrosshairPlan {
     /// Weapon name (as in its weapon file) to picture.
     #[serde(default)]
     pub weapons: BTreeMap<String, String>,
+    /// Its tint, red green blue opacity: normally, over a friend and over
+    /// an enemy.
+    #[serde(default = "plain_colour")]
+    pub colour: [u8; 4],
+    #[serde(default = "friend_colour")]
+    pub friend_colour: [u8; 4],
+    #[serde(default = "enemy_colour")]
+    pub enemy_colour: [u8; 4],
+}
+
+fn plain_colour() -> [u8; 4] {
+    [200, 240, 255, 110]
+}
+
+fn friend_colour() -> [u8; 4] {
+    [130, 255, 130, 220]
+}
+
+fn enemy_colour() -> [u8; 4] {
+    [255, 130, 130, 220]
 }
 
 /// `[use_panel]`: the original's use panel at the crosshair while the
@@ -181,6 +209,10 @@ struct OriginalLayout {
     /// What was just picked up and its seconds left (one at a time: a new
     /// one replaces the last, as in the original).
     pickup: Option<(String, f32)>,
+    /// The objective shown and for how long (it fades in when it changes).
+    objective: (String, f32),
+    /// The helmet glass's map for the screen shape it was made for.
+    glass: Option<(u32, rc_menus::helmet::GlassMap)>,
 }
 
 #[derive(Component)]
@@ -278,6 +310,7 @@ fn forget_drawn(mut original: ResMut<OriginalLayout>) {
     original.drawn.clear();
     original.messages.clear();
     original.pickup = None;
+    original.objective = Default::default();
 }
 
 /// Keep the short messages for as long as they asked, and the pickup
@@ -342,6 +375,7 @@ fn values(
         squad: squad
             .members
             .iter()
+            .filter(|m| m.in_squad)
             .map(|m| SquadLine {
                 number: m.number.clone(),
                 name: m.name.clone(),
@@ -352,6 +386,22 @@ fn values(
             .collect(),
         messages: messages.iter().map(|m| m.0.clone()).collect(),
         ..Default::default()
+    }
+}
+
+/// What the helmet's text box shows (Engine.dll `UHelmet::DrawTextInfo`):
+/// the advisor's words win over everything else in the box; the short
+/// messages and the use prompt over the objective.
+fn text_box(now: &mut HudValues, layout: &HudLayout, spoken: &Spoken, objective: &(String, f32)) {
+    let l = &layout.layout;
+    if !spoken.text.is_empty() {
+        now.subtitle = spoken.text.clone();
+        now.subtitle_fade = l.faded_in(spoken.age);
+        now.messages.clear();
+        now.prompt.clear();
+    } else if now.messages.is_empty() && now.prompt.is_empty() && !objective.0.is_empty() {
+        now.objective = objective.0.clone();
+        now.objective_fade = l.faded_in(objective.1);
     }
 }
 
@@ -369,6 +419,12 @@ fn draw_layout(
     log: Res<GameLog>,
     use_item: Option<Res<rc_game_core::UseItem>>,
     hud: Res<OriginalHud>,
+    (spoken, objectives, time): (
+        Option<Res<Spoken>>,
+        Option<Res<rc_scripts_plugin::Objectives>>,
+        Res<Time>,
+    ),
+    (helmet, helmet_readout): (Res<Helmet>, Res<HelmetReadout>),
 ) {
     let original = &mut *original;
     if !original.working {
@@ -387,6 +443,13 @@ fn draw_layout(
     if w < 1.0 || h < 1.0 {
         return;
     }
+    // The objective fades in again whenever it changes.
+    let objective = objectives.and_then(|o| o.shown()).unwrap_or_default();
+    if objective == original.objective.0 {
+        original.objective.1 += time.delta_secs();
+    } else {
+        original.objective = (objective, 0.0);
+    }
     let mut now = values(&vitals, &weapon, &squad, &original.messages);
     if let Some((text, left)) = &original.pickup {
         now.pickup = text.clone();
@@ -402,13 +465,50 @@ fn draw_layout(
             .map_or(usize::MAX, |u| u.prompt_wrap);
         now.prompt = wrap_prompt(p, wrap);
     }
+    text_box(
+        &mut now,
+        layout,
+        spoken.as_deref().unwrap_or(&Spoken::default()),
+        &original.objective,
+    );
+    // Through the helmet's glass while it is drawn.
+    let glass_model = match (&helmet.model, helmet_readout.shown) {
+        (Some(Ok(m)), true) if !m.glass.is_empty() => Some(m.clone()),
+        _ => None,
+    };
+    let aspect_key = (w / h).to_bits();
+    match &glass_model {
+        Some(m) if original.glass.as_ref().is_none_or(|g| g.0 != aspect_key) => {
+            original.glass = Some((
+                aspect_key,
+                rc_menus::helmet::GlassMap::new(m, &helmet.plan, w / h),
+            ));
+        }
+        None => original.glass = None,
+        _ => {}
+    }
     let max_aspect = settings.video.hud_max_aspect;
-    let key = (now, [w as u32, h as u32], max_aspect.to_bits());
+    let glass_on = original.glass.is_some() as u32;
+    let key = (
+        now,
+        [w as u32, h as u32],
+        max_aspect.to_bits() ^ (glass_on << 31),
+    );
     if original.drawn_for.as_ref() == Some(&key) && !roots.is_empty() {
         return;
     }
     let first = original.drawn_for.is_none();
-    let quads = rc_menus::hud::hud_quads(layout, &key.0, w, h, max_aspect, assets);
+    let glass = original.glass.as_ref().map(|g| &g.1);
+    let place = |p: [f32; 2]| glass.map_or(p, |g| g.place(p));
+    let quads = rc_menus::hud::hud_quads(
+        layout,
+        &key.0,
+        w,
+        h,
+        max_aspect,
+        assets,
+        glass.map(|_| &place as &dyn Fn([f32; 2]) -> [f32; 2]),
+    );
     original.drawn_for = Some(key);
     if !assets.problems.is_empty() {
         for p in assets.problems.drain(..) {
@@ -865,7 +965,6 @@ fn load_picture(
 fn update_crosshair(
     mut hud: ResMut<OriginalHud>,
     weapon: Res<WeaponReadout>,
-    theme: Res<Theme>,
     mut images: ResMut<Assets<Image>>,
     mut pictures: Query<(&mut ImageNode, &mut Node, &mut Visibility), With<CrossPicture>>,
     mut bars: Query<&mut Visibility, (With<CrossBar>, Without<CrossPicture>)>,
@@ -924,12 +1023,19 @@ fn update_crosshair(
     if image.image != handle {
         image.image = handle;
     }
-    // The original turns the crosshair red over an enemy.
-    image.color = if weapon.on_target {
-        theme.crosshair_on_target
+    // The original tints the crosshair by what it is over.
+    let c = &plan.crosshair;
+    let [r, g, b, a] = if weapon.on_target {
+        c.enemy_colour
+    } else if weapon.on_friend {
+        c.friend_colour
     } else {
-        Color::WHITE
+        c.colour
     };
+    let tint = Color::srgba_u8(r, g, b, a);
+    if image.color != tint {
+        image.color = tint;
+    }
     // Sized by screen height, so it is the same size at any screen shape.
     let s = plan.crosshair.scale * 100.0 / BASE_LINES;
     let (w, h) = (Val::Vh(size.x * s), Val::Vh(size.y * s));
@@ -951,6 +1057,7 @@ pub fn reticle_showing(w: &mut World) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
 
     /// The ring lights in twelfths, piece by piece of a 4 by 4 grid, from
     /// just left of the top round the left side; the rest stays faint.
@@ -1073,13 +1180,21 @@ mod tests {
         assert_eq!(w.get::<Visibility>(pic), Some(&Visibility::Inherited));
         assert_eq!(w.get::<ImageNode>(pic).unwrap().image, handle);
         let n = w.get::<Node>(pic).unwrap();
-        assert_eq!(n.width, Val::Vh(10.0)); // 48 of 480 lines
-        assert_eq!(n.height, Val::Vh(5.0));
-        assert_eq!(n.left, Val::Vh(-5.0));
+        // 48 pixels of the original's 600 lines: 8% of the screen height.
+        let vh = |v: Val| match v {
+            Val::Vh(x) => x,
+            _ => f32::NAN,
+        };
+        assert!((vh(n.width) - 8.0).abs() < 1e-3, "{:?}", n.width);
+        assert!((vh(n.height) - 4.0).abs() < 1e-3, "{:?}", n.height);
+        let tint = |app: &App| app.world().get::<ImageNode>(pic).unwrap().color;
+        assert_eq!(tint(&app), Color::srgba_u8(200, 240, 255, 110));
+        app.world_mut().resource_mut::<WeaponReadout>().on_friend = true;
+        app.update();
+        assert_eq!(tint(&app), Color::srgba_u8(130, 255, 130, 220));
         app.world_mut().resource_mut::<WeaponReadout>().on_target = true;
         app.update();
-        let red = app.world().resource::<Theme>().crosshair_on_target;
-        assert_eq!(app.world().get::<ImageNode>(pic).unwrap().color, red);
+        assert_eq!(tint(&app), Color::srgba_u8(255, 130, 130, 220));
     }
 
     /// A picture that can't be read leaves the bars as they are.

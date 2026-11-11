@@ -1,24 +1,38 @@
 # Which of the original game's HUD pictures the HUD uses. The pictures are
 # read from the player's install at run time; nothing from the game is here.
-# The original draws its HUD in native code, so where each picture goes is
-# our own choice.
+# Where each picture goes is read from the original's engine code where
+# the notes say so, otherwise our own choice.
 #
-# Checked 2026-10-29 against the install: HUDTextures.utx has each reticle
-# twice, a console one and a smaller "...PC" one; we use the PC ones. If a
-# picture can't be read, the placeholder crosshair stays and
-# logs/rc_game.log says why ("original hud: crosshair ..."). See them all
-# with:
-#   rc_probe --export-textures "<game folder>\GameData\Textures\HUDTextures.utx"
-
+# The crosshair, read from the original 2026-11-11: each weapon class's
+# `Reticle` (ctinventory.u class defaults; the "...PC" pictures are not
+# used by any weapon), drawn by the helmet (Engine.dll UHelmet::DrawHelmet)
+# at the screen's centre at the picture's own size on its 600-line HUD (so
+# 0.8 of ours), tinted by what it is over (the target type):
+#   normally (200, 240, 255) at opacity 110,
+#   over a friend (130, 255, 130) at 220,
+#   over an enemy (255, 130, 130) at 220.
+# If a picture can't be read, the placeholder crosshair stays and
+# logs/rc_game.log says why ("original hud: crosshair ...").
 [crosshair]
 enabled = true
-default = "HUDTextures.Reticles.HUD_WeaponDefaultPC"
-# 1 = one picture pixel per line of a 480-line screen (a guess).
-scale = 1.0
+default = "HUDTextures.Reticles.HUD_WeaponDefault"     # DC17mBlaster
+scale = 0.8
+colour = [200, 240, 255, 110]
+friend_colour = [130, 255, 130, 220]
+enemy_colour = [255, 130, 130, 220]
 
-# Weapon name, as in its file in data/weapons/, to its reticle.
+# Weapon name, as in its file in data/weapons/, to its class's reticle.
 [crosshair.weapons]
-"DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistolPC"
+"DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistol"                 # DC15s
+"DC-17m Sniper" = "HUDTextures.Reticles.HUD_WeaponSniper"                 # DC17mSniper
+"DC-17m Anti-Armour" = "HUDTextures.Reticles.HUD_WeaponAntiArmor"         # DC17mAntiArmor
+"ACP Array Gun" = "HUDTextures.Reticles.HUD_WeaponTranShotgun"            # Shotgun
+"ACP Repeater" = "HUDTextures.Reticles.HUD_WeaponTranSMG"                 # SMG
+"LS-150 Heavy ACP Repeater Gun" = "HUDTextures.Reticles.HUD_WeaponTranSMG" # TrandoshanRifle
+"LJ-50 Concussion Rifle" = "HUDTextures.Reticles.HUD_WeaponTranConcRifle" # ConcussionRifle
+"Wookiee Bowcaster" = "HUDTextures.Reticles.HUD_WeaponWookBowcaster"      # Bowcaster
+"Wookiee Homing Rocket Launcher" = "HUDTextures.Reticles.HUD_WeaponWookHomingDet" # RocketLauncher
+"Elite Beam" = "HUDTextures.Reticles.HUD_WeaponGeoElite"                  # EliteBeam
 
 # The use panel round the crosshair, while you stand at something you use by
 # holding Use (a bacta dispenser). The pictures are the original's; when
@@ -89,13 +103,16 @@ prompt_wrap = 21
 #
 # Texts: {weapon} {clip} {reserve} {grenade} {grenades} {message1}
 # (newest) {message2} {message3} {pickup} {prompt1} {prompt2} (the use
-# prompt's two lines); for squad rows {number} {name}
+# prompt's two lines) {subtitle} {objective}; for squad rows {number} {name}
 # {order}.
 # Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
 # clip, reserve, grenade, shield_low, health_low, health_full, squad_down, pickup,
-# prompt.
+# prompt, subtitle, objective.
 # Bars (`fill`): shield, health, clip, squad_health.
-# Fading (`fade`, 1 shown to 0 gone): pickup.
+# Fading (`fade`, 1 shown to 0 gone): pickup, subtitle, objective.
+# Texts can also name their `font` (one of the fonts below, scaled to the
+# line height), `wrap` onto more lines, and be drawn through the helmet's
+# glass (`glass = true`), as the original draws its HUD.
 
 [layout]
 enabled = true
@@ -108,199 +125,191 @@ fonts = [
     "OrbitFonts.OrbitBold18",
     "OrbitFonts.OrbitBold24",
 ]
+# Seconds the advisor's words and the objective take to fade in (the
+# original helmet's PromptFadeInTime, 0.5 in engine.u).
+text_fade_in = 0.5
 
-# --- Squad, bottom left: each squad mate's number over a panel showing
-# what they're doing ------------------------------------------------------
+# --- The bottom corners and meters, as the original helmet draws them ----
+# Read from Engine.dll `UHelmet::DrawHUD` (the helmet-on drawing): the
+# numbers there are on an 800 x 600 page; here they are times 0.8 (480
+# units high), measured from the page's bottom corners or bottom middle,
+# and drawn through the helmet's glass like the rest of the original HUD.
+# The original shows no ammo numbers here (the gun's own counter shows
+# them); it draws "clip / spare" only when zoomed in with the sniper rifle
+# or bowcaster (not done yet).
 
+# Squad, bottom left: one panel per squad mate actually in the squad, 40
+# apart (32 here). The number at (81, 388), left-aligned; the panel at
+# (75, 414) 43 x 40; the order picture at (87, 425) 20 x 20, coloured by
+# how hurt they are (`APawn::CalcHealthLevel`: 0 down, 1 below half, 2
+# below 0.91, 3 above).
 [[element]]
 group = "squad"
 anchor = "bottom_left"
-at = [64, -134]
-size = [34, 14]
-repeat_squad = [37, 0]
+at = [64.8, -169.6]
+size = [31, 21.6]
+repeat_squad = [32, 0]
 text = "{number}"
-align = "centre"
-colour = [205, 220, 225, 255]
-alert_when = "squad_down"
-alert_colour = [255, 80, 60, 255]
+font = "OrbitFonts.OrbitBold15"
+colour = [164, 200, 208, 220]
+blend = "alpha"
+glass = true
 
 [[element]]
 group = "squad"
 anchor = "bottom_left"
-at = [64, -112]
-size = [34, 31]
-repeat_squad = [37, 0]
+at = [60, -148.8]
+size = [34.4, 32]
+repeat_squad = [32, 0]
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [147, 399, 191, 442]
-colour = [150, 215, 150, 255]
-alert_when = "squad_down"
-alert_colour = [255, 80, 60, 255]
+part = [148, 354, 192, 396]
+colour = [255, 255, 255, 240]
+glass = true
 
-# The order icon inside the panel, by what the squad mate is doing.
+# The original picks the picture from a grid in CloneVisorIcons (25 x 25
+# texels, 27 apart, from 229, 485 going left and up) by what the squad mate
+# is doing. Which order uses which square is still OURS, not yet read from
+# the game.
 [[element]]
 group = "squad"
 anchor = "bottom_left"
-at = [72, -105]
-size = [18, 17]
-repeat_squad = [37, 0]
+at = [69.6, -140]
+size = [16, 16]
+repeat_squad = [32, 0]
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [202, 431, 228, 457]
+part = [202, 431, 227, 456]
 choose_by = "{order}"
-choices = { "FORM UP" = [202, 377, 228, 403], "SEARCH AND DESTROY" = [202, 350, 228, 376], "SECURE AREA" = [202, 404, 228, 430], "HOLD" = [202, 323, 228, 349], "DOWN" = [202, 458, 228, 484] }
-colour = [110, 235, 95, 255]
-alert_when = "squad_down"
-alert_colour = [255, 80, 60, 255]
+choices = { "FORM UP" = [202, 377, 227, 402], "SEARCH AND DESTROY" = [202, 350, 227, 375], "SECURE AREA" = [202, 404, 227, 429], "HOLD" = [202, 323, 227, 348], "DOWN" = [202, 458, 227, 483] }
+colour_by = "{squad_health_level}"
+colours = { "0" = [255, 73, 43, 200], "1" = [246, 139, 31, 200], "2" = [255, 251, 44, 200], "3" = [81, 213, 67, 200] }
+colour = [81, 213, 67, 200]
+glass = true
 
-# --- Health: the stepped meters either side of the middle ----------------
-# From the user's video of the original healing at a bacta dispenser
-# (2026-11-10): both stepped meters show health, mirrored, lit from the
-# bottom up (8 of 12 steps lit when hurt, all 12 at full); yellow while
-# hurt, green at full health. The pictures are the game's
-# (CloneVisorIcons); the original tints them in engine code, so the
-# colours were measured from the video (yellow 214,208,98; green
-# 72,212,68). OUR GUESS, not in the video: red when health is low.
-# Shield: the column of ticks beside the left meter (our guess).
+# Health meters either side of the middle, mirrored at 629: a white back
+# (171, 517, 75 x 80, alpha 130), the top piece (171, 458, 75 x 56) and the
+# stepped bar (171, 460, 59 x 54) in the health colour (red, orange,
+# yellow, green by `CalcHealthLevel`). The bar drops in elevenths, and by
+# at least 5 of its 55 while hurt at all.
+[[element]]
+group = "vitals"
+anchor = "bottom"
+at = [-183.2, -66.4]
+size = [60, 64]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 95, 256, 178]
+colour = [255, 255, 255, 130]
+glass = true
 
 [[element]]
 group = "vitals"
 anchor = "bottom"
-at = [-172, -80]
-size = [50, 39]
+at = [-183.2, -113.6]
+size = [60, 44.8]
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [181, 36, 239, 94]
-colour = [110, 160, 105, 200]
+part = [181, 36, 256, 95]
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
+colour = [72, 255, 72, 255]
+glass = true
 
 [[element]]
 group = "vitals"
 anchor = "bottom"
-at = [-172, -80]
-size = [50, 39]
-when = "health_full"
+at = [-183.2, -112]
+size = [47.2, 43.2]
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [181, 180, 241, 237]
+part = [181, 181, 240, 236]
 fill = "health"
 fill_toward = "down"
-colour = [72, 212, 68, 255]
-
-[[element]]
-group = "vitals"
-anchor = "bottom"
-at = [-172, -80]
-size = [50, 39]
-when = "!health_full"
-picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [181, 180, 241, 237]
-fill = "health"
-fill_toward = "down"
-colour = [214, 208, 98, 255]
-alert_when = "health_low"
-alert_colour = [255, 80, 60, 255]
-
-[[element]]
-group = "vitals"
-anchor = "bottom"
-at = [-120, -80]
-size = [9, 39]
-picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [233, 38, 251, 94]
-fill = "shield"
-fill_toward = "down"
-colour = [110, 235, 95, 255]
-alert_when = "shield_low"
-alert_colour = [255, 210, 90, 255]
-
-# The same health meter, mirrored, right of the middle.
+fill_steps = 11
+fill_least_gap = 0.0909
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
+colour = [72, 255, 72, 255]
+glass = true
 
 [[element]]
 group = "ammo"
 anchor = "bottom"
-at = [118, -80]
-size = [50, 39]
+at = [123.2, -66.4]
+size = [60, 64]
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [181, 36, 239, 94]
+part = [181, 95, 256, 178]
 mirror = true
-colour = [110, 160, 105, 200]
+colour = [255, 255, 255, 130]
+glass = true
 
 [[element]]
 group = "ammo"
 anchor = "bottom"
-at = [118, -80]
-size = [50, 39]
-when = "health_full"
+at = [123.2, -113.6]
+size = [60, 44.8]
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [181, 180, 241, 237]
+part = [181, 36, 256, 95]
+mirror = true
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
+colour = [72, 255, 72, 255]
+glass = true
+
+[[element]]
+group = "ammo"
+anchor = "bottom"
+at = [136, -112]
+size = [47.2, 43.2]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 181, 240, 236]
 mirror = true
 fill = "health"
 fill_toward = "down"
-colour = [72, 212, 68, 255]
+fill_steps = 11
+fill_least_gap = 0.0909
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
+colour = [72, 255, 72, 255]
+glass = true
 
-[[element]]
-group = "ammo"
-anchor = "bottom"
-at = [118, -80]
-size = [50, 39]
-when = "!health_full"
-picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [181, 180, 241, 237]
-mirror = true
-fill = "health"
-fill_toward = "down"
-colour = [214, 208, 98, 255]
-alert_when = "health_low"
-alert_colour = [255, 80, 60, 255]
-
-# Shots in the magazine, and spare ammo, over the meter.
-[[element]]
-group = "ammo"
-anchor = "bottom"
-at = [118, -100]
-size = [28, 14]
-when = "weapon"
-text = "{clip}"
-align = "right"
-colour = [205, 220, 225, 255]
-
-[[element]]
-group = "ammo"
-anchor = "bottom"
-at = [149, -97]
-size = [24, 10]
-when = "reserve"
-text = "{reserve}"
-colour = [150, 175, 180, 255]
-
-# --- Grenade: its picture in a panel, the count above it, bottom right ---
-
+# Grenades, bottom right: the same panel mirrored (682..725, 414), the
+# grenade's picture at (690, 422) 26 x 26 by its class (FlashBang,
+# SonicDetonator, EMPGrenade, ThermalDetonator), and the count ("%i")
+# centred on (703, 402), pale blue, red when none are left.
 [[element]]
 group = "grenade"
 anchor = "bottom_right"
-at = [-103, -134]
-size = [38, 14]
+at = [-93.6, -169.2]
+size = [32, 21.6]
 when = "grenade"
 text = "{grenades}"
-align = "right"
-colour = [205, 220, 225, 255]
+align = "centre"
+font = "OrbitFonts.OrbitBold15"
+colour = [200, 240, 255, 192]
+alert_when = "!grenades_left"
+alert_colour = [255, 128, 128, 255]
+blend = "alpha"
+glass = true
 
 [[element]]
 group = "grenade"
 anchor = "bottom_right"
-at = [-103, -112]
-size = [38, 31]
+at = [-94.4, -148.8]
+size = [34.4, 32]
 when = "grenade"
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [147, 353, 191, 396]
-colour = [190, 205, 210, 255]
+part = [148, 354, 192, 396]
+mirror = true
+glass = true
 
 [[element]]
 group = "grenade"
 anchor = "bottom_right"
-at = [-91, -106]
-size = [14, 19]
+at = [-88, -142.4]
+size = [20.8, 20.8]
 when = "grenade"
 picture = "HUDTextures.Icons.CloneVisorIcons"
-part = [152, 242, 170, 268]
+part = [148, 323, 173, 348]
 choose_by = "{grenade}"
-choices = { "THERMAL DETONATOR" = [152, 242, 170, 268], "SONIC DETONATOR" = [152, 269, 170, 295], "EC DETONATOR" = [152, 296, 170, 322], "FLASH DETONATOR" = [148, 323, 174, 349] }
+choices = { "THERMAL DETONATOR" = [148, 323, 173, 348], "SONIC DETONATOR" = [148, 269, 173, 294], "EC DETONATOR" = [148, 296, 173, 321], "FLASH DETONATOR" = [148, 242, 173, 267] }
+glass = true
 
 # --- Short messages, top middle (newest at the bottom) ----------------------
 
@@ -330,6 +339,53 @@ size = [260, 11]
 text = "{message1}"
 align = "centre"
 colour = [190, 235, 245, 255]
+
+# --- The advisor's words and the current objective, near the top -----------
+# Both read from the original's engine code (Engine.dll, the helmet HUD's
+# DrawTextInfo, DrawSubtitleText and DrawCurrentObjectiveText), 2026-11-11.
+# The original draws them on an 800 x 600 HUD; here 1 of its units is 0.8
+# of ours. Its text box starts 218 across and 45 down and is 364 wide
+# (so it is centred: 400 is the middle), the font is OrbitFonts.OrbitBold15
+# (27 lines tall), and the HUD is then drawn through the helmet's glass,
+# which moves it lower and curves it (`glass = true`).
+#
+# The words (who speaks and what, from the game's subtitles files): left
+# aligned, the font at 0.8 of its size (27 x 0.8 = 21.6 of 600, 17.28 of
+# ours), broken onto more lines to fit the box, colour (200, 200, 64) at
+# 220 of 255 opacity, fading in over PromptFadeInTime ([layout]
+# text_fade_in). While they show, nothing else in the box does.
+[[element]]
+group = "messages"
+anchor = "top"
+at = [-145.6, 36]
+size = [291.2, 17.28]
+when = "subtitle"
+text = "{subtitle}"
+font = "OrbitFonts.OrbitBold15"
+wrap = true
+glass = true
+blend = "alpha"
+colour = [200, 200, 64, 220]
+fade = "subtitle"
+
+# The current objective (the map's MissionObjectives list: the first one
+# not yet done, in capitals): centred in the same box, the font at full
+# size (21.6 of ours), colour (164, 200, 208) at 220 opacity, fading in
+# when it changes. Shown when nothing else is in the box.
+[[element]]
+group = "messages"
+anchor = "top"
+at = [-145.6, 36]
+size = [291.2, 21.6]
+when = "objective"
+text = "{objective}"
+align = "centre"
+font = "OrbitFonts.OrbitBold15"
+wrap = true
+glass = true
+blend = "alpha"
+colour = [164, 200, 208, 220]
+fade = "objective"
 
 # --- What was just picked up, above the middle ------------------------------
 # The original's pickup message (engine.u PickupMessagePlus, a LocalMessage):

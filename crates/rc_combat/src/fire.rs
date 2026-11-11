@@ -30,6 +30,7 @@ pub(crate) struct CombatRng(pub Rng);
 #[derive(Resource, Default)]
 pub(crate) struct Crosshair {
     pub on_target: bool,
+    pub on_friend: bool,
 }
 
 /// A bolt in the air.
@@ -251,12 +252,17 @@ pub(crate) fn player_trigger(
     let far = eye + view * CROSSHAIR_RANGE;
     let under = trace(level, &targets, eye, far, Some(me));
     let crosshair = under.as_ref().map_or(far, |h| eye + (far - eye) * h.t);
-    let on_target = under
+    let team_under = under
         .as_ref()
         .and_then(|h| h.entity)
         .and_then(|e| teams.get(e).ok())
-        .is_some_and(|t| *t == crate::Team::Separatist);
-    commands.insert_resource(crate::fire::Crosshair { on_target });
+        .copied();
+    let on_target = team_under == Some(crate::Team::Separatist);
+    let on_friend = team_under == Some(crate::Team::Republic);
+    commands.insert_resource(crate::fire::Crosshair {
+        on_target,
+        on_friend,
+    });
 
     if actions.just_pressed(Action::Reload) && !on_turret && state.start_reload(p) {
         say(format!("weapons: {id} reloading ({} s)", p.reload_time));
@@ -606,7 +612,8 @@ pub(crate) fn weapon_readout(
         // **Our choice:** the crosshair's spread shown as the aim error
         // over 50 (the widest weapon so far is 15).
         spread: (p.aim_error / 50.0).clamp(0.0, 1.0),
-        on_target: crosshair.is_some_and(|c| c.on_target),
+        on_target: crosshair.as_ref().is_some_and(|c| c.on_target),
+        on_friend: crosshair.as_ref().is_some_and(|c| c.on_friend),
         zoom_fov: out.zoom_fov,
     };
     if *out != new {

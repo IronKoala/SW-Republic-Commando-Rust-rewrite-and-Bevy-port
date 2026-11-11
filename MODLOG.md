@@ -3,6 +3,30 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Squad, grenade and health meters as the original draws them (rc_menus, rc_game, rc_game_core, rc_squad_plugin, data/ui/hud.toml)
+
+- **Changed:** The bottom-left squad panels, the two health meters and the bottom-right grenade panel now use the exact places, sizes, pictures and colours from the original's Engine.dll (`UHelmet::DrawHUD`, helmet on), drawn through the helmet's glass. Squad panels show only for mates actually in the squad (new `SquadMember::in_squad`). Meter and squad colours follow the original's four health levels (`APawn::CalcHealthLevel`: below half, below 0.91, above); the meter bar drops in elevenths. Grenade pictures by class fixed (thermal, sonic, EC, flash were mixed up); the count turns red at zero. The ammo numbers under the crosshair's right are gone: the original shows them only on the gun. The guessed shield tick column is gone (the original's shield bars come next). New HUD keys `colour_by`, `colours`, `fill_steps`, `fill_least_gap`; texts `{health_level}`, `{squad_health_level}`; condition `grenades_left`. `GlassMap::place` now carries points past the glass edge on with the nearest glass piece.
+- **Why:** User's side-by-side screenshots: squad icons, "58 60" and "2" showed when the original's didn't; meters looked dim and different.
+- **Tested how:** Numbers read from Engine.dll in a scratch folder outside the repo (nothing of it committed); `cargo test -p rc_menus -p rc_game -p rc_game_core`; `rc_probe --hud` compared with the user's screenshot of the original (meters and grenade panel land within a few pixels); `rc_game --script` in the cloud.
+- **Result:** Tests pass; "the original HUD is drawn in its own colours" passes (3771 of 9138 meter pixels in a health colour).
+- **Still broken / not tested:** Not tested on Windows. Pulsing, the arrow pointing to each squad mate, the timer ring, and which order uses which squad picture are not done. In our geo_01a two squad mates are already in the squad at the start, so their panels show; in the original you start alone (a squad question, not the HUD).
+
+## 2026-11-11: The original's crosshair pictures and colours (rc_game, rc_combat, rc_game_core, data/ui/hud.toml)
+
+- **Changed:** Each weapon now uses its class's own `Reticle` from ctinventory.u (DC-17m: `HUD_WeaponDefault`, the ring without the dot; we used the "PC" pictures, which no weapon names). Drawn at 0.8 of our old size (the picture's size on the original's 600-line HUD). Tinted as the original's helmet does (Engine.dll `UHelmet::DrawHelmet`, by target type): (200,240,255) at opacity 110 normally, (130,255,130) at 220 over a squad mate, (255,130,130) at 220 over an enemy. New `WeaponReadout::on_friend`; `[crosshair]` keys `colour`, `friend_colour`, `enemy_colour`.
+- **Why:** User's screenshots: the original's crosshair is a thin grey ring that turns green on friendlies; ours had a dot and was white.
+- **Tested how:** `cargo test -p rc_game` (tint for plain, friend, enemy); `rc_game --script` in the cloud (the squad screenshot shows the green ring on a squad mate).
+- **Result:** Tests pass; crosshair checks pass.
+- **Still broken / not tested:** Not tested on Windows. The other target types (markers, panels, pickups, turrets) and the lock-on reticles are not done.
+
+## 2026-11-11: Advisor's words and the objective line as in the original (rc_menus, rc_game, rc_scripts_plugin, data/ui/hud.toml)
+
+- **Changed:** The advisor's words now show near the top left in the game's own font (`OrbitBold15` at 0.8 size), yellow (200,200,64), broken onto lines to fit a 364-wide box, fading in over 0.5 s; the bottom-middle box with Bevy's font is now only the placeholder. The current mission objective ("USE BACTA TO HEAL") shows centred in the same box at full size in (164,200,208) when nobody speaks. While the advisor speaks, the short messages and use prompt in that box are hidden, as in the original. Both are moved through the helmet's glass as the original draws its HUD (lower and slightly curved). New: `helmet::GlassMap`, `rc_scripts_plugin::objectives` (the map's `MissionObjectives` list, revealed by its tag event, completed/failed/changed by `ACTION_ObjectiveUpdate`, saved with the game), HUD element keys `font`, `wrap`, `glass`, texts `{subtitle}` `{objective}`, `[layout] text_fade_in`.
+- **Why:** User's side-by-side screenshots: the advisor text was a bottom-middle monospace line and the objective line was missing.
+- **Tested how:** Positions, sizes, colours and the fade read from the original's Engine.dll (`UHelmet::DrawTextInfo`, `DrawSubtitleText`, `DrawCurrentObjectiveText`) and engine.u/gameplay.u scripts in a scratch folder outside the repo (nothing of it committed); `cargo test -p rc_menus -p rc_scripts_plugin`; `rc_game --script` in the cloud.
+- **Result:** New check "the current objective is drawn at the top, as in the original" passes in the cloud (17 letters, top 14% down, centred). `rc_probe --hud` paints the advisor's words with the same line breaks as the user's screenshot of the original. Other script failures in this cloud run come from game files not copied to the cloud (sounds, menus).
+- **Still broken / not tested:** Not tested on Windows. Letters aren't bent by the glass, only placed. Ctrl (the original's objective on/off key) not done. Objective words are the map's English ones.
+
 ## 2026-11-11: Each zone's distance fog, from the map (rc_level_viewer, rc_level_plugin, rc_game_core, rc_visor)
 
 - **Changed:** New `rc_level_viewer::fog`: every `ZoneInfo`/`LevelInfo`'s `bDistanceFog`, `DistanceFogColor`, `DistanceFogStart`/`End`, `DistanceFogBlendTime`, with missing values from `ZoneInfo`'s defaults in Engine.u (read at load). The player's camera (and the viewer's; `--no-fog` to compare) shows the fog of the zone it is in, as Bevy linear fog. The visor's low light fog now marks the camera `rc_game_core::OwnFog`, and zone fog leaves it alone meanwhile. Log: `level: distance fog on the player's camera: ...`.
