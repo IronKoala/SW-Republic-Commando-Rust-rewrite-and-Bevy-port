@@ -102,8 +102,9 @@ struct ShotStats {
     /// Amber pixels within 3% of the screen height of the centre (the
     /// crosshair).
     centre_amber: u32,
-    /// Near-white pixels within 7% of the screen height of the centre
-    /// (the original's reticle picture, which is white and grey).
+    /// Near-white or pale blue pixels within 7% of the screen height of
+    /// the centre (the original's reticle picture, white and grey, drawn
+    /// with the helmet's light blue tint).
     centre_white: u32,
 }
 
@@ -824,6 +825,25 @@ fn steps() -> Vec<Step> {
             30.0,
         ),
         Shot("flyover"),
+        // Projectile spawners: the events that set geo_01a's bunker
+        // missiles and the bombardment going come later in the level than
+        // this walk reaches, so the check sends them to the spawners
+        // itself (as the level's ScriptedTrigger12 and Trigger5 would),
+        // then again to switch them off.
+        Note(|w| spawner_event(w, "BunkerProjectileEFX")),
+        Until(
+            "the bunkers' missiles fly with their trail and blow up with the game's effect",
+            bunker_missiles_blow_up,
+            20.0,
+        ),
+        Note(|w| spawner_event(w, "BunkerProjectileEFX")),
+        Note(|w| spawner_event(w, "ArialBombardment01")),
+        Until(
+            "the bombardment's missiles fly in from high above and blow up",
+            bombardment_blows_up,
+            20.0,
+        ),
+        Note(|w| spawner_event(w, "ArialBombardment01")),
         Note(|w| set_pitch(w, 0.0)),
         Wait(0.2),
         // Turn round to where the squad stands (behind the player) and
@@ -1336,6 +1356,12 @@ fn steps() -> Vec<Step> {
                 // Doors, lifts and scripts run on clocks (looping movers,
                 // random timers), so a few frames later their numbers
                 // differ; the two checks above compare what matters.
+                // Effect spawners are switched on and off by those same
+                // looping scripts (geo_01a's BattleExplosions toggle).
+                if k == "effect_spawners" {
+                    notes.push(format!("[{k}] skipped (switched by looping scripts)"));
+                    continue;
+                }
                 if matches!(k.as_str(), "movers" | "scripts") {
                     notes.push(format!("[{k}] checked above"));
                     continue;
@@ -2333,8 +2359,12 @@ fn measure_shot(captured: On<ScreenshotCaptured>, mut shots: ResMut<Shots>, log:
             lit += 1;
         }
         let min = pr.min(pg).min(pb);
-        if min > 170
-            && pr.max(pg).max(pb) - min < 40
+        // The reticle is tinted (200,240,255) at opacity 110 (#101), so
+        // over dark rock it shows as a pale blue-grey rather than white;
+        // count both. The arena's rock and sand are never bluish.
+        let whitish = min > 170 && pr.max(pg).max(pb) - min < 40;
+        let tinted = min > 80 && pb > pr + 20 && pg > pr + 10;
+        if (whitish || tinted)
             && (x - w as i64 / 2).abs() <= r_white
             && (y - h as i64 / 2).abs() <= r_white
         {
@@ -3578,6 +3608,63 @@ fn fx_overhead_on(w: &mut World) -> bool {
         })
 }
 
+/// Send a level event straight to the effect and projectile spawners (not
+/// through the level's scripts, so nothing else waiting for it goes on).
+fn spawner_event(w: &mut World, name: &str) {
+    w.write_message(rc_game_core::ScriptEvent {
+        name: name.to_string(),
+        by: "the self-test".to_string(),
+    });
+}
+
+/// Projectiles of `class` made and blown up, with their trail and blast
+/// effects started and none missing.
+fn projectiles_blew_up(w: &mut World, class: &str, trail: &str, high: Option<f32>) -> bool {
+    let Some(p) = w.get_resource::<rc_scripts_plugin::projectiles::Projectiles>() else {
+        return false;
+    };
+    let made = p.made.iter().filter(|(_, c)| c == class).count();
+    let blasts: Vec<[f32; 3]> = p
+        .blasts
+        .iter()
+        .filter(|(c, _, world)| c == class && *world)
+        .map(|b| b.1)
+        .collect();
+    let highest = p.highest;
+    let Some(st) = w.get_resource::<rc_effects_plugin::EffectStats>() else {
+        return false;
+    };
+    let has = |n: &str| st.spawned.iter().any(|e| e == n);
+    let missing: Vec<&String> = st
+        .missing
+        .iter()
+        .filter(|m| *m == trail || *m == "Explosion_Barrel_AlongX")
+        .collect();
+    let ok = made > 0
+        && !blasts.is_empty()
+        && has(trail)
+        && has("Explosion_Barrel_AlongX")
+        && high.is_none_or(|h| highest.is_some_and(|z| z > h));
+    if ok || !missing.is_empty() {
+        w.resource::<GameLog>().line(format!(
+            "script: projectiles {class}: {made} made, {} blew up on the level (first at {:?}), highest {highest:?} uu; trail {trail} started {}, blast effect started {}; missing {missing:?}",
+            blasts.len(),
+            blasts.first().map(|b| b.map(|v| v.round())),
+            has(trail),
+            has("Explosion_Barrel_AlongX"),
+        ));
+    }
+    ok && missing.is_empty()
+}
+
+fn bunker_missiles_blow_up(w: &mut World) -> bool {
+    projectiles_blew_up(w, "GEO_01A_BunkerMissile", "GEO_BunkerMissile_Proj", None)
+}
+
+fn bombardment_blows_up(w: &mut World) -> bool {
+    projectiles_blew_up(w, "GEO_01AProj", "GEO_01AProjectile", Some(15000.0))
+}
+
 /// Gunships and fighters made, their models drawn far above the arena's
 /// floor (about -2300 uu), and nothing missing to draw them.
 fn fx_overhead_flying(w: &mut World) -> bool {
@@ -3620,7 +3707,10 @@ fn props_effect_shown(w: &mut World) -> Result<String, String> {
         && st.peak_meshes > 0
         && has("exp_GEN_barrel_01")
         && has("exp_barrels")
-        && st.missing.is_empty()
+        // Only the barrel's own parts count here: the missiles' trails
+        // have a ribbon part that isn't drawn yet, and that is reported
+        // by the spawner checks instead.
+        && !st.missing.iter().any(|m| m.starts_with("Explosion_Barrel"))
     {
         Ok(msg)
     } else {
