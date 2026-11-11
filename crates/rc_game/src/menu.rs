@@ -58,6 +58,11 @@ pub enum Page {
     /// The end-of-campaign debriefing (`debriefing.rs`). Back does
     /// nothing; only CONTINUE leaves it.
     Debriefing,
+    /// The original PROFILES page and its NEW PROFILE name page
+    /// (`original_profiles.rs`). Only reachable when they can be drawn
+    /// from the install; there is no placeholder.
+    Profiles,
+    NewProfile,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,7 +323,7 @@ pub fn items(
                 it("Quit", Cmd::Quit),
             ],
         ),
-        Page::LoadGame | Page::SaveGame => (
+        Page::LoadGame | Page::SaveGame | Page::Profiles | Page::NewProfile => (
             "SAVES (PLACEHOLDER)".into(),
             vec![it("Back", Cmd::Back)],
         ),

@@ -31,6 +31,7 @@ mod original_hud;
 mod original_lists;
 mod original_menu;
 mod original_pause;
+mod original_profiles;
 mod original_saves;
 mod panini;
 mod player;
@@ -260,6 +261,21 @@ fn main() -> AppExit {
     } else {
         PathBuf::from(settings.save.folder.trim())
     };
+    // The saves of the profile chosen last (`original_profiles.rs`); none
+    // chosen yet, the PROFILES page opens first.
+    let profile = original_profiles::Profile::at_start(&save_folder, &settings.save.profile);
+    match &profile.name {
+        Some(n) => log.line(format!("profiles: {n:?}, saves in {}", profile.saves().display())),
+        None if settings.save.profile.trim().is_empty() => {
+            log.line("profiles: none chosen yet; the PROFILES page opens first")
+        }
+        None => log.line(format!(
+            "profiles: {:?} has no folder in {}; the PROFILES page opens first",
+            settings.save.profile.trim(),
+            save_folder.display()
+        )),
+    }
+    let save_folder = profile.saves();
     for d in &paths.data_dirs {
         log.line(format!(
             "data folder: {}{}",
@@ -429,6 +445,7 @@ fn main() -> AppExit {
     .insert_resource(log)
     .insert_resource(paths)
     .insert_resource(rc_save::SaveFolder(save_folder))
+    .insert_resource(profile)
     .insert_resource(menu::GamePathsFound(found.is_some()))
     .insert_resource(player::FieldOfView::from_settings(&settings))
     .insert_resource(input::LookSettings::from_settings(&settings))

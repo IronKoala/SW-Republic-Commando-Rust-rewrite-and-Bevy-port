@@ -458,8 +458,19 @@ copy of the game.
   select sounds. QUIT asks the original's "are you sure?" question. Keyboard,
   gamepad and mouse move the focus. A screenshot of it matches a picture
   painted straight from the original's textures (mean difference 3.4 of
-  255). PROFILES and EXTRAS are greyed out until they're built;
-  MULTIPLAYER is greyed out for good (offline only).
+  255). EXTRAS is greyed out until it's built; MULTIPLAYER is greyed out
+  for good (offline only).
+
+  **PROFILES is the original's page** (tested in the cloud sandbox with the
+  install, not yet on Windows). The first time the game starts with no
+  profile it opens the PROFILES page and you must pick or make one, as the
+  original does. `< NEW >` opens the original's EDIT PROFILE NAME page:
+  type a name (letters, numbers and spaces, at most 15; spaces become
+  `_`), the original's blinking cursor, OK. SELECT loads a profile and
+  DELETE removes a profile and all of its saves after the original's
+  question (you can't delete the one you're using). Each profile is a
+  `Profile_<name>` folder inside the save folder holding that profile's
+  saves; settings and unlocked levels are still shared by all profiles.
 
   **The menus' moving background is the original's video (tested in the
   cloud sandbox, not yet on Windows).** The main menu, options, campaign

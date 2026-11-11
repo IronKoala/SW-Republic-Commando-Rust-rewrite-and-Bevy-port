@@ -25,12 +25,14 @@ use crate::menu::{GamePathsFound, Menu, Page};
 use crate::option_settings;
 use crate::original_lists;
 use crate::original_pause;
+use crate::original_profiles;
 use crate::original_saves;
 use crate::rebind::{RebindDone, StartRebind, UserBindingsPath};
 use crate::settings::Settings;
 use crate::settings::SettingsPath;
 use bevy::asset::RenderAssetUsages;
 use bevy::audio::{AudioSource, PlaybackSettings};
+use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -55,11 +57,8 @@ const MENU_ASPECT: f32 = 4.0 / 3.0;
 /// the original greys out buttons in its demo versions. Multiplayer stays
 /// off for good: this port is single-player and offline only.
 /// LOAD GAME joins them when its page can't be shown.
-const UNAVAILABLE: &[MainAction] = &[
-    MainAction::Multiplayer,
-    MainAction::Profiles,
-    MainAction::Extras,
-];
+/// PROFILES joins them when its page can't be shown.
+const UNAVAILABLE: &[MainAction] = &[MainAction::Multiplayer, MainAction::Extras];
 
 /// One original screen ready to draw.
 pub struct Screen {
@@ -190,6 +189,8 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::LoadGame => Some(original_saves::LOAD),
         Page::SaveGame => Some(original_saves::SAVE),
         Page::Debriefing => Some(DEBRIEFING_PAGE),
+        Page::Profiles => Some(original_profiles::PROFILES),
+        Page::NewProfile => Some(original_profiles::NEW_PROFILE),
         Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
@@ -206,6 +207,8 @@ fn page_from_key(key: &str) -> Option<Page> {
         DEBRIEFING_PAGE => Some(Page::Debriefing),
         original_saves::LOAD => Some(Page::LoadGame),
         original_saves::SAVE => Some(Page::SaveGame),
+        original_profiles::PROFILES => Some(Page::Profiles),
+        original_profiles::NEW_PROFILE => Some(Page::NewProfile),
         _ => None,
     }
 }
@@ -273,6 +276,14 @@ pub enum Asking {
     /// A message with one answer (BACK), such as "you can't overwrite the
     /// quicksave".
     Notice,
+    /// Delete this profile and its saves? (YES does it.)
+    DeleteProfile(String),
+    /// The original's warning box (`MenuWarning`): CONTINUE closes it, the
+    /// back key does nothing.
+    Warning,
+    /// A message that closes by itself and takes no input
+    /// ("LOADING PROFILE", `original_profiles.rs`).
+    Wait,
 }
 
 /// The original menus, when the install has them.
@@ -291,6 +302,8 @@ pub struct OriginalMenus {
     showing: Option<Shown>,
     /// The load and save pages' texts and work (`original_saves.rs`).
     pub saves: original_saves::SavePages,
+    /// The profile pages' texts and work (`original_profiles.rs`).
+    pub profiles: original_profiles::ProfilePages,
     /// The question box's layout, kept for when QUIT is chosen again.
     question_layout: Option<MenuLayout>,
     /// The "reassign button" box while it shows, and its layout.
@@ -395,6 +408,21 @@ impl OriginalMenus {
         true
     }
 
+    /// Show a box made elsewhere (the profile pages' warning and
+    /// message) over the screen showing, in the question box's place.
+    pub fn show_box(&mut self, screen: Screen, asking: Asking) {
+        self.question = Some(screen);
+        self.asking = Some(asking);
+        self.dirty = true;
+    }
+
+    /// Take the question box (or a box shown with `show_box`) away.
+    pub fn close_box(&mut self) {
+        self.question = None;
+        self.asking = None;
+        self.dirty = true;
+    }
+
     /// Fill in the debriefing page with a level's title, text and picture
     /// (`rc_menus::debriefing`), and load the picture.
     pub fn show_debriefing(&mut self, title: &str, text: &str, picture: &str) -> DebriefingShown {
@@ -497,6 +525,7 @@ impl Plugin for OriginalMenuPlugin {
                     navigate,
                     apply_options,
                     original_saves::apply_saves,
+                    original_profiles::apply_profiles,
                     drag_bars,
                     draw,
                     fit_area,
@@ -641,7 +670,34 @@ fn load(
         class_of(original_saves::LOAD),
         class_of(original_saves::SAVE),
     );
+    let (select_class, name_class) = (
+        class_of(original_profiles::PROFILES),
+        class_of(original_profiles::NEW_PROFILE),
+    );
     menus.saves = original_saves::read(load_class.as_deref(), save_class.as_deref());
+    // The profile pages' texts, warning box and loading message.
+    if select_class.is_some() {
+        let loading_class = assets.library.class(original_profiles::LOADING).ok();
+        menus.profiles.texts = original_profiles::read(
+            select_class.as_deref(),
+            name_class.as_deref(),
+            loading_class.as_deref(),
+        );
+        menus.profiles.loading_layout = loading_class.as_deref().map(rc_menus::build);
+        match assets.library.class(original_profiles::WARNING) {
+            Ok(c) => menus.profiles.warning_layout = Some(rc_menus::build(&c)),
+            Err(e) => log.line(format!(
+                "original menus: no warning box ({e}); profile warnings only go to the log"
+            )),
+        }
+        for l in [&menus.profiles.warning_layout, &menus.profiles.loading_layout]
+            .into_iter()
+            .flatten()
+        {
+            paths_needed.extend(assets.textures_of(l));
+        }
+        original_profiles::setup(&mut menus);
+    }
     let present: Vec<String> = menus.pages.keys().cloned().collect();
     for (k, p) in menus.pages.iter_mut() {
         let missing: Vec<usize> = p
@@ -668,6 +724,9 @@ fn load(
     let mut unavailable = UNAVAILABLE.to_vec();
     if !present.iter().any(|k| k == original_saves::LOAD) {
         unavailable.push(MainAction::LoadGame);
+    }
+    if !present.iter().any(|k| k == original_profiles::PROFILES) {
+        unavailable.push(MainAction::Profiles);
     }
     let quit_text = match main.get("QuitGameConfirm") {
         Some(V::Str(s)) => s.clone(),
@@ -942,6 +1001,7 @@ fn focus_new_page(
             }
         }
         original_lists::focus_first(&mut menus, k);
+        original_profiles::opened(&mut menus, k);
         let screen = &menus.pages[k].screen;
         log.line(format!(
             "original menus: page {k} opened, focus on {}",
@@ -1026,6 +1086,83 @@ fn play_sound(
         // Turned down by the SOUND FX volume in music.rs, as every sound is.
         commands.spawn((AudioPlayer(h.clone()), PlaybackSettings::DESPAWN));
     }
+}
+
+/// Keys typed while an edit box on page `k` has focus, as the original's
+/// `HandleInputKey` and `HandleInputKeyRaw` take them (`rc_menus::edit`):
+/// characters and Backspace go into the box, Enter leaves it
+/// (`original_profiles::enter_in_box`). `None` when no edit box has focus
+/// or no such key was pressed (arrows and Escape then work the menu as
+/// usual); otherwise whether anything changed.
+fn type_in_box(
+    menus: &mut OriginalMenus,
+    k: &str,
+    typed: &[KeyboardInput],
+    log: &GameLog,
+) -> Option<bool> {
+    use bevy::input::keyboard::Key;
+    use bevy::input::ButtonState;
+    let page = menus.pages.get_mut(k)?;
+    let f = page.screen.focus?;
+    let w = &mut page.screen.layout.widgets[f];
+    let Kind::Button(b) = &mut w.kind else {
+        return None;
+    };
+    let e = b.edit.clone()?;
+    let mut used = false;
+    let mut changed = false;
+    let mut enter = false;
+    for ev in typed.iter().filter(|e| e.state == ButtonState::Pressed) {
+        match &ev.logical_key {
+            Key::Enter => {
+                enter = true;
+                used = true;
+            }
+            Key::Backspace => {
+                used = true;
+                changed |= e.type_char(&mut b.blurred.text, '\u{8}');
+            }
+            Key::Escape | Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight => {}
+            _ => {
+                let text = ev.text.as_ref().map(|t| t.to_string()).or_else(|| {
+                    // A key with no text of its own (as the script sends):
+                    // its letter or digit.
+                    match ev.key_code {
+                        KeyCode::Space => Some(" ".into()),
+                        c => {
+                            let n = format!("{c:?}");
+                            n.strip_prefix("Key")
+                                .or_else(|| n.strip_prefix("Digit"))
+                                .filter(|s| s.len() == 1)
+                                .map(String::from)
+                        }
+                    }
+                });
+                if let Some(text) = text {
+                    used = true;
+                    for c in text.chars() {
+                        changed |= e.type_char(&mut b.blurred.text, c);
+                    }
+                }
+            }
+        }
+    }
+    if !used {
+        return None;
+    }
+    b.focused.text = b.blurred.text.clone();
+    if changed {
+        log.line(format!("original menus: page {k}: {} now {:?}", w.name, b.blurred.text));
+    }
+    if enter {
+        original_profiles::enter_in_box(&mut page.screen);
+        log.line(format!(
+            "original menus: page {k}: Enter in the box; focus on {}",
+            page.screen.focused_name().unwrap_or("none")
+        ));
+        changed = true;
+    }
+    Some(changed)
 }
 
 /// What the drop-down list did with this frame's input.
@@ -1181,9 +1318,14 @@ fn navigate(
     mut next_play: Option<ResMut<NextState<Play>>>,
     mut exit: MessageWriter<AppExit>,
     mut sources: ResMut<Assets<AudioSource>>,
-    (mut cursor, mut wheel): (MessageReader<CursorMoved>, MessageReader<MouseWheel>),
+    (mut cursor, mut wheel, mut typed): (
+        MessageReader<CursorMoved>,
+        MessageReader<MouseWheel>,
+        MessageReader<KeyboardInput>,
+    ),
     log: Res<GameLog>,
 ) {
+    let typed: Vec<KeyboardInput> = typed.read().cloned().collect();
     // Pointing at a button moves focus only when the mouse itself moves,
     // not when the menu is redrawn under a still pointer.
     let mouse_moved = cursor.read().count() > 0;
@@ -1232,6 +1374,18 @@ fn navigate(
     let in_question = menus.question.is_some();
     let in_rebind = menus.rebind.is_some();
     let in_overlay = in_question || in_rebind;
+    // Typing in an edit box (the NEW PROFILE page's name box): the keys
+    // that type go to the box, not to the menu (so W, S, Space and
+    // Backspace type rather than move or go back).
+    if let (false, Shown::Page(k)) = (in_overlay, &shown) {
+        if let Some(changed) = type_in_box(menus, k, &typed, &log) {
+            menus.used_input = true;
+            if changed {
+                menus.dirty = true;
+            }
+            return;
+        }
+    }
     // Pages with a list move along it with the keys and the wheel.
     if let (false, Shown::Page(k)) = (in_overlay, &shown) {
         if let Some(moved) = original_lists::keys(menus, k, &actions, wheel_y, &log) {
@@ -1319,10 +1473,18 @@ fn navigate(
     }
     let back = actions.just_pressed(Action::MenuBack);
     if in_question {
+        // The loading message takes no input; the warning box ignores the
+        // back key (`MenuWarning.HandleInputBack` does nothing).
+        let waiting = menus.asking == Some(Asking::Wait);
+        let warning = menus.asking == Some(Asking::Warning);
+        if waiting {
+            menus.used_input = true;
+            return;
+        }
         let q = menus.question.as_ref().unwrap();
         let answer = match chosen {
             Some(i) => Some(q.on_select(i)),
-            None if back => Some("OnBButton".into()),
+            None if back && !warning => Some("OnBButton".into()),
             None => None,
         };
         let Some(answer) = answer else {
@@ -1344,6 +1506,14 @@ fn navigate(
                 log.line(format!("original menus: question answered YES: {d:?}"));
                 menus.saves.asks.push(original_saves::SaveAsk::Do(d));
             }
+            (Some(Asking::DeleteProfile(name)), true) => {
+                log.line(format!("original menus: question answered YES: delete profile {name:?}"));
+                menus
+                    .profiles
+                    .asks
+                    .push(original_profiles::ProfileAsk::DoDelete(name));
+            }
+            (Some(Asking::Warning), _) => log.line("original menus: warning closed"),
             (asking, _) => log.line(format!("original menus: question {asking:?} answered NO")),
         }
         return;
@@ -1390,6 +1560,7 @@ fn navigate(
                 MainAction::CampaignMap => PageCmd::Open("campaigns".into()),
                 MainAction::Options => PageCmd::Open("options".into()),
                 MainAction::LoadGame => PageCmd::Open(original_saves::LOAD.into()),
+                MainAction::Profiles => PageCmd::Open(original_profiles::PROFILES.into()),
                 MainAction::Quit => PageCmd::QuitGame,
                 other => {
                     log.line(format!("original menus: {other:?} isn't available yet"));
@@ -1465,6 +1636,7 @@ fn navigate(
     // A list's own commands, and what only one page does.
     let cmd = match &shown {
         Shown::Page(k) => match original_lists::command(menus, k, chosen, by_key, cmd, &log)
+            .and_then(|c| original_profiles::command(menus, k, c, &log))
             .and_then(|c| original_saves::command(menus, k, c, &log))
         {
             Some(c) => c,

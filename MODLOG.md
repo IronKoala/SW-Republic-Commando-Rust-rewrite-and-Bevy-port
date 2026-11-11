@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The PROFILES page, the original's (rc_game, rc_menus, rc_save, data/ui/original_menus.toml)
+
+- **Changed:** PROFILES on the main menu is no longer greyed out. It opens the original's `MenuSelectProfile` page; `< NEW >` opens `MenuPCNewProfileName` (type a name), creating or choosing a profile shows `MenuLoadingProfile` for its one second, and the active-profile and name-in-use messages use `MenuWarning`. With no profile chosen the game opens on PROFILES and BACK is hidden, as `CTMenuMain.Init` does. New `rc_menus::edit` (the original's `MenuEditBox`: typing filter, length limit, backspace, blinking cursor), `rc_save::profiles` (profile folders), `rc_game/src/original_profiles.rs`, setting `save.profile`.
+- **Why:** User asked for the missing pages ("all").
+- **Tested how:** Script texts and defaults from `XInterfaceCommon.u` and `XInterfaceCTMenus.u` (`strings`); the edit box's typing, cursor and blink rules from `XInterface.dll` by disassembly (scratch folder, nothing copied). `cargo test -p rc_menus -p rc_save -p rc_game`; `rc_game --script` in the cloud with the install's menu files (new profile checks: forced first page, BACK ignored, typing, create, warnings, in-use name, delete with question).
+- **Result:** See the PR; profile checks pass in the cloud.
+- **Still broken / not tested:** Not tested on Windows. Guesses: Enter in the name box moves to OK (the original picks the "nearest" widget; which of BACK and OK it lands on wasn't worked out); the warning and loading boxes borrow the page's background as the question box does; the original's fade before the loading box isn't drawn; name match ignores capitals. Profiles hold only saves: settings and unlocked levels stay shared (the original keeps them per profile in `User.ini`). Saves made before this stay in the save folder's top and don't show under any profile. No on-screen keyboard, so a name can only be typed with a keyboard (the original PC page has none either).
+
 ## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
 
 - **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).
