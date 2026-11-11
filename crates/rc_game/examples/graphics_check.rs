@@ -8,6 +8,9 @@
 
 #[path = "../src/graphics.rs"]
 mod graphics;
+#[path = "../src/graphics_presets.rs"]
+#[allow(dead_code)]
+mod graphics_presets;
 #[path = "../src/settings.rs"]
 #[allow(dead_code)]
 mod settings;
@@ -39,11 +42,11 @@ const STEPS: &[Step] = &[
     },
     Step {
         name: "brightness 1",
-        change: |s| s.video.brightness = 1.0,
+        change: |s| s.video.gamma = 2.5,
     },
     Step {
         name: "brightness 0",
-        change: |s| s.video.brightness = 0.0,
+        change: |s| s.video.gamma = 0.5,
     },
     Step {
         name: "fsaa 4",
@@ -51,13 +54,13 @@ const STEPS: &[Step] = &[
     },
     Step {
         name: "bloom",
-        change: |s| s.video.bloom = true,
+        change: |s| s.video.bloom_quality = 2,
     },
     Step {
         name: "bloom + brightness 1",
         change: |s| {
-            s.video.bloom = true;
-            s.video.brightness = 1.0;
+            s.video.bloom_quality = 2;
+            s.video.gamma = 2.5;
         },
     },
     Step {
@@ -71,11 +74,11 @@ const STEPS: &[Step] = &[
     Step {
         name: "everything",
         change: |s| {
-            s.video.bloom = true;
+            s.video.bloom_quality = 2;
             s.video.blur = true;
             s.video.fsaa = 8;
             s.video.squad_shadows = true;
-            s.video.brightness = 0.8;
+            s.video.gamma = 1.9;
         },
     },
     Step {
@@ -249,7 +252,12 @@ fn drive(
             });
             return;
         };
+        // Each step starts from everything off (the defaults have blur,
+        // bloom and shadows on, like the original's), then changes one thing.
         let mut s = Settings::default();
+        s.video.bloom_quality = 0;
+        s.video.blur = false;
+        s.video.squad_shadows = false;
         (step.change)(&mut s);
         *settings = s;
         println!("step: {}", step.name);
