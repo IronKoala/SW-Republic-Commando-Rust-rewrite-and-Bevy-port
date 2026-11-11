@@ -8,6 +8,9 @@ edition.workspace = true
 rc_ai = { path = "../rc_ai" }
 rc_anim = { path = "../rc_anim" }
 rc_combat = { path = "../rc_combat" }
+# The weapon a fighter holds: its class read from the game, and its model.
+rc_effects = { path = "../rc_effects" }
+rc_effects_plugin = { path = "../rc_effects_plugin" }
 rc_game_core = { path = "../rc_game_core" }
 rc_image = { path = "../rc_image" }
 # rc_level and rc_level_viewer: only the rc_droidview program draws a map.

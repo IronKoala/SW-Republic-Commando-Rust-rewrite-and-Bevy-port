@@ -4514,6 +4514,8 @@ dependencies = [
  "rc_ai",
  "rc_anim",
  "rc_combat",
+ "rc_effects",
+ "rc_effects_plugin",
  "rc_game_core",
  "rc_image",
  "rc_level",

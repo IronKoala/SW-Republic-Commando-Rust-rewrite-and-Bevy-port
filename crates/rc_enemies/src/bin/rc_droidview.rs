@@ -28,7 +28,7 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::render::view::Tonemapping;
 use rc_ai::Mode;
 use rc_combat::{CombatSet, Dead, FireShot};
-use rc_enemies::{Droid, EnemiesPlugin, Fight, Looks};
+use rc_enemies::{Droid, EnemiesPlugin, Fight, HeldWeapon, Looks};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
     playing, CorePlugin, CurrentLevel, GameLog, GamePaths, GameSet, GameState, LevelCollision,
@@ -553,6 +553,8 @@ fn finish(
     mut exit: MessageWriter<AppExit>,
     mut done: Local<bool>,
     log: Res<GameLog>,
+    holders: Query<(&Droid, Option<&HeldWeapon>), Without<Dead>>,
+    weapons: Query<(&Transform, &Visibility)>,
 ) {
     let Some(fight) = fight else { return };
     if *done || fight.battle.time < opts.seconds {
@@ -604,6 +606,37 @@ fn finish(
             s.droids_hurt, s.droids_destroyed
         ),
     );
+    // Every living fighter whose type holds a weapon (the clone troopers)
+    // has its model, shown and moved onto its weapon bone.
+    let mut holding = 0;
+    let mut missing = Vec::new();
+    for (d, w) in &holders {
+        let wants = fight
+            .battle
+            .fighters
+            .iter()
+            .find(|f| f.id == d.id)
+            .is_some_and(|f| !f.params.look.held_weapon.is_empty());
+        if !wants {
+            continue;
+        }
+        let placed = w
+            .and_then(|HeldWeapon(w)| weapons.get(*w).ok())
+            .is_some_and(|(t, v)| *v != Visibility::Hidden && *t != Transform::IDENTITY);
+        if placed {
+            holding += 1;
+        } else {
+            missing.push(d.id);
+        }
+    }
+    if holding + missing.len() > 0 {
+        verdict(
+            missing.is_empty(),
+            format!(
+                "fighters hold their weapons ({holding} on the weapon bone, without: {missing:?})"
+            ),
+        );
+    }
     if opts.check {
         verdict(check.done, "picture check ran".into());
     }

@@ -166,6 +166,11 @@ pub struct Look {
     /// `Package.Group.Object` as UnrealEd shows it (the original swaps
     /// skins this way per class, with `Skins[0]`). Empty: the mesh's own.
     pub skin: String,
+    /// The weapon class whose model it holds in its hand (the original's
+    /// `RequiredEquipment`, whose `AttachmentClass` model hangs on the
+    /// weapon bone), like `DC17mBlaster`. Empty: nothing drawn in its hand
+    /// (its mesh may already carry its weapon).
+    pub held_weapon: String,
     pub idle: String,
     pub walk: String,
     pub run: String,
@@ -363,6 +368,7 @@ impl AiParams {
                 package: "GameData/Animations/droid.ukx".into(),
                 mesh: "BattleDroid".into(),
                 skin: String::new(),
+                held_weapon: String::new(),
                 idle: "ActionBreathe".into(),
                 walk: "WalkForward".into(),
                 run: "RunForward".into(),
@@ -535,6 +541,7 @@ impl AiParams {
             ("look", "package") => l.package = text(),
             ("look", "mesh") => l.mesh = text(),
             ("look", "skin") => l.skin = text(),
+            ("look", "held_weapon") => l.held_weapon = text(),
             ("look", "idle") => l.idle = text(),
             ("look", "walk") => l.walk = text(),
             ("look", "run") => l.run = text(),

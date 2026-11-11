@@ -3001,7 +3001,13 @@ friends. The music's battle rules count only separatists. `[combat]
 can_crouch = false` (the original's `bCanCrouch`) keeps troopers standing.
 What the files don't say is listed in `clone_trooper_tm.toml`: the
 troopers' attack state (`StateTrandoshanAttack`) works in compiled code,
-so they fight the way our droids do.
+so they fight the way our droids do. A type's `[look] held_weapon` names
+the weapon class whose model it holds (the original's `RequiredEquipment`:
+`DC17mBlaster` for `CloneTrooper`, `DC15BlasterCloneTM` for
+`CloneTrooperTM`). `rc_enemies` reads it once per type with
+`rc_effects_plugin::held::HeldModel` (as the level's cast does), hangs it
+as a child of each new fighter (`HeldWeapon`), and moves it onto the bone
+`weaponAttach_R` each time the body is posed (`DroidLook::bone_frame`).
 
 **Checking without looking.** `rc_droidsim` (no window) and
 `rc_droidview --check` (a window) run a stand-in player into a spawner's
@@ -4262,7 +4268,9 @@ holds its model: the weapon's `AttachmentClass` (engine.u's `Weapon`;
 bone `weaponAttach_R` (engine.u's `Pawn.GetWeaponBoneFor` returns it for
 every weapon; `AttachToBone`), placed again each time the body is posed
 (`rc_model::Model::bone_frame`). A class without a static mesh (the
-gunship's chin gun) draws nothing and says so in the log.
+gunship's chin gun) draws nothing and says so in the log. The reading,
+drawing and placing are `rc_effects_plugin::held::HeldModel`, shared with
+the fighters the map's spawners make (`rc_enemies`, see "Two sides").
 
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its

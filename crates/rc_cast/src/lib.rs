@@ -112,16 +112,7 @@ pub struct CastPlan {
     pub spawned: bool,
 }
 
-/// The bone a character's weapon hangs on (engine.u's
-/// `Pawn.GetWeaponBoneFor` returns it for every weapon).
-pub const WEAPON_BONE: &str = "weaponAttach_R";
-
-/// The model a character shows for the weapon it holds: the weapon's
-/// `AttachmentClass` and its static mesh, read from the game's files.
-pub struct HeldModel {
-    pub info: rc_effects::projectile::HeldWeapon,
-    sections: Vec<(Mesh, Option<rc_level_viewer::materials::Picture>)>,
-}
+pub use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 
 /// Read the model for weapon class `weapon`, once per game.
 fn held_model(
@@ -140,31 +131,10 @@ fn held_model(
             rc_effects::projectile::ClassPackages::open(game_data).map(Arc::new)
         })
         .clone();
-    let made = classes.and_then(|c| c.held_weapon(weapon)).and_then(|info| {
-        let mut mats = rc_level_viewer::materials::Materials::new(game_data);
-        let sections = rc_effects_plugin::static_mesh(&mut mats, &info.mesh)?;
-        Ok(HeldModel { info, sections })
-    });
+    let made = classes.and_then(|c| HeldModel::load(&c, game_data, weapon));
     let out = match made {
         Ok(m) => {
-            log_line(
-                log,
-                format!(
-                    "held weapon {weapon}: {} with model {} ({} parts), on bone {WEAPON_BONE}",
-                    m.info.attachment,
-                    m.info.mesh.join("."),
-                    m.sections.len()
-                ),
-            );
-            if m.info.relative_location != [0.0; 3] || m.info.relative_rotation != [0; 3] {
-                log_line(
-                    log,
-                    format!(
-                        "held weapon {weapon}: its RelativeLocation/Rotation {:?} {:?} aren't applied yet",
-                        m.info.relative_location, m.info.relative_rotation
-                    ),
-                );
-            }
+            log_line(log, m.describe());
             Some(Arc::new(m))
         }
         Err(e) => {
@@ -448,11 +418,9 @@ fn weapon_transform(
     local: &[rc_anim::math::Transform],
     held: &HeldModel,
 ) -> Option<Transform> {
-    let [o, x, y, z] = model.bone_frame(local, WEAPON_BONE)?;
-    let s = held.info.draw_scale;
-    let col = |v: [f32; 3]| Vec4::new(v[0] * s, v[1] * s, v[2] * s, 0.0);
-    let m = Mat4::from_cols(col(x), col(z), col(y), Vec4::new(o[0], o[1], o[2], 1.0));
-    Some(Transform::from_matrix(m))
+    model
+        .bone_frame(local, WEAPON_BONE)
+        .map(|f| held.on_bone(f))
 }
 
 fn first_clip(model: &Model, names: &[String]) -> Option<Clip> {
@@ -681,40 +649,8 @@ fn spawn_pieces(
             // each time the body is posed).
             if let Some(h) = held {
                 let at = weapon_transform(&model, &model.skeleton.local, h);
-                let mut w = c.spawn((at.unwrap_or_default(), Visibility::default()));
-                w.with_children(|g| {
-                    for (mesh, pic) in &h.sections {
-                        let texture = pic
-                            .as_ref()
-                            .map(|p| images.add(rc_level_viewer::draw::to_image(p)));
-                        let material = materials.add(StandardMaterial {
-                            base_color: Color::WHITE,
-                            emissive: LinearRgba::rgb(a, a, a),
-                            emissive_texture: texture.clone(),
-                            base_color_texture: texture,
-                            perceptual_roughness: 0.7,
-                            // The mesh is mirrored into Bevy's axes.
-                            double_sided: true,
-                            cull_mode: None,
-                            ..default()
-                        });
-                        g.spawn((
-                            Mesh3d(meshes.add(mesh.clone())),
-                            MeshMaterial3d(material),
-                            rc_game_core::LitByPlace {
-                                target: rc_game_core::LightTarget::Emissive,
-                                own: 0.0,
-                                scale: light_scale,
-                                height: 1.0,
-                                made_at: a.powf(1.0 / 2.2),
-                            },
-                        ));
-                    }
-                });
-                if at.is_none() {
-                    w.insert(Visibility::Hidden);
-                }
-                weapon = Some((w.id(), h.clone()));
+                let w = h.spawn(c, at, meshes, materials, images, a, light_scale);
+                weapon = Some((w, h.clone()));
             }
         });
     });

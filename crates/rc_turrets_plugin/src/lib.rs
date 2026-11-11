@@ -585,6 +585,7 @@ fn load_look(paths: &GamePaths, p: &TurretParams) -> Result<(KindLook, Vec<Strin
         package: p.model.package.clone(),
         mesh: p.model.mesh.clone(),
         skin: String::new(),
+        held_weapon: String::new(),
         idle: p.model.pose.clone(),
         walk: String::new(),
         run: String::new(),

@@ -320,6 +320,35 @@ impl DroidLook {
             .collect()
     }
 
+    /// Where bone `bone` is for bones placed at `local`: its origin and
+    /// its X, Y and Z directions, in Bevy units relative to the droid's
+    /// feet before its facing is applied (as [`Self::posed_local`]).
+    /// `None` when the mesh has no such bone.
+    pub fn bone_frame(&self, local: &[Transform], bone: &str) -> Option<[[f32; 3]; 4]> {
+        let i = self
+            .skeleton
+            .names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(bone))?;
+        let pose = globals(&self.skeleton.parents, local);
+        let g = pose.get(i)?;
+        let place = |p: [f32; 3]| {
+            let q = mesh_point(&self.mesh, g.apply(p));
+            to_bevy([q[0], q[1], q[2] + self.lift])
+        };
+        let o = place([0.0; 3]);
+        let axis = |p: [f32; 3]| {
+            let a = place(p);
+            [a[0] - o[0], a[1] - o[1], a[2] - o[2]]
+        };
+        Some([
+            o,
+            axis([1.0, 0.0, 0.0]),
+            axis([0.0, 1.0, 0.0]),
+            axis([0.0, 0.0, 1.0]),
+        ])
+    }
+
     /// Points posed at `frame` of `pose`, in Bevy units relative to the
     /// droid's feet, before its facing is applied.
     pub fn posed(&self, pose: Pose, frame: f32) -> Vec<[f32; 3]> {
