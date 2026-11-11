@@ -54,6 +54,7 @@ pub mod bacta;
 pub mod breakables;
 pub mod characters;
 pub mod cutscene;
+pub mod fx_factories;
 pub mod markers;
 pub mod music;
 pub mod save;
@@ -103,12 +104,14 @@ impl Plugin for ScriptsPlugin {
             .add_message::<ChangeLevel>()
             .add_message::<rc_effects_plugin::SpawnEffect>()
             .add_message::<rc_effects_plugin::PreloadEffect>()
+            .add_message::<rc_effects_plugin::EffectEnded>()
             .add_message::<TurretOrder>()
             .add_message::<rc_game_core::MarkerJob>()
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
             .add_save_part::<save::ScriptsSave>()
+            .add_save_part::<fx_factories::FxFactoriesSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(
                 Update,
@@ -134,6 +137,7 @@ impl Plugin for ScriptsPlugin {
                     breakables::explode,
                     sight::look,
                     run,
+                    fx_factories::run,
                     breakables::show,
                     characters::cast,
                     sounds::play,
@@ -541,6 +545,20 @@ fn build(
             }
         ));
     }
+    // Effect spawners: read now, their effects too, so the first doesn't
+    // stall the game.
+    let fx = fx_factories::read(map);
+    fx_factories::log_list(&fx, &log);
+    let mut wanted: Vec<&str> = fx.iter().map(|f| f.prototype.as_str()).collect();
+    wanted.sort_unstable_by_key(|n| n.to_ascii_lowercase());
+    wanted.dedup_by_key(|n| n.to_ascii_lowercase());
+    for w in wanted {
+        preload.write(rc_effects_plugin::PreloadEffect {
+            effect: Some(w.to_string()),
+            sound: None,
+        });
+    }
+    commands.insert_resource(fx_factories::LevelFxFactories::new(fx));
     commands.insert_resource(LevelScript {
         director,
         dispensers,
@@ -563,6 +581,7 @@ fn build(
 
 fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelScript>();
+    commands.remove_resource::<fx_factories::LevelFxFactories>();
     commands.remove_resource::<Objectives>();
     commands.remove_resource::<Loaded>();
 }

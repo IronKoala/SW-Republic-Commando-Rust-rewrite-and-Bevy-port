@@ -12,7 +12,8 @@
 //! effect from `cteffects.u` alone.
 
 use crate::def::{
-    DrawStyle, EffectDef, EmitterDef, EmitterKind, Range, RangeVector, StartShape, VelocityFrom,
+    CoordinateSystem, DrawStyle, EffectDef, EmitterDef, EmitterKind, Range, RangeVector,
+    StartShape, VelocityFrom,
 };
 use crate::tagged::{self, boolean, float, get, Tagged, Values};
 use rc_package::class_defaults::{class_defaults, find_class, property_names};
@@ -105,6 +106,8 @@ impl EffectPackage {
             emitters,
             sound,
             life_span: float(&own, "LifeSpan").unwrap_or(0.0),
+            // `Emitter`'s default bUnlit is on (Engine.u).
+            lit: !boolean(&own, "bUnlit").unwrap_or(true),
         })
     }
 }
@@ -165,8 +168,10 @@ fn colour(b: [u8; 4]) -> [f32; 4] {
 fn defaults_for(kind: &str) -> EmitterDef {
     let mut d = EmitterDef::default();
     if kind.eq_ignore_ascii_case("MeshEmitter") {
-        // MeshEmitter: StartSizeRange 1 (a scale of the model).
+        // MeshEmitter: StartSizeRange 1 (a scale of the model) and
+        // UseMeshBlendMode on.
         d.start_size = RangeVector::fixed(1.0);
+        d.mesh_blend = true;
     }
     d
 }
@@ -263,6 +268,10 @@ pub fn emitter(name: &str, kind: &str, v: &Values) -> EmitterDef {
         || boolean(v, "UseCollisionPlanes").unwrap_or(false)
         || boolean(v, "UseMaxCollisions").unwrap_or(false);
     d.damping = range_vector(get(v, "DampingFactorRange"), RangeVector::fixed(1.0)).z;
+    if let Some(b) = byte(v, "CoordinateSystem") {
+        d.coordinate_system = CoordinateSystem::from_byte(b);
+    }
+    d.mesh_blend = boolean(v, "UseMeshBlendMode").unwrap_or(d.mesh_blend);
     d
 }
 

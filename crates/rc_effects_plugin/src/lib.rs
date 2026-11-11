@@ -13,7 +13,17 @@
 //!   fire and flares, see-through for smoke and dust);
 //! - every particle of a mesh emitter (debris) is the game's own model;
 //! - the particles that bounce use a flat floor under the effect, not the
-//!   level (see `rc_effects::def::EmitterDef::collides`).
+//!   level (see `rc_effects::def::EmitterDef::collides`);
+//! - a mesh emitter with `UseMeshBlendMode` (the class default) draws its
+//!   model solid, as its own materials are; an effect whose `bUnlit` is
+//!   off (the flying gunships and fighters) has its models lit by the
+//!   level's light where they are, as the droids are
+//!   (`rc_game_core::LitByPlace`), starting from `lit_model_light`;
+//! - an effect placed turned (the level's effect spawners) has its
+//!   relative emitters' models turned the same way.
+//!
+//! Whoever gives an effect an `id` hears an [`EffectEnded`] with it when
+//! the effect is over (the effect spawners count what they made).
 //!
 //! Settings are in `data/effects/effects.toml`. Everything goes to the log
 //! with an `effects:` prefix, and the numbers to [`EffectStats`].
@@ -24,7 +34,7 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use rc_combat::GameSound;
-use rc_effects::def::{DrawStyle, EffectDef, EmitterKind};
+use rc_effects::def::{CoordinateSystem, DrawStyle, EffectDef, EmitterKind};
 use rc_effects::read::Library;
 use rc_effects::EffectState;
 use rc_game_core::{units, GameLog, GamePaths, GameSet, GameState, PlayerCamera};
@@ -47,6 +57,36 @@ pub struct SpawnEffect {
     pub sound: Option<Vec<String>>,
     /// Who asked, for the log.
     pub by: String,
+    /// Its turn (Unreal pitch, yaw, roll) and draw scale, as placed by an
+    /// effect spawner: see `rc_effects::EffectState::placed`.
+    pub rotation: [i32; 3],
+    pub draw_scale: f32,
+    /// A number to report its end with ([`EffectEnded`]); `None` for no
+    /// report.
+    pub id: Option<u64>,
+}
+
+impl Default for SpawnEffect {
+    fn default() -> Self {
+        SpawnEffect {
+            effect: String::new(),
+            at: Vec3::ZERO,
+            floor: None,
+            sound: None,
+            by: String::new(),
+            rotation: [0; 3],
+            draw_scale: 1.0,
+            id: None,
+        }
+    }
+}
+
+/// An effect started with an `id` is over (its life ended or its last
+/// particle is gone), or couldn't be shown at all.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct EffectEnded {
+    pub id: u64,
+    pub by: String,
 }
 
 /// "This effect (and sound) may be wanted soon": read it now, while the
@@ -68,6 +108,12 @@ pub struct EffectSettings {
     pub volume: f32,
     /// Distance (uu) at which a sound is at half loudness.
     pub sound_half_distance: f32,
+    /// How bright lit effect models (`bUnlit` off) are drawn until the
+    /// level's light where they are is known, 0-1 of their own colour.
+    pub lit_model_light: f32,
+    /// How strongly the level's light shows on lit effect models (the
+    /// squad's and droids' value).
+    pub lit_model_scale: f32,
 }
 
 impl Default for EffectSettings {
@@ -78,6 +124,8 @@ impl Default for EffectSettings {
             max_particles: 4000,
             volume: 1.0,
             sound_half_distance: 2000.0,
+            lit_model_light: 0.5,
+            lit_model_scale: 1.1,
         }
     }
 }
@@ -105,6 +153,8 @@ impl EffectSettings {
                 "max_particles" => s.max_particles = num()? as usize,
                 "volume" => s.volume = num()? as f32,
                 "sound_half_distance" => s.sound_half_distance = num()? as f32,
+                "lit_model_light" => s.lit_model_light = num()? as f32,
+                "lit_model_scale" => s.lit_model_scale = num()? as f32,
                 other => return Err(format!("unknown setting effects.{other}")),
             }
         }
@@ -126,6 +176,10 @@ pub struct EffectStats {
     pub peak_sprites: usize,
     /// Debris models drawn, most at once.
     pub peak_meshes: usize,
+    /// Models drawn last frame, and the highest one (Unreal Z), for the
+    /// self-tests (the gunships fly high over geo_01a).
+    pub meshes_drawn: usize,
+    pub highest_mesh: Option<f32>,
     /// Sounds started, by name.
     pub sounds: Vec<String>,
     /// Effects, pictures, models or sounds that couldn't be read, with why.
@@ -157,6 +211,9 @@ pub struct Effects {
 #[derive(Component)]
 pub struct RunningEffect {
     loaded: Arc<Loaded>,
+    /// Reported in an [`EffectEnded`] when it's over.
+    id: Option<u64>,
+    by: String,
     pub state: EffectState,
     /// One entity per emitter (sprites), or per particle (meshes).
     parts: Vec<Option<Entity>>,
@@ -176,6 +233,7 @@ pub struct EffectsPlugin;
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SpawnEffect>()
+            .add_message::<EffectEnded>()
             .add_message::<PreloadEffect>()
             .init_resource::<Effects>()
             .init_resource::<EffectStats>()
@@ -325,6 +383,7 @@ fn load_effect(
     materials: &mut Assets<StandardMaterial>,
     stats: &mut EffectStats,
     log: &Option<Res<GameLog>>,
+    lit_light: f32,
 ) -> Option<Arc<Loaded>> {
     let key = name.to_ascii_lowercase();
     if let Some(e) = effects.effects.get(&key) {
@@ -378,14 +437,40 @@ fn load_effect(
                     parts
                         .into_iter()
                         .map(|(m, pic)| {
-                            let material = StandardMaterial {
-                                base_color: Color::WHITE,
-                                base_color_texture: pic.map(|p| images.add(to_image(&p))),
-                                unlit: true,
-                                alpha_mode: AlphaMode::Blend,
-                                double_sided: true,
-                                cull_mode: None,
-                                ..default()
+                            let texture = pic.map(|p| images.add(to_image(&p)));
+                            let alpha_mode = if e.mesh_blend {
+                                // UseMeshBlendMode: as the model's own
+                                // materials draw it: solid.
+                                AlphaMode::Opaque
+                            } else {
+                                AlphaMode::Blend
+                            };
+                            let material = if def.lit {
+                                // Lit like the droids: its own colour as a
+                                // glow that follows the level's light
+                                // (LitByPlace, set when it's drawn).
+                                let a = lit_light;
+                                StandardMaterial {
+                                    base_color: Color::WHITE,
+                                    emissive: LinearRgba::rgb(a, a, a),
+                                    emissive_texture: texture.clone(),
+                                    base_color_texture: texture,
+                                    perceptual_roughness: 0.7,
+                                    alpha_mode,
+                                    double_sided: true,
+                                    cull_mode: None,
+                                    ..default()
+                                }
+                            } else {
+                                StandardMaterial {
+                                    base_color: Color::WHITE,
+                                    base_color_texture: texture,
+                                    unlit: true,
+                                    alpha_mode,
+                                    double_sided: true,
+                                    cull_mode: None,
+                                    ..default()
+                                }
                             };
                             (meshes.add(m), material)
                         })
@@ -468,8 +553,10 @@ fn preload(
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
     audio: Option<ResMut<Assets<AudioSource>>>,
+    settings: Option<Res<EffectSettings>>,
     log: Option<Res<GameLog>>,
 ) {
+    let lit_light = settings.map_or(0.5, |s| s.lit_model_light);
     let (Some(paths), Some(mut images), Some(mut meshes), Some(mut materials)) =
         (paths, images, meshes, materials)
     else {
@@ -488,6 +575,7 @@ fn preload(
                 &mut materials,
                 &mut stats,
                 &log,
+                lit_light,
             );
             if let (Some(l), Some(au)) = (loaded, audio.as_deref_mut()) {
                 if let Some(s) = &l.def.sound {
@@ -514,6 +602,7 @@ fn spawn(
     materials: Option<ResMut<Assets<StandardMaterial>>>,
     audio: Option<ResMut<Assets<AudioSource>>>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut ended: MessageWriter<EffectEnded>,
     log: Option<Res<GameLog>>,
 ) {
     let settings = settings.map(|s| s.clone()).unwrap_or_default();
@@ -536,6 +625,7 @@ fn spawn(
                 &mut materials,
                 &mut stats,
                 &log,
+                settings.lit_model_light,
             )
         } else {
             None
@@ -580,10 +670,19 @@ fn spawn(
                 if loaded.is_none() { "; no particles (see above)" } else { "" }
             ),
         );
-        let Some(loaded) = loaded else { continue };
+        let Some(loaded) = loaded else {
+            if let Some(id) = a.id {
+                ended.write(EffectEnded {
+                    id,
+                    by: a.by.clone(),
+                });
+            }
+            continue;
+        };
         stats.spawned.push(loaded.def.name.clone());
         let seed = 0x9E37_79B9 ^ (stats.spawned.len() as u64 * 7919) ^ origin[0].to_bits() as u64;
-        let mut state = EffectState::new(&loaded.def, origin, seed);
+        let mut state =
+            EffectState::new(&loaded.def, origin, seed).placed(a.rotation, a.draw_scale);
         state.floor = a.floor.map(|y| to_unreal(Vec3::new(a.at.x, y, a.at.z))[2]);
         let parts = loaded
             .looks
@@ -607,6 +706,8 @@ fn spawn(
         commands.spawn((
             RunningEffect {
                 loaded,
+                id: a.id,
+                by: a.by.clone(),
                 state,
                 parts,
                 debris: vec![Vec::new(); n],
@@ -635,6 +736,7 @@ fn step(
     time: Res<Time>,
     mut running: Query<(Entity, &mut RunningEffect)>,
     mut stats: ResMut<EffectStats>,
+    mut ended: MessageWriter<EffectEnded>,
     log: Option<Res<GameLog>>,
 ) {
     let dt = time.delta_secs().min(0.1);
@@ -655,6 +757,12 @@ fn step(
             }
             for d in r.debris.iter().flatten() {
                 commands.entity(*d).try_despawn();
+            }
+            if let Some(id) = r.id {
+                ended.write(EffectEnded {
+                    id,
+                    by: r.by.clone(),
+                });
             }
             commands.entity(e).despawn();
         }
@@ -689,6 +797,10 @@ fn draw(
     let budget = settings.as_ref().map_or(4000, |s| s.max_particles);
     let mut drawn = 0;
     let mut debris_drawn = 0;
+    let mut highest: Option<f32> = None;
+    let (lit_light, lit_scale) = settings
+        .as_ref()
+        .map_or((0.5, 1.1), |s| (s.lit_model_light, s.lit_model_scale));
     for mut r in &mut running {
         let r = &mut *r;
         let def = r.loaded.def.clone();
@@ -760,15 +872,27 @@ fn draw(
                         continue;
                     };
                     let have = &mut r.debris[i];
+                    let lit = def.lit;
                     // One entity per live particle, with the model's parts
                     // as children.
                     while have.len() < sprites.len() {
-                        let e = commands
-                            .spawn((
-                                Transform::default(),
-                                Visibility::default(),
-                                DespawnOnExit(GameState::InGame),
-                            ))
+                        let mut e = commands.spawn((
+                            Transform::default(),
+                            Visibility::default(),
+                            DespawnOnExit(GameState::InGame),
+                        ));
+                        if lit {
+                            // Lit by the level's light where it is, as the
+                            // droids are.
+                            e.insert(rc_game_core::LitByPlace {
+                                target: rc_game_core::LightTarget::Emissive,
+                                own: 0.0,
+                                scale: lit_scale,
+                                height: 0.0,
+                                made_at: lit_light.max(0.0).powf(1.0 / 2.2),
+                            });
+                        }
+                        let e = e
                             .with_children(|c| {
                                 for (m, mat) in models {
                                     c.spawn((
@@ -785,12 +909,25 @@ fn draw(
                             commands.entity(e).despawn();
                         }
                     }
+                    // A relative emitter's models are turned with the
+                    // effect (Unreal axes to Bevy's: swap Y and Z on both
+                    // sides, which keeps it a rotation).
+                    let turn = if emitter.coordinate_system == CoordinateSystem::Relative {
+                        let ax = r.state.axes;
+                        let b = |v: [f32; 3]| Vec3::new(v[0], v[2], v[1]);
+                        Quat::from_mat3(&Mat3::from_cols(b(ax[0]), b(ax[2]), b(ax[1])))
+                    } else {
+                        Quat::IDENTITY
+                    };
                     for (s, e) in sprites.iter().zip(have.iter()) {
                         debris_drawn += 1;
+                        highest = Some(highest.map_or(s.position[2], |h| h.max(s.position[2])));
                         let a = s.spin * std::f32::consts::TAU;
                         commands.entity(*e).insert(
                             Transform::from_translation(to_bevy(s.position))
-                                .with_rotation(Quat::from_euler(EulerRot::XYZ, a, a * 0.7, a * 0.3))
+                                .with_rotation(
+                                    turn * Quat::from_euler(EulerRot::XYZ, a, a * 0.7, a * 0.3),
+                                )
                                 .with_scale(Vec3::splat(s.half_size[0] / units::UU_PER_UNIT)),
                         );
                     }
@@ -802,6 +939,10 @@ fn draw(
     stats.sprites_drawn = drawn;
     stats.peak_sprites = stats.peak_sprites.max(drawn);
     stats.peak_meshes = stats.peak_meshes.max(debris_drawn);
+    stats.meshes_drawn = debris_drawn;
+    if let Some(h) = highest {
+        stats.highest_mesh = Some(stats.highest_mesh.map_or(h, |was| was.max(h)));
+    }
 }
 
 #[cfg(test)]
