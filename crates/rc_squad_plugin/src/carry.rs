@@ -126,10 +126,17 @@ impl SavePart for SquadCarry {
 
 /// Put the carried health and order on the new map's squad once it exists.
 pub(crate) fn apply_pending(world: &mut World) {
+    // Only the mates in the level now get a body; one who comes in later
+    // (a map's spawner) starts fresh, as in the original.
     let Some(want) = world
         .get_resource::<SquadState>()
         .and_then(|s| s.squad.as_ref())
-        .map(|s| s.members.len())
+        .map(|s| {
+            s.members
+                .iter()
+                .filter(|m| m.presence != rc_squad::Presence::Gone)
+                .count()
+        })
     else {
         return;
     };

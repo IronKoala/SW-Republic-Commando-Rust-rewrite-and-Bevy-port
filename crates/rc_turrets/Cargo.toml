@@ -1,0 +1,15 @@
+[package]
+name = "rc_turrets"
+version = "0.1.0"
+edition.workspace = true
+description = "Mounted turrets with no Bevy: reads them from a map, holds their rules (who is on one, aiming within its limits and speed, the events it sends) and their data files."
+
+[dependencies]
+rc_level = { path = "../rc_level" }
+rc_package = { path = "../rc_package" }
+# The rc_turret_check program runs a map's scripts with the turrets.
+rc_scripts = { path = "../rc_scripts" }
+# Reading data/turrets/*.toml. serde (MIT OR Apache-2.0), https://serde.rs;
+# toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

@@ -130,8 +130,19 @@ fn check_map(path: &PathBuf, mats: &mut Materials, log: &mut Log) -> Row {
         s.zones_with_ambient, s.props_with_ambient, s.props_zone_from_corners, s.props_bump_lit
     ));
     log.line(format!(
+        "  bump maps: {} of {} bump-lit props drawn with one ({} parts have no bump map and are drawn flat); {} bump maps ({} in the game's two-byte bump formats, the rest colour normal maps); {} BSP polygons have a bump map but no stored light direction (drawn flat)",
+        s.props_bump_drawn, s.props_bump_lit, s.bump_parts_without_map, s.bump_maps, s.bump_maps_two_byte, s.bsp_polygons_bump_flat
+    ));
+    for (e, n) in &s.bump_failures {
+        log.line(format!("    bump map not read ({n}x): {e}"));
+    }
+    log.line(format!(
         "  physics props that fall at the start moved down onto the ground: {}, furthest {:.0} units",
         s.props_settled, s.settle_drop_max
+    ));
+    log.line(format!(
+        "  ammo and grenade boxes drawn on their own: {}, furthest moved down onto the ground {:.0} units",
+        s.ammo_boxes, s.ammo_box_drop_max
     ));
     log.line(format!(
         "  blocking volumes {} ({} stop players, {} stop the AI, {} unreadable, {} scaled); {} path points inside one, {} volumes near a path point",

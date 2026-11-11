@@ -10,8 +10,9 @@
 //!
 //! The GAME options page's HELMET row (settings.toml `[game] helmet`) shows
 //! or hides it; `data/ui/helmet.toml` holds the rest. It is drawn unlit at
-//! the plan's brightness, a guess: the original lights it with lights
-//! inside the helmet, which we don't copy yet. If the model can't be read
+//! the plan's brightness (standing in for the original's lights inside the
+//! helmet) plus the level's light where you are times `light_scale` (see
+//! `rc_game_core::place_light`). If the model can't be read
 //! nothing is drawn and `logs/rc_game.log` says why ("helmet: ...").
 
 use crate::settings::Settings;
@@ -57,7 +58,7 @@ pub struct HelmetCamera;
 
 /// One drawn part of the model, with its mesh to refit.
 #[derive(Component)]
-struct HelmetPiece {
+pub(crate) struct HelmetPiece {
     part: usize,
 }
 
@@ -215,6 +216,14 @@ fn add_helmet_camera(
                         Mesh3d(mesh),
                         MeshMaterial3d(material),
                         RenderLayers::layer(HELMET_LAYER),
+                        // Its own light plus the level's where you are.
+                        rc_game_core::LitByPlace {
+                            target: rc_game_core::LightTarget::BaseColor,
+                            own: b,
+                            scale: helmet.plan.light_scale.max(0.0),
+                            height: 0.0,
+                            made_at: b,
+                        },
                         // Refitted for each screen shape; bounds don't follow.
                         NoFrustumCulling,
                         // Already in the camera's axes (`part_mesh`).
@@ -262,6 +271,7 @@ fn fit_and_show(
     helmet: Res<Helmet>,
     settings: Res<Settings>,
     state: Option<Res<State<GameState>>>,
+    cutscene: Option<Res<rc_game_core::Cutscene>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<(&mut Visibility, &Camera), With<HelmetCamera>>,
     pieces: Query<(&HelmetPiece, &Mesh3d)>,
@@ -274,7 +284,11 @@ fn fit_and_show(
         return;
     };
     let in_game = state.is_some_and(|s| *s.get() == GameState::InGame);
-    let show = in_game && helmet.plan.enabled && settings.game.helmet;
+    // A cutscene can take the helmet off (the prologue's young clone).
+    let show = in_game
+        && helmet.plan.enabled
+        && settings.game.helmet
+        && !cutscene.is_some_and(|c| c.hide_visor);
     let mut any = false;
     // The box the helmet is drawn in: the camera's own (smaller than the
     // window when full screen adds black bars), else the window.

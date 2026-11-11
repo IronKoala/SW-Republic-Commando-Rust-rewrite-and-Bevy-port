@@ -1,7 +1,7 @@
 //! Game screens, loading, and the player's place in the world.
 
 use bevy::prelude::*;
-use rc_movement::World;
+use rc_movement::{Pawn, World};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -110,6 +110,28 @@ impl LoadingGate {
 #[derive(Resource, Clone)]
 pub struct LevelCollision(pub Arc<dyn World + Send + Sync>);
 
+/// Something in the level that moves and carries whoever stands on it
+/// (lifts) or pushes whoever is in its way (doors). The doors and lifts
+/// part implements it; see [`MovingFloors`].
+pub trait CarryBodies: Send + Sync {
+    /// Carry or push `pawn` by what the level's movers did this frame, and
+    /// say what it stands on (the mover's name in the map), if anything.
+    /// Call it once per body per frame, before the body's own move.
+    fn carry(&self, pawn: &mut Pawn) -> Option<String>;
+}
+
+/// The level's lifts and doors, for every body other than the player to
+/// ride and be pushed by (squad mates, droids). Inserted by the doors and
+/// lifts part while a level is played; absent on a map without one.
+///
+/// The player's movement moves the movers (and the player) first each
+/// frame; parts that move other bodies run after it
+/// (`.after(PlayerMoveSet)` in `rc_game`) and call
+/// [`CarryBodies::carry`] for each body before stepping it, against
+/// [`LevelCollision`].
+#[derive(Resource, Clone)]
+pub struct MovingFloors(pub Arc<dyn CarryBodies>);
+
 /// The player's body. Its `Transform` is in Bevy space (see `units`), at the
 /// feet, turned to face where the player faces (yaw only).
 #[derive(Component, Debug, Default)]
@@ -131,9 +153,9 @@ pub struct PlayerStart {
     pub yaw: f32,
 }
 
-/// The mood of the music. The game shell plays calm music while this is
-/// `Calm` and battle music while it is `Battle`. Whatever knows a fight has
-/// started (enemies spotting the player) sets it.
+/// Whether the enemies are fighting (`Battle`) or not (`Calm`). The enemies
+/// part sets it. The music no longer reads it: it follows the original's own
+/// battle rules from [`crate::MusicThreats`] (where the enemies are).
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MusicMood {
     #[default]

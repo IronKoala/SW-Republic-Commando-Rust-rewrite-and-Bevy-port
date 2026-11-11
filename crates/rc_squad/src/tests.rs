@@ -1536,3 +1536,250 @@ fn speciality_settings_read_from_the_file() {
         .unwrap_err();
     assert!(e.contains("line 2") && e.contains("far"), "{e}");
 }
+
+fn limited_squad(world: &BrushWorld, leader: Leader) -> Squad {
+    let mut settings = SquadSettings::default();
+    settings.ammo.limited = true;
+    Squad::new(settings, MoveParams::player_commando(), leader, world).0
+}
+
+fn rifle_box(id: u64, feet: Vec3) -> SupplyBox {
+    SupplyBox {
+        id,
+        name: format!("DC17mBlasterBox{id}"),
+        feet,
+        gives: "dc17m_blaster".into(),
+        amount: 300,
+    }
+}
+
+#[test]
+fn ammo_settings_read_from_the_file() {
+    let s = SquadSettings::default()
+        .with_overrides(
+            "[ammo]\nlimited = \"yes\"\ncarry_dc17m_blaster = 100, 50\n\
+             fetch_range = 900\nthrows = \"sonic_detonator\"\n",
+        )
+        .unwrap();
+    assert!(s.ammo.limited);
+    assert_eq!(s.ammo.carry["dc17m_blaster"], (100, 50));
+    assert_eq!(s.ammo.fetch_range, 900.0);
+    assert_eq!(s.ammo.throws, "sonic_detonator");
+    let e = SquadSettings::default()
+        .with_overrides("[ammo]\ncarry_dc17m_blaster = 10, 50\n")
+        .unwrap_err();
+    assert!(e.contains("line 2"), "{e}");
+    let e = SquadSettings::default()
+        .with_overrides("[ammo]\nlimted = \"yes\"\n")
+        .unwrap_err();
+    assert!(e.contains("limted"), "{e}");
+}
+
+#[test]
+fn by_default_the_squad_never_runs_out_like_the_original() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    assert!(squad.members.iter().all(|m| m.ammo.is_empty()));
+    assert_eq!(squad.ammo_of(0, "dc17m_blaster"), None);
+    run(&mut squad, start, 0.5, &world);
+    squad.threats = vec![threat(1, Vec3::new(900.0, 0.0, 0.0))];
+    // A box right next to them: nobody goes for it or takes it.
+    squad.boxes = vec![rifle_box(7, Vec3::new(-300.0, 0.0, 0.0))];
+    let events = run(&mut squad, start, 10.0, &world);
+    assert!(shots(&events).len() > 50);
+    assert!(!has(&events, |e| matches!(
+        e,
+        SquadEvent::OutOfAmmo { .. } | SquadEvent::FetchAmmo { .. }
+    )));
+    assert!(squad.take_box(0, &squad.boxes[0].clone()).is_none());
+}
+
+#[test]
+fn limited_ammo_runs_out_and_they_hold_fire() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = limited_squad(&world, start);
+    assert_eq!(squad.ammo_of(0, "dc17m_blaster"), Some(120));
+    assert_eq!(squad.ammo_of(1, "thermal_detonator"), Some(2));
+    for m in &mut squad.members {
+        m.ammo.insert("dc17m_blaster".into(), 7);
+    }
+    run(&mut squad, start, 0.5, &world);
+    squad.threats = vec![threat(1, Vec3::new(900.0, 0.0, 0.0))];
+    let events = run(&mut squad, start, 10.0, &world);
+    let rifle: Vec<_> = weapons_fired(&events)
+        .into_iter()
+        .filter(|f| f.1 == "dc17m_blaster")
+        .collect();
+    // Sev and Fixer have a clear line; Scorch, behind the player, may not.
+    for i in 0..3 {
+        let n = rifle.iter().filter(|f| f.0 == i).count();
+        assert_eq!(squad.ammo_of(i, "dc17m_blaster"), Some(7 - n as u32));
+        if i < 2 {
+            assert_eq!(n, 7, "member {i} fired {n} rifle shots");
+        }
+    }
+    let outs = events
+        .iter()
+        .filter(|e| matches!(e, SquadEvent::OutOfAmmo { weapon, .. } if weapon == "dc17m_blaster"))
+        .count();
+    assert!(outs >= 2, "{outs}");
+}
+
+#[test]
+fn a_squad_mate_low_on_ammo_walks_to_a_box_and_takes_it() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = limited_squad(&world, start);
+    run(&mut squad, start, 1.0, &world);
+    // Sev is down to 20 of 300; the box is 600 uu behind the squad.
+    squad.members[0].ammo.insert("dc17m_blaster".into(), 20);
+    let b = rifle_box(5, Vec3::new(-700.0, 0.0, 0.0));
+    squad.boxes = vec![b.clone()];
+    let mut went = false;
+    let mut took = None;
+    let mut t = 0.0;
+    while t < 10.0 && took.is_none() {
+        let events = squad.update(DT, start, &world, &StraightLine);
+        went |= has(
+            &events,
+            |e| matches!(e, SquadEvent::FetchAmmo { member, .. } if member == "Sev"),
+        );
+        // The game's touch test: within 40 + 40 uu across.
+        for i in 0..3 {
+            let f = squad.members[i].pawn.feet();
+            if Vec3::new(f.x - b.feet.x, f.y - b.feet.y, 0.0).length() < 80.0 {
+                if let Some(e) = squad.take_box(i, &b) {
+                    took = Some((i, e));
+                }
+            }
+        }
+        t += DT;
+    }
+    assert!(went, "Sev never set off");
+    let (i, e) = took.expect("nobody took the box");
+    assert_eq!(i, 0);
+    assert!(
+        matches!(
+            &e,
+            SquadEvent::AmmoTaken {
+                added: 280,
+                now: 300,
+                max: 300,
+                ..
+            }
+        ),
+        "{e}"
+    );
+    assert_eq!(squad.ammo_of(0, "dc17m_blaster"), Some(300));
+    assert_eq!(squad.members[0].fetching, None);
+    // Full now: the next box is left lying, and the others never went.
+    assert!(squad.take_box(0, &rifle_box(6, b.feet)).is_none());
+    squad.members[1].ammo.insert("dc17m_blaster".into(), 300);
+    assert!(squad.take_box(1, &rifle_box(6, b.feet)).is_none());
+    // Back to the formation afterwards.
+    squad.boxes.clear();
+    run(&mut squad, start, 6.0, &world);
+    assert!(distances(&squad, start.feet)[0] < 400.0);
+}
+
+#[test]
+fn fetching_waits_for_an_empty_gun_in_a_fight_and_skips_far_boxes() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    // Too far: never goes.
+    let mut squad = limited_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    squad.members[0].ammo.insert("dc17m_blaster".into(), 0);
+    squad.boxes = vec![rifle_box(1, Vec3::new(-1900.0, 0.0, 0.0))];
+    let events = run(&mut squad, start, 2.0, &world);
+    assert!(!has(&events, |e| matches!(e, SquadEvent::FetchAmmo { .. })));
+
+    // In a fight with some left: stays and shoots; once empty, goes.
+    let mut squad = limited_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    squad.members[0].ammo.insert("dc17m_blaster".into(), 10);
+    squad.boxes = vec![rifle_box(2, Vec3::new(-600.0, -300.0, 0.0))];
+    squad.threats = vec![threat(1, Vec3::new(900.0, 0.0, 0.0))];
+    let events = run(&mut squad, start, 1.0, &world);
+    let first_fetch = events
+        .iter()
+        .position(|e| matches!(e, SquadEvent::FetchAmmo { member, .. } if member == "Sev"));
+    let out = events
+        .iter()
+        .position(|e| matches!(e, SquadEvent::OutOfAmmo { member, .. } if member == "Sev"));
+    let events = if first_fetch.is_none() {
+        let more = run(&mut squad, start, 6.0, &world);
+        assert!(squad.ammo_of(0, "dc17m_blaster") == Some(0));
+        [events, more].concat()
+    } else {
+        events
+    };
+    let out = out.or_else(|| {
+        events
+            .iter()
+            .position(|e| matches!(e, SquadEvent::OutOfAmmo { member, .. } if member == "Sev"))
+    });
+    let fetch = events
+        .iter()
+        .position(|e| matches!(e, SquadEvent::FetchAmmo { member, .. } if member == "Sev"));
+    let (out, fetch) = (out.expect("never ran out"), fetch.expect("never went"));
+    assert!(fetch > out, "went for the box before the gun was empty");
+}
+
+#[test]
+fn an_empty_speciality_gun_stays_put_away() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = limited_squad(&world, start);
+    squad.members[0].ammo.insert("dc17m_sniper".into(), 0);
+    run(&mut squad, start, 0.5, &world);
+    // Far enough for Sev to snipe.
+    squad.threats = vec![threat(1, Vec3::new(2500.0, 0.0, 0.0))];
+    let events = run(&mut squad, start, 6.0, &world);
+    let fired = weapons_fired(&events);
+    assert!(fired.iter().any(|f| f.0 == 0 && f.1 == "dc17m_blaster"));
+    assert!(!fired.iter().any(|f| f.1 == "dc17m_sniper"));
+
+    // Fixer with no grenades throws none.
+    let mut squad = limited_squad(&world, start);
+    squad.members[1].ammo.insert("thermal_detonator".into(), 0);
+    run(&mut squad, start, 0.5, &world);
+    squad.threats = vec![
+        threat(1, Vec3::new(1100.0, 700.0, 0.0)),
+        threat(2, Vec3::new(1200.0, 780.0, 0.0)),
+    ];
+    let events = run(&mut squad, start, 12.0, &world);
+    assert!(own_throws(&events).is_empty());
+}
+
+#[test]
+fn after_giving_up_on_a_box_they_go_back_before_trying_another() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = limited_squad(&world, start);
+    squad.settings.ammo.fetch_give_up = 2.0;
+    run(&mut squad, start, 0.5, &world);
+    squad.members[0].ammo.insert("dc17m_blaster".into(), 10);
+    // Out of reach, 400 uu up in the air; and one on the floor.
+    squad.boxes = vec![
+        rifle_box(1, Vec3::new(-500.0, -110.0, 400.0)),
+        rifle_box(2, Vec3::new(-900.0, -300.0, 0.0)),
+    ];
+    let events = run(&mut squad, start, 3.0, &world);
+    let gave_up = events.iter().position(|e| {
+        matches!(e, SquadEvent::FetchStopped { member, why, .. } if member == "Sev" && why == "can't get to it")
+    });
+    assert!(gave_up.is_some(), "never gave up on the box in the air");
+    // Not straight on to the next box...
+    assert!(!events[gave_up.unwrap()..]
+        .iter()
+        .any(|e| matches!(e, SquadEvent::FetchAmmo { member, .. } if member == "Sev")));
+    // ...but after the wait, the reachable one.
+    let events = run(&mut squad, start, 3.0, &world);
+    assert!(has(&events, |e| matches!(
+        e,
+        SquadEvent::FetchAmmo { member, name, .. } if member == "Sev" && name == "DC17mBlasterBox2"
+    )));
+}

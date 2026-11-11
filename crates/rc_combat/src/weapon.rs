@@ -64,6 +64,12 @@ pub struct WeaponParams {
     /// Seconds a reload takes (the first-person `Reload` animation).
     pub reload_time: f32,
     pub shot: ShotKind,
+    /// Shots fired at once by one pull of the trigger (`ProjPerFire`): 8
+    /// for the Trandoshan shotgun, 1 for everything else.
+    pub pellets: u32,
+    /// With more than one pellet: each flies up to this far off the aim,
+    /// in rotation units (65536 = one full turn) (`Spread`).
+    pub spread: f32,
     /// For `Lobbed` shots: the grenade file it fires.
     pub grenade: Option<String>,
     /// The zoom steps, fields of view in degrees across a 4:3 screen like
@@ -83,6 +89,10 @@ pub struct WeaponParams {
     pub melee: Option<(f32, f32)>,
     /// Where shots start, from the eye: forward, right, up (`FPFireOffset`).
     pub fire_offset: [f32; 3],
+    /// Twin barrels: every shot also fires from the mirror of
+    /// `fire_offset` (left for right), at the same time (`fire.mirror`;
+    /// the Wookiee heavy turret's `muzzle_l` and `muzzle_r`).
+    pub mirror_fire: bool,
     /// The camera kick per shot, in rotation units: up, sideways
     /// (`WeaponKick`). Sideways is random between minus and plus this.
     pub kick: [f32; 2],
@@ -123,8 +133,12 @@ pub struct ArmsParams {
     pub attachment_group: Option<String>,
     /// Hidden while zoomed in (`bZoomedUsesNoHUDArms`: the sniper scope).
     pub hide_zoomed: bool,
-    /// How bright the arms are drawn, 0 to 1.
+    /// How bright the arms are drawn, 0 to 1, when the level's light can't
+    /// be measured.
     pub brightness: f32,
+    /// How strongly the level's light where the player is shows on the
+    /// arms (`rc_game_core::place_light`); 0 keeps `brightness` always.
+    pub light_scale: f32,
     /// The ammo counter on the gun (see `counter`): the model's digit
     /// pieces, hundreds first, by material name (the ammo class's
     /// `PannerDigit100`, `PannerDigit10`, `PannerDigit1`). Empty: none.
@@ -187,6 +201,8 @@ impl WeaponParams {
             recharge_rate: t.number("ammo.recharge_rate")?.unwrap_or(0.0),
             reload_time: t.number("ammo.reload_time")?.unwrap_or(0.0),
             shot,
+            pellets: t.number("shot.pellets")?.unwrap_or(1.0).max(1.0) as u32,
+            spread: t.number("shot.spread")?.unwrap_or(0.0),
             grenade: t.text("shot.grenade")?,
             zoom_fovs: t.numbers("fire.zoom_fovs")?.unwrap_or_default(),
             zoom_damage: t.number("fire.zoom_damage")?.unwrap_or(1.0),
@@ -206,6 +222,7 @@ impl WeaponParams {
             },
             damage_kind,
             fire_offset: t.vec3("fire.offset")?.unwrap_or([0.0; 3]),
+            mirror_fire: t.boolean("fire.mirror")?.unwrap_or(false),
             kick: [kick[0], kick[1]],
             recoil_spring: t.number("recoil.spring")?.unwrap_or(0.0),
             recoil_damping: t.number("recoil.damping")?.unwrap_or(0.0),
@@ -232,6 +249,7 @@ impl WeaponParams {
                     attachment_group: t.text("arms.attachment_group")?,
                     hide_zoomed: t.boolean("arms.hide_zoomed")?.unwrap_or(false),
                     brightness: t.number("arms.brightness")?.unwrap_or(0.75),
+                    light_scale: t.number("arms.light_scale")?.unwrap_or(0.85).max(0.0),
                     counter_digits: t.texts("arms.counter_digits")?.unwrap_or_default(),
                     counter_bar: t.text("arms.counter_bar")?,
                 }),

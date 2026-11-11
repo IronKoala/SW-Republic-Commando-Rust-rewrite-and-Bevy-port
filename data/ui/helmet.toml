@@ -10,9 +10,12 @@ hud_class = "CTGame.CTHUD"
 mesh = "HUDMeshes.HelmetSurface.Helmet"
 # Used only if the HUD class can't be read (it says 84).
 display_fov = 84.0
-# 0 to 1. The original lights the frame with a dim glow and lights inside
-# the helmet, which we don't copy yet: this is a guess.
+# 0 to 1: the frame's own light. The original lights it with a dim glow and
+# lights inside the helmet, which we don't copy; this stands in for them.
 brightness = 0.5
+# How strongly the level's light where you are adds to that. Matched to two
+# original screenshots (dark tunnel, sunny canyon).
+light_scale = 0.8
 # On screens wider than 4:3 the frame's sides keep their shape and move out
 # to the screen edges; only the part nearer the middle than this (a share
 # of a 4:3 screen's half width) stretches. Narrower screens move them in.

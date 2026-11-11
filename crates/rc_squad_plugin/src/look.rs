@@ -162,11 +162,20 @@ pub struct MemberLook {
     pub skins: Vec<String>,
 }
 
+fn light_scale() -> f32 {
+    1.1
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LooksFile {
-    /// Light every squad mate always gets, 0 to 1 of its own colour.
+    /// Light every squad mate gets, 0 to 1 of its own colour, when the
+    /// level's light around it can't be measured.
     pub ambient: f32,
+    /// How strongly the level's light where a squad mate stands shows on
+    /// it (see `rc_game_core::place_light`).
+    #[serde(default = "light_scale")]
+    pub light_scale: f32,
     pub animations: Animations,
     #[serde(default)]
     pub blend: BlendTimes,
@@ -204,6 +213,7 @@ impl LooksFile {
                 .iter()
                 .map(|s| Some(s.clone()).filter(|s| !s.is_empty()))
                 .collect(),
+            ..Default::default()
         })
     }
 }
@@ -252,6 +262,7 @@ pub fn model_turn() -> Quat {
 pub fn spawn_pieces(
     model: Arc<Model>,
     ambient: f32,
+    light_scale: f32,
     parent: &mut EntityCommands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -319,6 +330,14 @@ pub fn spawn_pieces(
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material),
                     NoFrustumCulling,
+                    // Drawn by the level's light where the mate stands.
+                    rc_game_core::LitByPlace {
+                        target: rc_game_core::LightTarget::Emissive,
+                        own: 0.0,
+                        scale: light_scale,
+                        height: 1.0,
+                        made_at: a.powf(1.0 / 2.2),
+                    },
                 ));
                 pieces.push(Piece { section: i, mesh });
             }

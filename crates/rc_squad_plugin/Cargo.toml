@@ -39,3 +39,6 @@ rc_level = { path = "../rc_level" }
 # Only for the carry_over test: the real save plugin carries the squad to
 # the next map.
 rc_save = { path = "../rc_save" }
+# Only for the lift_room test: a lift for the squad to ride.
+rc_movers = { path = "../rc_movers" }
+rc_movers_plugin = { path = "../rc_movers_plugin" }

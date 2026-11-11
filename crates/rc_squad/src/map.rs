@@ -18,8 +18,14 @@
 //!   in `MyAnchor`. A firing position often has no spot: the squad mate
 //!   stands at the anchor.
 //!
-//! Squad mates arrive through `PawnFactory` actors whose `Prototype` is one
-//! of the `Commando..Delta` classes.
+//! Squad mates are placed in most mission maps as `Commando07Delta`,
+//! `Commando40Delta` and `Commando62Delta` actors, and join the player's
+//! squad when the level starts. A few arrive later through `PawnFactory`
+//! actors whose `Prototype` is one of those classes (Scorch on geo_01a,
+//! Fixer on ras_02b); those start outside the squad until a script's
+//! `ACTION_ChangeSquadMember` adds them. Squad mates are not carried from
+//! one map to the next: each map has its own (the original only carries
+//! their health over).
 
 use rc_level::actors::{self, Placement};
 use rc_movement::Vec3;
@@ -59,14 +65,102 @@ pub struct SquadFactory {
     /// The character class, like `Commando62Delta`.
     pub class: String,
     pub location: Vec3,
+    /// Facing, radians.
+    pub yaw: f32,
     /// The event that triggers it (`levelstart` means at the start).
     pub tag: String,
+    /// The name scripts call what it makes (`PawnTagFromFactory`, like
+    /// `Delta40`); the class name when it gives none.
+    pub pawn_tag: String,
+    /// The `ScriptedSequence` what it makes follows
+    /// (`AIScriptFromFactory`), if any.
+    pub script: Option<String>,
+}
+
+/// A squad mate placed in the map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedMate {
+    pub actor: String,
+    /// The character class, like `Commando62Delta`.
+    pub class: String,
+    /// Feet are `location` less the collision height; this is the actor's
+    /// own location (its middle), as the map gives it.
+    pub location: Vec3,
+    /// Facing, radians.
+    pub yaw: f32,
+    /// The name scripts call them (`Tag`): the class name unless the map
+    /// gave another (`Seven`, `Delta07`).
+    pub tag: String,
+    /// The `ScriptedSequence` they follow (`AIScriptTag`), if any.
+    pub script: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct MapSquadInfo {
     pub markers: Vec<MarkerSpot>,
     pub factories: Vec<SquadFactory>,
+    /// Squad mates placed in the map (in the squad from the start).
+    pub placed: Vec<PlacedMate>,
+    /// The map has a `CTSquad` actor: the original sets the squad up only
+    /// in maps that have one (the playable missions, not the prologue,
+    /// briefings or epilogue).
+    pub has_squad_actor: bool,
+}
+
+impl MapSquadInfo {
+    /// Whether this map has a squad at all: a `CTSquad` actor, or any
+    /// squad marker or squad-mate spawner.
+    pub fn wants_squad(&self) -> bool {
+        self.has_squad_actor || !self.markers.is_empty() || !self.factories.is_empty()
+    }
+
+    /// Where this map has the squad mate of `class` (like
+    /// `Commando62Delta`): placed in the map, else made by a spawner.
+    pub fn mate(&self, class: &str) -> Option<MateSource<'_>> {
+        self.placed
+            .iter()
+            .filter(|p| p.class.eq_ignore_ascii_case(class))
+            // A map with two (the prologue) has the one scripts call by
+            // the class name in the squad.
+            .min_by_key(|p| !p.tag.eq_ignore_ascii_case(class))
+            .map(MateSource::Placed)
+            .or_else(|| {
+                self.factories
+                    .iter()
+                    .find(|f| f.class.eq_ignore_ascii_case(class))
+                    .map(MateSource::Factory)
+            })
+    }
+}
+
+/// Where a map has a squad mate: see [`MapSquadInfo::mate`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MateSource<'a> {
+    Placed(&'a PlacedMate),
+    Factory(&'a SquadFactory),
+}
+
+impl MateSource<'_> {
+    /// The name scripts call the mate.
+    pub fn tag(&self) -> &str {
+        match self {
+            MateSource::Placed(p) => &p.tag,
+            MateSource::Factory(f) => &f.pawn_tag,
+        }
+    }
+
+    /// The `ScriptedSequence` the mate follows, if any.
+    pub fn script(&self) -> Option<&str> {
+        match self {
+            MateSource::Placed(p) => p.script.as_deref(),
+            MateSource::Factory(f) => f.script.as_deref(),
+        }
+    }
+}
+
+fn is_mate_class(class: &str) -> bool {
+    let lower = class.to_ascii_lowercase();
+    lower.starts_with("commando") && lower.ends_with("delta")
 }
 
 fn v(p: [f32; 3]) -> Vec3 {
@@ -98,7 +192,13 @@ pub fn job_name(anchor_class: &str) -> String {
 /// Read the squad's spots and factories from a map package.
 pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
     let level = actors::read_level(pkg, data).map_err(|e| format!("level: {e}"))?;
-    let mut info = MapSquadInfo::default();
+    let mut info = MapSquadInfo {
+        has_squad_actor: pkg
+            .exports
+            .iter()
+            .any(|e| pkg.export_class_name(e).eq_ignore_ascii_case("CTSquad")),
+        ..Default::default()
+    };
     let placed: Vec<(usize, Placement)> = level
         .actors
         .iter()
@@ -136,7 +236,8 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
     for (a, p) in &placed {
         let class = p.class.as_str();
         let is_order = class.starts_with("Marker") && !class.starts_with("MarkerSnipeAnchor");
-        if class != "SquadMarkerSpot" && class != "PawnFactory" && !is_order {
+        let is_mate = is_mate_class(class);
+        if class != "SquadMarkerSpot" && class != "PawnFactory" && !is_order && !is_mate {
             continue;
         }
         let Ok(props) = actors::read_actor_properties(pkg, data, *a) else {
@@ -146,7 +247,21 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
             Some(Value::Object(o)) => *o,
             _ => 0,
         };
-        if class == "SquadMarkerSpot" {
+        let name = |key: &str| match properties::find(pkg, &props, key).map(|q| &q.value) {
+            Some(Value::Name(n)) => Some(pkg.name(*n).to_string())
+                .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("None")),
+            _ => None,
+        };
+        if is_mate {
+            info.placed.push(PlacedMate {
+                actor: p.name.clone(),
+                class: p.class.clone(),
+                location: v(p.location),
+                yaw: yaw_of(p),
+                tag: name("Tag").unwrap_or_else(|| p.class.clone()),
+                script: name("AIScriptTag"),
+            });
+        } else if class == "SquadMarkerSpot" {
             spots.push(Spot {
                 name: p.name.clone(),
                 stand: v(p.location),
@@ -165,17 +280,15 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
         } else {
             let proto = object("Prototype");
             let proto_name = pkg.object_name(proto).to_string();
-            let lower = proto_name.to_ascii_lowercase();
-            if lower.starts_with("commando") && lower.ends_with("delta") {
-                let tag = match properties::find(pkg, &props, "Tag").map(|q| &q.value) {
-                    Some(Value::Name(n)) => pkg.name(*n).to_string(),
-                    _ => String::new(),
-                };
+            if is_mate_class(&proto_name) {
                 info.factories.push(SquadFactory {
                     actor: p.name.clone(),
-                    class: proto_name,
                     location: v(p.location),
-                    tag,
+                    yaw: yaw_of(p),
+                    tag: name("Tag").unwrap_or_default(),
+                    pawn_tag: name("PawnTagFromFactory").unwrap_or_else(|| proto_name.clone()),
+                    script: name("AIScriptFromFactory"),
+                    class: proto_name,
                 });
             }
         }

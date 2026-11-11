@@ -1,0 +1,41 @@
+# The shell the Wookiee heavy turret and the Trandoshan missile turret fire
+# (HeavyTurretProj and MissileTurretProj have the same values). It flies
+# like a grenade, falling a little, and goes off on touching anything.
+#
+# See dc17m_antiarmor_round.toml for how grenade files work. "game:" values
+# are the projectile classes in ctinventory.u and their parent
+# CTProjExplosive.
+
+name = "Turret Shell"
+
+[ammo]
+max_count = 1             # not carried by hand; the weapon's ammo counts
+
+[throw]
+speed = 5000              # game: HeavyTurretProj Speed (the weapon's shot.speed sets it)
+
+[fuse]
+time = 5                  # game: FuseTime
+after_impact = 1          # game: CTProjExplosive PostImpactFuseTime
+on_actor = true           # game: bActorDetonate
+on_world = true           # game: bWorldDetonate
+
+[flight]
+bounce = 0.5              # game: BounceDampening
+actor_bounce = 0.05       # game: CTProjExplosive ActorBounceDampening
+rest_speed = 20           # game: CTProjExplosive RestSpeed
+gravity = 1100            # game: level gravity (CTProjExplosive Physics 2, falling)
+
+[blast]
+damage = 800              # game: HeavyTurretProj Damage
+radius = 256              # game: DamageRadius
+damage_type = "CTDamageExplosion" # game: MyDamageType
+damage_kind = "explosion"
+
+[sound]
+package = "gen_sound"
+blast = "exp_GEN_ship_01" # game: ExplosionEffect DC_17_AA_hit, its SpawnSound (as the anti-armour round)
+
+[model]
+mesh = "WookieeRocketShell" # game: StaticMesh (not drawn yet)
+blast_colour = [1.0, 0.5, 0.2]   # our choice

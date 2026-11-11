@@ -1,0 +1,33 @@
+# The E-Web heavy repeating blaster on its tripod (ras_03c), sat at.
+#
+# See wookiee_heavy_turret.toml for how these files work. "game:" values
+# are EWebCannon (ctcharacters.u) and Turret (engine.u).
+
+name = "E-Web Turret"
+classes = ["EWebCannon"]
+
+[model]
+mesh = "EWebTurret"                # game: Mesh
+pose = "Fire"                      # game: frame 0 is at rest
+muzzles = ["muzzle"]               # game: Turret fires from 'muzzle'
+
+[aim]
+speed = 10000                      # game: Turret Speed
+min_yaw = -8194                    # game: Turret MinYaw
+max_yaw = 8194
+min_pitch = -8194
+max_pitch = 8194
+
+[gunner]
+height = -20                       # game: TurretHeight
+sit = true                         # game: SitToUse
+radius = 65                        # game: CollisionRadius
+half_height = 65                   # game: CollisionHeight
+reach = 100                        # our choice
+exit = [0, 127, -10]               # game: NavPtLocs offset
+weapon = "eweb_turret"             # game: FPWeaponClass EWebTurret
+
+[auto]
+weapon = "eweb_turret"
+shot_delay = 0.12                  # game: EWebTurretDefaults ShotDelay
+range = 5000                       # game: EWebTurretAmmo Range

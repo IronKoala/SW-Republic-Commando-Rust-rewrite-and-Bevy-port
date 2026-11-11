@@ -1,41 +1,29 @@
-# Which of the game's music tracks (GameData/Music/*.ogg) play where.
+# Music: our own choices, where the game's files say nothing.
 #
-# Each list plays in order and repeats. Names are file names without .ogg.
-# The original switches between calm ("suspense") and battle music as
-# fighting starts and stops; for now the calm list plays, and `battle` is
-# ready for when enemies can tell the music system a fight began.
-# Mods can replace this file to change the soundtrack.
+# The music itself and the rules for when it plays come from the game's own
+# files at run time, not from here:
+# - the pieces, their fades, loops and loudness: GameData/Sounds/*_music.uax
+# - room music: the map's volumes and GameData/Properties/audioenv.u
+# - battle music and when a fight starts: the map's LevelInfo and scripts
+# - menu music: each menu's BackgroundMusic in XInterfaceCTMenus.u
+# See "Music" in docs/DESIGN.md.
 
-menu = ["musui_mainmenu_lp"]
+# Seconds between checks for a fight starting or ending. The original keeps
+# a "next battle update time" but its spacing isn't stored anywhere.
+battle_check_seconds = 0.5
 
-# Levels pick the first [[level]] block whose prefix starts their map name.
-[[level]]
-prefix = "geo_"
-calm = ["musgeo_suspensestate01_lp", "musgeo_suspensestate02_lp", "musgeo_suspensestate03_lp", "musgeo_suspensestate04_lp", "musgeo_suspensestate05_lp", "musgeo_suspensestate06_lp"]
-battle = ["musgeo_battle02_lp", "musgeo_battle03_lp", "musgeo_jwbattle01_lp", "musgeo_jwbattle02_lp"]
+# A fight's music ends (with its victory flourish) this many seconds after
+# the last enemy left the level's outer battle radius, so it doesn't flicker
+# on and off at the edge.
+battle_end_seconds = 3.0
 
-[[level]]
-prefix = "ras_"
-calm = ["musras_suspensestate01_lp", "musras_suspensestate02_lp", "musras_suspensestate03_lp", "musras01_suspenselow01"]
-battle = ["musras_battle02_lp", "musras_jwbattle01_lp", "musras_jwbattle02_lp", "musras_jwbattle03_lp"]
+# Fade, in seconds, for room overlays cut short by a fight or a script.
+overlay_stop_fade = 1.0
 
-[[level]]
-prefix = "yyy"
-calm = ["musyyy_suspensestate01_lp", "musyyy_suspensestate02_lp", "musyyy_suspensestate03_lp", "musyyy_suspensestate04_lp", "musyyy_suspensestate05_lp"]
-battle = ["musyyy_battle02_lp", "musyyy_battle03_lp", "musyyy_battle04_lp", "musyyy_battle05_lp"]
+# The "player down" loop, for levels whose battle music doesn't name one
+# (every battle group in the game names this same piece).
+player_down = "musGEN_playerincap_lp"
 
-[[level]]
-prefix = "pro"
-calm = ["musgen_prologuevari_lp"]
-battle = []
-
-[[level]]
-prefix = "epilogue"
-calm = ["musgen_epilogue_ep"]
-battle = []
-
-# Any other map.
-[[level]]
-prefix = ""
-calm = ["musgeo_suspensestate01_lp"]
-battle = []
+# Mods: set this to a piece name from the music packages to replace the
+# main menu music. Empty keeps the original's (the sung "Vode An").
+menu = ""

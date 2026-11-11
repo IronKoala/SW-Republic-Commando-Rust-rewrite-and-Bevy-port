@@ -1,0 +1,43 @@
+# What the player fires from the Trandoshan missile turret (the original's
+# first-person turret weapon MissileTurret). After 8 shells it cools down
+# for 5 seconds (here: a "reload").
+#
+# Numbers marked "game:" are MissileTurret (ctinventory.u) with
+# MissileTurretDefaults (Properties/properties.u) on top, and its ammo
+# MissileTurretAmmo. "placeholder" marks the few not read yet.
+
+name = "Trandoshan Missile Turret"
+
+[fire]
+mode = "automatic"        # game: FireMode 2 (FM_Automatic)
+shot_delay = 0.5          # game: MissileTurretDefaults ShotDelay
+aim_error = 0
+offset = [150, 30, -20]   # placeholder: the arms model's muzzle1..muzzle4 bones (it takes turns)
+
+[ammo]
+clip_size = 8             # game: MissileTurret ReloadCount
+max_ammo = 10000          # game: Turret AmmoAmount 10000 (never runs out)
+start_ammo = 10000
+reload_time = 5           # game: MissileTurretDefaults CoolDownTime
+
+[shot]
+kind = "lobbed"
+speed = 5000              # game: MissileTurretProj Speed
+grenade = "turret_shell"  # game: MissileTurretProj has HeavyTurretProj's values
+
+[recoil]
+kick = [100, 100, 0]      # game: MissileTurretDefaults WeaponKick
+spring = 0.1              # game: RecoilConstant
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_dSpdMisFire_02"] # game: MissileTurretDefaults FireSound (not checked in the package yet)
+
+[model]
+package = "weapons"
+mesh = "DC17mBlaster"     # placeholder: shown only if the arms below can't be read
+
+[arms]
+mesh = "HudArmsTranTurret" # game: MissileTurret Mesh
+fov = 85
+brightness = 0.75

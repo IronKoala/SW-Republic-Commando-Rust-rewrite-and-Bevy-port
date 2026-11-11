@@ -55,6 +55,13 @@ pub struct Senses {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Combat {
     pub health: f32,
+    /// An energy shield on top of health (`Shields`): damage goes to it
+    /// first. 0 for none.
+    pub shields: f32,
+    /// Shield regained per second (`ShieldRechargeRate`).
+    pub shield_recharge_rate: f32,
+    /// Seconds after a hit before the shield recharges.
+    pub shield_recharge_delay: f32,
     pub accuracy: f32,
     /// Degrees of aim error at accuracy 0.
     pub max_aim_error: f32,
@@ -159,10 +166,13 @@ pub struct Look {
     pub throw: String,
     /// A close-up hit. Empty for none.
     pub melee: String,
-    /// Light the character always gets, 0 to 1 of its full colour, on top
-    /// of the level's lights (the original lights characters with each
-    /// zone's ambient light, which we don't read yet).
+    /// Light the character gets, 0 to 1 of its full colour, when the
+    /// level's light around it can't be measured (no level loaded).
     pub ambient: f32,
+    /// How strongly the level's light where the character stands shows on
+    /// it (see `rc_game_core::place_light`): 1 draws it as bright as the
+    /// surfaces around it. Matched to screenshots of the original.
+    pub light_scale: f32,
     /// Seconds to blend from one animation into the next. Our choice: the
     /// original blends inside its compiled code.
     pub blend_time: f32,
@@ -287,6 +297,9 @@ impl AiParams {
             },
             combat: Combat {
                 health: 100.0,
+                shields: 0.0,
+                shield_recharge_rate: 0.0,
+                shield_recharge_delay: 0.0,
                 accuracy: 0.4,
                 max_aim_error: 10.0,
                 weapon: "e5_blaster_tm".into(),
@@ -347,6 +360,7 @@ impl AiParams {
                 throw: String::new(),
                 melee: String::new(),
                 ambient: 0.5,
+                light_scale: 1.1,
                 blend_time: 0.2,
                 blend_time_fire: 0.05,
                 blend_time_death: 0.1,
@@ -474,6 +488,9 @@ impl AiParams {
             ("senses", "turn_rate") => s.turn_rate = num()?,
             ("senses", "hearing_radius") => s.hearing_radius = num()?,
             ("combat", "health") => c.health = num()?,
+            ("combat", "shields") => c.shields = num()?.max(0.0),
+            ("combat", "shield_recharge_rate") => c.shield_recharge_rate = num()?,
+            ("combat", "shield_recharge_delay") => c.shield_recharge_delay = num()?,
             ("combat", "accuracy") => c.accuracy = num()?,
             ("combat", "max_aim_error") => c.max_aim_error = num()?,
             ("combat", "weapon") => c.weapon = text(),
@@ -508,6 +525,7 @@ impl AiParams {
             ("look", "throw") => l.throw = text(),
             ("look", "melee") => l.melee = text(),
             ("look", "ambient") => l.ambient = num()?,
+            ("look", "light_scale") => l.light_scale = num()?.max(0.0),
             ("look", "blend_time") => l.blend_time = num()?.max(0.0),
             ("look", "blend_time_fire") => l.blend_time_fire = num()?.max(0.0),
             ("look", "blend_time_death") => l.blend_time_death = num()?.max(0.0),

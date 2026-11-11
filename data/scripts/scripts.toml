@@ -45,6 +45,12 @@ max_actions_per_frame = 64
 # chatter, briefings, explosions on cue), 0 is silent and 1 is full. An
 # action's own Volume (a few maps set one) is multiplied in.
 volume = 1.0
+# Sounds that come from a place in the level (a droid, a door, a gunship)
+# carry this far, in Unreal units (about 2 cm each), at full loudness when
+# the game's own settings for that sound give no distance. Past it they
+# get quieter. 2000 is the game's own default (engine.u's AudioParams
+# Radius, read with `rc_probe --class AudioParams`).
+default_radius = 2000
 
 [bacta]
 # How near the player must stand to use a bacta dispenser, in Unreal units
@@ -65,3 +71,12 @@ recharge_seconds = 10
 # NavigationPoint), read with `rc_probe --class Teleporter`.
 teleporter_radius = 80
 teleporter_height = 100
+
+[sight]
+# A LineOfSightTrigger sends its event the first time the player looks at
+# it (or at the thing it names) from near enough, nearly straight on, with
+# nothing in the way. Most maps give each trigger its own distance and
+# angle; these are for one that gives none. Unreal units (about 2 cm
+# each) and degrees from straight ahead.
+max_view_dist = 3000
+max_view_angle = 15

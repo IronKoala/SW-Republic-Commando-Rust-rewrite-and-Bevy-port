@@ -830,14 +830,38 @@ fn scripts_change_level_and_skip_disabled_actions() {
             "End",
             vec![act(
                 "ShowDebriefingScreen",
-                &[("NewLevel", t("YYY_01Briefing.ctm"))],
+                &[
+                    ("NewLevel", t("YYY_01Briefing.ctm")),
+                    ("MenuClass", t("XInterfaceCTMenus.CTDebriefingInfoRAS")),
+                    ("Title", t("CRITICAL DISCOVERIES")),
+                    ("Text", t("Well done.")),
+                    ("PicName", t("GUIContent.RAS_Debrief")),
+                ],
             )],
         )],
         failures: vec![],
         sounds: Default::default(),
     };
     let mut d = Director::new(&map, &[], Settings::default());
-    assert_eq!(changes(&run(&mut d, 0.1)), ["YYY_01Briefing.ctm"]);
+    let out = run(&mut d, 0.1);
+    assert_eq!(changes(&out), ["YYY_01Briefing.ctm"]);
+    // It carries what the screen shows, so the game can show it first.
+    let shown: Vec<&Debriefing> = out
+        .iter()
+        .filter_map(|e| match e {
+            Effect::ChangeLevel { debriefing, .. } => debriefing.as_ref(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [&Debriefing {
+            menu_class: "XInterfaceCTMenus.CTDebriefingInfoRAS".into(),
+            title: "CRITICAL DISCOVERIES".into(),
+            text: "Well done.".into(),
+            picture: "GUIContent.RAS_Debrief".into(),
+        }]
+    );
     // A hint screen (same action, no NewLevel) doesn't leave.
     let map = MapScripts {
         actors: vec![script(
@@ -885,4 +909,330 @@ fn level_addresses_read_as_map_and_portal() {
     assert_eq!(r(""), None);
     assert_eq!(r("#FromA"), None);
     assert_eq!(r("../../x.ctm"), None);
+}
+
+/// A Dispatcher (the prologue's and briefings' timing) sends its list in
+/// order, each after its own delay, when its tag is sent; it ignores its
+/// tag while it runs, and can run again afterwards.
+#[test]
+fn dispatcher_sends_its_list_in_time() {
+    let entry = |event: &str, delay: f32| {
+        let mut v = Vals::new();
+        v.insert("Event".into(), t(event));
+        v.insert("Delay".into(), Val::Float(delay));
+        v.insert("DelayMax".into(), Val::Float(0.0));
+        v.insert("Sound".into(), t("None"));
+        v.insert("bWaitForSound".into(), Val::Bool(false));
+        v
+    };
+    let map = MapScripts {
+        actors: vec![
+            actor(
+                obj(2, "PlayerStart", "PlayerStart0", &[("Event", t("Go"))]),
+                vec![],
+            ),
+            actor(
+                obj(
+                    3,
+                    "Dispatcher",
+                    "Dispatcher1",
+                    &[
+                        ("Tag", t("Go")),
+                        (
+                            "Events",
+                            Val::Structs(vec![entry("First", 0.0), entry("Second", 2.0), entry("Third", 1.0)]),
+                        ),
+                    ],
+                ),
+                vec![],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    assert_eq!(d.stats.dispatchers, 1);
+    d.start();
+    run(&mut d, 0.1);
+    assert_eq!(sent(&d), ["Go", "First"]);
+    // Sent again while it runs: not heard.
+    d.fire("Go", "test");
+    run(&mut d, 2.0);
+    assert_eq!(sent(&d), ["Go", "First", "Go", "Second"]);
+    run(&mut d, 1.2);
+    assert_eq!(sent(&d), ["Go", "First", "Go", "Second", "Third"]);
+    let at = |e: &str| d.history.iter().find(|(_, n)| n == e).unwrap().0;
+    assert!((at("Second") - at("First") - 2.0).abs() < 0.11);
+    assert!((at("Third") - at("Second") - 1.0).abs() < 0.11);
+    // Done: it runs again on its tag.
+    d.fire("Go", "test");
+    run(&mut d, 0.1);
+    assert_eq!(sent(&d).iter().filter(|e| *e == "First").count(), 2);
+}
+
+fn breakable(export: usize, name: &str, tag: &str, health: f32) -> Breakable {
+    Breakable {
+        export,
+        name: name.into(),
+        class: "ExplosiveBarrelGEO".into(),
+        tag: tag.into(),
+        location: [0.0; 3],
+        rotation: [0; 3],
+        draw_scale: 1.0,
+        draw_scale_3d: [1.0; 3],
+        pre_pivot: [0.0; 3],
+        health,
+        damaged_ratio: 0.0,
+        event: None,
+        damaged: rc_level::breakables::Transition::default(),
+        destroyed: rc_level::breakables::Transition::default(),
+        explosion: None,
+        damage_table: None,
+        hidden: false,
+        anim_prop: false,
+    }
+}
+
+/// geo_05b's clamps: shooting one breaks it at no health, its event
+/// reaches the script waiting for it, and more damage does nothing.
+#[test]
+fn shot_props_break_and_tell_the_scripts() {
+    let map = MapScripts {
+        actors: vec![script(
+            "WaitClamp",
+            vec![
+                act("WaitForEvent", &[("ExternalEvent", t("Clamp00"))]),
+                act("TriggerEvent", &[("Event", t("ClampGone"))]),
+            ],
+        )],
+        failures: vec![],
+        sounds: Default::default(),
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    let mut clamp = breakable(40, "KarmaProp2", "Attachment00", 50.0);
+    clamp.event = Some("Clamp00".into());
+    d.add_breakables(&[clamp]);
+    assert_eq!(d.stats.breakables, 1);
+    run(&mut d, 0.1);
+    assert_eq!(d.hurt_prop(40, 20.0), PropHurt::Hurt(30.0));
+    assert_eq!(d.hurt_prop(99, 20.0), PropHurt::NotBreakable);
+    assert_eq!(d.hurt_prop(40, 30.0), PropHurt::Broken);
+    assert_eq!(d.hurt_prop(40, 30.0), PropHurt::AlreadyBroken);
+    let fx = run(&mut d, 0.1);
+    assert!(fx
+        .iter()
+        .any(|e| matches!(e, Effect::PropDestroyed { export: 40, .. })));
+    let s = sent(&d);
+    assert!(s.contains(&"Clamp00".to_string()), "{s:?}");
+    assert!(s.contains(&"ClampGone".to_string()), "{s:?}");
+    assert_eq!(d.props_standing("Attachment00"), 0);
+    assert_eq!(d.destroyed_props(), vec![(40, "Attachment00".to_string())]);
+}
+
+/// A prop with a damaged step: at ratio x its health it goes there
+/// (sending the damaged event); with no damaged look it is simply gone
+/// and sends no broken event (rock cover); with a look and a time limit
+/// it breaks by itself when the time runs out.
+#[test]
+fn damaged_step_rules() {
+    let map = MapScripts::default();
+    let mut d = Director::new(&map, &[], Settings::default());
+    let mut rock = breakable(1, "GEO4_RockCover4", "GEO4_RockCover00", 2000.0);
+    rock.damaged_ratio = 0.01;
+    rock.event = Some("RockProp03".into());
+    let mut panel = breakable(2, "Panel", "Panel", 100.0);
+    panel.damaged_ratio = 0.5;
+    panel.damaged.mesh = Some("FlyingGrate".into());
+    panel.damaged.event = Some("PanelHit".into());
+    panel.damaged.life_span = 2.0;
+    panel.event = Some("PanelGone".into());
+    d.add_breakables(&[rock, panel]);
+    assert_eq!(d.hurt_prop(1, 1500.0), PropHurt::Hurt(500.0));
+    assert_eq!(d.hurt_prop(1, 5000.0), PropHurt::Damaged);
+    assert_eq!(d.hurt_prop(1, 5.0), PropHurt::AlreadyBroken);
+    let fx = run(&mut d, 0.1);
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::PropDamaged {
+            export: 1,
+            removed: true,
+            ..
+        }
+    )));
+    assert!(!sent(&d).contains(&"RockProp03".to_string()));
+
+    assert_eq!(d.hurt_prop(2, 60.0), PropHurt::Damaged);
+    assert_eq!(d.hurt_prop(2, 10.0), PropHurt::Hurt(30.0));
+    run(&mut d, 1.0);
+    assert!(sent(&d).contains(&"PanelHit".to_string()));
+    assert!(!sent(&d).contains(&"PanelGone".to_string()));
+    run(&mut d, 1.5);
+    assert!(sent(&d).contains(&"PanelGone".to_string()), "{:?}", sent(&d));
+    assert_eq!(d.prop_health(2), Some(0.0));
+}
+
+/// A broken prop stays broken after a save and a load.
+#[test]
+fn broken_props_are_saved() {
+    let map = MapScripts::default();
+    let mut d = Director::new(&map, &[], Settings::default());
+    d.add_breakables(&[breakable(7, "Barrel", "B", 60.0)]);
+    d.hurt_prop(7, 100.0);
+    run(&mut d, 0.1);
+    let snap = d.snapshot();
+    let mut e = Director::new(&map, &[], Settings::default());
+    e.add_breakables(&[breakable(7, "Barrel", "B", 60.0)]);
+    e.restore(&snap);
+    assert_eq!(e.hurt_prop(7, 1.0), PropHurt::AlreadyBroken);
+    assert_eq!(e.destroyed_props(), vec![(7, "B".to_string())]);
+}
+
+fn sight(name: &str, vals: &[(&str, Val)], at: [f32; 3]) -> ScriptActor {
+    let mut a = actor(obj(50, "LineOfSightTrigger", name, vals), vec![]);
+    a.location = at;
+    a
+}
+
+/// A line-of-sight trigger sends its event once, only when the player
+/// looks at it from near enough, straight on, with a clear line.
+#[test]
+fn line_of_sight_trigger_fires_when_looked_at() {
+    let map = MapScripts {
+        actors: vec![
+            sight(
+                "LineOfSightTrigger0",
+                &[
+                    ("Event", t("SawDroids")),
+                    ("MaxViewDist", Val::Float(1000.0)),
+                    ("MaxViewAngle", Val::Int(10)),
+                ],
+                [500.0, 0.0, 0.0],
+            ),
+            script(
+                "Waits",
+                vec![act("WaitForEvent", &[("ExternalEvent", t("SawDroids"))])],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    assert_eq!(d.stats.sight_triggers, 1);
+    let eye = [0.0, 0.0, 0.0];
+    // Looking the other way, or too far off to the side: nothing.
+    assert!(d.sight_candidates(eye, [-1.0, 0.0, 0.0]).is_empty());
+    assert!(d.sight_candidates(eye, [0.0, 1.0, 0.0]).is_empty());
+    // 20 degrees off: outside the 10 degree angle.
+    let a = 20f32.to_radians();
+    assert!(d.sight_candidates(eye, [a.cos(), a.sin(), 0.0]).is_empty());
+    // Too far away, even straight on.
+    assert!(d
+        .sight_candidates([-600.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+        .is_empty());
+    // Straight on but a wall in the way.
+    assert_eq!(d.look(eye, [1.0, 0.0, 0.0], &mut |_, _| false), 0);
+    run(&mut d, 0.1);
+    assert!(!sent(&d).contains(&"SawDroids".to_string()));
+    // 5 degrees off with a clear line: it goes off.
+    let a = 5f32.to_radians();
+    assert_eq!(d.look(eye, [a.cos(), a.sin(), 0.0], &mut |_, _| true), 1);
+    run(&mut d, 0.1);
+    assert_eq!(sent(&d), vec!["SawDroids".to_string()]);
+    // Only once.
+    assert_eq!(d.look(eye, [1.0, 0.0, 0.0], &mut |_, _| true), 0);
+    let st = d.script_states();
+    assert!(
+        st.iter().any(|(n, _, s)| n == "Waits" && s == "finished"),
+        "{st:?}"
+    );
+}
+
+/// `SeenActorTag` points it at another actor; `bEnabled=False` keeps it
+/// off until an event with its tag switches it on; saves keep both.
+#[test]
+fn line_of_sight_trigger_seen_actor_and_switch_on() {
+    let mut droid = actor(
+        obj(60, "Prop", "Target0", &[("Tag", t("LookHere"))]),
+        vec![],
+    );
+    droid.location = [0.0, 800.0, 0.0];
+    let map = MapScripts {
+        actors: vec![
+            sight(
+                "LOS1",
+                &[
+                    ("Tag", t("ArmLOS")),
+                    ("Event", t("Seen")),
+                    ("SeenActorTag", t("LookHere")),
+                    ("bEnabled", Val::Bool(false)),
+                ],
+                [5000.0, 0.0, 0.0],
+            ),
+            droid,
+        ],
+        ..Default::default()
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    let eye = [0.0, 0.0, 0.0];
+    // Off at first.
+    assert!(d.sight_candidates(eye, [0.0, 1.0, 0.0]).is_empty());
+    d.fire("ArmLOS", "test");
+    run(&mut d, 0.05);
+    // Looks at the seen actor, not the trigger's own place.
+    assert!(d.sight_candidates(eye, [1.0, 0.0, 0.0]).is_empty());
+    let c = d.sight_candidates(eye, [0.0, 1.0, 0.0]);
+    assert_eq!(c, vec![(0, [0.0, 800.0, 0.0])]);
+    let save = d.snapshot();
+    assert_eq!(save.sight.len(), 1);
+    assert!(save.sight[0].enabled && !save.sight[0].triggered);
+    d.look(eye, [0.0, 1.0, 0.0], &mut |_, _| true);
+    run(&mut d, 0.05);
+    assert!(sent(&d).contains(&"Seen".to_string()));
+    // A load from before it was seen makes it ready again.
+    let mut fresh = Director::new(&map, &[], Settings::default());
+    fresh.restore(&save);
+    assert_eq!(
+        fresh.sight_triggers(),
+        vec![("LOS1".to_string(), true, false)]
+    );
+}
+
+/// A watched character that moved: the game says where it is now.
+#[test]
+fn line_of_sight_trigger_follows_a_moving_character() {
+    let mut guy = actor(
+        obj(
+            61,
+            "TrandoshanScav",
+            "TrandoshanScav0",
+            &[("Tag", t("Dragger1"))],
+        ),
+        vec![],
+    );
+    guy.location = [1000.0, 0.0, 0.0];
+    let map = MapScripts {
+        actors: vec![
+            sight(
+                "LineOfSightTrigger1",
+                &[
+                    ("Event", t("Dragger1Seen")),
+                    ("SeenActorTag", t("Dragger1")),
+                    ("MaxViewAngle", Val::Int(30)),
+                ],
+                [0.0; 3],
+            ),
+            guy,
+        ],
+        ..Default::default()
+    };
+    let d = Director::new(&map, &[], Settings::default());
+    let eye = [0.0; 3];
+    // Placed along +X; it walked to +Y.
+    let moved = |tag: &str| (tag == "dragger1").then_some([0.0, 1000.0, 0.0]);
+    assert_eq!(d.sight_candidates(eye, [1.0, 0.0, 0.0]).len(), 1);
+    assert!(d
+        .sight_candidates_live(eye, [1.0, 0.0, 0.0], &moved)
+        .is_empty());
+    assert_eq!(
+        d.sight_candidates_live(eye, [0.0, 1.0, 0.0], &moved),
+        vec![(0, [0.0, 1000.0, 0.0])]
+    );
 }

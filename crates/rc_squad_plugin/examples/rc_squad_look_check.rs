@@ -306,6 +306,7 @@ fn setup(
         let mm = look::spawn_pieces(
             model.clone(),
             models.1,
+            1.1,
             &mut e,
             &mut meshes,
             &mut materials,

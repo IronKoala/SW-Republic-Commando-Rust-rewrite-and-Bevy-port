@@ -72,7 +72,7 @@ pub enum Trigger {
 impl Trigger {
     fn parse(t: &str) -> Result<Trigger, String> {
         let (head, tail) = match t.split_once(':') {
-            Some((h, rest)) => (h, Some(rest.trim().to_string())),
+            Some((h, rest)) => (h, Some(rest.trim().to_ascii_lowercase())),
             None => (t, None),
         };
         let none_after = |tr: Trigger| {
@@ -160,6 +160,10 @@ pub struct VoiceLine {
     /// finish instead of staying quiet (0: stay quiet). An answer to the
     /// player's order waits for the order to be said.
     pub wait: f32,
+    /// Some squad mates have no recording of this in the game (Sev has no
+    /// GrenadeReady): then they just stay quiet, and it isn't counted as
+    /// a missing line.
+    pub optional: bool,
 }
 
 impl VoiceLine {
@@ -173,6 +177,7 @@ impl VoiceLine {
             cooldown: 0.0,
             urgent: false,
             wait: 0.0,
+            optional: false,
         }
     }
 }
@@ -297,7 +302,7 @@ impl VoiceSettings {
         )];
         for l in &self.lines {
             out.push(format!(
-                "voice rule {}: on {:?} -> {} ({:?}, chance {}, cooldown {} s, wait {} s{})",
+                "voice rule {}: on {:?} -> {} ({:?}, chance {}, cooldown {} s, wait {} s{}{})",
                 l.key,
                 l.on,
                 l.events.join(" / "),
@@ -305,7 +310,8 @@ impl VoiceSettings {
                 l.chance,
                 l.cooldown,
                 l.wait,
-                if l.urgent { ", urgent" } else { "" }
+                if l.urgent { ", urgent" } else { "" },
+                if l.optional { ", optional" } else { "" }
             ));
         }
         out
@@ -343,6 +349,7 @@ fn set_line(l: &mut VoiceLine, key: &str, value: Value) -> Result<(), String> {
         "cooldown" => l.cooldown = one(value)?.max(0.0),
         "urgent" => l.urgent = yes_no(key, value)?,
         "wait" => l.wait = one(value)?.max(0.0),
+        "optional" => l.optional = yes_no(key, value)?,
         _ => return Err(format!("unknown setting `{key}` in a [line.*]")),
     }
     Ok(())
@@ -358,6 +365,8 @@ pub struct Say {
     /// The rule (`[line.<key>]`) that chose it.
     pub rule: String,
     pub urgent: bool,
+    /// No recording of it is fine (the rule's `optional`).
+    pub optional: bool,
     /// Any standing squad mate may say it instead (`who = "any"` or
     /// `"other"`), if the chosen one has no recording of it: the members
     /// to try, in order.
@@ -439,6 +448,16 @@ impl Chatter {
         }
         self.leader_was_down = squad.leader_down;
         let index = |name: &str| squad.members.iter().position(|m| m.settings.name == name);
+        // Squad events name a job as the squad panel does ("Breach door");
+        // the rules use its `[job.*]` key from squad.toml ("breach").
+        let key = |job: &str| {
+            squad
+                .settings
+                .jobs
+                .iter()
+                .find(|j| j.name == job || j.key.eq_ignore_ascii_case(job))
+                .map_or_else(|| job.to_ascii_lowercase(), |j| j.key.to_ascii_lowercase())
+        };
         for e in events {
             // (what, the member it's about, the member who does it)
             let (t, about, doer) = match e {
@@ -486,9 +505,9 @@ impl Chatter {
                 SquadEvent::MarkerAssigned { member, job, .. } => {
                     let i = index(member);
                     if let Some(i) = i {
-                        self.jobs[i] = Some(job.clone());
+                        self.jobs[i] = Some(key(job));
                     }
-                    (Trigger::JobAssigned(Some(job.clone())), i, i)
+                    (Trigger::JobAssigned(Some(key(job))), i, i)
                 }
                 SquadEvent::MarkerStarted { member, .. } => {
                     let i = index(member);
@@ -505,7 +524,7 @@ impl Chatter {
                 }
                 SquadEvent::Posted { member, job, .. } => {
                     let i = index(member);
-                    (Trigger::Posted(Some(job.clone())), i, i)
+                    (Trigger::Posted(Some(key(job))), i, i)
                 }
                 SquadEvent::FuseLit { member, .. } => {
                     let i = index(member);
@@ -529,12 +548,15 @@ impl Chatter {
                 continue;
             }
             let heard = self.decide(squad, r, about, doer, false);
-            if let Heard::Say(s) = &heard {
+            if let Heard::Say(_) = &heard {
                 self.last[r] = Some(squad.time);
                 busy = true;
             }
             out.push(heard);
         }
+        // The player's rules speak once per frame: a group job (breach)
+        // is given to every squad mate at once, but the player asked once.
+        let mut leader_said: Vec<usize> = Vec::new();
         for (t, about, doer) in happened {
             // A new order makes answers to older orders pointless: drop
             // them, so only the latest order is answered.
@@ -550,6 +572,16 @@ impl Chatter {
                     continue;
                 }
                 let line = &self.settings.lines[r];
+                if line.who == Who::Leader {
+                    if leader_said.contains(&r) {
+                        out.push(Heard::Quiet {
+                            rule: line.key.clone(),
+                            why: "already said for this order",
+                        });
+                        continue;
+                    }
+                    leader_said.push(r);
+                }
                 if busy && !line.urgent && line.wait > 0.0 {
                     let on_cooldown = self.last[r].is_some_and(|l| squad.time - l < line.cooldown);
                     if !on_cooldown && !self.waiting.iter().any(|w| w.0 == r) {
@@ -562,7 +594,7 @@ impl Chatter {
                     }
                 }
                 let heard = self.decide(squad, r, about, doer, busy);
-                if let Heard::Say(s) = &heard {
+                if let Heard::Say(_) = &heard {
                     self.last[r] = Some(squad.time);
                     busy = true;
                 }
@@ -600,7 +632,7 @@ impl Chatter {
         if line.chance < 1.0 && self.rng.next_f32() >= line.chance {
             return quiet("chance");
         }
-        let standing = |i: usize| !squad.members[i].down;
+        let standing = |i: usize| squad.members[i].available();
         let n = squad.members.len();
         let speaker = match line.who {
             Who::Leader => None,
@@ -670,6 +702,7 @@ impl Chatter {
             events,
             rule: line.key.clone(),
             urgent: line.urgent,
+            optional: line.optional,
             stand_ins,
         })
     }
@@ -864,6 +897,37 @@ mod tests {
         // never the one who is down.
         assert_eq!(s.stand_ins.len(), 1);
         assert!(!s.stand_ins.contains(&0) && Some(s.stand_ins[0]) != s.speaker);
+    }
+
+    #[test]
+    fn a_group_job_is_asked_for_once_and_confirmed_once() {
+        let mut sq = squad();
+        let mut c = rules(
+            "[line.boss]\non = \"job_assigned:breach\"\nevent = \"BreachInitiate\"\nwho = \"leader\"\nurgent = \"yes\"\n\
+             [line.confirm]\non = \"job_assigned:breach\"\nevent = \"BreachConfirm\"\nwait = 3\n",
+        );
+        // A breach fills every spot of the door: one MarkerAssigned for
+        // each squad mate, all in the same frame.
+        let assigned: Vec<SquadEvent> = ["Sev", "Fixer", "Scorch"]
+            .iter()
+            .enumerate()
+            .map(|(i, m)| SquadEvent::MarkerAssigned {
+                member: (*m).into(),
+                marker: format!("Breach{i}"),
+                // As the squad names it: the job's name, not its key.
+                job: "Breach door".into(),
+                distance: 300.0,
+            })
+            .collect();
+        let h = c.hear(&sq, &assigned, false);
+        assert_eq!(says(&h), vec![(None, "BreachInitiate".to_string())]);
+        c.speaking(sq.time, 1.0);
+        let mut confirms = 0;
+        for _ in 0..40 {
+            sq.time += 0.1;
+            confirms += says(&c.hear(&sq, &[], false)).len();
+        }
+        assert_eq!(confirms, 1);
     }
 
     #[test]

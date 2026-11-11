@@ -9,7 +9,9 @@
 //!   shares the same anchor, and work starts when all of them are in place.
 //! - **post**: walk to the spot and stay there, fighting from it with the
 //!   job's own weapon and sight (sniper, anti-armour) or throwing grenades
-//!   (`throw_...`), until the player recalls the squad (F4).
+//!   (`throw_...`), until the player recalls the squad (F4). A `mount`
+//!   post (manning a turret) gets on the anchor instead: the game holds
+//!   them on it and fires the turret, not their own gun.
 //!
 //! A map marker gets the first job whose `match` words appear in its order
 //! marker's class (`MarkerDoorBreach`), or, for one with no order marker,
@@ -71,6 +73,11 @@ pub struct JobSettings {
     /// original's `bCancelIfMembersNeeded`, set on its sniper, grenade,
     /// anti-armour and turret markers).
     pub pullable: bool,
+    /// Post: the anchor is a mounted turret the squad mate gets on once at
+    /// the spot (the original's `MarkerTurret`). The game holds them on it
+    /// and fires the turret; their own gun stays quiet. Where the turret
+    /// is taken (the player is on it) or missing, they fight from the spot.
+    pub mount: bool,
     /// Seconds from the end of the work to the blast and the result.
     pub fuse: f32,
     /// A blast at the anchor when the fuse runs out: damage at the middle,
@@ -126,6 +133,7 @@ impl JobSettings {
             result: JobResult::Nothing,
             group: false,
             pullable: false,
+            mount: false,
             fuse: 0.0,
             blast_damage: 0.0,
             blast_radius: 0.0,
@@ -201,6 +209,9 @@ impl JobSettings {
                 }
                 if self.pullable {
                     s += ", pullable";
+                }
+                if self.mount {
+                    s += ", gets on the anchor (a turret)";
                 }
                 if self.throw_interval > 0.0 {
                     s += &format!(
@@ -301,6 +312,10 @@ pub fn default_jobs() -> Vec<JobSettings> {
     anti_armour.auto_range = 600.0;
     anti_armour.auto_clearance = 400.0;
 
+    let mut turret = JobSettings::new("turret", "Man turret", &["turret"], JobKind::Post);
+    turret.pullable = true;
+    turret.mount = true;
+
     vec![
         bacta,
         demolition,
@@ -309,5 +324,6 @@ pub fn default_jobs() -> Vec<JobSettings> {
         sniper,
         grenade,
         anti_armour,
+        turret,
     ]
 }

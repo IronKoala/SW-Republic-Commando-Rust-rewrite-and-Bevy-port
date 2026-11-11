@@ -53,11 +53,11 @@ How it works:
   own copy of the picture and adjusts transparency so the result matches
   the original over a black background.
 
-Not done yet: the background video (`Movies/menu_bg.avi`, an MPEG-4 v2
-video with no Rust decoder), LOAD GAME, PROFILES and EXTRAS (greyed out
-until built), MULTIPLAYER (greyed out for good: offline only), the
-campaign, options and pause menus, button prompt pictures, and filling the
-sides of wide screens. Mouse use was not tested by the script.
+Not done yet (the campaign, load, save, options and pause menus have
+since been done; see below): the background video (`Movies/menu_bg.avi`,
+an MPEG-4 v2 video with no Rust decoder), PROFILES and EXTRAS (greyed out
+until built), MULTIPLAYER (greyed out for good: offline only) and button
+prompt pictures. Mouse use was not tested by the script.
 
 How to look at a menu without the game: `rc_probe --menu` (main menu) or
 `rc_probe --menu XInterface.MenuQuestionYesNo` paints it to
@@ -178,6 +178,18 @@ does `rc_menus::screens::fit_row_labels` shrink a label that would reach
 the first button of its row, keeping its left edge and middle line. The
 log names the labels it shrank ("labels shrunk to fit before their
 arrows") and any text still running into a button ("STILL OVERLAPPING").
+
+## The debriefing screen (2026-11-09)
+
+The end of each campaign (geo_05c, ras_04d, yyy_06d) shows the original
+`CTDebriefingInfo` screen: its own background, the two display-box
+frames, "YOU HAVE UNLOCKED / EXTRAS CONTENT" and the CONTINUE button, with
+the level script's title, text and picture filled in
+(`rc_menus/src/debriefing.rs`, page `debriefing` in
+`data/ui/original_menus.toml`). `rc_probe --menu
+XInterfaceCTMenus.CTDebriefingInfo` paints it with sample words of its own;
+`rc_probe --pages` says it uses the original. How it fits into play is in
+`docs/DESIGN.md` ("The debriefing screen").
 
 ## Wide screens: moving apart, not shrinking
 

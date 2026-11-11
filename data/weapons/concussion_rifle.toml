@@ -1,0 +1,54 @@
+# The Trandoshan LJ-50 concussion rifle: a slow shot that blasts
+# everything near where it lands.
+#
+# Numbers marked "game:" are ConcussionRifle's class defaults
+# (ctinventory.u, with ConcussionRifleDefaults in Properties/properties.u
+# on top) and its ammo ConcussionRifleAmmo(+Defaults).
+#
+# Our choice: the game's shot hits at once (bInstantHit) and then blasts
+# DamageRadius around the hit. Here it is a very fast round that goes off
+# on touching anything (concussion_rifle_blast.toml), which lands almost at
+# once and uses the grenade blast code.
+
+name = "LJ-50 Concussion Rifle"
+
+[fire]
+mode = "semi_auto"        # game: FireMode (the Weapon default)
+shot_delay = 2            # game: ShotDelay
+aim_error = 1             # game: ConcussionRifleDefaults AimError
+offset = [127.4, 10, -7.56] # placeholder: the ACP repeater's FPFireOffset
+
+[ammo]
+clip_size = 5             # game: ConcussionRifleDefaults ReloadCount
+max_ammo = 10             # game: ConcussionRifleAmmoDefaults MaxAmmo
+start_ammo = 10           # game: ConcussionRifleDefaults PickupAmmoCount
+reload_time = 4.07        # game: the arms' Reload animation (HudArmsConc), 122 frames at 30 fps
+
+[shot]
+kind = "lobbed"
+speed = 20000             # our choice: fast enough to land almost at once
+grenade = "concussion_rifle_blast"
+
+[melee]
+range = 200               # game: ConcussionRifleDefaults MeleeRange
+damage = 100              # game: ConcussionRifleDefaults MeleeDamage
+
+[recoil]
+kick = [350, 0, 0]        # game: WeaponKick
+spring = 2                # game: RecoilConstant
+damping = 0.1             # game: RecoilDampening
+
+[sound]
+package = "gen_sound"     # guess: wep_GEN_ sounds are in gen_sound.uax
+fire = ["wep_GEN_trnConcFire_01"] # game: ConcussionRifleDefaults FireSound
+empty = "wep_GEN_empty_01"
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: shown only if the arms can't load
+offset = [40, 12, -14]
+
+[arms]
+mesh = "HudArmsConc"      # game: ConcussionRifle's Mesh
+fov = 85                  # game: DisplayFOV
+brightness = 0.75         # our choice, as the other weapons
