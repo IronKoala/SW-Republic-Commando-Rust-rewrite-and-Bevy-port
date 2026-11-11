@@ -214,8 +214,9 @@ pub fn check_new_name(typed: &str, names: &[String], t: &Texts) -> Result<String
     if name.chars().count() < 1 {
         return Err(t.min_len.clone());
     }
-    // The original asks its profile code (`NAME_EXISTS`); here capitals
-    // don't count, as Windows folder names ignore them.
+    // NOT FROM THE GAME FILES: the original asks its native profile code
+    // (`NAME_EXISTS`), which wasn't read; here capitals don't count, as
+    // Windows folder names ignore them.
     if profiles::find(names, &name).is_some() {
         return Err(t.in_use.replacen("%s", &name, 1));
     }
@@ -315,8 +316,10 @@ pub fn command(menus: &mut OriginalMenus, k: &str, cmd: PageCmd, log: &GameLog) 
 
 /// Enter in the name box: the original moves focus to the nearest widget
 /// below it (it has no `OnSelect`). OK and BACK are both below and equally
-/// far to each side; which one the original's search picks wasn't worked
-/// out, so this port goes to OK.
+/// far to each side.
+///
+/// NOT FROM THE GAME FILES: which one the original's search picks wasn't
+/// worked out, so this port goes to OK.
 pub fn enter_in_box(screen: &mut Screen) {
     if let Some(ok) = screen
         .layout
@@ -329,6 +332,10 @@ pub fn enter_in_box(screen: &mut Screen) {
 }
 
 /// Show `text` in the original's warning box (CONTINUE closes it).
+///
+/// NOT FROM THE GAME FILES: the box borrows the page's own background
+/// picture (`setup_question`, as the port's question box does); what the
+/// original draws behind `MenuWarning` wasn't checked.
 fn warn(menus: &mut OriginalMenus, text: &str, under: &str, log: &GameLog) {
     log.line(format!("original menus: warning {text:?}"));
     let Some(mut layout) = menus.profiles.warning_layout.clone() else {
@@ -342,8 +349,12 @@ fn warn(menus: &mut OriginalMenus, text: &str, under: &str, log: &GameLog) {
     menus.show_box(Screen { layout, focus }, Asking::Warning);
 }
 
-/// Show the "LOADING PROFILE" message; when it has shown long enough, the
-/// game goes back to the main menu.
+/// Show the "LOADING PROFILE" message; when it has shown long enough
+/// (`HoldTime`, from the game files), the game goes back to the main menu.
+///
+/// NOT FROM THE GAME FILES: the background is borrowed from the page as in
+/// [`warn`]. Missing: the original's `MenuWarningTransition` fades in
+/// before the hold; that fade isn't drawn.
 fn hold_message(menus: &mut OriginalMenus, text: &str, under: &str, log: &GameLog) {
     log.line(format!("original menus: {text:?}"));
     let hold = menus.profiles.texts.hold;
