@@ -110,6 +110,10 @@ pub struct HelmetModel {
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
     pub parts: Vec<HelmetPart>,
+    /// The glass's triangles (three corner numbers each), which have no
+    /// picture of their own: the original draws the HUD onto them (see
+    /// [`GlassMap`]). Empty if the model has no such part.
+    pub glass: Vec<u32>,
     /// Degrees across a 4:3 screen.
     pub display_fov: f32,
     /// What was read and what was left out, for the log.
@@ -162,7 +166,11 @@ pub fn load(lib: &mut Library, plan: &HelmetPlan) -> Result<HelmetModel, String>
     }
     let package = plan.mesh.split('.').next().unwrap_or_default();
     let mut parts = vec![];
+    let mut glass = vec![];
     for (k, s) in m.sections.iter().enumerate() {
+        let first = s.first_index as usize;
+        let end = (first + s.num_faces as usize * 3).min(m.indices.len());
+        let indices: Vec<u32> = m.indices[first..end].iter().map(|&j| j as u32).collect();
         let reference = m.materials.get(k).copied().unwrap_or(0);
         let material = match rc_package::ObjectRef::from_index(reference) {
             rc_package::ObjectRef::Import(_) => object_path(pkg, reference),
@@ -177,14 +185,16 @@ pub fn load(lib: &mut Library, plan: &HelmetPlan) -> Result<HelmetModel, String>
         let picture = match lib.texture(&material) {
             Ok(p) => p,
             Err(e) => {
-                // The glass: its shader names no picture.
-                notes.push(format!("part {k} ({material}): nothing to draw ({e})"));
+                // The glass: its shader names no picture. The HUD is
+                // drawn onto it.
+                notes.push(format!(
+                    "part {k} ({material}): no picture ({e}); {} triangles of glass for the HUD",
+                    indices.len() / 3
+                ));
+                glass.extend(indices);
                 continue;
             }
         };
-        let first = s.first_index as usize;
-        let end = (first + s.num_faces as usize * 3).min(m.indices.len());
-        let indices: Vec<u32> = m.indices[first..end].iter().map(|&j| j as u32).collect();
         notes.push(format!(
             "part {k} ({material}): {} triangles, picture {}x{}",
             indices.len() / 3,
@@ -205,9 +215,105 @@ pub fn load(lib: &mut Library, plan: &HelmetPlan) -> Result<HelmetModel, String>
         normals: m.vertices.iter().map(|v| v.normal).collect(),
         uvs,
         parts,
+        glass,
         display_fov,
         notes,
     })
+}
+
+/// Where the HUD shows on the screen, through the helmet's glass.
+///
+/// The original (Engine.dll, `FPlayerSceneNode::Render` and
+/// `UHelmet::DrawHelmet`) draws the HUD into a picture the size of the
+/// screen, then draws the glass part of the helmet model with that
+/// picture on it: each glass corner's texture place is a place in the HUD
+/// picture, but the corner itself sits a little elsewhere on the screen,
+/// so the HUD comes out lower and slightly curved (the advisor's words
+/// drawn 45/600 down show nearer 1/7 down). This works out the same move
+/// for any point, from the model's own numbers.
+///
+/// On a screen wider than 4:3 the glass is moved like the frame
+/// ([`fit`]); each corner keeps the same move from its texture place,
+/// measured in screen heights, so nothing is stretched.
+#[derive(Debug, Clone, Default)]
+pub struct GlassMap {
+    /// Per triangle: each corner's (HUD place, screen place), as screen
+    /// fractions (0..1, x right, y down).
+    tris: Vec<[([f32; 2], [f32; 2]); 3]>,
+}
+
+impl GlassMap {
+    /// The map for a screen `aspect` (width / height). Empty (no move)
+    /// when the model has no glass.
+    pub fn new(model: &HelmetModel, plan: &HelmetPlan, aspect: f32) -> GlassMap {
+        let t = half_height(model.display_fov);
+        let fitted = fit(model, plan, aspect);
+        let screen = |p: [f32; 3], aspect: f32| -> Option<[f32; 2]> {
+            if p[0] <= 1e-3 {
+                return None;
+            }
+            Some([
+                0.5 + p[1] / p[0] / (2.0 * t * aspect),
+                0.5 - p[2] / p[0] / (2.0 * t),
+            ])
+        };
+        let mut tris = Vec::new();
+        for c in model.glass.chunks_exact(3) {
+            let mut tri = [([0.0; 2], [0.0; 2]); 3];
+            let mut ok = true;
+            for (k, &i) in c.iter().enumerate() {
+                let i = i as usize;
+                let (Some(&p), Some(&q), Some(&uv)) =
+                    (model.points.get(i), fitted.get(i), model.uvs.get(i))
+                else {
+                    ok = false;
+                    break;
+                };
+                let (Some(s43), Some(s)) = (screen(p, 4.0 / 3.0), screen(q, aspect)) else {
+                    ok = false;
+                    break;
+                };
+                // The move from texture place to screen place on 4:3, in
+                // screen heights across, kept on this screen.
+                let dx = (s43[0] - uv[0]) * (4.0 / 3.0) / aspect;
+                let dy = s43[1] - uv[1];
+                tri[k] = ([s[0] - dx, s[1] - dy], s);
+            }
+            if ok {
+                tris.push(tri);
+            }
+        }
+        GlassMap { tris }
+    }
+
+    /// Whether there is any glass to map through.
+    pub fn is_empty(&self) -> bool {
+        self.tris.is_empty()
+    }
+
+    /// Where a point of the HUD picture (screen fractions) shows on the
+    /// screen. Points outside the glass are left where they are.
+    pub fn place(&self, p: [f32; 2]) -> [f32; 2] {
+        for tri in &self.tris {
+            let [a, b, c] = [tri[0].0, tri[1].0, tri[2].0];
+            let d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+            if d.abs() < 1e-9 {
+                continue;
+            }
+            let l0 = ((b[1] - c[1]) * (p[0] - c[0]) + (c[0] - b[0]) * (p[1] - c[1])) / d;
+            let l1 = ((c[1] - a[1]) * (p[0] - c[0]) + (a[0] - c[0]) * (p[1] - c[1])) / d;
+            let l2 = 1.0 - l0 - l1;
+            let e = -1e-5;
+            if l0 >= e && l1 >= e && l2 >= e {
+                let s = [tri[0].1, tri[1].1, tri[2].1];
+                return [
+                    l0 * s[0][0] + l1 * s[1][0] + l2 * s[2][0],
+                    l0 * s[0][1] + l1 * s[1][1] + l2 * s[2][1],
+                ];
+            }
+        }
+        p
+    }
 }
 
 /// Tangent of half the up-and-down view angle for a view angle given in
@@ -496,9 +602,41 @@ mod tests {
             normals: vec![[0.0; 3]; 4],
             uvs: vec![[0.0; 2]; 4],
             parts: vec![],
+            glass: vec![],
             display_fov: 84.0,
             notes: vec![],
         }
+    }
+
+    #[test]
+    fn glass_moves_hud_points_like_its_corners() {
+        // One glass triangle whose texture places sit 0.1 screen above
+        // where its corners show.
+        let t = half_height(84.0);
+        let at = |sx: f32, sy: f32| {
+            [
+                10.0,
+                (sx - 0.5) * 2.0 * t * (4.0 / 3.0) * 10.0,
+                (0.5 - sy) * 2.0 * t * 10.0,
+            ]
+        };
+        let m = HelmetModel {
+            points: vec![at(0.2, 0.2), at(0.8, 0.2), at(0.5, 0.9)],
+            normals: vec![[0.0; 3]; 3],
+            uvs: vec![[0.2, 0.1], [0.8, 0.1], [0.5, 0.8]],
+            parts: vec![],
+            glass: vec![0, 1, 2],
+            display_fov: 84.0,
+            notes: vec![],
+        };
+        let g = GlassMap::new(&m, &HelmetPlan::default(), 4.0 / 3.0);
+        let p = g.place([0.5, 0.3]);
+        assert!(
+            (p[0] - 0.5).abs() < 1e-4 && (p[1] - 0.4).abs() < 1e-4,
+            "{p:?}"
+        );
+        // Outside the glass nothing moves.
+        assert_eq!(g.place([0.01, 0.99]), [0.01, 0.99]);
     }
 
     #[test]

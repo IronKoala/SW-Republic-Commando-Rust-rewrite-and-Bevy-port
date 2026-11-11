@@ -33,6 +33,12 @@ pub struct ScriptsSave {
     pub dispenser: Vec<DispenserSave>,
     #[serde(default)]
     pub objective: Vec<ObjectiveSave>,
+    /// Each mission objective's state (`objectives.rs`), in the map's
+    /// order, and which one is current.
+    #[serde(default)]
+    pub objective_states: Vec<u8>,
+    #[serde(default)]
+    pub objective_current: i32,
     pub director: DirectorSave,
 }
 
@@ -76,6 +82,10 @@ impl SavePart for ScriptsSave {
                 })
                 .collect()
         });
+        let (objective_states, objective_current) = world
+            .get_resource::<Objectives>()
+            .and_then(|o| o.mission.as_ref())
+            .map_or((Vec::new(), -1), |m| (m.states(), m.current));
         let script = world.get_resource::<LevelScript>()?;
         let mut hidden: Vec<usize> = script.hidden.iter().copied().collect();
         hidden.sort_unstable();
@@ -93,6 +103,8 @@ impl SavePart for ScriptsSave {
                 })
                 .collect(),
             objective,
+            objective_states,
+            objective_current,
             director: script.director.snapshot(),
         })
     }
@@ -116,6 +128,9 @@ impl SavePart for ScriptsSave {
                 .iter()
                 .map(|o| (o.time, o.objective, o.change_to))
                 .collect();
+            if let Some(m) = &mut o.mission {
+                m.restore(&d.objective_states, d.objective_current);
+            }
         }
         let mut script = world
             .get_resource_mut::<LevelScript>()
@@ -361,6 +376,8 @@ mod tests {
                 objective: 1,
                 change_to: 2,
             }],
+            objective_states: vec![2, 1, 0],
+            objective_current: 1,
             director: DirectorSave {
                 time: 31.25,
                 random_state: -5,

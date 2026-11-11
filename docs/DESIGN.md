@@ -3676,6 +3676,38 @@ helmet, `AmbientGlow` 20, its bump map); the visor's effects that the
 seconds late on the cloud's software graphics while its shaders are
 prepared.
 
+**The HUD through the glass.** The model's other part (`HelmetFinalBlend`,
+24 triangles) has no picture of its own: the original (Engine.dll,
+`FPlayerSceneNode::Render` and `UHelmet::DrawHelmet`) draws the whole HUD
+into a screen-sized picture and then draws this glass with that picture
+on it. Each glass corner's texture place is a place in the HUD, but the
+corner sits a little lower on the screen, so the original's HUD comes out
+lower and slightly curved: text drawn 45 down on its 600-line HUD shows
+about 1/7 of the way down. `helmet::GlassMap` works this move out from the
+model for any screen shape (on wide screens the glass moves like the
+frame and each corner keeps its move measured in screen heights) and
+`rc_menus::hud` applies it to elements marked `glass = true`, moving each
+picture's corners (the pictures themselves aren't bent). The crosshair and
+the markers are drawn after the glass in the original, so they aren't
+moved. Without the helmet (HELMET off) nothing is moved; the original
+then bends its flat HUD a different way, which we don't copy yet.
+
+**The advisor's words and the objective** (Engine.dll
+`UHelmet::DrawTextInfo`): one text box near the top (218, 45, 364 wide
+on the 800 x 600 HUD) in `OrbitFonts.OrbitBold15`. The words of whoever
+speaks (`subtitles.rs` keeps the newest in `Spoken`) are left aligned at
+0.8 of the font's size in (200, 200, 64) and win over everything else in
+the box. Otherwise the current objective is centred at full size in
+(164, 200, 208), when no short message or use prompt is in the box. Both
+are at opacity 220, fading in over the helmet's `PromptFadeInTime`
+(0.5 s) when they change. The objectives themselves are the map's
+`MissionObjectives` list, kept as the original's script keeps them
+(`rc_scripts_plugin::objectives`): its tag event reveals the next one,
+`ACTION_ObjectiveUpdate` completes, fails or changes one, and the first
+one not yet done shows, in capitals. Not done: Ctrl (`ShowGameStats`)
+turning the objective off and on, objectives in other languages (the
+words are the map's English ones).
+
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
 The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:

@@ -13,11 +13,20 @@
 //! the same file, and drawn here as pictures. While it is drawn, the
 //! placeholder's own drawings are hidden; if any of its pictures or fonts
 //! can't be read, the placeholder stays and the log says why.
+//!
+//! The advisor's words (`subtitles.rs`) and the current objective are
+//! drawn as the original's helmet draws them (Engine.dll `UHelmet`
+//! `DrawSubtitleText` and `DrawCurrentObjectiveText`): in one box near the
+//! top, the words winning over everything else in it. Elements marked
+//! `glass` are moved where the helmet's glass shows them, as the original
+//! draws its HUD onto the glass (`rc_menus::helmet::GlassMap`).
 #![allow(deprecated)]
 
+use crate::helmet::{Helmet, HelmetReadout};
 use crate::hud::{CrossBar, PlaceholderPart};
 use crate::menu::GamePathsFound;
 use crate::settings::Settings;
+use crate::subtitles::Spoken;
 use crate::theme::Theme;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -181,6 +190,10 @@ struct OriginalLayout {
     /// What was just picked up and its seconds left (one at a time: a new
     /// one replaces the last, as in the original).
     pickup: Option<(String, f32)>,
+    /// The objective shown and for how long (it fades in when it changes).
+    objective: (String, f32),
+    /// The helmet glass's map for the screen shape it was made for.
+    glass: Option<(u32, rc_menus::helmet::GlassMap)>,
 }
 
 #[derive(Component)]
@@ -278,6 +291,7 @@ fn forget_drawn(mut original: ResMut<OriginalLayout>) {
     original.drawn.clear();
     original.messages.clear();
     original.pickup = None;
+    original.objective = Default::default();
 }
 
 /// Keep the short messages for as long as they asked, and the pickup
@@ -355,6 +369,22 @@ fn values(
     }
 }
 
+/// What the helmet's text box shows (Engine.dll `UHelmet::DrawTextInfo`):
+/// the advisor's words win over everything else in the box; the short
+/// messages and the use prompt over the objective.
+fn text_box(now: &mut HudValues, layout: &HudLayout, spoken: &Spoken, objective: &(String, f32)) {
+    let l = &layout.layout;
+    if !spoken.text.is_empty() {
+        now.subtitle = spoken.text.clone();
+        now.subtitle_fade = l.faded_in(spoken.age);
+        now.messages.clear();
+        now.prompt.clear();
+    } else if now.messages.is_empty() && now.prompt.is_empty() && !objective.0.is_empty() {
+        now.objective = objective.0.clone();
+        now.objective_fade = l.faded_in(objective.1);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_layout(
     mut commands: Commands,
@@ -369,6 +399,12 @@ fn draw_layout(
     log: Res<GameLog>,
     use_item: Option<Res<rc_game_core::UseItem>>,
     hud: Res<OriginalHud>,
+    (spoken, objectives, time): (
+        Option<Res<Spoken>>,
+        Option<Res<rc_scripts_plugin::Objectives>>,
+        Res<Time>,
+    ),
+    (helmet, helmet_readout): (Res<Helmet>, Res<HelmetReadout>),
 ) {
     let original = &mut *original;
     if !original.working {
@@ -387,6 +423,13 @@ fn draw_layout(
     if w < 1.0 || h < 1.0 {
         return;
     }
+    // The objective fades in again whenever it changes.
+    let objective = objectives.and_then(|o| o.shown()).unwrap_or_default();
+    if objective == original.objective.0 {
+        original.objective.1 += time.delta_secs();
+    } else {
+        original.objective = (objective, 0.0);
+    }
     let mut now = values(&vitals, &weapon, &squad, &original.messages);
     if let Some((text, left)) = &original.pickup {
         now.pickup = text.clone();
@@ -402,13 +445,50 @@ fn draw_layout(
             .map_or(usize::MAX, |u| u.prompt_wrap);
         now.prompt = wrap_prompt(p, wrap);
     }
+    text_box(
+        &mut now,
+        layout,
+        spoken.as_deref().unwrap_or(&Spoken::default()),
+        &original.objective,
+    );
+    // Through the helmet's glass while it is drawn.
+    let glass_model = match (&helmet.model, helmet_readout.shown) {
+        (Some(Ok(m)), true) if !m.glass.is_empty() => Some(m.clone()),
+        _ => None,
+    };
+    let aspect_key = (w / h).to_bits();
+    match &glass_model {
+        Some(m) if original.glass.as_ref().is_none_or(|g| g.0 != aspect_key) => {
+            original.glass = Some((
+                aspect_key,
+                rc_menus::helmet::GlassMap::new(m, &helmet.plan, w / h),
+            ));
+        }
+        None => original.glass = None,
+        _ => {}
+    }
     let max_aspect = settings.video.hud_max_aspect;
-    let key = (now, [w as u32, h as u32], max_aspect.to_bits());
+    let glass_on = original.glass.is_some() as u32;
+    let key = (
+        now,
+        [w as u32, h as u32],
+        max_aspect.to_bits() ^ (glass_on << 31),
+    );
     if original.drawn_for.as_ref() == Some(&key) && !roots.is_empty() {
         return;
     }
     let first = original.drawn_for.is_none();
-    let quads = rc_menus::hud::hud_quads(layout, &key.0, w, h, max_aspect, assets);
+    let glass = original.glass.as_ref().map(|g| &g.1);
+    let place = |p: [f32; 2]| glass.map_or(p, |g| g.place(p));
+    let quads = rc_menus::hud::hud_quads(
+        layout,
+        &key.0,
+        w,
+        h,
+        max_aspect,
+        assets,
+        glass.map(|_| &place as &dyn Fn([f32; 2]) -> [f32; 2]),
+    );
     original.drawn_for = Some(key);
     if !assets.problems.is_empty() {
         for p in assets.problems.drain(..) {

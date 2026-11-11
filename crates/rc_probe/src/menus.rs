@@ -185,7 +185,13 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             quad.dst[0] = (quad.dst[0] - left) / screen;
             quad.dst[2] = (quad.dst[2] - left) / screen;
         }
-        let picture = render::render(&q, &mut assets, (480.0 * aspect).round() as usize, 480, [0, 0, 0, 255]);
+        let picture = render::render(
+            &q,
+            &mut assets,
+            (480.0 * aspect).round() as usize,
+            480,
+            [0, 0, 0, 255],
+        );
         let path = out_dir.join(format!("{name}_{shape}.png"));
         let _ = std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f));
         log.line(format!(
@@ -317,6 +323,27 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         pickup: "DC-17m Blaster Clips".into(),
         pickup_fade: 1.0,
         prompt: Vec::new(),
+        subtitle: "Clone Advisor 1: Proceed to the next bacta station and plug in. You'll see a tall device with a cross on it.".into(),
+        subtitle_fade: 1.0,
+        objective: String::new(),
+        objective_fade: 0.0,
+    };
+    // The objective shows when nobody speaks and no message is up.
+    let objective_only = HudValues {
+        messages: Vec::new(),
+        subtitle: String::new(),
+        objective: "USE BACTA TO HEAL".into(),
+        objective_fade: 1.0,
+        ..values.clone()
+    };
+    // Through the helmet's glass, as in the game with HELMET on.
+    let plan = rc_menus::helmet::HelmetPlan::default();
+    let helmet = match rc_menus::helmet::load(&mut Library::new(game_data), &plan) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            log.line(format!("  no helmet glass ({e}); HUD not moved"));
+            None
+        }
     };
     let mut ok = true;
     for (w, h) in [
@@ -332,13 +359,24 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
             log.line(format!("  OVERLAP {p}"));
             ok = false;
         }
-        let quads = hud_quads(&layout, &values, wf, hf, 16.0 / 9.0, &mut assets);
-        let picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);
-        let _ = std::fs::create_dir_all(out_dir);
-        let path = out_dir.join(format!("hud_{w}x{h}.png"));
-        match std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f)) {
-            Ok(()) => log.line(format!("{w}x{h}: {} pictures, painted to {}", quads.len(), path.display())),
-            Err(e) => log.line(format!("couldn't write {}: {e}", path.display())),
+        let glass = helmet
+            .as_ref()
+            .map(|m| rc_menus::helmet::GlassMap::new(m, &plan, wf / hf));
+        let place = |p: [f32; 2]| glass.as_ref().map_or(p, |g| g.place(p));
+        let place: Option<&dyn Fn([f32; 2]) -> [f32; 2]> = glass.as_ref().map(|_| &place as _);
+        for (name, v) in [("hud", &values), ("hud_objective", &objective_only)] {
+            let quads = hud_quads(&layout, v, wf, hf, 16.0 / 9.0, &mut assets, place);
+            let picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);
+            let _ = std::fs::create_dir_all(out_dir);
+            let path = out_dir.join(format!("{name}_{w}x{h}.png"));
+            match std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f)) {
+                Ok(()) => log.line(format!(
+                    "{w}x{h}: {} pictures, painted to {}",
+                    quads.len(),
+                    path.display()
+                )),
+                Err(e) => log.line(format!("couldn't write {}: {e}", path.display())),
+            }
         }
     }
     for p in &assets.problems {

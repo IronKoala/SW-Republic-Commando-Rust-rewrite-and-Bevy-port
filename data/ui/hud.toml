@@ -89,13 +89,16 @@ prompt_wrap = 21
 #
 # Texts: {weapon} {clip} {reserve} {grenade} {grenades} {message1}
 # (newest) {message2} {message3} {pickup} {prompt1} {prompt2} (the use
-# prompt's two lines); for squad rows {number} {name}
+# prompt's two lines) {subtitle} {objective}; for squad rows {number} {name}
 # {order}.
 # Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
 # clip, reserve, grenade, shield_low, health_low, health_full, squad_down, pickup,
-# prompt.
+# prompt, subtitle, objective.
 # Bars (`fill`): shield, health, clip, squad_health.
-# Fading (`fade`, 1 shown to 0 gone): pickup.
+# Fading (`fade`, 1 shown to 0 gone): pickup, subtitle, objective.
+# Texts can also name their `font` (one of the fonts below, scaled to the
+# line height), `wrap` onto more lines, and be drawn through the helmet's
+# glass (`glass = true`), as the original draws its HUD.
 
 [layout]
 enabled = true
@@ -108,6 +111,9 @@ fonts = [
     "OrbitFonts.OrbitBold18",
     "OrbitFonts.OrbitBold24",
 ]
+# Seconds the advisor's words and the objective take to fade in (the
+# original helmet's PromptFadeInTime, 0.5 in engine.u).
+text_fade_in = 0.5
 
 # --- Squad, bottom left: each squad mate's number over a panel showing
 # what they're doing ------------------------------------------------------
@@ -330,6 +336,53 @@ size = [260, 11]
 text = "{message1}"
 align = "centre"
 colour = [190, 235, 245, 255]
+
+# --- The advisor's words and the current objective, near the top -----------
+# Both read from the original's engine code (Engine.dll, the helmet HUD's
+# DrawTextInfo, DrawSubtitleText and DrawCurrentObjectiveText), 2026-11-11.
+# The original draws them on an 800 x 600 HUD; here 1 of its units is 0.8
+# of ours. Its text box starts 218 across and 45 down and is 364 wide
+# (so it is centred: 400 is the middle), the font is OrbitFonts.OrbitBold15
+# (27 lines tall), and the HUD is then drawn through the helmet's glass,
+# which moves it lower and curves it (`glass = true`).
+#
+# The words (who speaks and what, from the game's subtitles files): left
+# aligned, the font at 0.8 of its size (27 x 0.8 = 21.6 of 600, 17.28 of
+# ours), broken onto more lines to fit the box, colour (200, 200, 64) at
+# 220 of 255 opacity, fading in over PromptFadeInTime ([layout]
+# text_fade_in). While they show, nothing else in the box does.
+[[element]]
+group = "messages"
+anchor = "top"
+at = [-145.6, 36]
+size = [291.2, 17.28]
+when = "subtitle"
+text = "{subtitle}"
+font = "OrbitFonts.OrbitBold15"
+wrap = true
+glass = true
+blend = "alpha"
+colour = [200, 200, 64, 220]
+fade = "subtitle"
+
+# The current objective (the map's MissionObjectives list: the first one
+# not yet done, in capitals): centred in the same box, the font at full
+# size (21.6 of ours), colour (164, 200, 208) at 220 opacity, fading in
+# when it changes. Shown when nothing else is in the box.
+[[element]]
+group = "messages"
+anchor = "top"
+at = [-145.6, 36]
+size = [291.2, 21.6]
+when = "objective"
+text = "{objective}"
+align = "centre"
+font = "OrbitFonts.OrbitBold15"
+wrap = true
+glass = true
+blend = "alpha"
+colour = [164, 200, 208, 220]
+fade = "objective"
 
 # --- What was just picked up, above the middle ------------------------------
 # The original's pickup message (engine.u PickupMessagePlus, a LocalMessage):

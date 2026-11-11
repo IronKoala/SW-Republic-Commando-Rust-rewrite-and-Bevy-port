@@ -371,6 +371,7 @@ mod tests {
             points: vec![[10.0, 2.0, 3.0]; 3],
             normals: vec![[1.0, 0.0, 0.0]; 3],
             uvs: vec![[0.0; 2]; 3],
+            glass: vec![],
             parts: vec![helmet::HelmetPart {
                 material: "m".into(),
                 picture: rc_image::Rgba {
