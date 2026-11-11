@@ -21,7 +21,7 @@ offset = [127.4, 30, -10] # FPFireOffset: where bolts start, from the eye (forwa
 [ammo]
 clip_size = 60            # ReloadCount: shots per magazine
 max_ammo = 300            # MaxAmmo: most carried, magazine included
-start_ammo = 120          # PickupAmmoCount: ammo at the start
+start_ammo = 120          # PickupAmmoCount: ammo in one lying in the level (the player starts with max_ammo)
 reload_time = 1.5         # the first-person Reload animation: 45 frames at 30 fps
 
 [shot]

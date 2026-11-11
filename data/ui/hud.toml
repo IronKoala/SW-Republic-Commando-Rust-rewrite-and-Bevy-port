@@ -110,6 +110,9 @@ prompt_wrap = 21
 # prompt, subtitle, objective.
 # Bars (`fill`): shield, health, clip, squad_health.
 # Fading (`fade`, 1 shown to 0 gone): pickup, subtitle, objective.
+# Sliding (`scroll`, in picture widths, the picture repeating): compass.
+# Colours by a text (`colour_by` with `colours`): {health_level} and
+# {squad_health_level} are 0 to 3, the original's `CalcHealthLevel`.
 # Texts can also name their `font` (one of the fonts below, scaled to the
 # line height), `wrap` onto more lines, and be drawn through the helmet's
 # glass (`glass = true`), as the original draws its HUD.
@@ -128,6 +131,78 @@ fonts = [
 # Seconds the advisor's words and the objective take to fade in (the
 # original helmet's PromptFadeInTime, 0.5 in engine.u).
 text_fade_in = 0.5
+
+# --- The visor's frame and compass, as the original helmet draws them -----
+# Engine.dll `UHelmet::DrawHUD`: the arcs down both sides (5, 22, 112 x
+# 432, mirrored at 795), the short pieces at the top (106, 22, 86 x 19,
+# mirrored at 694) and the compass strip between them (194, 25, 414 x 11:
+# `CompassGraphic` repeated, sliding as you turn). White at 130 while
+# health is high; otherwise the health colour at 165 (the original pulses
+# it between 150 and 255 when below half: not done, shown at 150).
+# Group "visor" may overlap the others.
+
+[[element]]
+group = "visor"
+anchor = "top_left"
+at = [4, 17.6]
+size = [89.6, 345.6]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [0, 0, 142, 442]
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
+colour = [255, 255, 255, 130]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top_right"
+at = [-93.6, 17.6]
+size = [89.6, 345.6]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [0, 0, 142, 442]
+mirror = true
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
+colour = [255, 255, 255, 130]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top_left"
+at = [84.8, 17.6]
+size = [68.8, 15.2]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [143, 0, 229, 19]
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
+colour = [255, 255, 255, 130]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top_right"
+at = [-153.6, 17.6]
+size = [68.8, 15.2]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [143, 0, 229, 19]
+mirror = true
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
+colour = [255, 255, 255, 130]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top"
+at = [-164.8, 20]
+size = [331.2, 8.8]
+picture = "HUDTextures.Icons.CompassGraphic"
+part = [0, 0, 414, 16]
+scroll = "compass"
+colour_by = "{health_level}"
+colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
+colour = [255, 255, 255, 130]
+glass = true
 
 # --- The bottom corners and meters, as the original helmet draws them ----
 # Read from Engine.dll `UHelmet::DrawHUD` (the helmet-on drawing): the

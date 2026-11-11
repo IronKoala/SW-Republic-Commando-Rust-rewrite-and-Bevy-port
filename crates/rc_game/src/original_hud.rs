@@ -22,7 +22,7 @@
 //! draws its HUD onto the glass (`rc_menus::helmet::GlassMap`).
 #![allow(deprecated)]
 
-use crate::helmet::{Helmet, HelmetReadout};
+use crate::helmet::{Helmet, HelmetReadout, HudPage};
 use crate::hud::{CrossBar, PlaceholderPart};
 use crate::menu::GamePathsFound;
 use crate::settings::Settings;
@@ -213,6 +213,8 @@ struct OriginalLayout {
     objective: (String, f32),
     /// The helmet glass's map for the screen shape it was made for.
     glass: Option<(u32, rc_menus::helmet::GlassMap)>,
+    /// Where the compass strip has slid to (it follows the view's turn).
+    compass: Option<f32>,
 }
 
 #[derive(Component)]
@@ -349,6 +351,25 @@ fn collect_messages(
     original.messages.drain(..extra);
 }
 
+/// Where the compass strip should slide to, in picture widths, for a view
+/// facing `yaw` (radians, Unreal's): Engine.dll `UHelmet::DrawHUD` takes
+/// the yaw in Unreal's units (65536 a turn), modulo 65535, times 0.0001.
+fn compass_target(yaw: f32) -> f32 {
+    let units = (yaw / std::f32::consts::TAU * 65536.0) as i32;
+    (units % 65535) as f32 * 0.0001
+}
+
+/// The strip follows its target at 3 picture widths a second (so a turn
+/// past due north slides it all the way back, as in the original).
+fn compass_follow(now: f32, target: f32, dt: f32) -> f32 {
+    let step = 3.0 * dt;
+    if target > now {
+        (now + step).min(target)
+    } else {
+        (now - step).max(target)
+    }
+}
+
 /// What the HUD shows now. Bars are rounded to 1/200 so a recharging
 /// shield doesn't redraw every frame.
 fn values(
@@ -424,7 +445,12 @@ fn draw_layout(
         Option<Res<rc_scripts_plugin::Objectives>>,
         Res<Time>,
     ),
-    (helmet, helmet_readout): (Res<Helmet>, Res<HelmetReadout>),
+    (helmet, helmet_readout, bodies, page): (
+        Res<Helmet>,
+        Res<HelmetReadout>,
+        Query<&crate::player::Body, With<rc_game_core::Player>>,
+        Option<Res<HudPage>>,
+    ),
 ) {
     let original = &mut *original;
     if !original.working {
@@ -451,6 +477,12 @@ fn draw_layout(
         original.objective = (objective, 0.0);
     }
     let mut now = values(&vitals, &weapon, &squad, &original.messages);
+    if let Ok(b) = bodies.single() {
+        let c = original.compass.get_or_insert(compass_target(b.yaw));
+        *c = compass_follow(*c, compass_target(b.yaw), time.delta_secs());
+        // Rounded so standing still doesn't redraw.
+        now.compass = (*c * 2000.0).round() / 2000.0;
+    }
     if let Some((text, left)) = &original.pickup {
         now.pickup = text.clone();
         now.pickup_fade = layout.pickup_message.strength(*left);
@@ -499,16 +531,33 @@ fn draw_layout(
     }
     let first = original.drawn_for.is_none();
     let glass = original.glass.as_ref().map(|g| &g.1);
-    let place = |p: [f32; 2]| glass.map_or(p, |g| g.place(p));
-    let quads = rc_menus::hud::hud_quads(
+    // With the helmet on, the glass parts go on the page laid on its
+    // glass (`helmet::HudPage`); the rest, or everything without it, on
+    // the screen.
+    let on_page = glass.is_some() && page.is_some();
+    let quads = rc_menus::hud::hud_quads_of(
         layout,
         &key.0,
         w,
         h,
         max_aspect,
         assets,
-        glass.map(|_| &place as &dyn Fn([f32; 2]) -> [f32; 2]),
+        None,
+        &|e| !(on_page && e.glass),
     );
+    let page_quads = match (&page, on_page) {
+        (Some(p), true) => rc_menus::hud::hud_quads_of(
+            layout,
+            &key.0,
+            p.size.x as f32,
+            p.size.y as f32,
+            4.0 / 3.0,
+            assets,
+            None,
+            &|e| e.glass,
+        ),
+        _ => Vec::new(),
+    };
     original.drawn_for = Some(key);
     if !assets.problems.is_empty() {
         for p in assets.problems.drain(..) {
@@ -523,7 +572,7 @@ fn draw_layout(
             quads.len()
         ));
     }
-    for q in &quads {
+    for q in quads.iter().chain(&page_quads) {
         let k = (
             q.texture.to_ascii_lowercase(),
             gpu::variant(q.render_style),
@@ -553,22 +602,49 @@ fn draw_layout(
         commands.entity(r).despawn();
     }
     let images = &original.images;
-    commands
-        .spawn((
-            LayoutRoot,
-            crate::cutscene::HudRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                ..default()
-            },
-            // Over the placeholder (1), under the menus (10).
-            GlobalZIndex(2),
-            DespawnOnExit(GameState::InGame),
-        ))
-        .with_children(|root| {
-            for q in &quads {
+    spawn_quads(&mut commands, images, &quads, None);
+    if let (Some(p), false) = (&page, page_quads.is_empty()) {
+        spawn_quads(&mut commands, images, &page_quads, Some(p.camera));
+    }
+    // For checks: where the page's parts show on the screen.
+    let mut drawn = quads;
+    if let Some(g) = glass {
+        drawn.extend(page_quads.into_iter().map(|mut q| {
+            let a = g.place([q.dst[0], q.dst[1]]);
+            let b = g.place([q.dst[2], q.dst[3]]);
+            q.dst = [a[0], a[1], b[0], b[1]];
+            q
+        }));
+    }
+    original.drawn = drawn;
+}
+
+/// One HUD root holding `quads` (screen fractions of its target): on the
+/// screen, or on the helmet's page when `page` names its camera.
+fn spawn_quads(
+    commands: &mut Commands,
+    images: &HashMap<(String, gpu::Variant, [u8; 4]), Handle<Image>>,
+    quads: &[Quad],
+    page: Option<Entity>,
+) {
+    let mut root = commands.spawn((
+        LayoutRoot,
+        crate::cutscene::HudRoot,
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        // Over the placeholder (1), under the menus (10).
+        GlobalZIndex(2),
+        DespawnOnExit(GameState::InGame),
+    ));
+    if let Some(cam) = page {
+        root.insert(UiTargetCamera(cam));
+    }
+    root.with_children(|root| {
+            for q in quads {
                 let Some(image) = images.get(&(
                     q.texture.to_ascii_lowercase(),
                     gpu::variant(q.render_style),
@@ -599,7 +675,6 @@ fn draw_layout(
                 ));
             }
         });
-    original.drawn = quads;
 }
 
 /// While the original's HUD is drawn, hide the placeholder's drawings.
@@ -1058,6 +1133,18 @@ pub fn reticle_showing(w: &mut World) -> bool {
 mod tests {
     use super::*;
     use crate::theme::Theme;
+
+    #[test]
+    fn compass_slides_with_the_turn_as_the_original() {
+        // A quarter turn right is 16384 units: 1.6384 picture widths.
+        assert!((compass_target(std::f32::consts::FRAC_PI_2) - 1.6384).abs() < 1e-4);
+        // Turning left gives a negative slide (C's remainder keeps the sign).
+        assert!(compass_target(-std::f32::consts::FRAC_PI_2) < 0.0);
+        // It follows at 3 a second, and stops on its target.
+        assert!((compass_follow(0.0, 1.0, 0.1) - 0.3).abs() < 1e-6);
+        assert_eq!(compass_follow(0.9, 1.0, 0.1), 1.0);
+        assert!((compass_follow(1.0, 0.0, 0.1) - 0.7).abs() < 1e-6);
+    }
 
     /// The ring lights in twelfths, piece by piece of a 4 by 4 grid, from
     /// just left of the top round the left side; the rest stays faint.

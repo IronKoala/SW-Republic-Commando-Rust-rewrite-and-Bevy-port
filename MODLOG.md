@@ -3,6 +3,30 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
+
+- **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).
+- **Tested how:** `cargo test -p rc_menus` (new `a_sliding_strip_repeats_its_picture`), `cargo test -p rc_game --bins` (compass follow); `rc_game --script` in the cloud with a saved copy of the page picture; `rc_probe --hud`.
+- **Result:** The page holds the arcs, top pieces, compass, squad panels, meters and grenade panel in the right places, and the glass shows it across the whole visor. The HUD checks pass. In the cloud's pale test arena the frame is very faint: the arc picture is mostly dark grey and see-through.
+- **Still broken / not tested:** Not tested on Windows. Not compared side by side with the original: whether the frame looks as light as in the user's screenshots needs a look there. The low-health pulse, the top-left ring and the shield bars are not done. The cloud game ran at about 1 frame a second on main as well (before this change), so timed checks in the cloud fail for that reason.
+
+## 2026-11-11: The rifle starts full, 300 shots, as in the original (rc_combat, data/weapons/dc17m_blaster.toml)
+
+- **Changed:** Weapons the player is given at the level's start now carry the most they can (`MaxAmmo`: 300 for the DC-17m) instead of a lying pickup's `PickupAmmoCount` (120). New `WeaponState::given`, used by `equip_player`. Weapons picked up in the level still hold `PickupAmmoCount`.
+- **Why:** User's screenshots: the original's gun counter reads 300 at geo_01a's start, ours 120.
+- **Tested how:** Read from the original's engine.u script text (`Weapon.GiveAmmo`: in single player a non-secondary weapon gets `InitAmmoAmount`, and when that is -1, as for every weapon here, `MaxAmmo`; only a secondary weapon gets `PickupAmmoCount`) and `rc_probe --class` for the numbers; `cargo test -p rc_combat --test range`.
+- **Result:** Tests pass (updated for the full start).
+- **Still broken / not tested:** Not tested on Windows or in a full level run.
+
+## 2026-11-11: Light shafts and god rays with the game's falloff shader (rc_level_viewer, rc_level_plugin)
+
+- **Changed:** New `rc_level_viewer::falloff` (+ `falloff.wesl`): `HsFalloff` materials get the game's own shader maths: picture x `DiffuseTint` x falloff gradient (by viewing angle) x `GradientTint` x the mesh's painted colours, squared when `SrcBlend` is `SRCCOLOR`, panned and oscillated by the material's rates, added on top, no baked light and no fog. Settings and defaults read at load from Engine.u; `FalloffPlugin` comes with `PropLightPlugin`. Logs `light shafts ... N prop parts`.
+- **Why:** User's side-by-side screenshot of geo_01a: "the god rays aren't implemented". The sun rays (`SunBeam`, `rayfalloff`) were drawn as a flat block under the zone fog, or not seen.
+- **Tested how:** `falloff_check` with the game's files (cloud); `cargo test -p rc_level_viewer --lib falloff` (3 tests); `rc_level_viewer geo_01a --capture` before and after from the same spot (cloud).
+- **Result:** falloff_check 11 passed, 0 failed (9 prop parts on geo_01a). The capture shows streaky shafts fading along the beam, over the haze, where there was a flat light block (fog on) or nothing visible.
+- **Still broken / not tested:** Not tested on Windows. Our choices: the mesh's painted colours as the vertex colour; no fog on shafts; the shaft colour added as it is (the game adds on its brightness curve). The prologue's tank liquid also uses `HsFalloff`; not looked at.
+- **Next:** User check against the original on geo_01a.
+
 ## 2026-11-11: The landing gunship hovers from its map place (rc_cast, rc_game)
 
 - **Changed:** The cast part reads each class's `bAlignBottom`. Where it is off (the `Gunship` class, so geo_01a's `GunshipHigh1`), the model is drawn from its origin at the map's place, as a prop is, instead of being stood with its lowest point `CollisionHeight` below. New script check "the landing gunship hovers where the map puts it" and picture `logs/gunship.png` (the player stood 1500 uu away with a clear view, looking at it).

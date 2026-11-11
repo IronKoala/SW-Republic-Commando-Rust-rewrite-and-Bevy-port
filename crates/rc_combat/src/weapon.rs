@@ -325,6 +325,22 @@ impl WeaponState {
         }
     }
 
+    /// A weapon the player is given when the level starts (the original's
+    /// `Weapon.GiveAmmo` in single player, Engine): its ammo is the most
+    /// it can carry (`MaxAmmo`, as `InitAmmoAmount` is -1 for every
+    /// weapon), not the pickup's `PickupAmmoCount`. Only a secondary weapon
+    /// gets the pickup's count, and the one secondary, the pistol,
+    /// recharges instead.
+    pub fn given(p: &WeaponParams) -> Self {
+        let mut s = WeaponState::new(p);
+        if !p.recharges() {
+            let clip = p.clip_size.min(p.max_ammo);
+            s.clip = clip as f32;
+            s.reserve = p.max_ammo - clip;
+        }
+        s
+    }
+
     /// Whole shots in the magazine.
     pub fn shots_in_clip(&self) -> u32 {
         self.clip.floor().max(0.0) as u32

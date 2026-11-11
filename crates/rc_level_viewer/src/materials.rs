@@ -77,6 +77,10 @@ pub struct Picture {
     /// coordinate set: a `Combiner` with `CombineOperation` `CO_Multiply`
     /// (see `Layer`).
     pub multiply: Option<Arc<Layer>>,
+    /// The game's own falloff shader (`HsFalloff`: light shafts, god
+    /// rays), with everything it needs besides this picture. See
+    /// `crate::falloff`.
+    pub falloff: Option<Arc<crate::falloff::Falloff>>,
 }
 
 /// The second picture of a multiplying `Combiner`.
@@ -165,6 +169,10 @@ pub struct Materials {
     bumps: HashMap<String, Result<Arc<Bump>, Failure>>,
     /// Bump maps named by a material that couldn't be read, with why.
     pub bump_failures: BTreeMap<String, usize>,
+    /// `HsFalloff`'s class defaults from Engine.u, once read
+    /// (`crate::falloff::FalloffDefaults`). Without them falloff materials
+    /// are drawn as plain added light, as before.
+    pub falloff_defaults: Option<crate::falloff::FalloffDefaults>,
 }
 
 /// The dotted path of an import or export, outermost package first.
@@ -268,6 +276,7 @@ fn decode_texture(pkg: &Package, data: &[u8], index: usize) -> Result<Picture, F
         bump: None,
         uv_channel: 0,
         multiply: None,
+        falloff: None,
     })
 }
 
@@ -294,6 +303,7 @@ impl Materials {
             cache: HashMap::new(),
             bumps: HashMap::new(),
             bump_failures: BTreeMap::new(),
+            falloff_defaults: None,
         }
     }
 
@@ -404,11 +414,17 @@ impl Materials {
         if class == "HsHologram" {
             return self.hologram(pkg, data, &props, depth);
         }
-        // `HsFalloff` (light shafts, the prologue's tank liquid) tints its
-        // picture by `DiffuseTint` and `GradientTint` (white, no change,
-        // when not set: the class defaults in Engine.u). Its falloff
-        // picture, which fades the edges by viewing angle, isn't used.
-        let falloff_tint = additive.then(|| {
+        // `HsFalloff` (light shafts, the prologue's tank liquid): the game's
+        // own shader, when its class defaults could be read (see
+        // `crate::falloff`).
+        let falloff = if additive {
+            self.falloff(pkg, data, &props, depth)
+        } else {
+            None
+        };
+        // Without them: the picture tinted by `DiffuseTint` and
+        // `GradientTint`, drawn as plain added light.
+        let falloff_tint = (additive && falloff.is_none()).then(|| {
             let a = setting_colour(pkg, &props, "DiffuseTint").unwrap_or([255; 4]);
             let b = setting_colour(pkg, &props, "GradientTint").unwrap_or([255; 4]);
             [0, 1, 2].map(|k| ((a[k] as u32 * b[k] as u32 + 127) / 255) as u8)
@@ -448,6 +464,9 @@ impl Materials {
                     if let Some(c) = uv_channel {
                         p.uv_channel = c;
                     }
+                    if falloff.is_some() {
+                        p.falloff = falloff.clone();
+                    }
                     p
                 });
             }
@@ -458,6 +477,57 @@ impl Materials {
 }
 
 impl Materials {
+    /// An `HsFalloff` material's own shader settings (see `crate::falloff`),
+    /// or None to draw it as plain added light: when `HsFalloff`'s class
+    /// defaults weren't read, its gradient can't be found, or it blends in
+    /// a way we don't draw.
+    fn falloff(
+        &mut self,
+        pkg: &Package,
+        data: &[u8],
+        props: &[properties::Property],
+        depth: usize,
+    ) -> Option<Arc<crate::falloff::Falloff>> {
+        let defaults = self.falloff_defaults?;
+        let gradient = match self.link(pkg, data, props, "FalloffGradient", depth)? {
+            Ok(g) => g,
+            Err(_) => return None,
+        };
+        let number = |name: &str| match properties::find(pkg, props, name).map(|p| &p.value) {
+            Some(Value::Float(v)) => *v,
+            _ => 0.0,
+        };
+        let byte = |name: &str, default: u8| match properties::find(pkg, props, name).map(|p| &p.value) {
+            Some(Value::Byte(b)) => *b,
+            _ => default,
+        };
+        let src_blend = byte("SrcBlend", defaults.src_blend);
+        let dest_blend = byte("DestBlend", defaults.dest_blend);
+        if !crate::falloff::Falloff::supported(src_blend, dest_blend) {
+            return None;
+        }
+        let tint = |name: &str, default: [u8; 4]| {
+            crate::falloff::constant(setting_colour(pkg, props, name).unwrap_or(default))
+        };
+        Some(Arc::new(crate::falloff::Falloff {
+            gradient: gradient.image,
+            gradient_name: object_path(
+                pkg,
+                match properties::find(pkg, props, "FalloffGradient").map(|p| &p.value) {
+                    Some(Value::Object(o)) => *o,
+                    _ => 0,
+                },
+            )
+            .join("."),
+            diffuse_tint: tint("DiffuseTint", defaults.diffuse_tint),
+            gradient_tint: tint("GradientTint", defaults.gradient_tint),
+            pan: [number("UPanRate"), number("VPanRate")],
+            oscillate: [number("UOscilationRate"), number("VOscilationRate")],
+            src_blend,
+            dest_blend,
+        }))
+    }
+
     /// The material an object link points at, if the link is set.
     fn link(
         &mut self,
@@ -569,6 +639,7 @@ impl Materials {
             bump: None,
             uv_channel: 0,
             multiply: None,
+            falloff: None,
         })
     }
 }
@@ -765,5 +836,6 @@ fn constant_colour(pkg: &Package, data: &[u8], k: usize, name: &str) -> Result<P
         bump: None,
         uv_channel: 0,
         multiply: None,
+        falloff: None,
     })
 }

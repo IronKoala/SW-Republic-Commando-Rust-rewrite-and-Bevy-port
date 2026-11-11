@@ -3782,12 +3782,34 @@ helmet-on drawing; `data/ui/hud.toml` has every number, times 0.8 of the
   split screen.
 - Through the glass, a point past the glass's edge moves as the nearest
   piece of glass carries it on (`GlassMap::place`), so pictures lying
-  across the edge keep their shape.
+  across the edge keep their shape. (The game itself now uses the page
+  below; `GlassMap::place` still says where things land, for checks and
+  `rc_probe --hud`.)
+
+**The visor frame and compass** (Engine.dll `UHelmet::DrawHUD`): the arcs
+down both sides (5, 22, 112 x 432 from `CloneVisorIcons` 0, 0 to 142,
+442, mirrored at 795), the short pieces at the top (106, 22, 86 x 19,
+mirrored at 694) and the compass strip between them (194, 25, 414 x 11,
+`CompassGraphic` repeated). White at 130 while health is high, else the
+health colour (165 at level 2, 150 below; the original pulses that, not
+done). The compass slides with the way you face: the picture's offset is
+the yaw (0..65535) times 0.0001, followed at 3 per second
+(`original_hud::compass_follow`); `scroll = "compass"` on an element
+slides its picture, which repeats (`rc_menus::hud` `tiles`). Group
+`visor` may overlap the other groups.
+
+**The HUD page on the glass** (`helmet::HudPage`): as the original does,
+the HUD's `glass = true` parts are drawn on a 4:3 picture (1600 x 1200,
+its own 2D camera, order -10), and that picture is laid on the helmet
+model's glass (the part without a picture of its own) as an unlit,
+premultiplied see-through material. So the HUD bends with the glass and
+what lies past the glass's edge isn't seen. The parts not on the glass
+(crosshair, pickup line) are drawn on the screen as before.
 
 Not done yet: the pulsing (squad mates down, no grenades, low health),
 the arrow round each squad panel pointing to that mate, the timer ring
 while a mate works on something, which order uses which picture (ours),
-the shield bars and visor frame.
+the shield bars.
 
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
@@ -4292,6 +4314,51 @@ in the sky box (geo_01a's `SkyZoneInfo` doesn't turn it on); `bClearToFogColor`
 unused; fog mixed in linear light (Direct3D mixes on screen values), and
 by distance rather than depth.
 
+## Light shafts and god rays (`HsFalloff`, `rc_level_viewer::falloff`)
+
+geo_01a's sun rays are one mesh (`Arena_HR.ArenaWalls.SunBeam`, material
+`Arena_Textures.Unique.rayfalloff`), and its tunnels have light cones
+(`Arena_GM.DecapTunels.VolumetricLight`, `Shader.VolumnLightTex`). Both
+materials are `HsFalloff`. We drew them as their picture added on top,
+darkened by the baked light and covered by the zone fog, so the rays were
+a flat block in the haze or not seen at all.
+
+What the game does, all read from its files:
+
+| Read from | What it says |
+| --- | --- |
+| Engine.u, `HsFalloff` | settings `DiffuseTexture`, `FalloffGradient`, `UPanRate`, `VPanRate`, `UOscilationRate`, `VOscilationRate`, `DiffuseTint`, `GradientTint`, `SrcBlend`, `DestBlend`; defaults: tints white, `SrcBlend` 3, `DestBlend` 2 (`ED3DBLEND`: `SRCCOLOR`, `ONE`); shader `HardwareShaders.Falloff.FalloffImpl` |
+| hardwareshaders.utx, `FalloffImpl` | vertex shader: picture place = texture place + c0 x sin(time) + c1 x time; facing = max(0, eye direction . normal) picks the gradient's U; vertex colour from the `FVF_Specular` stream; no fog value written. Pixel shader: picture x c0 x gradient x c1 x vertex colour |
+| Engine.dll, `UHsFalloff`'s setup | copies the oscillation rates to vertex constant 0, the pan rates to 1, `DiffuseTint` and `GradientTint` (each byte / 255) to pixel constants 0 and 1, and the blend settings to the shader |
+
+So the frame buffer gets colour x colour + what was there with the
+defaults (the sun rays), or colour + what was there with `SrcBlend` `ONE`
+(the light cones, which also pan down at 0.1 a second).
+
+`materials::Materials::falloff` reads these into `falloff::Falloff` on
+the picture; `draw::spawn_level` gives such batches the mesh's painted
+colours and a `falloff::view::FalloffSurface`; `FalloffPlugin` (added by
+`PropLightPlugin`) swaps in `FalloffMaterial` (`falloff.wesl`).
+
+Our choices, not confirmed in the files:
+- The vertex colour is the mesh's own painted colour stream (the sun
+  beams are painted white at the bright end and black at the far end). We
+  did not find which stream the game feeds to `FVF_Specular`.
+- No distance fog on these surfaces: the shader writes no fog value (the
+  game's projector shaders do), and in the user's screenshot the rays
+  stand out from the haze.
+- The game adds on its brightness curve, we add in linear light. The
+  shader's result is added as it is: over mid-grey ground (0.45 on the
+  curve) that is close to what adding on the curve does (0.84 x); over
+  dark ground ours is brighter, over bright ground fainter. Turned into
+  linear light first it was about five times too faint to see.
+- The gradient is read at V 0 (the shader sets only U); the game's
+  gradients are the same down every column.
+
+Check: `cargo run -p rc_level_viewer --example falloff_check` with the
+game's files (11 checks on geo_01a). The level viewer and the game log
+`light shafts ... N prop parts, M draw batches`.
+
 ## Holograms, tank liquid and props with no stored light
 
 **Holograms (`HsHologram`).** Republic Commando's own hologram material
@@ -4371,8 +4438,9 @@ parts. The briefing holograms' grids and text use it.
 
 **Tinted falloff (`HsFalloff`).** Light shafts and the prologue's tank
 liquid multiply their picture by `DiffuseTint` and `GradientTint`
-(white, no change, by default). The game's falloff picture, which fades
-the edges by viewing angle, isn't used yet.
+(white, no change, by default). Now drawn with the game's own falloff
+shader: see "Light shafts and god rays" below. The tinted picture is
+still the fallback when `HsFalloff`'s class defaults can't be read.
 
 **Props with no stored light.** The map stores light only for props that
 stay put (their `StaticMeshInstance`). Props a script moves or shows

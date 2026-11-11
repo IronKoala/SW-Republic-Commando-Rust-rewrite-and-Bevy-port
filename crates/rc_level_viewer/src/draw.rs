@@ -44,6 +44,9 @@ pub struct DrawReport {
     /// multiplying `Combiner`, `materials::Layer`); counted in the others
     /// too.
     pub multiplied: usize,
+    /// Batches drawn with the game's falloff shader (`HsFalloff`: light
+    /// shafts and god rays, see `crate::falloff`).
+    pub falloff: usize,
     pub lights: SpawnReport,
     /// Batches drawn in the sky (seen only by the sky camera).
     pub sky_batches: usize,
@@ -159,6 +162,7 @@ pub fn spawn_level(
     let (mut lightmapped, mut coloured, mut full_bright, mut bump_lit) = (0, 0, 0, 0);
     let mut coloured_live = 0;
     let mut multiplied = 0;
+    let mut falloff_drawn = 0;
     let props_live = settings.live_light_on_props > 0.0;
     // Real-time light on props, for the shaders (0 = none).
     let live_gain = if props_live { settings.live_light_on_props } else { 0.0 };
@@ -273,7 +277,23 @@ pub fn spawn_level(
             }
             continue;
         }
-        if with_colours {
+        // The game's falloff shader (light shafts, god rays): its own
+        // material, swapped in by `falloff::view::FalloffPlugin`. Its vertex
+        // colours are the mesh's painted colours as 0-1 values.
+        let falloff = b.picture.as_ref().and_then(|p| p.falloff.clone());
+        if falloff.is_some() {
+            let c: Vec<[f32; 4]> = b
+                .colours
+                .iter()
+                .map(|c| c.map(|v| v as f32 / 255.0))
+                .collect();
+            let c = if c.len() == b.positions.len() {
+                c
+            } else {
+                vec![[1.0; 4]; b.positions.len()]
+            };
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, c);
+        } else if with_colours {
             let c: Vec<[f32; 4]> = b
                 .colours
                 .iter()
@@ -303,7 +323,8 @@ pub fn spawn_level(
         let prop_live = with_colours && page.is_none() && !b.sky && props_live;
         // Multiplying props always use `PropMaterial` (it does the
         // multiply); real-time light only where `prop_live` allows it.
-        let prop_shader = prop_live || layer.is_some();
+        let prop_live = prop_live && falloff.is_none();
+        let prop_shader = (prop_live || layer.is_some()) && falloff.is_none();
         let two_sided =
             b.two_sided || hologram || b.picture.as_ref().is_some_and(|p| p.blend);
         let material = StandardMaterial {
@@ -357,6 +378,10 @@ pub fn spawn_level(
         } else {
             entity.insert(MeshMaterial3d(materials.add(material)));
         }
+        if let Some(f) = falloff {
+            entity.insert(crate::falloff::view::FalloffSurface(f));
+            falloff_drawn += 1;
+        }
         if hologram {
             // rc_hologram swaps in the shimmering, flickering look. The
             // batch is in world space, so its height squashes towards its
@@ -397,6 +422,7 @@ pub fn spawn_level(
         coloured_live,
         full_bright,
         multiplied,
+        falloff: falloff_drawn,
         lights: report,
         sky_batches,
         entities,

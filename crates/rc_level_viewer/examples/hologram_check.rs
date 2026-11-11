@@ -123,6 +123,7 @@ fn ball() -> Batch {
             bump: None,
             uv_channel: 0,
             multiply: None,
+            falloff: None,
         }),
         ..default()
     }

@@ -143,6 +143,10 @@ fn one() -> f32 {
     1.0
 }
 
+/// The group drawn behind and round everything else (the visor frame); it
+/// may overlap other groups.
+pub const BACKGROUND_GROUP: &str = "visor";
+
 /// Every name an `[[element]]` may use.
 const ELEMENT_KEYS: &[&str] = &[
     "group",
@@ -165,6 +169,7 @@ const ELEMENT_KEYS: &[&str] = &[
     "fill_least_gap",
     "colour_by",
     "colours",
+    "scroll",
     "mirror",
     "text",
     "align",
@@ -307,6 +312,11 @@ pub struct Picture {
     /// Flip the picture left to right (to reuse one side's art).
     #[serde(default)]
     pub mirror: bool,
+    /// Slide the picture sideways by this value (see `HudValues::scroll`),
+    /// in picture widths, repeating it: the original's compass strip. The
+    /// `part` may then be wider than the picture.
+    #[serde(default)]
+    pub scroll: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -370,6 +380,10 @@ pub struct HudValues {
     pub objective: String,
     /// How far it has faded in, 0..1.
     pub objective_fade: f32,
+    /// The compass strip's slide, in picture widths (the original's
+    /// `UHelmet::DrawHUD`: the view's yaw, 65536 a turn, modulo 65535,
+    /// times 0.0001, followed at 3 a second).
+    pub compass: f32,
 }
 
 /// How hurt, as the original sorts it (Engine.dll
@@ -385,6 +399,29 @@ pub fn health_level(health: f32) -> u8 {
     } else {
         3
     }
+}
+
+/// A part `src` (texels, maybe wider than the picture) slid right by
+/// `shift` texels, cut where the picture repeats (every `tw` texels), each
+/// piece with its share of `dst`.
+fn tiles(src: [f32; 4], dst: [f32; 4], shift: f32, tw: f32) -> Vec<([f32; 4], [f32; 4])> {
+    let (u0, u1) = (src[0] + shift, src[2] + shift);
+    if tw <= 0.0 || u1 <= u0 {
+        return vec![(src, dst)];
+    }
+    let mut out = Vec::new();
+    let mut u = u0;
+    while u < u1 - 1e-3 && out.len() < 64 {
+        let tile = (u / tw).floor();
+        let end = ((tile + 1.0) * tw).min(u1);
+        let x = |u: f32| dst[0] + (dst[2] - dst[0]) * (u - u0) / (u1 - u0);
+        out.push((
+            [u - tile * tw, src[1], end - tile * tw, src[3]],
+            [x(u), dst[1], x(end), dst[3]],
+        ));
+        u = end;
+    }
+    out
 }
 
 /// `v` (0..1) as a bar that drops in `steps` steps and, while below 1,
@@ -419,6 +456,14 @@ impl HudValues {
             }
             .clamp(0.0, 1.0),
         )
+    }
+
+    /// A sliding amount by name, for `scroll` (not limited to 0..1).
+    pub fn scroll(&self, name: &str) -> Option<f32> {
+        match name {
+            "compass" => Some(self.compass),
+            _ => None,
+        }
     }
 
     /// A yes/no by name, for `when` and `alert_when`.
@@ -552,6 +597,11 @@ impl HudLayout {
                 return Err(format!("{}: size must be above 0", e.group));
             }
             if let Kind::Picture(p) = &e.kind {
+                if let Some(f) = &p.scroll {
+                    if HudValues::default().scroll(f).is_none() {
+                        return Err(format!("{}: scroll \"{f}\" is not \"compass\"", e.group));
+                    }
+                }
                 if let Some(f) = &p.fill {
                     if !known_fill.contains(&f.as_str()) {
                         return Err(format!(
@@ -643,12 +693,17 @@ pub fn check_plan(
     let mut groups: BTreeMap<&str, [f32; 4]> = BTreeMap::new();
     let mut out = Vec::new();
     for p in &placed {
+        // The visor frame is round everything else.
+        let background = p.group == BACKGROUND_GROUP;
         let r = p.rect;
         if r[0] < -0.5 || r[1] < -0.5 || r[2] > width + 0.5 || r[3] > height + 0.5 {
             out.push(format!(
                 "{} goes off the {width}x{height} screen: {r:?}",
                 p.group
             ));
+        }
+        if background {
+            continue;
         }
         groups
             .entry(&p.group)
@@ -684,6 +739,31 @@ pub fn hud_quads(
     sizes: &mut dyn Sizes,
     glass: Option<&dyn Fn([f32; 2]) -> [f32; 2]>,
 ) -> Vec<Quad> {
+    hud_quads_of(
+        layout,
+        values,
+        width,
+        height,
+        max_aspect,
+        sizes,
+        glass,
+        &|_| true,
+    )
+}
+
+/// [`hud_quads`] for only the elements `pick` chooses (the game draws the
+/// `glass` ones onto the helmet's glass and the rest onto the screen).
+#[allow(clippy::too_many_arguments)]
+pub fn hud_quads_of(
+    layout: &HudLayout,
+    values: &HudValues,
+    width: f32,
+    height: f32,
+    max_aspect: f32,
+    sizes: &mut dyn Sizes,
+    glass: Option<&dyn Fn([f32; 2]) -> [f32; 2]>,
+    pick: &dyn Fn(&Element) -> bool,
+) -> Vec<Quad> {
     let (area, unit) = frame(width, height, max_aspect, layout.layout.scale);
     let fonts: Vec<FontData> = layout
         .layout
@@ -692,7 +772,7 @@ pub fn hud_quads(
         .filter_map(|f| sizes.font(f))
         .collect();
     let mut out = Vec::new();
-    for e in &layout.elements {
+    for e in layout.elements.iter().filter(|e| pick(e)) {
         let members: Vec<Option<&SquadLine>> = if e.repeat_squad.is_some() {
             values.squad.iter().map(Some).collect()
         } else {
@@ -749,17 +829,24 @@ pub fn hud_quads(
                         }
                         cut(&mut src, &mut dst, v, p.fill_toward.as_deref(), p.mirror);
                     }
-                    if p.mirror {
-                        src.swap(0, 2);
+                    let slide = p.scroll.as_deref().and_then(|k| values.scroll(k));
+                    let pieces = match slide {
+                        Some(v) => tiles(src, dst, v * tw, tw),
+                        None => vec![(src, dst)],
+                    };
+                    for (mut src, dst) in pieces {
+                        if p.mirror {
+                            src.swap(0, 2);
+                        }
+                        out.push(Quad {
+                            texture: p.picture.clone(),
+                            src,
+                            dst: to_screen(dst),
+                            color: colour,
+                            render_style: style(e.blend.as_deref(), STY_ALPHA),
+                            widget: e.group.clone(),
+                        });
                     }
-                    out.push(Quad {
-                        texture: p.picture.clone(),
-                        src,
-                        dst: to_screen(dst),
-                        color: colour,
-                        render_style: style(e.blend.as_deref(), STY_ALPHA),
-                        widget: e.group.clone(),
-                    });
                 }
                 Kind::Text(t) => {
                     let text = values.text(&t.text, member);
@@ -1094,6 +1181,18 @@ mod tests {
         assert_eq!(v.flag("nonsense", None), None);
         assert_eq!(v.flag("grenades_left", None), Some(true));
         assert_eq!(v.text("{squad_health_level}", Some(&m)), "0");
+    }
+
+    #[test]
+    fn a_sliding_strip_repeats_its_picture() {
+        // 414 texels of a 128-wide picture over 414 pixels, slid by 0.5.
+        let t = tiles([0.0, 0.0, 414.0, 16.0], [0.0, 0.0, 414.0, 11.0], 64.0, 128.0);
+        assert_eq!(t[0], ([64.0, 0.0, 128.0, 16.0], [0.0, 0.0, 64.0, 11.0]));
+        assert_eq!(t[1], ([0.0, 0.0, 128.0, 16.0], [64.0, 0.0, 192.0, 11.0]));
+        let last = t.last().unwrap();
+        assert_eq!(last.1[2], 414.0);
+        let covered: f32 = t.iter().map(|(s, _)| s[2] - s[0]).sum();
+        assert!((covered - 414.0).abs() < 1e-3);
     }
 
     #[test]
