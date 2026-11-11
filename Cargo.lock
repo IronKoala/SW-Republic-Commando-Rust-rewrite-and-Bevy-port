@@ -4718,6 +4718,7 @@ dependencies = [
  "bevy",
  "rc_audio",
  "rc_combat",
+ "rc_effects",
  "rc_effects_plugin",
  "rc_game_core",
  "rc_level",

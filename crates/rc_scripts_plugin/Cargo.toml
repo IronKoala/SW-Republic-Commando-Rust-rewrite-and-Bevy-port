@@ -7,6 +7,8 @@ description = "Level scripts in the game: runs the map's own scripting (rc_scrip
 [dependencies]
 rc_audio = { path = "../rc_audio" }
 rc_combat = { path = "../rc_combat" }
+# The level's effect spawners (FXFactory): their rules.
+rc_effects = { path = "../rc_effects" }
 # Explosions and smoke when props break.
 rc_effects_plugin = { path = "../rc_effects_plugin" }
 rc_game_core = { path = "../rc_game_core" }

@@ -13,9 +13,41 @@
 //! - an emitter that doesn't respawn sends `max_particles` in all, then is
 //!   done once they have died;
 //! - a particle's size and colour follow its `size_scale` and
-//!   `colour_scale` over its life, linearly between the points.
+//!   `colour_scale` over its life, linearly between the points;
+//! - an effect can be turned and sized where it is placed
+//!   ([`EffectState::placed`], used by the level's effect spawners): an
+//!   emitter whose `CoordinateSystem` is `PTCS_Relative` has its start
+//!   places, flight and acceleration turned with the effect; every
+//!   particle's size is multiplied by the effect's draw scale. **Our
+//!   reading**: the engine's code for both is compiled, not in the game's
+//!   files; the values (the rotation, `EmitterDrawScale`,
+//!   `CoordinateSystem`) are the game's.
 
-use crate::def::{EffectDef, EmitterDef, Range, RangeVector, StartShape, VelocityFrom};
+use crate::def::{
+    CoordinateSystem, EffectDef, EmitterDef, Range, RangeVector, StartShape, VelocityFrom,
+};
+
+/// The three axes (forward, right, up; Unreal X, Y, Z) of an Unreal
+/// rotation (pitch, yaw, roll; 65536 a full turn), the engine's own order.
+pub fn rotation_axes(rot: [i32; 3]) -> [[f32; 3]; 3] {
+    let to_rad = std::f32::consts::TAU / 65536.0;
+    let (sp, cp) = (rot[0] as f32 * to_rad).sin_cos();
+    let (sy, cy) = (rot[1] as f32 * to_rad).sin_cos();
+    let (sr, cr) = (rot[2] as f32 * to_rad).sin_cos();
+    [
+        [cp * cy, cp * sy, sp],
+        [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp],
+        [-(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp],
+    ]
+}
+
+/// No turn.
+pub const IDENTITY_AXES: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// A vector in the effect's own axes, in the level's.
+fn turn(axes: &[[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
+    [0, 1, 2].map(|c| v[0] * axes[0][c] + v[1] * axes[1][c] + v[2] * axes[2][c])
+}
 
 /// A small random number maker (xorshift), so effects look the same in
 /// every test run.
@@ -95,6 +127,11 @@ pub struct EmitterState {
 #[derive(Debug, Clone)]
 pub struct EffectState {
     pub origin: [f32; 3],
+    /// The effect's own axes (forward, right, up) in the level's; for
+    /// emitters with `PTCS_Relative`. No turn unless [`Self::placed`].
+    pub axes: [[f32; 3]; 3],
+    /// Multiplies every particle's size (the effect's draw scale).
+    pub scale: f32,
     /// The height of the ground under it, for particles that bounce.
     pub floor: Option<f32>,
     pub age: f32,
@@ -145,11 +182,22 @@ impl EffectState {
             .collect();
         EffectState {
             origin,
+            axes: IDENTITY_AXES,
+            scale: 1.0,
             floor: None,
             age: 0.0,
             emitters,
             rng,
         }
+    }
+
+    /// Turned by `rotation` (Unreal pitch, yaw, roll) and sized by
+    /// `scale`, as an effect spawner places its effects. Call before the
+    /// first step.
+    pub fn placed(mut self, rotation: [i32; 3], scale: f32) -> Self {
+        self.axes = rotation_axes(rotation);
+        self.scale = scale;
+        self
     }
 
     /// Particles alive now, in all emitters.
@@ -206,13 +254,18 @@ impl EffectState {
                 }
             }
         }
+        if def.coordinate_system == CoordinateSystem::Relative {
+            offset = turn(&self.axes, offset);
+            velocity = turn(&self.axes, velocity);
+        }
         let sx = rng.unit();
         let size = if def.uniform_size {
             let s = def.start_size.x.at(sx);
             [s, s]
         } else {
             [def.start_size.x.at(sx), def.start_size.y.at(rng.unit())]
-        };
+        }
+        .map(|s| s * self.scale);
         let frames = def.frames();
         let frame = if def.random_frame && frames > 1 {
             let lo = def.frame_start.min(frames - 1);
@@ -266,11 +319,16 @@ impl EffectState {
                 continue;
             }
             // Age and move the live ones.
+            let acceleration = if d.coordinate_system == CoordinateSystem::Relative {
+                turn(&self.axes, d.acceleration)
+            } else {
+                d.acceleration
+            };
             let s = &mut self.emitters[i];
             for p in &mut s.particles {
                 p.age += dt;
                 for k in 0..3 {
-                    p.velocity[k] += d.acceleration[k] * dt;
+                    p.velocity[k] += acceleration[k] * dt;
                     p.velocity[k] *= (1.0 - p.velocity_loss[k] * dt).max(0.0);
                     p.position[k] += p.velocity[k] * dt;
                 }
@@ -414,7 +472,36 @@ mod tests {
             }],
             sound: None,
             life_span: 0.0,
+            lit: false,
         }
+    }
+
+    #[test]
+    fn a_relative_emitter_turns_with_the_effect_and_scales() {
+        let mut def = burst();
+        def.emitters[0].coordinate_system = crate::def::CoordinateSystem::Relative;
+        def.emitters[0].start_velocity = RangeVector::fixed(0.0);
+        def.emitters[0].start_velocity.x = Range::fixed(8000.0);
+        // Yaw a quarter turn: the effect's forward is the level's +Y.
+        let mut s = EffectState::new(&def, [0.0; 3], 5).placed([0, 16384, 0], 2.0);
+        s.step(&def, 0.01);
+        let p = &s.emitters[0].particles[0];
+        assert!(
+            p.velocity[0].abs() < 1.0 && (p.velocity[1] - 8000.0).abs() < 1.0,
+            "{:?}",
+            p.velocity
+        );
+        let plain = {
+            let mut s = EffectState::new(&def, [0.0; 3], 5);
+            s.step(&def, 0.01);
+            s.emitters[0].particles[0].size
+        };
+        assert!((p.size[0] - plain[0] * 2.0).abs() < 1e-3);
+        // Independent emitters ignore the turn.
+        def.emitters[0].coordinate_system = crate::def::CoordinateSystem::Independent;
+        let mut s = EffectState::new(&def, [0.0; 3], 5).placed([0, 16384, 0], 1.0);
+        s.step(&def, 0.01);
+        assert!((s.emitters[0].particles[0].velocity[0] - 8000.0).abs() < 1.0);
     }
 
     #[test]

@@ -648,6 +648,12 @@ copy of the game.
   barrel's model is left behind for a few seconds (geo_03a has them;
   geo_01b's map says its barrels leave none). Settings in
   `data/effects/effects.toml`.
+- **Effect spawners (since 2026-11-11, tested in the cloud only, not on
+  Windows or by playing).** The maps' `FXFactory` actors now run, so the
+  level scripts can switch on background action: in geo_01a, after the
+  opening briefing, Republic gunships and Geonosian fighters fly over the
+  arena, and battle explosions go off near you. 397 such spawners on 55
+  maps. Their on/off state is kept in save files.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to

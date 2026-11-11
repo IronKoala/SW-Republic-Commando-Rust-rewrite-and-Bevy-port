@@ -772,6 +772,21 @@ fn steps() -> Vec<Step> {
             }
         }),
         Note(|w| w.resource_mut::<Settings>().game.helmet = true),
+        // The level's effect spawners (`rc_scripts_plugin::fx_factories`):
+        // the opening script sends OverheadVehicles, which switches on
+        // geo_01a's five overhead spawners; the game's own gunship and
+        // Geonosian fighter models then fly over, high above the arena.
+        Until(
+            "the opening script switches on the overhead flyovers",
+            fx_overhead_on,
+            60.0,
+        ),
+        Until(
+            "gunships and fighters fly over, high above the arena",
+            fx_overhead_flying,
+            30.0,
+        ),
+        Shot("flyover"),
         Note(|w| set_pitch(w, 0.0)),
         Wait(0.2),
         // Turn round to where the squad stands (behind the player) and
@@ -3452,6 +3467,48 @@ fn props_blast_hurt(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a's five OverheadVehicles spawners are on.
+fn fx_overhead_on(w: &mut World) -> bool {
+    w.get_resource::<rc_scripts_plugin::fx_factories::LevelFxFactories>()
+        .is_some_and(|fx| {
+            fx.spawners
+                .list
+                .iter()
+                .zip(&fx.spawners.states)
+                .filter(|(f, s)| f.tag.eq_ignore_ascii_case("OverheadVehicles") && s.online)
+                .count()
+                == 5
+        })
+}
+
+/// Gunships and fighters made, their models drawn far above the arena's
+/// floor (about -2300 uu), and nothing missing to draw them.
+fn fx_overhead_flying(w: &mut World) -> bool {
+    let made: Vec<String> = w
+        .get_resource::<rc_scripts_plugin::fx_factories::LevelFxFactories>()
+        .map(|fx| fx.made.iter().map(|(_, e)| e.clone()).collect())
+        .unwrap_or_default();
+    let Some(st) = w.get_resource::<rc_effects_plugin::EffectStats>() else {
+        return false;
+    };
+    let gunships = made.iter().any(|e| e == "cFX_Gunships");
+    let fighters = made.iter().any(|e| e == "cFX_GEOfighters");
+    let high = st.highest_mesh.is_some_and(|z| z > 5000.0);
+    let ok = gunships && fighters && high && st.meshes_drawn > 0;
+    let missing: Vec<&String> = st
+        .missing
+        .iter()
+        .filter(|m| m.starts_with("cFX_"))
+        .collect();
+    if ok || !missing.is_empty() {
+        w.resource::<GameLog>().line(format!(
+            "script: flyovers: made {made:?}; {} models drawn now, highest at {:?} uu; missing {missing:?}",
+            st.meshes_drawn, st.highest_mesh
+        ));
+    }
+    ok && missing.is_empty()
+}
+
 fn props_effect_shown(w: &mut World) -> Result<String, String> {
     let st = w
         .get_resource::<rc_effects_plugin::EffectStats>()
@@ -3475,9 +3532,12 @@ fn props_effect_shown(w: &mut World) -> Result<String, String> {
 }
 
 fn props_effect_over(w: &mut World) -> bool {
+    // The barrel's own effect (the overhead flyovers run all level long).
     let running = {
         let mut q = w.query::<&rc_effects_plugin::RunningEffect>();
-        q.iter(w).count()
+        q.iter(w)
+            .filter(|r| r.name().eq_ignore_ascii_case("Explosion_Barrel_GEO"))
+            .count()
     };
     running == 0
         && w

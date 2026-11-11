@@ -4377,6 +4377,53 @@ ignored; beam and trail emitters aren't drawn; sounds aren't placed in 3D
 yet, only made quieter with distance (the level scripts' 3D sound in
 `rc_scripts_plugin/src/sounds.rs` could be reused).
 
+### Effect spawners (`FXFactory`, `rc_effects::factory`)
+
+**What the original does** (ctgame.u's `Factory` and `FXFactory`
+scripts). A map places `FXFactory` actors that make an effect class
+(`Prototype`) again and again, at `SpawnPoint`s that share its `Tag`
+(`SpawnMode` 0 in turn, 1 at random, 3 the one nearest the player) or at
+the factory itself (2). It starts off; the event named by its `Tag` turns
+it on and the same event again turns it off. While on, it makes one at
+once, then one every `SpawnInterval` seconds (a random time up to
+`SpawnIntervalMax` when that is bigger), as long as fewer than `MaxAlive`
+of its effects are still going and it has some of its `Capacity` left
+(`bGenerateForever` never runs out). A spawn point outside
+`MinPlayerRange..MaxPlayerRange` of the player is skipped; with `bCovert`
+one the player can see (in front within the field of view and nothing in
+the way) is skipped. Each spawn sends `SpawnEvent`; running out sends
+`ExhaustedEvent` and turns it off. Scripts' `ACTION_ResetFactory` fills
+it back to `Capacity`. `FXFactory` adds a random `EmitterDrawScale` and
+`SpawnOffset` to each effect. geo_01a's five `OverheadVehicles`
+factories (gunships and Geonosian fighters, effects `cFX_Gunships` and
+`cFX_GEOfighters` whose mesh emitters fly models across the sky) are
+turned on by `ScriptedTrigger52` after the briefing.
+
+**How we split it.** `rc_effects::factory::Spawners` holds the rules with
+no Bevy: `trigger`, `reset`, `stop`, `ended` and `step`, with a
+`PlayerView` the game gives it (where the player is, whether a point is in
+view). `rc_scripts_plugin/src/fx_factories.rs` reads the factories and
+spawn points from the map, passes level script events and
+`ResetFactory`/`StopFactory` orders to them, sends `SpawnEffect` with an
+id and the factory's turn and scale, and hears back `EffectEnded` from
+`rc_effects_plugin` when an effect finishes. On/off and what is left go
+in save files (`effect_spawners`).
+
+For the flying models, mesh emitters now use `CoordinateSystem`
+(`PTCS_Relative` turns a part's start place, speed and pull with the
+effect), `UseMeshBlendMode` (the class default true: the model's own
+material, drawn solid) and the effect's `bUnlit` (false on both flyover
+effects: drawn with the level's light at that place, as droids are,
+starting from `lit_model_light`).
+
+**Our reading (not checked against the original's engine code):**
+`EmitterDrawScale` multiplies every particle's size; the relative turn is
+the effect's full rotation; only the X part of `StartSpinRange` and
+`SpinsPerSecondRange` is used, so the flyovers' small Z spin (0.1, 0.01)
+is not applied (which way each part turns a model is not known); a lit model starts from the same light level the droids use
+(0.5); fades are not applied to models; the field of view for `bCovert`
+is the camera's 4:3 one.
+
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 
 **What the original does.** A `Turret` (the Wookiee heavy turret on
