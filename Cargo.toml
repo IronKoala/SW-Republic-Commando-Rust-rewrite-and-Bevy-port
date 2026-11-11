@@ -7,3 +7,18 @@ members = ["crates/rc_ai", "crates/rc_anim", "crates/rc_audio", "crates/rc_cast"
 
 [workspace.package]
 edition = "2021"
+
+# The menu background video is decoded on the CPU every frame it changes.
+# Unoptimised (debug) builds decode one 512x512 frame in about 70 ms, so a
+# debug run (the cloud test script) could never keep up with 30 frames a
+# second and slowed to a crawl. The decoder and the library it uses
+# (oxideav) are always built optimised; release builds are unchanged
+# (about 5 ms a frame on the cloud's CPU).
+[profile.dev.package.rc_video]
+opt-level = 3
+
+[profile.dev.package.oxideav-msmpeg4]
+opt-level = 3
+
+[profile.dev.package.oxideav-core]
+opt-level = 3
