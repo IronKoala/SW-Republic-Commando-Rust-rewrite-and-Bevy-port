@@ -253,6 +253,38 @@ fn steps() -> Vec<Step> {
             }
         }),
         Wait(0.5),
+        Check("the main menu's background video plays", |w| {
+            let v = w.resource::<crate::menu_video::MenuVideo>();
+            let movie = w
+                .resource::<OriginalMenus>()
+                .main
+                .as_ref()
+                .map(|m| m.layout.background_movie.clone())
+                .unwrap_or_default();
+            if movie.is_empty() {
+                return Err("the main menu names no background video".into());
+            }
+            match &v.player {
+                None => {
+                    let path = crate::menu_video::avi_for(w.resource::<rc_game_core::GamePaths>(), &movie);
+                    if path.exists() {
+                        Err(format!("{} is there but didn't play (see the log)", path.display()))
+                    } else {
+                        Ok(format!("{movie:?}: no {} in this install, skipped", path.display()))
+                    }
+                }
+                Some(p) if v.wanted && v.frames_shown >= 3 => Ok(format!(
+                    "{movie:?}: {} frames shown, now frame {:?} of {}",
+                    v.frames_shown,
+                    v.last_frame,
+                    p.frame_count()
+                )),
+                Some(_) => Err(format!(
+                    "{movie:?}: only {} frames shown (drawn: {})",
+                    v.frames_shown, v.wanted
+                )),
+            }
+        }),
         Shot("main_menu"),
         Check("main menu matches the original's pictures", |w| {
             compare(w, "main_menu", 0.2)
@@ -2061,8 +2093,17 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
     let across = w.resource::<OriginalMenus>().across;
     let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32), across);
     let ours = shrink(&shot, area, W, H);
+    let video = {
+        let v = w.resource::<crate::menu_video::MenuVideo>();
+        if v.wanted {
+            v.software_frame(W, H, area.width() / area.height().max(1.0))
+        } else {
+            None
+        }
+    };
     let mut menus = w.resource_mut::<OriginalMenus>();
-    let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let reference =
+        original_menu::software_picture(&mut menus, W, H, video).ok_or("no original menu")?;
     let mut total = 0.0f64;
     let mut worst = 0.0f64;
     let mut far = 0usize;

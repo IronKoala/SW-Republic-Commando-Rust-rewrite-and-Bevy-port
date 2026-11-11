@@ -1,0 +1,12 @@
+[package]
+name = "rc_video"
+version = "0.1.0"
+description = "Plays the original game's .avi videos (Microsoft MPEG-4 v2, 'MP42'), such as the menu background, read from the install at runtime"
+edition.workspace = true
+
+[dependencies]
+# Pure-Rust Microsoft MPEG-4 building blocks (tables, bit reader, IDCT,
+# motion compensation). MIT licence. Its own v2 picture decoder has
+# mistakes, so `msmpeg4v2.rs` drives these pieces itself (see there).
+oxideav-msmpeg4 = "=0.0.11"
+oxideav-core = "=0.1.43"

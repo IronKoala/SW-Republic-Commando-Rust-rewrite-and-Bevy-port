@@ -3463,7 +3463,9 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   rest. A value that is already set is never overwritten. Empty colours
   mean opaque white, empty scales mean 1.
 - `rc_menus::quads` turns widgets into textured rectangles in a 0..1 menu
-  area laid out for 640x480. `rc_menus::render` paints the same rectangles
+  area whose pictures and letters are sized for 800x600 (the original's
+  `XInterface.dll` ResScale), with stretched pictures' corners one texel
+  to one screen pixel (`quads::set_pixels_high`). `rc_menus::render` paints the same rectangles
   in software; the script compares that picture with a screenshot.
 - `rc_menus::gpu` makes copies of pictures for Bevy: each render style
   (normal, masked, translucent or additive, alpha) and each tint gets its
@@ -3471,6 +3473,15 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   gives the original's sRGB result over black.
 - `rc_menus::screens` holds what each menu's script does, rewritten by
   hand (the main menu and the yes/no question so far).
+- `rc_video` (no Bevy) plays the original's AVI videos: `avi::parse`
+  finds the size, rate and frame chunks; `msmpeg4v2::Decoder` decodes
+  Microsoft MPEG-4 v2 with the oxideav crates' tables and block decoding
+  plus our own picture loop; `VideoPlayer` steps, loops and gives YUV or
+  RGBA. `rc_game::menu_video` (resource `MenuVideo`, system `play`) opens
+  the video a menu's `BackgroundMovie` widget names
+  (`rc_menus::layout::MovieWidget`) and keeps a Bevy image on the frame
+  for the real time since it started; `original_menu::draw` places it
+  under the menu, cut to the screen's shape by `MenuVideo::crop`.
 - `rc_menus::pages` handles the pages behind the main menu (pause,
   campaign, options) as data. `data/ui/original_menus.toml` names each
   page's menu class and maps each button's function name (the original's
@@ -3481,6 +3492,28 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   otherwise the placeholder page stays and every reason is logged. So a
   mod can switch a page to another class, or teach it a button, without
   code, and an unfinished page never shows half-working.
+- The GRAPHICS page follows its own script, `CTGraphicsOptionsPCMenu` in
+  `XInterfaceCTMenus.u`, read from the install. Its presets aren't in the
+  menu: it names five `System.ini` sections (`GraphicsQualityLowest` to
+  `GraphicsQualityHighest`), and `rc_game/src/graphics_presets.rs` reads
+  them at start from `GameData/System/System.ini` with
+  `GameData/Save/System.ini` on top (only its lines that aren't commented
+  out), plus `[VideoSettings] DefaultConfig`, the preset SET RECOMMENDED
+  uses. GRAPHICS QUALITY isn't stored: as the original's
+  `MatchSettingsToPreset`, it shows the first preset every row matches, or
+  CUSTOM. The arrows never stop on CUSTOM (GRAPHICS QUALITY goes to
+  LOWEST; TEXTURE QUALITY to HIGHEST going left, LOWEST going right).
+  PROJECTORS off turns SQUAD SHADOWS off and greys it out; VSYNC off sets
+  FSAA to NONE and greys it out (`option_settings::row_enabled`,
+  `screens::disable_row` / `enable_row`). BRIGHTNESS is the original's
+  `Gamma`: row = int((Gamma - 0.5) / 2 x 10 + 0.5), set as row / 10 x 2 + 0.5
+  (`Engine.dll`); its screen curve is x ^ (1 / Gamma) (`D3DDrv.dll`), which
+  the port matches at mid grey with Bevy's exposure on the 3D view. FSAA's
+  list is NONE plus the sample counts the graphics card supports for
+  every format the cameras use. Presets leave the screen size alone
+  (`PRESETS_SET_SCREEN_SIZE`), since the original's hold only 4:3 sizes up
+  to 1024x768. The page opens with nothing lit, as in the user's
+  screenshots of the original.
 - The options pages (GAME, SOUND, GRAPHICS, CONTROLS) are original too.
   `rc_menus::layout` draws the original's choosers (`MenuButtonEnum`: a
   row with a list of values and arrows) and its picture buttons

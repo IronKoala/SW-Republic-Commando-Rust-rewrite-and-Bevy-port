@@ -81,6 +81,14 @@ pub struct Sprite {
     pub scale_mode: u8,
 }
 
+/// A menu's `BackgroundMovie` widget (`MenuMovie` in `XInterface.u`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MovieWidget {
+    pub sprite: Sprite,
+    pub hidden: bool,
+    pub pass: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Text {
     pub font: Option<String>,
@@ -214,6 +222,10 @@ pub struct MenuLayout {
     /// The `.xmv` background video's name (the PC game plays
     /// `Movies/menu_bg.avi` for it).
     pub background_movie: String,
+    /// How the class draws that video: its `BackgroundMovie` widget
+    /// (a `MenuMovie`, read like a sprite: no texture, but colour,
+    /// position, size and hidden flag). `None` when the class has none.
+    pub movie_widget: Option<MovieWidget>,
     pub music: Option<String>,
     /// Scrolling lists, their scroll bars and wheel areas (`lists.rs`).
     pub lists: crate::lists::Lists,
@@ -371,6 +383,14 @@ pub fn build(class: &ClassData) -> MenuLayout {
             Some(V::Str(s)) => s.clone(),
             _ => String::new(),
         },
+        movie_widget: class.get("BackgroundMovie").map(|v| MovieWidget {
+            sprite: sprite(v),
+            hidden: matches!(v.get("bHidden"), Some(V::Int(h)) if *h != 0),
+            pass: match v.get("Pass") {
+                Some(V::Int(p)) => *p,
+                _ => 0,
+            },
+        }),
         music: obj("BackgroundMusic"),
         lists,
     };
