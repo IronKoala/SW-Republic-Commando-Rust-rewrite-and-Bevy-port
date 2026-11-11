@@ -18,6 +18,13 @@
 //!   puts the characters running a script on a turret (its `ControlEvent`
 //!   goes off; they shoot at enemies in range with the turret's gun), and
 //!   `ACTION_SetTurretUsable` lets the player use a turret or not;
+//! - puts squad mates on turrets: one the player sends to a turret marker
+//!   ("Man turret") gets on when they reach it (the squad part asks with
+//!   [`TurretOrder::Squad`]) and works it like a script's character,
+//!   aiming at the nearest enemy in range and firing the turret's gun,
+//!   until recalled (F4), sent elsewhere, or down. While on, the squad
+//!   mate carries [`OnTurret`], which the squad part reads to hold the
+//!   body there and keep their own gun quiet;
 //! - saves where each turret points, who is on it and whether the player
 //!   may use it (`[turrets]`).
 //!
@@ -36,8 +43,7 @@
 //!   `Event` when destroyed, then lies still in its death pose. Script
 //!   actions find it by its tag (`ScriptTags`).
 //!
-//! **Not done yet:** squad mates getting on through the turret marker
-//! (`MarkerTurret`), turrets a gunner works being shot (they have 50
+//! **Not done yet:** turrets a gunner works being shot (they have 50
 //! health), turrets blocking the player's way, the turret firing and
 //! turning sounds, the automatic turrets' state looks (lit/cooling
 //! materials and effects, `TurretInfo`) and their explosion when
@@ -56,10 +62,10 @@ use rc_game_core::save::{SaveAppExt, SavePart};
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState, HudMessage,
-    LevelCollision, LoadingGate, Manning, Player, PlayerCamera, RaiseEvent, ScriptEvent,
+    LevelCollision, LoadingGate, Manning, OnTurret, Player, PlayerCamera, RaiseEvent, ScriptEvent,
     ScriptTags, TeleportPlayer, TurretOrder, UseClaimed,
 };
-use rc_turrets::{first_tagged, Gunner, Mounted, Turret, TurretParams};
+use rc_turrets::{first_tagged, for_marker, Gunner, Mounted, Turret, TurretParams};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -74,6 +80,10 @@ const PLAYER_HALF_HEIGHT: f32 = 84.0;
 /// The player must face the turret to within this angle to get on,
 /// radians (our choice: the original asks for the crosshair on it).
 const FACING: f32 = 1.2;
+
+/// A squad turret marker whose anchor isn't the turret itself goes with
+/// the nearest turret this close to the spot, uu (our choice).
+const MARKER_REACH: f32 = 512.0;
 
 pub struct TurretsPlugin;
 
@@ -194,6 +204,8 @@ pub struct LevelTurrets {
     use_taken: bool,
     /// Character gunners: when each turret last fired, seconds.
     last_shot: Vec<f32>,
+    /// Squad mates on turrets: each one's entity, by turret.
+    squad_gunners: HashMap<usize, Entity>,
     /// Automatic turrets: when each was last switched on, seconds (for its
     /// unfolding animation).
     switched_on: Vec<f32>,
@@ -263,6 +275,28 @@ fn automatic_look(lt: &LevelTurrets, i: usize) -> Look {
 }
 
 impl LevelTurrets {
+    /// The level's turrets with no models (they aren't drawn, and gunners
+    /// fire from where they're held). For tests and tools; the game reads
+    /// the map instead.
+    pub fn without_models(kinds: TurretKinds, list: Vec<Turret>) -> Self {
+        let n = list.len();
+        LevelTurrets {
+            kinds,
+            list,
+            entities: vec![Entity::PLACEHOLDER; n],
+            hits: vec![None; n],
+            looks: HashMap::new(),
+            previous_weapon: None,
+            offered: None,
+            use_taken: false,
+            last_shot: vec![f32::NEG_INFINITY; n],
+            squad_gunners: HashMap::new(),
+            switched_on: vec![f32::NEG_INFINITY; n],
+            time: 0.0,
+            stats: TurretStats::default(),
+        }
+    }
+
     /// The turret the player is on, if any.
     pub fn player_turret(&self) -> Option<usize> {
         self.list.iter().position(|t| t.gunner == Gunner::Player)
@@ -533,6 +567,7 @@ fn load(
         offered: None,
         use_taken: false,
         last_shot: vec![f32::NEG_INFINITY; n],
+        squad_gunners: HashMap::new(),
         switched_on: vec![f32::NEG_INFINITY; n],
         time: 0.0,
         stats: TurretStats::default(),
@@ -711,6 +746,7 @@ fn model_to_local(look: &DroidLook, half_height: f32, p: [f32; 3]) -> [f32; 3] {
 
 /// Scripts' orders: characters on and off turrets, usable or not.
 fn orders(
+    mut commands: Commands,
     turrets: Option<ResMut<LevelTurrets>>,
     mut incoming: MessageReader<TurretOrder>,
     mut raise: MessageWriter<RaiseEvent>,
@@ -769,6 +805,19 @@ fn orders(
                     )),
                 }
             }
+            TurretOrder::Squad {
+                anchor,
+                near,
+                gunner,
+                member,
+                on,
+            } => squad_order(
+                &mut commands,
+                &mut lt,
+                &mut raise,
+                (anchor, *near, *gunner, member, *on),
+                &log,
+            ),
             TurretOrder::SetUsable { turret, usable, by } => {
                 let mut n = 0;
                 for t in lt
@@ -784,6 +833,74 @@ fn orders(
                     if *usable { "usable" } else { "not usable" }
                 ));
             }
+        }
+    }
+}
+
+/// A squad mate gets on or off the turret of the marker they were sent to.
+fn squad_order(
+    commands: &mut Commands,
+    lt: &mut LevelTurrets,
+    raise: &mut MessageWriter<RaiseEvent>,
+    (anchor, near, e, member, on): (&str, [f32; 3], Entity, &str, bool),
+    log: &GameLog,
+) {
+    let who = Gunner::Squad(member.to_string());
+    let i = if on {
+        for_marker(&lt.list, anchor, near, MARKER_REACH)
+    } else {
+        lt.list.iter().position(|t| t.gunner == who)
+    };
+    let Some(i) = i else {
+        if on {
+            log.line(format!(
+                "{PART}: t={:.2} {member}: no turret {anchor} or within {MARKER_REACH} uu of the marker; fights from the spot",
+                lt.time
+            ));
+        }
+        commands.entity(e).try_remove::<OnTurret>();
+        return;
+    };
+    let name = lt.list[i].place.name.clone();
+    let result = if on {
+        lt.list[i].mount(who.clone())
+    } else {
+        lt.list[i].leave()
+    };
+    match result {
+        Mounted::On(events) => {
+            log.line(format!(
+                "{PART}: t={:.2} squad mate {member} gets on {name}",
+                lt.time
+            ));
+            lt.squad_gunners.insert(i, e);
+            let t = &lt.list[i];
+            let (yaw, pitch) = t.view();
+            commands.entity(e).insert(OnTurret {
+                turret: lt.entities[i],
+                name: name.clone(),
+                body: t.gunner_body(),
+                yaw,
+                pitch,
+            });
+            send(lt, raise, events, &name, log);
+        }
+        Mounted::Off(events) => {
+            log.line(format!(
+                "{PART}: t={:.2} squad mate {member} gets off {name}",
+                lt.time
+            ));
+            lt.squad_gunners.remove(&i);
+            commands.entity(e).try_remove::<OnTurret>();
+            send(lt, raise, events, &name, log);
+        }
+        Mounted::Taken => log.line(format!(
+            "{PART}: t={:.2} {member}: {name} is taken ({}); fights from the spot",
+            lt.time,
+            lt.list[i].gunner.save_name()
+        )),
+        Mounted::NotUsable | Mounted::NotOn => {
+            commands.entity(e).try_remove::<OnTurret>();
         }
     }
 }
@@ -1012,12 +1129,16 @@ fn player_on(
     m.body = tur.gunner_body();
 }
 
-/// Characters on turrets: hold them there, and shoot at enemies in range.
+/// Characters and squad mates on turrets: hold the characters there (the
+/// squad part holds its own), and shoot at enemies in range.
 #[allow(clippy::too_many_arguments)]
 fn characters(
+    mut commands: Commands,
     turrets: Option<ResMut<LevelTurrets>>,
     time: Res<Time>,
     chars: Query<(Entity, &ScriptTags, Option<&Team>, Has<Dead>)>,
+    others: Query<(Option<&Team>, Has<Dead>)>,
+    mut on_turret: Query<&mut OnTurret>,
     mut bodies: Query<&mut Transform, Without<TurretBody>>,
     targets: Query<(Entity, &GlobalTransform, &Team, &Hittable), Without<Dead>>,
     mut shots: MessageWriter<FireShot>,
@@ -1028,16 +1149,30 @@ fn characters(
     let dt = time.delta_secs().min(0.25);
     let now = lt.time;
     for i in 0..lt.list.len() {
-        let Gunner::Character(who) = lt.list[i].gunner.clone() else {
-            continue;
-        };
-        let gunner = chars.iter().find(|(_, st, _, _)| {
-            st.script
-                .as_deref()
-                .is_some_and(|s| s.eq_ignore_ascii_case(&who))
-        });
-        let Some((e, _, team, dead)) = gunner else {
-            continue;
+        let (who, e, team, dead, squad) = match lt.list[i].gunner.clone() {
+            Gunner::Character(who) => {
+                let gunner = chars.iter().find(|(_, st, _, _)| {
+                    st.script
+                        .as_deref()
+                        .is_some_and(|s| s.eq_ignore_ascii_case(&who))
+                });
+                let Some((e, _, team, dead)) = gunner else {
+                    continue;
+                };
+                (who, e, team.copied(), dead, false)
+            }
+            Gunner::Squad(who) => {
+                // Not asked for again yet after loading a save: wait.
+                let Some(&e) = lt.squad_gunners.get(&i) else {
+                    continue;
+                };
+                match others.get(e) {
+                    Ok((team, dead)) => (who, e, team.copied(), dead, true),
+                    // Gone from the level: off.
+                    Err(_) => (who, e, None, true, true),
+                }
+            }
+            _ => continue,
         };
         if dead {
             let name = lt.list[i].place.name.clone();
@@ -1047,10 +1182,23 @@ fn characters(
                 ));
                 send(&mut lt, &mut raise, events, &name, &log);
             }
+            if squad {
+                lt.squad_gunners.remove(&i);
+                commands.entity(e).try_remove::<OnTurret>();
+            }
             continue;
         }
-        // Held on the turret (standing at its gunner spot).
-        if let Ok(mut tr) = bodies.get_mut(e) {
+        if squad {
+            // The squad part holds the body; tell it where the gun points.
+            let t = &lt.list[i];
+            let (yaw, pitch) = t.view();
+            if let Ok(mut o) = on_turret.get_mut(e) {
+                o.body = t.gunner_body();
+                o.yaw = yaw;
+                o.pitch = pitch;
+            }
+        } else if let Ok(mut tr) = bodies.get_mut(e) {
+            // Held on the turret (standing at its gunner spot).
             let [x, y, z] = lt.list[i].gunner_body();
             tr.translation = to_bevy(rc_movement::Vec3::new(x, y, z - PLAYER_HALF_HEIGHT));
         }
@@ -1059,7 +1207,7 @@ fn characters(
             continue;
         };
         // The nearest enemy of the gunner's side in range.
-        let mine = team.copied().unwrap_or(Team::Republic);
+        let mine = team.unwrap_or(Team::Republic);
         let pivot = lt.list[i].place.location;
         let mut best: Option<([f32; 3], f32)> = None;
         for (_, g, team, h) in &targets {
@@ -1083,25 +1231,23 @@ fn characters(
         if now - lt.last_shot[i] < p.auto.shot_delay {
             continue;
         }
-        let Some(kl) = lt.looks.get(&lt.list[i].kind) else {
-            continue;
-        };
-        let (_, global) = turret_bones(kl, lt.list[i].yaw, lt.list[i].pitch);
-        let bones: Vec<usize> = if p.auto.muzzles_in_turn && !kl.muzzles.is_empty() {
-            let n = lt.stats.auto_shots % kl.muzzles.len();
-            vec![kl.muzzles[n]]
-        } else {
-            kl.muzzles.clone()
-        };
-        let starts: Vec<[f32; 3]> = if bones.is_empty() {
-            vec![lt.list[i].gunner_body()]
-        } else {
-            bones
-                .iter()
-                .map(|&b| {
-                    model_to_level(&kl.look, &lt.list[i], p.gunner.half_height, global[b].pos)
-                })
-                .collect()
+        // From the muzzles; from the gunner with no model.
+        let starts: Vec<[f32; 3]> = match lt.looks.get(&lt.list[i].kind) {
+            Some(kl) if !kl.muzzles.is_empty() => {
+                let (_, global) = turret_bones(kl, lt.list[i].yaw, lt.list[i].pitch);
+                let bones: Vec<usize> = if p.auto.muzzles_in_turn {
+                    vec![kl.muzzles[lt.stats.auto_shots % kl.muzzles.len()]]
+                } else {
+                    kl.muzzles.clone()
+                };
+                bones
+                    .iter()
+                    .map(|&b| {
+                        model_to_level(&kl.look, &lt.list[i], p.gunner.half_height, global[b].pos)
+                    })
+                    .collect()
+            }
+            _ => vec![lt.list[i].gunner_body()],
         };
         for s in starts {
             let d =
@@ -1413,7 +1559,8 @@ pub struct TurretSave {
     pub name: String,
     pub yaw: f32,
     pub pitch: f32,
-    /// `player`, `nobody`, or the script whose characters are on it.
+    /// `player`, `nobody`, `squad:<name>` for a squad mate, or the script
+    /// whose characters are on it.
     pub gunner: String,
     pub player_usable: bool,
     /// An automatic turret's state; absent for the others (and in saves
@@ -1448,11 +1595,7 @@ impl SavePart for TurretsSave {
                     name: t.place.name.clone(),
                     yaw: t.yaw,
                     pitch: t.pitch,
-                    gunner: match &t.gunner {
-                        Gunner::Nobody => "nobody".into(),
-                        Gunner::Player => "player".into(),
-                        Gunner::Character(c) => c.clone(),
-                    },
+                    gunner: t.gunner.save_name(),
                     player_usable: t.player_usable,
                     automatic: t.automatic.as_ref().map(|a| AutomaticSave {
                         on: a.on,
@@ -1503,14 +1646,12 @@ impl SavePart for TurretsSave {
                 t.pitch = s.pitch;
                 t.player_usable = s.player_usable;
                 // Put back as it was: no events (they went off before).
-                t.gunner = match s.gunner.as_str() {
-                    "nobody" => Gunner::Nobody,
-                    "player" => {
-                        on = Some(i);
-                        Gunner::Player
-                    }
-                    c => Gunner::Character(c.to_string()),
-                };
+                // A squad mate is asked on again by the squad part, which
+                // finds the turret already theirs.
+                t.gunner = Gunner::from_save_name(&s.gunner);
+                if t.gunner == Gunner::Player {
+                    on = Some(i);
+                }
             }
         }
         for e in destroyed {

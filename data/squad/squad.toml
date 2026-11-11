@@ -373,6 +373,13 @@ auto = "armoured"         # Scorch (the original's Commando62: auto anti-armour)
 auto_range = 600          # our own: out of the blast
 auto_clearance = 400      # our own: the round's 800 uu blast falls off; keep friends out of its harder half
 
+[job.turret]
+name = "Man turret"
+match = "turret"          # MarkerTurret, and spots whose anchor is a turret (yyy_06d's Wookiee heavy turrets)
+kind = "post"
+pullable = "yes"          # game: MarkerTurretNative bCancelIfMembersNeeded
+mount = "yes"             # gets on the anchor and fires the turret (data/turrets/*.toml [auto]), not their own gun
+
 # The squad. `class` is the original's character class (CTCharacters),
 # `number` and `name` are what its HUD shows, `hud_slot` its place on the
 # HUD (SquadHUDSlot), and `slot` the formation slot above. `colour` is each

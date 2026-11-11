@@ -77,7 +77,7 @@ pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, Play, Player, PlayerCamera, PlayerStart,
 };
-pub use turrets::{Manning, TurretOrder};
+pub use turrets::{Manning, OnTurret, TurretOrder};
 
 use bevy::prelude::*;
 

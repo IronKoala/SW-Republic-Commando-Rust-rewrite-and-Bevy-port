@@ -50,8 +50,8 @@ use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
-    LevelCollision, MarkerJob, MarkerJobStep, MovingFloors, Player, PlayerCamera, SquadMember,
-    SquadReadout, SquadStatus,
+    LevelCollision, MarkerJob, MarkerJobStep, MovingFloors, OnTurret, Player, PlayerCamera,
+    SquadMember, SquadReadout, SquadStatus, TurretOrder,
 };
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
@@ -72,6 +72,10 @@ pub const ORDER_REACH: f32 = 4096.0;
 pub const MARKER_AIM_ANGLE: f32 = 0.12;
 /// Log every member's position this often, seconds.
 pub const LOG_EVERY: f32 = 1.0;
+
+/// A squad mate at a turret post who isn't on the turret (it was taken, by
+/// the player say) asks again this often, seconds. Our own.
+pub const TURRET_ASK_EVERY: f32 = 2.0;
 /// Log the squad's fight numbers this often, seconds.
 pub const FIGHT_LOG_EVERY: f32 = 5.0;
 
@@ -427,6 +431,8 @@ impl Plugin for SquadPlugin {
             .init_resource::<SquadThreats>()
             .init_resource::<SquadFightStats>()
             .init_resource::<SquadLooks>()
+            .init_resource::<SquadTurrets>()
+            .add_message::<TurretOrder>()
             .init_resource::<voice::SquadHeard>()
             .init_resource::<voice::SquadVoices>()
             .init_resource::<voice::SquadVoiceStats>()
@@ -456,6 +462,7 @@ impl Plugin for SquadPlugin {
                     gather_threats,
                     ammo::gather_boxes,
                     run_squad,
+                    man_turrets,
                     ammo::take_boxes,
                     carry_out_jobs,
                     voice::load_voices,
@@ -519,8 +526,10 @@ fn clear_squad(
     mut state: ResMut<SquadState>,
     stats: Res<SquadFightStats>,
     mut voices: ResMut<voice::SquadVoices>,
+    mut turrets: ResMut<SquadTurrets>,
     log: Option<Res<GameLog>>,
 ) {
+    *turrets = SquadTurrets::default();
     if let Some(c) = voices.chatter.as_mut() {
         c.reset();
     }
@@ -1307,6 +1316,108 @@ fn run_squad(
     if stats.since_log >= FIGHT_LOG_EVERY {
         stats.since_log = 0.0;
         log_line(&log, fight_line(squad, &stats));
+    }
+}
+
+/// Squad mates at turret posts ("Man turret"), each member's: seconds
+/// until asking to get on again, where they stood at the post (put back
+/// there when off), and whether they've been asked off.
+#[derive(Resource, Debug, Default)]
+pub struct SquadTurrets {
+    ask_in: Vec<f32>,
+    stand: Vec<Option<UVec3>>,
+    leaving: Vec<bool>,
+}
+
+/// Turret posts: a squad mate posted at a `mount` job's marker asks the
+/// turret part to get on its turret (`TurretOrder::Squad`). While they
+/// carry `OnTurret` they're held where it says, turned with the gun, and
+/// don't fire their own; once off the post (recalled, sent elsewhere,
+/// down) they're asked off and put back on their feet at the spot.
+fn man_turrets(
+    time: Res<Time>,
+    mut state: ResMut<SquadState>,
+    mut st: ResMut<SquadTurrets>,
+    mates: Query<(Entity, &SquadMate, Option<&OnTurret>)>,
+    mut orders: MessageWriter<TurretOrder>,
+    log: Option<Res<GameLog>>,
+) {
+    let Some(squad) = state.squad.as_mut() else {
+        return;
+    };
+    let n = squad.members.len();
+    st.ask_in.resize(n, 0.0);
+    st.stand.resize(n, None);
+    st.leaving.resize(n, false);
+    let dt = time.delta_secs().min(0.25);
+    for (e, mate, on) in &mates {
+        let i = mate.index;
+        if i >= n {
+            continue;
+        }
+        let name = squad.members[i].settings.name.clone();
+        match (squad.turret_post(i), on) {
+            (Some(k), Some(o)) => {
+                if squad.members[i].mounted.is_none() {
+                    log_line(
+                        &log,
+                        format!(
+                            "t={:.2} {name} mans {} from {}",
+                            squad.time, o.name, squad.markers[k].0.name
+                        ),
+                    );
+                }
+                let [x, y, z] = o.body;
+                squad.hold_on_turret(i, UVec3::new(x, y, z), o.yaw);
+                st.stand[i] = Some(squad.markers[k].0.stand);
+                st.leaving[i] = false;
+            }
+            (Some(k), None) => {
+                if squad.members[i].mounted.is_some() {
+                    let feet = squad.markers[k].0.stand;
+                    squad.off_turret(i, feet);
+                }
+                st.leaving[i] = false;
+                st.ask_in[i] -= dt;
+                if st.ask_in[i] <= 0.0 {
+                    st.ask_in[i] = TURRET_ASK_EVERY;
+                    let spot = &squad.markers[k].0;
+                    orders.write(TurretOrder::Squad {
+                        anchor: spot.anchor.clone(),
+                        near: [spot.stand.x, spot.stand.y, spot.stand.z],
+                        gunner: e,
+                        member: name,
+                        on: true,
+                    });
+                }
+            }
+            (None, Some(o)) => {
+                if !st.leaving[i] {
+                    st.leaving[i] = true;
+                    log_line(
+                        &log,
+                        format!("t={:.2} {name} leaves {}", squad.time, o.name),
+                    );
+                    orders.write(TurretOrder::Squad {
+                        anchor: String::new(),
+                        near: o.body,
+                        gunner: e,
+                        member: name,
+                        on: false,
+                    });
+                }
+            }
+            (None, None) => {
+                st.ask_in[i] = 0.0;
+                st.leaving[i] = false;
+                if squad.members[i].mounted.is_some() {
+                    let feet = st.stand[i]
+                        .take()
+                        .unwrap_or_else(|| squad.members[i].pawn.feet());
+                    squad.off_turret(i, feet);
+                }
+            }
+        }
     }
 }
 
