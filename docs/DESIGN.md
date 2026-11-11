@@ -2969,6 +2969,25 @@ choice is in its compiled engine. A stunned droid (flash or EMP grenade)
 stands still and does nothing until the stun wears off, and grenade blasts
 are heard like shots.
 
+**Two sides: clone troopers fight the droids.** A type's `[type] side`
+is `"separatist"` (the default) or `"republic"` (the original's
+`TeamIndex`: droids 5, clone troopers 2). The clone troopers
+(`clone_trooper.toml` for `CloneTrooper`, `clone_trooper_tm.toml` for
+`CloneTrooperTM`, 16 spawners on geo_01a) come from the map's spawners
+like the droids and run in the same `Battle`, with the same brain. Each
+step, separatist fighters choose among the player, the squad and the
+republic fighters; republic fighters choose among the separatist ones
+only, and with none in sight they don't hunt anyone. Each side keeps clear
+of its own side's line of fire (`ally_in_line`, which widens with the
+shooter's aim error so a burst doesn't stray into a friend), counts
+against its own `max_alive_total`, and gets `rc_combat::Team::Republic`
+or `Separatist`, so the player's crosshair and the squad treat troopers as
+friends. The music's battle rules count only separatists. `[combat]
+can_crouch = false` (the original's `bCanCrouch`) keeps troopers standing.
+What the files don't say is listed in `clone_trooper_tm.toml`: the
+troopers' attack state (`StateTrandoshanAttack`) works in compiled code,
+so they fight the way our droids do.
+
 **Checking without looking.** `rc_droidsim` (no window) and
 `rc_droidview --check` (a window) run a stand-in player into a spawner's
 trigger on a real map and log every spawn, sighting, state change, route,

@@ -332,9 +332,11 @@ impl Battle {
         self.fighters.iter_mut().find(|f| f.id == id)
     }
 
-    /// Whether any living droid is fighting (has seen or heard the enemy).
+    /// Whether any living separatist fighter is fighting (has seen or
+    /// heard the enemy). Clone troopers on their own don't count.
     pub fn in_fight(&self) -> bool {
         self.alive()
+            .filter(|f| !f.params.kind.republic())
             .any(|f| matches!(f.mode, Mode::Alerted | Mode::Attack))
     }
 
@@ -345,8 +347,10 @@ impl Battle {
     }
 
     /// Like [`Battle::step`], with other enemies of the droids besides the
-    /// player (squad mates). Each droid fights the nearest one it can see,
-    /// and the player when it sees none (so it still hunts the player).
+    /// player (squad mates). Each droid fights the nearest one it can see
+    /// (the player, a squad mate or a republic fighter), and the player
+    /// when it sees none (so it still hunts the player). Republic fighters
+    /// (clone troopers) fight the nearest separatist one they can see.
     /// Spawners only react to the player.
     pub fn step_with(
         &mut self,
@@ -358,10 +362,23 @@ impl Battle {
         let mut out = Vec::new();
         self.spawn(player.map(|p| p.centre), &mut out);
         let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
-        let allies: Vec<Vec3> = self.alive().map(|f| f.pawn.location).collect();
+        // Two sides: separatist fighters (droids, Geonosians, ...) and
+        // republic ones (clone troopers). Each side's friends, so it
+        // doesn't shoot through them, and what the other side can fight.
+        let mut friends: [Vec<Vec3>; 2] = [Vec::new(), Vec::new()];
+        let mut as_target: [Vec<Target>; 2] = [Vec::new(), Vec::new()];
+        for f in self.alive() {
+            let k = f.params.kind.republic() as usize;
+            friends[k].push(f.pawn.location);
+            as_target[k].push(f.as_target());
+        }
         let mut heard = Vec::new();
-        let mut targets: Vec<Target> = player.into_iter().collect();
-        targets.extend_from_slice(others);
+        // Separatists fight the player, the squad and the clone troopers;
+        // clone troopers fight the separatists.
+        let mut targets: [Vec<Target>; 2] = [player.into_iter().collect(), Vec::new()];
+        targets[0].extend_from_slice(others);
+        targets[0].extend_from_slice(&as_target[1]);
+        targets[1] = std::mem::take(&mut as_target[0]);
         for f in self.fighters.iter_mut() {
             if f.mode == Mode::Dead {
                 continue;
@@ -371,14 +388,18 @@ impl Battle {
                 f.pawn.velocity = Vec3::ZERO;
                 continue;
             }
-            let target = f.choose_target(world, &targets).or(player);
+            let side = f.params.kind.republic() as usize;
+            // A separatist with no one in sight still hunts the player.
+            let target = f
+                .choose_target(world, &targets[side])
+                .or(if side == 0 { player } else { None });
             let view = View {
                 world,
                 nav: &self.nav,
                 time: self.time,
                 target,
                 cover_taken: &taken,
-                allies: &allies,
+                allies: &friends[side],
             };
             for e in f.tick(dt, &view) {
                 if let AiEvent::Fire { origin, .. } = e {
@@ -467,10 +488,14 @@ impl Battle {
     }
 
     /// For tests and demos with a stand-in player: a path node 2500-4500 uu
-    /// along the paths from some spawner's walk-in trigger, and that
+    /// along the paths from some enemy spawner's walk-in trigger, and that
     /// trigger's centre. Returns (node, trigger centre, spawner).
     pub fn approach(&self) -> Option<(usize, Vec3, usize)> {
+        // An enemy's spawner: clone troopers' don't make a fight.
         for (k, sp) in self.spawners.iter().enumerate() {
+            if sp.params.kind.republic() {
+                continue;
+            }
             for &(c, _) in &sp.factory.triggers {
                 for (i, n) in self.nav.nodes.iter().enumerate() {
                     if !matches!(n.kind, rc_nav::NodeKind::Path) || self.nav.blocked.contains(&i) {
@@ -619,7 +644,13 @@ impl Battle {
             if matches!(f.mode, Mode::Alerted | Mode::Attack | Mode::Investigate) {
                 let at = f.last_seen_at.unwrap_or(fighter.pawn.location);
                 let mut ev = Vec::new();
-                fighter.alert(at, self.time, &mut ev);
+                // One that was attacking carries on attacking, so saving
+                // again straight after the load gives the same state.
+                if f.mode == Mode::Attack {
+                    fighter.resume_attack(at, self.time, &mut ev);
+                } else {
+                    fighter.alert(at, self.time, &mut ev);
+                }
             }
             self.fighters.push(fighter);
             self.made_by.push(f.spawner);
@@ -725,7 +756,13 @@ impl Battle {
 
     fn try_make(&mut self, i: usize, player: Option<Vec3>, out: &mut Vec<BattleEvent>) -> Try {
         let alive_here = self.alive_from(i);
-        let alive_total = self.alive().count() as u32;
+        // The cap on fighters alive at once counts each side on its own,
+        // so clone troopers don't take the droids' places.
+        let side = self.spawners[i].params.kind.republic();
+        let alive_total = self
+            .alive()
+            .filter(|f| f.params.kind.republic() == side)
+            .count() as u32;
         let sp = &self.spawners[i];
         let f = &sp.factory;
         if !f.generate_forever && sp.made >= f.capacity {

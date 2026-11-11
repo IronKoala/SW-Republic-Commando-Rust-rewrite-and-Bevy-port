@@ -485,6 +485,72 @@ fn shoots_a_squad_mate_when_the_player_is_hidden() {
     assert_eq!(b.fighters[0].target_index, Some(1));
 }
 
+/// A clone trooper's settings: a battle droid that fights for the republic.
+fn trooper_params() -> Arc<AiParams> {
+    Arc::new(
+        AiParams::battle_droid()
+            .with_overrides("[type]\nid = \"clone_trooper\"\nside = \"republic\"\n")
+            .unwrap(),
+    )
+}
+
+#[test]
+fn clone_troopers_and_droids_fight_each_other_not_the_player() {
+    let world = flat_floor(vec![]);
+    let mut b = one_droid_battle();
+    // A clone trooper 1500 uu away, facing the droid; the player is
+    // nearer the trooper than the droid is.
+    b.fighters.push(Fighter::new(
+        2,
+        trooper_params(),
+        Vec3::new(1500.0, 0.0, 0.0),
+        std::f32::consts::PI,
+        StartState::StationaryAttack,
+    ));
+    b.made_by.push(0);
+    let player = target_at(2500.0, 2500.0);
+    let mut droid_dirs = Vec::new();
+    let mut trooper_dirs = Vec::new();
+    for _ in 0..90 {
+        for e in b.step_with(1.0 / 30.0, &world, Some(player), &[]) {
+            if let BattleEvent::Ai {
+                id,
+                event: AiEvent::Fire { direction, .. },
+            } = e
+            {
+                if id == 1 {
+                    droid_dirs.push(direction);
+                } else {
+                    trooper_dirs.push(direction);
+                }
+            }
+        }
+    }
+    assert!(!droid_dirs.is_empty(), "the droid never fired");
+    assert!(!trooper_dirs.is_empty(), "the trooper never fired");
+    for d in &droid_dirs {
+        assert!(d.x > 0.9, "the droid fired at {d:?}, not the trooper");
+    }
+    for d in &trooper_dirs {
+        assert!(d.x < -0.9, "the trooper fired at {d:?}, not the droid");
+    }
+    // Clone troopers on their own don't make it a fight for the music.
+    let mut alone = Battle::new(trooper_params(), NavGraph::default(), vec![]);
+    alone.fighters.push(Fighter::new(
+        1,
+        trooper_params(),
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    ));
+    alone.made_by.push(0);
+    for _ in 0..60 {
+        let ev = alone.step_with(1.0 / 30.0, &world, Some(target_at(800.0, 0.0)), &[]);
+        assert!(fire_directions(&ev).is_empty(), "a trooper fired at the player");
+    }
+    assert!(!alone.in_fight());
+}
+
 #[test]
 fn prefers_the_nearest_visible_enemy_and_keeps_it() {
     let world = flat_floor(vec![]);
@@ -554,6 +620,12 @@ fn every_enemy_file_reads_and_claims_its_classes() {
         Some("super_battle_droid")
     );
     assert_eq!(who("CloneCommando"), None);
+    // The clone troopers fight on the player's side.
+    assert_eq!(who("CloneTrooper").as_deref(), Some("clone_trooper"));
+    assert_eq!(who("CloneTrooperTM").as_deref(), Some("clone_trooper_tm"));
+    for t in &types {
+        assert_eq!(t.republic(), t.id.starts_with("clone_trooper"), "{}", t.id);
+    }
     // Every Trandoshan kind the campaign's maps place has exactly one file.
     for (class, id) in [
         ("TrandoshanMercenary", "trandoshan"),
@@ -708,9 +780,12 @@ fn a_battle_carries_on_from_a_snapshot() {
         a.feet,
         z.feet
     );
-    // A droid that was fighting is fighting again.
-    if a.mode != Mode::Idle {
-        assert_eq!(z.mode, Mode::Alerted);
+    // A droid that was fighting is fighting again: one that was attacking
+    // carries straight on, one that had only just seen you is alerted.
+    match a.mode {
+        Mode::Idle => {}
+        Mode::Attack => assert_eq!(z.mode, Mode::Attack),
+        _ => assert_eq!(z.mode, Mode::Alerted),
     }
     // The spawner doesn't make the destroyed droid again.
     for _ in 0..120 {

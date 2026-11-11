@@ -1376,6 +1376,16 @@ fn steps() -> Vec<Step> {
                     notes.push(format!("[{k}] checked above"));
                     continue;
                 }
+                // Fighters in a fight (clone troopers against droids)
+                // turn, walk, pick targets and change mode from frame to
+                // frame, so for them only who is there and how hurt is
+                // compared.
+                let (v, b) = if k == "enemies" {
+                    (fight_settled(v), fight_settled(b))
+                } else {
+                    (v.clone(), b.clone())
+                };
+                let (v, b) = (&v, &b);
                 let diff = rc_save::file::largest_difference(v, b)
                     .ok_or(format!("[{k}] changed shape: {v} vs {b}"))?;
                 notes.push(format!("[{k}] off by {diff:.3}"));
@@ -3445,6 +3455,38 @@ fn cast_summary(w: &mut World) -> Result<String, String> {
     } else {
         Err(got)
     }
+}
+
+/// The `[enemies]` save part without what a running fight changes from
+/// one frame to the next: each fighter's facing, mode and where it last
+/// saw its enemy, where a fighting one stands (it may be walking to
+/// cover), and when each spawner tries next. Who is there, how hurt, and
+/// what each spawner has made are still compared.
+fn fight_settled(v: &toml::Value) -> toml::Value {
+    let mut v = v.clone();
+    if let Some(t) = v.as_table_mut() {
+        for (list, keys) in [
+            ("droids", &["facing", "mode", "last_seen_at"][..]),
+            ("spawners", &["next_spawn"][..]),
+        ] {
+            if let Some(items) = t.get_mut(list).and_then(|x| x.as_array_mut()) {
+                for item in items.iter_mut().filter_map(|x| x.as_table_mut()) {
+                    // One that is fighting may be walking to cover.
+                    let fighting = item
+                        .get("mode")
+                        .and_then(|m| m.as_str())
+                        .is_some_and(|m| m != "idle");
+                    if fighting {
+                        item.remove("feet");
+                    }
+                    for k in keys {
+                        item.remove(*k);
+                    }
+                }
+            }
+        }
+    }
+    v
 }
 
 fn bunker_droids(

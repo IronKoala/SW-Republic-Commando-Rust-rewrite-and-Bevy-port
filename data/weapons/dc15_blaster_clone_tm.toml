@@ -1,0 +1,40 @@
+# The rifle the background clone troopers of the first Geonosis level
+# carry (CloneTrooperTM's RequiredEquipment, Properties.DC15BlasterCloneTM
+# in Properties/properties.u, parents DC15BlasterClone and
+# CTWeaponRecharging). Its ammo is DC15BlasterCloneAmmoTM and its bolt
+# DC17BlasterProjTM: weak, fast bolts, like the droids' E-5 (TM) on the
+# same level, so the trench battle lasts.
+#
+# Every value is the original's, read with `rc_probe --class`; the class
+# that holds it is named on each line.
+
+name = "DC-15 Blaster (clone trooper, TM)"
+
+[fire]
+mode = "automatic"        # FireMode 2 (DC15BlasterClone)
+shot_delay = 0.1          # ShotDelay (DC15BlasterCloneTM)
+aim_error = 0             # AimError: not set, the Weapon class's 0
+offset = [57.4, 20, -6.56] # FPFireOffset (CTWeaponRecharging)
+
+[ammo]
+max_ammo = 100            # MaxAmmo (CTAmmoRecharging)
+recharge_rate = 100       # RechargeRate (DC15BlasterCloneAmmo)
+
+[shot]
+kind = "bolt"             # DC17BlasterProj: bLaserBolt
+accel = 60000             # AccelFactor (Projectile)
+max_speed = 10000         # MaxSpeed (DC17BlasterProjTM)
+life_span = 10            # LifeSpan (DC17BlasterProj)
+damage = 2                # Damage (DC17BlasterProjTM)
+damage_kind = "blaster"
+damage_type = "CTDamageEnergy" # MyDamageType (DC15BlasterCloneAmmo, DC17BlasterProj)
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_DC17_PRO"] # FireSound (DC15BlasterCloneTM)
+
+[model]
+package = "weapons"
+mesh = "DC15Blaster"      # StaticMesh of its AttachmentClass DC15AttachmentClone
+offset = [40, 12, -14]    # our choice, as the other weapon files (only used if a player held it)
+bolt_colour = [0.3, 0.7, 1.0]  # our choice, the same blue as the DC-17m: DC17BlasterProjTM LightHue 122

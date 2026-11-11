@@ -23,6 +23,7 @@ id = "battle_droid"       # this file's name
 name = "battle droid"     # for the log
 classes = ["BattleDroid*"] # the game's classes a map's spawner may make; * matches any ending (BattleDroid, BattleDroidTM, ...)
 body = "droid"            # "droid" or "organic": EMP stuns droids, flash grenades blind organics
+side = "separatist"       # "separatist" (fights the player, squad and clone troopers) or "republic" (clone troopers: fight the separatists). game: TeamIndex (BattleDroid 5, CloneTrooper 2)
 
 [movement]
 ground_speed = 375        # game: BattleDroid GroundSpeed
@@ -65,6 +66,7 @@ cover_boredom_time = 15   # game: CTBot CoverBoredomTime (looks for new cover af
 cover_search_radius = 1500 # guess: how far it will go to reach cover
 lost_sight_reposition = 2 # guess: seconds without a clear shot before a stationary droid moves
 uses_cover = true         # guess: looks for cover when shot in the open
+can_crouch = true         # game: Pawn bCanCrouch (the droid classes leave it on): ducks down in cover between bursts
 drops = "e5_blaster_pickup" # placeholder: the weapon file it leaves when it falls ("" for none)
 damage_table = "DV_DroidsBattleDroidDamage" # game: BattleDroid DamageVariance (data/combat/damage_types.toml)
 # Close-up hits with a melee weapon (the Geonosian's force pike). The
@@ -101,7 +103,7 @@ radius = 600              # game: ThermalDetonatorProjDefaults DamageRadius (no 
 # spawners themselves: by their walk-in Triggers, or, for spawners with
 # none, when the player comes this close.
 activate_unscripted_within = 3000
-max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones
+max_alive_total = 12      # guess: cap on droids alive at once, for speed on phones (each side counts on its own: clone troopers have their own 12)
 
 [sound]
 # What the droid says. Names are groups (SoundMultiple) in

@@ -136,6 +136,14 @@ copy of the game.
   still have to be read from the game. Droids still only shoot at you, not
   at the squad.
 
+- **Clone troopers fight the droids (tested in the cloud sandbox by
+  numbers, not yet on Windows or by eye).** geo_01a's 16 clone trooper
+  spawners now make troopers with the original's numbers (health,
+  accuracy, speed, rifle, the `CloneTrooper` model). They shoot the
+  droids, the droids shoot them, and they leave you and the squad alone.
+  They fight the way our droids do, since the original's trooper tactics
+  are compiled code. Settings: `data/enemies/clone_trooper*.toml`.
+
 - **The squad takes cover (tested in the cloud sandbox by numbers, not yet
   on Windows or with eyes).** In a fight, squad mates run to the map's
   cover points (the same ones the droids use), crouch behind them between

@@ -1,0 +1,81 @@
+# Clone trooper of the first Geonosis level's trench battle
+# (CloneTrooperTM, which geo_01a's spawners make; 9 spawners there). They
+# fight on the player's side: they shoot the droids, the droids shoot
+# them, and they leave the player and the squad alone.
+#
+# Numbers marked "game:" are the original's, read with `rc_probe --class`:
+# CloneTrooperTM (Properties/properties.u), its parent CloneTrooper
+# (System/ctcharacters.u) and Pawn (engine.u); its brain CloneTrooperBot
+# (ctcharacters.u) and CTBot (ctgame.u); its rifle DC15BlasterCloneTM
+# (data/weapons/dc15_blaster_clone_tm.toml). Anything not listed takes the
+# battle droid's value (battle_droid.toml).
+#
+# Not found in the files, so not done: CloneTrooperBot's attack state is
+# StateTrandoshanAttack (CoverHideTime 0.5 to 2 s, MinStepInterval 10,
+# AllySearchRadius 1000), but how it uses them is in the original's
+# compiled code. Our fighters all share one way of fighting (the battle
+# droid's), so the troopers fight the way our droids do.
+
+[type]
+id = "clone_trooper_tm"
+name = "clone trooper"
+classes = ["CloneTrooperTM"] # game: the map class
+body = "organic"
+side = "republic"         # game: CloneTrooper TeamIndex 2, the player's team (droids are 5)
+
+[movement]
+ground_speed = 450        # game: CloneTrooper GroundSpeed
+accel_rate = 1024         # game: CloneTrooper AccelRate
+walk_speed_ratio = 0.5    # game: Pawn WalkSpeedRatio
+collision_radius = 40     # game: Pawn CollisionRadius
+collision_height = 84     # game: CloneTrooper CollisionHeight
+crouch_radius = 40        # game: Pawn CrouchRadius
+crouch_height = 56        # game: CloneTrooper CrouchHeight
+base_eye_height = 60      # game: CloneTrooper BaseEyeHeight
+side_speed_ratio = 0.8    # game: Pawn SideSpeedRatio
+
+[senses]
+sight_radius = 10000      # game: Pawn SightRadius (the trooper classes don't change it)
+peripheral_vision = 0.2   # game: Pawn PeripheralVision
+auto_detect_radius = 200  # game: Pawn AutoDetectRadius
+enemy_memory_time = 15    # game: CTBot EnemyMemoryTime
+decision_interval = 0.5   # game: CTBot DecisionInterval
+turn_rate = 110           # game: Pawn RotationRate yaw 20000 per second
+
+[combat]
+health = 100              # game: CloneTrooper Health
+accuracy = 0.4            # game: CloneTrooperTM Accuracy
+weapon = "dc15_blaster_clone_tm" # game: CloneTrooperTM RequiredEquipment Properties.DC15BlasterCloneTM
+burst_count = 15          # game: CloneTrooperBot BurstCount (the rifle's own BurstCount is 4)
+shot_delay = 0.1          # game: DC15BlasterCloneTM ShotDelay
+weapon_range = 7000       # game: Weapon ValidRange max
+max_aim_yaw = 80          # game: Pawn MaxAimYaw
+can_crouch = false        # game: CloneTrooper bCanCrouch = false
+drops = ""                # game: DC15BlasterClone has no DroppedPickupClass
+damage_table = ""         # game: no MyDamageVariance on the trooper classes: every hit counts in full
+
+[sound]
+# game: none of the trooper classes sets an AudioTable, so they say
+# nothing (the battle droid's lines are switched off here).
+spotted = []
+hurt = []
+death = []
+hurt_explosion = []
+death_explosion = []
+hurt_electrical = []
+death_electrical = []
+hurt_melee = []
+hurt_fall = []
+death_fall = []
+
+[look]
+# game: CloneTrooper Mesh = Clone.CloneTrooper, drawn with the mesh's own
+# material (CloneTextures CloneTrooper_Shader; the class sets no Skins).
+# Its everyday moves come from CloneCommandoSet, which has every name the
+# battle droid file uses.
+package = "GameData/Animations/clone.ukx"
+mesh = "CloneTrooper"
+skin = ""
+throw = "ThrowGrenade"    # not used: troopers carry no grenades
+ambient = 0.5             # the same as the cast's troopers (data/cast/cast.toml)
+light_scale = 1.1         # the same as the cast's troopers

@@ -145,6 +145,17 @@ pub struct FightStats {
     /// Where droid bolts ended: on another droid, on the level, or nowhere
     /// (out of range). Hits on the player are `hits_on_player`.
     pub bolts_on_droids: u32,
+    /// Bolts one side's fighter landed on the other side's: clone troopers
+    /// hitting droids, and droids hitting clone troopers.
+    pub clone_bolts_on_droids: u32,
+    /// Shots clone troopers fired (`shots` counts the other side's).
+    pub clone_shots: u32,
+    pub droid_bolts_on_clones: u32,
+    /// Clone troopers' bolts that hit another clone trooper (by mistake).
+    pub clone_bolts_on_clones: u32,
+    /// Fighters of each side destroyed: clone troopers (`side =
+    /// "republic"`) and the rest. `droids_destroyed` counts both.
+    pub clones_destroyed: u32,
     pub bolts_on_level: u32,
     pub bolts_nowhere: u32,
     /// Grenades enemies threw.
@@ -615,7 +626,9 @@ fn hear_level(
 /// music's battle rules.
 fn tell_music(fight: Res<Fight>, mut threats: ResMut<rc_game_core::MusicThreats>) {
     threats.0.clear();
-    threats.0.extend(fight.battle.alive().map(|f| {
+    // Clone troopers are friends, not threats.
+    let threats_now = fight.battle.alive().filter(|f| !f.params.kind.republic());
+    threats.0.extend(threats_now.map(|f| {
         let at = f.pawn.location;
         rc_game_core::MusicThreat {
             at: [at.x, at.y, at.z],
@@ -660,6 +673,13 @@ fn summary(f: &Fight, log: &GameLog) {
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
+    let clones = f.battle.alive().filter(|f| f.params.kind.republic()).count();
+    if clones > 0 || s.clones_destroyed > 0 {
+        log.line(format!(
+            "{PART}: t={:.1}s clone troopers: {clones} alive, {} destroyed; {} clone shots, {} hit droids, {} hit other clones by mistake; {} droid bolts hit clones",
+            f.battle.time, s.clones_destroyed, s.clone_shots, s.clone_bolts_on_droids, s.clone_bolts_on_clones, s.droid_bolts_on_clones
+        ));
+    }
 }
 
 /// Where the player is, for droids to look at (Unreal units).
@@ -814,7 +834,13 @@ fn think(
                         },
                         None => Health::new(p.combat.health),
                     },
-                    Team::Separatist,
+                    // Clone troopers (side = "republic") are on the player's
+                    // side: the squad leaves them alone and droids shoot them.
+                    if p.kind.republic() {
+                        Team::Republic
+                    } else {
+                        Team::Separatist
+                    },
                     if p.kind.body == "organic" {
                         Body::Organic
                     } else {
@@ -887,7 +913,16 @@ fn think(
                     AiEvent::Fire {
                         origin, direction, ..
                     } => {
-                        fight.stats.shots += 1;
+                        let republic = fight
+                            .battle
+                            .fighters
+                            .iter()
+                            .any(|f| f.id == id && f.params.kind.republic());
+                        if republic {
+                            fight.stats.clone_shots += 1;
+                        } else {
+                            fight.stats.shots += 1;
+                        }
                         if let Ok(mut d) = droids.get_mut(entity) {
                             d.last_fire = now;
                         }
@@ -971,7 +1006,7 @@ fn think(
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
                         }
-                        log.line(format!("{PART}: t={now:.1}s droid {id} spotted the player {distance:.0} uu away"));
+                        log.line(format!("{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: {} -> {}",
@@ -1135,6 +1170,14 @@ fn react_to_combat(
             }
         }
         fight.stats.droids_destroyed += 1;
+        if fight
+            .battle
+            .fighters
+            .iter()
+            .any(|f| f.id == droid.id && f.params.kind.republic())
+        {
+            fight.stats.clones_destroyed += 1;
+        }
         let kind = last_kind.get(d).copied().unwrap_or("other");
         say(&mut commands, fight, droid.id, "death", kind);
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);
@@ -1186,7 +1229,28 @@ fn react_to_combat(
         let st = &mut fight.stats;
         match l.target {
             Some(t) if droids.contains(t) => {
-                st.bolts_on_droids += 1;
+                let side = |e: Entity| {
+                    droids.get(e).ok().and_then(|d| {
+                        fight
+                            .battle
+                            .fighters
+                            .iter()
+                            .find(|f| f.id == d.id)
+                            .map(|f| f.params.kind.republic())
+                    })
+                };
+                match (side(l.shooter), side(t)) {
+                    (Some(true), Some(false)) => {
+                        st.clone_bolts_on_droids += 1;
+                        continue;
+                    }
+                    (Some(false), Some(true)) => {
+                        st.droid_bolts_on_clones += 1;
+                        continue;
+                    }
+                    (Some(true), Some(true)) => st.clone_bolts_on_clones += 1,
+                    _ => st.bolts_on_droids += 1,
+                }
                 if let (Ok(a), Ok(b)) = (droids.get(l.shooter), droids.get(t)) {
                     let pos = |e: Entity| transforms.get(e).map(|t| to_unreal(t.translation)).ok();
                     let gap = pos(l.shooter)
