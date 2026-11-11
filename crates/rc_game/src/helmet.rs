@@ -14,6 +14,12 @@
 //! helmet) plus the level's light where you are times `light_scale` (see
 //! `rc_game_core::place_light`). If the model can't be read
 //! nothing is drawn and `logs/rc_game.log` says why ("helmet: ...").
+//!
+//! The HUD on the glass: as the original does, the HUD's glass parts are
+//! drawn onto a 4:3 page ([`HudPage`], its own camera rendering into a
+//! picture), and that picture is laid on the model's glass (the part
+//! without a picture of its own), so the HUD bends with the glass and what
+//! lies past the glass's edge isn't seen.
 
 use crate::settings::Settings;
 use bevy::asset::RenderAssetUsages;
@@ -61,6 +67,25 @@ pub struct HelmetCamera;
 pub(crate) struct HelmetPiece {
     part: usize,
 }
+
+/// `HelmetPiece::part` of the glass.
+const GLASS: usize = usize::MAX;
+
+/// The page the HUD's glass parts are drawn on (4:3, like the original's
+/// 800 x 600 HUD), and the camera that draws it. It is laid on the
+/// helmet's glass.
+#[derive(Resource, Clone)]
+pub struct HudPage {
+    pub image: Handle<Image>,
+    pub camera: Entity,
+    /// Pixels across and down.
+    pub size: UVec2,
+}
+
+/// The page's size: 4:3, sharp enough for 1440-line screens.
+const PAGE: UVec2 = UVec2::new(1600, 1200);
+/// Drawn before everything that may show it.
+const PAGE_CAMERA_ORDER: isize = -10;
 
 pub struct HelmetPlugin;
 
@@ -146,6 +171,7 @@ fn add_helmet_camera(
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
     images: Option<ResMut<Assets<Image>>>,
+    page: Option<Res<HudPage>>,
 ) {
     let Some(Ok(model)) = &helmet.model else {
         return;
@@ -155,6 +181,33 @@ fn add_helmet_camera(
     else {
         return;
     };
+    // The page the HUD's glass parts are drawn on, once.
+    if !model.glass.is_empty() && page.is_none() {
+        let image = images.add(Image::new_target_texture(
+            PAGE.x,
+            PAGE.y,
+            TextureFormat::Bgra8UnormSrgb,
+            None,
+        ));
+        let camera = commands
+            .spawn((
+                Camera2d,
+                Camera {
+                    order: PAGE_CAMERA_ORDER,
+                    clear_color: ClearColorConfig::Custom(Color::NONE),
+                    ..default()
+                },
+                bevy::camera::RenderTarget::Image(image.clone().into()),
+            ))
+            .id();
+        commands.insert_resource(HudPage {
+            image,
+            camera,
+            size: PAGE,
+        });
+        // Wait a frame for the page so the glass can show it.
+        return;
+    }
     for cam in &players {
         if existing.iter().any(|c| c.parent() == cam) {
             continue;
@@ -230,6 +283,32 @@ fn add_helmet_camera(
                         Transform::IDENTITY,
                     ));
                 }
+                // The glass, showing the HUD's page.
+                if let Some(page) = &page {
+                    let material = materials.add(StandardMaterial {
+                        base_color: Color::WHITE,
+                        base_color_texture: Some(page.image.clone()),
+                        unlit: true,
+                        // The page's see-through parts let the view through.
+                        alpha_mode: AlphaMode::Premultiplied,
+                        cull_mode: None,
+                        double_sided: true,
+                        ..default()
+                    });
+                    let mesh = meshes.add(part_mesh(
+                        model,
+                        GLASS,
+                        &helmet::fit(model, &helmet.plan, 4.0 / 3.0),
+                    ));
+                    h.spawn((
+                        HelmetPiece { part: GLASS },
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        RenderLayers::layer(HELMET_LAYER),
+                        NoFrustumCulling,
+                        Transform::IDENTITY,
+                    ));
+                }
             });
         });
     }
@@ -261,7 +340,12 @@ fn part_mesh(model: &HelmetModel, i: usize, points: &[[f32; 3]]) -> Mesh {
     // Unreal's axes are left-handed and Bevy's right-handed, so this turn
     // is also a mirror, which keeps the corner order of each front face as
     // it is (as in `rc_level_viewer`).
-    m.insert_indices(Indices::U32(model.parts[i].indices.clone()));
+    let indices = if i == GLASS {
+        model.glass.clone()
+    } else {
+        model.parts[i].indices.clone()
+    };
+    m.insert_indices(Indices::U32(indices));
     m
 }
 
@@ -340,7 +424,9 @@ fn fit_and_show(
     for (piece, mesh) in pieces {
         if let Some(mut m) = meshes.get_mut(&mesh.0) {
             *m = part_mesh(model, piece.part, &points);
-            triangles += model.parts[piece.part].indices.len() / 3;
+            if piece.part != GLASS {
+                triangles += model.parts[piece.part].indices.len() / 3;
+            }
         }
     }
     readout.triangles = triangles;

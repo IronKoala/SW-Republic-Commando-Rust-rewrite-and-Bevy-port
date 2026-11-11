@@ -3,6 +3,13 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
+
+- **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).
+- **Tested how:** `cargo test -p rc_menus` (new `a_sliding_strip_repeats_its_picture`), `cargo test -p rc_game --bins` (compass follow); `rc_game --script` in the cloud with a saved copy of the page picture; `rc_probe --hud`.
+- **Result:** The page holds the arcs, top pieces, compass, squad panels, meters and grenade panel in the right places, and the glass shows it across the whole visor. The HUD checks pass. In the cloud's pale test arena the frame is very faint: the arc picture is mostly dark grey and see-through.
+- **Still broken / not tested:** Not tested on Windows. Not compared side by side with the original: whether the frame looks as light as in the user's screenshots needs a look there. The low-health pulse, the top-left ring and the shield bars are not done. The cloud game ran at about 1 frame a second on main as well (before this change), so timed checks in the cloud fail for that reason.
+
 ## 2026-11-11: The rifle starts full, 300 shots, as in the original (rc_combat, data/weapons/dc17m_blaster.toml)
 
 - **Changed:** Weapons the player is given at the level's start now carry the most they can (`MaxAmmo`: 300 for the DC-17m) instead of a lying pickup's `PickupAmmoCount` (120). New `WeaponState::given`, used by `equip_player`. Weapons picked up in the level still hold `PickupAmmoCount`.

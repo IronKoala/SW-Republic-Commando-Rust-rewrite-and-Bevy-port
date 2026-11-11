@@ -3782,12 +3782,34 @@ helmet-on drawing; `data/ui/hud.toml` has every number, times 0.8 of the
   split screen.
 - Through the glass, a point past the glass's edge moves as the nearest
   piece of glass carries it on (`GlassMap::place`), so pictures lying
-  across the edge keep their shape.
+  across the edge keep their shape. (The game itself now uses the page
+  below; `GlassMap::place` still says where things land, for checks and
+  `rc_probe --hud`.)
+
+**The visor frame and compass** (Engine.dll `UHelmet::DrawHUD`): the arcs
+down both sides (5, 22, 112 x 432 from `CloneVisorIcons` 0, 0 to 142,
+442, mirrored at 795), the short pieces at the top (106, 22, 86 x 19,
+mirrored at 694) and the compass strip between them (194, 25, 414 x 11,
+`CompassGraphic` repeated). White at 130 while health is high, else the
+health colour (165 at level 2, 150 below; the original pulses that, not
+done). The compass slides with the way you face: the picture's offset is
+the yaw (0..65535) times 0.0001, followed at 3 per second
+(`original_hud::compass_follow`); `scroll = "compass"` on an element
+slides its picture, which repeats (`rc_menus::hud` `tiles`). Group
+`visor` may overlap the other groups.
+
+**The HUD page on the glass** (`helmet::HudPage`): as the original does,
+the HUD's `glass = true` parts are drawn on a 4:3 picture (1600 x 1200,
+its own 2D camera, order -10), and that picture is laid on the helmet
+model's glass (the part without a picture of its own) as an unlit,
+premultiplied see-through material. So the HUD bends with the glass and
+what lies past the glass's edge isn't seen. The parts not on the glass
+(crosshair, pickup line) are drawn on the screen as before.
 
 Not done yet: the pulsing (squad mates down, no grenades, low health),
 the arrow round each squad panel pointing to that mate, the timer ring
 while a mate works on something, which order uses which picture (ours),
-the shield bars and visor frame.
+the shield bars.
 
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
