@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The bacta dispenser's prompt fades in as in the original (rc_menus, rc_game, data/ui/hud.toml)
+
+- **Changed:** "PRESS AND HOLD 'F' TO HEAL" now fades in instead of popping up: opacity from 0 to 220 in a straight line over 0.5 s, starting again each time the prompt comes back or its words change. New fade name `prompt` for HUD elements (`HudValues::prompt_fade`, `LayoutSettings::prompt_faded_in`); the two prompt elements in `hud.toml` use it and are drawn see-through. The game log notes when the prompt starts fading in and when it is fully shown.
+- **Why:** Follow-up from the bacta dispenser work (PR #96): the original fades the prompt in, ours didn't.
+- **Tested how:** Read from the original's Engine.dll (`UHelmet::DrawActivateText` and the call in `DrawTextInfo`, disassembled in the cloud scratch folder, nothing committed) and `rc_probe --classes Engine.u Helmet` (`PromptFadeInTime = 0.5`); new test `the_use_prompt_fades_in_like_the_original` in `cargo test -p rc_menus`.
+- **Result:** rc_menus tests pass (47) and rc_game program tests pass (67); clippy shows nothing new. The numbers match the original's formula: 0 at the start, 44 at 0.1 s, 110 at 0.25 s, 220 from 0.5 s.
+- **Still broken / not tested:** Not tested on Windows, and not seen in a game run (the cloud game runs at about 1 frame a second). The see-through drawing is taken from the advisor's words, which the original draws with the same text call. Found but not done: at full health the original swaps the dispenser's prompt for another of the helmet's texts (most likely `FullHealthText`, "YOU ARE AT FULL HEALTH", but which text it is was not confirmed); not checked what the port shows then.
+- **Next:** User check on Windows.
+
 ## 2026-11-11: The menu background video no longer slows the game to a crawl (rc_video build settings, rc_game)
 
 - **Changed:** The video decoder (`rc_video`) and the oxideav crates it uses are built optimised in debug builds too (root `Cargo.toml`, `[profile.dev.package.*]`). `menu_video::play` decodes at most 3 frames per game frame (`MAX_DECODES_PER_UPDATE`); when it is further behind, the video runs late instead (logged once, counted in `MenuVideo::frames_late`, shown in the script's video check).
@@ -18,6 +27,7 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Tested how:** `rc_game --script` in the cloud with the game's files, before (main at 5edb977) and after.
 - **Result:** Before: the run quit at 32.9 s with the error above, as geo_01a finished loading. After: geo_01a loaded and the script played on in the level for 2.5 minutes with no graphics error (the run was then stopped; its slowness is a separate fix).
 - **Still broken / not tested:** Not tested on Windows. The shafts are added light, so leaving them out of the prepass and shadows changes nothing on screen (motion blur doesn't smear them; it didn't before either, since the game quit).
+
 ## 2026-11-11: Clone troopers and other cast lit by where they stand (rc_cast, data/cast/cast.toml)
 
 - **Changed:** Characters and props the cast part draws (troopers standing about in missions, cutscene characters) now take the level's light where they stand (`rc_game_core::LitByPlace`), as the squad and droids already do, instead of one fixed brightness. New setting `light_scale` in `data/cast/cast.toml` (1.1, the squad's and droids' value, which was matched to two original screenshots). Holograms keep their own glow.
