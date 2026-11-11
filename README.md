@@ -260,6 +260,12 @@ copy of the game.
   weapons' own first-person models are only as good as the arms loader
   (not checked for the new ones).
 
+- **Light shafts and god rays (not tested on Windows).** geo_01a's sun rays
+  and tunnel light cones are drawn with the game's own falloff shader
+  (`HsFalloff`), read from its files: they fade by viewing angle and along
+  the beam, and stand out from the haze instead of showing as a flat block
+  or not at all. Check: `cargo run -p rc_level_viewer --example falloff_check`.
+
 - **Geonosis arena look: stone tiers and brown haze (not tested on Windows).**
   The arena's far tiers, spires and upper rocks on geo_01a used to show as
   flat grey-white shapes. Their materials multiply a painted light picture by

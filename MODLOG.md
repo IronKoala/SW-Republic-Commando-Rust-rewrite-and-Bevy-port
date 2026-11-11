@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Light shafts and god rays with the game's falloff shader (rc_level_viewer, rc_level_plugin)
+
+- **Changed:** New `rc_level_viewer::falloff` (+ `falloff.wesl`): `HsFalloff` materials get the game's own shader maths: picture x `DiffuseTint` x falloff gradient (by viewing angle) x `GradientTint` x the mesh's painted colours, squared when `SrcBlend` is `SRCCOLOR`, panned and oscillated by the material's rates, added on top, no baked light and no fog. Settings and defaults read at load from Engine.u; `FalloffPlugin` comes with `PropLightPlugin`. Logs `light shafts ... N prop parts`.
+- **Why:** User's side-by-side screenshot of geo_01a: "the god rays aren't implemented". The sun rays (`SunBeam`, `rayfalloff`) were drawn as a flat block under the zone fog, or not seen.
+- **Tested how:** `falloff_check` with the game's files (cloud); `cargo test -p rc_level_viewer --lib falloff` (3 tests); `rc_level_viewer geo_01a --capture` before and after from the same spot (cloud).
+- **Result:** falloff_check 11 passed, 0 failed (9 prop parts on geo_01a). The capture shows streaky shafts fading along the beam, over the haze, where there was a flat light block (fog on) or nothing visible.
+- **Still broken / not tested:** Not tested on Windows. Our choices: the mesh's painted colours as the vertex colour; no fog on shafts; the shaft colour added as it is (the game adds on its brightness curve). The prologue's tank liquid also uses `HsFalloff`; not looked at.
+- **Next:** User check against the original on geo_01a.
+
 ## 2026-11-11: Each zone's distance fog, from the map (rc_level_viewer, rc_level_plugin, rc_game_core, rc_visor)
 
 - **Changed:** New `rc_level_viewer::fog`: every `ZoneInfo`/`LevelInfo`'s `bDistanceFog`, `DistanceFogColor`, `DistanceFogStart`/`End`, `DistanceFogBlendTime`, with missing values from `ZoneInfo`'s defaults in Engine.u (read at load). The player's camera (and the viewer's; `--no-fog` to compare) shows the fog of the zone it is in, as Bevy linear fog. The visor's low light fog now marks the camera `rc_game_core::OwnFog`, and zone fog leaves it alone meanwhile. Log: `level: distance fog on the player's camera: ...`.

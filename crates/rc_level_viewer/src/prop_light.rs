@@ -93,6 +93,9 @@ pub struct PropLightPlugin;
 impl Plugin for PropLightPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "prop_light.wesl");
+        // The game's falloff shader (light shafts) comes with it, so every
+        // app that draws levels gets it.
+        app.add_plugins(crate::falloff::view::FalloffPlugin);
         if !app.is_plugin_added::<MaterialPlugin<PropMaterial>>() {
             app.add_plugins(MaterialPlugin::<PropMaterial>::default());
         }

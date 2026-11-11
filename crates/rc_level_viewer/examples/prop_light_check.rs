@@ -141,6 +141,7 @@ fn bump_square(x: f32) -> Batch {
         })),
         uv_channel: 0,
         multiply: None,
+        falloff: None,
     });
     b.bump_lit = true;
     b.light_dirs = vec![[0.0, 0.0, 1.0]; 4];
