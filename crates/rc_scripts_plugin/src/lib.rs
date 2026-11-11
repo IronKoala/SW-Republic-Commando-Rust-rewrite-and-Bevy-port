@@ -56,7 +56,9 @@ pub mod characters;
 pub mod cutscene;
 pub mod fx_factories;
 pub mod markers;
+pub mod projectiles;
 pub mod music;
+pub mod objectives;
 pub mod save;
 pub mod sight;
 pub mod sounds;
@@ -65,9 +67,9 @@ use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
 use rc_game_core::save::{RestoringSave, SaveAppExt};
 use rc_game_core::{
-    playing, units::to_unreal, Action, ChangeLevel, CurrentLevel, GameLog,
-    GamePaths, GameSet, GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player,
-    PlayerVitals, RaiseEvent, TurretOrder,
+    playing, units::to_unreal, Action, ChangeLevel, CurrentLevel, GameLog, GamePaths, GameSet,
+    GameState, HudMessage, InputPrompts, LevelScriptsRun, LoadingGate, Player, PlayerVitals,
+    RaiseEvent, TurretOrder,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
 use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
@@ -105,6 +107,9 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_effects_plugin::SpawnEffect>()
             .add_message::<rc_effects_plugin::PreloadEffect>()
             .add_message::<rc_effects_plugin::EffectEnded>()
+            .add_message::<projectiles::SpawnProjectile>()
+            .add_message::<projectiles::RemoveProjectiles>()
+            .init_resource::<projectiles::Projectiles>()
             .add_message::<TurretOrder>()
             .add_message::<rc_game_core::MarkerJob>()
             .init_resource::<rc_game_core::UseClaimed>()
@@ -138,6 +143,7 @@ impl Plugin for ScriptsPlugin {
                     sight::look,
                     run,
                     fx_factories::run,
+                    projectiles::fly,
                     breakables::show,
                     characters::cast,
                     sounds::play,
@@ -153,7 +159,7 @@ impl Plugin for ScriptsPlugin {
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
-                (forget, sounds::forget, cutscene::forget),
+                (forget, sounds::forget, cutscene::forget, projectiles::forget),
             );
     }
 }
@@ -173,12 +179,20 @@ pub use rc_game_core::FactoryOrder;
 /// down.
 pub use rc_game_core::save::CheckpointReached;
 
-/// The mission objectives the scripts have updated, in order: (seconds,
-/// `ObjectiveNum`, `ChangeToObjNum`). What the numbers mean on screen
-/// isn't worked out yet.
+/// The mission objectives: the map's list and where each stands
+/// (`mission`, see [`objectives`]), and the updates the scripts made, in
+/// order: (seconds, `ObjectiveNum`, `ChangeToObjNum`).
 #[derive(Resource, Debug, Clone, Default)]
 pub struct Objectives {
     pub updates: Vec<(f32, i32, i32)>,
+    pub mission: Option<objectives::MissionList>,
+}
+
+impl Objectives {
+    /// The objective the helmet shows now, in capitals.
+    pub fn shown(&self) -> Option<String> {
+        self.mission.as_ref()?.shown()
+    }
 }
 
 struct Dispenser {
@@ -549,7 +563,11 @@ fn build(
     // stall the game.
     let fx = fx_factories::read(map);
     fx_factories::log_list(&fx, &log);
-    let mut wanted: Vec<&str> = fx.iter().map(|f| f.prototype.as_str()).collect();
+    let mut wanted: Vec<&str> = fx
+        .iter()
+        .filter(|f| f.kind == rc_effects::factory::Kind::Effect)
+        .map(|f| f.prototype.as_str())
+        .collect();
     wanted.sort_unstable_by_key(|n| n.to_ascii_lowercase());
     wanted.dedup_by_key(|n| n.to_ascii_lowercase());
     for w in wanted {
@@ -574,7 +592,18 @@ fn build(
         breaking: breakables::Breakables::new(&breakable),
         props: breakables::PropStats::default(),
     });
-    commands.insert_resource(Objectives::default());
+    let mission = objectives::MissionList::from_map(map);
+    if let Some(m) = &mission {
+        log.line(format!(
+            "{PART}: {} mission objectives, revealed by {}",
+            m.list.len(),
+            m.tag
+        ));
+    }
+    commands.insert_resource(Objectives {
+        mission,
+        ..Objectives::default()
+    });
     commands.remove_resource::<Loaded>();
     gate.done(PART);
 }
@@ -699,6 +728,13 @@ fn run(
                             ));
                         }
                     }
+                }
+                if let Some(i) = objectives
+                    .as_mut()
+                    .and_then(|o| o.mission.as_mut())
+                    .and_then(|m| m.event(&name))
+                {
+                    log.line(format!("{PART}: t={now:.2} objective {i} revealed"));
                 }
                 events.write(ScriptEvent { name, by });
             }
@@ -1131,10 +1167,17 @@ fn carry_out(
         "objectiveupdate" => {
             let num = a.int("ObjectiveNum").unwrap_or(0);
             let to = a.int("ChangeToObjNum").unwrap_or(0);
+            let action = a.int("UpdateAction").unwrap_or(0).clamp(0, 2) as u8;
             if let Some(o) = objectives {
                 o.updates.push((now, num, to));
+                if let Some(m) = &mut o.mission {
+                    m.update(action, num, to);
+                }
             }
-            log.line(format!("{at}: objective {num} -> {to}"));
+            log.line(format!(
+                "{at}: objective {num} {} {to}",
+                ["completed", "failed", "changed to"][action as usize]
+            ));
         }
         _ => {
             script.stats.not_done += 1;

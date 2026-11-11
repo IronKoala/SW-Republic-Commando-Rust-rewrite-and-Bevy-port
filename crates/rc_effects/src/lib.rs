@@ -4,6 +4,7 @@
 
 pub mod def;
 pub mod factory;
+pub mod projectile;
 pub mod read;
 pub mod sim;
 pub mod tagged;

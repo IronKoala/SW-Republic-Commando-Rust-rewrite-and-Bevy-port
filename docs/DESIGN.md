@@ -3723,6 +3723,72 @@ helmet, `AmbientGlow` 20, its bump map); the visor's effects that the
 seconds late on the cloud's software graphics while its shaders are
 prepared.
 
+**The HUD through the glass.** The model's other part (`HelmetFinalBlend`,
+24 triangles) has no picture of its own: the original (Engine.dll,
+`FPlayerSceneNode::Render` and `UHelmet::DrawHelmet`) draws the whole HUD
+into a screen-sized picture and then draws this glass with that picture
+on it. Each glass corner's texture place is a place in the HUD, but the
+corner sits a little lower on the screen, so the original's HUD comes out
+lower and slightly curved: text drawn 45 down on its 600-line HUD shows
+about 1/7 of the way down. `helmet::GlassMap` works this move out from the
+model for any screen shape (on wide screens the glass moves like the
+frame and each corner keeps its move measured in screen heights) and
+`rc_menus::hud` applies it to elements marked `glass = true`, moving each
+picture's corners (the pictures themselves aren't bent). The crosshair and
+the markers are drawn after the glass in the original, so they aren't
+moved. Without the helmet (HELMET off) nothing is moved; the original
+then bends its flat HUD a different way, which we don't copy yet.
+
+**The advisor's words and the objective** (Engine.dll
+`UHelmet::DrawTextInfo`): one text box near the top (218, 45, 364 wide
+on the 800 x 600 HUD) in `OrbitFonts.OrbitBold15`. The words of whoever
+speaks (`subtitles.rs` keeps the newest in `Spoken`) are left aligned at
+0.8 of the font's size in (200, 200, 64) and win over everything else in
+the box. Otherwise the current objective is centred at full size in
+(164, 200, 208), when no short message or use prompt is in the box. Both
+are at opacity 220, fading in over the helmet's `PromptFadeInTime`
+(0.5 s) when they change. The objectives themselves are the map's
+`MissionObjectives` list, kept as the original's script keeps them
+(`rc_scripts_plugin::objectives`): its tag event reveals the next one,
+`ACTION_ObjectiveUpdate` completes, fails or changes one, and the first
+one not yet done shows, in capitals. Not done: Ctrl (`ShowGameStats`)
+turning the objective off and on, objectives in other languages (the
+words are the map's English ones).
+
+**The bottom corners and meters** (Engine.dll `UHelmet::DrawHUD`, the
+helmet-on drawing; `data/ui/hud.toml` has every number, times 0.8 of the
+800 x 600 page, all `glass = true`):
+
+- *Squad*, bottom left: one panel per squad mate who is in the squad
+  (`SquadMember::in_squad`; mates away or not yet arrived aren't shown),
+  40 apart. Their number above it in `OrbitBold15`, (164, 200, 208) at
+  220; the panel picture (148, 354 to 192, 396 in `CloneVisorIcons`) at
+  240; the order picture inside, tinted by how hurt they are.
+- *Health meters* either side of the middle, mirrored: a white back at
+  130, the top piece and a bar in the health colour. The bar drops in
+  elevenths, and by at least 5/55 while hurt at all (`fill_steps`,
+  `fill_least_gap`).
+- *How hurt* is the original's `APawn::CalcHealthLevel`: 0 at no health,
+  1 below half, 2 below 0.91, 3 above (`rc_menus::hud::health_level`, texts
+  `{health_level}` and `{squad_health_level}`, used with `colour_by` and
+  `colours`). Player meter colours: red (255, 94, 72), orange (246, 139,
+  31), yellow (255, 250, 110), green (72, 255, 72); squad pictures: (255,
+  73, 43), (246, 139, 31), (255, 251, 44), (81, 213, 67), at 200.
+- *Grenades*, bottom right: the panel mirrored, the grenade's picture by
+  its class, the count centred above, (200, 240, 255) at 192, red (255,
+  128, 128) when none are left.
+- *No ammo numbers*: the gun's own counter shows them. The original writes
+  "clip / spare" only zoomed in with the sniper rifle or bowcaster, and in
+  split screen.
+- Through the glass, a point past the glass's edge moves as the nearest
+  piece of glass carries it on (`GlassMap::place`), so pictures lying
+  across the edge keep their shape.
+
+Not done yet: the pulsing (squad mates down, no grenades, low health),
+the arrow round each squad panel pointing to that mate, the timer ring
+while a mate works on something, which order uses which picture (ours),
+the shield bars and visor frame.
+
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
 The details and numbers are in `docs/DISPLAY_AND_INPUT.md`. The shape:
@@ -4567,6 +4633,46 @@ the effect's full rotation; only the X part of `StartSpinRange` and
 is not applied (which way each part turns a model is not known); a lit model starts from the same light level the droids use
 (0.5); fades are not applied to models; the field of view for `bCovert`
 is the camera's 4:3 one.
+
+### Projectile spawners (`ProjectileFactory`, `rc_effects::projectile`)
+
+**What the original does** (ctgame.u's `Factory` and `ProjectileFactory`,
+engine.u's `Projectile`, ctinventory.u's `CTProjExplosive`). A
+`ProjectileFactory` runs by the same rules as an effect spawner but makes
+a projectile class. With `SpawnMode` 2 the projectile starts with the
+factory's `InitialPhysicsFromFactory`/`InitialSpeedFromFactory` and turn;
+otherwise with its spawn point's `InitialPhysics`/`InitialSpeed` (default
+2, falling, and 0) and turn. Physics 6 flies straight; 2 falls with the
+zone's gravity (`PhysicsVolume` default Z -1100, `TerminalVelocity`
+12000). The class's `ProjectileEffect` is spawned and carried along; when
+the projectile goes, the trail fades out (`Emitter.FadeOut`: no new
+particles, the old ones finish). An explosive projectile blows up when
+its `FuseTime` runs out, on hitting the world with `bWorldDetonate`
+(the class's hit effect is spawned first, then `Explode` spawns it
+again) or on touching an actor with `bActorDetonate`; `Explode` spawns the
+`HitEffectsByMaterial` effect and hurts everything within
+`DamageRadius` (`HurtRadius`). `ACTION_StopFactorySpawning` turns a
+factory off (for good with `PermanentlyDisableFactory`) and can destroy
+what it made (`DestroyFactoryOffspring`). geo_01a has six: air
+bombardment (`GEO_01AProj`, Speed 8000, from Z 21244 at 10000 straight
+down), missiles from the bunkers (`GEO_01A_BunkerMissile`, falling, 4000)
+and the end-of-level bombardment; 52 on 15 maps in all.
+
+**How we split it.** `rc_effects::projectile` (no Bevy) reads a class
+and its parents from properties.u, physicalmaterials.u, ctinventory.u and
+engine.u (`ClassPackages`), and moves a `Flight` with a hit test the game
+passes in. `rc_effects::factory` gained `Kind::Projectile`, spawn-point
+physics and speed, and `stop(tag, for_good, remove_offspring)`.
+`rc_scripts_plugin/src/projectiles.rs` draws the model, carries the trail
+(`SpawnEffect.follow`, moved each frame by `rc_effects_plugin`, faded when
+the carrier goes), sweeps against `LevelCollision`, and on a blast spawns
+the effect and sends `rc_combat::Explode`.
+
+**Not done yet:** projectiles that aren't explosive or are laser bolts
+(logged "isn't flown yet"), bouncing and sticking, touching actors
+(`bActorDetonate`), zone gravity other than the default, decals and
+per-surface effects (the default material effect is used), and the trails'
+ribbon emitters (not drawn).
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 

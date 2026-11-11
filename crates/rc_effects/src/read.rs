@@ -60,6 +60,12 @@ impl EffectPackage {
             .collect()
     }
 
+    /// The name of a class's parent.
+    pub fn parent(&self, class: &str) -> Option<String> {
+        let e = find_class(&self.pkg, class)?;
+        rc_package::class_defaults::parent_name(&self.pkg, e).map(str::to_string)
+    }
+
     /// The class's own defaults as named values.
     pub fn class_values(&self, class: &str) -> Option<Values> {
         let e = find_class(&self.pkg, class)?;

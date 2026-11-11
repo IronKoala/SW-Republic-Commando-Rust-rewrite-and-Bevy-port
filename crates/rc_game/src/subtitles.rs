@@ -7,9 +7,11 @@
 //! `SubtitleSound[12]="CA1G1500"` and `SubtitleText[12]="Clone Advisor 1:
 //! ..."`. A line shows while its sound plays (at least `MIN_SECONDS`).
 //!
-//! PLACEHOLDER look: Bevy's built-in font in our theme's colours, in the
-//! same style as the rest of the stand-in display (`hud.rs`), until the
-//! display is drawn with the original's fonts.
+//! The newest line is also kept in [`Spoken`], which the original HUD
+//! (`original_hud.rs`) draws as the original does: top left in the game's
+//! own font and colour. The lines drawn here are the PLACEHOLDER look
+//! (Bevy's built-in font, bottom middle), shown only when the original HUD
+//! can't be drawn.
 
 use crate::settings::Settings;
 use crate::theme::Theme;
@@ -22,6 +24,14 @@ use std::collections::HashMap;
 const MIN_SECONDS: f32 = 1.5;
 /// The most lines shown at once (the newest at the bottom).
 const MAX_LINES: usize = 3;
+
+/// The newest line on screen and how long it has shown (seconds); empty
+/// text when none is.
+#[derive(Resource, Debug, Default, Clone, PartialEq)]
+pub struct Spoken {
+    pub text: String,
+    pub age: f32,
+}
 
 /// The words of each line, by lower-case sound name.
 #[derive(Resource, Debug, Default)]
@@ -130,7 +140,8 @@ pub struct SubtitlesPlugin;
 
 impl Plugin for SubtitlesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load)
+        app.init_resource::<Spoken>()
+            .add_systems(Startup, load)
             .add_systems(OnEnter(GameState::InGame), spawn_area)
             .add_systems(
                 Update,
@@ -154,6 +165,7 @@ struct SubtitleArea;
 struct SubtitleLine {
     sound: Entity,
     shown: f32,
+    text: String,
 }
 
 fn spawn_area(mut commands: Commands, settings: Res<Settings>) {
@@ -177,6 +189,7 @@ fn spawn_area(mut commands: Commands, settings: Res<Settings>) {
             },
             DespawnOnExit(GameState::InGame),
             GlobalZIndex(2),
+            crate::hud::PlaceholderPart,
         ))
         .with_children(|root| {
             root.spawn((
@@ -207,9 +220,11 @@ fn show(
     area: Query<Entity, With<SubtitleArea>>,
     mut lines: Query<(Entity, &mut SubtitleLine)>,
     log: Res<GameLog>,
+    mut spoken: Option<ResMut<Spoken>>,
 ) {
     let dt = time.delta_secs();
     let mut on_screen = 0;
+    let mut newest: Option<(String, f32)> = None;
     for (e, mut l) in &mut lines {
         l.shown += dt;
         let still_playing = sounds.contains(l.sound);
@@ -217,9 +232,13 @@ fn show(
             commands.entity(e).despawn();
         } else {
             on_screen += 1;
+            if newest.as_ref().is_none_or(|n| l.shown < n.1) {
+                newest = Some((l.text.clone(), l.shown));
+            }
         }
     }
     let Ok(area) = area.single() else {
+        set_spoken(&mut spoken, newest);
         return;
     };
     for (e, s) in &started {
@@ -245,11 +264,13 @@ fn show(
             on_screen += 1;
         }
         log.line(format!("subtitles: {}: \"{text}\"", s.name));
+        newest = Some((text.clone(), 0.0));
         commands.entity(area).with_children(|p| {
             p.spawn((
                 SubtitleLine {
                     sound: e,
                     shown: 0.0,
+                    text: text.clone(),
                 },
                 Node {
                     padding: UiRect::axes(Val::VMin(1.0), Val::VMin(0.3)),
@@ -262,6 +283,16 @@ fn show(
                 TextColor(theme.text),
             ));
         });
+    }
+    set_spoken(&mut spoken, newest);
+}
+
+fn set_spoken(spoken: &mut Option<ResMut<Spoken>>, newest: Option<(String, f32)>) {
+    let Some(spoken) = spoken else { return };
+    let (text, age) = newest.unwrap_or_default();
+    let now = Spoken { text, age };
+    if **spoken != now {
+        **spoken = now;
     }
 }
 
@@ -297,6 +328,7 @@ mod tests {
             .insert_resource(Theme::default())
             .insert_resource(GameLog::terminal())
             .insert_resource(subs)
+            .init_resource::<Spoken>()
             .add_systems(Update, show);
         app.world_mut().spawn(SubtitleArea);
         app
@@ -325,6 +357,7 @@ mod tests {
         let line = say(&mut app, "LINE1");
         app.update();
         assert_eq!(shown(&mut app), ["Sev: Copy that."]);
+        assert_eq!(app.world().resource::<Spoken>().text, "Sev: Copy that.");
         // A line with no words in the files shows nothing.
         say(&mut app, "unknown");
         app.update();
@@ -333,6 +366,7 @@ mod tests {
         app.world_mut().resource_mut::<Settings>().game.subtitles = false;
         app.update();
         assert!(shown(&mut app).is_empty());
+        assert_eq!(app.world().resource::<Spoken>().text, "");
         app.world_mut().despawn(line);
         say(&mut app, "line1");
         app.update();

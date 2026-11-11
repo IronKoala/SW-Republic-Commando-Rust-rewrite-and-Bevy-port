@@ -64,6 +64,9 @@ pub struct SpawnEffect {
     /// A number to report its end with ([`EffectEnded`]); `None` for no
     /// report.
     pub id: Option<u64>,
+    /// Carried by this entity (a projectile's trail, `ProjectileEffect`):
+    /// it moves with it, and fades out when it's gone.
+    pub follow: Option<Entity>,
 }
 
 impl Default for SpawnEffect {
@@ -77,6 +80,7 @@ impl Default for SpawnEffect {
             rotation: [0; 3],
             draw_scale: 1.0,
             id: None,
+            follow: None,
         }
     }
 }
@@ -214,6 +218,8 @@ pub struct RunningEffect {
     /// Reported in an [`EffectEnded`] when it's over.
     id: Option<u64>,
     by: String,
+    /// The entity carrying it, until that's gone.
+    follow: Option<Entity>,
     pub state: EffectState,
     /// One entity per emitter (sprites), or per particle (meshes).
     parts: Vec<Option<Entity>>,
@@ -708,6 +714,7 @@ fn spawn(
                 loaded,
                 id: a.id,
                 by: a.by.clone(),
+                follow: a.follow,
                 state,
                 parts,
                 debris: vec![Vec::new(); n],
@@ -735,6 +742,7 @@ fn step(
     mut commands: Commands,
     time: Res<Time>,
     mut running: Query<(Entity, &mut RunningEffect)>,
+    carriers: Query<&GlobalTransform>,
     mut stats: ResMut<EffectStats>,
     mut ended: MessageWriter<EffectEnded>,
     log: Option<Res<GameLog>>,
@@ -743,6 +751,16 @@ fn step(
     let mut live = 0;
     for (e, mut r) in &mut running {
         let def = r.loaded.def.clone();
+        if let Some(c) = r.follow {
+            match carriers.get(c) {
+                Ok(g) => r.state.move_to(&def, to_unreal(g.translation())),
+                Err(_) => {
+                    // `Emitter.FadeOut`, as a projectile's `Destroyed` does.
+                    r.follow = None;
+                    r.state.fade_out();
+                }
+            }
+        }
         r.state.step(&def, dt);
         live += r.state.live();
         // Safety: an effect that loops forever ends after a minute.

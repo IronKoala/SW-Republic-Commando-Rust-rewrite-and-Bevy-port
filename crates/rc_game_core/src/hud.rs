@@ -44,6 +44,9 @@ pub struct WeaponReadout {
     pub spread: f32,
     /// True while the crosshair is over an enemy (the original turns it red).
     pub on_target: bool,
+    /// True while the crosshair is over a friend, a squad mate (the
+    /// original turns it green).
+    pub on_friend: bool,
     /// While zoomed in (the sniper attachment): the field of view to use,
     /// degrees across a 4:3 screen like the video setting. `None` when not
     /// zoomed.
@@ -63,6 +66,10 @@ pub struct SquadMember {
     pub status: SquadStatus,
     /// What they're doing, in a few words ("Form up", "Sniping").
     pub order: String,
+    /// With the player's squad. Squad mates the level's scripts have
+    /// taken away, or who haven't arrived yet, are listed but not in it;
+    /// the original helmet only shows the squad.
+    pub in_squad: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -1,15 +1,17 @@
-//! The level's effect spawners (`FXFactory`): read from the map while it
-//! loads, switched on and off by the level's events, and run by
-//! `rc_effects::factory` (the rules, from the game's own script source,
-//! are written there). What they make goes to the effects part as a
-//! [`SpawnEffect`], placed and turned as the map says; the effects part
-//! reports each one's end ([`EffectEnded`]) so a spawner knows when it may
-//! make another.
+//! The level's effect and projectile spawners (`FXFactory`,
+//! `ProjectileFactory`): read from the map while it loads, switched on and
+//! off by the level's events, and run by `rc_effects::factory` (the rules,
+//! from the game's own script source, are written there). Effects they
+//! make go to the effects part as a [`SpawnEffect`], placed and turned as
+//! the map says; projectiles go to `projectiles` as a [`SpawnProjectile`].
+//! Each one's end comes back as an [`EffectEnded`], so a spawner knows
+//! when it may make another.
 //!
 //! geo_01a's gunships and Geonosian fighters flying overhead
 //! (`OverheadVehicles`, switched on by the opening script), its random
-//! battle explosions (`BattleExplosions`), and the steam, sparks, fire and
-//! explosions of the other levels come from these.
+//! battle explosions (`BattleExplosions`), its bombardment and bunker
+//! missiles (`ArialBombardment01`, `BunkerProjectileEFX`), and the steam,
+//! sparks, fire and explosions of the other levels come from these.
 //!
 //! Which spawners are on, and how much of their capacity is left, goes
 //! into save files (`[effect_spawners]`). Logged with the `scripts:`
@@ -18,7 +20,8 @@
 use crate::{LevelScript, PART};
 use bevy::prelude::*;
 use rc_effects::def::Range;
-use rc_effects::factory::{FxFactory, PlayerView, Spawners, Spot};
+use crate::projectiles::{RemoveProjectiles, SpawnProjectile};
+use rc_effects::factory::{FxFactory, Kind, PlayerView, Spawners, Spot};
 use rc_effects_plugin::{EffectEnded, SpawnEffect};
 use rc_game_core::save::SavePart;
 use rc_game_core::units::{to_bevy, to_unreal};
@@ -84,18 +87,21 @@ fn sub<'a>(v: &'a Vals, key: &str) -> Option<&'a Vals> {
     }
 }
 
-/// Every `FXFactory` in the map, with its spawn points.
+/// Every `FXFactory` and `ProjectileFactory` in the map, with its spawn
+/// points.
 pub fn read(map: &MapScripts) -> Vec<FxFactory> {
     let spots: Vec<(&str, Spot)> = map
         .actors
         .iter()
         .filter(|a| a.obj.class.eq_ignore_ascii_case("SpawnPoint"))
         .map(|a| {
+            let d = Spot::at(a.location, rotation(&a.obj));
             (
                 a.obj.tag(),
                 Spot {
-                    location: a.location,
-                    rotation: rotation(&a.obj),
+                    physics: a.obj.int("InitialPhysics").map_or(d.physics, |p| p as u8),
+                    speed: a.obj.float("InitialSpeed").unwrap_or(d.speed),
+                    ..d
                 },
             )
         })
@@ -103,14 +109,23 @@ pub fn read(map: &MapScripts) -> Vec<FxFactory> {
     let d = FxFactory::default();
     map.actors
         .iter()
-        .filter(|a| a.obj.class.eq_ignore_ascii_case("FXFactory"))
         .filter_map(|a| {
+            let kind = if a.obj.class.eq_ignore_ascii_case("FXFactory") {
+                Kind::Effect
+            } else if a.obj.class.eq_ignore_ascii_case("ProjectileFactory") {
+                Kind::Projectile
+            } else {
+                return None;
+            };
             let o = &a.obj;
             let prototype = o.text("Prototype")?.to_string();
             let tag = o.tag().to_string();
             let offset = o.structure("SpawnOffset");
+            // `ProjectileFactory` has no draw scale or offset of its own.
+            let fx = kind == Kind::Effect;
             Some(FxFactory {
                 name: o.name.clone(),
+                kind,
                 spots: spots
                     .iter()
                     .filter(|(t, _)| t.eq_ignore_ascii_case(&tag))
@@ -131,12 +146,18 @@ pub fn read(map: &MapScripts) -> Vec<FxFactory> {
                 covert: o.flag("bCovert", d.covert),
                 spawn_event: o.text("SpawnEvent").map(str::to_string),
                 exhausted_event: o.text("ExhaustedEvent").map(str::to_string),
-                draw_scale: range(o.structure("EmitterDrawScale")).unwrap_or(d.draw_scale),
+                draw_scale: range(o.structure("EmitterDrawScale"))
+                    .filter(|_| fx)
+                    .unwrap_or(d.draw_scale),
                 spawn_offset: [
-                    range(offset.and_then(|s| sub(s, "X"))).unwrap_or(d.spawn_offset[0]),
-                    range(offset.and_then(|s| sub(s, "Y"))).unwrap_or(d.spawn_offset[1]),
-                    range(offset.and_then(|s| sub(s, "Z"))).unwrap_or(d.spawn_offset[2]),
+                    range(offset.and_then(|s| sub(s, "X"))).filter(|_| fx).unwrap_or(d.spawn_offset[0]),
+                    range(offset.and_then(|s| sub(s, "Y"))).filter(|_| fx).unwrap_or(d.spawn_offset[1]),
+                    range(offset.and_then(|s| sub(s, "Z"))).filter(|_| fx).unwrap_or(d.spawn_offset[2]),
                 ],
+                physics: o
+                    .int("InitialPhysicsFromFactory")
+                    .map_or(d.physics, |p| p as u8),
+                speed: o.float("InitialSpeedFromFactory").unwrap_or(d.speed),
             })
         })
         .collect()
@@ -144,10 +165,11 @@ pub fn read(map: &MapScripts) -> Vec<FxFactory> {
 
 /// Log what was read, once per level.
 pub fn log_list(list: &[FxFactory], log: &GameLog) {
-    log.line(format!("{PART}: {} effect spawners", list.len()));
+    log.line(format!("{PART}: {} effect and projectile spawners", list.len()));
     for f in list {
         log.line(format!(
-            "{PART}:   effect spawner {} (tag {}): {} at ({:.0}, {:.0}, {:.0}) turned {:?}, mode {}, {} spawn points, every {}-{} s, {} alive at most, {}, draw scale {}-{}{}",
+            "{PART}:   {} spawner {} (tag {}): {} at ({:.0}, {:.0}, {:.0}) turned {:?}, mode {}, {} spawn points, every {}-{} s, {} alive at most, {}, draw scale {}-{}{}",
+            kind_name(f.kind),
             f.name,
             f.tag,
             f.prototype,
@@ -169,6 +191,13 @@ pub fn log_list(list: &[FxFactory], log: &GameLog) {
             f.draw_scale.max,
             if f.covert { ", only out of sight" } else { "" }
         ));
+    }
+}
+
+fn kind_name(k: Kind) -> &'static str {
+    match k {
+        Kind::Effect => "effect",
+        Kind::Projectile => "projectile",
     }
 }
 
@@ -213,6 +242,8 @@ pub fn run(
     camera: Query<(&GlobalTransform, Option<&Projection>), With<PlayerCamera>>,
     collision: Option<Res<LevelCollision>>,
     mut spawn: MessageWriter<SpawnEffect>,
+    mut shoot: MessageWriter<SpawnProjectile>,
+    mut remove: MessageWriter<RemoveProjectiles>,
     mut raise: MessageWriter<RaiseEvent>,
     log: Res<GameLog>,
 ) {
@@ -268,12 +299,29 @@ pub fn run(
                     ));
                 }
             }
-            FactoryOrder::Stop { tag, .. } => {
-                let n = fx.spawners.stop(tag);
+            FactoryOrder::Stop {
+                tag,
+                for_good,
+                remove_offspring,
+            } => {
+                let (n, gone) = fx.spawners.stop(tag, *for_good, *remove_offspring);
                 if n > 0 {
                     log.line(format!(
-                        "{PART}: t={now:.2} effect spawners {tag}: switched off ({n})"
+                        "{PART}: t={now:.2} spawners {tag}: switched off{} ({n}){}",
+                        if *for_good { " for good" } else { "" },
+                        if gone.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", {} of what they made removed", gone.len())
+                        }
                     ));
+                }
+                // Only projectiles are removed; effects play out (not done).
+                for g in &gone {
+                    fx.live.remove(g);
+                }
+                if !gone.is_empty() {
+                    remove.write(RemoveProjectiles(gone));
                 }
             }
         }
@@ -284,7 +332,8 @@ pub fn run(
         for (i, s) in fx.spawners.states.iter().enumerate() {
             if s.online != was[i] {
                 log.line(format!(
-                    "{PART}: t={now:.2} effect spawner {} switched {} by {}",
+                    "{PART}: t={now:.2} {} spawner {} switched {} by {}",
+                    kind_name(fx.spawners.list[i].kind),
                     fx.spawners.list[i].name,
                     if s.online { "on" } else { "off" },
                     e.name
@@ -298,12 +347,25 @@ pub fn run(
         for s in st.spawns {
             let id = s.id;
             let name = fx.spawners.list[s.factory].name.clone();
+            let kind = fx.spawners.list[s.factory].kind;
             fx.live.insert(id, s.factory);
             log.line(format!(
-                "{PART}: t={now:.2} effect spawner {name} makes {} at ({:.0}, {:.0}, {:.0}) turned {:?}, draw scale {}",
-                s.effect, s.location[0], s.location[1], s.location[2], s.rotation, s.draw_scale
+                "{PART}: t={now:.2} {} spawner {name} makes {} at ({:.0}, {:.0}, {:.0}) turned {:?}, draw scale {}, physics {} speed {}",
+                kind_name(kind), s.effect, s.location[0], s.location[1], s.location[2], s.rotation, s.draw_scale, s.physics, s.speed
             ));
             fx.made.push((name.clone(), s.effect.clone()));
+            if kind == Kind::Projectile {
+                shoot.write(SpawnProjectile {
+                    class: s.effect,
+                    location: s.location,
+                    rotation: s.rotation,
+                    physics: s.physics,
+                    speed: s.speed,
+                    id,
+                    by: name,
+                });
+                continue;
+            }
             spawn.write(SpawnEffect {
                 effect: s.effect,
                 at: to_bevy(UVec3::new(s.location[0], s.location[1], s.location[2])),
@@ -313,12 +375,13 @@ pub fn run(
                 rotation: s.rotation,
                 draw_scale: s.draw_scale,
                 id: Some(id),
+                follow: None,
             });
         }
         for (event, by) in st.events {
             raise.write(RaiseEvent {
                 name: event,
-                by: format!("{by} (effect spawner)"),
+                by: format!("{by} (spawner)"),
             });
         }
     }
