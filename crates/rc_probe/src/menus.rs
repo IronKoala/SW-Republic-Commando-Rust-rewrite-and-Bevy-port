@@ -316,6 +316,7 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         ],
         pickup: "DC-17m Blaster Clips".into(),
         pickup_fade: 1.0,
+        prompt: Vec::new(),
     };
     let mut ok = true;
     for (w, h) in [
