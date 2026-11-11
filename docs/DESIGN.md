@@ -4124,7 +4124,7 @@ overlaps aren't darker, the off switch and the far-away cut-off. In the
 game the log says `shadows: N more shadow copies (C characters, ...)`
 and `shadows: character shadows on/off`.
 
-## Multiplying materials (geo_01a's arena)
+## Multiplying materials and zone fog (geo_01a's arena)
 
 **Multiplying `Combiner`s.** Most materials are one picture, perhaps
 wrapped in shaders and modifiers, and we follow the wrapper links down to
@@ -4151,6 +4151,29 @@ other operations (`CO_AlphaBlend_With_Mask` 5 with a `VertexColor` mask
 blends rock and plaster on `RezSpires` and `RubbleBlend`; we show the
 first), Combiners on walls (BSP) and on terrain.
 Check: `cargo run -p rc_level_viewer --example multiply_check`.
+
+**Zone fog (`fog.rs`).** Each `ZoneInfo` (and the `LevelInfo` for the rest)
+can set `bDistanceFog`, `DistanceFogColor` (stored blue, green, red),
+`DistanceFogStart`, `DistanceFogEnd` and `DistanceFogBlendTime`; values a
+map leaves out are the `ZoneInfo` class defaults, read from Engine.u at
+load (3000, 8000, grey 128, 1 s). geo_01a's arena zone: fog on, colour
+142,119,94, start 3000, end 64000. The game's D3DDrv.dll sets Direct3D's
+fog mode to `D3DFOG_LINEAR`, so a surface keeps `(end - d) / (end - start)`
+of its colour; Bevy's `FogFalloff::Linear` is the same formula (units / 50).
+`scene::build` reads every zone's fog into `Scene::fog` with a copy of the
+BSP's zone tree; `spawn_level` puts it in the `LevelFog` resource, and
+`ZoneFogPlugin`'s `follow_zone_fog` looks up the zone of every camera with
+`ZoneFogView` each frame and sets its `DistanceFog`. The game's level
+plugin puts `ZoneFogView` on the player's camera and takes it (and the
+fog) away when the level ends; the viewer puts it on its camera unless
+`--no-fog`. The visor's low light mode brings its own fog (the original's
+vision mode `OverideFog`): it marks the camera `rc_game_core::OwnFog`
+while on, and the level plugin's copy of `follow_zone_fog` skips such
+cameras, then puts the zone's fog back when the mark goes. Our choices, not read from the game: the camera's zone picks
+the fog, blended in a straight line over the new zone's blend time; no fog
+in the sky box (geo_01a's `SkyZoneInfo` doesn't turn it on); `bClearToFogColor`
+unused; fog mixed in linear light (Direct3D mixes on screen values), and
+by distance rather than depth.
 
 ## Holograms, tank liquid and props with no stored light
 

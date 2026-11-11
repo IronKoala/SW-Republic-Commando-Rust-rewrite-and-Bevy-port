@@ -160,6 +160,8 @@ fn scene(batches: Vec<Batch>, lights: Vec<Light>) -> Scene {
             from: "test".into(),
         },
         sky: None,
+        fog: Default::default(),
+        fog_error: None,
     }
 }
 

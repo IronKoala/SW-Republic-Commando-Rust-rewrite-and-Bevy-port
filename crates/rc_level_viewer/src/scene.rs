@@ -312,6 +312,10 @@ pub struct Scene {
     pub spawn: Spawn,
     /// `None` when the map has no `SkyZoneInfo`.
     pub sky: Option<Sky>,
+    /// Each zone's distance fog (`crate::fog`).
+    pub fog: crate::fog::ZoneFogs,
+    /// Why the fog couldn't be read, if it couldn't (then there is none).
+    pub fog_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -1208,6 +1212,11 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     let model = level.model.ok_or("the level has no BSP model")?;
     let bsp = bsp::read_model(pkg, data, &pkg.exports[model]).map_err(|e| format!("BSP: {e}"))?;
 
+    let (fog, fog_error) = match crate::fog::FogDefaults::read(mats) {
+        Ok(d) => (crate::fog::ZoneFogs::read(pkg, data, &level, &bsp, &d), None),
+        Err(e) => (crate::fog::ZoneFogs::default(), Some(e)),
+    };
+
     let mut b = Builder::default();
     let mut ctx = Ctx {
         mats,
@@ -1681,6 +1690,8 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         stats: ctx.stats,
         spawn,
         sky,
+        fog,
+        fog_error,
     })
 }
 

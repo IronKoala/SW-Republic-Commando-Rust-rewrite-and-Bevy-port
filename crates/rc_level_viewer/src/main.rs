@@ -16,7 +16,8 @@
 //! starts the camera looking up (positive) or down. `--no-sky` leaves the
 //! sky out (the background colour shows instead). `--view-bump` starts the
 //! camera in front of the biggest bump-mapped surface instead of at the
-//! player start, for checking bump maps (`rc_capture_compare`).
+//! player start, for checking bump maps (`rc_capture_compare`). `--no-fog`
+//! leaves the zones' distance fog off (see `fog.rs`), for comparing.
 //!
 //! Everything is logged to `logs/rc_level_viewer.log`: what was read, what
 //! couldn't be shown and why, frame rates, camera position, and an on-screen
@@ -83,6 +84,7 @@ struct ViewOptions {
     pitch_degrees: f32,
     bump_view: bool,
     sky: bool,
+    fog: bool,
 }
 
 /// Save red, green, blue pixels (top row first) as a 24-bit .bmp file, a
@@ -236,7 +238,7 @@ fn setup(
         speed: 10.0,
     };
     let rotation = cam.rotation();
-    commands.spawn((
+    let mut camera = commands.spawn((
         Camera3d::default(),
         if has_sky {
             sky::viewer_camera()
@@ -254,6 +256,30 @@ fn setup(
         }),
         Transform::from_translation(position).with_rotation(rotation),
         cam,
+    ));
+    if view.fog {
+        camera.insert(rc_level_viewer::fog::view::ZoneFogView::default());
+    }
+    let at = position * 50.0;
+    let (zone, fog) = scene.fog.at([at.x, at.z, at.y]);
+    log.line(format!(
+        "fog: {} of {} zones turn distance fog on{}; the camera starts in zone {:?}: {}{}",
+        scene.fog.zones_with_fog,
+        scene.fog.zones_read,
+        scene
+            .fog_error
+            .as_ref()
+            .map(|e| format!(" (fog not read: {e})"))
+            .unwrap_or_default(),
+        zone,
+        match fog {
+            Some(f) => format!(
+                "colour {:?}, from {} to {} Unreal units",
+                f.colour, f.start, f.end
+            ),
+            None => "no fog".to_string(),
+        },
+        if view.fog { "" } else { " (switched off: --no-fog)" }
     ));
     log.line(format!(
         "scene set up: {} draw batches ({} with a texture), {triangles} triangles; camera at {:?} (Bevy units) from {}, facing yaw {:.1} degrees",
@@ -569,6 +595,7 @@ fn main() -> AppExit {
         pitch_degrees: 0.0,
         bump_view: false,
         sky: true,
+        fog: true,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -578,6 +605,8 @@ fn main() -> AppExit {
             view.pitch_degrees = args.next().and_then(|n| n.parse().ok()).unwrap_or(0.0);
         } else if arg == "--no-sky" {
             view.sky = false;
+        } else if arg == "--no-fog" {
+            view.fog = false;
         } else if arg == "--view-bump" {
             view.bump_view = true;
         } else if arg == "--capture" {
@@ -694,6 +723,7 @@ fn main() -> AppExit {
         .insert_resource(log)
         .add_plugins((sky::SkyPlugin, rc_level_viewer::bump::BumpMapPlugin))
         .add_plugins(prop_light::PropLightPlugin)
+        .add_plugins(rc_level_viewer::fog::view::ZoneFogPlugin)
         .add_plugins(rc_hologram::HologramPlugin)
         .insert_resource(rc_hologram::HologramGameData(game_data.clone()))
         .add_systems(Startup, setup)

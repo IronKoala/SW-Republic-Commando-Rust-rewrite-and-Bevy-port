@@ -4,6 +4,7 @@
 pub mod bump;
 pub mod camera;
 pub mod draw;
+pub mod fog;
 pub mod lighting;
 pub mod materials;
 pub mod probe;

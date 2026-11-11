@@ -386,6 +386,8 @@ pub fn spawn_level(
     entities.extend(report.entities.iter().copied());
     // The baked light already includes the zones' ambient light.
     commands.insert_resource(GlobalAmbientLight::NONE);
+    // Each zone's distance fog, for cameras with `fog::view::ZoneFogView`.
+    commands.insert_resource(crate::fog::view::LevelFog(scene.fog.clone()));
     DrawReport {
         triangles,
         textured,
