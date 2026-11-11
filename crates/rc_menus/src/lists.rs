@@ -279,6 +279,7 @@ mod tests {
                 }],
                 wheel_areas: vec![],
             },
+            white_texture: None,
         };
         set_items(&mut l, 0, (0..items).map(|i| format!("item {i}")).collect());
         l

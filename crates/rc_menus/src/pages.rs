@@ -130,6 +130,10 @@ pub struct PagePlan {
     /// Rows hidden whole (the row's button, label and arrows), by the
     /// row button's name.
     pub hidden_rows: Vec<String>,
+    /// On a wide screen keep the page as one block in the middle (only
+    /// its full-screen backdrop widens) instead of spreading it out
+    /// (`fit::together`).
+    pub keep_together: bool,
 }
 
 /// A button the port adds to an original page, made as a copy of one of
@@ -283,7 +287,8 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
     for i in candidates {
         let w = &layout.widgets[i];
         let Kind::Button(b) = &w.kind else { continue };
-        if b.disabled {
+        // An edit box is typed into; the game's code for the page reads it.
+        if b.disabled || b.edit.is_some() {
             continue;
         }
         if let Some(e) = plan.extra_buttons.iter().find(|e| e.name == w.name) {
@@ -397,6 +402,8 @@ struct PageDef {
     moves: BTreeMap<String, f32>,
     #[serde(default)]
     hidden_rows: Vec<String>,
+    #[serde(default)]
+    keep_together: bool,
 }
 
 #[derive(Deserialize)]
@@ -445,6 +452,7 @@ pub fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
             texts: d.texts.into_iter().collect(),
             moves: d.moves.into_iter().collect(),
             hidden_rows: d.hidden_rows,
+            keep_together: d.keep_together,
         });
     }
     Ok(out)
@@ -478,6 +486,7 @@ mod tests {
             movie_widget: None,
             music: None,
             lists: Default::default(),
+            white_texture: None,
         }
     }
 

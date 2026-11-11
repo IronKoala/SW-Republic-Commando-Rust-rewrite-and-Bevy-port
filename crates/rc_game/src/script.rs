@@ -18,6 +18,7 @@
 //! then QUIT again and YES).
 
 use crate::menu::{Menu, Page};
+use crate::original_credits;
 use crate::original_menu::{self, OriginalMenus};
 use crate::player::Body;
 use crate::settings::Settings;
@@ -62,6 +63,9 @@ enum Step {
     /// Press and release a key on the keyboard itself (for choosing a new
     /// key, which reads the keyboard, not the actions).
     Key(KeyCode),
+    /// Type text on the keyboard, one key a frame, as the keyboard sends
+    /// it (with each key's text); `\u{8}` is Backspace and `\n` Enter.
+    Type(&'static str),
     /// Capture the window, save it to `logs/<name>.png` and measure its
     /// colours (retried while the capture comes back black).
     Shot(&'static str),
@@ -240,10 +244,113 @@ fn steps() -> Vec<Step> {
     vec![
         Until("main menu", |w| in_state(w, GameState::MainMenu), 10.0),
         Check("main menu page shows", |w| match page(w) {
-            Page::Main => Ok("main".into()),
+            // The profiles page may already be over it (no profile yet).
+            Page::Main | Page::Profiles => Ok(format!("{:?}", page(w))),
             p => Err(format!("{p:?}")),
         }),
         Wait(0.3),
+        // No profile yet (the script's save folder starts empty): the
+        // original PROFILES page opens first, and a profile is made.
+        Check(
+            "with no profile, the original PROFILES page opens first, BACK hidden",
+            |w| {
+                let items = save_items(w, "profiles")?;
+                let back = button_hidden(w, "profiles", "BButton");
+                let got = format!("{:?} {:?} {items:?}, BACK hidden {back:?}, focus {:?}", page(w), shown_page(w), focus(w));
+                match (page(w), shown_page(w).as_deref(), back, focus(w).as_deref()) {
+                    (Page::Profiles, Some("profiles"), Some(true), Some("ProfileList[0]"))
+                        if items == ["< NEW >"] => Ok(got),
+                    _ => Err(got),
+                }
+            },
+        ),
+        Shot("profiles_first"),
+        Press(Action::MenuBack),
+        Wait(0.2),
+        Check("BACK does nothing while no profile is chosen", |w| {
+            match (page(w), shown_page(w)) {
+                (Page::Profiles, Some(k)) if k == "profiles" => Ok("still on profiles".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuAccept), // < NEW >
+        Wait(0.3),
+        Check("< NEW > opens the name page, focus in its empty box", |w| {
+            let text = button_text(w, "NameBox");
+            match (page(w), focus(w).as_deref(), text.as_deref()) {
+                (Page::NewProfile, Some("NameBox"), Some("")) => Ok("new_profile, NameBox".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Type("Script 1\u{8}2!"),
+        Wait(0.1),
+        Check(
+            "typing fills the box (Backspace takes one off, ! isn't a letter or digit)",
+            |w| match button_text(w, "NameBox").as_deref() {
+                Some("Script 2") => Ok("Script 2".into()),
+                other => Err(format!("{other:?}")),
+            },
+        ),
+        Check("the box's cursor is drawn after the text", |w| {
+            let m = w.resource::<OriginalMenus>();
+            let quads: Vec<_> = m.drawn.iter().filter(|q| q.widget == "NameBox").collect();
+            let white = quads
+                .iter()
+                .filter(|q| q.texture.eq_ignore_ascii_case("Engine.MenuWhite"))
+                .count();
+            // The cursor blinks: it may be off in this frame, but the page
+            // must have its picture.
+            let picture = m
+                .pages
+                .get(crate::original_profiles::NEW_PROFILE)
+                .and_then(|p| p.screen.layout.white_texture.clone());
+            match picture {
+                Some(p) => Ok(format!(
+                    "{} pictures and letters for NameBox, {white} cursor ({p})",
+                    quads.len()
+                )),
+                None => Err("the page has no WhiteTexture for the cursor".into()),
+            }
+        }),
+        Shot("new_profile"),
+        Type("\n"),
+        Wait(0.1),
+        Check("Enter leaves the box for OK", |w| match focus(w).as_deref() {
+            Some("AButton") => Ok("AButton".into()),
+            other => Err(format!("{other:?}")),
+        }),
+        Press(Action::MenuAccept), // OK
+        Wait(0.2),
+        Check("OK shows the original's message", |w| {
+            let m = w.resource::<OriginalMenus>();
+            let text = m
+                .question
+                .as_ref()
+                .and_then(|q| q.layout.widget("Message"))
+                .and_then(|w| match &w.kind {
+                    rc_menus::layout::Kind::Text(t) => Some(t.text.clone()),
+                    _ => None,
+                });
+            match text.as_deref() {
+                Some("CREATING PROFILE: Script_2") => Ok("CREATING PROFILE: Script_2".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Until(
+            "the main menu after the message",
+            |w| page(w) == Page::Main && w.resource::<OriginalMenus>().question.is_none(),
+            5.0,
+        ),
+        Check("the profile is made and in use, its saves in its own folder", |w| {
+            let saves = w.resource::<rc_save::SaveFolder>().0.clone();
+            let remembered = w.resource::<Settings>().save.profile.clone();
+            let got = format!("saves in {}, settings profile {remembered:?}", saves.display());
+            if saves.ends_with("Profile_Script_2") && saves.is_dir() && remembered == "Script_2" {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Check("the original main menu is drawn", |w| {
             let m = w.resource::<OriginalMenus>();
             if !m.active() {
@@ -1719,7 +1826,81 @@ fn steps() -> Vec<Step> {
             s.game.tactical_visor = crate::settings::TacticalVisor::Cycle;
             s.game.tactical_intensity = 0.2;
         }),
-        // MULTIPLAYER, PROFILES and EXTRAS are greyed out and skipped.
+        // EXTRAS: the original page; its five videos are greyed out (no
+        // MPEG-1 player yet), VIEW CREDITS rolls Credits.int.
+        FocusOn("MenuOptions[6]"),
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check(
+            "EXTRAS opens the original EXTRAS page, videos greyed, focus on VIEW CREDITS",
+            |w| {
+                let shown = original_page_shown(w);
+                let greyed = (0..rc_menus::extras::NUM_EXTRAS)
+                    .filter(|&i| {
+                        let m = w.resource::<OriginalMenus>();
+                        m.pages.get(original_credits::EXTRAS).is_some_and(|p| {
+                            matches!(
+                                p.screen.layout.widget(&rc_menus::extras::row_name(i))
+                                    .map(|w| &w.kind),
+                                Some(rc_menus::layout::Kind::Button(b)) if b.disabled
+                            )
+                        })
+                    })
+                    .count();
+                let got = format!("{shown:?}, {greyed} videos greyed, focus {:?}", focus(w));
+                match (shown.as_deref(), greyed, focus(w).as_deref()) {
+                    (Some(original_credits::EXTRAS), 5, Some("Credits")) => Ok(got),
+                    _ => Err(got),
+                }
+            },
+        ),
+        Shot("extras"),
+        Press(Action::MenuAccept), // VIEW CREDITS
+        Wait(1.5),
+        Check("VIEW CREDITS rolls the names from Credits.int", |w| {
+            let shown = original_page_shown(w);
+            let m = w.resource::<OriginalMenus>();
+            let lines: Vec<String> = m
+                .pages
+                .get(original_credits::CREDITS)
+                .map(|p| {
+                    p.screen
+                        .layout
+                        .widgets
+                        .iter()
+                        .filter(|w| w.name.starts_with("MenuCreditLineBuffer") && !w.hidden)
+                        .filter_map(|w| match &w.kind {
+                            rc_menus::layout::Kind::Text(t) => {
+                                Some(format!("{} at {:.3}", t.text, t.pos[1]))
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let got = format!("{shown:?}: {}", lines.join(" | "));
+            match shown.as_deref() {
+                Some(original_credits::CREDITS)
+                    if lines.first().is_some_and(|l| l.starts_with("GAME DESIGN at 0.")) =>
+                {
+                    Ok(got)
+                }
+                _ => Err(got),
+            }
+        }),
+        Shot("credits"),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("BACK leaves the credits for EXTRAS", |w| {
+            match original_page_shown(w).as_deref() {
+                Some(original_credits::EXTRAS) => Ok("extras".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        FocusOn("MenuOptions[0]"),
+        // MULTIPLAYER is greyed out and skipped.
         FocusAfter(Action::MenuDown, "MenuOptions[1]"), // LOAD GAME
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         FocusAfter(Action::MenuDown, "MenuOptions[4]"),
@@ -1947,7 +2128,125 @@ fn steps() -> Vec<Step> {
                 p => Err(format!("{p:?}")),
             }
         }),
-        FocusAfter(Action::MenuDown, "MenuOptions[7]"),
+        FocusOn("MenuOptions[5]"),
+        Press(Action::MenuAccept), // PROFILES
+        Wait(0.3),
+        Check("PROFILES lists the profile, focus on it, BACK and DELETE shown", |w| {
+            let items = save_items(w, "profiles")?;
+            let back = button_hidden(w, "profiles", "BButton");
+            let delete = button_hidden(w, "profiles", "XButton");
+            let got = format!("{items:?} focus {:?} BACK hidden {back:?} DELETE hidden {delete:?}", focus(w));
+            match (items.as_slice(), focus(w).as_deref(), back, delete) {
+                ([n, p], Some("ProfileList[1]"), Some(false), Some(false))
+                    if n == "< NEW >" && p == "SCRIPT_2" => Ok(got),
+                _ => Err(got),
+            }
+        }),
+        Shot("profiles"),
+        FocusOn("XButton"),
+        Press(Action::MenuAccept), // DELETE
+        Wait(0.2),
+        Check("the profile in use can't be deleted (the original's warning)", |w| {
+            match warning_text(w).as_deref() {
+                Some("YOU CANNOT DELETE THE ACTIVE PROFILE.") => Ok("warning".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Shot("profile_warning"),
+        Press(Action::MenuBack),
+        Wait(0.2),
+        Check("back doesn't close the warning", |w| match warning_text(w) {
+            Some(_) => Ok("still up".into()),
+            None => Err("closed".into()),
+        }),
+        Press(Action::MenuAccept), // CONTINUE
+        Wait(0.2),
+        Check("CONTINUE closes the warning", |w| match warning_text(w) {
+            None => Ok("closed".into()),
+            Some(t) => Err(t),
+        }),
+        // A second profile, loaded, then the first one deleted.
+        Press(Action::MenuUp),
+        Wait(0.1),
+        Check("up from the buttons goes to < NEW >", |w| match focus(w).as_deref() {
+            Some("ProfileList[0]") => Ok("ProfileList[0]".into()),
+            other => Err(format!("{other:?}")),
+        }),
+        Press(Action::MenuAccept), // < NEW >
+        Wait(0.3),
+        Type("script 2"),
+        Type("\n"),
+        Press(Action::MenuAccept), // OK
+        Wait(0.2),
+        Check("a name already taken (capitals don't count) gets the original's warning", |w| {
+            match warning_text(w).as_deref() {
+                Some("THERE IS ALREADY A PROFILE NAMED script_2") => Ok("warning".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuAccept), // CONTINUE
+        Wait(0.2),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("BACK on the name page goes back to the list", |w| {
+            match (page(w), shown_page(w)) {
+                (Page::Profiles, Some(k)) if k == "profiles" => Ok("profiles".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuUp),
+        Wait(0.1),
+        Check("up from SCRIPT_2 goes to < NEW >", |w| match focus(w).as_deref() {
+            Some("ProfileList[0]") => Ok("ProfileList[0]".into()),
+            other => Err(format!("{other:?}")),
+        }),
+        Press(Action::MenuAccept), // < NEW >
+        Wait(0.3),
+        Type("Alpha"),
+        Type("\n"),
+        Press(Action::MenuAccept), // OK
+        Until(
+            "the main menu after making Alpha",
+            |w| page(w) == Page::Main && w.resource::<OriginalMenus>().question.is_none(),
+            5.0,
+        ),
+        Press(Action::MenuAccept), // PROFILES (focus stayed on it)
+        Wait(0.3),
+        Check("the list has both, focus on ALPHA (in use)", |w| {
+            let items = save_items(w, "profiles")?;
+            match (items.len(), focus(w).as_deref()) {
+                (3, Some("ProfileList[1]")) if items[1] == "ALPHA" && items[2] == "SCRIPT_2" => {
+                    Ok(format!("{items:?}"))
+                }
+                other => Err(format!("{items:?} {other:?}")),
+            }
+        }),
+        Press(Action::MenuDown), // SCRIPT_2
+        FocusOn("XButton"),
+        Press(Action::MenuAccept), // DELETE
+        Wait(0.2),
+        Check("DELETE asks the original's question", |w| match question_text(w) {
+            Some(q) if q == "DELETE SCRIPT_2 PROFILE, AND ALL ASSOCIATED SAVED GAMES?" => Ok(q),
+            other => Err(format!("{other:?}")),
+        }),
+        Press(Action::MenuRight), // YES
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check("YES deletes the profile and its folder", |w| {
+            let items = save_items(w, "profiles")?;
+            let gone = !std::path::Path::new("logs/script_saves/Profile_Script_2").exists();
+            match (items.as_slice(), gone) {
+                ([_, a], true) if a == "ALPHA" => Ok(format!("{items:?}, folder gone")),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("BACK closes the list", |w| match page(w) {
+            Page::Main => Ok("main".into()),
+            p => Err(format!("{p:?}")),
+        }),
+        FocusOn("MenuOptions[7]"),
         Press(Action::MenuAccept), // QUIT
         Wait(0.3),
         Check("QUIT asks the original's question, on NO", |w| {
@@ -2074,6 +2373,24 @@ fn save_items(w: &mut World, k: &str) -> Result<Vec<String>, String> {
         .first()
         .map(|l| l.items.clone())
         .unwrap_or_default())
+}
+
+/// Whether a widget on an original page is hidden.
+fn button_hidden(w: &mut World, k: &str, name: &str) -> Option<bool> {
+    let m = w.resource::<OriginalMenus>();
+    m.pages.get(k)?.screen.layout.widget(name).map(|w| w.hidden)
+}
+
+/// The warning box's text, when it shows.
+fn warning_text(w: &mut World) -> Option<String> {
+    let m = w.resource::<OriginalMenus>();
+    if m.asking != Some(original_menu::Asking::Warning) {
+        return None;
+    }
+    match &m.question.as_ref()?.layout.widget("Message")?.kind {
+        rc_menus::layout::Kind::Text(t) => Some(t.text.clone()),
+        _ => None,
+    }
 }
 
 /// The question box's question, when it shows.
@@ -2583,6 +2900,42 @@ fn run(world: &mut World) {
                 }
                 done = frames >= 2;
             }
+            Step::Type(text) => {
+                use bevy::input::keyboard::{Key, KeyboardInput};
+                use bevy::input::ButtonState;
+                let window = world
+                    .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+                    .iter(world)
+                    .next();
+                // One key a frame: pressed on even frames, released on odd.
+                let chars: Vec<char> = text.chars().collect();
+                let at = (frames / 2) as usize;
+                if let (Some(window), Some(&c)) = (window, chars.get(at)) {
+                    let (key_code, logical_key, typed) = match c {
+                        '\u{8}' => (KeyCode::Backspace, Key::Backspace, None),
+                        '\n' => (KeyCode::Enter, Key::Enter, None),
+                        ' ' => (KeyCode::Space, Key::Space, Some(" ".into())),
+                        c => (
+                            KeyCode::KeyA,
+                            Key::Character(c.to_string().into()),
+                            Some(c.to_string().into()),
+                        ),
+                    };
+                    world.write_message(KeyboardInput {
+                        key_code,
+                        logical_key,
+                        state: if frames % 2 == 0 {
+                            ButtonState::Pressed
+                        } else {
+                            ButtonState::Released
+                        },
+                        text: if frames % 2 == 0 { typed } else { None },
+                        repeat: false,
+                        window,
+                    });
+                }
+                done = at >= chars.len();
+            }
             Step::FocusAfter(a, want) => {
                 if frames == 0 {
                     held.insert(a);
@@ -2676,6 +3029,7 @@ fn run(world: &mut World) {
                     | Step::Wait(_)
                     | Step::FocusAfter(..)
                     | Step::Key(_)
+                    | Step::Type(_)
             ) {
                 break;
             }
