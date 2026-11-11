@@ -1778,8 +1778,16 @@ class defaults with `rc_probe --classes`:
     the same value: red (255 - 115v), green (140 + 115v), blue 180,
     opacity 240.
   - The prompt (`DrawActivateText`) is (164,200,208), fading in to
-    opacity 220 (the fade-in, the helmet's `PromptFadeInTime` 0.5 s by our
-    reading, is not done). Its place, near the top in two lines ("PRESS
+    opacity 220. The fade-in is copied from `DrawActivateText`: opacity
+    = whole part of (seconds up / `PromptFadeInTime` x 220), so 0 on the
+    first frame and 220 from 0.5 s on (`PromptFadeInTime` is 0.5 in
+    engine.u's Helmet defaults, read with `rc_probe --classes`). The clock
+    starts again when the prompt was not drawn the frame before
+    (`bActivateTextLastFrame`, also cleared when the advisor's words take
+    the box) or its words differ from `LastActivateText`. In the port:
+    `LayoutSettings::prompt_faded_in`, `fade = "prompt"` on the prompt
+    elements, see-through (`blend = "alpha"`) like the advisor's words,
+    which go through the same text call. Its place, near the top in two lines ("PRESS
     AND HOLD 'F' TO" / "HEAL"), is still matched to the user's
     screenshots: the `{prompt1}`/`{prompt2}` elements of
     `data/ui/hud.toml`.

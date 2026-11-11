@@ -129,6 +129,19 @@ impl LayoutSettings {
             .max(1.0)
             / 10.0
     }
+
+    /// How far the use prompt shown for `age` seconds has faded in, 0..1,
+    /// exactly as the original works it out (Engine.dll
+    /// `UHelmet::DrawActivateText`): its opacity climbs in a straight line
+    /// from 0 to 220 over `PromptFadeInTime` (our `text_fade_in`), cut
+    /// down to a whole number each frame. Given as that opacity over 220,
+    /// so the element's own 220 times this is the original's number.
+    pub fn prompt_faded_in(&self, age: f32) -> f32 {
+        if self.text_fade_in <= 0.0 || age >= self.text_fade_in {
+            return 1.0;
+        }
+        (age.max(0.0) / self.text_fade_in * 220.0).floor() / 220.0
+    }
 }
 
 fn half() -> f32 {
@@ -371,6 +384,8 @@ pub struct HudValues {
     /// The use prompt ("PRESS AND HOLD 'F' TO HEAL"), as lines; empty
     /// when none is shown.
     pub prompt: Vec<String>,
+    /// How far the prompt has faded in, 0..1.
+    pub prompt_fade: f32,
     /// What the person speaking says (the advisor's words), empty when
     /// nobody speaks.
     pub subtitle: String,
@@ -450,6 +465,7 @@ impl HudValues {
                 },
                 "squad_health" => member?.health,
                 "pickup" => self.pickup_fade,
+                "prompt" => self.prompt_fade,
                 "subtitle" => self.subtitle_fade,
                 "objective" => self.objective_fade,
                 _ => return None,
@@ -1113,6 +1129,20 @@ mod tests {
         e.group = "intruder".into();
         l.elements.push(e);
         assert!(!check_plan(&l, 1920.0, 1080.0, 16.0 / 9.0, 3).is_empty());
+    }
+
+    #[test]
+    fn the_use_prompt_fades_in_like_the_original() {
+        // Engine.dll DrawActivateText: opacity = int(age / 0.5 * 220),
+        // 220 from 0.5 s on.
+        let l = LayoutSettings::default();
+        let opacity = |age: f32| (l.prompt_faded_in(age) * 220.0).round() as u32;
+        assert_eq!(opacity(0.0), 0);
+        assert_eq!(opacity(0.1), 44);
+        assert_eq!(opacity(0.25), 110);
+        assert_eq!(opacity(0.499), 219);
+        assert_eq!(opacity(0.5), 220);
+        assert_eq!(opacity(3.0), 220);
     }
 
     #[test]
