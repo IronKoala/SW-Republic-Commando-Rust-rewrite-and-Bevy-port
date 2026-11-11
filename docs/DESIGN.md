@@ -4171,6 +4171,57 @@ overlaps aren't darker, the off switch and the far-away cut-off. In the
 game the log says `shadows: N more shadow copies (C characters, ...)`
 and `shadows: character shadows on/off`.
 
+## Multiplying materials and zone fog (geo_01a's arena)
+
+**Multiplying `Combiner`s.** Most materials are one picture, perhaps
+wrapped in shaders and modifiers, and we follow the wrapper links down to
+it (`materials.rs`, `links_for`). A `Combiner` mixes two materials, and
+for most of them we still show only `Material1`. The exception that
+matters: `CombineOperation` 2, which the game's Engine.u enum
+`EColorOperation` names `CO_Multiply`. geo_01a's big unlit backdrop meshes
+(`EntireArena`, `RezSpires`, `UpperRock`, `upperStair`, all `bUnlit`) use
+such materials (`Arena_Textures.Unique.TierWallLM` and 23 more in
+arena_textures.utx): `Material1` is a painted light picture laid once over
+the whole mesh (texture coordinate set 0), `Material2` a repeating stone
+texture moved to set 1 by a `TexCoordSource` (`TexCoordSource` =
+`TCS_Stream1`). Showing `Material1` alone drew the light picture: the
+grey-white arena tiers. Now `Picture::multiply` carries the second picture
+(`materials::Layer`) with its own coordinate set, the static mesh batch
+gets those coordinates as `layer_uvs` (Bevy's `UV_1`), and `PropMaterial`
+multiplies (`prop_light.wesl`, binding 101/102, scale in `settings.y`: 1,
+or 2 / 4 for the Combiner's `Modulate2X` / `Modulate4X`). Multiplying in
+linear light equals multiplying the stored values, as the game does, on a
+pure power curve. A `TexCoordSource` (or any texture modifier storing
+`TexCoordSource` 0-7) now also picks which coordinate set a plain picture
+uses. `CO_Use_Color_From_Material2` (1) shows `Material2`. Not done: the
+other operations (`CO_AlphaBlend_With_Mask` 5 with a `VertexColor` mask
+blends rock and plaster on `RezSpires` and `RubbleBlend`; we show the
+first), Combiners on walls (BSP) and on terrain.
+Check: `cargo run -p rc_level_viewer --example multiply_check`.
+
+**Zone fog (`fog.rs`).** Each `ZoneInfo` (and the `LevelInfo` for the rest)
+can set `bDistanceFog`, `DistanceFogColor` (stored blue, green, red),
+`DistanceFogStart`, `DistanceFogEnd` and `DistanceFogBlendTime`; values a
+map leaves out are the `ZoneInfo` class defaults, read from Engine.u at
+load (3000, 8000, grey 128, 1 s). geo_01a's arena zone: fog on, colour
+142,119,94, start 3000, end 64000. The game's D3DDrv.dll sets Direct3D's
+fog mode to `D3DFOG_LINEAR`, so a surface keeps `(end - d) / (end - start)`
+of its colour; Bevy's `FogFalloff::Linear` is the same formula (units / 50).
+`scene::build` reads every zone's fog into `Scene::fog` with a copy of the
+BSP's zone tree; `spawn_level` puts it in the `LevelFog` resource, and
+`ZoneFogPlugin`'s `follow_zone_fog` looks up the zone of every camera with
+`ZoneFogView` each frame and sets its `DistanceFog`. The game's level
+plugin puts `ZoneFogView` on the player's camera and takes it (and the
+fog) away when the level ends; the viewer puts it on its camera unless
+`--no-fog`. The visor's low light mode brings its own fog (the original's
+vision mode `OverideFog`): it marks the camera `rc_game_core::OwnFog`
+while on, and the level plugin's copy of `follow_zone_fog` skips such
+cameras, then puts the zone's fog back when the mark goes. Our choices, not read from the game: the camera's zone picks
+the fog, blended in a straight line over the new zone's blend time; no fog
+in the sky box (geo_01a's `SkyZoneInfo` doesn't turn it on); `bClearToFogColor`
+unused; fog mixed in linear light (Direct3D mixes on screen values), and
+by distance rather than depth.
+
 ## Holograms, tank liquid and props with no stored light
 
 **Holograms (`HsHologram`).** Republic Commando's own hologram material

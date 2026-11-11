@@ -4119,10 +4119,10 @@ fn ammo_box_after_load(w: &mut World) -> Result<String, String> {
 }
 
 /// Whether the player's camera has the low light mode's night-vision
-/// picture and its distance fog.
+/// picture and its own distance fog (not the level zone's).
 fn night_and_fog(w: &mut World) -> (bool, bool) {
     let mut q = w.query_filtered::<
-        (Has<rc_visor::NightVisionView>, Has<bevy::pbr::DistanceFog>),
+        (Has<rc_visor::NightVisionView>, Has<rc_game_core::OwnFog>),
         With<PlayerCamera>,
     >();
     q.iter(w).next().unwrap_or((false, false))

@@ -21,11 +21,15 @@ import bevy_pbr::render::{
 
 struct PropLight {
     // x: how strongly real-time lights show on props (1 = like on walls).
-    // y, z, w unused (kept for 16-byte alignment on older phones).
+    // y: 0, or the scale of a second picture the texture is multiplied by
+    //    (a multiplying Combiner: light picture x stone, read on UV_1).
+    // z, w unused (kept for 16-byte alignment on older phones).
     settings: vec4<f32>,
 };
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> prop_light: PropLight;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var layer_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var layer_sampler: sampler;
 
 @fragment
 fn fragment(vertex_output: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
@@ -44,7 +48,13 @@ fn fragment(vertex_output: VertexOutput, @builtin(front_facing) is_front: bool) 
         pbr_input.material.alpha_cutoff,
         pbr_input.material.base_color,
     );
-    let surface = pbr_input.material.base_color;
+    var surface = pbr_input.material.base_color;
+@if(VERTEX_UVS_B) {
+    if prop_light.settings.y > 0.0 {
+        let layer = textureSample(layer_texture, layer_sampler, vertex_output.uv_b);
+        surface = vec4<f32>(surface.rgb * layer.rgb * prop_light.settings.y, surface.a);
+    }
+}
 
     let live = apply_pbr_lighting(pbr_input);
     let gain = max(prop_light.settings.x, 0.0);

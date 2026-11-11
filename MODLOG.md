@@ -3,6 +3,24 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Each zone's distance fog, from the map (rc_level_viewer, rc_level_plugin, rc_game_core, rc_visor)
+
+- **Changed:** New `rc_level_viewer::fog`: every `ZoneInfo`/`LevelInfo`'s `bDistanceFog`, `DistanceFogColor`, `DistanceFogStart`/`End`, `DistanceFogBlendTime`, with missing values from `ZoneInfo`'s defaults in Engine.u (read at load). The player's camera (and the viewer's; `--no-fog` to compare) shows the fog of the zone it is in, as Bevy linear fog. The visor's low light fog now marks the camera `rc_game_core::OwnFog`, and zone fog leaves it alone meanwhile. Log: `level: distance fog on the player's camera: ...`.
+- **Why:** The original's geo_01a has a brown haze over the far arena that the port lacked. The arena zone (`ZoneInfo12`) stores fog on, colour 142,119,94, end 64000 (start default 3000). The game's D3DDrv.dll sets Direct3D linear fog, the same formula Bevy uses.
+- **Tested how:** `cargo test -p rc_level_viewer fog` (2 tests); `rc_level_viewer geo_01a --capture` (cloud); `rc_game --script` in the cloud.
+- **Result:** Tests pass. geo_01a: 3 of 5 zones fog, camera starts in the arena zone with 142,119,94 from 3000 to 64000; the far tiers fade into brown as in the original. geo_01b: 11 of 13 zones, 136,135,119 from 100 to 10000. Script: 132 passed, 2 failed (the same 2 level-line checks); the visor check (no low light fog after leaving low light) passes.
+- **Still broken / not tested:** Not tested on Windows. Our choices, not read from the game: the camera's zone picks the fog; zone changes blend in a straight line over `DistanceFogBlendTime`; no fog in the sky box; `bClearToFogColor` unused; fog mixed in linear light by distance (Direct3D: on screen colours, by depth). geo_01b's near fog (from 100 units) not compared with the original.
+- **Next:** User check on Windows against their screenshots; the original's bloom (zones also set `Bloom`/`BloomFilter`).
+
+## 2026-11-11: Geonosis arena tiers drawn as stone, not grey-white (rc_level_viewer)
+
+- **Changed:** Materials that are a `Combiner` with `CombineOperation` 2 (`CO_Multiply` in Engine.u's `EColorOperation`) now multiply their two pictures, each on its own texture coordinate set (`materials::Layer`, `Batch::layer_uvs`, `PropMaterial` binding 101/102). `TexCoordSource` (`TCS_Stream0`-`7`) now picks the coordinate set; `CO_Use_Color_From_Material2` shows `Material2`. New check `examples/multiply_check.rs`; the viewer logs `multiplying materials: N prop parts`.
+- **Why:** User's side-by-side screenshots of geo_01a: the arena's far tiers, spires and rocks were flat grey-white in the port, brown stone in the original. Those props (`EntireArena`, `RezSpires`, `UpperRock`, `upperStair`, bUnlit) use materials like `Arena_Textures.Unique.TierWallLM` = painted light picture (set 0) x stone (`TierWall`, set 1); we drew only the light picture.
+- **Tested how:** `multiply_check` (cloud); `rc_level_viewer geo_01a --capture` before and after (cloud, the game's files); `prop_light_check`; `rc_game --script` in the cloud.
+- **Result:** multiply_check 4 passed, 0 failed (plain 200, multiplied 48 against 50 expected, on both halves). geo_01a: 28 prop parts, 14 batches multiplied; the tiers show stone, dark brown as in the original. prop_light_check 9 passed. Script: 132 passed, 2 failed (the 2 level-line checks that already failed).
+- **Still broken / not tested:** Not tested on Windows. Combiners that blend two pictures by vertex alpha (`CO_AlphaBlend_With_Mask`, rock and plaster on `RezSpires`, `RubbleBlend`) still show the first picture only. Combiners on walls (BSP) and terrain not done.
+- **Next:** The arena zone's distance fog (next entry).
+
 ## 2026-11-11: The menus' moving background video, played from the original file (rc_video, rc_game, rc_menus)
 
 - **Changed:** New crate `rc_video` reads AVI files and decodes Microsoft MPEG-4 v2 (`MP42`) pictures, built on the MIT-licensed `oxideav-msmpeg4` with four fixes of ours (picture header, macroblock codes, slices, AC prediction). New tool `rc_video_check`. `rc_game` plays `GameData/Movies/menu_bg.avi` behind the original menus that name it (main menu, options, campaign, load), looping at its own 29.97 frames a second and darkened to 192/255 like the original's `BackgroundMovie` widget; not in the pause menu. `rc_menus` now reads the `BackgroundMovie` widget (`MovieWidget`) and has `render_over` and `quads::fit_box`. New script check "the main menu's background video plays"; the menu picture checks now paint over the same video frame.

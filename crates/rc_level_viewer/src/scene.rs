@@ -46,6 +46,10 @@ pub struct Batch {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
+    /// Static meshes whose picture multiplies by a second one
+    /// (`Picture::multiply`): where each corner falls on that second
+    /// picture (its own texture coordinate set). Empty otherwise.
+    pub layer_uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
     /// BSP only: which lightmap page lights these triangles, and where each
     /// corner falls on it (0..1). `None` for surfaces the game didn't light.
@@ -233,6 +237,9 @@ pub struct Stats {
     pub sky_props: usize,
     /// Sky props whose stored light is all black, drawn at full brightness.
     pub sky_props_unlit: usize,
+    /// Prop parts (one mesh section on one prop) whose material multiplies
+    /// two pictures (`Combiner` with `CO_Multiply`, see `materials::Layer`).
+    pub prop_parts_multiplied: usize,
     /// Zones with an ambient light found (by where their ZoneInfo stands),
     /// and props that had it added to their stored light.
     pub zones_with_ambient: usize,
@@ -305,6 +312,10 @@ pub struct Scene {
     pub spawn: Spawn,
     /// `None` when the map has no `SkyZoneInfo`.
     pub sky: Option<Sky>,
+    /// Each zone's distance fog (`crate::fog`).
+    pub fog: crate::fog::ZoneFogs,
+    /// Why the fog couldn't be read, if it couldn't (then there is none).
+    pub fog_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -589,7 +600,6 @@ fn add_mesh_actor(
     // A mirrored actor (an odd number of negative scales) turns its
     // triangles inside out, so flip them back.
     let mirrored = (s3[0] * s3[1] * s3[2] * p.draw_scale) < 0.0;
-    let uv0 = mesh.uv_sets.first();
     for (si, sec) in mesh.sections.iter().enumerate() {
         // The actor's Skins override the mesh's own materials.
         let (key, pic) = match p.skins.get(si).copied().filter(|&m| m != 0) {
@@ -619,6 +629,18 @@ fn add_mesh_actor(
             ctx.stats.bump_parts_without_map += 1;
         }
         bump_drawn |= bump_lit;
+        // The texture coordinate sets the picture (and its multiplying
+        // layer, if any) are laid on; set 0 if the mesh lacks the one asked
+        // for.
+        let set = |n: usize| mesh.uv_sets.get(n).or(mesh.uv_sets.first());
+        let uv0 = set(pic.as_ref().map_or(0, |p| p.uv_channel));
+        let layer_set = pic
+            .as_ref()
+            .and_then(|p| p.multiply.as_ref())
+            .map(|l| set(l.uv_channel));
+        if layer_set.is_some() {
+            ctx.stats.prop_parts_multiplied += 1;
+        }
         let batch = b.batch(
             &key,
             &pic,
@@ -663,6 +685,13 @@ fn add_mesh_actor(
                             .copied()
                             .unwrap_or([0.0, 0.0]),
                     );
+                    if let Some(l) = layer_set {
+                        batch.layer_uvs.push(
+                            l.and_then(|u| u.get(vi as usize))
+                                .copied()
+                                .unwrap_or([0.0, 0.0]),
+                        );
+                    }
                     if let Some(c) = colours {
                         batch.colours.push(c[vi as usize]);
                     }
@@ -1183,6 +1212,11 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     let model = level.model.ok_or("the level has no BSP model")?;
     let bsp = bsp::read_model(pkg, data, &pkg.exports[model]).map_err(|e| format!("BSP: {e}"))?;
 
+    let (fog, fog_error) = match crate::fog::FogDefaults::read(mats) {
+        Ok(d) => (crate::fog::ZoneFogs::read(pkg, data, &level, &bsp, &d), None),
+        Err(e) => (crate::fog::ZoneFogs::default(), Some(e)),
+    };
+
     let mut b = Builder::default();
     let mut ctx = Ctx {
         mats,
@@ -1656,6 +1690,8 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         stats: ctx.stats,
         spawn,
         sky,
+        fog,
+        fog_error,
     })
 }
 
