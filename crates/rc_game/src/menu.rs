@@ -63,6 +63,11 @@ pub enum Page {
     /// from the install; there is no placeholder.
     Profiles,
     NewProfile,
+    /// The original EXTRAS page (main menu) and the credits it opens. Only
+    /// reachable when they can be drawn from the install; there is no
+    /// placeholder.
+    Extras,
+    Credits,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -322,6 +327,10 @@ pub fn items(
                 ),
                 it("Quit", Cmd::Quit),
             ],
+        ),
+        Page::Extras | Page::Credits => (
+            "EXTRAS (PLACEHOLDER)".into(),
+            vec![it("Back", Cmd::Back)],
         ),
         Page::LoadGame | Page::SaveGame | Page::Profiles | Page::NewProfile => (
             "SAVES (PLACEHOLDER)".into(),

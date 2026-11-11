@@ -27,6 +27,7 @@ mod menu;
 mod menu_video;
 mod music;
 mod option_settings;
+mod original_credits;
 mod original_hud;
 mod original_lists;
 mod original_menu;

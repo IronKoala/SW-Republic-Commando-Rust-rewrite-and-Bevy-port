@@ -229,6 +229,51 @@ Not done: in-mission menus in the original draw a dark see-through square
 (`InLevelBackgroundMovieReplacement`, `blacksquare` at 0,0,0,192) instead
 of the video.
 
+## The EXTRAS page and the credits (2026-11-11)
+
+EXTRAS on the main menu opens the original `CTExtrasMenu` (page `extras`
+in `data/ui/original_menus.toml`). What the original does, from its own
+files (the class's script text in `XInterfaceCTMenus.u`, read with
+`strings -n1`, and its default values):
+
+- Five video rows (ASH VIDEO, CONCEPT ART MONTAGE, FOLEY FEATURETTE, SPEC
+  OPS FEATURETTE, TEMUERA MORRISON INTERVIEW) and VIEW CREDITS, inside a
+  display box under the four planet rings, with BACK.
+- `Init` locks rows 2, 3 and 4 until the player has reached
+  `RAS_01Briefing`, `YYY_01Briefing` and `Epilogue`: the bars beside the
+  row hide, its text turns grey (128) and moves down 0.01, and a "COMPLETE
+  ... CAMPAIGN FOR" line shows above it (`rc_menus/src/extras.rs`). This
+  port keeps no campaign progress yet, so every map counts as reached and
+  nothing is locked (the campaign page lists every mission for the same
+  reason).
+- Each video row plays `GameData/Movies/extras*.mpg` (MPEG-1 video,
+  512x512, with MPEG audio; the script names the Xbox `.xmv` files) and
+  stops the menu music meanwhile. **This port can't play MPEG-1 yet, so the
+  five rows are greyed out.**
+- VIEW CREDITS opens `CTCreditsMenu` with `FROMEXTRAS`. Its script reads
+  `CreditsLine[i]` (else `CreditsLine_PC[i]`, else `CreditsLine_Xbox[i]`,
+  skipped on a PC) from `GameData/System/Credits.int` until a number has
+  none; `Scale=<n>` lines set the size of the lines after them. The lines
+  start just below the screen, `YLineOffset` (0.05) apart, and move up
+  `ScrollSpeed` (0.175 screens a second); the ones on screen go into the
+  page's 25 text widgets. When the last line has gone off the top the page
+  closes back to EXTRAS (`rc_menus/src/credits.rs`,
+  `rc_game/src/original_credits.rs`). With the install's file: 569 lines,
+  about 168 seconds.
+- The credits page has its own music, `ASH_Track4_Clones`; the original
+  swaps the music whenever a menu with other music opens
+  (`ManageMenuBackgroundMusic` in `Engine.u`), so the main menu's music
+  starts again on the way back (`rc_game/src/music.rs`).
+
+On a wide screen EXTRAS stays one block in the middle (`keep_together`
+in the page's toml, `fit::together`): its top rows sit under the planet
+rings, so spreading it pulled it apart. Only the background widens. Our
+choice; the original has only 4:3.
+
+Not done: the five videos (needs an MPEG-1 video and MPEG audio player),
+campaign progress for the locks, the credits at the end of the game
+(there the page goes out to the main menu).
+
 ## Wide screens: moving apart, not shrinking
 
 The user asked (2026-10-30) for the menus to fit every screen shape we

@@ -18,6 +18,7 @@
 //! then QUIT again and YES).
 
 use crate::menu::{Menu, Page};
+use crate::original_credits;
 use crate::original_menu::{self, OriginalMenus};
 use crate::player::Body;
 use crate::settings::Settings;
@@ -1821,7 +1822,81 @@ fn steps() -> Vec<Step> {
             s.game.tactical_visor = crate::settings::TacticalVisor::Cycle;
             s.game.tactical_intensity = 0.2;
         }),
-        // MULTIPLAYER and EXTRAS are greyed out and skipped.
+        // EXTRAS: the original page; its five videos are greyed out (no
+        // MPEG-1 player yet), VIEW CREDITS rolls Credits.int.
+        FocusOn("MenuOptions[6]"),
+        Press(Action::MenuAccept),
+        Wait(0.3),
+        Check(
+            "EXTRAS opens the original EXTRAS page, videos greyed, focus on VIEW CREDITS",
+            |w| {
+                let shown = original_page_shown(w);
+                let greyed = (0..rc_menus::extras::NUM_EXTRAS)
+                    .filter(|&i| {
+                        let m = w.resource::<OriginalMenus>();
+                        m.pages.get(original_credits::EXTRAS).is_some_and(|p| {
+                            matches!(
+                                p.screen.layout.widget(&rc_menus::extras::row_name(i))
+                                    .map(|w| &w.kind),
+                                Some(rc_menus::layout::Kind::Button(b)) if b.disabled
+                            )
+                        })
+                    })
+                    .count();
+                let got = format!("{shown:?}, {greyed} videos greyed, focus {:?}", focus(w));
+                match (shown.as_deref(), greyed, focus(w).as_deref()) {
+                    (Some(original_credits::EXTRAS), 5, Some("Credits")) => Ok(got),
+                    _ => Err(got),
+                }
+            },
+        ),
+        Shot("extras"),
+        Press(Action::MenuAccept), // VIEW CREDITS
+        Wait(1.5),
+        Check("VIEW CREDITS rolls the names from Credits.int", |w| {
+            let shown = original_page_shown(w);
+            let m = w.resource::<OriginalMenus>();
+            let lines: Vec<String> = m
+                .pages
+                .get(original_credits::CREDITS)
+                .map(|p| {
+                    p.screen
+                        .layout
+                        .widgets
+                        .iter()
+                        .filter(|w| w.name.starts_with("MenuCreditLineBuffer") && !w.hidden)
+                        .filter_map(|w| match &w.kind {
+                            rc_menus::layout::Kind::Text(t) => {
+                                Some(format!("{} at {:.3}", t.text, t.pos[1]))
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let got = format!("{shown:?}: {}", lines.join(" | "));
+            match shown.as_deref() {
+                Some(original_credits::CREDITS)
+                    if lines.first().is_some_and(|l| l.starts_with("GAME DESIGN at 0.")) =>
+                {
+                    Ok(got)
+                }
+                _ => Err(got),
+            }
+        }),
+        Shot("credits"),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("BACK leaves the credits for EXTRAS", |w| {
+            match original_page_shown(w).as_deref() {
+                Some(original_credits::EXTRAS) => Ok("extras".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        FocusOn("MenuOptions[0]"),
+        // MULTIPLAYER is greyed out and skipped.
         FocusAfter(Action::MenuDown, "MenuOptions[1]"), // LOAD GAME
         FocusAfter(Action::MenuDown, "MenuOptions[2]"),
         FocusAfter(Action::MenuDown, "MenuOptions[4]"),
@@ -2049,7 +2124,7 @@ fn steps() -> Vec<Step> {
                 p => Err(format!("{p:?}")),
             }
         }),
-        FocusAfter(Action::MenuDown, "MenuOptions[5]"),
+        FocusOn("MenuOptions[5]"),
         Press(Action::MenuAccept), // PROFILES
         Wait(0.3),
         Check("PROFILES lists the profile, focus on it, BACK and DELETE shown", |w| {
@@ -2167,7 +2242,7 @@ fn steps() -> Vec<Step> {
             Page::Main => Ok("main".into()),
             p => Err(format!("{p:?}")),
         }),
-        FocusAfter(Action::MenuDown, "MenuOptions[7]"),
+        FocusOn("MenuOptions[7]"),
         Press(Action::MenuAccept), // QUIT
         Wait(0.3),
         Check("QUIT asks the original's question, on NO", |w| {

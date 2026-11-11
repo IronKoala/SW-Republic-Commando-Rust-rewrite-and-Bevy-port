@@ -462,8 +462,7 @@ copy of the game.
   select sounds. QUIT asks the original's "are you sure?" question. Keyboard,
   gamepad and mouse move the focus. A screenshot of it matches a picture
   painted straight from the original's textures (mean difference 3.4 of
-  255). EXTRAS is greyed out until it's built; MULTIPLAYER is greyed out
-  for good (offline only).
+  255). MULTIPLAYER is greyed out for good (offline only).
 
   **PROFILES is the original's page** (tested in the cloud sandbox with the
   install, not yet on Windows). The first time the game starts with no
@@ -505,7 +504,11 @@ copy of the game.
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
   OVERWRITE and DELETE, with the original's questions. LOAD GAME is on the
   main menu and the pause menu; the pause menu's QUICK SAVE, QUICK LOAD and
-  LOAD LAST SAVE work too. **The options pages are the original's too** (tested in
+  LOAD LAST SAVE work too. **EXTRAS is the original's page** (tested in
+  the cloud sandbox with the install, not yet on Windows): VIEW CREDITS
+  rolls the game's own credits with their own music and goes back to
+  EXTRAS at the end. The five videos are greyed out: this port can't play
+  their MPEG-1 files yet. **The options pages are the original's too** (tested in
   the cloud sandbox with the install, not yet on Windows): GAME, SOUND,
   GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
   sensitivity, invert mouse, difficulty, effects and music volume, screen
