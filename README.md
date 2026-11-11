@@ -494,7 +494,11 @@ copy of the game.
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
   OVERWRITE and DELETE, with the original's questions. LOAD GAME is on the
   main menu and the pause menu; the pause menu's QUICK SAVE, QUICK LOAD and
-  LOAD LAST SAVE work too. **The options pages are the original's too** (tested in
+  LOAD LAST SAVE work too. **EXTRAS is the original's page** (tested in
+  the cloud sandbox with the install, not yet on Windows): VIEW CREDITS
+  rolls the game's own credits with their own music and goes back to
+  EXTRAS at the end. The five videos are greyed out: this port can't play
+  their MPEG-1 files yet. **The options pages are the original's too** (tested in
   the cloud sandbox with the install, not yet on Windows): GAME, SOUND,
   GRAPHICS and CONTROLS with their tabs, arrows and values. Mouse
   sensitivity, invert mouse, difficulty, effects and music volume, screen

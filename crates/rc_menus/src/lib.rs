@@ -13,7 +13,9 @@
 
 pub mod assets;
 pub mod campaign;
+pub mod credits;
 pub mod debriefing;
+pub mod extras;
 pub mod fit;
 pub mod gpu;
 pub mod helmet;

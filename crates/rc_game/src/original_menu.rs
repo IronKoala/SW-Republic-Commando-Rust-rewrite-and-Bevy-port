@@ -23,6 +23,7 @@
 use crate::input::{BaseBindings, Bindings};
 use crate::menu::{GamePathsFound, Menu, Page};
 use crate::option_settings;
+use crate::original_credits;
 use crate::original_lists;
 use crate::original_pause;
 use crate::original_saves;
@@ -54,12 +55,8 @@ const MENU_ASPECT: f32 = 4.0 / 3.0;
 /// Main menu buttons this port can't offer yet; they are greyed out the way
 /// the original greys out buttons in its demo versions. Multiplayer stays
 /// off for good: this port is single-player and offline only.
-/// LOAD GAME joins them when its page can't be shown.
-const UNAVAILABLE: &[MainAction] = &[
-    MainAction::Multiplayer,
-    MainAction::Profiles,
-    MainAction::Extras,
-];
+/// LOAD GAME and EXTRAS join them when their pages can't be shown.
+const UNAVAILABLE: &[MainAction] = &[MainAction::Multiplayer, MainAction::Profiles];
 
 /// One original screen ready to draw.
 pub struct Screen {
@@ -190,6 +187,8 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::LoadGame => Some(original_saves::LOAD),
         Page::SaveGame => Some(original_saves::SAVE),
         Page::Debriefing => Some(DEBRIEFING_PAGE),
+        Page::Extras => Some(original_credits::EXTRAS),
+        Page::Credits => Some(original_credits::CREDITS),
         Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
@@ -204,6 +203,8 @@ fn page_from_key(key: &str) -> Option<Page> {
         "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
         DEBRIEFING_PAGE => Some(Page::Debriefing),
+        original_credits::EXTRAS => Some(Page::Extras),
+        original_credits::CREDITS => Some(Page::Credits),
         original_saves::LOAD => Some(Page::LoadGame),
         original_saves::SAVE => Some(Page::SaveGame),
         _ => None,
@@ -497,6 +498,7 @@ impl Plugin for OriginalMenuPlugin {
                     navigate,
                     apply_options,
                     original_saves::apply_saves,
+                    original_credits::roll_credits,
                     drag_bars,
                     draw,
                     fit_area,
@@ -555,6 +557,12 @@ fn load(
         if rc_menus::debriefing::is_debriefing(&class.family) {
             // CONTINUE shows on a PC (the original's Init).
             rc_menus::debriefing::show_continue(&mut layout);
+        }
+        if rc_menus::extras::is_extras(&class.family) {
+            let locked = rc_menus::extras::init(&mut layout, original_credits::reached);
+            log.line(format!(
+                "original menus: EXTRAS rows still locked: {locked:?} (this port keeps no campaign progress yet, so every map counts as reached)"
+            ));
         }
         for w in &layout.widgets {
             if let Kind::Button(b) = &w.kind {
@@ -650,7 +658,9 @@ fn load(
             .iter()
             .filter(|(_, c)| {
                 matches!(c, PageCmd::Open(to) | PageCmd::Switch(to)
-                    if (to == original_saves::LOAD || to == original_saves::SAVE)
+                    if (to == original_saves::LOAD
+                        || to == original_saves::SAVE
+                        || to == original_credits::CREDITS)
                         && !present.contains(to))
             })
             .map(|(i, _)| *i)
@@ -668,6 +678,9 @@ fn load(
     let mut unavailable = UNAVAILABLE.to_vec();
     if !present.iter().any(|k| k == original_saves::LOAD) {
         unavailable.push(MainAction::LoadGame);
+    }
+    if !present.iter().any(|k| k == original_credits::EXTRAS) {
+        unavailable.push(MainAction::Extras);
     }
     let quit_text = match main.get("QuitGameConfirm") {
         Some(V::Str(s)) => s.clone(),
@@ -1390,6 +1403,7 @@ fn navigate(
                 MainAction::CampaignMap => PageCmd::Open("campaigns".into()),
                 MainAction::Options => PageCmd::Open("options".into()),
                 MainAction::LoadGame => PageCmd::Open(original_saves::LOAD.into()),
+                MainAction::Extras => PageCmd::Open(original_credits::EXTRAS.into()),
                 MainAction::Quit => PageCmd::QuitGame,
                 other => {
                     log.line(format!("original menus: {other:?} isn't available yet"));
@@ -1918,10 +1932,21 @@ fn draw(
                 .unwrap_or(0.0);
             fit::shift_all(&mut layout, dx);
         } else {
-            let spread = fit::spread(&mut layout, assets, across);
+            let together = n == 0
+                && matches!(&shown, Shown::Page(k) if menus.question.is_none()
+                    && menus.pages[k].plan.keep_together);
+            let spread = if together {
+                fit::together(&mut layout, assets, across)
+            } else {
+                fit::spread(&mut layout, assets, across)
+            };
             if n == 0 {
                 page_moves = spread.moved.clone();
-                if across > 1.0 + 1e-4 {
+                if together && across > 1.0 + 1e-4 {
+                    notes.push(format!(
+                        "kept together in the middle of {across:.2} 4:3 widths (keep_together)"
+                    ));
+                } else if across > 1.0 + 1e-4 {
                     notes.push(format!(
                         "{} groups spread over {across:.2} 4:3 widths{}",
                         spread.groups,

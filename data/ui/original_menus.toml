@@ -49,6 +49,10 @@
 # widgets down (negative: up) by a fraction of the screen, and
 # hidden_rows = [...] hides whole rows (by the row's button).
 #
+# keep_together = true keeps a page as one block in the middle of a wide
+# screen (only its full-screen background widens) instead of spreading it
+# out (rc_menus/src/fit.rs).
+#
 # Checked 2026-10-29 with `rc_probe --pages` against the install: these are
 # the original's function names. `rc_probe --pages` lists every menu's
 # buttons and says which pages would use their original menu.
@@ -109,6 +113,37 @@ copy_of = "BButton"
 text = "EVERY MAP +"
 move_right = 0.35
 command = "act:every_map"
+
+# The EXTRAS page, from the main menu (checked 2026-11-11 with the
+# install). Which rows are locked follows the original's own rule
+# (rc_menus/src/extras.rs); this port keeps no campaign progress yet, so
+# none are. Each video row plays a film from GameData/Movies (MPEG-1
+# video, MPEG audio), which this port can't play yet: greyed out.
+[pages.extras]
+class = "XInterfaceCTMenus.CTExtrasMenu"
+back = "back"
+# Its rows sit under the planet rings, so spreading it out on a wide
+# screen pulls it apart: it stays one block in the middle instead.
+keep_together = true
+
+[pages.extras.buttons]
+OnBButton = "back"
+Extra0Selected = "unavailable"
+Extra1Selected = "unavailable"
+Extra2Selected = "unavailable"
+Extra3Selected = "unavailable"
+Extra4Selected = "unavailable"
+CreditsSelected = "open:credits"
+
+# The credits EXTRAS opens: the names in GameData/System/Credits.int roll
+# up the screen (rc_game/src/original_credits.rs), then the page goes back
+# to EXTRAS by itself.
+[pages.credits]
+class = "XInterfaceCTMenus.CTCreditsMenu"
+back = "back"
+
+[pages.credits.buttons]
+OnBButton = "back"
 
 # The load and save pages (checked 2026-10-30 with the install): the saves
 # in a scrolling list, newest first after the autosave and quicksave.
