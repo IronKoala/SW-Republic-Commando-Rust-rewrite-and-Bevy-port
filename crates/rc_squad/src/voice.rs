@@ -632,7 +632,7 @@ impl Chatter {
         if line.chance < 1.0 && self.rng.next_f32() >= line.chance {
             return quiet("chance");
         }
-        let standing = |i: usize| !squad.members[i].down;
+        let standing = |i: usize| squad.members[i].available();
         let n = squad.members.len();
         let speaker = match line.who {
             Who::Leader => None,

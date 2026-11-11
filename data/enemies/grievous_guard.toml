@@ -1,0 +1,84 @@
+# General Grievous's bodyguard (GrievousGuard): a tall, shielded droid that
+# fights up close with an electro-staff and fires missiles from a rack on
+# its back. On Kashyyyk (yyy_01e) the level ends when the player has killed
+# the guards the level sends (their deaths send ThreeDeadGuards).
+#
+# Numbers marked "game:" are the original's: GrievousGuard
+# (ctcharacters.u, parent Droid) with GrievousGuardDefaults
+# (Properties/properties.u) on top, and its brain GrievousGuardBot(+Defaults).
+# "guess" and "our choice" mark the rest. Anything not listed takes the
+# battle droid's value (battle_droid.toml).
+#
+# Not done yet: the original's guards leap between perches on walls and
+# ceilings (GrievousGuardPerch, bCanPerch) and dodge; ours walk. Their
+# missiles don't home in. Hits on the shield use the guard's own table
+# (DV_DroidsGrievousGuardDamage), not the game's shield table
+# (DV_DroidsGrievousGuardShieldDamage). After loading a save a guard's
+# shield is full again. They have no voice: the game gives them no
+# AudioTable.
+
+[type]
+id = "grievous_guard"
+name = "Grievous's bodyguard"
+classes = ["GrievousGuard*"]  # game: the map class
+body = "droid"
+
+[movement]
+ground_speed = 600        # game: Pawn GroundSpeed (the guard doesn't change it)
+walk_speed_ratio = 0.375  # game: WalkSpeedRatio
+back_speed_ratio = 0.5    # game: BackSpeedRatio
+side_speed_ratio = 1      # game: SideSpeedRatio
+jump_z = 2000             # game: JumpZ
+collision_radius = 60     # game: CollisionRadius
+collision_height = 105    # game: CollisionHeight
+crouch_radius = 60        # game: CrouchRadius
+crouch_height = 70        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: GrievousGuardDefaults SightRadius
+
+[combat]
+health = 2000             # game: GrievousGuardDefaults Health and MaxHealth
+shields = 250             # game: GrievousGuardDefaults Shields and MaxShields
+shield_recharge_rate = 0  # game: ShieldRechargeRate isn't set for the guard
+accuracy = 0.95           # game: GrievousGuardDefaults Accuracy
+weapon = "grievous_missile_rack" # game: RequiredEquipment[1] GrievousMissileRack (data/weapons/grievous_missile_rack.toml)
+burst_count = 2           # game: GrievousGuardBotDefaults BurstCount
+shot_delay = 0.5          # our choice: see the weapon file
+burst_pause_min = 2       # guess
+burst_pause_max = 4       # guess
+weapon_range = 2500       # game: MissileRack ValidRange max
+ready_distance = 1500     # game: GrievousMissileRackDefaults OptimalDist
+safe_distance = 600       # game: MissileRack ValidRange min
+uses_cover = false        # game: its attack state is StateGrievousGuardAttack, no cover
+melee_range = 250         # game: GrievousStaff MeleeRange
+melee_damage = 50         # game: GrievousStaff MeleeDamage
+melee_damage_type = "CTDamageMelee" # game: GrievousStaff MeleeDamageType
+melee_delay = 1.17        # game: the MeleeAttack animation's length (35 frames at 30 a second)
+lunge_distance = 900      # guess: it has Lunge animations; the distance isn't in its defaults
+leap_speed = 1200         # guess: stands in for its leaps (JumpZ 2000) when a script sends it up to a perch
+drops = ""                # game: the staff and rack aren't pick-ups
+damage_table = "DV_DroidsGrievousGuardDamage" # game: MyDamageVariance
+
+[sound]
+# game: no AudioTable, so the guards say nothing. Clear the battle droid's lines.
+package = "character_voice"
+spotted = []
+hurt = []
+death = []
+
+[look]
+package = "GameData/Animations/droid.ukx"   # game: the mesh is in this package
+mesh = "GrievousGuard"                       # game: Mesh (skin: DroidTextures GrievousGuard_Shader)
+idle = "ActionBreathe"
+walk = "WalkForward"
+run = "RunForward"
+walk_back = "WalkBackward"
+step_left = "DodgeLeft"                      # our choice: it has no side steps
+step_right = "DodgeRight"                    # our choice
+fire = "FireRockets"
+crouch = "ActionBreathe"                     # game: CrouchSpeedRatio 0, it doesn't crouch
+crouch_fire = "FireRockets"
+death = "Death"
+melee = "MeleeAttack"

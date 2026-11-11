@@ -512,6 +512,52 @@ second), `MeleeAttack2` (31), `Lunge` (39), `Lunge2` (49).
   (log line `spawners no enemy file claims`).
 - `GeonosianDrone` (not read yet). `GeonosianElite`: see below.
 
+## Grievous's bodyguards (read 2026-11-10)
+
+Read only from the user's install with `rc_probe --class` (ctcharacters.u,
+ctinventory.u, Properties/properties.u) and `rc_character --list`
+(Animations/droid.ukx).
+
+- `GrievousGuard` (parent `Droid`): Mesh `GrievousGuard` (droid.ukx, set
+  `GrievousGuardSet`, 44 sequences, skin DroidTextures
+  `GrievousGuard_Shader`), CollisionRadius 60, CollisionHeight 105,
+  CrouchRadius 60, CrouchHeight 70, BaseEyeHeight 60, WalkSpeedRatio 0.375,
+  CrouchSpeedRatio 0, BackSpeedRatio 0.5, SideSpeedRatio 1, JumpZ 2000,
+  DodgeDistance 300, bCanJump, bCanPerch, RequiredEquipment
+  `GrievousStaff` and `GrievousMissileRack`, ControllerClass
+  `GrievousGuardBot`. GroundSpeed is Pawn's 600. No AudioTable (no voice).
+- `GrievousGuardDefaults`: Health and MaxHealth 2000, **Shields and
+  MaxShields 250** (no ShieldRechargeRate), Accuracy 0.95, SightRadius 5000,
+  MyDamageVariance `DV_DroidsGrievousGuardDamage`, DeathEffect
+  `GREVG_DeathExplo_Beam`, BestGrenadeAgainst EMPGrenade.
+- `GrievousGuardBot`: BurstCount 3 (Defaults: 2), RequiredStates StateIdle,
+  StateInvestigate, StateGrievousGuardAttack.
+- `GrievousStaff` (melee): MeleeRange 250, MeleeDamage 50, MeleeDamageType
+  CTDamageMelee; Defaults add StatusEffect_ElectrocuteGrievousGuard, 20 a
+  second for 0.5 s (not done in the port).
+- `GrievousMissileRack` (parent `MissileRack`): ValidRange 600-2500,
+  Defaults OptimalDist 1500, FireSound `wep_GEN_dSpidMisFire_01`. Ammo
+  `GrievousMissileAmmo` fires `GrievousHomingMissile` (parent
+  `HomingMissile`: Speed 200, EngineThrust 10000, FuseTime 10, bActorDetonate,
+  bWorldDetonate; Projectile MaxSpeed 2000). Defaults: Damage 250,
+  DamageRadius 1024, ExplosionStatusEffect StatusEffect_Stun (up to 9 s),
+  StaticMesh `GrievousMissile`.
+- Animations used: ActionBreathe, WalkForward, RunForward, WalkBackward,
+  DodgeLeft/Right, FireRockets (79 frames), MeleeAttack (35 frames), Death.
+  Also there: Lunge, Lunge2, shield, wall and ceiling perch sets, Wookiee
+  finishing moves.
+- yyy_01e: 4 `GrievousGuard` factories. `Spawn_Guard` (PawnFactory9, tag
+  Guard1, death event `GrievousGuard_dead`) is switched on by the landing pad
+  door markers' EventUnderway. Counter1 turns `GrievousGuard_dead` into
+  `Spawn_Guard_Three` (PawnFactory35, tag Guard3, death event
+  `ThreeDeadGuards`). Dispatcher7 `ThreeDeadGuards` plays 7 lines and sends
+  `EndLevel`; ScriptedTrigger7 then changes level to YYY_35A. The other two
+  factories are cutscene guards: `SeeGrievousGuard` (Mover_Enter_Tower,
+  invulnerable, removed after `GreivousVerified`, sent by a
+  LineOfSightTrigger) and `ThrownGrievousGuard` (SpawnThrow, a body a
+  Wookiee throws). Two more guards (`GrievousGuardOne/Two`) are placed in
+  the map for the Tarfful rescue scene.
+
 ## The other Trandoshans (read 2026-11-10)
 
 Read only from the user's install with `rc_probe --class` (ctcharacters.u,
