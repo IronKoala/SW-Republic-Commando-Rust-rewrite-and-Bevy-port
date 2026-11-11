@@ -4141,7 +4141,11 @@ with `rc_model` with every animation set kept (`ModelSpec::keep_sets`,
 `[class.*]` in the data file can change a class's mesh or materials: the
 commandos' armour colours come from there (the original swaps them in
 compiled code). Characters stand with their feet `CollisionHeight` below
-their `Location`; props are drawn at theirs.
+their `Location`; props are drawn at theirs, and so are characters whose
+class turns `bAlignBottom` off (engine.u: "Actor aligned to bottom of
+cylinder", true on `Pawn`; ctcharacters.u's `Gunship` sets it false), so
+geo_01a's landing gunship hovers from its map place over the player
+start instead of being stood on the ground.
 
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its
