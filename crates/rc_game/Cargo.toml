@@ -26,6 +26,8 @@ rc_package = { path = "../rc_package" }
 rc_audio = { path = "../rc_audio" }
 rc_level = { path = "../rc_level" }
 rc_music = { path = "../rc_music" }
+# The menus' background video (the install's Movies/menu_bg.avi).
+rc_video = { path = "../rc_video" }
 # Reading our TOML settings files. serde (MIT OR Apache-2.0),
 # https://serde.rs; toml (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
 serde = { version = "1", features = ["derive"] }

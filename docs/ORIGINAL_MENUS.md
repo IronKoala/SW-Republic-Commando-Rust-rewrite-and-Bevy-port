@@ -34,9 +34,15 @@ How it works:
   comments: positions interpolated down arrays, other values copied down
   arrays, a widget's `Style` filled from its template, and the
   `DefaultMenu...` blocks filling the rest, never overwriting a value that's
-  set. Then it turns the widgets into textured rectangles for a 640x480
-  menu area (checked: the planets only fit inside their rings at that
-  size). Pictures with the "stretch" scale modes are drawn in nine pieces.
+  set. Then it turns the widgets into textured rectangles for an 800x600
+  menu area: the original's `XInterface.dll` sets `ResScaleX` to the
+  screen width / 800 and `ResScaleY` to the height / 600 when it draws a
+  menu. (Until 2026-11-11 this said 640x480, a guess from the planets
+  fitting their rings; it drew everything a quarter too big, which the
+  user's screenshots of the original at 1600x1200 showed.) Pictures with
+  the "stretch" scale modes are drawn in nine pieces; each corner is half
+  the picture, one texel to one screen pixel at any screen size, as the
+  DLL's `DrawMenuSpriteStretched` does.
   Text supports `MaxSizeX` with "..." or word wrap.
 - `rc_menus::screens` has what the main menu's script does on a PC,
   rewritten by hand: the border grows by one row for QUIT, Xbox Live and
@@ -190,6 +196,38 @@ the level script's title, text and picture filled in
 XInterfaceCTMenus.CTDebriefingInfo` paints it with sample words of its own;
 `rc_probe --pages` says it uses the original. How it fits into play is in
 `docs/DESIGN.md` ("The debriefing screen").
+
+## The moving background video (2026-11-11)
+
+What the original does, from its own files:
+
+- Each menu class names its video in `BackgroundMovieName`: `Menu_BG.xmv`
+  (an Xbox name) for the main menu, options, campaign, load and question
+  pages; empty for the pause menu. Its `BackgroundMovie` widget is a
+  `MenuMovie` with colour 192,192,192 (three quarters brightness), fitted
+  to the whole 4:3 menu screen (`MSCM_Fit`, 1x1, centred), declared before
+  every other widget so it is drawn under them all.
+- `Engine.dll` swaps `.XMV` for `.AVI` and looks in `..\Movies\`, so the PC
+  plays `GameData/Movies/menu_bg.avi`: Microsoft MPEG-4 version 2,
+  512x512, 29.97 frames a second, 475 frames (15.85 s), no sound.
+- `MenuBase.StartBackgroundMovie` plays it looping at the file's own rate
+  (`MaxFrameRate = 0`), only on the front end, not in a mission. A new
+  menu with the same video carries on with it (`TransferTransientElements`).
+- The user's screenshots of the original match our decoded frames
+  stretched over the whole 4:3 screen.
+
+The port: `rc_video` reads the AVI and decodes each picture;
+`rc_game/src/menu_video.rs` keeps a Bevy picture on the frame that belongs
+to the time since the video started, multiplied by the widget's colour;
+`original_menu::draw` puts it under the menu. On screens of another shape
+we keep the 4:3 look and cut off the top and bottom (or the sides); the
+original has nothing to copy there. `rc_game --script` checks that frames
+go by ("the main menu's background video plays") and compares the menu
+screenshot against a software copy painted over the same video frame.
+
+Not done: in-mission menus in the original draw a dark see-through square
+(`InLevelBackgroundMovieReplacement`, `blacksquare` at 0,0,0,192) instead
+of the video.
 
 ## Wide screens: moving apart, not shrinking
 

@@ -253,6 +253,38 @@ fn steps() -> Vec<Step> {
             }
         }),
         Wait(0.5),
+        Check("the main menu's background video plays", |w| {
+            let v = w.resource::<crate::menu_video::MenuVideo>();
+            let movie = w
+                .resource::<OriginalMenus>()
+                .main
+                .as_ref()
+                .map(|m| m.layout.background_movie.clone())
+                .unwrap_or_default();
+            if movie.is_empty() {
+                return Err("the main menu names no background video".into());
+            }
+            match &v.player {
+                None => {
+                    let path = crate::menu_video::avi_for(w.resource::<rc_game_core::GamePaths>(), &movie);
+                    if path.exists() {
+                        Err(format!("{} is there but didn't play (see the log)", path.display()))
+                    } else {
+                        Ok(format!("{movie:?}: no {} in this install, skipped", path.display()))
+                    }
+                }
+                Some(p) if v.wanted && v.frames_shown >= 3 => Ok(format!(
+                    "{movie:?}: {} frames shown, now frame {:?} of {}",
+                    v.frames_shown,
+                    v.last_frame,
+                    p.frame_count()
+                )),
+                Some(_) => Err(format!(
+                    "{movie:?}: only {} frames shown (drawn: {})",
+                    v.frames_shown, v.wanted
+                )),
+            }
+        }),
         Shot("main_menu"),
         Check("main menu matches the original's pictures", |w| {
             compare(w, "main_menu", 0.2)
@@ -777,6 +809,21 @@ fn steps() -> Vec<Step> {
             }
         }),
         Note(|w| w.resource_mut::<Settings>().game.helmet = true),
+        // The level's effect spawners (`rc_scripts_plugin::fx_factories`):
+        // the opening script sends OverheadVehicles, which switches on
+        // geo_01a's five overhead spawners; the game's own gunship and
+        // Geonosian fighter models then fly over, high above the arena.
+        Until(
+            "the opening script switches on the overhead flyovers",
+            fx_overhead_on,
+            60.0,
+        ),
+        Until(
+            "gunships and fighters fly over, high above the arena",
+            fx_overhead_flying,
+            30.0,
+        ),
+        Shot("flyover"),
         Note(|w| set_pitch(w, 0.0)),
         Wait(0.2),
         // Turn round to where the squad stands (behind the player) and
@@ -1419,6 +1466,47 @@ fn steps() -> Vec<Step> {
                 }
             },
         ),
+        Check(
+            "the pause menu shows the original's rows for a living player, centred",
+            |w| {
+                let m = w.resource::<OriginalMenus>();
+                let Some(p) = m.pages.get("paused") else {
+                    return Ok("no original pause menu".into());
+                };
+                let l = &p.screen.layout;
+                if !rc_menus::pause::is_pause_menu(l) {
+                    return Ok("not the original's eleven rows".into());
+                }
+                let shown: Vec<usize> = (0..rc_menus::pause::NUM_OPTIONS)
+                    .filter(|&i| {
+                        rc_menus::pause::row(l, i).is_some_and(|x| !l.widgets[x].hidden)
+                    })
+                    .collect();
+                // Alive: never LOAD LAST SAVE; RESUME and QUIT always.
+                for (i, want) in [(0, false), (3, true), (10, true)] {
+                    if shown.contains(&i) != want {
+                        return Err(format!("row {i} shown {}, want {want}", !want));
+                    }
+                }
+                let ys: Vec<f32> = shown
+                    .iter()
+                    .filter_map(|&i| rc_menus::pause::row(l, i))
+                    .filter_map(|x| match &l.widgets[x].kind {
+                        rc_menus::layout::Kind::Button(b) => Some(b.blurred.pos[1]),
+                        _ => None,
+                    })
+                    .collect();
+                let steps: Vec<f32> = ys.windows(2).map(|p| p[1] - p[0]).collect();
+                if steps.iter().any(|d| (d - steps[0]).abs() > 1e-4) {
+                    return Err(format!("rows not evenly spaced: {ys:?}"));
+                }
+                let focus = p.screen.focused_name().unwrap_or("none").to_string();
+                if focus != "MenuOptions[3]" {
+                    return Err(format!("focus on {focus}, want RESUME GAME"));
+                }
+                Ok(format!("rows {shown:?} from {:.4}, focus on RESUME GAME", ys[0]))
+            },
+        ),
         Shot("paused"),
         // The original save and load pages, from the pause menu.
         FocusPauseItem("SaveGameSelected", 0),
@@ -2035,8 +2123,17 @@ fn compare(w: &mut World, name: &'static str, min_lit: f64) -> Result<String, St
     let across = w.resource::<OriginalMenus>().across;
     let area = original_menu::area_for(Vec2::new(shot.width as f32, shot.height as f32), across);
     let ours = shrink(&shot, area, W, H);
+    let video = {
+        let v = w.resource::<crate::menu_video::MenuVideo>();
+        if v.wanted {
+            v.software_frame(W, H, area.width() / area.height().max(1.0))
+        } else {
+            None
+        }
+    };
     let mut menus = w.resource_mut::<OriginalMenus>();
-    let reference = original_menu::software_picture(&mut menus, W, H).ok_or("no original menu")?;
+    let reference =
+        original_menu::software_picture(&mut menus, W, H, video).ok_or("no original menu")?;
     let mut total = 0.0f64;
     let mut worst = 0.0f64;
     let mut far = 0usize;
@@ -3467,6 +3564,48 @@ fn props_blast_hurt(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a's five OverheadVehicles spawners are on.
+fn fx_overhead_on(w: &mut World) -> bool {
+    w.get_resource::<rc_scripts_plugin::fx_factories::LevelFxFactories>()
+        .is_some_and(|fx| {
+            fx.spawners
+                .list
+                .iter()
+                .zip(&fx.spawners.states)
+                .filter(|(f, s)| f.tag.eq_ignore_ascii_case("OverheadVehicles") && s.online)
+                .count()
+                == 5
+        })
+}
+
+/// Gunships and fighters made, their models drawn far above the arena's
+/// floor (about -2300 uu), and nothing missing to draw them.
+fn fx_overhead_flying(w: &mut World) -> bool {
+    let made: Vec<String> = w
+        .get_resource::<rc_scripts_plugin::fx_factories::LevelFxFactories>()
+        .map(|fx| fx.made.iter().map(|(_, e)| e.clone()).collect())
+        .unwrap_or_default();
+    let Some(st) = w.get_resource::<rc_effects_plugin::EffectStats>() else {
+        return false;
+    };
+    let gunships = made.iter().any(|e| e == "cFX_Gunships");
+    let fighters = made.iter().any(|e| e == "cFX_GEOfighters");
+    let high = st.highest_mesh.is_some_and(|z| z > 5000.0);
+    let ok = gunships && fighters && high && st.meshes_drawn > 0;
+    let missing: Vec<&String> = st
+        .missing
+        .iter()
+        .filter(|m| m.starts_with("cFX_"))
+        .collect();
+    if ok || !missing.is_empty() {
+        w.resource::<GameLog>().line(format!(
+            "script: flyovers: made {made:?}; {} models drawn now, highest at {:?} uu; missing {missing:?}",
+            st.meshes_drawn, st.highest_mesh
+        ));
+    }
+    ok && missing.is_empty()
+}
+
 fn props_effect_shown(w: &mut World) -> Result<String, String> {
     let st = w
         .get_resource::<rc_effects_plugin::EffectStats>()
@@ -3490,9 +3629,12 @@ fn props_effect_shown(w: &mut World) -> Result<String, String> {
 }
 
 fn props_effect_over(w: &mut World) -> bool {
+    // The barrel's own effect (the overhead flyovers run all level long).
     let running = {
         let mut q = w.query::<&rc_effects_plugin::RunningEffect>();
-        q.iter(w).count()
+        q.iter(w)
+            .filter(|r| r.name().eq_ignore_ascii_case("Explosion_Barrel_GEO"))
+            .count()
     };
     running == 0
         && w.get_resource::<rc_effects_plugin::EffectStats>()
@@ -4031,10 +4173,10 @@ fn ammo_box_after_load(w: &mut World) -> Result<String, String> {
 }
 
 /// Whether the player's camera has the low light mode's night-vision
-/// picture and its distance fog.
+/// picture and its own distance fog (not the level zone's).
 fn night_and_fog(w: &mut World) -> (bool, bool) {
     let mut q = w.query_filtered::<
-        (Has<rc_visor::NightVisionView>, Has<bevy::pbr::DistanceFog>),
+        (Has<rc_visor::NightVisionView>, Has<rc_game_core::OwnFog>),
         With<PlayerCamera>,
     >();
     q.iter(w).next().unwrap_or((false, false))

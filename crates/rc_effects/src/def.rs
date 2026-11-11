@@ -106,6 +106,31 @@ pub enum StartShape {
     Polar,
 }
 
+/// Whose axes an emitter's particles live in (`EParticleCoordinateSystem`,
+/// whose three names are in `Engine.u`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoordinateSystem {
+    /// `PTCS_Independent` (the class default): the level's axes.
+    #[default]
+    Independent,
+    /// `PTCS_Relative`: the effect's own, so where its particles start and
+    /// which way they fly turn with the effect (see
+    /// [`crate::EffectState::placed`]).
+    Relative,
+    /// `PTCS_Absolute`.
+    Absolute,
+}
+
+impl CoordinateSystem {
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            1 => CoordinateSystem::Relative,
+            2 => CoordinateSystem::Absolute,
+            _ => CoordinateSystem::Independent,
+        }
+    }
+}
+
 /// Which way new particles fly (`EParticleVelocityDirection`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VelocityFrom {
@@ -201,6 +226,12 @@ pub struct EmitterDef {
     /// `DampingFactorRange` (Z): how much of its speed a particle keeps
     /// when it bounces.
     pub damping: Range,
+    /// `CoordinateSystem`.
+    pub coordinate_system: CoordinateSystem,
+    /// `UseMeshBlendMode` (mesh emitters; `MeshEmitter`'s default is on):
+    /// the model is drawn the way its own materials say (solid), not with
+    /// the emitter's `draw_style`.
+    pub mesh_blend: bool,
 }
 
 impl Default for EmitterDef {
@@ -247,6 +278,8 @@ impl Default for EmitterDef {
             spins_per_second: Range::fixed(0.0),
             collides: false,
             damping: Range::fixed(1.0),
+            coordinate_system: CoordinateSystem::Independent,
+            mesh_blend: false,
         }
     }
 }
@@ -275,4 +308,9 @@ pub struct EffectDef {
     /// `LifeSpan`: the effect is removed after this long (0: when its
     /// emitters are done).
     pub life_span: f32,
+    /// `bUnlit` switched off: its models are lit by the level's light
+    /// where they are. The `Emitter` class default is unlit, and most
+    /// effects keep it; the flying gunships and fighters
+    /// (`cFX_Gunships`, `cFX_GEOfighters`) switch it off.
+    pub lit: bool,
 }

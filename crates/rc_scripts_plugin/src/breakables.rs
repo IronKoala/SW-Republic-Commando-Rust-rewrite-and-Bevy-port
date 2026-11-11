@@ -436,6 +436,7 @@ pub(crate) fn show(
                 floor: Some(to_bevy(Vec3::new(at[0], at[1], floor)).y),
                 sound: step.sound_path.clone(),
                 by: b.name.clone(),
+                ..default()
             });
         }
         if !broken {

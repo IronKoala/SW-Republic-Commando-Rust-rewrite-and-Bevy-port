@@ -3463,7 +3463,9 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   rest. A value that is already set is never overwritten. Empty colours
   mean opaque white, empty scales mean 1.
 - `rc_menus::quads` turns widgets into textured rectangles in a 0..1 menu
-  area laid out for 640x480. `rc_menus::render` paints the same rectangles
+  area whose pictures and letters are sized for 800x600 (the original's
+  `XInterface.dll` ResScale), with stretched pictures' corners one texel
+  to one screen pixel (`quads::set_pixels_high`). `rc_menus::render` paints the same rectangles
   in software; the script compares that picture with a screenshot.
 - `rc_menus::gpu` makes copies of pictures for Bevy: each render style
   (normal, masked, translucent or additive, alpha) and each tint gets its
@@ -3471,6 +3473,15 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   gives the original's sRGB result over black.
 - `rc_menus::screens` holds what each menu's script does, rewritten by
   hand (the main menu and the yes/no question so far).
+- `rc_video` (no Bevy) plays the original's AVI videos: `avi::parse`
+  finds the size, rate and frame chunks; `msmpeg4v2::Decoder` decodes
+  Microsoft MPEG-4 v2 with the oxideav crates' tables and block decoding
+  plus our own picture loop; `VideoPlayer` steps, loops and gives YUV or
+  RGBA. `rc_game::menu_video` (resource `MenuVideo`, system `play`) opens
+  the video a menu's `BackgroundMovie` widget names
+  (`rc_menus::layout::MovieWidget`) and keeps a Bevy image on the frame
+  for the real time since it started; `original_menu::draw` places it
+  under the menu, cut to the screen's shape by `MenuVideo::crop`.
 - `rc_menus::pages` handles the pages behind the main menu (pause,
   campaign, options) as data. `data/ui/original_menus.toml` names each
   page's menu class and maps each button's function name (the original's
@@ -3481,6 +3492,28 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   otherwise the placeholder page stays and every reason is logged. So a
   mod can switch a page to another class, or teach it a button, without
   code, and an unfinished page never shows half-working.
+- The GRAPHICS page follows its own script, `CTGraphicsOptionsPCMenu` in
+  `XInterfaceCTMenus.u`, read from the install. Its presets aren't in the
+  menu: it names five `System.ini` sections (`GraphicsQualityLowest` to
+  `GraphicsQualityHighest`), and `rc_game/src/graphics_presets.rs` reads
+  them at start from `GameData/System/System.ini` with
+  `GameData/Save/System.ini` on top (only its lines that aren't commented
+  out), plus `[VideoSettings] DefaultConfig`, the preset SET RECOMMENDED
+  uses. GRAPHICS QUALITY isn't stored: as the original's
+  `MatchSettingsToPreset`, it shows the first preset every row matches, or
+  CUSTOM. The arrows never stop on CUSTOM (GRAPHICS QUALITY goes to
+  LOWEST; TEXTURE QUALITY to HIGHEST going left, LOWEST going right).
+  PROJECTORS off turns SQUAD SHADOWS off and greys it out; VSYNC off sets
+  FSAA to NONE and greys it out (`option_settings::row_enabled`,
+  `screens::disable_row` / `enable_row`). BRIGHTNESS is the original's
+  `Gamma`: row = int((Gamma - 0.5) / 2 x 10 + 0.5), set as row / 10 x 2 + 0.5
+  (`Engine.dll`); its screen curve is x ^ (1 / Gamma) (`D3DDrv.dll`), which
+  the port matches at mid grey with Bevy's exposure on the 3D view. FSAA's
+  list is NONE plus the sample counts the graphics card supports for
+  every format the cameras use. Presets leave the screen size alone
+  (`PRESETS_SET_SCREEN_SIZE`), since the original's hold only 4:3 sizes up
+  to 1024x768. The page opens with nothing lit, as in the user's
+  screenshots of the original.
 - The options pages (GAME, SOUND, GRAPHICS, CONTROLS) are original too.
   `rc_menus::layout` draws the original's choosers (`MenuButtonEnum`: a
   row with a list of values and arrows) and its picture buttons
@@ -3535,6 +3568,20 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   the new `DeleteSave` messages, asking first with the original question
   box where the original does (`OriginalMenus::ask`, `Asking`). A page
   button that opens a load or save page that can't be drawn is greyed out.
+- The pause menu's rows follow the original's own rules each time it
+  opens (`rc_menus::pause`, rewritten by hand from the script in
+  `XInterfaceCTMenus.u`): which of the eleven rows show depends on health,
+  being down, a briefing (`Cutscene.held`), the prologue, the quicksave
+  and whether hints can be switched back on (`settings.game.hint_screens`
+  off and the map's LevelInfo `bLevelContainsHints`, read by
+  `rc_game/src/original_pause.rs` when the level starts). The rows that
+  show are stacked one step apart (the step between the first two rows),
+  centred on the screen. The menu starts from the layout as first read on
+  each opening (`PageScreen.base`), as the original makes a new menu each
+  time; coming back from its own pages keeps the rows, except that closing
+  the load or save page hides LOAD LAST SAVE or QUICK LOAD when their saves
+  are gone. `rc_probe --menu XInterfaceCTMenus.CTPausePCMenu` paints each
+  case.
 - `rc_game/src/original_hud.rs` swaps the placeholder HUD's drawn shapes
   for the original's pictures, named in `data/ui/hud.toml` (the original
   places them in native code, so placement is ours). It reads its own
@@ -4190,6 +4237,57 @@ overlaps aren't darker, the off switch and the far-away cut-off. In the
 game the log says `shadows: N more shadow copies (C characters, ...)`
 and `shadows: character shadows on/off`.
 
+## Multiplying materials and zone fog (geo_01a's arena)
+
+**Multiplying `Combiner`s.** Most materials are one picture, perhaps
+wrapped in shaders and modifiers, and we follow the wrapper links down to
+it (`materials.rs`, `links_for`). A `Combiner` mixes two materials, and
+for most of them we still show only `Material1`. The exception that
+matters: `CombineOperation` 2, which the game's Engine.u enum
+`EColorOperation` names `CO_Multiply`. geo_01a's big unlit backdrop meshes
+(`EntireArena`, `RezSpires`, `UpperRock`, `upperStair`, all `bUnlit`) use
+such materials (`Arena_Textures.Unique.TierWallLM` and 23 more in
+arena_textures.utx): `Material1` is a painted light picture laid once over
+the whole mesh (texture coordinate set 0), `Material2` a repeating stone
+texture moved to set 1 by a `TexCoordSource` (`TexCoordSource` =
+`TCS_Stream1`). Showing `Material1` alone drew the light picture: the
+grey-white arena tiers. Now `Picture::multiply` carries the second picture
+(`materials::Layer`) with its own coordinate set, the static mesh batch
+gets those coordinates as `layer_uvs` (Bevy's `UV_1`), and `PropMaterial`
+multiplies (`prop_light.wesl`, binding 101/102, scale in `settings.y`: 1,
+or 2 / 4 for the Combiner's `Modulate2X` / `Modulate4X`). Multiplying in
+linear light equals multiplying the stored values, as the game does, on a
+pure power curve. A `TexCoordSource` (or any texture modifier storing
+`TexCoordSource` 0-7) now also picks which coordinate set a plain picture
+uses. `CO_Use_Color_From_Material2` (1) shows `Material2`. Not done: the
+other operations (`CO_AlphaBlend_With_Mask` 5 with a `VertexColor` mask
+blends rock and plaster on `RezSpires` and `RubbleBlend`; we show the
+first), Combiners on walls (BSP) and on terrain.
+Check: `cargo run -p rc_level_viewer --example multiply_check`.
+
+**Zone fog (`fog.rs`).** Each `ZoneInfo` (and the `LevelInfo` for the rest)
+can set `bDistanceFog`, `DistanceFogColor` (stored blue, green, red),
+`DistanceFogStart`, `DistanceFogEnd` and `DistanceFogBlendTime`; values a
+map leaves out are the `ZoneInfo` class defaults, read from Engine.u at
+load (3000, 8000, grey 128, 1 s). geo_01a's arena zone: fog on, colour
+142,119,94, start 3000, end 64000. The game's D3DDrv.dll sets Direct3D's
+fog mode to `D3DFOG_LINEAR`, so a surface keeps `(end - d) / (end - start)`
+of its colour; Bevy's `FogFalloff::Linear` is the same formula (units / 50).
+`scene::build` reads every zone's fog into `Scene::fog` with a copy of the
+BSP's zone tree; `spawn_level` puts it in the `LevelFog` resource, and
+`ZoneFogPlugin`'s `follow_zone_fog` looks up the zone of every camera with
+`ZoneFogView` each frame and sets its `DistanceFog`. The game's level
+plugin puts `ZoneFogView` on the player's camera and takes it (and the
+fog) away when the level ends; the viewer puts it on its camera unless
+`--no-fog`. The visor's low light mode brings its own fog (the original's
+vision mode `OverideFog`): it marks the camera `rc_game_core::OwnFog`
+while on, and the level plugin's copy of `follow_zone_fog` skips such
+cameras, then puts the zone's fog back when the mark goes. Our choices, not read from the game: the camera's zone picks
+the fog, blended in a straight line over the new zone's blend time; no fog
+in the sky box (geo_01a's `SkyZoneInfo` doesn't turn it on); `bClearToFogColor`
+unused; fog mixed in linear light (Direct3D mixes on screen values), and
+by distance rather than depth.
+
 ## Holograms, tank liquid and props with no stored light
 
 **Holograms (`HsHologram`).** Republic Commando's own hologram material
@@ -4442,6 +4540,53 @@ debris bounces off a flat floor at the prop's base, not the level;
 ignored; beam and trail emitters aren't drawn; sounds aren't placed in 3D
 yet, only made quieter with distance (the level scripts' 3D sound in
 `rc_scripts_plugin/src/sounds.rs` could be reused).
+
+### Effect spawners (`FXFactory`, `rc_effects::factory`)
+
+**What the original does** (ctgame.u's `Factory` and `FXFactory`
+scripts). A map places `FXFactory` actors that make an effect class
+(`Prototype`) again and again, at `SpawnPoint`s that share its `Tag`
+(`SpawnMode` 0 in turn, 1 at random, 3 the one nearest the player) or at
+the factory itself (2). It starts off; the event named by its `Tag` turns
+it on and the same event again turns it off. While on, it makes one at
+once, then one every `SpawnInterval` seconds (a random time up to
+`SpawnIntervalMax` when that is bigger), as long as fewer than `MaxAlive`
+of its effects are still going and it has some of its `Capacity` left
+(`bGenerateForever` never runs out). A spawn point outside
+`MinPlayerRange..MaxPlayerRange` of the player is skipped; with `bCovert`
+one the player can see (in front within the field of view and nothing in
+the way) is skipped. Each spawn sends `SpawnEvent`; running out sends
+`ExhaustedEvent` and turns it off. Scripts' `ACTION_ResetFactory` fills
+it back to `Capacity`. `FXFactory` adds a random `EmitterDrawScale` and
+`SpawnOffset` to each effect. geo_01a's five `OverheadVehicles`
+factories (gunships and Geonosian fighters, effects `cFX_Gunships` and
+`cFX_GEOfighters` whose mesh emitters fly models across the sky) are
+turned on by `ScriptedTrigger52` after the briefing.
+
+**How we split it.** `rc_effects::factory::Spawners` holds the rules with
+no Bevy: `trigger`, `reset`, `stop`, `ended` and `step`, with a
+`PlayerView` the game gives it (where the player is, whether a point is in
+view). `rc_scripts_plugin/src/fx_factories.rs` reads the factories and
+spawn points from the map, passes level script events and
+`ResetFactory`/`StopFactory` orders to them, sends `SpawnEffect` with an
+id and the factory's turn and scale, and hears back `EffectEnded` from
+`rc_effects_plugin` when an effect finishes. On/off and what is left go
+in save files (`effect_spawners`).
+
+For the flying models, mesh emitters now use `CoordinateSystem`
+(`PTCS_Relative` turns a part's start place, speed and pull with the
+effect), `UseMeshBlendMode` (the class default true: the model's own
+material, drawn solid) and the effect's `bUnlit` (false on both flyover
+effects: drawn with the level's light at that place, as droids are,
+starting from `lit_model_light`).
+
+**Our reading (not checked against the original's engine code):**
+`EmitterDrawScale` multiplies every particle's size; the relative turn is
+the effect's full rotation; only the X part of `StartSpinRange` and
+`SpinsPerSecondRange` is used, so the flyovers' small Z spin (0.1, 0.01)
+is not applied (which way each part turns a model is not known); a lit model starts from the same light level the droids use
+(0.5); fades are not applied to models; the field of view for `bCovert`
+is the camera's 4:3 one.
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 

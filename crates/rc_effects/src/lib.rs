@@ -3,9 +3,10 @@
 //! Rust; `rc_effects_plugin` draws them in Bevy.
 
 pub mod def;
+pub mod factory;
 pub mod read;
 pub mod sim;
 pub mod tagged;
 
-pub use def::{DrawStyle, EffectDef, EmitterDef, EmitterKind};
+pub use def::{CoordinateSystem, DrawStyle, EffectDef, EmitterDef, EmitterKind};
 pub use sim::{EffectState, Sprite};
