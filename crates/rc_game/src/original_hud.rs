@@ -211,6 +211,9 @@ struct OriginalLayout {
     pickup: Option<(String, f32)>,
     /// The objective shown and for how long (it fades in when it changes).
     objective: (String, f32),
+    /// The use prompt drawn last frame and for how long it has been up
+    /// (it fades in again whenever it comes back or its words change).
+    prompt: Option<(Vec<String>, f32)>,
     /// The helmet glass's map for the screen shape it was made for.
     glass: Option<(u32, rc_menus::helmet::GlassMap)>,
     /// Where the compass strip has slid to (it follows the view's turn).
@@ -503,6 +506,35 @@ fn draw_layout(
         spoken.as_deref().unwrap_or(&Spoken::default()),
         &original.objective,
     );
+    // The prompt fades in as the original's does (Engine.dll
+    // `UHelmet::DrawActivateText`): its clock starts again when it wasn't
+    // drawn the frame before (bActivateTextLastFrame) or its words differ
+    // from LastActivateText; the first frame is at opacity 0.
+    original.prompt = if now.prompt.is_empty() {
+        None
+    } else {
+        match original.prompt.take() {
+            Some((lines, age)) if lines == now.prompt => {
+                let older = age + time.delta_secs();
+                if layout.layout.prompt_faded_in(age) < 1.0
+                    && layout.layout.prompt_faded_in(older) >= 1.0
+                {
+                    log.line(format!("original hud: prompt fully faded in after {older:.2} s"));
+                }
+                Some((lines, older))
+            }
+            _ => {
+                log.line(format!(
+                    "original hud: prompt {:?} fading in from opacity 0",
+                    now.prompt.join(" ")
+                ));
+                Some((now.prompt.clone(), 0.0))
+            }
+        }
+    };
+    if let Some((_, age)) = &original.prompt {
+        now.prompt_fade = layout.layout.prompt_faded_in(*age);
+    }
     // Through the helmet's glass while it is drawn.
     let glass_model = match (&helmet.model, helmet_readout.shown) {
         (Some(Ok(m)), true) if !m.glass.is_empty() => Some(m.clone()),
