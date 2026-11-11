@@ -147,6 +147,28 @@ pub struct ArmsParams {
     pub counter_bar: Option<String>,
 }
 
+impl ArmsParams {
+    /// The `[arms]` section of a data file, `None` without an `arms.mesh`.
+    pub(crate) fn read(t: &mut Table) -> Result<Option<ArmsParams>, String> {
+        let Some(mesh) = t.text("arms.mesh")? else {
+            return Ok(None);
+        };
+        Ok(Some(ArmsParams {
+            package: t
+                .text("arms.package")?
+                .unwrap_or_else(|| "GameData/Animations/hudarms.ukx".to_string()),
+            mesh,
+            fov: t.number("arms.fov")?.unwrap_or(85.0),
+            attachment_group: t.text("arms.attachment_group")?,
+            hide_zoomed: t.boolean("arms.hide_zoomed")?.unwrap_or(false),
+            brightness: t.number("arms.brightness")?.unwrap_or(0.75),
+            light_scale: t.number("arms.light_scale")?.unwrap_or(0.85).max(0.0),
+            counter_digits: t.texts("arms.counter_digits")?.unwrap_or_default(),
+            counter_bar: t.text("arms.counter_bar")?,
+        }))
+    }
+}
+
 impl WeaponParams {
     /// Read a weapon file. `id` is its name without `.toml`.
     pub fn from_text(id: &str, text: &str) -> Result<WeaponParams, String> {
@@ -238,22 +260,7 @@ impl WeaponParams {
             model: t.text("model.mesh")?,
             model_offset: t.vec3("model.offset")?.unwrap_or([0.0; 3]),
             bolt_colour: t.vec3("model.bolt_colour")?.unwrap_or([1.0, 0.3, 0.1]),
-            arms: match t.text("arms.mesh")? {
-                None => None,
-                Some(mesh) => Some(ArmsParams {
-                    package: t
-                        .text("arms.package")?
-                        .unwrap_or_else(|| "GameData/Animations/hudarms.ukx".to_string()),
-                    mesh,
-                    fov: t.number("arms.fov")?.unwrap_or(85.0),
-                    attachment_group: t.text("arms.attachment_group")?,
-                    hide_zoomed: t.boolean("arms.hide_zoomed")?.unwrap_or(false),
-                    brightness: t.number("arms.brightness")?.unwrap_or(0.75),
-                    light_scale: t.number("arms.light_scale")?.unwrap_or(0.85).max(0.0),
-                    counter_digits: t.texts("arms.counter_digits")?.unwrap_or_default(),
-                    counter_bar: t.text("arms.counter_bar")?,
-                }),
-            },
+            arms: ArmsParams::read(&mut t)?,
         };
         t.finish()?;
         let p = WeaponParams {

@@ -32,6 +32,18 @@ pub struct WeaponLibrary {
     /// Sound name to Bevy sound. Empty when there is no audio (tests).
     pub sounds: HashMap<String, GameSound>,
     pub player: PlayerSetup,
+    /// The hands for using things (`data/combat/hand_signal.toml`).
+    pub hands: Option<crate::hands::HandSignal>,
+}
+
+impl WeaponLibrary {
+    /// The arms settings for an arms id: a weapon's, or the hands'.
+    pub fn arms_of(&self, id: &str) -> Option<&crate::weapon::ArmsParams> {
+        match self.hands.as_ref().and_then(|h| h.for_arms(id)) {
+            Some((a, _)) => Some(a),
+            None => self.weapons.get(id)?.arms.as_ref(),
+        }
+    }
 }
 
 /// One sound name from a game package, ready to play. A plain `Sound` has
@@ -279,6 +291,33 @@ pub(crate) fn load(
             .and_then(|t| PlayerSetup::from_text(&t))
         {
             Ok(s) => lib.player = s,
+            Err(e) => {
+                let e = format!("{}: {e}", p.display());
+                say(&log, format!("weapons: FAILED to read {e}"));
+                lib.errors.push(e);
+            }
+        },
+    }
+    match paths.data_file("combat/hand_signal.toml") {
+        None => say(
+            &log,
+            "weapons: no combat/hand_signal.toml: the gun stays in hand while using things".into(),
+        ),
+        Some(p) => match std::fs::read_to_string(&p)
+            .map_err(|e| e.to_string())
+            .and_then(|t| crate::hands::HandSignal::from_text(&t))
+        {
+            Ok(h) => {
+                say(
+                    &log,
+                    format!(
+                        "weapons: hands {} with moves for {}",
+                        h.arms.mesh,
+                        h.uses.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ),
+                );
+                lib.hands = Some(h);
+            }
             Err(e) => {
                 let e = format!("{}: {e}", p.display());
                 say(&log, format!("weapons: FAILED to read {e}"));

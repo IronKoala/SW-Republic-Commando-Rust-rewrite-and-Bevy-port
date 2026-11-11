@@ -3339,6 +3339,23 @@ the real reload times of the sniper (78 frames, 2.6 s), anti-armour
 (42 frames, 1.4 s) and the Trandoshan repeater (65 frames, 2.17 s), which
 were stand-ins before.
 
+**Using things: the hands** (`rc_combat/src/hands.rs`,
+`data/combat/hand_signal.toml`). The game's `HandSignal` is a "weapon"
+(mesh `HudArmsHands`) that using something switches to
+(`CTPlayer.StartHandSignal`, `SwitchWeapon(11)`). For a bacta dispenser
+(`HandSignal.SetupBactaHealer`) its moves are `BactaLoad` (up),
+`BactaLoop` (fired again each time it goes idle while Use is held,
+`CTPlayer` state `UsingItem`) and `BactaHolster` (down); then
+`Pawn.SwitchToLastWeapon` brings the gun back with `Load`. We follow the
+same order: the scripts set `UseItem::hands = "bacta"` while healing, the
+arms put the gun away with `Holster`, play the hands with their moves
+under the usual names (`hold_fire` keeps `Fire` going), and bring the gun
+back when it's cleared. Measured in the shipped files: the three bacta
+moves are 3-frame poses (0.1 s) with every point of the hands below and
+behind the eye, outside the view, so on screen the gun goes down and
+comes back and no hands show. The keypad and squad-order moves in the
+same set do come into view, so the measurement is sound.
+
 The sniper attachment has `bZoomedUsesNoHUDArms`: its arms are hidden
 while zoomed (`hide_zoomed`). The arms are also hidden while the player is
 down.
