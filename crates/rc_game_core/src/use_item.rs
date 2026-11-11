@@ -48,8 +48,9 @@ pub enum UsePanel {
     #[default]
     Hidden,
     /// The crosshair is on something usable that can't be used now (a
-    /// dispenser at full health or recharging): its icon only.
-    Icon,
+    /// dispenser at full health or recharging): its icon only, coloured
+    /// by the `0` to `1` value (a bacta dispenser: the player's health).
+    Icon(f32),
     /// It can be used: the icon, and the ring `0` to `1` full (a bacta
     /// dispenser: the player's health). Hold Use to start.
     Ready(f32),

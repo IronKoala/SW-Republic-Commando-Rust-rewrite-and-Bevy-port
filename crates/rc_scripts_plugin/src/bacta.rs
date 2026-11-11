@@ -570,7 +570,7 @@ pub(crate) fn heal(
             panel = if ready && hurt {
                 UsePanel::Ready(health_now)
             } else if targeted {
-                UsePanel::Icon
+                UsePanel::Icon(health_now)
             } else {
                 UsePanel::Hidden
             };

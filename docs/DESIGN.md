@@ -1630,23 +1630,41 @@ class defaults with `rc_probe --classes`:
   dispenser's collision cylinder, `HealthRecharging`
   (int_GEN_hudHlthChrgng_02) looping while healing, `HealthCharged`
   (int_GEN_hudHlthChrgd_01) at full. Heard from the helmet (no `SoundAt`).
-- **Use panel** (matched to the user's screenshots and video of the
-  original, 2026-11-10; the original draws it in native code). In place of
-  the crosshair while aiming at a dispenser: its icon (square `HUDIconX`
-  1, `HUDIconY` 7 of `HUDTextures.Icons.CloneVisorIcons`, 27-pixel
-  squares counted from the bottom right) and round it the ring
-  `HUDTextures.Reticles.HUD_EventTimer`, showing the player's health
-  while the dispenser can heal them. The ring fills a quarter at a time
-  from the top round to the left (top left, bottom left, bottom right,
-  top right), each quarter uncovered by a straight edge, with the rest
-  drawn faint (`original_hud::ring_pixels`). At full health or while
-  recharging only the icon shows (`UsePanel::Icon`). The prompt sits near
-  the top in two lines ("PRESS AND HOLD 'F' TO" / "HEAL"), the
-  `{prompt1}`/`{prompt2}` elements of `data/ui/hud.toml`. Healing
-  starting plays the HUD's `HealingTarget` (int_GEN_hudTimer_01).
+- **Use panel** (how it is drawn was read from the original's engine
+  code, `Engine.dll`, 2026-11-11: the helmet HUD's `DrawTimerRing` and the
+  part of `DrawHelmet` that calls it when the player's `TargetType` is
+  `TGT_Panel`; only behaviour and numbers were taken, no code). In place
+  of the crosshair while aiming at a dispenser, centred on the screen on
+  the original's 600-line HUD:
+  - The ring `HUDTextures.Reticles.HUD_EventTimer` (the helmet's
+    `EventTimer`) at its own size. It is cut into a 4 by 4 grid of
+    pieces. The whole ring is drawn first in (200,240,255) at opacity
+    92/255, then the lit pieces on top in the same colour, fully opaque:
+    one more step for each full twelfth of the value, from just left of
+    the top, down the left, along the bottom, up the right; the piece
+    just right of the top only lights at full, when the whole picture is
+    drawn (`original_hud::ring_pixels`, `RING_STEPS`).
+  - For a bacta dispenser (the panel kind the engine checks for) the
+    value is the player's `Health / HealthMax`. At full health the ring
+    is left out and only the icon shows (`UsePanel::Icon`).
+  - The icon: square `HUDIconX` 1, `HUDIconY` 7 of the helmet's
+    `HUDTextures.Icons.LargeVisorIcons`, 40-pixel squares counted from
+    the bottom right of a 3 by 10 grid, drawn 40x40. Its colour follows
+    the same value: red (255 - 115v), green (140 + 115v), blue 180,
+    opacity 240.
+  - The prompt (`DrawActivateText`) is (164,200,208), fading in to
+    opacity 220 (the fade-in, the helmet's `PromptFadeInTime` 0.5 s by our
+    reading, is not done). Its place, near the top in two lines ("PRESS
+    AND HOLD 'F' TO" / "HEAL"), is still matched to the user's
+    screenshots: the `{prompt1}`/`{prompt2}` elements of
+    `data/ui/hud.toml`.
+  - Not read yet: other panels show a "%02i:%02i" countdown under the
+    ring when the panel has time left; the healing sound is the
+    `HealingTarget` HUD sound (int_GEN_hudTimer_01), but when the engine
+    plays it was not found in this part of the code.
 - **Our readings, not checked against the original** (it doesn't run on
-  the user's PC right now): when each sound plays, how the outer panel
-  and prompt are sized and coloured (matched by eye to screenshots), the
+  the user's PC right now): when each sound plays, where the prompt sits
+  (matched by eye to screenshots), the
   pull's speed, the hologram's brightness and fade. The dispenser's zap
   effect and its hum (`BactaZap_Dispenser`, `Bacta_Body`) come next, with
   the effects plugin. Not done: the first-person arm plugging in

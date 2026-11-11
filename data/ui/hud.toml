@@ -28,30 +28,36 @@ scale = 1.0
 # (clockwise) from empty to full health. Remove this part to turn it off.
 [use_panel]
 # The use panel at the crosshair while you aim at a bacta dispenser, in
-# place of the crosshair. All pictures are the game's own; the original
-# draws them in native code, so sizes and colours were matched to the
-# user's screenshots and video of the original (2026-11-10, 1600x1200):
-# the ring's outer edge is 206 pixels across there, the icon's circle 74.
+# place of the crosshair. All pictures are the game's own. How the original
+# draws them was read from its engine code (Engine.dll, the helmet HUD's
+# DrawTimerRing and the part of DrawHelmet that calls it for a "panel"
+# target), 2026-11-11, and is written here as numbers:
 #
-# The ring (HUD_EventTimer) shows your health while the dispenser can heal
-# you, filling a quarter at a time from the top round to the left; the
-# part still to fill shows at ring_unfilled strength. At full health (or
-# while the dispenser recharges) only the icon shows.
+# The ring (HUD_EventTimer) is centred on the screen at its picture's own
+# size on the original's 600-line HUD (so 0.8 on our 480 lines). It is cut
+# into a 4 by 4 grid of pieces: the whole ring is drawn faint first, then
+# the pieces lit so far on top, one more step per twelfth of the value,
+# from just left of the top, down the left, along the bottom and up the
+# right; the piece just right of the top only lights at full. For a bacta
+# dispenser the value is your health. At full health only the icon shows.
 ring = "HUDTextures.Reticles.HUD_EventTimer"
 ring_scale = 0.8
-# The HUD's own DefaultTextColor (engine.u HUD).
-ring_colour = [198, 232, 255]
-ring_unfilled = 0.4
-# The dispenser's icon: square icon (counted from the bottom right, the
-# game's BactaDispenser HUDIconX 1, HUDIconY 7) of the CloneVisorIcons
-# sheet, whose squares are icon_cell pixels. Paler before use, greener in
-# use.
-icon_sheet = "HUDTextures.Icons.CloneVisorIcons"
-icon_cell = 27
+ring_colour = [200, 240, 255]
+ring_alpha = 255
+ring_alpha_unlit = 92
+# The icon: the target's HUDIconX/HUDIconY square (BactaDispenser: 1, 7) of
+# the helmet's LargeVisorIcons sheet, 40-pixel squares counted from the
+# bottom right of a 3 by 10 grid, drawn 40x40 at the screen centre. Its
+# colour follows the same value: red-pink at 0, green at 1, mixed in a
+# straight line between.
+icon_sheet = "HUDTextures.Icons.LargeVisorIcons"
+icon_cell = 40
+icon_grid = [3, 10]
 icon = [1, 7]
-icon_scale = 1.23
-icon_colour = [170, 205, 172]
-icon_colour_working = [138, 240, 176]
+icon_scale = 0.8
+icon_colour_empty = [255, 140, 180]
+icon_colour_full = [140, 255, 180]
+icon_alpha = 240
 # The prompt (the [[element]]s with {prompt1} and {prompt2} below) breaks
 # onto a second line after about this many letters, as in the original.
 prompt_wrap = 21
@@ -354,10 +360,11 @@ fade = "pickup"
 # --- The use prompt, near the top ---------------------------------------------
 # "PRESS AND HOLD 'F' TO HEAL" while you aim at a bacta dispenser you can
 # use (the dispenser's ActivatePromptText, read from the game). The original
-# draws it in native code; place, size and colour were matched to the
-# user's screenshots of the original (1600x1200): two centred lines whose
-# middles are 190 and 247 pixels down. Colour: the HUD's own
-# DefaultTextColor (engine.u HUD).
+# draws it in native code; place and size were matched to the user's
+# screenshots of the original (1600x1200): two centred lines whose middles
+# are 190 and 247 pixels down. Colour read from Engine.dll (below); the
+# original also fades it in over the helmet's PromptFadeInTime (0.5 s),
+# which we don't do yet.
 [[element]]
 group = "prompt"
 anchor = "centre"
@@ -366,7 +373,9 @@ size = [320, 18]
 when = "prompt"
 text = "{prompt1}"
 align = "centre"
-colour = [198, 232, 255, 255]
+# The original's activate-prompt colour, read from Engine.dll
+# (DrawActivateText): (164, 200, 208), fading in to 220 opacity.
+colour = [164, 200, 208, 220]
 
 [[element]]
 group = "prompt"
@@ -376,4 +385,4 @@ size = [320, 18]
 when = "prompt"
 text = "{prompt2}"
 align = "centre"
-colour = [198, 232, 255, 255]
+colour = [164, 200, 208, 220]

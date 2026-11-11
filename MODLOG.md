@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Bacta use panel ring and icon read from the original's engine code (rc_game, rc_game_core, data/ui/hud.toml)
+
+- **Changed:** The ring now lights in twelve steps, piece by piece of a 4 by 4 grid of the `HUD_EventTimer` picture, over a faint whole ring, as the original's `Engine.dll` (`UHelmet::DrawTimerRing`) draws it; colour (200,240,255), faint part at 92/255. The icon is now from `LargeVisorIcons` (40-pixel squares, 3 by 10 grid, drawn 40x40) and its colour follows your health from red-pink to green (255-115v, 140+115v, 180, opacity 240). Prompt colour (164,200,208) at opacity 220 (`DrawActivateText`). `UsePanel::Icon` now carries the value. `[use_panel]` keys changed: `ring_alpha`, `ring_alpha_unlit`, `icon_grid`, `icon_colour_empty`, `icon_colour_full`, `icon_alpha`.
+- **Why:** User asked to read the compiled code that decides how the ring fills and its colour, instead of guessing from video. The quarter-at-a-time fill and the colours from before were our readings of the video and were wrong in the details.
+- **Tested how:** Machine code read in a scratch folder outside the repo (nothing of it is committed); `cargo test -p rc_game --bin rc_game original_hud`; `rc_game --script` in the cloud.
+- **Result:** 6 HUD unit tests pass (2 new: twelve-step ring, icon colour). `rc_game --script`: 127 passed, 2 failed (the same 2 old level-line checks); the use panel check passes and its screenshot shows 7 of 12 steps lit at 62% health.
+- **Still broken / not tested:** Not tested on Windows. The prompt's fade-in and the countdown text other panels show are not done. Where the original's HUD canvas sits on wide screens wasn't checked (we keep it centred and sized by screen height).
+
 ## 2026-11-11: Health meters as in the original's video (data/ui/hud.toml, rc_menus)
 
 - **Changed:** Both stepped meters beside the bottom middle now show health (mirrored), lit from the bottom up; yellow while hurt, green at full; red when low stays our guess. The tick column shows shield (our guess). The right meter no longer shows the magazine. Ring and prompt colour are the HUD's own `DefaultTextColor` (198,232,255). New HUD condition `health_full`.

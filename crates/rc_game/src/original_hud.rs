@@ -71,8 +71,8 @@ pub struct CrosshairPlan {
 
 /// `[use_panel]`: the original's use panel at the crosshair while the
 /// player aims at something they use by holding Use (a bacta
-/// dispenser): its icon, and round it a ring that fills a quarter at a
-/// time. See `data/ui/hud.toml`.
+/// dispenser): its icon, and round it a ring that lights up in twelve
+/// steps. See `data/ui/hud.toml` and [`ring_pixels`].
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct UsePanelPlan {
@@ -80,19 +80,24 @@ pub struct UsePanelPlan {
     /// a 480-line screen).
     pub ring: String,
     pub ring_scale: f32,
-    /// The ring's colour (sRGB 0 to 255), and how strongly the part still
-    /// to fill shows (0 to 1).
+    /// The ring's colour (sRGB 0 to 255), how opaque its lit pieces are
+    /// and how opaque the whole ring is drawn underneath (0 to 255).
     pub ring_colour: [u8; 3],
-    pub ring_unfilled: f32,
-    /// The sheet of icons, its square size in pixels, and which square
-    /// (counted from the bottom right, as the game's `HUDIconX`/`Y`).
+    pub ring_alpha: u8,
+    pub ring_alpha_unlit: u8,
+    /// The sheet of icons, its square size in pixels, how many squares
+    /// across and down it counts, and which square (counted from the
+    /// bottom right of that grid, as the game's `HUDIconX`/`Y`).
     pub icon_sheet: String,
     pub icon_cell: u32,
+    pub icon_grid: [u32; 2],
     pub icon: [u32; 2],
     pub icon_scale: f32,
-    /// The icon's colour before use and while in use.
-    pub icon_colour: [u8; 3],
-    pub icon_colour_working: [u8; 3],
+    /// The icon's colour at 0 (empty) and at 1 (full); in between it is
+    /// mixed in a straight line. Its opacity (0 to 255).
+    pub icon_colour_empty: [u8; 3],
+    pub icon_colour_full: [u8; 3],
+    pub icon_alpha: u8,
     /// The prompt above ("PRESS AND HOLD 'F' TO HEAL") breaks onto a
     /// second line after about this many letters.
     pub prompt_wrap: usize,
@@ -197,7 +202,7 @@ enum UsePart {
 struct UsePanelPictures {
     tried: bool,
     ring: Option<(rc_image::Rgba, Handle<Image>)>,
-    /// The fill the ring image shows now, in 1/200ths.
+    /// How many of its twelve steps the ring image shows lit now.
     ring_fill: Option<u32>,
     icon: Option<(Handle<Image>, Vec2)>,
 }
@@ -566,37 +571,72 @@ fn spawn_picture(
     }
 }
 
-/// The ring drawn filled to `fill` (0 to 1): the game's ring fills a
-/// quarter at a time going round from the top to the left (top left,
-/// bottom left, bottom right, top right), each quarter uncovered by a
-/// straight edge from its start; what is still to fill shows faintly.
-/// Read from the original's screenshots and video (it draws this in
-/// native code).
-pub fn ring_pixels(src: &rc_image::Rgba, fill: f32, unfilled: f32) -> Vec<u8> {
+/// The ring picture cut into a 4 by 4 grid of pieces: which pieces light
+/// up at each of the twelve steps, as (column, row) from the top left.
+/// The ring lights from just left of the top, down the left side, along
+/// the bottom and up the right side; the last piece (just right of the
+/// top) only shows when the ring is full, when the whole picture lights.
+const RING_STEPS: [&[(usize, usize)]; 11] = [
+    &[(1, 0)],
+    &[(0, 0), (1, 1)],
+    &[(0, 1)],
+    &[(0, 2)],
+    &[(0, 3), (1, 2)],
+    &[(1, 3)],
+    &[(2, 3)],
+    &[(3, 3), (2, 2)],
+    &[(3, 2)],
+    &[(3, 1)],
+    &[(3, 0), (2, 1)],
+];
+
+/// How many of the ring's twelve steps are lit at `fill` (0 to 1): one
+/// more for each full twelfth.
+pub fn ring_steps(fill: f32) -> usize {
+    (1..=12).take_while(|k| fill >= *k as f32 / 12.0).count()
+}
+
+/// The ring drawn at `fill` (0 to 1), as the original draws it: the whole
+/// ring faint (`unlit` opacity) and on top of it the pieces lit so far
+/// (`lit` opacity), going up in twelfths. See [`RING_STEPS`].
+pub fn ring_pixels(src: &rc_image::Rgba, fill: f32, lit: u8, unlit: u8) -> Vec<u8> {
     let (w, h) = (src.width, src.height);
-    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
-    let r = cx.min(cy);
-    let steps = fill.clamp(0.0, 1.0) * 4.0;
+    let steps = ring_steps(fill);
+    let mut on = [[steps >= 12; 4]; 4];
+    for pieces in RING_STEPS.iter().take(steps.min(11)) {
+        for &(c, r) in *pieces {
+            on[r][c] = true;
+        }
+    }
+    let (lit, unlit) = (lit as f32 / 255.0, unlit as f32 / 255.0);
     let mut out = src.pixels.clone();
     for y in 0..h {
         for x in 0..w {
-            let dx = x as f32 + 0.5 - cx;
-            let dy = y as f32 + 0.5 - cy;
-            // Which quarter, in filling order, and how far along it this
-            // pixel lies (0 at its start edge, 1 at its end).
-            let (q, along) = match (dx < 0.0, dy < 0.0) {
-                (true, true) => (0.0, -dx / r),
-                (true, false) => (1.0, dy / r),
-                (false, false) => (2.0, dx / r),
-                (false, true) => (3.0, -dy / r),
+            let (c, r) = ((x * 4 / w.max(1)).min(3), (y * 4 / h.max(1)).min(3));
+            let a = &mut out[(y * w + x) * 4 + 3];
+            let base = *a as f32 / 255.0;
+            let under = base * unlit;
+            let alpha = if on[r][c] {
+                // The lit piece drawn over the faint whole ring.
+                let over = base * lit;
+                over + under * (1.0 - over)
+            } else {
+                under
             };
-            let part = (steps - q).clamp(0.0, 1.0);
-            let filled = part >= 1.0 || (part > 0.0 && along <= part);
-            if !filled {
-                let a = &mut out[(y * w + x) * 4 + 3];
-                *a = (*a as f32 * unfilled).round() as u8;
-            }
+            *a = (alpha * 255.0).round() as u8;
         }
+    }
+    out
+}
+
+/// The icon's colour at `fill` (0 to 1): from `empty` to `full` in a
+/// straight line, each part cut to a whole number.
+pub fn icon_colour(empty: [u8; 3], full: [u8; 3], fill: f32) -> [u8; 3] {
+    let f = fill.clamp(0.0, 1.0);
+    let mut out = [0; 3];
+    for i in 0..3 {
+        let v = empty[i] as f32 + (full[i] as f32 - empty[i] as f32) * f;
+        out[i] = v.clamp(0.0, 255.0) as u8;
     }
     out
 }
@@ -660,9 +700,15 @@ fn update_use_panel(
             Ok(sheet) => {
                 let c = panel.icon_cell as usize;
                 let (ix, iy) = (panel.icon[0] as usize, panel.icon[1] as usize);
-                if (ix + 1) * c <= sheet.width && (iy + 1) * c <= sheet.height && c > 0 {
-                    let x0 = sheet.width - (ix + 1) * c;
-                    let y0 = sheet.height - (iy + 1) * c;
+                let (cols, rows) = (panel.icon_grid[0] as usize, panel.icon_grid[1] as usize);
+                if ix < cols
+                    && iy < rows
+                    && cols * c <= sheet.width
+                    && rows * c <= sheet.height
+                    && c > 0
+                {
+                    let x0 = (cols - 1 - ix) * c;
+                    let y0 = (rows - 1 - iy) * c;
                     let mut px = Vec::with_capacity(c * c * 4);
                     for y in y0..y0 + c {
                         let i = (y * sheet.width + x0) * 4;
@@ -680,7 +726,7 @@ fn update_use_panel(
                         RenderAssetUsages::RENDER_WORLD,
                     );
                     log.line(format!(
-                        "original hud: use icon {} square {:?} ({c} px from the bottom right)",
+                        "original hud: use icon {} square {:?} ({c} px, from the bottom right of {cols}x{rows})",
                         panel.icon_sheet, panel.icon
                     ));
                     pics.icon = Some((images.add(image), Vec2::splat(c as f32)));
@@ -701,11 +747,15 @@ fn update_use_panel(
         UsePanel::Ready(f) | UsePanel::Working(f) => Some(f),
         _ => None,
     };
+    let icon_fill = match state {
+        UsePanel::Ready(f) | UsePanel::Working(f) | UsePanel::Icon(f) => f,
+        UsePanel::Hidden => 0.0,
+    };
     // Redraw the ring when its fill changes.
     if let (Some(f), Some((src, handle))) = (fill, pics.ring.as_ref()) {
-        let step = (f.clamp(0.0, 1.0) * 200.0).round() as u32;
+        let step = ring_steps(f) as u32;
         if pics.ring_fill != Some(step) {
-            let px = ring_pixels(src, step as f32 / 200.0, panel.ring_unfilled);
+            let px = ring_pixels(src, f, panel.ring_alpha, panel.ring_alpha_unlit);
             if let Some(mut img) = images.get_mut(handle) {
                 img.data = Some(px);
             }
@@ -713,7 +763,7 @@ fn update_use_panel(
         }
     }
     let size_of = |picture_px: Vec2, scale: f32| picture_px * scale * 100.0 / BASE_LINES;
-    let rgb = |c: [u8; 3]| Color::srgb_u8(c[0], c[1], c[2]);
+    let rgba = |c: [u8; 3], a: u8| Color::srgba_u8(c[0], c[1], c[2], a);
     for (part, mut image, mut node, mut shown) in &mut parts {
         let drawn = match part {
             UsePart::Ring => fill.and_then(|_| {
@@ -724,7 +774,8 @@ fn update_use_panel(
                             Vec2::new(src.width as f32, src.height as f32),
                             panel.ring_scale,
                         ),
-                        rgb(panel.ring_colour),
+                        // Opacity is in the picture (see ring_pixels).
+                        rgba(panel.ring_colour, 255),
                     )
                 })
             }),
@@ -732,12 +783,13 @@ fn update_use_panel(
                 .then(|| pics.icon.clone())
                 .flatten()
                 .map(|(h, px)| {
-                    let colour = if matches!(state, UsePanel::Working(_)) {
-                        panel.icon_colour_working
-                    } else {
-                        panel.icon_colour
-                    };
-                    (h, size_of(px, panel.icon_scale), rgb(colour))
+                    let colour =
+                        icon_colour(panel.icon_colour_empty, panel.icon_colour_full, icon_fill);
+                    (
+                        h,
+                        size_of(px, panel.icon_scale),
+                        rgba(colour, panel.icon_alpha),
+                    )
                 }),
         };
         let Some((handle, size, colour)) = drawn else {
@@ -900,28 +952,59 @@ pub fn reticle_showing(w: &mut World) -> bool {
 mod tests {
     use super::*;
 
-    /// The ring fills top left, bottom left, bottom right, top right; the
-    /// quarter being filled is uncovered from its start edge.
+    /// The ring lights in twelfths, piece by piece of a 4 by 4 grid, from
+    /// just left of the top round the left side; the rest stays faint.
     #[test]
-    fn ring_fills_a_quarter_at_a_time() {
+    fn ring_lights_in_twelve_steps() {
+        assert_eq!(ring_steps(0.0), 0);
+        assert_eq!(ring_steps(0.08), 0);
+        assert_eq!(ring_steps(1.0 / 12.0), 1);
+        assert_eq!(ring_steps(0.5), 6);
+        assert_eq!(ring_steps(0.99), 11);
+        assert_eq!(ring_steps(1.0), 12);
         let src = rc_image::Rgba {
             width: 4,
             height: 4,
             pixels: vec![255; 64],
         };
         let alpha = |px: &[u8], x: usize, y: usize| px[(y * 4 + x) * 4 + 3];
-        // Half full: both left quarters full, the right ones faint.
-        let half = ring_pixels(&src, 0.5, 0.4);
-        assert_eq!(alpha(&half, 0, 0), 255);
-        assert_eq!(alpha(&half, 0, 3), 255);
-        assert_eq!(alpha(&half, 3, 3), 102);
-        assert_eq!(alpha(&half, 3, 0), 102);
-        // Five eighths: the bottom right quarter half uncovered, from the
-        // bottom middle outwards.
-        let more = ring_pixels(&src, 0.625, 0.4);
-        assert_eq!(alpha(&more, 2, 3), 255);
-        assert_eq!(alpha(&more, 3, 3), 102);
-        assert_eq!(alpha(&more, 3, 0), 102);
+        // One step: only the piece just left of the top is lit.
+        let one = ring_pixels(&src, 0.1, 255, 92);
+        assert_eq!(alpha(&one, 1, 0), 255);
+        assert_eq!(alpha(&one, 0, 0), 92);
+        assert_eq!(alpha(&one, 2, 0), 92);
+        // Half: the left side and the bottom left are lit.
+        let half = ring_pixels(&src, 0.5, 255, 92);
+        for (x, y) in [
+            (0, 0),
+            (1, 0),
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 3),
+            (1, 1),
+            (1, 2),
+        ] {
+            assert_eq!(alpha(&half, x, y), 255, "{x},{y}");
+        }
+        for (x, y) in [(2, 0), (3, 0), (3, 3), (2, 3), (2, 2)] {
+            assert_eq!(alpha(&half, x, y), 92, "{x},{y}");
+        }
+        // Eleven steps: all but the piece just right of the top.
+        let most = ring_pixels(&src, 0.95, 255, 92);
+        assert_eq!(alpha(&most, 2, 0), 92);
+        assert_eq!(alpha(&most, 3, 0), 255);
+        let full = ring_pixels(&src, 1.0, 255, 92);
+        assert!((0..16).all(|i| alpha(&full, i % 4, i / 4) == 255));
+    }
+
+    /// The icon goes from red-pink when empty to green when full.
+    #[test]
+    fn icon_colour_follows_the_fill() {
+        let (e, f) = ([255, 140, 180], [140, 255, 180]);
+        assert_eq!(icon_colour(e, f, 0.0), [255, 140, 180]);
+        assert_eq!(icon_colour(e, f, 1.0), [140, 255, 180]);
+        assert_eq!(icon_colour(e, f, 0.5), [197, 197, 180]);
     }
 
     /// The prompt breaks where the original's does.

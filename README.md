@@ -319,7 +319,7 @@ copy of the game.
   with the game's files, not yet on Windows or by playing): holding Use
   pulls you in front of the dispenser, turns you to face it and holds you
   there until you're full or let go; the original's use panel (the
-  dispenser's + icon and a ring that fills with your health) takes the
+  dispenser's + icon and a ring that lights in twelve steps with your health, drawn the way the original's engine code draws it) takes the
   crosshair's place, with the HUD's own timer sound; "PRESS AND HOLD 'F' TO HEAL" shows
   when you can use it (nothing happens at full health); the squad marker
   hologram (a see-through commando) fades in where a squad mate would heal
