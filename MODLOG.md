@@ -37,6 +37,14 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Result:** Before: the run quit at 32.9 s with the error above, as geo_01a finished loading. After: geo_01a loaded and the script played on in the level for 2.5 minutes with no graphics error (the run was then stopped; its slowness is a separate fix).
 - **Still broken / not tested:** Not tested on Windows. The shafts are added light, so leaving them out of the prepass and shadows changes nothing on screen (motion blur doesn't smear them; it didn't before either, since the game quit).
 
+## 2026-11-11: Clone troopers hold their rifles (rc_cast, rc_model, rc_effects, rc_package, rc_game)
+
+- **Changed:** Cast characters whose class names a weapon (`RequiredEquipment`) hold that weapon's model on their `weaponAttach_R` bone, moved with every pose. The model is the weapon's `AttachmentClass` `StaticMesh` (DC-17m: `DC17mBlasterAttachment`, `Weapons.CloneWeapons.DC17mBlaster`), lit by where the character stands. New: `rc_model::Model::bone_frame`, `rc_effects::projectile::ClassPackages::held_weapon`, `rc_package` `Defaults::string`, `rc_cast::Cast::held_weapon`. New script check "the clone troopers hold their rifles".
+- **Why:** User's side-by-side screenshots of geo_01a: the original's troopers hold rifles, ours held nothing.
+- **Tested how:** From the files: `CloneTrooper.RequiredEquipment = "CTInventory.DC17mBlaster"` (ctcharacters.u), `DC17mBlaster.AttachmentClass` (ctinventory.u), engine.u's `GetWeaponBoneFor` returning `'weaponAttach_R'` and `Weapon` hanging `ThirdPersonActor` there with `AttachToBone`. `cargo test -p rc_effects` with the game's files; `rc_game --script` in the cloud with geo_01a.
+- **Result:** 138 passed, 0 failed; 8 of 8 clone troopers hold a DC-17m. The bacta dispenser picture shows both troopers aiming theirs, barrel forward.
+- **Still broken / not tested:** Not tested on Windows or by playing. Only the cast draws held weapons; the squad and the droids still hold none (the same code can be reused there). Attachments' `RelativeLocation`/`RelativeRotation` aren't applied (the DC-17m's are zero; others are logged). The gunship's chin gun has no static mesh and isn't drawn. No muzzle flash (`MuzzleClass`) yet; the troopers don't fire.
+
 ## 2026-11-11: Clone troopers and other cast lit by where they stand (rc_cast, data/cast/cast.toml)
 
 - **Changed:** Characters and props the cast part draws (troopers standing about in missions, cutscene characters) now take the level's light where they stand (`rc_game_core::LitByPlace`), as the squad and droids already do, instead of one fixed brightness. New setting `light_scale` in `data/cast/cast.toml` (1.1, the squad's and droids' value, which was matched to two original screenshots). Holograms keep their own glow.

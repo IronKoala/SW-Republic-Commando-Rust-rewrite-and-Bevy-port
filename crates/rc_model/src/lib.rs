@@ -850,6 +850,37 @@ impl Model {
             .collect()
     }
 
+    /// Where a bone is for bones placed at `local`, in the same space as
+    /// [`Model::posed_local`] (Bevy units relative to the feet, before the
+    /// character's facing): where the bone's own origin and its X, Y and Z
+    /// directions (one Unreal unit each) land, or `None` when the model has
+    /// no bone of that name. What the original's `AttachToBone` hangs a
+    /// held weapon on (`weaponAttach_R`).
+    pub fn bone_frame(&self, local: &[Transform], bone: &str) -> Option<[[f32; 3]; 4]> {
+        let i = self
+            .skeleton
+            .names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(bone))?;
+        let pose = globals(&self.skeleton.parents, local);
+        let g = pose.get(i)?;
+        let place = |p: [f32; 3]| {
+            let q = mesh_point(&self.mesh, g.apply(p));
+            to_bevy([q[0], q[1], q[2] + self.lift])
+        };
+        let o = place([0.0; 3]);
+        let axis = |p: [f32; 3]| {
+            let a = place(p);
+            [a[0] - o[0], a[1] - o[1], a[2] - o[2]]
+        };
+        Some([
+            o,
+            axis([1.0, 0.0, 0.0]),
+            axis([0.0, 1.0, 0.0]),
+            axis([0.0, 0.0, 1.0]),
+        ])
+    }
+
     /// Points posed at `frame` of animation `key`, in Bevy units (axes as
     /// [`to_bevy`]) relative to the mesh's own origin: nothing lifted and
     /// the root bone's travel kept. For models that aren't characters
