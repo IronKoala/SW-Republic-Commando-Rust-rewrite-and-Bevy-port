@@ -705,6 +705,9 @@ copy of the game.
   explosion, and the blasts hurt what is near. Only explosive missiles
   fly so far; bullets, bolts and grenades from spawners are logged and
   skipped. The trails' ribbon part isn't drawn yet.
+- **Clone troopers in missions (since 2026-11-11, tested in the cloud
+  only).** They take the light of where they stand, and hold their rifles:
+  the game's own DC-17m model, on their hand bone. They don't fire yet.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to

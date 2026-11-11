@@ -64,6 +64,21 @@ pub const GRAVITY_Z: f32 = -1100.0;
 /// `PhysicsVolume`'s `TerminalVelocity`.
 pub const TERMINAL_VELOCITY: f32 = 12000.0;
 
+/// The model a character shows for the weapon it holds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeldWeapon {
+    pub weapon: String,
+    /// The weapon's `AttachmentClass` (`DC17mBlasterAttachment`).
+    pub attachment: String,
+    /// Its `StaticMesh`, package first.
+    pub mesh: Vec<String>,
+    pub draw_scale: f32,
+    /// `RelativeLocation` and `RelativeRotation` (pitch, yaw, roll) from
+    /// the bone, zero when the class sets none.
+    pub relative_location: [f32; 3],
+    pub relative_rotation: [i32; 3],
+}
+
 /// `DrawType` 8, a static mesh.
 const DT_STATIC_MESH: u8 = 8;
 
@@ -127,6 +142,45 @@ impl ClassPackages {
             all.extend(v);
         }
         Some((all, chain))
+    }
+
+    /// The model a character holding weapon class `weapon` shows in its
+    /// hand (engine.u's `Weapon.AttachmentClass`, an `InventoryAttachment`
+    /// whose `StaticMesh` the weapon hangs on the holder's weapon bone).
+    pub fn held_weapon(&self, weapon: &str) -> Result<HeldWeapon, String> {
+        let (v, _) = self
+            .values(weapon)
+            .ok_or_else(|| format!("no class {weapon}"))?;
+        let attachment = match get(&v, "AttachmentClass") {
+            Some(Tagged::Object(p)) if !p.is_empty() => p.last().cloned().unwrap_or_default(),
+            _ => return Err(format!("{weapon} has no AttachmentClass")),
+        };
+        let (a, _) = self
+            .values(&attachment)
+            .ok_or_else(|| format!("no class {attachment}"))?;
+        let mesh = match get(&a, "StaticMesh") {
+            Some(Tagged::Object(p)) if !p.is_empty() => p.clone(),
+            _ => return Err(format!("{attachment} has no StaticMesh")),
+        };
+        let vector = |k: &str| match get(&a, k) {
+            Some(Tagged::Vector(x)) => *x,
+            _ => [0.0; 3],
+        };
+        let rotator = |k: &str| match get(&a, k) {
+            Some(Tagged::Struct(s)) => ["Pitch", "Yaw", "Roll"].map(|c| match get(s, c) {
+                Some(Tagged::Int(i)) => *i,
+                _ => 0,
+            }),
+            _ => [0; 3],
+        };
+        Ok(HeldWeapon {
+            weapon: weapon.to_string(),
+            attachment,
+            mesh,
+            draw_scale: float(&a, "DrawScale").unwrap_or(1.0),
+            relative_location: vector("RelativeLocation"),
+            relative_rotation: rotator("RelativeRotation"),
+        })
     }
 
     /// Read a projectile class.
@@ -403,5 +457,9 @@ mod game_files {
         let b = lib.projectile("GEO_01A_BunkerMissile").unwrap();
         println!("{b:?}");
         assert!(b.world_detonate && !b.actor_detonate);
+        let w = lib.held_weapon("DC17mBlaster").unwrap();
+        assert_eq!(w.attachment, "DC17mBlasterAttachment");
+        assert_eq!(w.mesh.last().map(String::as_str), Some("DC17mBlaster"));
+        eprintln!("{w:?}");
     }
 }

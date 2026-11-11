@@ -110,6 +110,9 @@ pub struct CastMember {
     /// cylinder"; ctcharacters.u's `Gunship` sets it false), whose model's
     /// origin is `location` itself, as a prop's.
     pub half_height: f32,
+    /// The weapon class it holds (`RequiredEquipment`, `DC17mBlaster` from
+    /// "CTInventory.DC17mBlaster"); characters only.
+    pub weapon: Option<String>,
     /// `bAlignBottom` (engine.u's `Pawn` and `AnimProp` default true):
     /// false draws the model from its own origin at `location`.
     pub align_bottom: bool,
@@ -363,6 +366,14 @@ pub fn find_cast(
                 0.0
             },
             align_bottom,
+            weapon: if is_pawn {
+                defaults
+                    .string("RequiredEquipment")
+                    .and_then(|w| w.rsplit('.').next().map(str::to_string))
+                    .filter(|w| !w.is_empty() && !w.eq_ignore_ascii_case("None"))
+            } else {
+                None
+            },
             yaw: yaw_of(a),
             scale: number("DrawScale", 1.0),
             package,
