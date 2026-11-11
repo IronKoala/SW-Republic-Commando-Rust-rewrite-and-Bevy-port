@@ -1729,6 +1729,7 @@ fn write_readout(
                 SquadStatus::Ok
             },
             order: if m.down { "Down".into() } else { m.doing },
+            in_squad: m.presence == rc_squad::Presence::InSquad,
         })
         .collect();
     if readout.members != members {

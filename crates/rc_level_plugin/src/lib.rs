@@ -37,7 +37,7 @@ use rc_level_viewer::bump::{BumpLitMaterial, BumpMapPlugin};
 use rc_level_viewer::draw::{self, BACKGROUND};
 use rc_level_viewer::lighting::LightingSettings;
 use rc_level_viewer::sky::{self, SkyViewer};
-use rc_level_viewer::{materials, prop_light, scene};
+use rc_level_viewer::{fog, materials, prop_light, scene};
 use rc_movement::{Hit, MoveParams, TriangleWorld, Vec3, World as MoveWorld};
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -70,12 +70,19 @@ impl Plugin for LevelPlugin {
             prop_light::PropLightPlugin,
             rc_hologram::HologramPlugin,
         ))
+            // Zone fog on the player's camera, except while the visor's low
+            // light mode has its own (`rc_game_core::OwnFog`).
+            .add_systems(
+                PostUpdate,
+                fog::view::follow_zone_fog::<Without<rc_game_core::OwnFog>>
+                    .after(bevy::transform::TransformSystems::Propagate),
+            )
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, load.run_if(in_state(GameState::Loading)))
             .add_message::<rc_game_core::PropAnim>()
             .add_systems(
                 Update,
-                let_sky_through.run_if(in_state(GameState::InGame)),
+                (let_sky_through, fog_on_player_camera).run_if(in_state(GameState::InGame)),
             )
             .add_systems(
                 Update,
@@ -329,7 +336,18 @@ fn begin(
     commands.insert_resource(Countdown(3));
 }
 
-fn forget(mut commands: Commands) {
+fn forget(
+    mut commands: Commands,
+    views: Query<Entity, With<fog::view::ZoneFogView>>,
+) {
+    // The fog belongs to the level: the menus and the next level start
+    // without it.
+    commands.remove_resource::<fog::view::LevelFog>();
+    for e in &views {
+        commands
+            .entity(e)
+            .remove::<(fog::view::ZoneFogView, bevy::pbr::DistanceFog)>();
+    }
     commands.remove_resource::<LevelInfo>();
     commands.remove_resource::<LevelMoverData>();
     commands.remove_resource::<LevelParts>();
@@ -647,6 +665,37 @@ fn build_look(
     let mut mats = materials::Materials::new(game_data);
     let sc = scene::build(Rc::new((pkg, data)), &mut mats)?;
     Ok((sc, settings, notes))
+}
+
+/// The player's camera shows the distance fog of the zone it is in, as
+/// the map sets it (`rc_level_viewer::fog`).
+fn fog_on_player_camera(
+    mut commands: Commands,
+    fogs: Option<Res<fog::view::LevelFog>>,
+    views: Query<(Entity, &GlobalTransform), (With<PlayerCamera>, Without<fog::view::ZoneFogView>)>,
+    log: Res<GameLog>,
+) {
+    let Some(fogs) = fogs else {
+        return;
+    };
+    for (e, at) in &views {
+        commands.entity(e).insert(fog::view::ZoneFogView::default());
+        let b = at.translation() * 50.0;
+        let (zone, f) = fogs.0.at([b.x, b.z, b.y]);
+        log.line(format!(
+            "{PART}: distance fog on the player's camera: {} of {} zones turn it on; the camera is in zone {:?}: {}",
+            fogs.0.zones_with_fog,
+            fogs.0.zones_read,
+            zone,
+            match f {
+                Some(f) => format!(
+                    "colour {:?}, from {} to {} Unreal units",
+                    f.colour, f.start, f.end
+                ),
+                None => "no fog".to_string(),
+            }
+        ));
+    }
 }
 
 /// When the map has a sky, the player's camera must not clear the picture

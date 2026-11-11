@@ -121,6 +121,8 @@ fn ball() -> Batch {
             blend: false,
             hologram: true,
             bump: None,
+            uv_channel: 0,
+            multiply: None,
         }),
         ..default()
     }
@@ -154,6 +156,8 @@ fn setup(
             from: "test".into(),
         },
         sky: None,
+        fog: Default::default(),
+        fog_error: None,
     };
     let r = draw::spawn_level(
         &mut commands,

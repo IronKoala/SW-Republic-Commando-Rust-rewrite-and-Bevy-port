@@ -607,7 +607,9 @@ fn update_night_vision(
                 commands.entity(e).remove::<NightVisionView>();
             }
             if has_fog {
-                commands.entity(e).remove::<(NightFog, DistanceFog)>();
+                commands
+                    .entity(e)
+                    .remove::<(NightFog, rc_game_core::OwnFog, DistanceFog)>();
             }
             *since = 0.0;
             continue;
@@ -646,6 +648,7 @@ fn update_night_vision(
             let (start, end) = n.fog.unwrap_or((l.fallback_fog[0], l.fallback_fog[1]));
             commands.entity(e).insert((
                 NightFog,
+                rc_game_core::OwnFog,
                 DistanceFog {
                     color: Color::BLACK,
                     falloff: FogFalloff::Linear {

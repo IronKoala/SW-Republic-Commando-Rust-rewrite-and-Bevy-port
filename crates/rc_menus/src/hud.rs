@@ -100,6 +100,10 @@ pub struct LayoutSettings {
     /// one at least as tall as it is drawn, so letters stay sharp.
     #[serde(default)]
     pub fonts: Vec<String>,
+    /// Seconds the advisor's words and the objective take to fade in
+    /// (the original's `Helmet.PromptFadeInTime`, 0.5 in engine.u).
+    #[serde(default = "half")]
+    pub text_fade_in: f32,
 }
 
 impl Default for LayoutSettings {
@@ -108,8 +112,27 @@ impl Default for LayoutSettings {
             enabled: true,
             scale: 1.0,
             fonts: Vec::new(),
+            text_fade_in: 0.5,
         }
     }
+}
+
+impl LayoutSettings {
+    /// How far a text shown for `age` seconds has faded in, 0..1, in
+    /// tenths (so the HUD is redrawn only ten times while it fades).
+    pub fn faded_in(&self, age: f32) -> f32 {
+        if self.text_fade_in <= 0.0 {
+            return 1.0;
+        }
+        ((age / self.text_fade_in).clamp(0.0, 1.0) * 10.0)
+            .floor()
+            .max(1.0)
+            / 10.0
+    }
+}
+
+fn half() -> f32 {
+    0.5
 }
 
 fn yes() -> bool {
@@ -138,10 +161,17 @@ const ELEMENT_KEYS: &[&str] = &[
     "choices",
     "fill",
     "fill_toward",
+    "fill_steps",
+    "fill_least_gap",
+    "colour_by",
+    "colours",
     "mirror",
     "text",
     "align",
     "fade",
+    "font",
+    "wrap",
+    "glass",
 ];
 
 /// Which corner or edge of the HUD area an element is pinned to.
@@ -210,6 +240,13 @@ pub struct Element {
     pub alert_colour: Option<[u8; 4]>,
     #[serde(default)]
     pub alert_when: Option<String>,
+    /// Other colours by the value of a text (see `HudValues::text`), for
+    /// example `colour_by = "{health_level}"` with `colours = { "3" =
+    /// [72, 255, 72, 255] }`. Falls back to `colour`; `alert_colour` wins.
+    #[serde(default)]
+    pub colour_by: Option<String>,
+    #[serde(default)]
+    pub colours: BTreeMap<String, [u8; 4]>,
     /// "alpha" (default for pictures) or "add" (glowing; default for text).
     #[serde(default)]
     pub blend: Option<String>,
@@ -218,6 +255,11 @@ pub struct Element {
     /// pickup message fade out as it ends.
     #[serde(default)]
     pub fade: Option<String>,
+    /// Shown through the helmet's glass, as the original draws its HUD
+    /// (see `helmet::GlassMap`): moved where the glass shows that part
+    /// of the HUD picture. Only while the helmet is drawn.
+    #[serde(default)]
+    pub glass: bool,
     #[serde(flatten)]
     pub kind: Kind,
 }
@@ -254,6 +296,14 @@ pub struct Picture {
     /// or "up".
     #[serde(default)]
     pub fill_toward: Option<String>,
+    /// Empty the bar in this many steps instead of smoothly (the
+    /// original's meters drop in elevenths).
+    #[serde(default)]
+    pub fill_steps: Option<u32>,
+    /// While the value is below 1, hide at least this fraction of the
+    /// bar, so any hurt shows.
+    #[serde(default)]
+    pub fill_least_gap: f32,
     /// Flip the picture left to right (to reuse one side's art).
     #[serde(default)]
     pub mirror: bool,
@@ -267,6 +317,16 @@ pub struct TextPart {
     /// "left" (default), "centre" or "right" within the box.
     #[serde(default)]
     pub align: Option<String>,
+    /// Always this font (one of `[layout] fonts`, like
+    /// `OrbitFonts.OrbitBold15`), scaled to the line height, instead of
+    /// the nearest size.
+    #[serde(default)]
+    pub font: Option<String>,
+    /// Break long text onto more lines, at spaces, to fit the box's
+    /// width; each line is `size`'s height further down. Without it a
+    /// long text is cut short with "...".
+    #[serde(default)]
+    pub wrap: bool,
 }
 
 /// One squad mate as the HUD shows them.
@@ -301,6 +361,43 @@ pub struct HudValues {
     /// The use prompt ("PRESS AND HOLD 'F' TO HEAL"), as lines; empty
     /// when none is shown.
     pub prompt: Vec<String>,
+    /// What the person speaking says (the advisor's words), empty when
+    /// nobody speaks.
+    pub subtitle: String,
+    /// How far it has faded in, 0..1.
+    pub subtitle_fade: f32,
+    /// The current mission objective, empty when none is shown.
+    pub objective: String,
+    /// How far it has faded in, 0..1.
+    pub objective_fade: f32,
+}
+
+/// How hurt, as the original sorts it (Engine.dll
+/// `APawn::CalcHealthLevel`, health over the most health): 0 dead, 1 below
+/// half, 2 below 0.91, 3 above.
+pub fn health_level(health: f32) -> u8 {
+    if health <= 0.0 {
+        0
+    } else if health < 0.5 {
+        1
+    } else if health < 0.91 {
+        2
+    } else {
+        3
+    }
+}
+
+/// `v` (0..1) as a bar that drops in `steps` steps and, while below 1,
+/// hides at least `least_gap` of itself.
+fn stepped(v: f32, steps: Option<u32>, least_gap: f32) -> f32 {
+    let mut gap = 1.0 - v;
+    if let Some(n) = steps.filter(|n| *n > 0) {
+        gap = (gap * n as f32).floor() / n as f32;
+    }
+    if v < 1.0 && gap < least_gap {
+        gap = least_gap;
+    }
+    (1.0 - gap).clamp(0.0, 1.0)
 }
 
 impl HudValues {
@@ -316,6 +413,8 @@ impl HudValues {
                 },
                 "squad_health" => member?.health,
                 "pickup" => self.pickup_fade,
+                "subtitle" => self.subtitle_fade,
+                "objective" => self.objective_fade,
                 _ => return None,
             }
             .clamp(0.0, 1.0),
@@ -333,12 +432,15 @@ impl HudValues {
             "clip" => !self.weapon.is_empty() && self.clip_size.is_some(),
             "reserve" => !self.weapon.is_empty() && self.reserve.is_some(),
             "grenade" => self.grenade.is_some(),
+            "grenades_left" => self.grenade.as_ref().is_some_and(|g| g.1 > 0),
             "shield_low" => self.shield < 0.25,
             "health_low" => self.health < 0.25,
             "health_full" => self.health >= 0.999,
             "squad_down" => member?.down,
             "pickup" => !self.pickup.is_empty(),
             "prompt" => !self.prompt.is_empty(),
+            "subtitle" => !self.subtitle.is_empty(),
+            "objective" => !self.objective.is_empty(),
             _ => return None,
         };
         Some(v != not)
@@ -370,7 +472,14 @@ impl HudValues {
             "reserve" => self.reserve.map_or("--".into(), |r| r.to_string()),
             "grenade" => self.grenade.as_ref()?.0.to_uppercase(),
             "grenades" => self.grenade.as_ref()?.1.to_string(),
+            "health_level" => health_level(self.health).to_string(),
+            "squad_health_level" => {
+                let m = member?;
+                health_level(if m.down { 0.0 } else { m.health }).to_string()
+            }
             "pickup" => self.pickup.clone(),
+            "subtitle" => self.subtitle.clone(),
+            "objective" => self.objective.clone(),
             "prompt1" => self.prompt.first().cloned().unwrap_or_default(),
             "prompt2" => self.prompt.get(1).cloned().unwrap_or_default(),
             "number" => member?.number.clone(),
@@ -563,7 +672,9 @@ pub fn check_plan(
 }
 
 /// The quads to draw for `values` on a `width` x `height` screen, in
-/// screen fractions (0..1), in drawing order.
+/// screen fractions (0..1), in drawing order. `glass` moves a point of
+/// the HUD (screen fractions) to where the helmet's glass shows it, for
+/// elements with `glass = true`; pass `None` without a helmet.
 pub fn hud_quads(
     layout: &HudLayout,
     values: &HudValues,
@@ -571,6 +682,7 @@ pub fn hud_quads(
     height: f32,
     max_aspect: f32,
     sizes: &mut dyn Sizes,
+    glass: Option<&dyn Fn([f32; 2]) -> [f32; 2]>,
 ) -> Vec<Quad> {
     let (area, unit) = frame(width, height, max_aspect, layout.layout.scale);
     let fonts: Vec<FontData> = layout
@@ -587,6 +699,7 @@ pub fn hud_quads(
             vec![None]
         };
         for (i, member) in members.into_iter().enumerate() {
+            let first_quad = out.len();
             if let Some(w) = &e.when {
                 if values.flag(w, member) != Some(true) {
                     continue;
@@ -598,9 +711,13 @@ pub fn hud_quads(
                 .alert_when
                 .as_deref()
                 .is_some_and(|w| values.flag(w, member) == Some(true));
+            let chosen = e
+                .colour_by
+                .as_deref()
+                .and_then(|k| e.colours.get(&values.text(k, member)).copied());
             let mut colour = match (alert, e.alert_colour) {
                 (true, Some(c)) => c,
-                _ => e.colour,
+                _ => chosen.unwrap_or(e.colour),
             };
             if let Some(f) = &e.fade {
                 let v = values.fraction(f, member).unwrap_or(1.0);
@@ -626,6 +743,7 @@ pub fn hud_quads(
                     let mut dst = rect;
                     if let Some(f) = &p.fill {
                         let v = values.fraction(f, member).unwrap_or(1.0);
+                        let v = stepped(v, p.fill_steps, p.fill_least_gap);
                         if v <= 0.0 {
                             continue;
                         }
@@ -646,26 +764,70 @@ pub fn hud_quads(
                 Kind::Text(t) => {
                     let text = values.text(&t.text, member);
                     let line_px = rect[3] - rect[1];
-                    let Some(font) = pick_font(&fonts, line_px) else {
+                    let font = match &t.font {
+                        Some(f) => fonts.iter().find(|d| d.path.eq_ignore_ascii_case(f)),
+                        None => pick_font(&fonts, line_px),
+                    };
+                    let Some(font) = font else {
                         continue;
                     };
-                    text_line(
-                        &text,
-                        font,
-                        rect,
-                        t.align.as_deref(),
-                        colour,
-                        style(e.blend.as_deref(), STY_ADDITIVE),
-                        &e.group,
-                        width,
-                        height,
-                        &mut out,
-                    );
+                    let lines = if t.wrap {
+                        let k = line_px / font.line_height.max(1) as f32;
+                        wrap_words(font, &text, (rect[2] - rect[0]) / k)
+                    } else {
+                        vec![text]
+                    };
+                    for (n, line) in lines.iter().enumerate() {
+                        let down = n as f32 * line_px;
+                        text_line(
+                            line,
+                            font,
+                            [rect[0], rect[1] + down, rect[2], rect[3] + down],
+                            t.align.as_deref(),
+                            colour,
+                            style(e.blend.as_deref(), STY_ADDITIVE),
+                            &e.group,
+                            width,
+                            height,
+                            &mut out,
+                        );
+                    }
+                }
+            }
+            if let (true, Some(g)) = (e.glass, glass) {
+                for q in &mut out[first_quad..] {
+                    let a = g([q.dst[0], q.dst[1]]);
+                    let b = g([q.dst[2], q.dst[3]]);
+                    q.dst = [a[0], a[1], b[0], b[1]];
                 }
             }
         }
     }
     out
+}
+
+/// `text` broken at spaces into lines no wider than `max` font pixels (a
+/// word longer than that gets a line of its own).
+pub fn wrap_words(font: &FontData, text: &str, max: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let tried = if line.is_empty() {
+            word.to_string()
+        } else {
+            format!("{line} {word}")
+        };
+        if line.is_empty() || line_width(font, &tried, 0) <= max {
+            line = tried;
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line = word.to_string();
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 /// `colour` at `v` (0..1) of its strength. A glowing ("add") part fades
@@ -887,6 +1049,8 @@ mod tests {
         let text = Kind::Text(TextPart {
             text: String::new(),
             align: None,
+            font: None,
+            wrap: false,
         });
         assert_eq!(
             faded([255, 200, 100, 255], 0.5, &text, None),
@@ -928,6 +1092,21 @@ mod tests {
         assert_eq!(v.flag("!reserve", None), Some(true));
         assert_eq!(v.flag("squad_down", Some(&m)), Some(true));
         assert_eq!(v.flag("nonsense", None), None);
+        assert_eq!(v.flag("grenades_left", None), Some(true));
+        assert_eq!(v.text("{squad_health_level}", Some(&m)), "0");
+    }
+
+    #[test]
+    fn health_levels_and_stepped_bars_as_the_original() {
+        assert_eq!(
+            [0.0, 0.2, 0.5, 0.9, 0.91, 1.0].map(health_level),
+            [0, 1, 2, 2, 3, 3]
+        );
+        // Elevenths, and at least 5/55 gone while hurt at all.
+        assert_eq!(stepped(1.0, Some(11), 5.0 / 55.0), 1.0);
+        assert_eq!(stepped(0.99, Some(11), 5.0 / 55.0), 1.0 - 5.0 / 55.0);
+        assert!((stepped(0.5, Some(11), 5.0 / 55.0) - 6.0 / 11.0).abs() < 1e-6);
+        assert_eq!(stepped(0.3, None, 0.0), 0.3);
     }
 
     #[test]
@@ -953,5 +1132,29 @@ text = "hi"
         assert!(HudLayout::parse(text).unwrap_err().contains("sometimes"));
         let typo = text.replace("when = \"sometimes\"", "colur = [1, 2, 3, 4]");
         assert!(HudLayout::parse(&typo).unwrap_err().contains("colur"));
+    }
+
+    #[test]
+    fn long_text_wraps_at_spaces() {
+        // Every letter 10 pixels wide, no kerning.
+        let g = rc_package::font::Glyph {
+            u: 0,
+            v: 0,
+            width: 10,
+            height: 10,
+            page: 0,
+        };
+        let font = FontData {
+            path: "F".into(),
+            glyphs: vec![g; 128],
+            pages: vec!["p".into()],
+            kerning: 0,
+            line_height: 10,
+        };
+        assert_eq!(
+            wrap_words(&font, "ab cd efghijk l", 50.0),
+            ["ab cd", "efghijk", "l"]
+        );
+        assert!(wrap_words(&font, "  ", 50.0).is_empty());
     }
 }

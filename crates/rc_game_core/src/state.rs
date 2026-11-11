@@ -143,6 +143,13 @@ pub struct Player;
 #[derive(Component, Debug, Default)]
 pub struct PlayerCamera;
 
+/// On a camera whose distance fog belongs to something else for now, like
+/// the visor's low light mode (the original's vision modes override the
+/// zone's fog). The level's zone fog leaves such a camera's fog alone, and
+/// takes over again once this is removed (with the fog).
+#[derive(Component, Debug, Default)]
+pub struct OwnFog;
+
 /// Where the player starts on the current map: feet position in Unreal
 /// units, and facing (radians, Unreal's yaw: 0 along +X, a quarter turn
 /// along +Y). Inserted by the level plugin while loading, from the map's
