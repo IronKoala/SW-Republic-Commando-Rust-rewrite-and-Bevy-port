@@ -66,7 +66,11 @@ class = "XInterfaceCTMenus.CTPausePCMenu"
 over_game = true
 back = "resume"
 
-# In the original's order. Hints aren't built yet.
+# In the original's order. Which rows show each time the menu opens, and
+# where they sit, follow the original's own rules (rc_menus/src/pause.rs):
+# LOAD LAST SAVE only when the player is down or dead, QUICK LOAD only
+# with a quicksave, no saving in a briefing or the prologue, ENABLE HINTS
+# only when hint screens are off in a level that has them.
 [pages.paused.buttons]
 LoadLastSaveSelected = "act:load_last"
 QuickSaveSelected = "act:quick_save"
@@ -76,7 +80,7 @@ RestartMissionSelected = "restart"
 SaveGameSelected = "open:save_game"
 LoadGameSelected = "open:load_game"
 OptionsSelected = "open:options"
-EnableHintsSelected = "unavailable"
+EnableHintsSelected = "act:enable_hints"
 EndMissionSelected = "quit_to_menu"
 QuitSelected = "quit_game"
 
