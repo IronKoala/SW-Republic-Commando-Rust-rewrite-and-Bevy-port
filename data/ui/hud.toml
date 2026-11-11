@@ -39,7 +39,8 @@ scale = 1.0
 # while the dispenser recharges) only the icon shows.
 ring = "HUDTextures.Reticles.HUD_EventTimer"
 ring_scale = 0.8
-ring_colour = [199, 235, 255]
+# The HUD's own DefaultTextColor (engine.u HUD).
+ring_colour = [198, 232, 255]
 ring_unfilled = 0.4
 # The dispenser's icon: square icon (counted from the bottom right, the
 # game's BactaDispenser HUDIconX 1, HUDIconY 7) of the CloneVisorIcons
@@ -85,7 +86,7 @@ prompt_wrap = 21
 # prompt's two lines); for squad rows {number} {name}
 # {order}.
 # Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
-# clip, reserve, grenade, shield_low, health_low, squad_down, pickup,
+# clip, reserve, grenade, shield_low, health_low, health_full, squad_down, pickup,
 # prompt.
 # Bars (`fill`): shield, health, clip, squad_health.
 # Fading (`fade`, 1 shown to 0 gone): pickup.
@@ -144,10 +145,15 @@ colour = [110, 235, 95, 255]
 alert_when = "squad_down"
 alert_colour = [255, 80, 60, 255]
 
-# --- Shield and health: the stepped meter left of the middle (pinned to
-# the bottom middle, like the magazine meter) ------------------------------
-# A dim empty meter with the bright full one over it, emptying from the
-# top. Health is the column of ticks beside it.
+# --- Health: the stepped meters either side of the middle ----------------
+# From the user's video of the original healing at a bacta dispenser
+# (2026-11-10): both stepped meters show health, mirrored, lit from the
+# bottom up (8 of 12 steps lit when hurt, all 12 at full); yellow while
+# hurt, green at full health. The pictures are the game's
+# (CloneVisorIcons); the original tints them in engine code, so the
+# colours were measured from the video (yellow 214,208,98; green
+# 72,212,68). OUR GUESS, not in the video: red when health is low.
+# Shield: the column of ticks beside the left meter (our guess).
 
 [[element]]
 group = "vitals"
@@ -163,13 +169,26 @@ group = "vitals"
 anchor = "bottom"
 at = [-172, -80]
 size = [50, 39]
+when = "health_full"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 180, 241, 237]
-fill = "shield"
+fill = "health"
 fill_toward = "down"
-colour = [110, 235, 95, 255]
-alert_when = "shield_low"
-alert_colour = [255, 210, 90, 255]
+colour = [72, 212, 68, 255]
+
+[[element]]
+group = "vitals"
+anchor = "bottom"
+at = [-172, -80]
+size = [50, 39]
+when = "!health_full"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 180, 241, 237]
+fill = "health"
+fill_toward = "down"
+colour = [214, 208, 98, 255]
+alert_when = "health_low"
+alert_colour = [255, 80, 60, 255]
 
 [[element]]
 group = "vitals"
@@ -178,20 +197,19 @@ at = [-120, -80]
 size = [9, 39]
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [233, 38, 251, 94]
-fill = "health"
+fill = "shield"
 fill_toward = "down"
 colour = [110, 235, 95, 255]
-alert_when = "health_low"
-alert_colour = [255, 80, 60, 255]
+alert_when = "shield_low"
+alert_colour = [255, 210, 90, 255]
 
-# --- Ammunition: the same meter, mirrored, right of the middle -----------
+# The same health meter, mirrored, right of the middle.
 
 [[element]]
 group = "ammo"
 anchor = "bottom"
 at = [118, -80]
 size = [50, 39]
-when = "clip"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 36, 239, 94]
 mirror = true
@@ -202,13 +220,28 @@ group = "ammo"
 anchor = "bottom"
 at = [118, -80]
 size = [50, 39]
-when = "clip"
+when = "health_full"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 180, 241, 237]
 mirror = true
-fill = "clip"
+fill = "health"
 fill_toward = "down"
-colour = [110, 235, 95, 255]
+colour = [72, 212, 68, 255]
+
+[[element]]
+group = "ammo"
+anchor = "bottom"
+at = [118, -80]
+size = [50, 39]
+when = "!health_full"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [181, 180, 241, 237]
+mirror = true
+fill = "health"
+fill_toward = "down"
+colour = [214, 208, 98, 255]
+alert_when = "health_low"
+alert_colour = [255, 80, 60, 255]
 
 # Shots in the magazine, and spare ammo, over the meter.
 [[element]]
@@ -323,7 +356,8 @@ fade = "pickup"
 # use (the dispenser's ActivatePromptText, read from the game). The original
 # draws it in native code; place, size and colour were matched to the
 # user's screenshots of the original (1600x1200): two centred lines whose
-# middles are 190 and 247 pixels down, light grey-blue.
+# middles are 190 and 247 pixels down. Colour: the HUD's own
+# DefaultTextColor (engine.u HUD).
 [[element]]
 group = "prompt"
 anchor = "centre"
@@ -332,7 +366,7 @@ size = [320, 18]
 when = "prompt"
 text = "{prompt1}"
 align = "centre"
-colour = [215, 228, 235, 255]
+colour = [198, 232, 255, 255]
 
 [[element]]
 group = "prompt"
@@ -342,4 +376,4 @@ size = [320, 18]
 when = "prompt"
 text = "{prompt2}"
 align = "centre"
-colour = [215, 228, 235, 255]
+colour = [198, 232, 255, 255]

@@ -335,6 +335,7 @@ impl HudValues {
             "grenade" => self.grenade.is_some(),
             "shield_low" => self.shield < 0.25,
             "health_low" => self.health < 0.25,
+            "health_full" => self.health >= 0.999,
             "squad_down" => member?.down,
             "pickup" => !self.pickup.is_empty(),
             "prompt" => !self.prompt.is_empty(),

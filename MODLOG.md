@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Health meters as in the original's video (data/ui/hud.toml, rc_menus)
+
+- **Changed:** Both stepped meters beside the bottom middle now show health (mirrored), lit from the bottom up; yellow while hurt, green at full; red when low stays our guess. The tick column shows shield (our guess). The right meter no longer shows the magazine. Ring and prompt colour are the HUD's own `DefaultTextColor` (198,232,255). New HUD condition `health_full`.
+- **Why:** User: "the health bar filling is not vanilla ... RE-USE THE GAME FILES". Their video shows both meters at 8 of 12 steps in yellow while hurt, rising to 12 and turning green at full.
+- **Tested how:** `cargo test -p rc_menus`; `rc_game --script` in the cloud; side-by-side with the user's screenshot.
+- **Result:** 127 passed, 2 failed (the same 2 old level-line checks).
+- **Still broken / not tested:** Not tested on Windows. The meter colours were measured from the video (the original tints them in engine code). What shows shield in the original isn't in the video.
+
 ## 2026-11-11: Bacta dispenser: the original's use panel and its sound (rc_game, rc_menus, rc_scripts_plugin)
 
 - **Changed:** The guessed turning panel is gone. In place of the crosshair: the dispenser's icon (CloneVisorIcons square 1,7, the dispenser's own HUDIconX/Y) and the `HUD_EventTimer` ring showing your health, filling a quarter at a time with the rest faint; icon only at full health or while recharging. The prompt moved near the top in two lines, with the key in quotes ("PRESS AND HOLD 'F' TO / HEAL"). Healing starting plays the HUD's `HealingTarget` sound (int_GEN_hudTimer_01). New `UsePanel::Icon`/`Ready(fill)`, `{prompt1}`/`{prompt2}` HUD texts, `[use_panel]` rewritten.
