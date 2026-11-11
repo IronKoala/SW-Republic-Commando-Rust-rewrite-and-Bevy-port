@@ -933,6 +933,14 @@ fn steps() -> Vec<Step> {
             "the current objective is drawn at the top, as in the original",
             objective_line,
         ),
+        // The landing gunship hovers over the landing zone, as in the
+        // user's screenshot of the original: its class turns
+        // `bAlignBottom` off, so it is drawn from its map place, not
+        // stood on the ground.
+        Check("the landing gunship hovers where the map puts it", gunship_hovers),
+        Note(view_gunship),
+        Wait(0.5),
+        Shot("gunship"),
         Note(level_script_view_dispenser),
         Wait(0.5),
         Shot("bacta_dispenser"),
@@ -2935,6 +2943,73 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
 
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
+/// geo_01a's landing gunship (`GunshipHigh1`, the cast part draws it).
+fn gunship_hovers(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<(&rc_cast::Cast, &GlobalTransform)>();
+    let (c, t) = q
+        .iter(w)
+        .find(|(c, _)| c.class.eq_ignore_ascii_case("GunshipHigh"))
+        .ok_or("no gunship in the cast")?;
+    let at = rc_game_core::units::to_unreal(t.translation());
+    let msg = format!(
+        "{} drawn from ({:.0}, {:.0}, {:.0}), map place ({:.0}, {:.0}, {:.0})",
+        c.name, at.x, at.y, at.z, c.location[0], c.location[1], c.location[2]
+    );
+    if (at.z - c.location[2]).abs() < 1.0 {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// Stand the player on the ground 1500 uu from the gunship, at the first
+/// of 16 directions with a clear view of it, and look at it, for
+/// logs/gunship.png.
+fn view_gunship(w: &mut World) {
+    use rc_movement::Vec3 as V;
+    let gunship = {
+        let mut q = w.query::<&rc_cast::Cast>();
+        q.iter(w)
+            .find(|c| c.class.eq_ignore_ascii_case("GunshipHigh"))
+            .map(|c| c.location)
+    };
+    let (Some(g), Some(world)) = (
+        gunship,
+        w.get_resource::<rc_game_core::LevelCollision>().map(|c| c.0.clone()),
+    ) else {
+        return;
+    };
+    let clear = |a: V, b: V| world.sweep(V::ZERO, a, b).is_none_or(|h| h.time >= 1.0);
+    let spot = (0..16).find_map(|i| {
+        let turn = i as f32 / 16.0 * std::f32::consts::TAU;
+        let (x, y) = (g[0] + 1500.0 * turn.cos(), g[1] + 1500.0 * turn.sin());
+        // The floor under that point.
+        let top = V::new(x, y, g[2]);
+        let h = world.sweep(V::ZERO, top, V::new(x, y, g[2] - 2000.0))?;
+        if h.time >= 1.0 {
+            return None;
+        }
+        let eye = V::new(x, y, g[2] - 2000.0 * h.time + 100.0);
+        clear(eye, V::new(g[0], g[1], g[2])).then_some(eye)
+    });
+    let log = w.resource::<GameLog>().clone();
+    let Some(at) = spot else {
+        log.line("script: no clear view of the gunship found");
+        return;
+    };
+    let (dx, dy, dz) = (g[0] - at.x, g[1] - at.y, g[2] - at.z);
+    let mut q = w.query_filtered::<&mut Body, With<Player>>();
+    for mut b in q.iter_mut(w) {
+        b.pawn.location = at;
+        b.yaw = dy.atan2(dx);
+        b.pitch = dz.atan2((dx * dx + dy * dy).sqrt());
+        log.line(format!(
+            "script: player looks at the gunship from ({:.0}, {:.0}, {:.0})",
+            at.x, at.y, at.z
+        ));
+    }
+}
+
 fn level_script_view_dispenser(w: &mut World) {
     let Some(s) = w.get_resource::<rc_scripts_plugin::LevelScript>() else {
         return;

@@ -465,11 +465,13 @@ fn spawn_pieces(
     let normals = model.normals(&points);
     let a = ambient.max(0.0);
     let mut pieces = Vec::new();
-    // A prop's origin is where the map put it; a character stands on its
-    // feet (the model is lifted to the floor, see rc_model).
+    // A prop's origin is where the map put it, and so is a character's
+    // whose class turns `bAlignBottom` off (the gunship); any other
+    // character stands on its feet (the model is lifted to the floor, see
+    // rc_model).
     let drop = match m.kind {
-        Kind::Prop => -model.lift / UU_PER_UNIT,
-        Kind::Pawn => 0.0,
+        Kind::Pawn if m.align_bottom => 0.0,
+        _ => -model.lift / UU_PER_UNIT,
     } * m.scale;
     parent.with_children(|p| {
         let mut holder = p.spawn((

@@ -97,8 +97,14 @@ pub struct CastMember {
     /// origin for a prop.
     pub location: [f32; 3],
     /// Half the character's height (`CollisionHeight`): its feet are this
-    /// far below `location`. 0 for props.
+    /// far below `location`. 0 for props, and for characters whose class
+    /// turns `bAlignBottom` off (engine.u: "Actor aligned to bottom of
+    /// cylinder"; ctcharacters.u's `Gunship` sets it false), whose model's
+    /// origin is `location` itself, as a prop's.
     pub half_height: f32,
+    /// `bAlignBottom` (engine.u's `Pawn` and `AnimProp` default true):
+    /// false draws the model from its own origin at `location`.
+    pub align_bottom: bool,
     /// Facing, radians (Unreal's yaw).
     pub yaw: f32,
     pub scale: f32,
@@ -320,6 +326,7 @@ pub fn find_cast(
             continue;
         };
         let number = |k: &str, d: f32| o.float(k).or_else(|| defaults.number(k)).unwrap_or(d);
+        let align_bottom = o.flag("bAlignBottom", defaults.bool("bAlignBottom").unwrap_or(true));
         let prop_anim = o
             .structure("AnimHealthy")
             .and_then(|s| match s.get("Anim") {
@@ -342,11 +349,12 @@ pub fn find_cast(
             class: o.class.clone(),
             kind: if is_pawn { Kind::Pawn } else { Kind::Prop },
             location: a.location,
-            half_height: if is_pawn {
+            half_height: if is_pawn && align_bottom {
                 number("CollisionHeight", 78.0)
             } else {
                 0.0
             },
+            align_bottom,
             yaw: yaw_of(a),
             scale: number("DrawScale", 1.0),
             package,
