@@ -32,6 +32,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
+use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
@@ -99,7 +100,8 @@ impl Plugin for EnemiesPlugin {
             )
             .add_systems(
                 Update,
-                animate
+                (hang_weapons, animate)
+                    .chain()
                     .in_set(GameSet::View)
                     .run_if(playing)
                     .run_if(resource_exists::<Fight>),
@@ -299,7 +301,14 @@ impl EnemySounds {
 pub struct TypeLook {
     pub look: Arc<DroidLook>,
     material: Option<Handle<StandardMaterial>>,
+    /// The weapon model it holds (`[look] held_weapon`), when one is drawn.
+    pub held: Option<Arc<HeldModel>>,
 }
+
+/// The entity showing the weapon a fighter holds (a child of the
+/// fighter), moved onto its weapon bone each time the body is posed.
+#[derive(Component)]
+pub struct HeldWeapon(pub Entity);
 
 /// Every enemy type: each `enemies/*.toml` across the data folders (a
 /// mod's file replaces the base file with the same name), each read on top
@@ -561,11 +570,13 @@ fn load_fight(
                         ..default()
                     }));
                 }
+                let held = held_model(&paths, &t.kind.id, &t.look.held_weapon, &log);
                 looks.by_type.insert(
                     t.kind.id.clone(),
                     TypeLook {
                         look: Arc::new(look),
                         material,
+                        held,
                     },
                 );
             }
@@ -578,6 +589,84 @@ fn load_fight(
     let mut battle = Battle::with_types(params, nav, droids);
     battle.scripted = scripted;
     commands.insert_resource(Fight::new(battle));
+}
+
+/// The model of weapon class `weapon` (empty: none), read from the game's
+/// files, for enemy type `kind`.
+fn held_model(
+    paths: &GamePaths,
+    kind: &str,
+    weapon: &str,
+    log: &GameLog,
+) -> Option<Arc<HeldModel>> {
+    if weapon.is_empty() {
+        return None;
+    }
+    let game_data = paths.game_data();
+    let made = rc_effects::projectile::ClassPackages::open(&game_data)
+        .and_then(|c| HeldModel::load(&c, &game_data, weapon));
+    match made {
+        Ok(m) => {
+            log.line(format!("{PART}: {kind}: {}", m.describe()));
+            Some(Arc::new(m))
+        }
+        Err(e) => {
+            log.line(format!(
+                "{PART}: {kind}: held weapon {weapon} not drawn: {e}"
+            ));
+            None
+        }
+    }
+}
+
+/// Give each new fighter whose type holds a weapon its model, on its
+/// weapon bone as the original's `AttachToBone`.
+fn hang_weapons(
+    mut commands: Commands,
+    looks: Res<Looks>,
+    new: Query<(Entity, &Droid), Added<Droid>>,
+    meshes: Option<ResMut<Assets<Mesh>>>,
+    materials: Option<ResMut<Assets<StandardMaterial>>>,
+    images: Option<ResMut<Assets<Image>>>,
+    fight: Res<Fight>,
+) {
+    let (Some(mut meshes), Some(mut materials), Some(mut images)) = (meshes, materials, images)
+    else {
+        return;
+    };
+    for (e, d) in &new {
+        let Some(tl) = looks.by_type.get(&d.kind) else {
+            continue;
+        };
+        let Some(h) = &tl.held else { continue };
+        let Some(p) = fight
+            .battle
+            .fighters
+            .iter()
+            .find(|f| f.id == d.id)
+            .map(|f| f.params.clone())
+        else {
+            continue;
+        };
+        let local = tl.look.local_pose(Pose::Idle, 0.0);
+        let at = tl
+            .look
+            .bone_frame(&local, WEAPON_BONE)
+            .map(|f| h.on_bone(f));
+        let mut w = Entity::PLACEHOLDER;
+        commands.entity(e).with_children(|c| {
+            w = h.spawn(
+                c,
+                at,
+                &mut meshes,
+                &mut materials,
+                &mut images,
+                p.look.ambient,
+                p.look.light_scale,
+            );
+        });
+        commands.entity(e).insert(HeldWeapon(w));
+    }
 }
 
 /// The level's events switch spawners on and off; the scripts' orders stop
@@ -1318,20 +1407,32 @@ fn animate(
     time: Res<Time>,
     fight: Res<Fight>,
     looks: Res<Looks>,
-    mut droids: Query<&mut Droid>,
+    mut droids: Query<(&mut Droid, Option<&HeldWeapon>)>,
+    mut held: Query<&mut Transform, Without<Droid>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
 ) {
     let dt = time.delta_secs();
+    // Held weapons to move onto their bones.
+    let mut weapons_moved = Vec::new();
     let now = fight.battle.time;
     let mut meshes = meshes;
     for f in &fight.battle.fighters {
         let Some(&e) = fight.entities.get(&f.id) else {
             continue;
         };
-        let Ok(mut d) = droids.get_mut(e) else {
+        let Ok((mut d, weapon)) = droids.get_mut(e) else {
             continue;
         };
         let d = &mut *d;
+        let tl = looks.by_type.get(&d.kind);
+        // Where the held weapon goes for bones placed at `local`.
+        let mut place_weapon = |local: &[rc_anim::math::Transform]| {
+            if let (Some(HeldWeapon(w)), Some(tl)) = (weapon, tl) {
+                if let (Some(h), Some(f)) = (&tl.held, tl.look.bone_frame(local, WEAPON_BONE)) {
+                    weapons_moved.push((*w, h.on_bone(f)));
+                }
+            }
+        };
         // A level script's animation, while the script holds it still.
         if d.scripted.is_some() {
             let holding = matches!(f.script, Some(rc_ai::ScriptGoal::Hold { .. }));
@@ -1357,7 +1458,9 @@ fn animate(
                 continue;
             };
             let target = look.local_clip(&sa.clip, sa.frame);
-            let points = look.posed_local(d.blend.apply(target));
+            let local = d.blend.apply(target);
+            place_weapon(local);
+            let points = look.posed_local(local);
             let (pos, normals) = look.wedge_attributes(&points);
             if let Some(mut m) = meshes.get_mut(handle) {
                 m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
@@ -1393,11 +1496,18 @@ fn animate(
             continue;
         };
         let target = look.local_pose(d.pose, d.frame);
-        let points = look.posed_local(d.blend.apply(target));
+        let local = d.blend.apply(target);
+        place_weapon(local);
+        let points = look.posed_local(local);
         let (pos, normals) = look.wedge_attributes(&points);
         if let Some(mut m) = meshes.get_mut(&handle) {
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
             m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        }
+    }
+    for (w, t) in weapons_moved {
+        if let Ok(mut at) = held.get_mut(w) {
+            *at = t;
         }
     }
 }

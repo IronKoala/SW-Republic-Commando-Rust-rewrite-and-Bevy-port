@@ -76,6 +76,7 @@ death_fall = []
 package = "GameData/Animations/clone.ukx"
 mesh = "CloneTrooper"
 skin = ""
+held_weapon = "DC17mBlaster" # game: RequiredEquipment; its AttachmentClass model hangs on bone weaponAttach_R
 throw = "ThrowGrenade"    # not used: troopers carry no grenades
 ambient = 0.5             # the same as the cast's troopers (data/cast/cast.toml)
 light_scale = 1.1         # the same as the cast's troopers

@@ -34,6 +34,8 @@
 //! Settings are in `data/effects/effects.toml`. Everything goes to the log
 //! with an `effects:` prefix, and the numbers to [`EffectStats`].
 
+pub mod held;
+
 use bevy::asset::RenderAssetUsages;
 use bevy::audio::{PlaybackSettings, Volume};
 use bevy::camera::visibility::NoFrustumCulling;

@@ -142,7 +142,9 @@ copy of the game.
   accuracy, speed, rifle, the `CloneTrooper` model). They shoot the
   droids, the droids shoot them, and they leave you and the squad alone.
   They fight the way our droids do, since the original's trooper tactics
-  are compiled code. Settings: `data/enemies/clone_trooper*.toml`.
+  are compiled code. They hold their rifles (the DC-17m and the DC-15, the
+  game's own models), as the level's other troopers do. Settings:
+  `data/enemies/clone_trooper*.toml`.
 
 - **The squad takes cover (tested in the cloud sandbox by numbers, not yet
   on Windows or with eyes).** In a fight, squad mates run to the map's

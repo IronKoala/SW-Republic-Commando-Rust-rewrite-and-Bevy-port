@@ -138,6 +138,7 @@ hurt_interval = 2.0                    # our choice: seconds between hurt lines 
 package = "GameData/Animations/droid.ukx"
 mesh = "BattleDroid"
 skin = ""                 # the skin to wear instead of the mesh's own, as Package.Group.Object (the original's Skins[0]); empty: the mesh's own
+held_weapon = ""          # the weapon class whose model it holds on bone weaponAttach_R (the original's RequiredEquipment), like "DC17mBlaster"; empty: none drawn
 idle = "ActionBreathe"
 walk = "WalkForward"
 run = "RunForward"
