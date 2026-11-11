@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: Using a bacta dispenser puts the gun away for the game's own "hands" moves (rc_combat, rc_game_core, rc_scripts_plugin, data/combat/hand_signal.toml)
+
+- **Changed:** While healing at a bacta dispenser the gun now plays `Holster`, the game's hands model (`HudArmsHands`) plays the dispenser's three moves (`BactaLoad`, then `BactaLoop` over and over while Use is held, then `BactaHolster`), and the gun comes back with `Load`. New `rc_combat::hands` and `data/combat/hand_signal.toml` (one section per use, so door panels etc. can be added as data), `UseItem::hands` (set by the bacta script), `ArmsInput::hold_fire`, `ArmsHistory` (every arms animation started, for tests and mods). New script check and picture `logs/bacta_hands.png`.
+- **Why:** User asked for the arm plugging into the dispenser, from the original files.
+- **Source:** ctinventory.u script text: `HandSignal.SetupBactaHealer` (LoadAnim/FireAnim/HolsterAnim), `HandSignal` class `Mesh = HudArms.HudArmsHands`; ctgame.u `CTPlayer.Use`/`StartHandSignal`/state `UsingItem` (fires the hands each time they go idle while Use is held, `SwitchToLastWeapon` when done); engine.u `Weapon.TweenDown`/`PlaySelect`.
+- **Tested how:** `cargo test --release -p rc_combat --lib` (55 passed, 3 new); `rc_game --script` in the cloud with the game's files on geo_01a.
+- **Result:** 136 checks passed, 4 failed (the 4 are the level lines and objective text timing out, which happens because the cloud game runs slowly; not related). Check "the gun went down, the hands plugged into the dispenser ... then the gun came back up" PASS: `dc17m_blaster Holster`, `hands:bacta BactaLoad`, `BactaLoop`, `BactaHolster`, `dc17m_blaster Load`. Finding: in the shipped hudarms.ukx the three bacta moves are 3-frame (0.1 s) poses with every point of the hands below and behind the eye, out of view (the keypad and squad-order moves in the same set do come into view). So on screen the gun goes down, no hands show, and the gun comes back. No visible arm-plugging animation exists in the game's files.
+- **Still broken / not tested:** Not tested on Windows or by playing. The hands' brightness numbers are copied from the DC-17m arms (not from the game). The test ran with a local, uncommitted fix for the god-ray shader crash on main (fixed separately in PR #112).
+- **Next:** The heal speed: ctgame.u's `BactaDispenser.BeginActivating` heals `MaxHealth / BactaRate` per second (BactaRate 4: a full heal takes 4 s); ours is 50 health a second from `scripts.toml`. Separate change.
+
 ## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
 
 - **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).

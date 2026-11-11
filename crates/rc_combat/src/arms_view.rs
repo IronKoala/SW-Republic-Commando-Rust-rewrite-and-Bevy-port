@@ -58,6 +58,16 @@ pub struct ArmsReadout {
     pub counter: Option<(String, f32)>,
 }
 
+/// The last animations the arms started, oldest first, as
+/// `"<weapon> <game sequence>"` (`"hands:bacta BactaLoad"`), for tests
+/// and mods. Keeps the last [`ArmsHistory::KEEP`].
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ArmsHistory(pub Vec<String>);
+
+impl ArmsHistory {
+    pub const KEEP: usize = 64;
+}
+
 /// The camera that draws the arms.
 #[derive(Component)]
 pub struct ArmsCamera;
@@ -122,13 +132,7 @@ impl ArmsClips for Clips<'_> {
     }
 
     fn group(&self, weapon: &str) -> Option<&str> {
-        self.lib
-            .weapons
-            .get(weapon)?
-            .arms
-            .as_ref()?
-            .attachment_group
-            .as_deref()
+        self.lib.arms_of(weapon)?.attachment_group.as_deref()
     }
 }
 
@@ -203,31 +207,56 @@ pub(crate) fn load_arms(
         Some(l) => l.line(s),
         None => println!("{s}"),
     };
+    // Every weapon carried, and the hands for each use (see `hands`),
+    // each with its moves under the names the rules use.
+    let mut wanted: Vec<(String, &ArmsParams, Vec<(String, String)>)> = vec![];
+    let plain = || {
+        ArmsAnim::ALL
+            .iter()
+            .map(|s| (s.sequence().to_string(), s.sequence().to_string()))
+            .collect::<Vec<_>>()
+    };
     for (id, _) in &arsenal.weapons {
-        if models.0.contains_key(id) {
+        if let Some(a) = lib.weapons.get(id).and_then(|p| p.arms.as_ref()) {
+            wanted.push((id.clone(), a, plain()));
+        }
+    }
+    if let Some(h) = &lib.hands {
+        for (using, m) in &h.uses {
+            let sequences = vec![
+                (ArmsAnim::Load.sequence().to_string(), m.load.clone()),
+                (ArmsAnim::Fire.sequence().to_string(), m.fire.clone()),
+                (ArmsAnim::Holster.sequence().to_string(), m.holster.clone()),
+            ];
+            wanted.push((crate::hands::arms_id(using), &h.arms, sequences));
+        }
+    }
+    for (id, a, sequences) in wanted {
+        if models.0.contains_key(&id) {
             continue;
         }
-        let Some(a) = lib.weapons.get(id).and_then(|p| p.arms.as_ref()) else {
-            continue;
-        };
         let spec = ModelSpec {
             package: a.package.clone(),
             mesh: a.mesh.clone(),
             set: None,
-            sequences: ArmsAnim::ALL
-                .iter()
-                .map(|s| (s.sequence().to_string(), s.sequence().to_string()))
-                .collect(),
+            sequences: sequences.clone(),
             skins: vec![],
             ..Default::default()
         };
         let made = Model::load(&|rel| paths.game_file(rel), &spec);
         match &made {
             Ok((m, notes)) => {
-                let found: Vec<&str> = ArmsAnim::ALL
+                let found: Vec<String> = sequences
                     .iter()
-                    .map(|a| a.sequence())
-                    .filter(|s| m.clip(s).is_some())
+                    .filter(|(ours, _)| m.clip(ours).is_some())
+                    .map(|(ours, game)| {
+                        let clip = m.clip(ours).map_or(0.0, |c| c.duration());
+                        if ours == game {
+                            ours.clone()
+                        } else {
+                            format!("{game} as {ours} ({clip:.2} s)")
+                        }
+                    })
                     .collect();
                 say(format!(
                     "arms: {id}: {} from {}, {} pieces, animations {}",
@@ -243,7 +272,7 @@ pub(crate) fn load_arms(
                 }
                 // The sounds its animations make (see `arms_sound`).
                 if let (Some(sounds), Some(audio)) = (sounds.as_deref_mut(), audio.as_deref_mut()) {
-                    for line in sounds.read(id, m, &paths, audio) {
+                    for line in sounds.read(&id, m, &paths, audio) {
                         say(line);
                     }
                 }
@@ -253,7 +282,7 @@ pub(crate) fn load_arms(
                 a.mesh
             )),
         }
-        models.0.insert(id.clone(), made.map(|(m, _)| Arc::new(m)));
+        models.0.insert(id, made.map(|(m, _)| Arc::new(m)));
     }
 }
 
@@ -265,7 +294,6 @@ pub(crate) struct Watch {
     shots: Option<(String, u32)>,
     reloading: bool,
     feet: Option<Vec3>,
-    logged: Option<(Option<String>, ArmsAnim)>,
     /// Where the arms were last frame, for the animations' sounds.
     heard: Option<Moment>,
 }
@@ -283,14 +311,17 @@ pub(crate) fn animate_arms(
     mut pieces: Query<(Entity, &ArmsPieces, &mut Visibility)>,
     mut throws: MessageReader<ThrowGrenade>,
     mut swings: MessageReader<MeleeSwing>,
-    mut watch: Local<Watch>,
+    (mut watch, mut history): (Local<Watch>, ResMut<ArmsHistory>),
     mut assets: (
         Option<ResMut<Assets<Mesh>>>,
         Option<ResMut<Assets<StandardMaterial>>>,
         Option<ResMut<Assets<Image>>>,
     ),
     log: Option<Res<GameLog>>,
-    cutscene: Option<Res<rc_game_core::Cutscene>>,
+    (cutscene, use_item): (
+        Option<Res<rc_game_core::Cutscene>>,
+        Option<Res<rc_game_core::UseItem>>,
+    ),
     mut sounds: Option<ResMut<ArmsSounds>>,
 ) {
     let (Some(models), Ok((me, arsenal, body, down)), Ok((camera, mut projection))) =
@@ -302,9 +333,17 @@ pub(crate) fn animate_arms(
     };
     let dt = time.delta_secs();
     let current = arsenal.current();
-    let weapon = current
-        .map(|(id, _)| id.clone())
+    // Using something (a bacta dispenser): the hands instead of the gun.
+    let hands = use_item
+        .as_ref()
+        .and_then(|u| u.hands.as_deref())
+        .map(crate::hands::arms_id)
         .filter(|id| matches!(models.0.get(id), Some(Ok(_))));
+    let weapon = hands.clone().or_else(|| {
+        current
+            .map(|(id, _)| id.clone())
+            .filter(|id| matches!(models.0.get(id), Some(Ok(_))))
+    });
     // A shot fired, or a reload begun, with the same weapon as last frame.
     let (fired, reload_started) = match current {
         Some((id, w)) => {
@@ -342,6 +381,7 @@ pub(crate) fn animate_arms(
         reload_started,
         threw: throws.read().any(|t| t.thrower == me),
         melee: swings.read().any(|s| s.attacker == me),
+        hold_fire: hands.is_some(),
     };
     let clips = Clips {
         models: &models,
@@ -365,26 +405,31 @@ pub(crate) fn animate_arms(
         }
     }
     watch.heard = Some(now_at);
-    let now = (arms.shown.clone(), arms.anim);
-    if watch.logged.as_ref() != Some(&now) {
+    // Every animation started this frame, even one that also ended in it
+    // (an animation started again, a shot after a shot, is noted once).
+    let started = watch.arms.take_started();
+    for (w, a) in &started {
+        let shown = w.as_deref().unwrap_or("nothing");
+        let sequence = game_sequence(&lib, w.as_deref(), *a);
+        let entry = format!("{shown} {sequence}");
+        if history.0.last() == Some(&entry) {
+            continue;
+        }
+        history.0.push(entry);
+        if history.0.len() > ArmsHistory::KEEP {
+            history.0.remove(0);
+        }
         let line = format!(
-            "arms: {} plays {} (speed {speed:.0} uu/s{})",
-            arms.shown.as_deref().unwrap_or("nothing"),
-            arms.anim.sequence(),
+            "arms: {shown} plays {sequence} (speed {speed:.0} uu/s{})",
             if zoomed { ", zoomed" } else { "" }
         );
         match &log {
             Some(l) => l.line(line),
             None => println!("{line}"),
         }
-        watch.logged = Some(now);
     }
 
-    let params = arms
-        .shown
-        .as_deref()
-        .and_then(|w| lib.weapons.get(w))
-        .and_then(|p| p.arms.as_ref());
+    let params = arms.shown.as_deref().and_then(|w| lib.arms_of(w));
     if let (Some(a), Projection::Perspective(p)) = (params, &mut *projection) {
         p.fov = vertical_fov(a.fov);
     }
@@ -523,6 +568,20 @@ pub(crate) fn animate_arms(
         }
     }
     commands.insert_resource(readout);
+}
+
+/// The game's name for what `shown` plays: the hands' moves have their
+/// own names (`BactaLoad` for `Load`).
+fn game_sequence(lib: &WeaponLibrary, shown: Option<&str>, anim: ArmsAnim) -> String {
+    let moves = shown
+        .and_then(|w| lib.hands.as_ref()?.for_arms(w))
+        .map(|(_, m)| m);
+    match (moves, anim) {
+        (Some(m), ArmsAnim::Load) => m.load.clone(),
+        (Some(m), ArmsAnim::Fire) => m.fire.clone(),
+        (Some(m), ArmsAnim::Holster) => m.holster.clone(),
+        _ => anim.sequence().to_string(),
+    }
 }
 
 /// Slide the counter's pictures to show `r`, and read back what they show.

@@ -24,6 +24,12 @@ pub struct UseItem {
     /// (the original's `ActivatePromptText`, "PRESS AND HOLD F TO HEAL"),
     /// with the Use button's name already filled in.
     pub prompt: Option<String>,
+    /// While set, the first-person arms put the weapon away and show the
+    /// hands using the thing instead (the original's `HandSignal`
+    /// "weapon"). The name picks which moves the hands play, from
+    /// `data/combat/hand_signal.toml` (`"bacta"`: plugging into a bacta
+    /// dispenser). A VR mod can read the same flag to pose its own hands.
+    pub hands: Option<String>,
 }
 
 /// Where a used thing holds the player.
