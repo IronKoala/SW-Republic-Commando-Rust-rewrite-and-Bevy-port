@@ -82,8 +82,19 @@ copy of the game.
   the game's own; every number is in `data/squad/squad.toml`. The
   windowless test run `rc_squad_sim` passes 36 checks on geo_01a. They
   have the original's health and shields, and at 0 health one goes down
-  and stays put until revived. They are in the game program (`rc_game`):
-  start a level and they stand with you.
+  and stays put until revived. They are in the game program (`rc_game`).
+
+- **Squad mates come and go as each level says (tested in the cloud
+  sandbox by numbers, not yet in the full game, on Windows or by
+  playing).** As in the original, each map has its own squad: mates
+  start where the map places them, and the level's scripts take them out
+  of the squad and bring them back (you find Scorch, Fixer and Sev one by
+  one on Geonosis; on ras_02b Fixer turns up at the final door, opens it
+  and rejoins). Out of the squad, a mate stays put or walks where the
+  script sends them. Some maps start you alone because the map does
+  (ras_01a, ras_02b, geo_05a). Squad mates don't play scripted
+  animations yet. `spawn = "with_player"` in `data/squad/squad.toml`
+  brings back the old way (all three with you from the start).
 
 - **Sev, Fixer and Scorch look like themselves (tested in the cloud
   sandbox and on Windows).** Each squad mate is drawn with the
@@ -372,8 +383,9 @@ copy of the game.
   Hive`, ...), shows a loading screen with the mission text, and drops you
   into the level with an on-screen display (shield, health, crosshair, ammo,
   squad, messages). Escape pauses; the pause menu resumes, opens options or
-  quits to the main menu. It plays the game's own music (the main menu
-  theme, then each campaign's calm tracks). It reads a settings file
+  quits to the main menu. It plays the game's own music by the
+  original's rules (the main menu theme, then each room's music, battle
+  music when enemies come close, a victory flourish when the fight ends). It reads a settings file
   (`settings.toml`: game folder, mods, screen, volumes, mouse) and a controls
   file (`data/input/bindings.toml`: the original PC keys, plus gamepad and
   touch). `rc_game --script` drives itself through the menus and a level and
@@ -602,6 +614,13 @@ copy of the game.
   near them. A prop that breaks sends its event to the level scripts (53
   on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
   go on. Broken props are kept in save files.
+- **Particle effects (since 2026-11-10, tested in the cloud only, not on
+  Windows or by playing).** Explosions now show the game's own fireball,
+  smoke, sparks and flying debris, read from its effect classes (all 575
+  read), with the explosion sounds. Where the map gives one, a broken
+  barrel's model is left behind for a few seconds (geo_03a has them;
+  geo_01b's map says its barrels leave none). Settings in
+  `data/effects/effects.toml`.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to
@@ -627,9 +646,11 @@ copy of the game.
   explosion or broken pieces yet). The last level's ending also needs the
   rockets that hit the ship, which aren't done.
 
-- Breakable props just disappear when they break: their broken model,
-  effect and sound aren't shown yet, the burning or electric after-effect
-  some barrels leave isn't done, and loose props aren't pushed by blasts.
+- Breakable props: the damaged step's model isn't swapped in, the
+  burning or electric after-effect some barrels leave isn't done, and
+  loose props aren't pushed by blasts. Effects aren't drawn yet for shots,
+  grenades or anything else besides breaking props, beam and trail
+  effects aren't drawn, and explosion sounds aren't placed in 3D yet.
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
@@ -641,7 +662,7 @@ copy of the game.
   (the droid, gunship or spot it belongs to) and gets quieter with
   distance, unless the game's own settings for that sound say it is radio
   (most dialogue is). Tested in the cloud on a silent sound card, not yet
-  listened to or run on Windows. No subtitles yet. Music cues, characters walking or animating, the squad
+  listened to or run on Windows. No subtitles yet. Music actions are carried out. Characters walking or animating, the squad
   joining and leaving and camera moves are logged as "not done yet". At the
   end of each campaign the original debriefing screen shows (its own
   picture, frame and texts, with the level's title, words and picture);
@@ -675,8 +696,14 @@ copy of the game.
   in the prologue's gym in the cloud; not tested on Windows. The shadow
   stays flat at the feet (not on steps, slopes or walls) and has sharp
   edges. The squad and enemies don't have these yet.
-- Music: the menu and level tracks play, but the switch to battle music
-  waits for enemies that can say a fight has started. 13 "streamed" ambient loops for the RAS level name files that don't
+- Music: follows the original's rules, read from the game's files
+  (`cargo run --release -p rc_music --bin rc_music_check` checks every
+  level's music against your install). Heard on Windows on 2026-11-09:
+  the menu theme, room music and its overlays, and pausing. Our guesses:
+  exactly when a fight starts and ends, and the fade curves. Not done:
+  battle volumes, the death stinger, debriefing, credits and title-card
+  music, music in save games.
+- 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game
   picks from) are played for weapons, grenades and enemy voices. With 3D
   SOUND on, enemy and scripted sounds are heard from their side. Before

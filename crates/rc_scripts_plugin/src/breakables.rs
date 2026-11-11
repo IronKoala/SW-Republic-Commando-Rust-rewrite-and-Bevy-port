@@ -22,6 +22,9 @@ use crate::LevelScript;
 use bevy::prelude::*;
 use rc_combat::grenade::blast_scale;
 use rc_combat::{Blast, DamageKind, Explode, ShotLanded, WeaponLibrary};
+use rc_effects_plugin::{PreloadEffect, SpawnEffect};
+use rc_game_core::GamePaths;
+use rc_level_viewer::draw::MoverPart;
 use rc_game_core::units;
 use rc_game_core::{GameLog, LevelCollision};
 use rc_level::breakables::Breakable;
@@ -40,6 +43,9 @@ pub struct Breakables {
     by_export: HashMap<usize, Breakable>,
     /// (director time it goes off, export).
     due: Vec<(f32, usize)>,
+    /// Props that just entered a step (export, true for broken), whose
+    /// effect, sound and model `show` puts on.
+    pub(crate) stepped: Vec<(usize, bool)>,
 }
 
 impl Breakables {
@@ -47,6 +53,7 @@ impl Breakables {
         Breakables {
             by_export: list.iter().map(|b| (b.export, b.clone())).collect(),
             due: Vec::new(),
+            stepped: Vec::new(),
         }
     }
 
@@ -83,6 +90,8 @@ pub struct PropStats {
     pub broken: Vec<String>,
     /// Props that exploded, by name.
     pub exploded: Vec<String>,
+    /// Props whose broken model was put in their place, by name.
+    pub broken_looks: Vec<String>,
 }
 
 fn in_box(p: Vec3, (lo, hi): (Vec3, Vec3), slack: f32) -> bool {
@@ -350,6 +359,171 @@ pub(crate) fn explode(
     }
 }
 
+/// A broken prop's model, standing where the prop was until `until`
+/// (level script time; `None`: for good).
+#[derive(Component, Debug, Clone)]
+pub struct BrokenLook {
+    pub export: usize,
+    pub until: Option<f32>,
+}
+
+/// Every effect and sound a breakable prop can need, read while the level
+/// loads.
+pub(crate) fn preload(list: &[Breakable], out: &mut MessageWriter<PreloadEffect>) {
+    let mut seen = std::collections::HashSet::new();
+    for b in list {
+        for t in [&b.damaged, &b.destroyed] {
+            let key = (t.effect.clone(), t.sound_path.clone());
+            if (key.0.is_some() || key.1.is_some()) && seen.insert(key) {
+                out.write(PreloadEffect {
+                    effect: t.effect.clone(),
+                    sound: t.sound_path.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// Props that entered a step: start its effect and sound, and put the
+/// broken model in place.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn show(
+    mut commands: Commands,
+    script: Option<ResMut<LevelScript>>,
+    parts: Option<Res<LevelParts>>,
+    paths: Option<Res<GamePaths>>,
+    mut effects: MessageWriter<SpawnEffect>,
+    drawn: Query<(&MoverPart, &Mesh3d)>,
+    looks: Query<(Entity, &BrokenLook)>,
+    meshes: Option<ResMut<Assets<Mesh>>>,
+    materials: Option<ResMut<Assets<StandardMaterial>>>,
+    images: Option<ResMut<Assets<Image>>>,
+    log: Res<GameLog>,
+) {
+    let Some(mut script) = script else { return };
+    let now = script.director.time;
+    // Broken models whose time is up go.
+    for (e, l) in &looks {
+        if l.until.is_some_and(|t| now >= t) {
+            commands.entity(e).despawn();
+            log.line(format!("props: t={now:.2} broken model of export {} removed", l.export));
+        }
+    }
+    if script.breaking.stepped.is_empty() {
+        return;
+    }
+    let mut meshes = meshes;
+    let mut materials = materials;
+    let mut images = images;
+    let mut mats = paths
+        .as_ref()
+        .map(|p| rc_level_viewer::materials::Materials::new(&p.game_data()));
+    for (export, broken) in std::mem::take(&mut script.breaking.stepped) {
+        let Some(b) = script.breaking.get(export).cloned() else {
+            continue;
+        };
+        let step = if broken { &b.destroyed } else { &b.damaged };
+        let at = [0, 1, 2].map(|k| b.location[k] + step.effect_offset[k]);
+        let floor = parts
+            .as_deref()
+            .and_then(|p| bounds(p, export))
+            .map(|(lo, _)| lo.z)
+            .unwrap_or(b.location[2]);
+        if step.effect.is_some() || step.sound_path.is_some() {
+            effects.write(SpawnEffect {
+                effect: step.effect.clone().unwrap_or_default(),
+                at: to_bevy(Vec3::from_array(at)),
+                floor: Some(to_bevy(Vec3::new(at[0], at[1], floor)).y),
+                sound: step.sound_path.clone(),
+                by: b.name.clone(),
+            });
+        }
+        if !broken {
+            continue;
+        }
+        let Some(path) = &step.mesh_path else {
+            continue;
+        };
+        let (Some(m), Some(meshes), Some(materials), Some(images)) = (
+            mats.as_mut(),
+            meshes.as_deref_mut(),
+            materials.as_deref_mut(),
+            images.as_deref_mut(),
+        ) else {
+            continue;
+        };
+        // The intact prop's own stored light, averaged, lights the broken
+        // one (it has none of its own).
+        let mut sum = Vec4::ZERO;
+        let mut n = 0.0;
+        for (part, mesh) in &drawn {
+            if part.0 != export {
+                continue;
+            }
+            if let Some(bevy::mesh::VertexAttributeValues::Float32x4(c)) = meshes
+                .get(&mesh.0)
+                .and_then(|m| m.attribute(Mesh::ATTRIBUTE_COLOR))
+            {
+                for v in c {
+                    sum += Vec4::from_array(*v);
+                    n += 1.0;
+                }
+            }
+        }
+        let light = if n > 0.0 { sum / n } else { Vec4::ONE };
+        match rc_effects_plugin::static_mesh(m, path) {
+            Ok(sections) => {
+                let until = (step.life_span > 0.0).then(|| {
+                    let extra = step.life_span_max * ((export as f32 * 0.618).fract());
+                    now + step.life_span + extra
+                });
+                for (mut mesh, pic) in sections {
+                    // Model units to the level: placed like the prop.
+                    if let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) =
+                        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+                    {
+                        for v in p.iter_mut() {
+                            // static_mesh gave Bevy axes (x, z, y); back to
+                            // the model's own, then into the level.
+                            let w = b.to_level([v[0], v[2], v[1]]);
+                            *v = to_bevy(Vec3::from_array(w)).to_array();
+                        }
+                    }
+                    let material = StandardMaterial {
+                        base_color: Color::linear_rgb(light.x, light.y, light.z),
+                        base_color_texture: pic.map(|p| images.add(rc_level_viewer::draw::to_image(&p))),
+                        unlit: true,
+                        double_sided: true,
+                        cull_mode: None,
+                        ..default()
+                    };
+                    commands.spawn((
+                        Mesh3d(meshes.add(mesh)),
+                        MeshMaterial3d(materials.add(material)),
+                        Transform::IDENTITY,
+                        BrokenLook { export, until },
+                        DespawnOnExit(rc_game_core::GameState::InGame),
+                    ));
+                }
+                script.props.broken_looks.push(b.name.clone());
+                log.line(format!(
+                    "props: t={now:.2} {} shows its broken model {}{}",
+                    b.name,
+                    path.join("."),
+                    until
+                        .map(|t| format!(" until t={t:.2}"))
+                        .unwrap_or_else(|| " for good".into())
+                ));
+            }
+            Err(e) => log.line(format!(
+                "props: t={now:.2} {}: broken model {} can't be read: {e}",
+                b.name,
+                path.join(".")
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +547,10 @@ mod tests {
             class: "ExplosiveBarrelGEO".into(),
             tag: "ExplosiveBarrelGEO".into(),
             location: [0.0; 3],
+            rotation: [0; 3],
+            draw_scale: 1.0,
+            draw_scale_3d: [1.0; 3],
+            pre_pivot: [0.0; 3],
             health: 60.0,
             damaged_ratio: 0.0,
             event: None,
@@ -432,6 +610,10 @@ mod tests {
             class: "ExplosiveBarrelGEO".into(),
             tag: "ExplosiveBarrelGEO".into(),
             location: at,
+            rotation: [0; 3],
+            draw_scale: 1.0,
+            draw_scale_3d: [1.0; 3],
+            pre_pivot: [0.0; 3],
             health: 60.0,
             damaged_ratio: 0.0,
             event: Some(format!("{name}Gone")),

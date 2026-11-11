@@ -54,7 +54,8 @@ the small set of types in `crates/rc_game_core`.
 | What the map has | `rc_level_plugin::LevelInfo` (counts, sky position), present while in the game |
 | A new camera the player looks through (VR) | give it `PlayerCamera`; the level part adds `SkyViewer` so the sky turns with it |
 | Recoil | send a `ViewKick { pitch, yaw }` message (radians); the player's view applies it |
-| Battle music | set `MusicMood::Battle` when a fight starts, `Calm` when it ends |
+| Battle music | list your enemies in `rc_game_core::MusicThreats` (where each is, in Unreal units, and whether it is fighting); the music's battle rules decide when a fight starts and ends |
+| Music from a script or a mod | send `rc_game_core::MusicCue` (set the music state, play a one-off piece, battle on or off, battle settings, force a fight or the victory flourish) |
 | Where the player is | the entity with `Player`; the view is the entity with `PlayerCamera` |
 | Show numbers on screen | write `PlayerVitals`, `WeaponReadout`, `SquadReadout`, or send a `HudMessage` |
 | Units | `units::to_bevy` / `units::to_unreal` (50 Unreal units = 1 Bevy unit) |
@@ -102,7 +103,7 @@ it starts), so old saves still load after you add a part.
 | level (`rc_level_plugin`) | `LevelCollision`, `PlayerStart`, `LevelInfo`, the map's look and sky camera; `SkyViewer` on the player's camera | `CurrentLevel`, `GamePaths` |
 | player | the `Player` body, the `PlayerCamera` | `ActionState`, `LevelCollision` |
 | weapons and combat | `WeaponReadout`, `PlayerVitals` | `ActionState`, `PlayerCamera`, `LevelCollision` |
-| enemies | their own entities, `MusicMood` | `Player`, `LevelCollision` |
+| enemies | their own entities, `MusicMood`, `MusicThreats` | `Player`, `LevelCollision` |
 | squad | `SquadReadout` | `ActionState`, `Player` |
 | saving (`rc_save`) | the save files, `SaveList`, `SaveResult`, `RestoringSave`, `CurrentLevel` when loading | every registered `SavePart`, `CheckpointReached`, `ActionState` |
 

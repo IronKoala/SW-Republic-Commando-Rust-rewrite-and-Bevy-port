@@ -1710,8 +1710,18 @@ grenade `Blast` hurts the props around it, and a prop's own explosion sends
 `rc_combat::Explode` (characters) and hurts the props around it (so barrels
 set each other off). Broken and damaged state are saved with the scripts.
 
-Not done yet: the broken or damaged model (props just disappear), the
-effect and sound, the burning or electric after-effect some barrels leave,
+When a step starts, `rc_scripts_plugin/src/breakables.rs` (`show`) sends
+its effect (`Effect`, at `EffectOffset`) and sound (`TransitionSound`) to
+the effects plugin, and for a broken step with a model (`Mesh`) puts that
+model where the prop stood, for the step's `StateLifeSpan`. A map that
+writes its own `DestroyedState` replaces the class's one whole: geo_01b's
+barrels say `Mesh=None`, so they leave no broken model there (geo_03a's
+and others' do: `MarkerIcons.SetTrap.GEO_EplBarrel_Dest`). The broken
+model is unlit and tinted by the average vertex colour of the prop it
+replaces (our choice).
+
+Not done yet: the damaged step's model, the broken look in save files,
+the burning or electric after-effect some barrels leave,
 the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
 through (geo_04c's wall components) aren't in the collision, so shots pass
 through them.
@@ -2068,12 +2078,57 @@ slicing, Sev sniping, as in the original). Mods can change a job or add a new on
   the weapons part's attachments. If a post's weapon file isn't there, the
   squad mate uses the usual DC-17m and the log says so once.
 
-### Where the squad comes from
+### Where the squad comes from, leaving and rejoining (`rc_squad/src/presence.rs`, `rc_squad_plugin/src/membership.rs`)
 
-`spawn = "with_player"` puts all three in their form-up slots at the
-start. The original brings them in through each map's scripts: on geo_01a
-only Scorch, from `PawnFactory14` on the `levelstart` event. The log lists
-these (`the map would bring in ...`) for later.
+As in the original, each map has its own squad (`spawn = "from_map"`, the
+default). Most mission maps place `Commando07Delta`, `Commando40Delta` and
+`Commando62Delta` actors; those squad mates start where they are placed,
+in the squad. A few come later from a `PawnFactory` whose `Prototype` is
+one of those classes, when its event is sent, out of the squad (Scorch on
+geo_01a at `levelstart`, Fixer on ras_02b at `PlayerAtFinalDoor`, Sev and
+Scorch on yyy_01d). A map with neither has no squad mates: the player
+starts ras_01a, ras_01c, ras_02a, ras_02b and geo_05a alone. Mates are not
+carried from map to map; the original only carries their health
+(`SaveSquadTravelInfo`). `spawn = "with_player"` (all three around the
+player, the old way) is still there, and is what a map that can't be read
+gets. `rc_game --script` and `rc_squad_sim` use it through
+`SquadSpawnOverride`, because their checks are about all three.
+
+Level scripts take mates out and put them back with
+`ACTION_ChangeSquadMember` (`MemberTag`, `bAddMember`, default add; the
+class's own script calls `RemoveFromSquad` / `AddToSquad` for every pawn
+with that tag). Scripts name a mate by its `Tag`: the class name unless
+the map gives another (`Seven`, `Delta07`, `Delta40` from a factory's
+`PawnTagFromFactory`). The scripts part resolves the tag to the mate's
+entity (`ScriptTags`) and sends `rc_game_core::SquadMembership`; the squad
+part carries it out.
+
+Each `rc_squad::Member` has a `Presence`: `InSquad`, `Away` (in the level,
+out of the squad) or `Gone` (not in the level). Away and gone members are
+skipped by orders, marked jobs, cover, fighting and reviving
+(`Member::available`). An away member stands where they are unless a
+script sends them somewhere: they follow `CharacterOrder`s (walk or run
+to a point or to the player, turn to the player, wait for the player, be
+put somewhere, hide, leave the level) using the squad's own path finding
+and steering, and the script hears back (`CharacterOrderDone`) when they
+get there. In the squad, orders that would walk or turn them are answered
+at once (the squad leads them). Bodies come and go with presence
+(`sync_bodies`). A save keeps each mate's presence and which spawners went
+off (`presence`, `spawners_used` in `[squad]`).
+
+yyy_06d's `NewSquad` spawners make second copies of Fixer and Scorch while
+the first ones are still in the level. We have one body per squad mate,
+so the one in the level moves to the spawner and takes the new name.
+
+Not done: scripted animations on squad mates (`PlayAnim` is logged and
+skipped), scripted walks for mates who are in the squad (the original
+lets a high-priority script take over a squad member), and squad mates
+other than Delta (clone troopers, "Fred" on ras_01c) joining.
+
+Checked by `cargo test -p rc_squad_plugin --test rejoin_room` (no game
+files) and `cargo run --release -p rc_squad_plugin --example rejoin_survey
+-- <Maps folder>`, which lists every map's mates and checks every
+`ChangeSquadMember` names one of them.
 
 ### Finding the way
 
@@ -2461,11 +2516,47 @@ target, shield and health bars, the ammo counter, a squad list and short
 messages. It reads only the readout resources, and logs its numbers every
 two seconds.
 
-**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
-`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
-track and, per map name prefix, a calm and a battle list; `MusicMood`
-chooses between them. Each track is despawned when it ends and the next one
-starts.
+**Music.** The original's music system ("iMuse") is rebuilt from what the
+game's own files say, with nothing hard-coded per level:
+
+- `rc_music::library` reads every piece of music from the `*_music.uax`
+  packages (`SoundStreamed`: file, looping, fade-in and fade-out time and
+  shape, loudness from `params_mus.uax`, likelihood) and every group
+  (`SoundMultiple`: members picked at random by likelihood, an optional
+  first piece, and for battle groups the "won" flourish and the "lost"
+  music). Room music comes from the `AudioEnvironment` classes in
+  `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
+  delay and spacing, once only).
+- `rc_level::music` reads what a map says: the `LevelInfo` battle settings
+  (battle music, how many enemies, inner and outer radius, criteria) and
+  every volume with an `AudioClass`.
+- `rc_music::imuse` is the director, without Bevy. Inputs: script music
+  actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
+  `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
+  `ForceVictoryFlourish`), rooms entered, where the enemies are and whether
+  they are fighting, and whether the player is down. Output: play and stop
+  commands for three layers (main, overlay, episode).
+- `rc_game`'s `music.rs` carries the commands out with Bevy's audio and
+  fades. Menus play what their menu class says (`BackgroundMusic`: the main
+  menu's sung theme; the loading and pause menus have none, so the level's
+  music pauses).
+- Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
+  part lists its enemies in `MusicThreats`.
+- `data/music/music.toml` holds only our own timings (how often the battle
+  check runs, how long after the last enemy the fight ends, the
+  player-down music) and an optional menu override.
+
+Our reading of the battle rules (the original does this in compiled code,
+so these are guesses checked against the settings' names and defaults): a
+fight starts when the number of counted enemies inside the inner radius
+reaches the threshold; it ends when no counted enemy has been inside the
+outer radius for 3 seconds, then the "won" flourish plays and the room's
+music comes back. "Proximity" counts any living enemy, "Attack" counts
+fighting enemies anywhere, "Attack and proximity" counts fighting enemies
+in range. A state set by a script during a fight waits until the fight
+ends. The fade curves (linear, sine, log, inverse log) are our guess at
+the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
+credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each
@@ -2611,7 +2702,9 @@ squad:
      `Died` (the droid stops and plays its death animation, and its body
      stays), and hears the player's `FireShot`s.
    - `MusicMood::Battle` while any droid is alerted or attacking, `Calm`
-     otherwise and on leaving the level.
+     otherwise and on leaving the level. Every living droid and whether it
+     is fighting goes into `MusicThreats`, which the music's battle rules
+     read.
    - Looks: the `[look]` section names the mesh (`BattleDroid` in
      `droid.ukx`) and which animation plays for idle, walk, run, back,
      sidesteps, fire, crouch, crouched fire and death. Every droid's points
@@ -3340,11 +3433,47 @@ target, shield and health bars, the ammo counter, a squad list and short
 messages. It reads only the readout resources, and logs its numbers every
 two seconds.
 
-**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
-`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
-track and, per map name prefix, a calm and a battle list; `MusicMood`
-chooses between them. Each track is despawned when it ends and the next one
-starts.
+**Music.** The original's music system ("iMuse") is rebuilt from what the
+game's own files say, with nothing hard-coded per level:
+
+- `rc_music::library` reads every piece of music from the `*_music.uax`
+  packages (`SoundStreamed`: file, looping, fade-in and fade-out time and
+  shape, loudness from `params_mus.uax`, likelihood) and every group
+  (`SoundMultiple`: members picked at random by likelihood, an optional
+  first piece, and for battle groups the "won" flourish and the "lost"
+  music). Room music comes from the `AudioEnvironment` classes in
+  `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
+  delay and spacing, once only).
+- `rc_level::music` reads what a map says: the `LevelInfo` battle settings
+  (battle music, how many enemies, inner and outer radius, criteria) and
+  every volume with an `AudioClass`.
+- `rc_music::imuse` is the director, without Bevy. Inputs: script music
+  actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
+  `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
+  `ForceVictoryFlourish`), rooms entered, where the enemies are and whether
+  they are fighting, and whether the player is down. Output: play and stop
+  commands for three layers (main, overlay, episode).
+- `rc_game`'s `music.rs` carries the commands out with Bevy's audio and
+  fades. Menus play what their menu class says (`BackgroundMusic`: the main
+  menu's sung theme; the loading and pause menus have none, so the level's
+  music pauses).
+- Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
+  part lists its enemies in `MusicThreats`.
+- `data/music/music.toml` holds only our own timings (how often the battle
+  check runs, how long after the last enemy the fight ends, the
+  player-down music) and an optional menu override.
+
+Our reading of the battle rules (the original does this in compiled code,
+so these are guesses checked against the settings' names and defaults): a
+fight starts when the number of counted enemies inside the inner radius
+reaches the threshold; it ends when no counted enemy has been inside the
+outer radius for 3 seconds, then the "won" flourish plays and the room's
+music comes back. "Proximity" counts any living enemy, "Attack" counts
+fighting enemies anywhere, "Attack and proximity" counts fighting enemies
+in range. A state set by a script during a fight waits until the fight
+ends. The fade curves (linear, sine, log, inverse log) are our guess at
+the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
+credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each
@@ -4063,6 +4192,42 @@ the middle, a blue box edge, no glow and a lit floor in low light, the same
 picture after cycling round), and `rc_game --script` (starts in tactical
 with the squad glowing, X goes to low light with the lamp and back, the two
 GAME page rows change the settings).
+
+## Particle effects (`rc_effects`, `rc_effects_plugin`)
+
+The game's fireballs, smoke, sparks and flying debris are `Emitter`
+classes in the script packages (575 of them, mostly in
+`Properties/CTEffects.u`). Each class's defaults list its parts in
+`Emitters`: `SpriteEmitter`s (camera-facing squares with a picture) and
+`MeshEmitter`s (copies of a model), each a block of named values
+(`MaxParticles`, `Lifetime`, `StartVelocityRange`, `SizeScale`,
+`ColorScale`, `Texture`, `TextureUSubdivisions`, `DrawStyle` ...). The
+class also names a `SpawnSound`. `rc_effects` reads these with the engine's
+defaults (`engine.u`'s `ParticleEmitter`) under the class's own values
+(`read.rs`, `tagged.rs`), and runs them with no Bevy (`sim.rs`): spawning
+at the emitter's rate, moving with speed, gravity and drag, growing and
+fading by the scale lists, picking picture frames, bouncing debris off the
+floor. `rc_effect_check` reads every effect in the install.
+
+`rc_effects_plugin` draws them. Any part of the game sends `SpawnEffect`
+(effect class, place, optional floor height and sound); `PreloadEffect`
+reads one ahead of time (the level does this for every breakable prop's
+effect, so the first blast doesn't stall). Sprites become one mesh per
+emitter rebuilt each frame, with the emitter's draw style turned into a
+blend mode (Translucent and Brighten add light, AlphaBlend blends,
+Modulated and Darken multiply). Mesh debris is one entity per piece. The
+sound plays with its loudness falling off with distance
+(`sound_half_distance`). Settings are in `data/effects/effects.toml`
+(on/off, size, a particle cap, volume).
+
+Our choices (not checked against the original): a sprite's size is its
+half-width; both the prop's `TransitionSound` and the effect's
+`SpawnSound` play; added-light sprites ignore the colour list's alpha;
+debris bounces off a flat floor at the prop's base, not the level;
+`UseDirectionAs`, `MaxAbsVelocity` and blending between frames are
+ignored; beam and trail emitters aren't drawn; sounds aren't placed in 3D
+yet, only made quieter with distance (the level scripts' 3D sound in
+`rc_scripts_plugin/src/sounds.rs` could be reused).
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 

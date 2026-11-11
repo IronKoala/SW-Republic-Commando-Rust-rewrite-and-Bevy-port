@@ -1,0 +1,8 @@
+[package]
+name = "rc_effects"
+version = "0.1.0"
+edition.workspace = true
+description = "Particle effects (explosions, sparks, smoke): reads the game's Emitter classes from its script packages and runs them, with no Bevy."
+
+[dependencies]
+rc_package = { path = "../rc_package" }

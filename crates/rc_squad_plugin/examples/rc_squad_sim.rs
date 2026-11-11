@@ -1047,6 +1047,9 @@ fn main() -> AppExit {
     .insert_resource(log)
     .insert_resource(LevelCollision(world.clone()))
     .insert_resource(map_data)
+    // The checks here are about all three following, fighting and
+    // working; the squad from the map is checked by the rejoin tests.
+    .insert_resource(rc_squad_plugin::SquadSpawnOverride::with_player())
     .insert_resource(Sim {
         pawn: Pawn::new(params, feet),
         yaw,
