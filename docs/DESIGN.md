@@ -3463,7 +3463,9 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   rest. A value that is already set is never overwritten. Empty colours
   mean opaque white, empty scales mean 1.
 - `rc_menus::quads` turns widgets into textured rectangles in a 0..1 menu
-  area laid out for 640x480. `rc_menus::render` paints the same rectangles
+  area whose pictures and letters are sized for 800x600 (the original's
+  `XInterface.dll` ResScale), with stretched pictures' corners one texel
+  to one screen pixel (`quads::set_pixels_high`). `rc_menus::render` paints the same rectangles
   in software; the script compares that picture with a screenshot.
 - `rc_menus::gpu` makes copies of pictures for Bevy: each render style
   (normal, masked, translucent or additive, alpha) and each tint gets its
@@ -3544,6 +3546,20 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   the new `DeleteSave` messages, asking first with the original question
   box where the original does (`OriginalMenus::ask`, `Asking`). A page
   button that opens a load or save page that can't be drawn is greyed out.
+- The pause menu's rows follow the original's own rules each time it
+  opens (`rc_menus::pause`, rewritten by hand from the script in
+  `XInterfaceCTMenus.u`): which of the eleven rows show depends on health,
+  being down, a briefing (`Cutscene.held`), the prologue, the quicksave
+  and whether hints can be switched back on (`settings.game.hint_screens`
+  off and the map's LevelInfo `bLevelContainsHints`, read by
+  `rc_game/src/original_pause.rs` when the level starts). The rows that
+  show are stacked one step apart (the step between the first two rows),
+  centred on the screen. The menu starts from the layout as first read on
+  each opening (`PageScreen.base`), as the original makes a new menu each
+  time; coming back from its own pages keeps the rows, except that closing
+  the load or save page hides LOAD LAST SAVE or QUICK LOAD when their saves
+  are gone. `rc_probe --menu XInterfaceCTMenus.CTPausePCMenu` paints each
+  case.
 - `rc_game/src/original_hud.rs` swaps the placeholder HUD's drawn shapes
   for the original's pictures, named in `data/ui/hud.toml` (the original
   places them in native code, so placement is ours). It reads its own

@@ -89,6 +89,91 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             focus = rc_menus::lists::widget_of(&layout, 0, 2);
         }
     }
+    if rc_menus::pause::is_pause_menu(&layout) {
+        // The pause menu sets its rows up each time it opens
+        // (rc_menus::pause): each case painted on its own, and the
+        // pictures below show it playing with a quicksave.
+        use rc_menus::pause::PauseState;
+        let cases = [
+            ("playing", PauseState::default()),
+            (
+                "playing_quicksave",
+                PauseState {
+                    has_quick_save: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "playing_quicksave_hints_off",
+                PauseState {
+                    has_quick_save: true,
+                    can_enable_hints: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "down",
+                PauseState {
+                    no_health: true,
+                    incapacitated: true,
+                    has_quick_save: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "dead",
+                PauseState {
+                    no_health: true,
+                    has_quick_save: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "briefing",
+                PauseState {
+                    briefing: true,
+                    ..Default::default()
+                },
+            ),
+        ];
+        let name = class.rsplit('.').next().unwrap_or(class);
+        let _ = std::fs::create_dir_all(out_dir);
+        let mut chosen = None;
+        for (case, s) in cases {
+            let mut l = layout.clone();
+            let Some(rows) = rc_menus::pause::init(&mut l, &s) else {
+                continue;
+            };
+            let f = rc_menus::pause::row(&l, rows.focus);
+            let names: Vec<String> = rows
+                .shown
+                .iter()
+                .filter_map(|&i| rc_menus::pause::row(&l, i))
+                .map(|w| match &l.widgets[w].kind {
+                    Kind::Button(b) => format!("{} at {:.4}", b.blurred.text, b.blurred.pos[1]),
+                    _ => String::new(),
+                })
+                .collect();
+            log.line(format!(
+                "pause menu {case}: top {:.4}, focus {}, rows: {}",
+                rows.top,
+                rows.focus,
+                names.join(", ")
+            ));
+            quads::set_pixels_high(480.0);
+            let q = quads::menu_quads(&l, f, &mut assets);
+            let picture = render::render(&q, &mut assets, 640, 480, [0, 0, 0, 255]);
+            let path = out_dir.join(format!("{name}_{case}.png"));
+            let _ = std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f));
+            if case == "playing_quicksave" {
+                chosen = Some((f, l));
+            }
+        }
+        if let Some((f, l)) = chosen {
+            focus = f;
+            layout = l;
+        }
+    }
     log.line(format!(
         "{} widgets ({} shown on PC), skipped: {:?}",
         layout.widgets.len(),
@@ -135,6 +220,15 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
         log.line(format!("  [{shown}] pass {} {}: {line}", w.pass, w.name));
     }
     let focus = focus.or_else(|| layout.buttons_on_pc().first().copied());
+    // Painted 480 pixels high, or RC_PROBE_MENU_HIGH (to compare with a
+    // screenshot of the original). Stretched pictures' corners are one
+    // texel to one pixel, so the quads depend on it.
+    let high: usize = std::env::var("RC_PROBE_MENU_HIGH")
+        .ok()
+        .and_then(|h| h.parse().ok())
+        .filter(|&h| h >= 120)
+        .unwrap_or(480);
+    quads::set_pixels_high(high as f32);
     let quads = quads::menu_quads(&layout, focus, &mut assets);
     log.line(format!("{} quads to draw", quads.len()));
     for q in &quads {
@@ -164,7 +258,7 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             }
         }
     }
-    let picture = render::render(&quads, &mut assets, 640, 480, [0, 0, 0, 255]);
+    let picture = render::render(&quads, &mut assets, high * 4 / 3, high, [0, 0, 0, 255]);
     let name = class.rsplit('.').next().unwrap_or(class);
     let _ = std::fs::create_dir_all(out_dir);
     let path = out_dir.join(format!("{name}.png"));
@@ -185,7 +279,13 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             quad.dst[0] = (quad.dst[0] - left) / screen;
             quad.dst[2] = (quad.dst[2] - left) / screen;
         }
-        let picture = render::render(&q, &mut assets, (480.0 * aspect).round() as usize, 480, [0, 0, 0, 255]);
+        let picture = render::render(
+            &q,
+            &mut assets,
+            (high as f32 * aspect).round() as usize,
+            high,
+            [0, 0, 0, 255],
+        );
         let path = out_dir.join(format!("{name}_{shape}.png"));
         let _ = std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f));
         log.line(format!(
@@ -337,7 +437,11 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         let _ = std::fs::create_dir_all(out_dir);
         let path = out_dir.join(format!("hud_{w}x{h}.png"));
         match std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f)) {
-            Ok(()) => log.line(format!("{w}x{h}: {} pictures, painted to {}", quads.len(), path.display())),
+            Ok(()) => log.line(format!(
+                "{w}x{h}: {} pictures, painted to {}",
+                quads.len(),
+                path.display()
+            )),
             Err(e) => log.line(format!("couldn't write {}: {e}", path.display())),
         }
     }
