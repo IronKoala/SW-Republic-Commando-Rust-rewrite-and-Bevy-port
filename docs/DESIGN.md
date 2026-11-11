@@ -4188,7 +4188,15 @@ geo_01a's landing gunship hovers from its map place over the player
 start instead of being stood on the ground. Cast members are drawn by
 the level's light where they stand (`rc_game_core::LitByPlace`, the
 data file's `light_scale`, 1.1 as the squad and droids), so a trooper in
-shade is dark; holograms keep their own glow.
+shade is dark; holograms keep their own glow. A character whose class names a weapon
+(`RequiredEquipment`, "CTInventory.DC17mBlaster" on `CloneTrooper`)
+holds its model: the weapon's `AttachmentClass` (engine.u's `Weapon`;
+`DC17mBlasterAttachment`) gives a `StaticMesh`, read with
+`rc_effects::projectile::ClassPackages::held_weapon` and drawn on the
+bone `weaponAttach_R` (engine.u's `Pawn.GetWeaponBoneFor` returns it for
+every weapon; `AttachToBone`), placed again each time the body is posed
+(`rc_model::Model::bone_frame`). A class without a static mesh (the
+gunship's chin gun) draws nothing and says so in the log.
 
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its
