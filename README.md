@@ -382,8 +382,12 @@ copy of the game.
   hologram (a see-through commando) fades in where a squad mate would heal
   when you aim at that spot and a squad mate is hurt; and the helmet's own sounds play
   when you aim at it, while healing and when full. When each sound plays
-  and how the panel moves are our reading (native code); the arm plugging
-  in and the zap effect aren't done. Settings: `[bacta]` in
+  and how the panel moves are our reading (native code). While healing the
+  gun goes down and the game's own "hands" moves for the dispenser play
+  (`BactaLoad`, `BactaLoop`, `BactaHolster` from `hudarms.ukx`), then the
+  gun comes back up; in the game's files those hand moves sit out of view,
+  so no hands show on screen (tested in the cloud, not on Windows). The
+  zap effect isn't done. Settings: `[bacta]` in
   `data/scripts/scripts.toml`, `[use_panel]` in `data/ui/hud.toml`.
   Enemy spawners now follow the scripts too (tested in the cloud sandbox
   with the real files, not yet on Windows or by playing): the level's
@@ -716,6 +720,9 @@ copy of the game.
   explosion, and the blasts hurt what is near. Only explosive missiles
   fly so far; bullets, bolts and grenades from spawners are logged and
   skipped. The trails' ribbon part isn't drawn yet.
+- **Clone troopers in missions (since 2026-11-11, tested in the cloud
+  only).** They take the light of where they stand, and hold their rifles:
+  the game's own DC-17m model, on their hand bone. They don't fire yet.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to

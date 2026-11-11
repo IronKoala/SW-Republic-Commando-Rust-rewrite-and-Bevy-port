@@ -34,6 +34,7 @@ pub mod damage_types;
 pub mod data;
 mod fire;
 pub mod grenade;
+pub mod hands;
 pub mod health;
 mod library;
 mod melee;
@@ -45,7 +46,7 @@ mod throw;
 mod view;
 pub mod weapon;
 
-pub use arms_view::{ArmsCamera, ArmsReadout, ARMS_CAMERA_ORDER, ARMS_LAYER};
+pub use arms_view::{ArmsCamera, ArmsHistory, ArmsReadout, ARMS_CAMERA_ORDER, ARMS_LAYER};
 pub use damage_types::{DamageTable, DamageTypes};
 pub use grenade::{GrenadeParams, Grenades};
 pub use health::{
@@ -210,6 +211,7 @@ impl Plugin for WeaponsPlugin {
             // Pickup sounds (`pickup_sound`).
             .init_resource::<pickup_sound::PickupSounds>()
             .init_resource::<arms_sound::ArmsSounds>()
+            .init_resource::<arms_view::ArmsHistory>()
             .add_systems(
                 Update,
                 (

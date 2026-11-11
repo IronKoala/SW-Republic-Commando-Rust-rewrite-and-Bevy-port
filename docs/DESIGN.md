@@ -1778,8 +1778,16 @@ class defaults with `rc_probe --classes`:
     the same value: red (255 - 115v), green (140 + 115v), blue 180,
     opacity 240.
   - The prompt (`DrawActivateText`) is (164,200,208), fading in to
-    opacity 220 (the fade-in, the helmet's `PromptFadeInTime` 0.5 s by our
-    reading, is not done). Its place, near the top in two lines ("PRESS
+    opacity 220. The fade-in is copied from `DrawActivateText`: opacity
+    = whole part of (seconds up / `PromptFadeInTime` x 220), so 0 on the
+    first frame and 220 from 0.5 s on (`PromptFadeInTime` is 0.5 in
+    engine.u's Helmet defaults, read with `rc_probe --classes`). The clock
+    starts again when the prompt was not drawn the frame before
+    (`bActivateTextLastFrame`, also cleared when the advisor's words take
+    the box) or its words differ from `LastActivateText`. In the port:
+    `LayoutSettings::prompt_faded_in`, `fade = "prompt"` on the prompt
+    elements, see-through (`blend = "alpha"`) like the advisor's words,
+    which go through the same text call. Its place, near the top in two lines ("PRESS
     AND HOLD 'F' TO" / "HEAL"), is still matched to the user's
     screenshots: the `{prompt1}`/`{prompt2}` elements of
     `data/ui/hud.toml`.
@@ -3331,6 +3339,23 @@ the real reload times of the sniper (78 frames, 2.6 s), anti-armour
 (42 frames, 1.4 s) and the Trandoshan repeater (65 frames, 2.17 s), which
 were stand-ins before.
 
+**Using things: the hands** (`rc_combat/src/hands.rs`,
+`data/combat/hand_signal.toml`). The game's `HandSignal` is a "weapon"
+(mesh `HudArmsHands`) that using something switches to
+(`CTPlayer.StartHandSignal`, `SwitchWeapon(11)`). For a bacta dispenser
+(`HandSignal.SetupBactaHealer`) its moves are `BactaLoad` (up),
+`BactaLoop` (fired again each time it goes idle while Use is held,
+`CTPlayer` state `UsingItem`) and `BactaHolster` (down); then
+`Pawn.SwitchToLastWeapon` brings the gun back with `Load`. We follow the
+same order: the scripts set `UseItem::hands = "bacta"` while healing, the
+arms put the gun away with `Holster`, play the hands with their moves
+under the usual names (`hold_fire` keeps `Fire` going), and bring the gun
+back when it's cleared. Measured in the shipped files: the three bacta
+moves are 3-frame poses (0.1 s) with every point of the hands below and
+behind the eye, outside the view, so on screen the gun goes down and
+comes back and no hands show. The keypad and squad-order moves in the
+same set do come into view, so the measurement is sound.
+
 The sniper attachment has `bZoomedUsesNoHUDArms`: its arms are hidden
 while zoomed (`hide_zoomed`). The arms are also hidden while the player is
 down.
@@ -3482,6 +3507,16 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   (`rc_menus::layout::MovieWidget`) and keeps a Bevy image on the frame
   for the real time since it started; `original_menu::draw` places it
   under the menu, cut to the screen's shape by `MenuVideo::crop`.
+  Decoding is on the CPU: about 5 ms a 512x512 frame in a release build,
+  so 30 frames a second cost little. Two guards keep a slow computer from
+  dragging the game down: the decoder and the oxideav crates are built
+  optimised even in debug builds (`[profile.dev.package.*]` in the root
+  `Cargo.toml`; unoptimised they took about 70 ms a frame), and `play`
+  decodes at most `MAX_DECODES_PER_UPDATE` frames per game frame. When
+  the clock is further ahead, the video's start moves later, so it shows
+  every picture in order but runs late, instead of each game frame
+  decoding more catch-up frames than the last (logged once,
+  `MenuVideo::frames_late` counts them).
 - `rc_menus::pages` handles the pages behind the main menu (pause,
   campaign, options) as data. `data/ui/original_menus.toml` names each
   page's menu class and maps each button's function name (the original's
@@ -4182,7 +4217,18 @@ their `Location`; props are drawn at theirs, and so are characters whose
 class turns `bAlignBottom` off (engine.u: "Actor aligned to bottom of
 cylinder", true on `Pawn`; ctcharacters.u's `Gunship` sets it false), so
 geo_01a's landing gunship hovers from its map place over the player
-start instead of being stood on the ground.
+start instead of being stood on the ground. Cast members are drawn by
+the level's light where they stand (`rc_game_core::LitByPlace`, the
+data file's `light_scale`, 1.1 as the squad and droids), so a trooper in
+shade is dark; holograms keep their own glow. A character whose class names a weapon
+(`RequiredEquipment`, "CTInventory.DC17mBlaster" on `CloneTrooper`)
+holds its model: the weapon's `AttachmentClass` (engine.u's `Weapon`;
+`DC17mBlasterAttachment`) gives a `StaticMesh`, read with
+`rc_effects::projectile::ClassPackages::held_weapon` and drawn on the
+bone `weaponAttach_R` (engine.u's `Pawn.GetWeaponBoneFor` returns it for
+every weapon; `AttachToBone`), placed again each time the body is posed
+(`rc_model::Model::bone_frame`). A class without a static mesh (the
+gunship's chin gun) draws nothing and says so in the log.
 
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its

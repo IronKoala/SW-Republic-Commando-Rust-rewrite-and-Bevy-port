@@ -1,0 +1,20 @@
+# The hands the player uses things with: the game's HandSignal "weapon"
+# (CTInventory.HandSignal). Using something puts the gun away and brings
+# these hands up instead (see crates/rc_combat/src/hands.rs).
+
+[arms]
+# The animated model, read from the game at run time (Animations/hudarms.ukx).
+mesh = "HudArmsHands"     # game: HandSignal's Mesh (HudArms.HudArmsHands)
+fov = 85                  # game: DisplayFOV (HandSignal keeps Weapon's 85)
+# NOT from the game files: the same values as the DC-17m's arms, so the
+# hands are lit like the gun they replace. The original lights the arms
+# in its compiled engine code, which we don't read.
+brightness = 0.75
+light_scale = 0.85
+
+# One section per thing used: its three moves in HudArmsHandsSet.
+# game: HandSignal.SetupBactaHealer
+[bacta]
+load = "BactaLoad"        # LoadAnim: the hands come up and plug in
+fire = "BactaLoop"        # FireAnim: repeated while Use is held
+holster = "BactaHolster"  # HolsterAnim: unplug and go down
