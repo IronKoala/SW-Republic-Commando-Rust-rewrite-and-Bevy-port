@@ -38,6 +38,7 @@
 mod ammo;
 pub mod look;
 pub mod save;
+pub mod membership;
 pub mod voice;
 
 use bevy::prelude::*;
@@ -94,6 +95,60 @@ pub struct SquadState {
     /// The lift or other mover each squad mate stands on (its name in the
     /// map), by `Squad::members` index.
     pub riding: Vec<Option<String>>,
+    /// What the level's scripts call each squad mate and where the map
+    /// brings them in, by `Squad::members` index.
+    pub mates: Vec<MateTags>,
+    /// A level script waiting on a squad mate (a walk, the player coming
+    /// near): the script and action, by `Squad::members` index.
+    pub script_waits: Vec<Option<membership::ScriptWait>>,
+}
+
+/// Where the squad comes from, overriding `spawn` in the settings file.
+/// `rc_game --script` puts all three with the player, as its checks
+/// were written for.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct SquadSpawnOverride(pub rc_squad::Spawn);
+
+impl SquadSpawnOverride {
+    pub fn with_player() -> Self {
+        SquadSpawnOverride(rc_squad::Spawn::WithPlayer)
+    }
+}
+
+/// What the level's scripts call a squad mate, and the spawner that
+/// brings them in later, if the map has one.
+#[derive(Debug, Clone, Default)]
+pub struct MateTags {
+    /// The name scripts use (`Commando62Delta`, `Delta40`, `Seven`).
+    pub tag: String,
+    /// The `ScriptedSequence` they follow, if any.
+    pub script: Option<String>,
+    /// The map's spawners that make this mate (usually none or one;
+    /// yyy_06d makes new copies of Fixer and Scorch late in the level).
+    pub factories: Vec<rc_squad::SquadFactory>,
+    /// The spawners (by actor name) that went off already: each makes
+    /// one, as in the map.
+    pub factories_used: Vec<String>,
+    /// What scripts called them before any spawner went off.
+    pub placed_tag: String,
+    pub placed_script: Option<String>,
+}
+
+impl MateTags {
+    /// Back to how the map starts them, then as if the `used` spawners
+    /// had gone off (in that order), for a loaded save.
+    pub fn replay(&mut self, used: &[String]) {
+        self.tag = self.placed_tag.clone();
+        self.script = self.placed_script.clone();
+        self.factories_used.clear();
+        for u in used {
+            if let Some(f) = self.factories.iter().find(|f| f.actor == *u) {
+                self.tag = f.pawn_tag.clone();
+                self.script = f.script.clone();
+            }
+            self.factories_used.push(u.clone());
+        }
+    }
 }
 
 /// Player options that change how the squad takes orders. The game sets
@@ -167,6 +222,8 @@ pub struct SquadMapData {
     /// squad-mate spawners): the prologue, briefings and epilogue. No
     /// squad mates are brought in.
     pub squadless: bool,
+    /// The map's squad information was read (`info` is the map's own).
+    pub read: bool,
 }
 
 impl SquadMapData {
@@ -193,6 +250,7 @@ impl SquadMapData {
         };
         match rc_squad::map::read(&pkg, &data) {
             Ok(info) => {
+                out.read = true;
                 out.notes.push(format!(
                     "{} squad markers, {} squad-mate spawners in the map",
                     info.markers.len(),
@@ -213,8 +271,20 @@ impl SquadMapData {
                 }
                 for f in &info.factories {
                     out.notes.push(format!(
-                        "  the map would bring in {} at ({:.0}, {:.0}, {:.0}) on event '{}' ({})",
-                        f.class, f.location.x, f.location.y, f.location.z, f.tag, f.actor
+                        "  the map brings in {} at ({:.0}, {:.0}, {:.0}) on event '{}' ({}, called {})",
+                        f.class, f.location.x, f.location.y, f.location.z, f.tag, f.actor, f.pawn_tag
+                    ));
+                }
+                for p in &info.placed {
+                    out.notes.push(format!(
+                        "  {} placed at ({:.0}, {:.0}, {:.0}) ({}, called {}, script {})",
+                        p.class,
+                        p.location.x,
+                        p.location.y,
+                        p.location.z,
+                        p.actor,
+                        p.tag,
+                        p.script.as_deref().unwrap_or("none")
                     ));
                 }
                 out.info = info;
@@ -264,6 +334,7 @@ pub struct SquadJobQueue(pub Vec<SquadEvent>);
 pub struct SquadLooks {
     tried: bool,
     pub ambient: f32,
+    pub light_scale: f32,
     pub blend: look::BlendTimes,
     pub models: HashMap<String, Option<Arc<rc_model::Model>>>,
 }
@@ -283,6 +354,7 @@ impl SquadLooks {
         };
         log_line(log, format!("looks from {}", file.display()));
         self.ambient = looks.ambient;
+        self.light_scale = looks.light_scale;
         self.blend = looks.blend;
         log_line(
             log,
@@ -348,6 +420,10 @@ impl Plugin for SquadPlugin {
         app.add_message::<SquadOrder>()
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<SquadJobDone>()
+            .add_message::<rc_game_core::SquadMembership>()
+            .add_message::<rc_game_core::ScriptEvent>()
+            .add_message::<rc_game_core::CharacterOrder>()
+            .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<MarkerJob>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
@@ -368,7 +444,7 @@ impl Plugin for SquadPlugin {
                     .in_set(GameSet::Simulate)
                     .in_set(SquadSet)
                     .after(spawn_squad)
-                    .before(check_down)
+                    .before(membership::factory_arrivals)
                     .run_if(resource_exists::<save::PendingSquadSave>),
             )
             .add_systems(OnExit(GameState::InGame), clear_squad)
@@ -376,6 +452,10 @@ impl Plugin for SquadPlugin {
                 Update,
                 (
                     spawn_squad,
+                    membership::factory_arrivals,
+                    membership::change_membership,
+                    membership::follow_script_orders,
+                    sync_bodies,
                     check_down,
                     ride_movers,
                     take_orders,
@@ -512,10 +592,7 @@ fn spawn_squad(
     map: Option<Res<SquadMapData>>,
     paths: Option<Res<GamePaths>>,
     log: Option<Res<GameLog>>,
-    meshes: Option<ResMut<Assets<Mesh>>>,
-    materials: Option<ResMut<Assets<StandardMaterial>>>,
-    images: Option<ResMut<Assets<Image>>>,
-    mut looks: ResMut<SquadLooks>,
+    spawn_override: Option<Res<SquadSpawnOverride>>,
 ) {
     if state.squad.is_some() {
         return;
@@ -523,7 +600,14 @@ fn spawn_squad(
     let (Ok(pt), Some(collision)) = (player.single(), collision) else {
         return;
     };
-    let settings = load_settings(paths.as_deref(), &log);
+    let mut settings = load_settings(paths.as_deref(), &log);
+    if let Some(o) = spawn_override {
+        log_line(
+            &log,
+            format!("spawn {:?} (set by the game, not the settings file)", o.0),
+        );
+        settings.spawn = o.0;
+    }
     for line in settings.summary() {
         log_line(&log, line);
     }
@@ -574,14 +658,98 @@ fn spawn_squad(
             );
         }
     }
+    // Where each mate is: from the map (as the original), or all with
+    // the player.
+    let from_map = squad.settings.spawn == rc_squad::Spawn::FromMap;
+    let info = map.as_ref().filter(|m| from_map && m.read).map(|m| &m.info);
+    if from_map && info.is_none() {
+        log_line(
+            &log,
+            "spawn = from_map, but the map's squad mates couldn't be read: all three start with the player",
+        );
+    }
+    let mut events = events;
+    state.mates = Vec::new();
+    for i in 0..squad.members.len() {
+        let class = squad.members[i].settings.class.clone();
+        let source = info.and_then(|inf| inf.mate(&class));
+        let factories: Vec<rc_squad::SquadFactory> = info
+            .map(|inf| {
+                inf.factories
+                    .iter()
+                    .filter(|f| f.class.eq_ignore_ascii_case(&class))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let (tag, script) = match source {
+            Some(src) => (src.tag().to_string(), src.script().map(str::to_string)),
+            None => (class.clone(), None),
+        };
+        state.mates.push(MateTags {
+            placed_tag: tag.clone(),
+            placed_script: script.clone(),
+            tag,
+            script,
+            factories,
+            factories_used: Vec::new(),
+        });
+        if info.is_none() {
+            continue;
+        }
+        match source {
+            Some(rc_squad::MateSource::Placed(p)) => {
+                let feet = p.location - UVec3::new(0.0, 0.0, mate_half_height());
+                events.extend(squad.arrive(i, feet, p.yaw, true));
+                log_line(
+                    &log,
+                    format!(
+                        "{} is placed in the map ({}, called {}{}): in the squad",
+                        squad.members[i].settings.name,
+                        p.actor,
+                        p.tag,
+                        p.script
+                            .as_ref()
+                            .map(|s| format!(", follows script {s}"))
+                            .unwrap_or_default()
+                    ),
+                );
+            }
+            Some(rc_squad::MateSource::Factory(f)) => {
+                squad.members[i].presence = rc_squad::Presence::Gone;
+                log_line(
+                    &log,
+                    format!(
+                        "{} comes later: {} makes them on event '{}' (called {}), out of the squad",
+                        squad.members[i].settings.name, f.actor, f.tag, f.pawn_tag
+                    ),
+                );
+            }
+            None => {
+                squad.members[i].presence = rc_squad::Presence::Gone;
+                log_line(
+                    &log,
+                    format!(
+                        "{} is not in this map",
+                        squad.members[i].settings.name
+                    ),
+                );
+            }
+        }
+    }
     for e in &events {
         log_line(&log, e.to_string());
     }
     commands.insert_resource(SquadFightStats::sized(squad.members.len()));
+    let here = squad
+        .members
+        .iter()
+        .filter(|m| m.presence == rc_squad::Presence::InSquad)
+        .count();
     log_line(
         &log,
         format!(
-            "{} squad mates with the player at ({:.0}, {:.0}, {:.0}); {} markers; path network {}",
+            "{here} of {} squad mates in the squad with the player at ({:.0}, {:.0}, {:.0}); {} markers; path network {}",
             squad.members.len(),
             leader.feet.x,
             leader.feet.y,
@@ -594,10 +762,62 @@ fn spawn_squad(
             }
         ),
     );
-    // The original models where they could be read; otherwise a stand-in
-    // body (placeholder): a capsule the commando's size in their colour,
-    // with a dark visor showing which way they face. Nothing is drawn
-    // without a renderer.
+    // The bodies come next frame, from `sync_bodies`.
+    state.squad = Some(squad);
+}
+
+/// Half the height of a squad mate's body: a map gives where its middle
+/// is, the squad works with its feet.
+pub fn mate_half_height() -> f32 {
+    MoveParams::player_commando().collision_height
+}
+
+/// Give every squad mate in the level a body and take it away from those
+/// who left the level. The original models where they could be read;
+/// otherwise a stand-in body (placeholder): a capsule the commando's size
+/// in their colour, with a dark visor showing which way they face.
+/// Nothing is drawn without a renderer.
+#[allow(clippy::too_many_arguments)]
+fn sync_bodies(
+    mut commands: Commands,
+    state: Res<SquadState>,
+    mut bodies: Query<(Entity, &SquadMate, &mut rc_game_core::ScriptTags)>,
+    paths: Option<Res<GamePaths>>,
+    log: Option<Res<GameLog>>,
+    meshes: Option<ResMut<Assets<Mesh>>>,
+    materials: Option<ResMut<Assets<StandardMaterial>>>,
+    images: Option<ResMut<Assets<Image>>>,
+    mut looks: ResMut<SquadLooks>,
+) {
+    let Some(squad) = state.squad.as_ref() else {
+        return;
+    };
+    let mut has = vec![false; squad.members.len()];
+    for (e, mate, mut tags) in &mut bodies {
+        // A spawner can give them a new name (yyy_06d's second copies).
+        if let Some(t) = state.mates.get(mate.index) {
+            if tags.tag.as_deref() != Some(t.tag.as_str()) || tags.script != t.script {
+                tags.tag = Some(t.tag.clone());
+                tags.script = t.script.clone();
+            }
+        }
+        let gone = squad
+            .members
+            .get(mate.index)
+            .is_none_or(|m| m.presence == rc_squad::Presence::Gone);
+        if gone {
+            commands.entity(e).despawn();
+            log_line(&log, format!("{}'s body taken out of the level", mate.name));
+        } else if let Some(h) = has.get_mut(mate.index) {
+            *h = true;
+        }
+    }
+    let wanted: Vec<usize> = (0..squad.members.len())
+        .filter(|&i| !has[i] && squad.members[i].presence != rc_squad::Presence::Gone)
+        .collect();
+    if wanted.is_empty() {
+        return;
+    }
     let drawing = meshes.is_some() && materials.is_some() && images.is_some();
     if drawing {
         let keys: Vec<String> = squad
@@ -611,7 +831,9 @@ fn spawn_squad(
         (Some(meshes), Some(materials), Some(images)) => Some((meshes, materials, images)),
         _ => None,
     };
-    for (i, m) in squad.members.iter().enumerate() {
+    for i in wanted {
+        let m = &squad.members[i];
+        let tags = state.mates.get(i);
         let mut e = commands.spawn((
             SquadMate {
                 index: i,
@@ -628,19 +850,35 @@ fn spawn_squad(
                 m.settings.shield_recharge_delay,
             ),
             Team::Republic,
-            // Level scripts name squad mates by their class
-            // (`MakeInvulnerable Tag=Commando62Delta`). Their own scripted
-            // walks aren't carried out yet.
+            // Level scripts name squad mates by their `Tag` (the class
+            // name unless the map gave another, like `Delta40`), and
+            // walk them about while they're out of the squad
+            // (`membership.rs`).
             rc_game_core::ScriptTags {
-                tag: Some(m.settings.class.clone()),
-                script: None,
-                follows_orders: false,
+                tag: Some(tags.map_or_else(|| m.settings.class.clone(), |t| t.tag.clone())),
+                script: tags.and_then(|t| t.script.clone()),
+                follows_orders: true,
             },
             Hittable::COMMANDO,
             // The original's squad damage table: droid bolts x0.15,
             // explosions x0.4, stuns x0.
             DamageTable("DV_OrganicCTSquadDamage".into()),
         ));
+        log_line(
+            &log,
+            format!(
+                "{} gets a body at ({:.0}, {:.0}, {:.0}), {}",
+                m.settings.name,
+                m.pawn.feet().x,
+                m.pawn.feet().y,
+                m.pawn.feet().z,
+                if m.presence == rc_squad::Presence::InSquad {
+                    "in the squad"
+                } else {
+                    "out of the squad"
+                }
+            ),
+        );
         let Some((meshes, materials, images)) = assets.as_mut() else {
             continue;
         };
@@ -648,6 +886,7 @@ fn spawn_squad(
             let mut mm = look::spawn_pieces(
                 model.clone(),
                 looks.ambient,
+                looks.light_scale,
                 &mut e,
                 meshes,
                 materials,
@@ -659,7 +898,6 @@ fn spawn_squad(
             stand_in_body(&mut e, m.settings.colour, meshes, materials);
         }
     }
-    state.squad = Some(squad);
 }
 
 /// The placeholder body for a squad mate whose model couldn't be read.

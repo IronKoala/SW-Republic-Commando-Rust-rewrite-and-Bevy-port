@@ -6,6 +6,7 @@ pub mod camera;
 pub mod draw;
 pub mod lighting;
 pub mod materials;
+pub mod probe;
 pub mod prop_light;
 pub mod scene;
 pub mod sky;

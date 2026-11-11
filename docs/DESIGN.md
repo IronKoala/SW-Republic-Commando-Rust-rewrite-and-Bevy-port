@@ -26,6 +26,7 @@ The code is a Cargo "workspace": several small Rust libraries and programs
 | `rc_squad_plugin` | `SquadPlugin`, the squad in the Bevy game, and the `rc_squad_sim` example (a windowless squad test on a real map). |
 | `rc_hologram` | `HologramPlugin`: holograms shimmer and flicker like the original's `DynamicHologram` shader, with the game's own glow and noise pictures. Check: `hologram_check` example in `rc_level_viewer`. |
 | `rc_cast` | `CastPlugin`, the characters placed in a map that no other part owns (the Kaminoans, young clones, troopers and commandos of the cutscenes, animated props, troopers and vehicles standing about in missions): drawn with the game's models and moved by the level scripts. |
+| `rc_shadows` | `ShadowsPlugin`, character shadows the way the original draws them: each marked character's shape laid on the floor from a light high above (`CastsShadow`, `data/shadows/shadows.toml`). The `shadow_check` example checks it without the game. |
 | `rc_game_core` | The shared pieces every part of the game plugs into: screens, folders, input actions, display readouts, loading, collision, player markers, units, the log, and the save interface (`save`). Bevy, but no window. |
 | `rc_movers_plugin` | `MoversPlugin`, doors and lifts in `rc_game`: runs `rc_movers` on the level part's movers, puts them in `LevelCollision`, moves their drawn parts, and opens doors by event name (`LevelMovers::send`). |
 | `rc_scripts` | Level scripts: runs a map's own scripting (scripted triggers and sequences, touch triggers, counters, true/false conditions, checkpoints, destructible props) as events and tags. No Bevy. `rc_script_check` reads every map's scripts and runs them without a window. |
@@ -412,6 +413,55 @@ game running.
 The real-time light factors are still placeholders. The plan to set them
 properly: compute what our lights would give at each static-mesh vertex and
 compare with the colours the game baked there, then adjust until they agree.
+
+**Light by place (characters, the gun, the helmet).** Squad mates, droids,
+the first-person gun and the helmet frame carry no baked light, and the
+original draws them by where they are: dim in a dark tunnel, bright in the
+sun. Until 2026-11-09 ours used fixed guesses (`ambient = 0.5`,
+`arms.brightness = 0.75`, helmet `brightness = 0.5`), so in YYY_06A's tunnel
+the gun was 2 to 3.5 times brighter than in the user's original screenshot
+and the squad about twice as bright.
+
+- `rc_level_viewer::probe::LightProbe` (no Bevy) is built once per level
+  from `scene::Scene`: points spread over every lit surface (about every 3
+  Bevy units on big triangles, one per small triangle) with the surface's
+  facing and its light, from the prop corner colours (zone ambient
+  included), the terrain's corner colours and the lightmaps, on the game's
+  scale (stored value x drawing gain / 255, so 1.0 shows a texture as
+  stored). They sit in a grid of 6-unit cells. A question ("how much light
+  at this point?") averages the samples within 6 units that face the point,
+  weighted by how squarely they face it and 1 / (1 + distance²); with none
+  it looks 12, then 24 units away. Packed to 20 bytes a sample: 0.3 to 1.1
+  million samples, 6 to 22 MB, built in 30 to 140 ms per map (yyy_06a,
+  geo_04a, ras_01a, geo_01a). `cargo run -p rc_level_viewer --example
+  probe_check -- MAP` prints the light at a map's start.
+- `rc_level_plugin` puts it in `rc_game_core::PlaceLight` while a level is
+  on. Any part tags an entity `rc_game_core::LitByPlace` (`own`, `scale`,
+  `height`, `made_at`, and whether it sets the glow or the base colour);
+  `rc_level_plugin::place_light` gives the entity its own copies of its
+  materials and every 0.1 s sets them to `own + scale x light`, eased over
+  about a quarter of a second, measured `height` above the entity. The
+  log says the light at the player's eyes every 5 s (`light: at the
+  player's eyes ...`).
+- Who uses it, and the numbers (all in data files): squad mates
+  (`squad/looks.toml` `light_scale = 1.1`) and enemies (`light_scale` in
+  `enemies/*.toml`, default 1.1) as their glow, so real-time lights still
+  add; the gun (`arms.light_scale = 0.85` in each weapon file) and the
+  helmet frame (`ui/helmet.toml`: its own `brightness = 0.5` plus
+  `light_scale = 0.8`) as their colour. The old fixed values are kept for
+  when there's no level light (and for `arms.light_scale = 0`).
+- Matched to two original screenshots, YYY_06A's start tunnel (light 0.35)
+  and GEO_04A's canyon (about 0.45-0.5, spot not exactly known). Middle
+  values (0-255), original / before / after: tunnel gun body 22 / 76 / 25,
+  gun side 56 / 113 / 43, helmet top 58 / 35 / 59, helmet lower left 66 /
+  40 / 68; canyon gun 43 / 76 / 34 and 63 / 113 / 55, helmet 69 / 35 / 65
+  and 110 / 40 / 74. Squad mates in the tunnel: brightest 2% of their
+  pixels 67-95 in the original, 153 before, about 105 after (one mate,
+  another spot).
+- It is a fill light only: no direction, so a character in the sun isn't
+  brighter on the sunny side, and the original's per-light shading isn't
+  copied. The scales come from two screenshots and are a calibration, not
+  the original's formula.
 
 **Speed (and VR).** The viewer uses `live_lights = dynamic` by default: the
 91-98% of lights that are baked cost nothing at run time, and only a handful
@@ -1709,8 +1759,18 @@ grenade `Blast` hurts the props around it, and a prop's own explosion sends
 `rc_combat::Explode` (characters) and hurts the props around it (so barrels
 set each other off). Broken and damaged state are saved with the scripts.
 
-Not done yet: the broken or damaged model (props just disappear), the
-effect and sound, the burning or electric after-effect some barrels leave,
+When a step starts, `rc_scripts_plugin/src/breakables.rs` (`show`) sends
+its effect (`Effect`, at `EffectOffset`) and sound (`TransitionSound`) to
+the effects plugin, and for a broken step with a model (`Mesh`) puts that
+model where the prop stood, for the step's `StateLifeSpan`. A map that
+writes its own `DestroyedState` replaces the class's one whole: geo_01b's
+barrels say `Mesh=None`, so they leave no broken model there (geo_03a's
+and others' do: `MarkerIcons.SetTrap.GEO_EplBarrel_Dest`). The broken
+model is unlit and tinted by the average vertex colour of the prop it
+replaces (our choice).
+
+Not done yet: the damaged step's model, the broken look in save files,
+the burning or electric after-effect some barrels leave,
 the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
 through (geo_04c's wall components) aren't in the collision, so shots pass
 through them.
@@ -2068,12 +2128,57 @@ slicing, Sev sniping, as in the original). Mods can change a job or add a new on
   the weapons part's attachments. If a post's weapon file isn't there, the
   squad mate uses the usual DC-17m and the log says so once.
 
-### Where the squad comes from
+### Where the squad comes from, leaving and rejoining (`rc_squad/src/presence.rs`, `rc_squad_plugin/src/membership.rs`)
 
-`spawn = "with_player"` puts all three in their form-up slots at the
-start. The original brings them in through each map's scripts: on geo_01a
-only Scorch, from `PawnFactory14` on the `levelstart` event. The log lists
-these (`the map would bring in ...`) for later.
+As in the original, each map has its own squad (`spawn = "from_map"`, the
+default). Most mission maps place `Commando07Delta`, `Commando40Delta` and
+`Commando62Delta` actors; those squad mates start where they are placed,
+in the squad. A few come later from a `PawnFactory` whose `Prototype` is
+one of those classes, when its event is sent, out of the squad (Scorch on
+geo_01a at `levelstart`, Fixer on ras_02b at `PlayerAtFinalDoor`, Sev and
+Scorch on yyy_01d). A map with neither has no squad mates: the player
+starts ras_01a, ras_01c, ras_02a, ras_02b and geo_05a alone. Mates are not
+carried from map to map; the original only carries their health
+(`SaveSquadTravelInfo`). `spawn = "with_player"` (all three around the
+player, the old way) is still there, and is what a map that can't be read
+gets. `rc_game --script` and `rc_squad_sim` use it through
+`SquadSpawnOverride`, because their checks are about all three.
+
+Level scripts take mates out and put them back with
+`ACTION_ChangeSquadMember` (`MemberTag`, `bAddMember`, default add; the
+class's own script calls `RemoveFromSquad` / `AddToSquad` for every pawn
+with that tag). Scripts name a mate by its `Tag`: the class name unless
+the map gives another (`Seven`, `Delta07`, `Delta40` from a factory's
+`PawnTagFromFactory`). The scripts part resolves the tag to the mate's
+entity (`ScriptTags`) and sends `rc_game_core::SquadMembership`; the squad
+part carries it out.
+
+Each `rc_squad::Member` has a `Presence`: `InSquad`, `Away` (in the level,
+out of the squad) or `Gone` (not in the level). Away and gone members are
+skipped by orders, marked jobs, cover, fighting and reviving
+(`Member::available`). An away member stands where they are unless a
+script sends them somewhere: they follow `CharacterOrder`s (walk or run
+to a point or to the player, turn to the player, wait for the player, be
+put somewhere, hide, leave the level) using the squad's own path finding
+and steering, and the script hears back (`CharacterOrderDone`) when they
+get there. In the squad, orders that would walk or turn them are answered
+at once (the squad leads them). Bodies come and go with presence
+(`sync_bodies`). A save keeps each mate's presence and which spawners went
+off (`presence`, `spawners_used` in `[squad]`).
+
+yyy_06d's `NewSquad` spawners make second copies of Fixer and Scorch while
+the first ones are still in the level. We have one body per squad mate,
+so the one in the level moves to the spawner and takes the new name.
+
+Not done: scripted animations on squad mates (`PlayAnim` is logged and
+skipped), scripted walks for mates who are in the squad (the original
+lets a high-priority script take over a squad member), and squad mates
+other than Delta (clone troopers, "Fred" on ras_01c) joining.
+
+Checked by `cargo test -p rc_squad_plugin --test rejoin_room` (no game
+files) and `cargo run --release -p rc_squad_plugin --example rejoin_survey
+-- <Maps folder>`, which lists every map's mates and checks every
+`ChangeSquadMember` names one of them.
 
 ### Finding the way
 
@@ -2461,11 +2566,47 @@ target, shield and health bars, the ammo counter, a squad list and short
 messages. It reads only the readout resources, and logs its numbers every
 two seconds.
 
-**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
-`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
-track and, per map name prefix, a calm and a battle list; `MusicMood`
-chooses between them. Each track is despawned when it ends and the next one
-starts.
+**Music.** The original's music system ("iMuse") is rebuilt from what the
+game's own files say, with nothing hard-coded per level:
+
+- `rc_music::library` reads every piece of music from the `*_music.uax`
+  packages (`SoundStreamed`: file, looping, fade-in and fade-out time and
+  shape, loudness from `params_mus.uax`, likelihood) and every group
+  (`SoundMultiple`: members picked at random by likelihood, an optional
+  first piece, and for battle groups the "won" flourish and the "lost"
+  music). Room music comes from the `AudioEnvironment` classes in
+  `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
+  delay and spacing, once only).
+- `rc_level::music` reads what a map says: the `LevelInfo` battle settings
+  (battle music, how many enemies, inner and outer radius, criteria) and
+  every volume with an `AudioClass`.
+- `rc_music::imuse` is the director, without Bevy. Inputs: script music
+  actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
+  `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
+  `ForceVictoryFlourish`), rooms entered, where the enemies are and whether
+  they are fighting, and whether the player is down. Output: play and stop
+  commands for three layers (main, overlay, episode).
+- `rc_game`'s `music.rs` carries the commands out with Bevy's audio and
+  fades. Menus play what their menu class says (`BackgroundMusic`: the main
+  menu's sung theme; the loading and pause menus have none, so the level's
+  music pauses).
+- Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
+  part lists its enemies in `MusicThreats`.
+- `data/music/music.toml` holds only our own timings (how often the battle
+  check runs, how long after the last enemy the fight ends, the
+  player-down music) and an optional menu override.
+
+Our reading of the battle rules (the original does this in compiled code,
+so these are guesses checked against the settings' names and defaults): a
+fight starts when the number of counted enemies inside the inner radius
+reaches the threshold; it ends when no counted enemy has been inside the
+outer radius for 3 seconds, then the "won" flourish plays and the room's
+music comes back. "Proximity" counts any living enemy, "Attack" counts
+fighting enemies anywhere, "Attack and proximity" counts fighting enemies
+in range. A state set by a script during a fight waits until the fight
+ends. The fade curves (linear, sine, log, inverse log) are our guess at
+the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
+credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each
@@ -2611,7 +2752,9 @@ squad:
      `Died` (the droid stops and plays its death animation, and its body
      stays), and hears the player's `FireShot`s.
    - `MusicMood::Battle` while any droid is alerted or attacking, `Calm`
-     otherwise and on leaving the level.
+     otherwise and on leaving the level. Every living droid and whether it
+     is fighting goes into `MusicThreats`, which the music's battle rules
+     read.
    - Looks: the `[look]` section names the mesh (`BattleDroid` in
      `droid.ukx`) and which animation plays for idle, walk, run, back,
      sidesteps, fire, crouch, crouched fire and death. Every droid's points
@@ -2681,6 +2824,16 @@ table and sight). The files: `trandoshan` (Prosecutor mercenaries),
 `trandoshan_slaver_berserker`, `trandoshan_slaver_grenadier`,
 `trandoshan_heavy` and `trandoshan_scavenger`, with weapons
 `trandoshan_shotgun`, `trandoshan_rifle` and `scav_beam`.
+
+Grievous's bodyguards have 250 shield, which never recharges.
+**Missiles.** An enemy weapon with a
+`lobbed` shot and a grenade file with `flight.gravity = 0` flies straight
+and goes off on touching anything: the bodyguards' missile rack
+(`grievous_missile_rack.toml` with `data/grenades/grievous_missile.toml`).
+To check that a level's own scripts and its spawners work together without
+a window, `rc_guard_check` (an example in `rc_enemies`) runs yyy_01e's
+scripts and spawners with a stand-in player that kills each bodyguard 3 s
+after it appears, and checks the level ends.
 
 **Grenades.** `[grenades]` gives an enemy grenades: which file in
 `data/grenades/` and how many (the Trandoshan mercenary: two of
@@ -3330,11 +3483,47 @@ target, shield and health bars, the ammo counter, a squad list and short
 messages. It reads only the readout resources, and logs its numbers every
 two seconds.
 
-**Music.** `music.rs` plays the game's Ogg Vorbis files straight from
-`GameData/Music` with Bevy's audio. `data/music/music.toml` picks the menu
-track and, per map name prefix, a calm and a battle list; `MusicMood`
-chooses between them. Each track is despawned when it ends and the next one
-starts.
+**Music.** The original's music system ("iMuse") is rebuilt from what the
+game's own files say, with nothing hard-coded per level:
+
+- `rc_music::library` reads every piece of music from the `*_music.uax`
+  packages (`SoundStreamed`: file, looping, fade-in and fade-out time and
+  shape, loudness from `params_mus.uax`, likelihood) and every group
+  (`SoundMultiple`: members picked at random by likelihood, an optional
+  first piece, and for battle groups the "won" flourish and the "lost"
+  music). Room music comes from the `AudioEnvironment` classes in
+  `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
+  delay and spacing, once only).
+- `rc_level::music` reads what a map says: the `LevelInfo` battle settings
+  (battle music, how many enemies, inner and outer radius, criteria) and
+  every volume with an `AudioClass`.
+- `rc_music::imuse` is the director, without Bevy. Inputs: script music
+  actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
+  `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
+  `ForceVictoryFlourish`), rooms entered, where the enemies are and whether
+  they are fighting, and whether the player is down. Output: play and stop
+  commands for three layers (main, overlay, episode).
+- `rc_game`'s `music.rs` carries the commands out with Bevy's audio and
+  fades. Menus play what their menu class says (`BackgroundMusic`: the main
+  menu's sung theme; the loading and pause menus have none, so the level's
+  music pauses).
+- Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
+  part lists its enemies in `MusicThreats`.
+- `data/music/music.toml` holds only our own timings (how often the battle
+  check runs, how long after the last enemy the fight ends, the
+  player-down music) and an optional menu override.
+
+Our reading of the battle rules (the original does this in compiled code,
+so these are guesses checked against the settings' names and defaults): a
+fight starts when the number of counted enemies inside the inner radius
+reaches the threshold; it ends when no counted enemy has been inside the
+outer radius for 3 seconds, then the "won" flourish plays and the room's
+music comes back. "Proximity" counts any living enemy, "Attack" counts
+fighting enemies anywhere, "Attack and proximity" counts fighting enemies
+in range. A state set by a script during a fight waits until the fight
+ends. The fade curves (linear, sine, log, inverse log) are our guess at
+the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
+credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each
@@ -3787,6 +3976,56 @@ cast can't be hurt), and saving their places (the cutscene maps have no
 checkpoints). In missions, the placed troopers, walkers and the scripted
 spider droid now stand and move as their scripts say but don't fight.
 
+## Character shadows (`rc_shadows`)
+
+**What the original does** (read from its install: the script text and
+class defaults in `Engine.u`, `CTCharacters.u` and
+`XInterfaceCTMenus.u`; nothing copied). Every `Pawn` checks each frame:
+if its `bActorShadows` is set and the "Shadows" option is on (the
+GRAPHICS page's SQUAD SHADOWS row, `EnableShadows`), it makes a
+`ShadowProjector`: a 128x128 picture of the character's shape seen from
+`Normal(vect(1,1,3))` (high above and a little to one side, the same for
+every character), laid on the floors and walls around it, fading over
+`MaxTraceDistance` 350 units and not drawn beyond `CullDistance` 1200
+units from the camera, at full `ShadowDarkness`. Only `CloneCommando`
+(Delta) sets `bActorShadows` in its class; maps set it on chosen actors.
+The prologue marks 7 troopers, 3 young clones and 1 Kaminoan (Kaminoan2,
+in the gym); the two Kaminoans in the opening nursery are not marked, so
+they cast no shadow in the original either. `AnimProp`s carry the flag in
+the prologue but aren't pawns, so they never make a projector.
+
+**What we do.** `rc_cast` reads `bActorShadows` (the map's value, else
+the class's) and puts `rc_shadows::CastsShadow` on each marked character.
+`ShadowsPlugin` gives every mesh under it a "shadow twin": the same mesh
+(same pose, updated with it), drawn with `ShadowMaterial`, whose small
+shader (`shadow.wesl`) slides each point down along the light onto the
+floor at the character's feet and draws it black and see-through by
+`strength`: `darkness x (1 - distance along the light from the middle of
+the body / max_trace_distance)`, about 0.75 for a standing trooper. The
+twin writes depth with a strict "nearer than" test, and rounds its depth,
+so the body's many overlapping triangles darken each floor spot once. No
+extra camera or picture is drawn: one more draw of each body with a
+very small shader, which phones and VR headsets can afford.
+`CharacterShadows` switches all of them; `rc_game` sets it from SQUAD
+SHADOWS (`video.squad_shadows`). Shadows farther than `cull_distance`
+from `PlayerCamera` are hidden. All numbers are in
+`data/shadows/shadows.toml`.
+
+**Differences from the original.** The floor is taken as flat at the
+feet: the shadow doesn't bend onto steps, slopes or walls, and it shows
+under (not on) a prop standing on the floor next to the character. The
+edges are sharp where the original's small picture softens them. How the
+original's blending turns `ShadowDarkness` 255 into a final darkness
+isn't known for sure. The squad and enemies don't use it yet (the squad
+has the old flat round patch under each commando).
+
+**Checking it.** `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p
+rc_shadows --example shadow_check`: two overlapping boxes on a white
+floor, seen from above; checks where the shadow falls, its darkness, that
+overlaps aren't darker, the off switch and the far-away cut-off. In the
+game the log says `shadows: N more shadow copies (C characters, ...)`
+and `shadows: character shadows on/off`.
+
 ## Holograms, tank liquid and props with no stored light
 
 **Holograms (`HsHologram`).** Republic Commando's own hologram material
@@ -4004,6 +4243,42 @@ picture after cycling round), and `rc_game --script` (starts in tactical
 with the squad glowing, X goes to low light with the lamp and back, the two
 GAME page rows change the settings).
 
+## Particle effects (`rc_effects`, `rc_effects_plugin`)
+
+The game's fireballs, smoke, sparks and flying debris are `Emitter`
+classes in the script packages (575 of them, mostly in
+`Properties/CTEffects.u`). Each class's defaults list its parts in
+`Emitters`: `SpriteEmitter`s (camera-facing squares with a picture) and
+`MeshEmitter`s (copies of a model), each a block of named values
+(`MaxParticles`, `Lifetime`, `StartVelocityRange`, `SizeScale`,
+`ColorScale`, `Texture`, `TextureUSubdivisions`, `DrawStyle` ...). The
+class also names a `SpawnSound`. `rc_effects` reads these with the engine's
+defaults (`engine.u`'s `ParticleEmitter`) under the class's own values
+(`read.rs`, `tagged.rs`), and runs them with no Bevy (`sim.rs`): spawning
+at the emitter's rate, moving with speed, gravity and drag, growing and
+fading by the scale lists, picking picture frames, bouncing debris off the
+floor. `rc_effect_check` reads every effect in the install.
+
+`rc_effects_plugin` draws them. Any part of the game sends `SpawnEffect`
+(effect class, place, optional floor height and sound); `PreloadEffect`
+reads one ahead of time (the level does this for every breakable prop's
+effect, so the first blast doesn't stall). Sprites become one mesh per
+emitter rebuilt each frame, with the emitter's draw style turned into a
+blend mode (Translucent and Brighten add light, AlphaBlend blends,
+Modulated and Darken multiply). Mesh debris is one entity per piece. The
+sound plays with its loudness falling off with distance
+(`sound_half_distance`). Settings are in `data/effects/effects.toml`
+(on/off, size, a particle cap, volume).
+
+Our choices (not checked against the original): a sprite's size is its
+half-width; both the prop's `TransitionSound` and the effect's
+`SpawnSound` play; added-light sprites ignore the colour list's alpha;
+debris bounces off a flat floor at the prop's base, not the level;
+`UseDirectionAs`, `MaxAbsVelocity` and blending between frames are
+ignored; beam and trail emitters aren't drawn; sounds aren't placed in 3D
+yet, only made quieter with distance (the level scripts' 3D sound in
+`rc_scripts_plugin/src/sounds.rs` could be reused).
+
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 
 **What the original does.** A `Turret` (the Wookiee heavy turret on
@@ -4089,6 +4364,31 @@ takes them back without sending its event twice. Test:
 `rc_turrets_plugin/tests/squad_turret.rs` (no game files). Check the maps
 with `cargo run --release -p rc_turrets_plugin --example
 squad_turret_survey -- <Maps folder> [map ...]`.
+
+**Turrets that run themselves (`[automatic]`).** The core ship turrets
+(geo_04b, geo_05a, geo_05c) are `AutoTurret`s in the original: folded
+(`ClosedBreathe`) until a `Trigger` with their tag, then they play
+`Deploy`, look for the nearest enemy they can see from `BaseEyeHeight`,
+turn toward it and fire (`ShotDelay` 0.15 s), barrels in turn, straight
+from the barrel at the target. After 4 s of firing they stop for 1 s
+(`TimeUntilCooldown`, `CooldownDuration`). Another `Trigger` with their tag
+switches them off. They have health (256), a damage table
+(`DV_TurretsCoreshipAuto`) and send `FirstDamagedEvent` on the first hit and
+`Event` when destroyed; nobody can get on them. In the port a turret file's
+`[automatic]` section turns this on (`deployed`, `closed_pose`, `deploy`,
+`fire_for`, `cool_down`, `side`, `health`, `damage_table`, `eye_height`).
+Each automatic turret gets a hidden target entity (`LevelTurrets::hits`)
+that shots and blasts hit and enemies aim at; the turret fires as that
+entity. Turrets mounted on walls (geo_04b) use their full map rotation
+(`Turret::axes`, `to_level`), and aim in their own frame
+(`turn_toward_by`), allowing for barrels that hang below the pivot.
+
+**Gunship cannons.** `GunshipCannon` (geo_04a, geo_04d) is a player turret
+like the others: sit-down (`SitToUse`), yaw and pitch +-90 degrees, and an
+instant-hit weapon (`GunshipTurret`: 50 damage, `CTDamageEnergyGunshipTurret`,
+range 10000). Getting on sends its `ControlEvent`, which the scripts there
+wait for. Our choice: the game fires it every frame (`FireRate` 0.01); we
+fire every 0.05 s.
 
 **Our choices.** Facing the turret within 1.2 radians counts as looking at
 it (the original asks for the crosshair on it). The Trandoshan turret's

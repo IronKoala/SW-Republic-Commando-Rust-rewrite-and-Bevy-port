@@ -166,10 +166,13 @@ pub struct Look {
     pub throw: String,
     /// A close-up hit. Empty for none.
     pub melee: String,
-    /// Light the character always gets, 0 to 1 of its full colour, on top
-    /// of the level's lights (the original lights characters with each
-    /// zone's ambient light, which we don't read yet).
+    /// Light the character gets, 0 to 1 of its full colour, when the
+    /// level's light around it can't be measured (no level loaded).
     pub ambient: f32,
+    /// How strongly the level's light where the character stands shows on
+    /// it (see `rc_game_core::place_light`): 1 draws it as bright as the
+    /// surfaces around it. Matched to screenshots of the original.
+    pub light_scale: f32,
     /// Seconds to blend from one animation into the next. Our choice: the
     /// original blends inside its compiled code.
     pub blend_time: f32,
@@ -357,6 +360,7 @@ impl AiParams {
                 throw: String::new(),
                 melee: String::new(),
                 ambient: 0.5,
+                light_scale: 1.1,
                 blend_time: 0.2,
                 blend_time_fire: 0.05,
                 blend_time_death: 0.1,
@@ -521,6 +525,7 @@ impl AiParams {
             ("look", "throw") => l.throw = text(),
             ("look", "melee") => l.melee = text(),
             ("look", "ambient") => l.ambient = num()?,
+            ("look", "light_scale") => l.light_scale = num()?.max(0.0),
             ("look", "blend_time") => l.blend_time = num()?.max(0.0),
             ("look", "blend_time_fire") => l.blend_time_fire = num()?.max(0.0),
             ("look", "blend_time_death") => l.blend_time_death = num()?.max(0.0),

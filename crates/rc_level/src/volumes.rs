@@ -98,7 +98,11 @@ pub fn blocking_volumes(pkg: &Package, data: &[u8], level: &LevelInfo) -> Volume
     out
 }
 
-fn read_volume(pkg: &Package, data: &[u8], a: usize) -> Result<(BlockingVolume, bool), String> {
+pub(crate) fn read_volume(
+    pkg: &Package,
+    data: &[u8],
+    a: usize,
+) -> Result<(BlockingVolume, bool), String> {
     let props = actors::read_actor_properties(pkg, data, a).map_err(|e| e.to_string())?;
     let place: Placement = actors::read_placement(pkg, data, a).map_err(|e| e.to_string())?;
     let brush = match properties::find(pkg, &props, "Brush").map(|p| &p.value) {

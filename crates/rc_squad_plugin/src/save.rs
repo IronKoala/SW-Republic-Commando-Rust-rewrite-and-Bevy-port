@@ -14,7 +14,7 @@ use rc_game_core::save::SavePart;
 use rc_game_core::units::to_bevy;
 use rc_game_core::GameLog;
 use rc_movement::Vec3 as UVec3;
-use rc_squad::{MarkerState, MemberState, Patient, Stance};
+use rc_squad::{MarkerState, MemberState, Patient, Presence, Stance};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,14 +56,29 @@ pub struct MemberSave {
     pub health: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shield: Option<f32>,
+    /// in_squad, away (a level script took them out of the squad) or
+    /// gone (not in the level). Saves from before this was kept have
+    /// everyone in the squad.
+    #[serde(default = "in_squad")]
+    pub presence: String,
+    /// The map's spawners for them that went off already (actor names,
+    /// in order).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spawners_used: Vec<String>,
     /// Shots and grenades left, only with `[ammo] limited` on.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub ammo: std::collections::BTreeMap<String, u32>,
 }
 
-/// A loaded `[squad]` section waiting for the squad to appear.
+fn in_squad() -> String {
+    Presence::InSquad.name().into()
+}
+
+/// A loaded `[squad]` section waiting for the squad to appear. Put back
+/// in two steps: the squad as soon as it exists, then (once
+/// `sync_bodies` has made them) the bodies' health and shields.
 #[derive(Resource, Debug, Clone)]
-pub struct PendingSquadSave(pub SquadSave);
+pub struct PendingSquadSave(pub SquadSave, pub bool);
 
 fn arr(v: UVec3) -> [f32; 3] {
     [v.x, v.y, v.z]
@@ -162,7 +177,9 @@ impl SavePart for SquadSave {
             .iter(world)
             .map(|(m, h, s)| (m.index, h.map_or(0.0, |h| h.current), s.map(|s| s.current)))
             .collect();
-        let squad = world.get_resource::<SquadState>()?.squad.as_ref()?;
+        let state = world.get_resource::<SquadState>()?;
+        let squad = state.squad.as_ref()?;
+        let mates = &state.mates;
         Some(SquadSave {
             stance: stance_name(squad.stance).into(),
             objective: squad.objective.map(arr),
@@ -189,6 +206,11 @@ impl SavePart for SquadSave {
                         revive: m.revive.map(patient_name),
                         health: body.map_or(0.0, |b| b.1),
                         shield: body.and_then(|b| b.2),
+                        presence: m.presence.name().into(),
+                        spawners_used: mates
+                            .get(i)
+                            .map(|t| t.factories_used.clone())
+                            .unwrap_or_default(),
                         ammo: m.ammo.clone(),
                     }
                 })
@@ -198,73 +220,117 @@ impl SavePart for SquadSave {
 
     fn load(world: &mut World, data: Self) -> Result<(), String> {
         stance(&data.stance)?;
-        world.insert_resource(PendingSquadSave(data));
+        world.insert_resource(PendingSquadSave(data, false));
         Ok(())
     }
 }
 
-/// Put a loaded `[squad]` section back once the squad and its bodies exist.
+/// Put a loaded `[squad]` section back once the squad exists (first
+/// step), then once every mate in the level has a body (second step).
 pub(crate) fn apply_pending(world: &mut World) {
-    let Some(want) = world
+    let Some(present) = world
         .get_resource::<SquadState>()
         .and_then(|s| s.squad.as_ref())
-        .map(|s| s.members.len())
+        .map(|s| {
+            s.members
+                .iter()
+                .filter(|m| m.presence != Presence::Gone)
+                .count()
+        })
     else {
         return;
     };
-    let mut q = world.query::<&SquadMate>();
-    if q.iter(world).count() < want {
-        return;
-    }
-    let Some(PendingSquadSave(d)) = world.remove_resource::<PendingSquadSave>() else {
+    let Some(PendingSquadSave(d, squad_done)) = world.get_resource::<PendingSquadSave>().cloned()
+    else {
         return;
     };
+    if !squad_done {
+        let problems = put_back_squad(world, &d);
+        world.resource_mut::<PendingSquadSave>().1 = true;
+        let log = world.resource::<GameLog>();
+        log.line(format!(
+            "squad: put back: stance {}, {} mates ({} down, {} out of the squad, {} not in the level){}",
+            d.stance,
+            d.members.len(),
+            d.members.iter().filter(|m| m.down).count(),
+            d.members.iter().filter(|m| m.presence == "away").count(),
+            d.members.iter().filter(|m| m.presence == "gone").count(),
+            if problems.is_empty() {
+                String::new()
+            } else {
+                format!("; {}", problems.join("; "))
+            }
+        ));
+        return;
+    }
+    let mut q = world.query::<&SquadMate>();
+    if q.iter(world).count() < present {
+        return;
+    }
+    world.remove_resource::<PendingSquadSave>();
+    put_back_bodies(world, &d);
+}
+
+/// The squad's own state from the save; what didn't fit, for the log.
+fn put_back_squad(world: &mut World, d: &SquadSave) -> Vec<String> {
     let mut problems = Vec::new();
-    {
-        let mut state = world.resource_mut::<SquadState>();
-        let squad = state.squad.as_mut().expect("checked above");
-        if let Ok(s) = stance(&d.stance) {
-            squad.stance = s;
-        }
-        squad.objective = d.objective.map(vec);
-        squad.leader_down = d.leader_down;
-        squad.player_revive = d.player_revive.filter(|(i, _)| *i < squad.members.len());
-        for ((_, m), name) in squad.markers.iter_mut().zip(&d.markers) {
-            *m = marker(name);
-        }
-        if d.markers.len() != squad.markers.len() {
-            problems.push(format!(
-                "{} markers saved, {} on this map",
-                d.markers.len(),
-                squad.markers.len()
-            ));
-        }
-        for m in squad.members.iter_mut() {
-            let Some(s) = d.members.iter().find(|s| s.name == m.settings.name) else {
-                problems.push(format!("{} isn't in the save", m.settings.name));
-                continue;
-            };
-            let delta = vec(s.feet) - m.pawn.feet();
-            m.pawn.location += delta;
-            m.pawn.velocity = UVec3::ZERO;
-            m.yaw = s.yaw;
-            m.state = member_state(&s.state, s.left);
-            m.goal = vec(s.goal);
-            m.hold_point = vec(s.hold_point);
-            m.marker = s.marker;
-            m.engaging = None;
-            m.down = s.down;
-            m.revive = s.revive.as_deref().and_then(patient);
-            m.fetching = None;
-            // Only what this squad counts (a save made with `limited` off
-            // has none; one made with it on keeps its counts).
-            for (id, n) in m.ammo.iter_mut() {
-                if let Some(v) = s.ammo.get(id) {
-                    *n = *v;
-                }
+    let mut state = world.resource_mut::<SquadState>();
+    let state = &mut *state;
+    let squad = state.squad.as_mut().expect("checked by the caller");
+    if let Ok(s) = stance(&d.stance) {
+        squad.stance = s;
+    }
+    squad.objective = d.objective.map(vec);
+    squad.leader_down = d.leader_down;
+    squad.player_revive = d.player_revive.filter(|(i, _)| *i < squad.members.len());
+    for ((_, m), name) in squad.markers.iter_mut().zip(&d.markers) {
+        *m = marker(name);
+    }
+    if d.markers.len() != squad.markers.len() {
+        problems.push(format!(
+            "{} markers saved, {} on this map",
+            d.markers.len(),
+            squad.markers.len()
+        ));
+    }
+    for (i, m) in squad.members.iter_mut().enumerate() {
+        let Some(s) = d.members.iter().find(|s| s.name == m.settings.name) else {
+            problems.push(format!("{} isn't in the save", m.settings.name));
+            continue;
+        };
+        let delta = vec(s.feet) - m.pawn.feet();
+        m.pawn.location += delta;
+        m.pawn.velocity = UVec3::ZERO;
+        m.yaw = s.yaw;
+        m.state = member_state(&s.state, s.left);
+        m.goal = vec(s.goal);
+        m.hold_point = vec(s.hold_point);
+        m.marker = s.marker;
+        m.engaging = None;
+        m.down = s.down;
+        m.revive = s.revive.as_deref().and_then(patient);
+        m.script_move = None;
+        m.fetching = None;
+        // Only what this squad counts (a save made with `limited` off
+        // has none; one made with it on keeps its counts).
+        for (id, n) in m.ammo.iter_mut() {
+            if let Some(v) = s.ammo.get(id) {
+                *n = *v;
             }
         }
+        m.presence = Presence::from_name(&s.presence).unwrap_or_else(|| {
+            problems.push(format!("{}: unknown presence {:?}", s.name, s.presence));
+            Presence::InSquad
+        });
+        if let Some(t) = state.mates.get_mut(i) {
+            t.replay(&s.spawners_used);
+        }
     }
+    problems
+}
+
+/// The bodies' place, health and shield from the save.
+fn put_back_bodies(world: &mut World, d: &SquadSave) {
     // Their bodies: place, health, shield, down or up.
     let members: Vec<(usize, String, UVec3, f32)> = world
         .resource::<SquadState>()
@@ -304,16 +370,4 @@ pub(crate) fn apply_pending(world: &mut World) {
             ent.remove::<Dead>();
         }
     }
-    let log = world.resource::<GameLog>();
-    log.line(format!(
-        "squad: put back: stance {}, {} mates ({} down){}",
-        d.stance,
-        d.members.len(),
-        d.members.iter().filter(|m| m.down).count(),
-        if problems.is_empty() {
-            String::new()
-        } else {
-            format!("; {}", problems.join("; "))
-        }
-    ));
 }

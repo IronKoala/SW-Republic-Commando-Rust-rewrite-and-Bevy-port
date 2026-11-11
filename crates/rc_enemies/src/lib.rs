@@ -12,7 +12,7 @@
 //! which flies the bolts and applies the damage; droids get `Health`,
 //! `Team::Separatist` and `Hittable`, so the player's shots hurt them, and
 //! they react to `Damage` and `Died`. It sets `MusicMood::Battle` while
-//! droids are fighting. Each droid is the game's animated `BattleDroid`
+//! droids are fighting, and lists them in `MusicThreats` for the music. Each droid is the game's animated `BattleDroid`
 //! mesh, posed on the CPU every frame.
 //!
 //! Level scripts can take a character over (`scripted.rs`): walk it
@@ -69,6 +69,7 @@ impl Plugin for EnemiesPlugin {
             .add_message::<FactoryOrder>()
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
+            .init_resource::<rc_game_core::MusicThreats>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
@@ -77,6 +78,14 @@ impl Plugin for EnemiesPlugin {
                     .chain()
                     .in_set(GameSet::Simulate)
                     .before(CombatSet::Fire)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>),
+            )
+            .add_systems(
+                Update,
+                tell_music
+                    .after(think)
+                    .in_set(GameSet::Simulate)
                     .run_if(playing)
                     .run_if(resource_exists::<Fight>),
             )
@@ -602,12 +611,27 @@ fn hear_level(
     }
 }
 
+/// Where the living droids are and whether they're fighting, for the
+/// music's battle rules.
+fn tell_music(fight: Res<Fight>, mut threats: ResMut<rc_game_core::MusicThreats>) {
+    threats.0.clear();
+    threats.0.extend(fight.battle.alive().map(|f| {
+        let at = f.pawn.location;
+        rc_game_core::MusicThreat {
+            at: [at.x, at.y, at.z],
+            engaged: matches!(f.mode, Mode::Alerted | Mode::Attack),
+        }
+    }));
+}
+
 fn end_fight(
     mut commands: Commands,
     fight: Option<Res<Fight>>,
     mut mood: ResMut<MusicMood>,
+    mut threats: ResMut<rc_game_core::MusicThreats>,
     log: Res<GameLog>,
 ) {
+    threats.0.clear();
     if let Some(f) = fight {
         summary(&f, &log);
     }
@@ -832,6 +856,15 @@ fn think(
                         MeshMaterial3d(material.clone()),
                         NoFrustumCulling,
                     ));
+                    // Lit by the level's light where it stands (its
+                    // material becomes its own copy; see place_light).
+                    e.insert(rc_game_core::LitByPlace {
+                        target: rc_game_core::LightTarget::Emissive,
+                        own: 0.0,
+                        scale: p.look.light_scale,
+                        height: 1.0,
+                        made_at: p.look.ambient.max(0.0).powf(1.0 / 2.2),
+                    });
                 }
                 fight.entities.insert(id, e.id());
                 fight.stats.spawned += 1;

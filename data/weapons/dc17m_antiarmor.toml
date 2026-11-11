@@ -51,4 +51,5 @@ offset = [40, 12, -14]
 mesh = "HudArmsAntiArmor"  # game: DC17mAntiArmor's Mesh
 fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
 attachment_group = "dc17m" # our name: weapons that swap with AttachHolster/AttachLoad
-brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet
+brightness = 0.75         # used only when the level's light can't be measured
+light_scale = 0.85        # how strongly the light where you stand shows on the arms; matched to two original screenshots

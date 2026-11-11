@@ -52,4 +52,5 @@ bolt_colour = [0.3, 0.6, 1.0]  # our choice, from the bolt light's hue 141 (blue
 # plain [model] in view instead.
 mesh = "HudArmsDC15s"      # game: DC15s's Mesh
 fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
-brightness = 0.75         # our choice: the game lights the arms by the zone, not read yet
+brightness = 0.75         # used only when the level's light can't be measured
+light_scale = 0.85        # how strongly the light where you stand shows on the arms; matched to two original screenshots

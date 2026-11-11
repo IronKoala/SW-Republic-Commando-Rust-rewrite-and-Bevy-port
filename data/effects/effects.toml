@@ -1,0 +1,13 @@
+# Particle effects (explosions, smoke, sparks, debris).
+#
+# The effects themselves are the game's own, read from
+# GameData/Properties/cteffects.u. These are our settings for drawing them.
+# Mods: change any value and restart. A misspelt name stops this file
+# loading, with a line in logs/rc_game.log saying why.
+
+[effects]
+enabled = true            # false: no particles at all (sounds still play)
+size = 1.0                # our choice: multiplies every particle's size
+max_particles = 4000      # our choice: most drawn at once (a phone guard)
+volume = 1.0              # loudness of effect sounds
+sound_half_distance = 2000 # our choice: uu at which a sound is half as loud (as grenades)

@@ -62,6 +62,10 @@ fn placed() -> PlacedTurret {
         speed: None,
         exit_spot: None,
         exit_offset: None,
+        event: None,
+        first_damaged_event: None,
+        deployed: None,
+        health: None,
     }
 }
 
