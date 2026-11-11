@@ -3463,7 +3463,9 @@ filled in by the new `rc_menus` crate, which knows nothing about Bevy:
   rest. A value that is already set is never overwritten. Empty colours
   mean opaque white, empty scales mean 1.
 - `rc_menus::quads` turns widgets into textured rectangles in a 0..1 menu
-  area laid out for 640x480. `rc_menus::render` paints the same rectangles
+  area whose pictures and letters are sized for 800x600 (the original's
+  `XInterface.dll` ResScale), with stretched pictures' corners one texel
+  to one screen pixel (`quads::set_pixels_high`). `rc_menus::render` paints the same rectangles
   in software; the script compares that picture with a screenshot.
 - `rc_menus::gpu` makes copies of pictures for Bevy: each render style
   (normal, masked, translucent or additive, alpha) and each tint gets its
