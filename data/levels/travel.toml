@@ -5,12 +5,16 @@
 # map then loads fresh, and these parts of a save file come with you, so
 # you keep them. The names are the save file's section names:
 #
-#   combat  - your health, shield, the weapons you carry and their ammo
+#   combat       - your health, shield, the weapons you carry and their ammo
+#   squad_carry  - each squad mate's health and the squad's last order, as
+#                  the original keeps them: a mate who is down when you
+#                  leave gets up on the next map with a quarter of their
+#                  health; shields come back full; "secure position" isn't
+#                  kept (the spot was on the old map)
 #
-# Not carried (the next map starts them fresh): where you stand (you
-# arrive at the next map's start or the teleporter the exit names), the
-# squad (their places belong to the old map: they arrive with you, up and
-# at full health), doors, scripts and enemies.
+# Not carried (the next map starts them fresh): where you and the squad
+# stand (you arrive at the next map's start or the teleporter the exit
+# names, the squad with you), doors, scripts and enemies.
 #
 # A mod can carry more or less by listing other names.
-carry = ["combat"]
+carry = ["combat", "squad_carry"]

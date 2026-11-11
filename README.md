@@ -373,7 +373,10 @@ copy of the game.
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the
   next map in the campaign, and you keep your health, shield, weapons and
-  ammo. You arrive where the original puts you, and the new map's start is
+  ammo. The squad keeps their health and your last order, as in the
+  original; a squad mate who was down gets up on the next map with a
+  quarter of their health (tested in the cloud with a test, not yet by
+  playing). You arrive where the original puts you, and the new map's start is
   saved as your checkpoint. Following the exits from the prologue goes
   through all 56 campaign maps to the epilogue. `rc_game --script` walks
   into geo_01a's exit and checks geo_01b (56 of 56 checks).

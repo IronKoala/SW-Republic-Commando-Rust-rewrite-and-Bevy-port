@@ -3782,14 +3782,32 @@ portal, by }`.
 
 **Carrying the player over.** `rc_save` handles `ChangeLevel` like a load
 of a save, but with only some sections: the ones `data/levels/travel.toml`
-lists (`carry = ["combat"]`: health, shield, weapons and ammo) are read out
-of the game with each part's own `SavePart::save`, the map is loaded fresh
-(`CurrentLevel`, `GameState::Loading`), and on its first frame each
-carried section goes back in with that part's `SavePart::load`, before
-the level-start checkpoint is written, so that checkpoint has them. Not
-carried: the player's place (they arrive), the squad (their places belong
-to the old map; they arrive fresh), doors, scripts and enemies. A mod can
-change the list.
+lists (`carry = ["combat", "squad_carry"]`) are read out of the game with
+each part's own `SavePart::save`, the map is loaded fresh (`CurrentLevel`,
+`GameState::Loading`), and on its first frame each carried section goes
+back in with that part's `SavePart::load`, before the level-start
+checkpoint is written, so that checkpoint has them. While those sections
+are written, the resource `rc_game_core::save::CarryingOver` exists, so a
+part can carry something different from what a save file keeps. Not
+carried: the player's and squad's places (they arrive), doors, scripts and
+enemies. A mod can change the list.
+
+**Carrying the squad over** (`rc_squad_plugin::carry`, section
+`[squad_carry]`). What the original keeps, read from the clone player's
+`SaveSquadTravelInfo` and `TravelPostAccept` in CTCharacters.u: each squad
+mate's health, matched by class (we match by name), and the squad's last
+order. A mate who is down when the player leaves gets up on the next map
+with a quarter of their full health (`DOWN_HEALTH_SHARE`). The order is
+kept except "secure position", whose spot was on the old map. Shields come
+back full (the original doesn't carry them either). Squad mates' weapons
+and ammo aren't carried: they have no ammo limit. The section is only
+written while `CarryingOver` exists, or while a carried section is still
+waiting for the squad to appear (so a save made in between keeps it);
+ordinary saves keep the full `[squad]` section instead. A mate on the new
+map who wasn't carried starts at full health; one carried but missing is
+dropped (the original keeps their old entry for a later map; we don't).
+Checked by `rc_squad_plugin`'s `carry_over` test, through the real save
+plugin's level exit.
 
 **Arriving.** `rc_save` inserts `ArrivalPortal(portal)`. The level part
 looks for a `Teleporter` with that `Tag` in the new map

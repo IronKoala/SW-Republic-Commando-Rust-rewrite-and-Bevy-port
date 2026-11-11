@@ -35,6 +35,7 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
+pub mod carry;
 mod ammo;
 pub mod look;
 pub mod save;
@@ -437,6 +438,7 @@ impl Plugin for SquadPlugin {
             .init_resource::<voice::SquadVoices>()
             .init_resource::<voice::SquadVoiceStats>()
             .add_save_part::<save::SquadSave>()
+            .add_save_part::<carry::SquadCarry>()
             .add_systems(OnEnter(GameState::Loading), load_map_data)
             .add_systems(
                 Update,
@@ -447,7 +449,17 @@ impl Plugin for SquadPlugin {
                     .before(membership::factory_arrivals)
                     .run_if(resource_exists::<save::PendingSquadSave>),
             )
+            .add_systems(
+                Update,
+                carry::apply_pending
+                    .in_set(GameSet::Simulate)
+                    .in_set(SquadSet)
+                    .after(spawn_squad)
+                    .before(check_down)
+                    .run_if(resource_exists::<carry::PendingSquadCarry>),
+            )
             .add_systems(OnExit(GameState::InGame), clear_squad)
+            .add_systems(OnEnter(GameState::MainMenu), carry::forget_pending)
             .add_systems(
                 Update,
                 (

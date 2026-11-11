@@ -243,6 +243,14 @@ pub struct RestoringSave {
     pub slot: SaveSlot,
 }
 
+/// Exists only while the save plugin writes the sections that go on with
+/// the player to the next map (`data/levels/travel.toml`). A part that
+/// carries something different from what a save file keeps (the squad's
+/// health, say) checks for this in its `save` and stays out of ordinary
+/// save files otherwise.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct CarryingOver;
+
 /// One save on disk, for a Load Game screen. Kept up to date by the save
 /// plugin in [`SaveList`].
 #[derive(Debug, Clone, PartialEq)]

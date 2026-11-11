@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-09: The squad keeps their health and order on the next map (rc_squad_plugin, rc_save)
+
+- **Changed:** New `crates/rc_squad_plugin/src/carry.rs`: a `[squad_carry]` save section with each squad mate's health and the squad's order, carried to the next map and put back once the squad appears there. `data/levels/travel.toml` (and `rc_save`'s default) now carries `["combat", "squad_carry"]`. `rc_game_core::save::CarryingOver` exists while `rc_save` writes the carried sections, so the squad's section stays out of ordinary save files. New test `crates/rc_squad_plugin/tests/carry_over.rs`.
+- **Why:** Squad carry-over was an open gap: the squad arrived on every new map at full health. The original keeps it. Read from the game's own CTCharacters.u (`SaveSquadTravelInfo`, `TravelPostAccept`, not copied): each mate's health is kept; a mate who is down gets a quarter of full health; the last order is kept unless it was "secure position".
+- **Tested how:** `cargo test -p rc_squad_plugin -p rc_save` in the cloud. The new test runs the real squad, combat and save plugins: Fixer hurt to 123, Scorch down, order "search and destroy", then a level exit.
+- **Result:** All pass. On the next map Sev 400/400, Fixer 123/400, Scorch 100/400 (up), shields full, still "search and destroy"; the new map's start checkpoint has Fixer's 123; a quicksave there has no `[squad_carry]`. A second exit with "secure position" arrives in "form up".
+- **Still broken / not tested:** Not tested on Windows, by playing, or with `rc_game --script` (no game files staged here). The original's health-level look (`SetHealthLevel`) isn't shown. A mate carried but not on the next map is dropped; the original keeps them for a later map.
+- **Next:** The user plays from geo_01a into geo_01b with a hurt squad.
+
 ## 2026-11-10: Squad mates man turrets (rc_squad, rc_squad_plugin, rc_turrets, rc_turrets_plugin, rc_game_core)
 
 - **Changed:** New `[job.turret]` ("Man turret") in `data/squad/squad.toml`: a pullable post with the new `mount = "yes"` setting. `rc_squad`: `JobSettings::mount`, `Member::mounted`, `Squad::turret_post`, `hold_on_turret`, `off_turret`; a mounted member is held in place and doesn't move or fire their own gun. `rc_squad_plugin`: `man_turrets` system and `SquadTurrets` resource. `rc_game_core`: `TurretOrder::Squad` and the `OnTurret` component. `rc_turrets`: `Gunner::Squad`, `Gunner::save_name`/`from_save_name`, `for_marker`. `rc_turrets_plugin`: carries out `TurretOrder::Squad`, aims and fires for squad gunners like script characters, `LevelTurrets::without_models`, saves squad gunners as `squad:<name>`. New test `rc_turrets_plugin/tests/squad_turret.rs` and tool `squad_turret_survey` (example). Notes in `docs/DESIGN.md` ("Squad mates on turrets") and README.
