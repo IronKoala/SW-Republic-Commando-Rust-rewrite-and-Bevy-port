@@ -25,6 +25,12 @@
 //! Whoever gives an effect an `id` hears an [`EffectEnded`] with it when
 //! the effect is over (the effect spawners count what they made).
 //!
+//! An effect with an `AmbientSound` (the bacta dispenser's zap hums) loops
+//! it for as long as the effect is there. An effect can be carried by an
+//! entity (`follow`) and turned by given axes (`axes`), as one hung on a
+//! model's bone is; when its carrier goes it fades out, or with
+//! `vanish_with_carrier` is taken away at once.
+//!
 //! Settings are in `data/effects/effects.toml`. Everything goes to the log
 //! with an `effects:` prefix, and the numbers to [`EffectStats`].
 
@@ -67,6 +73,14 @@ pub struct SpawnEffect {
     /// Carried by this entity (a projectile's trail, `ProjectileEffect`):
     /// it moves with it, and fades out when it's gone.
     pub follow: Option<Entity>,
+    /// When the carrier (`follow`) is gone, take the effect away at once
+    /// (the game's `Destroy`, as `DestroyAttachment` does to the bacta
+    /// dispenser's zap) instead of letting it fade out (`FadeOut`).
+    pub vanish_with_carrier: bool,
+    /// Its own axes (forward, right, up, Unreal X, Y, Z, in the level's
+    /// axes), for an effect hung on a bone (`AttachToBone` with no turn of
+    /// its own takes the bone's). Used instead of `rotation` when given.
+    pub axes: Option<[[f32; 3]; 3]>,
 }
 
 impl Default for SpawnEffect {
@@ -81,6 +95,8 @@ impl Default for SpawnEffect {
             draw_scale: 1.0,
             id: None,
             follow: None,
+            vanish_with_carrier: false,
+            axes: None,
         }
     }
 }
@@ -220,6 +236,10 @@ pub struct RunningEffect {
     by: String,
     /// The entity carrying it, until that's gone.
     follow: Option<Entity>,
+    /// Taken away at once when the carrier goes (see `SpawnEffect`).
+    vanish_with_carrier: bool,
+    /// Its `AmbientSound`, looping while it is there.
+    ambient: Option<Entity>,
     pub state: EffectState,
     /// One entity per emitter (sprites), or per particle (meshes).
     parts: Vec<Option<Entity>>,
@@ -584,7 +604,7 @@ fn preload(
                 lit_light,
             );
             if let (Some(l), Some(au)) = (loaded, audio.as_deref_mut()) {
-                if let Some(s) = &l.def.sound {
+                for s in l.def.sound.iter().chain(&l.def.ambient_sound) {
                     load_sound(&mut effects, s, &paths, au, &mut stats, &log);
                 }
             }
@@ -662,6 +682,30 @@ fn spawn(
                 stats.sounds.push(name);
             }
         }
+        // Its ambient sound loops for as long as it is there (the actor's
+        // `AmbientSound`), at the same loudness rule.
+        let mut ambient = None;
+        if let (Some(s), Some(au)) = (
+            loaded.as_ref().and_then(|l| l.def.ambient_sound.clone()),
+            audio.as_deref_mut(),
+        ) {
+            if let Some(h) =
+                load_sound(&mut effects, &s, &paths, au, &mut stats, &log).and_then(|g| g.pick())
+            {
+                let name = s.last().cloned().unwrap_or_default();
+                ambient = Some(
+                    commands
+                        .spawn((
+                            AudioPlayer(h),
+                            PlaybackSettings::LOOP.with_volume(Volume::Linear(vol)),
+                            DespawnOnExit(GameState::InGame),
+                        ))
+                        .id(),
+                );
+                say(&log, format!("effects: {} hums {name} (looping)", a.effect));
+                stats.sounds.push(name);
+            }
+        }
         let origin = to_unreal(a.at);
         say(
             &log,
@@ -683,12 +727,18 @@ fn spawn(
                     by: a.by.clone(),
                 });
             }
+            if let Some(e) = ambient {
+                commands.entity(e).despawn();
+            }
             continue;
         };
         stats.spawned.push(loaded.def.name.clone());
         let seed = 0x9E37_79B9 ^ (stats.spawned.len() as u64 * 7919) ^ origin[0].to_bits() as u64;
         let mut state =
             EffectState::new(&loaded.def, origin, seed).placed(a.rotation, a.draw_scale);
+        if let Some(axes) = a.axes {
+            state.axes = axes;
+        }
         state.floor = a.floor.map(|y| to_unreal(Vec3::new(a.at.x, y, a.at.z))[2]);
         let parts = loaded
             .looks
@@ -715,6 +765,8 @@ fn spawn(
                 id: a.id,
                 by: a.by.clone(),
                 follow: a.follow,
+                vanish_with_carrier: a.vanish_with_carrier,
+                ambient,
                 state,
                 parts,
                 debris: vec![Vec::new(); n],
@@ -751,9 +803,14 @@ fn step(
     let mut live = 0;
     for (e, mut r) in &mut running {
         let def = r.loaded.def.clone();
+        let mut vanish = false;
         if let Some(c) = r.follow {
             match carriers.get(c) {
                 Ok(g) => r.state.move_to(&def, to_unreal(g.translation())),
+                Err(_) if r.vanish_with_carrier => {
+                    // `Destroy`: gone at once, with its sound.
+                    vanish = true;
+                }
                 Err(_) => {
                     // `Emitter.FadeOut`, as a projectile's `Destroyed` does.
                     r.follow = None;
@@ -761,14 +818,28 @@ fn step(
                 }
             }
         }
-        r.state.step(&def, dt);
-        live += r.state.live();
+        if !vanish {
+            r.state.step(&def, dt);
+            live += r.state.live();
+        }
         // Safety: an effect that loops forever ends after a minute.
-        if r.state.done(&def) || r.state.age > 60.0 {
+        if vanish || r.state.done(&def) || r.state.age > 60.0 {
             say(
                 &log,
-                format!("effects: {} over after {:.2} s", def.name, r.state.age),
+                format!(
+                    "effects: {} {} after {:.2} s",
+                    def.name,
+                    if vanish {
+                        "taken away with its carrier"
+                    } else {
+                        "over"
+                    },
+                    r.state.age
+                ),
             );
+            if let Some(a) = r.ambient.take() {
+                commands.entity(a).try_despawn();
+            }
             stats.finished += 1;
             for p in r.parts.iter().flatten() {
                 commands.entity(*p).try_despawn();

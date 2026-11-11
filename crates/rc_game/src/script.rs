@@ -1120,6 +1120,10 @@ fn steps() -> Vec<Step> {
             "healing pulled the player in front of the dispenser and held them, the use panel filled, and the heal sounds played",
             bacta_pull_and_panel,
         ),
+        Check(
+            "the game's zap effect hung on the dispenser's Eye bone while healing, with its hum, and was taken away after",
+            bacta_zap,
+        ),
         Until("the barricade opens", level_script_barricade_gone, 60.0),
         Wait(3.0),
         Check(
@@ -3524,6 +3528,44 @@ fn bacta_pull_and_panel(w: &mut World) -> Result<String, String> {
     } else {
         Err(msg)
     }
+}
+
+/// After healing at the dispenser: the game's `DispenserEffectClass`
+/// (`BactaZap_Dispenser`) was hung on the `Eye` bone, its hum
+/// (`AmbientSound`) started, and both were taken away when healing ended.
+fn bacta_zap(w: &mut World) -> Result<String, String> {
+    let st = w
+        .get_resource::<rc_scripts_plugin::bacta::BactaStats>()
+        .cloned()
+        .ok_or("no bacta stats")?;
+    let fx = w
+        .get_resource::<rc_effects_plugin::EffectStats>()
+        .cloned()
+        .ok_or("no effect stats")?;
+    let still: Vec<String> = w
+        .query::<&rc_effects_plugin::RunningEffect>()
+        .iter(w)
+        .filter(|r| r.name().eq_ignore_ascii_case("BactaZap_Dispenser"))
+        .map(|r| r.name().to_string())
+        .collect();
+    let carriers = w
+        .query::<&rc_scripts_plugin::bacta::BactaZap>()
+        .iter(w)
+        .count();
+    let hum = fx.sounds.iter().any(|s| s.eq_ignore_ascii_case("ele_GEO_genEnrgy_lp_01"));
+    let msg = format!(
+        "zaps {:?}, removed {}; effect sounds {:?}; still running {:?}, carriers {carriers}",
+        st.zaps, st.zaps_removed, fx.sounds, still
+    );
+    let ok = st
+        .zaps
+        .iter()
+        .any(|z| z.0.eq_ignore_ascii_case("BactaZap_Dispenser"))
+        && hum
+        && st.zaps_removed >= 1
+        && still.is_empty()
+        && carriers == 0;
+    if ok { Ok(msg) } else { Err(msg) }
 }
 
 /// The arms' moves while healing at the dispenser, in the game's order

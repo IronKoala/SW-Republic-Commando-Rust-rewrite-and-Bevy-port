@@ -386,8 +386,11 @@ copy of the game.
   gun goes down and the game's own "hands" moves for the dispenser play
   (`BactaLoad`, `BactaLoop`, `BactaHolster` from `hudarms.ukx`), then the
   gun comes back up; in the game's files those hand moves sit out of view,
-  so no hands show on screen (tested in the cloud, not on Windows). The
-  zap effect isn't done. Settings: `[bacta]` in
+  so no hands show on screen (tested in the cloud, not on Windows). Once
+  the dispenser's canister has swung in, the game's own zap effect appears
+  on it with its hum, and both vanish when you stop, as the game's script
+  does (not yet seen or heard on Windows); the effect on your own body
+  isn't done. Settings: `[bacta]` in
   `data/scripts/scripts.toml`, `[use_panel]` in `data/ui/hud.toml`.
   Enemy spawners now follow the scripts too (tested in the cloud sandbox
   with the real files, not yet on Windows or by playing): the level's

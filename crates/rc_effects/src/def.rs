@@ -305,6 +305,10 @@ pub struct EffectDef {
     /// `SpawnSound`: the sound it makes as it appears: its path, package
     /// first (`["GEN_Sound", "Impacts_Explos", "exp_barrels"]`).
     pub sound: Option<Vec<String>>,
+    /// `AmbientSound`: a sound that loops for as long as the effect is
+    /// there (the bacta dispenser's zap hums with
+    /// `GEO_Sound.GEO_03.ele_GEO_genEnrgy_lp_01`); path as `sound`.
+    pub ambient_sound: Option<Vec<String>>,
     /// `LifeSpan`: the effect is removed after this long (0: when its
     /// emitters are done).
     pub life_span: f32,

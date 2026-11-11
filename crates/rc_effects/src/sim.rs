@@ -506,6 +506,7 @@ mod tests {
                 ..EmitterDef::default()
             }],
             sound: None,
+            ambient_sound: None,
             life_span: 0.0,
             lit: false,
         }
