@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The EXTRAS page and the rolling credits (rc_menus, rc_game, data/ui/original_menus.toml)
+
+- **Changed:** EXTRAS on the main menu now opens the original `CTExtrasMenu` page (new page `extras`), set up by its own `Init` rule for locked rows (`rc_menus::extras`). VIEW CREDITS opens the original `CTCreditsMenu` (page `credits`): the lines of the install's `Credits.int` roll up at the class's speed and gap and the page goes back to EXTRAS at the end (`rc_menus::credits`, `rc_game/src/original_credits.rs`); the credits play their own music (`ASH_Track4_Clones`), and the main menu music starts again after. New page option `keep_together` (`fit::together`): EXTRAS stays one block in the middle of a wide screen. New `Page::Extras`, `Page::Credits`. Script steps for EXTRAS and the credits.
+- **Why:** EXTRAS was greyed out because the page was never built.
+- **Tested how:** `cargo test -p rc_menus` (new tests: locks by map reached, credits read and roll like the original's Init and Tick). In the cloud with the install: `rc_game` driven by keys under Xvfb: main menu, EXTRAS, VIEW CREDITS, Escape, Escape; and waited for the credits to end by themselves. Screenshots looked at.
+- **Result:** Log: `page extras opened, focus on Credits`, `credits: 569 lines ... about 168 s`, `music: credits: ASH_Track4_Clones`, back to EXTRAS with `music: menu: musUI_mainmenuVOX_lp`.
+- **Still broken / not tested:** Not tested on Windows. The five videos are greyed out: they are MPEG-1 with MPEG audio, which nothing in this port can play yet. No campaign progress is kept, so no row is ever locked. The full `rc_game --script` run wasn't finished in the cloud (no maps staged; the level part fails without them); the new EXTRAS script steps were not run in it. In the cloud, debug builds with `menu_bg.avi` present ran at about 0.1 frames a second; without it, 22.
+- **Next:** An MPEG-1 + MPEG audio player for the five videos (a pure-Rust candidate: `oxideav-mpeg12video`; not checked).
+
 ## 2026-11-11: The visor's frame and compass, drawn on the helmet's glass (rc_game, rc_menus, data/ui/hud.toml)
 
 - **Changed:** The arcs down both sides of the visor, the short pieces at the top and the sliding compass strip, at the places, sizes, pictures and colours of the original's Engine.dll (`UHelmet::DrawHUD`). The HUD's glass parts are now drawn onto a 4:3 page (`helmet::HudPage`, its own camera) laid on the helmet model's glass, as the original does, instead of being placed point by point. New HUD keys: `scroll` (a repeating, sliding picture) and group `visor` (may overlap).

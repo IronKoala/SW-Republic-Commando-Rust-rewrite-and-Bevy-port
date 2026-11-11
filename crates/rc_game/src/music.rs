@@ -126,6 +126,11 @@ struct MenuTracks {
     main_menu: Option<String>,
     loading: Option<String>,
     pause: Option<String>,
+    /// The credits page's own piece. The original's console swaps the
+    /// music whenever a menu with other `BackgroundMusic` opens
+    /// (`ManageMenuBackgroundMusic` in `Engine.u`), and starts the main
+    /// menu's piece again when the credits close.
+    credits: Option<String>,
 }
 
 /// One music layer's track entity, and whether it has been seen playing
@@ -390,6 +395,7 @@ fn shell_music(
     paths: Res<GamePaths>,
     mut lib: ResMut<Library>,
     mut menus: ResMut<MenuTracks>,
+    menu: Res<crate::menu::Menu>,
     mut layers: ResMut<Layers>,
     mut tracks: Query<&mut Track>,
     mut sources: ResMut<Assets<AudioSource>>,
@@ -408,6 +414,7 @@ fn shell_music(
                 menus.main_menu = menu_music(&mut ml, rc_menus::screens::MAIN_MENU, &log);
                 menus.loading = menu_music(&mut ml, "XInterfaceCTMenus.CTLoading", &log);
                 menus.pause = menu_music(&mut ml, "XInterfaceCTMenus.CTPausePCMenu", &log);
+                menus.credits = menu_music(&mut ml, rc_menus::credits::CREDITS_MENU, &log);
                 log.line(format!(
                     "music: menus play: main menu {}, loading {}, pause {}",
                     menus.main_menu.as_deref().unwrap_or("nothing"),
@@ -425,7 +432,9 @@ fn shell_music(
                     menus.main_menu = Some(plan.menu.clone());
                 }
             }
-            if *state.get() == GameState::MainMenu {
+            if *state.get() == GameState::MainMenu && menu.page == crate::menu::Page::Credits {
+                ("credits", menus.credits.clone())
+            } else if *state.get() == GameState::MainMenu {
                 ("menu", menus.main_menu.clone())
             } else {
                 ("loading", menus.loading.clone())
