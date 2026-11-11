@@ -40,11 +40,17 @@ pub struct HelmetPlan {
     /// Used if the HUD class can't be read: degrees across a 4:3 screen.
     #[serde(default = "display_fov")]
     pub display_fov: f32,
-    /// How bright the frame is, 0 to 1. The original lights it with
-    /// `AmbientGlow` 20 and lights inside the helmet, which we don't copy
-    /// yet; this is a guess to be matched against the real game.
+    /// How bright the frame is on its own, 0 to 1: the original lights it
+    /// with `AmbientGlow` 20 and lights inside the helmet, which we don't
+    /// copy; this stands in for them. The level's light where the player
+    /// is adds `light_scale` times itself on top (in the game).
     #[serde(default = "brightness")]
     pub brightness: f32,
+    /// How strongly the level's light around the player shows on the
+    /// frame. Matched to two original screenshots (dark tunnel, sunny
+    /// canyon).
+    #[serde(default = "light_scale")]
+    pub light_scale: f32,
     /// Where the frame's sides begin, as a fraction of the half width of a
     /// 4:3 screen from the middle. Beyond it the model keeps its shape and
     /// moves to the screen edge; inside it, it stretches.
@@ -66,6 +72,9 @@ fn display_fov() -> f32 {
 }
 fn brightness() -> f32 {
     0.5
+}
+fn light_scale() -> f32 {
+    0.8
 }
 fn sides_from() -> f32 {
     0.5

@@ -35,6 +35,8 @@
 //!   a campaign's last level ends.
 //! - [`save`]: the interface each part fills in so it is saved and loaded
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
+//! - [`PlaceLight`] and [`LitByPlace`]: the level's light at any point, and
+//!   the tag that draws a character, the gun or the helmet by it.
 //! - [`turrets`]: [`Manning`] while the player works a mounted turret, and
 //!   the level scripts' [`TurretOrder`]s.
 //!
@@ -48,6 +50,7 @@ mod hud;
 mod log;
 pub mod music;
 pub mod paths;
+pub mod place_light;
 pub mod pickups;
 pub mod save;
 pub mod sound;
@@ -68,6 +71,7 @@ pub use hud::{
 pub use log::GameLog;
 pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
+pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use sound::{SoundAt, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,

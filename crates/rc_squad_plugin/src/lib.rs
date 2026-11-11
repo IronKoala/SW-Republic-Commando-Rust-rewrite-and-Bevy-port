@@ -330,6 +330,7 @@ pub struct SquadJobQueue(pub Vec<SquadEvent>);
 pub struct SquadLooks {
     tried: bool,
     pub ambient: f32,
+    pub light_scale: f32,
     pub blend: look::BlendTimes,
     pub models: HashMap<String, Option<Arc<rc_model::Model>>>,
 }
@@ -349,6 +350,7 @@ impl SquadLooks {
         };
         log_line(log, format!("looks from {}", file.display()));
         self.ambient = looks.ambient;
+        self.light_scale = looks.light_scale;
         self.blend = looks.blend;
         log_line(
             log,
@@ -875,6 +877,7 @@ fn sync_bodies(
             let mut mm = look::spawn_pieces(
                 model.clone(),
                 looks.ambient,
+                looks.light_scale,
                 &mut e,
                 meshes,
                 materials,

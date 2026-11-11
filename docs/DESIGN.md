@@ -414,6 +414,55 @@ The real-time light factors are still placeholders. The plan to set them
 properly: compute what our lights would give at each static-mesh vertex and
 compare with the colours the game baked there, then adjust until they agree.
 
+**Light by place (characters, the gun, the helmet).** Squad mates, droids,
+the first-person gun and the helmet frame carry no baked light, and the
+original draws them by where they are: dim in a dark tunnel, bright in the
+sun. Until 2026-11-09 ours used fixed guesses (`ambient = 0.5`,
+`arms.brightness = 0.75`, helmet `brightness = 0.5`), so in YYY_06A's tunnel
+the gun was 2 to 3.5 times brighter than in the user's original screenshot
+and the squad about twice as bright.
+
+- `rc_level_viewer::probe::LightProbe` (no Bevy) is built once per level
+  from `scene::Scene`: points spread over every lit surface (about every 3
+  Bevy units on big triangles, one per small triangle) with the surface's
+  facing and its light, from the prop corner colours (zone ambient
+  included), the terrain's corner colours and the lightmaps, on the game's
+  scale (stored value x drawing gain / 255, so 1.0 shows a texture as
+  stored). They sit in a grid of 6-unit cells. A question ("how much light
+  at this point?") averages the samples within 6 units that face the point,
+  weighted by how squarely they face it and 1 / (1 + distance²); with none
+  it looks 12, then 24 units away. Packed to 20 bytes a sample: 0.3 to 1.1
+  million samples, 6 to 22 MB, built in 30 to 140 ms per map (yyy_06a,
+  geo_04a, ras_01a, geo_01a). `cargo run -p rc_level_viewer --example
+  probe_check -- MAP` prints the light at a map's start.
+- `rc_level_plugin` puts it in `rc_game_core::PlaceLight` while a level is
+  on. Any part tags an entity `rc_game_core::LitByPlace` (`own`, `scale`,
+  `height`, `made_at`, and whether it sets the glow or the base colour);
+  `rc_level_plugin::place_light` gives the entity its own copies of its
+  materials and every 0.1 s sets them to `own + scale x light`, eased over
+  about a quarter of a second, measured `height` above the entity. The
+  log says the light at the player's eyes every 5 s (`light: at the
+  player's eyes ...`).
+- Who uses it, and the numbers (all in data files): squad mates
+  (`squad/looks.toml` `light_scale = 1.1`) and enemies (`light_scale` in
+  `enemies/*.toml`, default 1.1) as their glow, so real-time lights still
+  add; the gun (`arms.light_scale = 0.85` in each weapon file) and the
+  helmet frame (`ui/helmet.toml`: its own `brightness = 0.5` plus
+  `light_scale = 0.8`) as their colour. The old fixed values are kept for
+  when there's no level light (and for `arms.light_scale = 0`).
+- Matched to two original screenshots, YYY_06A's start tunnel (light 0.35)
+  and GEO_04A's canyon (about 0.45-0.5, spot not exactly known). Middle
+  values (0-255), original / before / after: tunnel gun body 22 / 76 / 25,
+  gun side 56 / 113 / 43, helmet top 58 / 35 / 59, helmet lower left 66 /
+  40 / 68; canyon gun 43 / 76 / 34 and 63 / 113 / 55, helmet 69 / 35 / 65
+  and 110 / 40 / 74. Squad mates in the tunnel: brightest 2% of their
+  pixels 67-95 in the original, 153 before, about 105 after (one mate,
+  another spot).
+- It is a fill light only: no direction, so a character in the sun isn't
+  brighter on the sunny side, and the original's per-light shading isn't
+  copied. The scales come from two screenshots and are a calibration, not
+  the original's formula.
+
 **Speed (and VR).** The viewer uses `live_lights = dynamic` by default: the
 91-98% of lights that are baked cost nothing at run time, and only a handful
 of real-time lights remain (2 in `geo_01a`, 19 in `pro`). That suits a later

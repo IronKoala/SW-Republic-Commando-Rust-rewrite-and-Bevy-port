@@ -563,6 +563,7 @@ fn load_look(paths: &GamePaths, p: &TurretParams) -> Result<(KindLook, Vec<Strin
         throw: String::new(),
         melee: String::new(),
         ambient: 0.5,
+        light_scale: 1.1,
         blend_time: 0.0,
         blend_time_fire: 0.0,
         blend_time_death: 0.0,

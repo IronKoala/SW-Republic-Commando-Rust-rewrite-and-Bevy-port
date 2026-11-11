@@ -58,6 +58,8 @@ pub const PART: &str = "level";
 /// change brightness without touching code. Optional.
 pub const LIGHTING_FILE: &str = "levels/lighting.cfg";
 
+pub mod place_light;
+
 pub struct LevelPlugin;
 
 impl Plugin for LevelPlugin {
@@ -74,6 +76,16 @@ impl Plugin for LevelPlugin {
             .add_systems(
                 Update,
                 let_sky_through.run_if(in_state(GameState::InGame)),
+            )
+            .add_systems(
+                Update,
+                (
+                    place_light::take_materials,
+                    place_light::follow_light,
+                    place_light::log_player_light,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::InGame)),
             )
             .add_systems(
                 Update,
@@ -321,6 +333,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelInfo>();
     commands.remove_resource::<LevelMoverData>();
     commands.remove_resource::<LevelParts>();
+    commands.remove_resource::<rc_game_core::PlaceLight>();
     commands.remove_resource::<LevelBreakables>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
     commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
@@ -534,6 +547,25 @@ fn load(world: &mut World) {
             for n in notes {
                 log.line(format!("{PART}: lighting: {n}"));
             }
+            // The light probe: how much light reaches any point, from the
+            // light baked into the level's surfaces, for the characters,
+            // the gun and the helmet (see `place_light`).
+            let probe_t = Instant::now();
+            let (probe, ps) = rc_level_viewer::probe::LightProbe::build(
+                &sc,
+                settings.vertex_colour_gain,
+                settings.lightmap_gain,
+                place_light::PROBE_RADIUS,
+            );
+            log.line(format!(
+                "{PART}: light probe: {} samples ({} from props, {} terrain, {} walls with lightmaps) in {:.0} ms",
+                probe.samples(),
+                ps.prop_samples,
+                ps.terrain_samples,
+                ps.bsp_samples,
+                probe_t.elapsed().as_secs_f64() * 1000.0
+            ));
+            world.insert_resource(rc_game_core::PlaceLight(Arc::new(place_light::Probe(probe))));
             let report = world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
                     world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {

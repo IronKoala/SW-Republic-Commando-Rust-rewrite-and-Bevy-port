@@ -10,9 +10,9 @@
 //! display 3.
 //!
 //! The model is posed on the CPU each frame like the squad's (`rc_anim`
-//! moves its points). It's drawn unlit at the weapon's `arms.brightness`:
-//! the game lights it by the zone the player stands in, which we don't read
-//! yet.
+//! moves its points). It's drawn unlit, at the level's light where the
+//! player is times the weapon's `arms.light_scale` (see
+//! `rc_game_core::place_light`), or at `arms.brightness` without a level.
 //!
 //! The DC-17m's ammo counter (see `counter`) is pieces of the model whose
 //! materials slide their picture sideways (`uv_transform`), set each frame
@@ -449,6 +449,7 @@ pub(crate) fn animate_arms(
         }
         None => {
             let brightness = params.map_or(1.0, |a| a.brightness);
+            let light_scale = params.map_or(0.0, |a| a.light_scale);
             let made = spawn_pieces(
                 model,
                 &points,
@@ -499,13 +500,23 @@ pub(crate) fn animate_arms(
                 ))
                 .with_children(|h| {
                     for (_, mesh, material) in made {
-                        h.spawn((
+                        let mut piece = h.spawn((
                             Mesh3d(mesh),
                             MeshMaterial3d(material),
                             RenderLayers::layer(ARMS_LAYER),
                             // Posed on the CPU: the stored bounds don't follow.
                             NoFrustumCulling,
                         ));
+                        // Drawn by the level's light where the player is.
+                        if light_scale > 0.0 {
+                            piece.insert(rc_game_core::LitByPlace {
+                                target: rc_game_core::LightTarget::BaseColor,
+                                own: 0.0,
+                                scale: light_scale,
+                                height: 0.0,
+                                made_at: brightness.clamp(0.0, 1.0),
+                            });
+                        }
                     }
                 });
             });
