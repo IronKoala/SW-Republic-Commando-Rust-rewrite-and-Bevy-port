@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-11: The original's crosshair pictures and colours (rc_game, rc_combat, rc_game_core, data/ui/hud.toml)
+
+- **Changed:** Each weapon now uses its class's own `Reticle` from ctinventory.u (DC-17m: `HUD_WeaponDefault`, the ring without the dot; we used the "PC" pictures, which no weapon names). Drawn at 0.8 of our old size (the picture's size on the original's 600-line HUD). Tinted as the original's helmet does (Engine.dll `UHelmet::DrawHelmet`, by target type): (200,240,255) at opacity 110 normally, (130,255,130) at 220 over a squad mate, (255,130,130) at 220 over an enemy. New `WeaponReadout::on_friend`; `[crosshair]` keys `colour`, `friend_colour`, `enemy_colour`.
+- **Why:** User's screenshots: the original's crosshair is a thin grey ring that turns green on friendlies; ours had a dot and was white.
+- **Tested how:** `cargo test -p rc_game` (tint for plain, friend, enemy); `rc_game --script` in the cloud (the squad screenshot shows the green ring on a squad mate).
+- **Result:** Tests pass; crosshair checks pass.
+- **Still broken / not tested:** Not tested on Windows. The other target types (markers, panels, pickups, turrets) and the lock-on reticles are not done.
+
 ## 2026-11-11: Advisor's words and the objective line as in the original (rc_menus, rc_game, rc_scripts_plugin, data/ui/hud.toml)
 
 - **Changed:** The advisor's words now show near the top left in the game's own font (`OrbitBold15` at 0.8 size), yellow (200,200,64), broken onto lines to fit a 364-wide box, fading in over 0.5 s; the bottom-middle box with Bevy's font is now only the placeholder. The current mission objective ("USE BACTA TO HEAL") shows centred in the same box at full size in (164,200,208) when nobody speaks. While the advisor speaks, the short messages and use prompt in that box are hidden, as in the original. Both are moved through the helmet's glass as the original draws its HUD (lower and slightly curved). New: `helmet::GlassMap`, `rc_scripts_plugin::objectives` (the map's `MissionObjectives` list, revealed by its tag event, completed/failed/changed by `ACTION_ObjectiveUpdate`, saved with the game), HUD element keys `font`, `wrap`, `glass`, texts `{subtitle}` `{objective}`, `[layout] text_fade_in`.

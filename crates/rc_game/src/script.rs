@@ -3490,11 +3490,9 @@ fn props_effect_over(w: &mut World) -> bool {
         q.iter(w).count()
     };
     running == 0
-        && w
-            .get_resource::<rc_effects_plugin::EffectStats>()
+        && w.get_resource::<rc_effects_plugin::EffectStats>()
             .is_some_and(|s| s.finished >= 1)
 }
-
 
 fn props_simple_shapes(w: &mut World) -> Result<String, String> {
     let info = w
@@ -3918,7 +3916,11 @@ fn objective_line(w: &mut World) -> Result<String, String> {
         .collect();
     let n = letters.len().max(1) as f32;
     let top = letters.iter().map(|q| q.dst[1]).fold(1.0f32, f32::min);
-    let middle = letters.iter().map(|q| (q.dst[0] + q.dst[2]) / 2.0).sum::<f32>() / n;
+    let middle = letters
+        .iter()
+        .map(|q| (q.dst[0] + q.dst[2]) / 2.0)
+        .sum::<f32>()
+        / n;
     let got = format!(
         "objective {shown:?}: {} letters, top {:.1}% down, centred {:.1}% across",
         letters.len(),

@@ -27,7 +27,6 @@ use crate::hud::{CrossBar, PlaceholderPart};
 use crate::menu::GamePathsFound;
 use crate::settings::Settings;
 use crate::subtitles::Spoken;
-use crate::theme::Theme;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -76,6 +75,26 @@ pub struct CrosshairPlan {
     /// Weapon name (as in its weapon file) to picture.
     #[serde(default)]
     pub weapons: BTreeMap<String, String>,
+    /// Its tint, red green blue opacity: normally, over a friend and over
+    /// an enemy.
+    #[serde(default = "plain_colour")]
+    pub colour: [u8; 4],
+    #[serde(default = "friend_colour")]
+    pub friend_colour: [u8; 4],
+    #[serde(default = "enemy_colour")]
+    pub enemy_colour: [u8; 4],
+}
+
+fn plain_colour() -> [u8; 4] {
+    [200, 240, 255, 110]
+}
+
+fn friend_colour() -> [u8; 4] {
+    [130, 255, 130, 220]
+}
+
+fn enemy_colour() -> [u8; 4] {
+    [255, 130, 130, 220]
 }
 
 /// `[use_panel]`: the original's use panel at the crosshair while the
@@ -945,7 +964,6 @@ fn load_picture(
 fn update_crosshair(
     mut hud: ResMut<OriginalHud>,
     weapon: Res<WeaponReadout>,
-    theme: Res<Theme>,
     mut images: ResMut<Assets<Image>>,
     mut pictures: Query<(&mut ImageNode, &mut Node, &mut Visibility), With<CrossPicture>>,
     mut bars: Query<&mut Visibility, (With<CrossBar>, Without<CrossPicture>)>,
@@ -1004,12 +1022,19 @@ fn update_crosshair(
     if image.image != handle {
         image.image = handle;
     }
-    // The original turns the crosshair red over an enemy.
-    image.color = if weapon.on_target {
-        theme.crosshair_on_target
+    // The original tints the crosshair by what it is over.
+    let c = &plan.crosshair;
+    let [r, g, b, a] = if weapon.on_target {
+        c.enemy_colour
+    } else if weapon.on_friend {
+        c.friend_colour
     } else {
-        Color::WHITE
+        c.colour
     };
+    let tint = Color::srgba_u8(r, g, b, a);
+    if image.color != tint {
+        image.color = tint;
+    }
     // Sized by screen height, so it is the same size at any screen shape.
     let s = plan.crosshair.scale * 100.0 / BASE_LINES;
     let (w, h) = (Val::Vh(size.x * s), Val::Vh(size.y * s));
@@ -1031,6 +1056,7 @@ pub fn reticle_showing(w: &mut World) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
 
     /// The ring lights in twelfths, piece by piece of a 4 by 4 grid, from
     /// just left of the top round the left side; the rest stays faint.
@@ -1153,13 +1179,21 @@ mod tests {
         assert_eq!(w.get::<Visibility>(pic), Some(&Visibility::Inherited));
         assert_eq!(w.get::<ImageNode>(pic).unwrap().image, handle);
         let n = w.get::<Node>(pic).unwrap();
-        assert_eq!(n.width, Val::Vh(10.0)); // 48 of 480 lines
-        assert_eq!(n.height, Val::Vh(5.0));
-        assert_eq!(n.left, Val::Vh(-5.0));
+        // 48 pixels of the original's 600 lines: 8% of the screen height.
+        let vh = |v: Val| match v {
+            Val::Vh(x) => x,
+            _ => f32::NAN,
+        };
+        assert!((vh(n.width) - 8.0).abs() < 1e-3, "{:?}", n.width);
+        assert!((vh(n.height) - 4.0).abs() < 1e-3, "{:?}", n.height);
+        let tint = |app: &App| app.world().get::<ImageNode>(pic).unwrap().color;
+        assert_eq!(tint(&app), Color::srgba_u8(200, 240, 255, 110));
+        app.world_mut().resource_mut::<WeaponReadout>().on_friend = true;
+        app.update();
+        assert_eq!(tint(&app), Color::srgba_u8(130, 255, 130, 220));
         app.world_mut().resource_mut::<WeaponReadout>().on_target = true;
         app.update();
-        let red = app.world().resource::<Theme>().crosshair_on_target;
-        assert_eq!(app.world().get::<ImageNode>(pic).unwrap().color, red);
+        assert_eq!(tint(&app), Color::srgba_u8(255, 130, 130, 220));
     }
 
     /// A picture that can't be read leaves the bars as they are.

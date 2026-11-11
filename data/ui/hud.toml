@@ -1,24 +1,38 @@
 # Which of the original game's HUD pictures the HUD uses. The pictures are
 # read from the player's install at run time; nothing from the game is here.
-# The original draws its HUD in native code, so where each picture goes is
-# our own choice.
+# Where each picture goes is read from the original's engine code where
+# the notes say so, otherwise our own choice.
 #
-# Checked 2026-10-29 against the install: HUDTextures.utx has each reticle
-# twice, a console one and a smaller "...PC" one; we use the PC ones. If a
-# picture can't be read, the placeholder crosshair stays and
-# logs/rc_game.log says why ("original hud: crosshair ..."). See them all
-# with:
-#   rc_probe --export-textures "<game folder>\GameData\Textures\HUDTextures.utx"
-
+# The crosshair, read from the original 2026-11-11: each weapon class's
+# `Reticle` (ctinventory.u class defaults; the "...PC" pictures are not
+# used by any weapon), drawn by the helmet (Engine.dll UHelmet::DrawHelmet)
+# at the screen's centre at the picture's own size on its 600-line HUD (so
+# 0.8 of ours), tinted by what it is over (the target type):
+#   normally (200, 240, 255) at opacity 110,
+#   over a friend (130, 255, 130) at 220,
+#   over an enemy (255, 130, 130) at 220.
+# If a picture can't be read, the placeholder crosshair stays and
+# logs/rc_game.log says why ("original hud: crosshair ...").
 [crosshair]
 enabled = true
-default = "HUDTextures.Reticles.HUD_WeaponDefaultPC"
-# 1 = one picture pixel per line of a 480-line screen (a guess).
-scale = 1.0
+default = "HUDTextures.Reticles.HUD_WeaponDefault"     # DC17mBlaster
+scale = 0.8
+colour = [200, 240, 255, 110]
+friend_colour = [130, 255, 130, 220]
+enemy_colour = [255, 130, 130, 220]
 
-# Weapon name, as in its file in data/weapons/, to its reticle.
+# Weapon name, as in its file in data/weapons/, to its class's reticle.
 [crosshair.weapons]
-"DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistolPC"
+"DC-15s Pistol" = "HUDTextures.Reticles.HUD_WeaponPistol"                 # DC15s
+"DC-17m Sniper" = "HUDTextures.Reticles.HUD_WeaponSniper"                 # DC17mSniper
+"DC-17m Anti-Armour" = "HUDTextures.Reticles.HUD_WeaponAntiArmor"         # DC17mAntiArmor
+"ACP Array Gun" = "HUDTextures.Reticles.HUD_WeaponTranShotgun"            # Shotgun
+"ACP Repeater" = "HUDTextures.Reticles.HUD_WeaponTranSMG"                 # SMG
+"LS-150 Heavy ACP Repeater Gun" = "HUDTextures.Reticles.HUD_WeaponTranSMG" # TrandoshanRifle
+"LJ-50 Concussion Rifle" = "HUDTextures.Reticles.HUD_WeaponTranConcRifle" # ConcussionRifle
+"Wookiee Bowcaster" = "HUDTextures.Reticles.HUD_WeaponWookBowcaster"      # Bowcaster
+"Wookiee Homing Rocket Launcher" = "HUDTextures.Reticles.HUD_WeaponWookHomingDet" # RocketLauncher
+"Elite Beam" = "HUDTextures.Reticles.HUD_WeaponGeoElite"                  # EliteBeam
 
 # The use panel round the crosshair, while you stand at something you use by
 # holding Use (a bacta dispenser). The pictures are the original's; when
