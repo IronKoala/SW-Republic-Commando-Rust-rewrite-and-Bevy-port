@@ -818,8 +818,11 @@ copy of the game.
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
   doors, barricades, damage to the player, bacta dispensers, prompts,
-  objectives (kept, not shown), checkpoints, enemy spawners, level
-  changes, and lines of dialogue and sounds (the game's own, read from its
+  objectives (kept, not shown), the objective tracker (the original's
+  tipped ring with its arrow and the distance at the bottom of the screen,
+  and the four pulsing arrows round the goal once it is in view; since
+  2026-11-12, tested in the cloud, not yet on Windows), checkpoints, enemy
+  spawners, level changes, and lines of dialogue and sounds (the game's own, read from its
   sound files; a script waiting for a line waits for its real length).
   Since 2026-11-09 a scripted sound comes from its place in the level
   (the droid, gunship or spot it belongs to) and gets quieter with

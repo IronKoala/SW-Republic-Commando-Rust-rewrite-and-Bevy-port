@@ -63,6 +63,7 @@ pub mod projectiles;
 pub mod save;
 pub mod sight;
 pub mod sounds;
+pub mod tracker;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
@@ -116,6 +117,9 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
+            .add_message::<tracker::TrackerAsk>()
+            .init_resource::<tracker::ObjectiveTracker>()
+            .add_systems(Startup, tracker::load_look)
             .add_save_part::<save::ScriptsSave>()
             .add_save_part::<fx_factories::FxFactoriesSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
@@ -145,6 +149,7 @@ impl Plugin for ScriptsPlugin {
                     sight::look,
                     run,
                     send_ammo,
+                    tracker::track,
                     fx_factories::run,
                     placed_emitters::run,
                     projectiles::fly,
@@ -168,6 +173,7 @@ impl Plugin for ScriptsPlugin {
                     sounds::forget,
                     cutscene::forget,
                     projectiles::forget,
+                    tracker::forget,
                 ),
             );
     }
@@ -312,6 +318,8 @@ pub struct PlayStats {
     pub sounds_missing: Vec<String>,
     /// Music actions passed on to the music.
     pub music_cues: usize,
+    /// Objective tracker steps passed on to the tracker.
+    pub tracker_asks: usize,
     /// The sounds played from a place in the level (not heard everywhere).
     pub sounds_placed: Vec<String>,
     pub not_done: usize,
@@ -391,18 +399,19 @@ fn begin(
         .and_then(|(p, d)| {
             rc_level::actors::read_level(&p, &d)
                 .map(|l| {
-                    (
-                        rc_level::scripts::read(&p, &d, &l),
-                        rc_level::scripts::places(&p, &d, &l),
-                    )
+                    let m = rc_level::scripts::read(&p, &d, &l);
+                    // What the map's objective tracker steps point at.
+                    let targets = tracker::read_targets(&p, &d, &l, &m, &paths, &log);
+                    (m, rc_level::scripts::places(&p, &d, &l), targets)
                 })
                 .map_err(|e| e.to_string())
         });
     match read {
-        Ok((m, places)) => {
+        Ok((m, places, targets)) => {
             for f in &m.failures {
                 log.line(format!("{PART}: unreadable: {f}"));
             }
+            commands.insert_resource(targets);
             commands.insert_resource(Loaded(m, settings, places));
         }
         Err(e) => {
@@ -657,6 +666,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<placed_emitters::LevelEmitters>();
     commands.remove_resource::<Objectives>();
     commands.remove_resource::<Loaded>();
+    commands.remove_resource::<tracker::TrackerTargets>();
 }
 
 fn text_of(v: Option<&Val>) -> String {
@@ -692,11 +702,12 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief, mut music): (
+    (mut checkpoints, mut change, mut debrief, mut music, mut tracker_asks): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
         MessageWriter<rc_game_core::MusicCue>,
+        MessageWriter<tracker::TrackerAsk>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -946,6 +957,14 @@ fn run(
                     ));
                     script.stats.music_cues += 1;
                     music.write(cue);
+                    continue;
+                }
+                if let Some(tag) = tracker::asked(&call.action) {
+                    script.stats.tracker_asks += 1;
+                    tracker_asks.write(tracker::TrackerAsk {
+                        tag,
+                        from: format!("t={now:.2} {} #{}", call.script, call.index),
+                    });
                     continue;
                 }
                 carry_out(
