@@ -949,12 +949,40 @@ fn steps() -> Vec<Step> {
             20.0,
         ),
         Note(|w| spawner_event(w, "BunkerProjectileEFX")),
+        // The two troopers on the ramp (GunshipTrooper02 and 03): when
+        // the player walks into Trigger42 it sends RunLZTroopers, and
+        // their scripts (ScriptedSequence14 and 3) run them to
+        // WaitToBeBlownUp and WaitToBeBlownUp02, where Trigger5's
+        // bombardment lands and kills them. The walk doesn't reach
+        // Trigger42, so the check sends its event itself.
+        Note(|w| {
+            w.write_message(rc_game_core::RaiseEvent {
+                name: "RunLZTroopers".to_string(),
+                by: "the self-test (as Trigger42)".to_string(),
+            });
+        }),
+        Until(
+            "the two ramp troopers run to where the bombardment lands",
+            |w| ramp_troopers(w, false).is_ok(),
+            30.0,
+        ),
+        Check("the two ramp troopers run to where the bombardment lands", |w| {
+            ramp_troopers(w, false)
+        }),
         Note(|w| spawner_event(w, "ArialBombardment01")),
         Until(
             "the bombardment's missiles fly in from high above and blow up",
             bombardment_blows_up,
             20.0,
         ),
+        Until(
+            "the bombardment kills the two ramp troopers",
+            |w| ramp_troopers(w, true).is_ok(),
+            10.0,
+        ),
+        Check("the bombardment kills the two ramp troopers", |w| {
+            ramp_troopers(w, true)
+        }),
         Note(|w| spawner_event(w, "ArialBombardment01")),
         Note(|w| set_pitch(w, 0.0)),
         Wait(0.2),
@@ -4384,6 +4412,37 @@ fn projectiles_blew_up(w: &mut World, class: &str, trail: &str, high: Option<f32
 
 fn bunker_missiles_blow_up(w: &mut World) -> bool {
     projectiles_blew_up(w, "GEO_01A_BunkerMissile", "GEO_BunkerMissile_Proj", None)
+}
+
+/// geo_01a's two ramp troopers stand on their places (WaitToBeBlownUp,
+/// WaitToBeBlownUp02, from the map) and, with `dead`, have died there.
+fn ramp_troopers(w: &mut World, dead: bool) -> Result<String, String> {
+    let spots = [
+        ("CloneTrooper7", [-1144.3364, 532.4252]),
+        ("CloneTrooper13", [-1287.9878, 757.9026]),
+    ];
+    let mut q = w.query::<&rc_cast::Cast>();
+    let mut parts = Vec::new();
+    let mut ok = true;
+    for (name, spot) in spots {
+        let Some(c) = q.iter(w).find(|c| c.name == name) else {
+            parts.push(format!("{name} missing"));
+            ok = false;
+            continue;
+        };
+        let d = ((c.location[0] - spot[0]).powi(2) + (c.location[1] - spot[1]).powi(2)).sqrt();
+        parts.push(format!(
+            "{name} {d:.0} uu from its place{}",
+            if c.is_dead() { ", dead" } else { ", alive" }
+        ));
+        ok &= d < 50.0 && (!dead || c.is_dead());
+    }
+    let msg = parts.join("; ");
+    if ok {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
 }
 
 fn bombardment_blows_up(w: &mut World) -> bool {

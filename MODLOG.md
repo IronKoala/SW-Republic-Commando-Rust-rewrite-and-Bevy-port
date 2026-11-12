@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: The two troopers on geo_01a's ramp die in the air strike, as the map says (rc_cast, rc_game, docs)
+
+- **Changed:** No new game code was needed: since the cast can die (PR #131), the map's own scripts do the rest. New `rc_game --script` steps: send RunLZTroopers (as Trigger42 does when the player walks in), wait for CloneTrooper7 and 13 to reach WaitToBeBlownUp and WaitToBeBlownUp02, send ArialBombardment01, and check that both die. Comments and docs/DESIGN.md corrected: the level's script sequence carries on past its character's death (Mikey's own sequence kills him and then sends MikeyMegaForce; the ramp pair's sequences wait for their own death event and then play a line).
+- **Why:** The user's side-by-side playtest: the two troopers on the ramp never died.
+- **Where it comes from:** geo_01a.ctm (Trigger42, Trigger5, ScriptedSequence14 and 3, ProjectileFactory11 `GEO_01AProj` 400 damage / 512 uu), read with the level dump; the user's PC log shows the same run up to "0 characters reached" before #131.
+- **Tested how:** `rc_game --script` in the cloud with the game's files.
+- **Result:** "CloneTrooper7 0 uu from its place, alive; CloneTrooper13 0 uu from its place, alive -> PASS"; the missile at (-1455, 629, -2384) reaches them at 341 and 235 uu for 164.5 and 247.5 damage; both play Death and send GunshipTrooper02Death / 03Death, which run their sequences on to CT3R1001 / CT3R1002 (not loaded in the cloud: voice packages not copied); "CloneTrooper7 ... dead; CloneTrooper13 ... dead -> PASS".
+- **Still broken / not tested:** Not tested on Windows. Their `SuggestEnemy Rockey` and `SetScriptPriority` are logged "not done yet" (the AI's part). No ragdoll: the original throws them (explosions always ragdoll); here they fall in place.
+- **Next:** The troopers' own AI.
+
 ## 2026-11-12: Placed clone troopers can be hurt and die (rc_cast, rc_game)
 
 - **Changed:** Characters in the cast whose class has `Health` (read with the class's "...Defaults" class on top) get `rc_combat`'s `Health` and a `Hittable` cylinder from `CollisionRadius`/`CollisionHeight`, so bolts, blasts and the scripts' `HurtActor` hurt them. Vehicles are left unhurt for now. New `rc_cast::die`: on death the map's `Event` for the character is triggered (`RaiseEvent`), it stops, plays its `Death` animation and holds the last frame, and from then on ignores script orders apart from hiding and removal. The body is removed `RagdollLifeSpan` seconds later (60 for a clone trooper) unless `bSaveMyCorpse`. New `read::Life`, `Cast::is_dead`, `Cast::playing`, `Cast::death_event`. Two new `rc_game --script` checks.
