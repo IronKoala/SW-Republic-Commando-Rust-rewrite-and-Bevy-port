@@ -56,9 +56,10 @@ pub mod characters;
 pub mod cutscene;
 pub mod fx_factories;
 pub mod markers;
-pub mod projectiles;
 pub mod music;
 pub mod objectives;
+pub mod placed_emitters;
+pub mod projectiles;
 pub mod save;
 pub mod sight;
 pub mod sounds;
@@ -144,6 +145,7 @@ impl Plugin for ScriptsPlugin {
                     sight::look,
                     run,
                     fx_factories::run,
+                    placed_emitters::run,
                     projectiles::fly,
                     breakables::show,
                     characters::cast,
@@ -160,7 +162,12 @@ impl Plugin for ScriptsPlugin {
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
-                (forget, sounds::forget, cutscene::forget, projectiles::forget),
+                (
+                    forget,
+                    sounds::forget,
+                    cutscene::forget,
+                    projectiles::forget,
+                ),
             );
     }
 }
@@ -581,6 +588,28 @@ fn build(
         });
     }
     commands.insert_resource(fx_factories::LevelFxFactories::new(fx));
+    // Emitters placed in the map (geo_01a's dust under the landing
+    // gunship): found by their class, their effects read now.
+    let emitters = match rc_effects::read::Library::open(&paths.game_data()) {
+        Ok(lib) => placed_emitters::read(map, &|c: &str| lib.is_emitter(c)),
+        Err(e) => {
+            log.line(format!(
+                "{PART}: effect packages not read ({e}); no placed emitters"
+            ));
+            Vec::new()
+        }
+    };
+    placed_emitters::log_list(&emitters, &log);
+    let mut classes: Vec<&str> = emitters.iter().map(|e| e.class.as_str()).collect();
+    classes.sort_unstable_by_key(|n| n.to_ascii_lowercase());
+    classes.dedup_by_key(|n| n.to_ascii_lowercase());
+    for c in classes {
+        preload.write(rc_effects_plugin::PreloadEffect {
+            effect: Some(c.to_string()),
+            sound: None,
+        });
+    }
+    commands.insert_resource(placed_emitters::LevelEmitters::new(emitters));
     commands.insert_resource(LevelScript {
         director,
         dispensers,
@@ -615,6 +644,7 @@ fn build(
 fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelScript>();
     commands.remove_resource::<fx_factories::LevelFxFactories>();
+    commands.remove_resource::<placed_emitters::LevelEmitters>();
     commands.remove_resource::<Objectives>();
     commands.remove_resource::<Loaded>();
 }
