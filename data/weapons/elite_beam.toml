@@ -53,3 +53,8 @@ bolt_colour = [0.4, 0.9, 1.0]
 mesh = "HudArmsEliteBeam" # game: EliteBeam's Mesh
 fov = 85                  # game: DisplayFOV
 brightness = 0.75         # our choice, as the other weapons
+
+[events]
+# Level events this weapon sends (game: EliteBeam's class defaults with its
+# "...Defaults" class on top; see docs/DESIGN.md "Events the player sends").
+first_draw = "EliteBeamEvent"         # FirstTimeSwitchEvent: the first time the player brings it up

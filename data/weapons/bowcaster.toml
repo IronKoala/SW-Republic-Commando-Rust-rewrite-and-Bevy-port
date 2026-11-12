@@ -56,3 +56,8 @@ mesh = "HudArmsBow"       # game: Bowcaster's Mesh
 fov = 85                  # game: DisplayFOV
 hide_zoomed = true        # game: BowcasterDefaults bZoomedUsesNoHUDArms
 brightness = 0.75         # our choice, as the other weapons
+
+[events]
+# Level events this weapon sends (game: Bowcaster's class defaults with its
+# "...Defaults" class on top; see docs/DESIGN.md "Events the player sends").
+first_draw = "BowcasterEvent"         # FirstTimeSwitchEvent: the first time the player brings it up

@@ -19,6 +19,11 @@ pub struct CombatSave {
     /// The weapon in hand, by id.
     pub current: String,
     pub weapons: Vec<WeaponSave>,
+    /// The weapons brought up at least once (`level_events::WeaponsDrawn`).
+    /// Missing in older saves: then every weapon carried counts as
+    /// brought up, so their first-time events aren't sent again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn: Option<Vec<String>>,
 }
 
 /// One weapon carried.
@@ -39,8 +44,13 @@ impl SavePart for CombatSave {
     const KEY: &'static str = "combat";
 
     fn save(world: &mut World) -> Option<Self> {
-        let mut q = world.query_filtered::<(&Health, Option<&Shield>, &Arsenal), With<Player>>();
-        let (h, s, a) = q.iter(world).next()?;
+        let mut q = world.query_filtered::<(
+            &Health,
+            Option<&Shield>,
+            &Arsenal,
+            Option<&crate::level_events::WeaponsDrawn>,
+        ), With<Player>>();
+        let (h, s, a, drawn) = q.iter(world).next()?;
         Some(CombatSave {
             health: h.current,
             shield: s.map(|s| s.current),
@@ -55,6 +65,7 @@ impl SavePart for CombatSave {
                     reloading: w.reloading,
                 })
                 .collect(),
+            drawn: Some(drawn.map(|d| d.0.clone()).unwrap_or_default()),
         })
     }
 
@@ -80,6 +91,11 @@ impl SavePart for CombatSave {
             }
         }
         let current = weapons.iter().position(|w| w.0 == d.current).unwrap_or(0);
+        let drawn = crate::level_events::WeaponsDrawn(
+            d.drawn
+                .clone()
+                .unwrap_or_else(|| weapons.iter().map(|w| w.0.clone()).collect()),
+        );
         let mut q = world.query_filtered::<Entity, With<Player>>();
         let player = q.iter(world).next().ok_or("no player in the level")?;
         let mut shield = Shield::new(
@@ -99,6 +115,7 @@ impl SavePart for CombatSave {
             Team::Republic,
             Hittable::COMMANDO,
             Arsenal { weapons, current },
+            drawn,
         ));
         if health.is_dead() {
             e.insert(Dead);

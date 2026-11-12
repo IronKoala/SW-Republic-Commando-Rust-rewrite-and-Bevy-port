@@ -53,3 +53,8 @@ mesh = "HudArmsUzi"        # game: SMG's Mesh
 fov = 85                  # game: DisplayFOV (degrees across 4:3, whatever the view setting)
 brightness = 0.75         # used only when the level's light can't be measured
 light_scale = 0.85        # how strongly the light where you stand shows on the arms; matched to two original screenshots
+
+[events]
+# Level events this weapon sends (game: SMG's class defaults with its
+# "...Defaults" class on top; see docs/DESIGN.md "Events the player sends").
+first_draw = "SMGEvent"         # FirstTimeSwitchEvent: the first time the player brings it up

@@ -52,3 +52,8 @@ offset = [40, 12, -14]
 mesh = "HudArmsConc"      # game: ConcussionRifle's Mesh
 fov = 85                  # game: DisplayFOV
 brightness = 0.75         # our choice, as the other weapons
+
+[events]
+# Level events this weapon sends (game: ConcussionRifle's class defaults with its
+# "...Defaults" class on top; see docs/DESIGN.md "Events the player sends").
+first_draw = "ConcRifleEvent"         # FirstTimeSwitchEvent: the first time the player brings it up

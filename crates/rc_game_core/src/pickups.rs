@@ -60,7 +60,20 @@ pub struct PlacedWeapon {
     /// Touch cylinder radius and half-height, Unreal units.
     pub radius: f32,
     pub height: f32,
+    /// The level event sent when the player picks it up (its `Event` in
+    /// the map), if any.
+    pub event: Option<String>,
 }
+
+/// What the map's player start adds to the player's equipment, as the
+/// original's class paths (`CTInventory.DC15s`, `CTInventory.DC17mSniper`):
+/// the map's `PlayerStart` `StartInventory`. The original gives the
+/// player `PlayerCommando`'s own equipment (the DC-17m blaster and the
+/// grenades) and then this list, so the pistol and the DC-17m attachments
+/// come from the map (geo_03a's start has only the pistol; its sniper
+/// attachment lies in the level). Inserted while the level loads.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelStartInventory(pub Vec<String>);
 
 /// Every weapon lying in the level just loaded. Inserted while the level
 /// loads.

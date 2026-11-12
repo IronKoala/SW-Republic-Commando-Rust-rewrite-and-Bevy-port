@@ -92,6 +92,11 @@ pub struct PlayerSetup {
     pub melee: MeleeParams,
     /// The player's damage table (in `damage_types.toml`).
     pub damage_table: Option<String>,
+    /// The level events sent when the player goes down and when a revive
+    /// brings them back (`[events]` `down` and `revived`; game:
+    /// `PlayerCommando`'s `Event` and `ReviveEvent`).
+    pub down_event: Option<String>,
+    pub revived_event: Option<String>,
 }
 
 /// The player's close-range hit when the weapon in hand has none of its
@@ -126,10 +131,12 @@ impl Default for PlayerSetup {
             shield: 100.0,
             shield_recharge_rate: 20.0,
             shield_recharge_delay: 3.0,
-            weapons: vec!["dc17m_blaster".into(), "dc15s_pistol".into()],
+            weapons: vec!["dc17m_blaster".into()],
             grenades: vec![],
             melee: MeleeParams::default(),
             damage_table: Some("DV_OrganicCTPlayerDamage".into()),
+            down_event: Some("PlayerIncapacitated".into()),
+            revived_event: Some("PlayerRevived".into()),
         }
     }
 }
@@ -156,6 +163,8 @@ impl PlayerSetup {
                 sound: t.text("melee.sound")?.or(d.melee.sound),
             },
             damage_table: t.text("player.damage_table")?.or(d.damage_table),
+            down_event: t.text("events.down")?.or(d.down_event),
+            revived_event: t.text("events.revived")?.or(d.revived_event),
         };
         t.finish()?;
         Ok(p)
@@ -628,13 +637,36 @@ fn top_package(pkg: &Package, mut outer: i32) -> Option<String> {
 pub(crate) fn equip_player(
     mut commands: Commands,
     lib: Res<WeaponLibrary>,
+    start: Option<Res<rc_game_core::pickups::LevelStartInventory>>,
+    rules: Option<Res<crate::pickup::WeaponPickupRules>>,
     players: Query<Entity, (With<Player>, Without<Arsenal>)>,
     log: Option<Res<GameLog>>,
 ) {
+    // The map's start list needs the class-to-weapon table: wait for it.
+    if start.as_ref().is_some_and(|s| !s.0.is_empty()) && rules.is_none() {
+        return;
+    }
     for e in &players {
         let s = &lib.player;
-        let weapons: Vec<(String, WeaponState)> = s
-            .weapons
+        let mut ids: Vec<String> = s.weapons.clone();
+        // Then what the map's player start adds (`StartInventory`), as the
+        // original's `PlayerCommando.AddDefaultInventory` does.
+        if let (Some(start), Some(rules)) = (&start, &rules) {
+            for path in &start.0 {
+                let class = path.rsplit('.').next().unwrap_or(path);
+                match rules.weapons.get(&class.to_ascii_lowercase()) {
+                    Some(id) if !ids.contains(id) => ids.push(id.clone()),
+                    Some(_) => {}
+                    None => say(
+                        &log,
+                        format!(
+                            "weapons: the map's start list names {path}, which no weapon file is (pickups/weapon_pickups.toml [weapons]): not given"
+                        ),
+                    ),
+                }
+            }
+        }
+        let weapons: Vec<(String, WeaponState)> = ids
             .iter()
             .filter_map(|id| {
                 lib.weapons

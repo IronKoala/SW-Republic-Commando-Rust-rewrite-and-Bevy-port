@@ -116,6 +116,14 @@ pub struct WeaponParams {
     /// The animated first-person arms holding it (`[arms]`). `None`: the
     /// plain `model` is shown instead.
     pub arms: Option<ArmsParams>,
+    /// The level event sent the first time the player brings this weapon
+    /// up after getting it (`events.first_draw`; game:
+    /// `FirstTimeSwitchEvent`, sent by `Weapon.BringUp` in engine.u).
+    pub first_draw_event: Option<String>,
+    /// The level event sent when the weapon in the player's hand has no
+    /// ammo left at all (`events.out_of_ammo`; game: `OutOfAmmoEvent`,
+    /// sent by `Weapon.SwitchToWeaponWithAmmo` in engine.u).
+    pub out_of_ammo_event: Option<String>,
 }
 
 /// A weapon's first-person arms: an animated model in the game's
@@ -261,6 +269,8 @@ impl WeaponParams {
             model_offset: t.vec3("model.offset")?.unwrap_or([0.0; 3]),
             bolt_colour: t.vec3("model.bolt_colour")?.unwrap_or([1.0, 0.3, 0.1]),
             arms: ArmsParams::read(&mut t)?,
+            first_draw_event: t.text("events.first_draw")?,
+            out_of_ammo_event: t.text("events.out_of_ammo")?,
         };
         t.finish()?;
         let p = WeaponParams {

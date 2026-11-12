@@ -261,6 +261,9 @@ pub struct PlacedWeapon {
     pub height: f32,
     /// How far it was moved down onto the ground (`rest_weapon_on_ground`).
     pub dropped: f32,
+    /// The event it sends when the player picks it up (the map's `Event`
+    /// on it, like geo_03a's `GotSniper`), if any.
+    pub event: Option<String>,
 }
 
 /// The weapon class (package, class) a pickup class gives, if its
@@ -364,6 +367,11 @@ pub fn read_weapon(
         .and_then(|(_, p)| rc_package::class::string_value(p))
         .unwrap_or_default();
     let sound = pickup_sound(map, &props, &look);
+    let event = match in_map("Event") {
+        Some(Value::Name(n)) => Some(map.name(*n).to_string())
+            .filter(|e| !e.is_empty() && !e.eq_ignore_ascii_case("None")),
+        _ => None,
+    };
     Some(PlacedWeapon {
         export: actor,
         name: place.name.clone(),
@@ -376,6 +384,7 @@ pub fn read_weapon(
         radius,
         height,
         dropped: 0.0,
+        event,
     })
 }
 

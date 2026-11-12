@@ -364,6 +364,7 @@ fn forget(
     commands.remove_resource::<LevelBreakables>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
     commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
+    commands.remove_resource::<rc_game_core::pickups::LevelStartInventory>();
 }
 
 /// The loading itself. It blocks for as long as the map takes (about 2 s for
@@ -562,6 +563,7 @@ fn load(world: &mut World) {
             sound: w.sound.clone(),
             radius: w.radius,
             height: w.height,
+            event: w.event.clone(),
         })
         .collect();
     log.line(format!(
@@ -571,6 +573,13 @@ fn load(world: &mut World) {
         lvl.weapons.iter().map(|w| w.dropped).fold(0.0f32, f32::max),
     ));
     world.insert_resource(rc_game_core::pickups::LevelWeaponPickups(weapons));
+    log.line(format!(
+        "{PART}: the player start adds {:?} to the player's equipment (StartInventory)",
+        lvl.start_inventory
+    ));
+    world.insert_resource(rc_game_core::pickups::LevelStartInventory(
+        lvl.start_inventory.clone(),
+    ));
 
     // The look. If it can't be built the level is still solid, just
     // invisible, so the game goes on and says so in the log.

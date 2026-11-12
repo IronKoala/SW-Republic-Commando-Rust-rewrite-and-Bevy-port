@@ -383,7 +383,13 @@ fn a_geonosian_rushes_in_with_its_force_pike() {
 struct Raised(Vec<String>);
 
 fn collect_raised(mut r: MessageReader<RaiseEvent>, mut got: ResMut<Raised>) {
-    got.0.extend(r.read().map(|e| e.name.clone()));
+    // Only the droids' own: the player's rifle sends its first-time event
+    // as the level starts (rc_combat::level_events).
+    got.0.extend(
+        r.read()
+            .filter(|e| e.by != "dc17m_blaster")
+            .map(|e| e.name.clone()),
+    );
 }
 
 #[test]

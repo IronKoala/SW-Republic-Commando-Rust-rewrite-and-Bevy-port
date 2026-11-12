@@ -126,6 +126,9 @@ pub struct WeaponPickup {
     pub message: String,
     /// The sound of taking it (package, name). `None`: the rules file's.
     pub sound: Option<(String, String)>,
+    /// The level event sent when the player picks it up (the map's
+    /// `Event` on it, like geo_03a's `GotSniper`). `None` for dropped ones.
+    pub event: Option<String>,
     /// Touch cylinder, Unreal units.
     pub radius: f32,
     pub height: f32,
@@ -142,6 +145,7 @@ impl WeaponPickup {
             weapon: weapon.to_string(),
             ammo,
             placed: None,
+            event: None,
             message: String::new(),
             sound: None,
             radius: DROPPED_RADIUS,
@@ -166,6 +170,9 @@ pub struct WeaponTaken {
     pub added: u32,
     /// The weapon thrown down to make room, if any.
     pub dropped: Option<String>,
+    /// The level event the pickup sends (see [`WeaponPickup::event`]):
+    /// only when it went into the player's hands, as in the game.
+    pub event: Option<String>,
 }
 
 /// Spawn a dropped weapon `at` the ground (with the bolt look of its
@@ -270,6 +277,7 @@ pub(crate) fn place_weapons(
                 weapon: id.clone(),
                 ammo: Some(w.ammo),
                 placed: Some((w.export, w.name.clone())),
+                event: w.event.clone(),
                 message: w.message.clone(),
                 sound: w.sound.clone(),
                 radius: w.radius,
@@ -463,6 +471,11 @@ pub(crate) fn collect_pickups(
                         new_weapon: false,
                         added,
                         dropped: None,
+                        // Game: a weapon you carry is "handled" by your
+                        // own (`Weapon.HandlePickupQuery` says so), and
+                        // `Pickup.ValidTouch` sends the event only when
+                        // the pickup itself is taken.
+                        event: None,
                     });
                     commands.entity(e).despawn();
                 }
@@ -540,6 +553,7 @@ pub(crate) fn collect_pickups(
             new_weapon: true,
             added: ammo.min(params.max_ammo),
             dropped: thrown.map(|t| t.0),
+            event: p.event.clone(),
         });
         commands.entity(e).despawn();
     }

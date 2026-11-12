@@ -3469,6 +3469,68 @@ very fast round that blasts where it lands, `grenades/concussion_rifle_blast.tom
 The sound package names are guesses from the sound names (`wep_GEN_` in
 `gen_sound`, `wep_YYY_` in `yyy_sound`).
 
+### Events the player sends (`rc_combat/src/level_events.rs`)
+
+Level scripts wait for events that the player's own weapons, pickups and
+body send in the original. Each goes to the scripts as a `RaiseEvent`.
+Where each comes from (engine.u, ctinventory.u, ctcharacters.u, read as
+text with `strings`; class defaults with `rc_probe --class`):
+
+- **A placed weapon's `Event`** (geo_03a's sniper attachment `GotSniper`,
+  geo_04d's anti-armour `AAEvent`): `Pickup.ValidTouch` sends it when the
+  pickup itself is taken. If the player already carries that weapon,
+  `Weapon.HandlePickupQuery` handles the pickup (ammo only) and nothing is
+  sent. `EliteBeamPickup` overrides `ValidTouch` and always sends it on
+  Use. Read from the map by `rc_level::pickups` (`PlacedWeapon::event`),
+  sent from `WeaponTaken::event` (only for `new_weapon`). Ammo boxes go
+  through the same `ValidTouch`, but a box of ammo you carry is always
+  handled by your `Ammunition` and one you don't carry can't be touched, so
+  a box's `Event` is never sent in the original either.
+- **A weapon's `first_draw`** (`FirstTimeSwitchEvent`: `DC17mBlasterEvent`,
+  `DC17mSniperEvent`, `EliteBeamEvent`, `PistolEvent`...): `Weapon.BringUp`
+  sends it if the player controller's `FirstTimeSwitch` for that weapon is
+  1, which `Weapon.GiveTo` sets from -1 the first time the weapon is
+  given. Kept as `WeaponsDrawn` on the player (and `drawn` in the `[combat]`
+  save; older saves count every carried weapon as drawn). The weapon in
+  hand at the start counts as brought up. Grenades are never brought up in
+  the original (the weapon cycle skips thrown weapons, and `SwitchGrenade`
+  only sets `CurrentGrenade`; engine.dll and ctgame.dll never call
+  `BringUp`), so `SonicDetonatorDefaults`' `SonicDetEvent`, which geo_03d
+  waits for, is never sent by the original either. The port doesn't send it.
+- **A weapon's `out_of_ammo`** (`OutOfAmmoEvent`: only the DC-17m blaster's
+  `BlasterOutOfAmmoEvent`, geo_01b and geo_01c): `Weapon.SwitchToWeaponWithAmmo`
+  sends it when the weapon in hand has no ammo at all and doesn't
+  recharge (from state `Idle`, firing, or `ServerThink`), then switches to
+  the last weapon. The port sends it when that happens and again when the
+  empty weapon is brought up again. **Not done:** the switch itself.
+- **The player's `down` / `revived`** (`[events]` in `player.toml`:
+  `PlayerCommando`'s `Event = PlayerIncapacitated`, `ReviveEvent =
+  PlayerRevived`): `Pawn.OnIncapacitated` (and `Pawn.Died`) trigger `Event`;
+  `ReviveEvent` goes when state `Reviving` ends, after the get-up animation,
+  through `CloneCommando.PlayReviveCue`. Sent when the player's `Dead`
+  comes and goes. The port has no get-up animation, so `revived` goes as
+  the revive is done.
+
+Squad mates do the same in `rc_squad_plugin` (`check_down`): the map's
+`Event` and `ReviveEvent` on a placed Delta (geo_01b `40Wounded`, geo_05b
+`Delta07Down`/`Delta07Revived`...), or a spawner's `PawnEventFromFactory`
+(which `PawnFactory` copies into the pawn's `Event`; the made pawn has no
+`ReviveEvent`). Kept in `MateTags`.
+
+**Starting weapons.** The original gives the player `PlayerCommando`'s
+`RequiredEquipment` (with `PlayerCommandoDefaults` on top: the DC-17m
+blaster, the four grenades, the bacta and hand signal) and then the map's
+`PlayerStart` `StartInventory` (`PlayerCommando.AddDefaultInventory`).
+Every Geonosis start adds the DC-15s; geo_03c on adds the sniper
+attachment, geo_05b on the anti-armour one. Before that the attachments lie
+in geo_03a and geo_04d, and taking them is what sends `GotSniper` and
+`AAEvent`. So `player.toml` now starts with the DC-17m only, and
+`rc_level::map_collision` reads the first `PlayerStart`'s list into
+`rc_game_core::pickups::LevelStartInventory`; `equip_player` adds those
+weapons by `[weapons]` in `weapon_pickups.toml` (which now lists `DC15s`).
+After a level change the carried weapons come from the save sections as
+before, and the list isn't added again.
+
 ### Modding
 
 Every weapon is one file in `data/weapons`. A mod folder's file with the

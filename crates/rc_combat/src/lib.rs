@@ -36,6 +36,7 @@ mod fire;
 pub mod grenade;
 pub mod hands;
 pub mod health;
+pub mod level_events;
 mod library;
 mod melee;
 pub mod pickup;
@@ -250,6 +251,20 @@ impl Plugin for WeaponsPlugin {
             )
             // The weapons lying in the levels (`pickup`).
             .add_message::<pickup::WeaponTaken>()
+            // Events the level's scripts wait for (`level_events`).
+            .add_message::<rc_game_core::RaiseEvent>()
+            .add_systems(
+                Update,
+                (
+                    level_events::pickup_events.after(pickup::collect_pickups),
+                    level_events::weapon_events.after(CombatSet::Fire),
+                    level_events::player_down_events,
+                )
+                    .in_set(GameSet::Simulate)
+                    .after(CombatSet::ApplyDamage)
+                    .run_if(playing)
+                    .run_if(resource_exists::<WeaponLibrary>),
+            )
             .init_resource::<pickup::WeaponsGone>()
             .add_systems(
                 Update,
