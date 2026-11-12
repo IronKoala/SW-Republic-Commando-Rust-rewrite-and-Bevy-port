@@ -432,4 +432,32 @@ mod tests {
             Some(1)
         );
     }
+
+    /// The enemies part makes every placed character an enemy file claims
+    /// (apart from clone troopers), so the cast must leave each of those
+    /// classes out or it would be there twice.
+    #[test]
+    fn every_enemy_files_classes_are_left_out() {
+        let f = CastFile::default();
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/enemies");
+        let mut checked = 0;
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let text = std::fs::read_to_string(e.path()).unwrap();
+            let v: toml::Value = toml::from_str(&text).unwrap();
+            let t = &v["type"];
+            if t.get("side").and_then(|s| s.as_str()) == Some("republic") {
+                continue;
+            }
+            for c in t["classes"].as_array().unwrap() {
+                let c = c.as_str().unwrap().trim_end_matches('*');
+                assert!(
+                    f.leaves_out(&[c.to_string()]),
+                    "{c} ({}) is an enemy but the cast doesn't leave it out",
+                    e.path().display()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 10);
+    }
 }

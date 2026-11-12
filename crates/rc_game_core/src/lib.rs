@@ -65,7 +65,8 @@ pub mod use_item;
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
-    ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
+    ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone,
+    FactoryOrder,
     LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
     ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
 };
@@ -113,6 +114,7 @@ impl Plugin for CorePlugin {
             .add_message::<FactoryOrder>()
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()
+            .add_message::<CharacterCollision>()
             .add_message::<SquadStanceOrder>()
             .add_message::<SquadMembership>()
             .add_message::<MarkerJob>()
