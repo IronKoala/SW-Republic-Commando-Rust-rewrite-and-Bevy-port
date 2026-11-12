@@ -3,6 +3,14 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: Clone troopers carry their own DC-15 rifle, not the commandos' DC-17m (rc_cast, data/enemies, data/weapons)
+
+- **Changed:** New `data/weapons/dc15_blaster_clone.toml` (the game's `Properties.DC15BlasterClone`). `data/enemies/clone_trooper.toml` (class `CloneTrooper`) now uses it and holds its model (`held_weapon = "DC15BlasterClone"`, shot delay 0.15). `rc_cast` takes a character's `RequiredEquipment` from its class's "...Defaults" class in Properties/properties.u when that sets one, so the level's placed troopers hold the DC-15 too. `rc_enemy_look_check` now also loads each type's held weapon. The game script's rifle check looks for `DC15BlasterClone`.
+- **Why:** User's side-by-side shots: the original's troopers hold their own blaster rifle, ours held the commando's DC-17m. `CloneTrooper`'s own value in ctcharacters.u is the DC-17m, but the game lays `CloneTrooperDefaults` over the class (core.dll holds `Properties.%sDefaults` and `UClass::IsDefaultsOverride`), and that sets `Properties.DC15BlasterClone`. The ammo boxes and player weapons already read their Defaults classes this way.
+- **Tested how:** `rc_probe --class` on CloneTrooperDefaults, DC15BlasterClone, its ammo, DC15AttachmentClone, DC17BlasterProjDefaults (numbers in docs/RESEARCH.md "Clone troopers"); `strings` on core.dll for the Defaults rule; `cargo test --release -p rc_ai -p rc_cast -p rc_combat`; `rc_enemy_look_check`; `rc_game --script` in the cloud with the game's files copied read only from the PC.
+- **Result:** rc_ai, rc_cast pass; rc_combat's `real_game_sounds_and_model` fails the same way on main without these changes (sound packages not copied to the cloud). Look check 47 passed, 0 failed, including "clone_trooper: holds DC15BlasterClone (model Weapons.CloneWeapons.DC15Blaster from DC15AttachmentClone)". Script: "the clone troopers hold their rifles: 8 of 8 clone troopers hold a DC15BlasterClone -> PASS".
+- **Still broken / not tested:** Not tested on Windows or by eye. Only `RequiredEquipment` is taken from the Defaults class in the cast; its other values (footsteps, burnt skin, ragdoll settings) are not used yet. The troopers still don't die or fight with the game's own tactics (next PRs).
+- **Next:** Placed troopers can be hurt and die.
 ## 2026-11-12: You stand in the gunship until the rope order, then drop to the ground (rc_level)
 
 - **Changed:** `rc_level::volumes::blocking_volumes` also reads any other volume the map makes block players or characters (`bBlockPlayers` or `bBlockActors` set on the map's actor). These volumes don't stop shots.

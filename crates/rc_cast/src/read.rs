@@ -113,8 +113,9 @@ pub struct CastMember {
     /// cylinder"; ctcharacters.u's `Gunship` sets it false), whose model's
     /// origin is `location` itself, as a prop's.
     pub half_height: f32,
-    /// The weapon class it holds (`RequiredEquipment`, `DC17mBlaster` from
-    /// "CTInventory.DC17mBlaster"); characters only.
+    /// The weapon class it holds (`RequiredEquipment`, with the class's
+    /// "...Defaults" class on top: `DC15BlasterClone` from
+    /// "Properties.DC15BlasterClone" for a clone trooper); characters only.
     pub weapon: Option<String>,
     /// `bAlignBottom` (engine.u's `Pawn` and `AnimProp` default true):
     /// false draws the model from its own origin at `location`.
@@ -379,8 +380,14 @@ pub fn find_cast(
             },
             align_bottom,
             weapon: if is_pawn {
-                defaults
-                    .string("RequiredEquipment")
+                // The game lays the class's "...Defaults" class in
+                // Properties/properties.u over it (core.dll builds the
+                // name "Properties.%sDefaults"): CloneTrooperDefaults swaps
+                // the trooper's DC-17m for Properties.DC15BlasterClone.
+                Some(format!("{}Defaults", o.class))
+                    .filter(|d| lib.has_class(d))
+                    .and_then(|d| lib.defaults(&d).string("RequiredEquipment"))
+                    .or_else(|| defaults.string("RequiredEquipment"))
                     .and_then(|w| w.rsplit('.').next().map(str::to_string))
                     .filter(|w| !w.is_empty() && !w.eq_ignore_ascii_case("None"))
             } else {

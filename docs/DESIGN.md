@@ -3013,8 +3013,13 @@ What the files don't say is listed in `clone_trooper_tm.toml`: the
 troopers' attack state (`StateTrandoshanAttack`) works in compiled code,
 so they fight the way our droids do. A type's `[look] held_weapon` names
 the weapon class whose model it holds (the original's `RequiredEquipment`:
-`DC17mBlaster` for `CloneTrooper`, `DC15BlasterCloneTM` for
-`CloneTrooperTM`). `rc_enemies` reads it once per type with
+`DC15BlasterClone` for `CloneTrooper`, `DC15BlasterCloneTM` for
+`CloneTrooperTM`). `CloneTrooper`'s own value in ctcharacters.u is the
+commandos' `CTInventory.DC17mBlaster`, but the game lays
+`CloneTrooperDefaults` (Properties/properties.u) over the class (core.dll
+builds the name `Properties.%sDefaults`), and that sets
+`Properties.DC15BlasterClone`; its numbers are in
+`data/weapons/dc15_blaster_clone.toml`. `rc_enemies` reads it once per type with
 `rc_effects_plugin::held::HeldModel` (as the level's cast does), hangs it
 as a child of each new fighter (`HeldWeapon`), and moves it onto the bone
 `weaponAttach_R` each time the body is posed (`DroidLook::bone_frame`).
@@ -4271,7 +4276,9 @@ start instead of being stood on the ground. Cast members are drawn by
 the level's light where they stand (`rc_game_core::LitByPlace`, the
 data file's `light_scale`, 1.1 as the squad and droids), so a trooper in
 shade is dark; holograms keep their own glow. A character whose class names a weapon
-(`RequiredEquipment`, "CTInventory.DC17mBlaster" on `CloneTrooper`)
+(`RequiredEquipment`, taken from the class's "...Defaults" class in
+Properties/properties.u when that sets it, as the game does:
+"Properties.DC15BlasterClone" from `CloneTrooperDefaults` on `CloneTrooper`)
 holds its model: the weapon's `AttachmentClass` (engine.u's `Weapon`;
 `DC17mBlasterAttachment`) gives a `StaticMesh`, read with
 `rc_effects::projectile::ClassPackages::held_weapon` and drawn on the
