@@ -80,3 +80,19 @@ pub struct PickedUp {
     /// Sound package and the sound's name in it.
     pub sound: Option<(String, String)>,
 }
+
+/// A level script gives the player ammo, or takes it away (the original's
+/// `ACTION_AddAmmo`, gameplay.u). geo_01a starts by taking every grenade
+/// away; later levels hand out a full set. The combat part carries it out
+/// on the player's weapon or grenade of that class, keeping the count
+/// between none and the most carried (`Ammunition.AddAmmo`, engine.u).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct AddAmmo {
+    /// The original's weapon class (`WhichWeapon`: `ThermalDetonator`,
+    /// `FlashBang`, ...).
+    pub weapon_class: String,
+    /// How much to add; below 0 takes away (`AmmoAmount`).
+    pub amount: i32,
+    /// Which script step asked, for the log.
+    pub by: String,
+}

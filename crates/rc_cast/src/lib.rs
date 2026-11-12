@@ -20,9 +20,16 @@
 //!   walks are short and on clear floors), and is posed on the CPU each
 //!   frame like the squad.
 //!
-//! The cast takes no damage, doesn't fight and isn't kept in save files
-//! (the cutscene maps have no checkpoints). Everything it does is logged
-//! with the prefix `cast:`.
+//! Characters whose class has `Health` (the clone troopers standing about
+//! in the missions) can be hurt and die (`rc_combat`'s `Health` and
+//! `Hittable`): as engine.u's `Pawn.Died`, death triggers the map's
+//! `Event` for the character, stops its script (`Controller.PawnDied`
+//! destroys an AI's controller) and plays its `Death` animation; the
+//! body goes after `RagdollLifeSpan` seconds unless `bSaveMyCorpse`.
+//! The original throws many deaths into a ragdoll instead (all deaths
+//! by explosion); there are no ragdolls here yet. The cast doesn't fight
+//! and isn't kept in save files (the cutscene maps have no checkpoints).
+//! Everything it does is logged with the prefix `cast:`.
 
 pub mod read;
 
@@ -32,6 +39,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rc_anim::Clip;
+use rc_combat::{Died, Health, Hittable};
 use rc_game_core::units::{to_bevy, to_unreal, UU_PER_UNIT};
 use rc_game_core::{
     playing, CharacterAct, CharacterOrder, CharacterOrderDone, CurrentLevel, GameLog, GamePaths,
@@ -39,7 +47,7 @@ use rc_game_core::{
 };
 use rc_model::NotifyTrigger;
 use rc_model::{Model, ModelSpec};
-use read::{CastFile, CastMember, Kind};
+use read::{CastFile, CastMember, Kind, Life};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -66,7 +74,7 @@ impl Plugin for CastPlugin {
             .add_systems(OnEnter(GameState::Loading), load_cast)
             .add_systems(
                 Update,
-                (spawn_cast, follow_orders, trigger_props, move_cast)
+                (spawn_cast, follow_orders, trigger_props, move_cast, die)
                     .chain()
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
@@ -359,9 +367,28 @@ pub struct Cast {
     /// plays then (`AnimTriggered`, looping or not).
     tag: String,
     trigger: Option<(String, bool)>,
+    /// How it can die (see [`Life`]); `None` can't be hurt.
+    life: Option<Life>,
+    /// When it died (`time`), once dead.
+    died_at: Option<f32>,
 }
 
 impl Cast {
+    /// It has died.
+    pub fn is_dead(&self) -> bool {
+        self.died_at.is_some()
+    }
+
+    /// What its death triggers (the map's `Event` for it), if it can die.
+    pub fn death_event(&self) -> Option<&str> {
+        self.life.as_ref().and_then(|l| l.event.as_deref())
+    }
+
+    /// The animation a script or its death plays, if any.
+    pub fn playing(&self) -> Option<&str> {
+        self.scripted.as_ref().map(|s| s.clip.name.as_str())
+    }
+
     /// The weapon class whose model it holds, when one is drawn.
     pub fn held_weapon(&self) -> Option<&str> {
         self.look
@@ -474,6 +501,18 @@ fn spawn_cast(
             DespawnOnExit(GameState::InGame),
             Name::new(format!("cast {}", m.name)),
         ));
+        if let Some(l) = &m.life {
+            // The hit cylinder's middle is the map place: the body stands
+            // `half_height` below it (0 for one drawn from its origin).
+            e.insert((
+                Health::new(l.health),
+                Hittable {
+                    radius: l.radius,
+                    half_height: l.half_height,
+                    center_up: m.half_height,
+                },
+            ));
+        }
         if m.shadow {
             e.insert(rc_shadows::CastsShadow {
                 middle: m.half_height / UU_PER_UNIT,
@@ -522,6 +561,8 @@ fn spawn_cast(
             time: 0.0,
             tag: m.tag.clone(),
             trigger: m.prop_trigger.clone(),
+            life: m.life.clone(),
+            died_at: None,
         });
     }
     if !plan.members.is_empty() {
@@ -700,6 +741,15 @@ fn follow_orders(
             continue; // not one of ours
         };
         let at = format!("t={:.2} {} ({} #{})", c.time, c.name, o.script, o.index);
+        // A dead character's controller is gone (engine.u's
+        // `Controller.PawnDied` destroys an AI's), so nothing runs its
+        // script: only actions on the body itself (hide it, take it away)
+        // still apply. A script waiting on it stays waiting, as the
+        // original's stops.
+        if c.is_dead() && !matches!(o.act, CharacterAct::Hidden(_) | CharacterAct::Remove) {
+            log_line(&log, format!("{at} is dead; ignores {:?}", o.act));
+            continue;
+        }
         // A new order replaces one the script stopped waiting for.
         c.waiting = None;
         let mut finished = false;
@@ -955,6 +1005,91 @@ fn move_cast(
         if finished && goal != Goal::Stand {
             c.goal = Goal::Stand;
             done_msg(&mut done, c.waiting.take());
+        }
+    }
+}
+
+/// Characters whose health ran out die as engine.u's `Pawn.Died` and
+/// `PlayDying`: the map's `Event` for them is triggered, they stop, and
+/// they play `Death` (`PlayDyingAnim`, for a character not on a turret or
+/// flying) and hold its last frame. The body is taken away
+/// `RagdollLifeSpan` seconds later (`LifeSpan`), unless kept.
+fn die(
+    mut commands: Commands,
+    mut died: MessageReader<Died>,
+    mut cast: Query<(Entity, &mut Cast)>,
+    names: Query<&Name>,
+    mut raise: MessageWriter<RaiseEvent>,
+    log: Option<Res<GameLog>>,
+) {
+    for d in died.read() {
+        let Ok((_, mut c)) = cast.get_mut(d.entity) else {
+            continue; // not one of ours
+        };
+        if c.is_dead() {
+            continue;
+        }
+        let c = &mut *c;
+        c.died_at = Some(c.time);
+        c.goal = Goal::Stand;
+        c.waiting = None;
+        c.moving = None;
+        let by = d
+            .killer
+            .and_then(|k| names.get(k).ok())
+            .map_or_else(|| "no one (script or level)".to_string(), |n| n.to_string());
+        // The original's `TryToRagdoll` throws the body into a ragdoll
+        // when it has no `Death` animation, and sometimes when it has
+        // (each damage type's `RagdollOnDeathProbability`).
+        let death = c.look.as_ref().and_then(|l| l.model.named_clip("Death"));
+        let how = match death {
+            Some(clip) => {
+                let secs = clip.num_frames / clip.rate.max(1.0);
+                c.scripted = Some(Scripted {
+                    clip,
+                    looping: false,
+                });
+                if let Some(l) = c.look.as_mut() {
+                    l.playing = None;
+                }
+                format!("plays Death ({secs:.2} s)")
+            }
+            None => {
+                c.scripted = None;
+                "has no Death animation (the original would throw it into a ragdoll; none here yet)"
+                    .to_string()
+            }
+        };
+        let event = c.life.as_ref().and_then(|l| l.event.clone());
+        log_line(
+            &log,
+            format!(
+                "t={:.2} {} dies, killed by {by}: {how}{}",
+                c.time,
+                c.name,
+                event
+                    .as_ref()
+                    .map_or(String::new(), |e| format!(", triggers {e}"))
+            ),
+        );
+        if let Some(name) = event {
+            raise.write(RaiseEvent {
+                name,
+                by: format!("{} died", c.name),
+            });
+        }
+    }
+    for (e, c) in &cast {
+        let (Some(at), Some(keep)) = (c.died_at, c.life.as_ref().and_then(|l| l.corpse_time))
+        else {
+            continue;
+        };
+        if c.time - at >= keep {
+            log_line(
+                &log,
+                format!("t={:.2} {}'s body goes after {keep:.0} s", c.time, c.name),
+            );
+            commands.entity(e).despawn();
         }
     }
 }
