@@ -763,6 +763,49 @@ the maps' actors.
   bytes): every `TransitionSound` is None, and no map sets one or a
   `DispenseSound`.
 
+## Droidekas and dwarf spider droids (read 2026-11-12)
+
+Class defaults from ctcharacters.u, ctinventory.u and properties.u; the
+attack states from ctgame.dll and the ragdoll notify from Engine.dll, read
+locally with a disassembler for understanding only (nothing kept). Hard-coded
+names in the compiled code are indices into core.dll's name table (index =
+offset / 4: 900 Fire, 875 StepLeft, 876 StepRight, 912 FireRockets, 924
+EyeBlink, 927 eyelid, 928 EnterDefensiveBreathe, 929 ExitDefensiveBreathe,
+930 DefensiveBreathe, 931 ScanArea, 932 ProximityDefense, 933
+EnterStandRocketBreathe, 934 ExitStandRocketBreathe, 935 StandScanArea, 936
+StandRocketFire).
+
+- Droideka: Health = MaxHealth 400, Shields = MaxShields 800, no
+  ShieldRechargeRate, Accuracy 0.95, SightRadius 5000, GroundSpeed 728,
+  WalkSpeedRatio 0.187, collision 75 x 90. DroidekaBot BurstCount 20,
+  states StateIdle, StateDroidekaAttack, StateInvestigate. Blaster: ShotDelay
+  0.2, automatic, bolt 5000 uu/s, Damage 40 (Defaults). The shield bubble
+  (a ForceField) shows only while it stands still; shields soak damage
+  whenever Shields > 0 (Pawn.TakeDamage).
+- StateDroidekaAttack::UpdateSelf: focus the best enemy; if it has a shot,
+  GOAL_Shoot(5.0, BurstCount); then GOAL_Sleep(1.0). No move goals.
+- Dwarf spider droid: MaxHealth 5000, Accuracy 0.9, GroundSpeed 100 walking,
+  collision 310 x 175, EnemyMemoryTime 30, MaxAimYaw 30. Cannon: ShotDelay
+  1.0, shell 5000 uu/s, Damage 250, DamageRadius 512 (Defaults). Missile
+  rack fires from FireRockets / StandRocketFire (FireSecondary).
+- StateSpiderDroidAttack::UpdateSelf, first match wins each decision:
+  proximity defence when ProxDefNPCThreshold (2) enemies, or the player,
+  are within ProxDefRange (600) and ProxDefMinInterval (12 s) has passed
+  (ProximityDefense: SpawnStatusEffect 10 s, radius 700, 1000 per s); a
+  side step (CanStep left/right, each with chance 5%); the missile attack
+  when the rack's ValidRange holds the enemy, MinGrenadeTime (10 s) has
+  passed and a random number is under GrenadeProbability (0.3): with knee
+  shields Enter/ScanArea/FireRockets/ExitDefensiveBreathe, without them
+  the Stand... set; else, enemy in front (facing dot > ShotRange 0), turn,
+  ceil(random x BurstCount) Fire animations (the cannon fires from the
+  animation's AnimNotify_FireWeapon at 0.44), turn, GOAL_Sleep(1.5); else
+  GOAL_Sleep(0.5). ProcessStimulus blocks with DefensiveBreathe on a stimulus of group 5 (which stimuli those are is not checked) coming
+  from in front within 500 uu, every MinDefenseInterval (10 s). It blinks
+  every BlinkInterval (1 to 4 s). No move goals.
+- UAnimNotify_GoRagdoll::Notify: a pawn with Health > 0 takes 1,000,000
+  damage. geo_05b's placed Droideka0 (Event IntroDead) plays DroidekaIntro
+  (cGEO05DroidekaSet), whose GoRagdoll notify is at 0.996.
+
 ## Engine code read for the droid dispensers (Engine.dll, 2026-11-12)
 
 Disassembled locally, read only, for the user's "decompile what the files

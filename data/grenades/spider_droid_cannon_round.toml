@@ -1,0 +1,38 @@
+# The dwarf spider droid's cannon shell (SpiderDroidCannonProj, ctinventory.u,
+# parent CTProjExplosive) with SpiderDroidCannonProjDefaults
+# (Properties/properties.u) on top. It flies straight (Physics 6, projectile)
+# and goes off when it hits anything.
+
+name = "DSD Cannon Shell"
+
+[ammo]
+max_count = 1             # not carried by hand; the cannon's ammo counts
+
+[throw]
+speed = 5000              # game: SpiderDroidCannonProj Speed and MaxSpeed
+
+[fuse]
+time = 5                  # game: SpiderDroidCannonProj FuseTime
+after_impact = 0          # our choice: it goes off as it hits (bActorDetonate, bWorldDetonate)
+on_actor = true           # game: bActorDetonate
+on_world = true           # game: bWorldDetonate
+
+[flight]
+bounce = 0.5              # game: SpiderDroidCannonProj BounceDampening
+actor_bounce = 0.05       # game: CTProjExplosive ActorBounceDampening
+rest_speed = 20           # game: CTProjExplosive RestSpeed
+gravity = 0               # game: Physics 6 (projectile), no fall
+
+[blast]
+damage = 250              # game: SpiderDroidCannonProjDefaults Damage
+radius = 512              # game: SpiderDroidCannonProjDefaults DamageRadius
+damage_type = "CTDamageExplosion" # game: SpiderDroidCannonAmmo MyDamageType
+damage_kind = "explosion"
+
+[sound]
+package = "gen_sound"
+blast = "exp_GEN_ship_01" # placeholder: the impact effect (SpiderDroid_Cannon_Impact) and its sound aren't read yet
+
+[model]
+mesh = "SpiderMissile"    # game: SpiderDroidCannonProjDefaults StaticMesh (not drawn yet)
+blast_colour = [1.0, 0.7, 0.3]   # our choice

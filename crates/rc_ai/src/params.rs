@@ -95,6 +95,17 @@ pub struct Combat {
     /// Crouches (in cover, between bursts). The original's Pawn
     /// `bCanCrouch`; clone troopers have it off.
     pub can_crouch: bool,
+    /// Stands its ground once it fights: no cover, no closing in, no
+    /// backing off, no moving for a better shot. The original's
+    /// `StateDroidekaAttack` and `StateSpiderDroidAttack` (ctgame.dll)
+    /// give their fighter only turn, aim, shoot and wait goals, never a
+    /// move.
+    pub holds_ground: bool,
+    /// Seconds from the start of a burst to its first shot, while the
+    /// firing animation winds up. The dwarf spider droid's cannon goes off
+    /// from its `Fire` animation's `AnimNotify_FireWeapon`, 44% into the
+    /// 3-second animation. 0 for none.
+    pub fire_wind_up: f32,
     /// The weapon file left on the ground when it falls, for the player to
     /// pick up. Empty for none.
     pub drops: String,
@@ -338,6 +349,8 @@ impl AiParams {
                 lost_sight_reposition: 2.0,
                 uses_cover: true,
                 can_crouch: true,
+                holds_ground: false,
+                fire_wind_up: 0.0,
                 drops: "e5_blaster_pickup".into(),
                 damage_table: "DV_DroidsBattleDroidDamage".into(),
                 melee_range: 0.0,
@@ -500,6 +513,8 @@ impl AiParams {
             }
             ("combat", "uses_cover") => c.uses_cover = boolean()?,
             ("combat", "can_crouch") => c.can_crouch = boolean()?,
+            ("combat", "holds_ground") => c.holds_ground = boolean()?,
+            ("combat", "fire_wind_up") => c.fire_wind_up = num()?.max(0.0),
             ("combat", "drops") => c.drops = text(),
             ("combat", "damage_table") => c.damage_table = text(),
             ("combat", "melee_range") => c.melee_range = num()?,

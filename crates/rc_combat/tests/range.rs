@@ -168,6 +168,7 @@ fn every_weapon_file_reads() {
             "dc17m_antiarmor",
             "dc17m_blaster",
             "dc17m_sniper",
+            "droideka_blaster",
             "e5_blaster",
             "e5_blaster_pickup",
             "e5_blaster_tm",
@@ -182,6 +183,7 @@ fn every_weapon_file_reads() {
             "rocket_launcher",
             "sbd_blaster",
             "scav_beam",
+            "spider_droid_cannon",
             "trandoshan_rifle",
             "trandoshan_shotgun",
             "trandoshan_smg"
@@ -482,6 +484,7 @@ fn every_grenade_file_reads_and_the_player_carries_them() {
             "grievous_missile",
             "rocket_launcher_rocket",
             "sonic_detonator",
+            "spider_droid_cannon_round",
             "thermal_detonator",
             "thermal_detonator_enemy",
             "turret_shell"

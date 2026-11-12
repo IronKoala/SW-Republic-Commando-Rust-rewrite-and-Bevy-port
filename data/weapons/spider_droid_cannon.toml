@@ -1,0 +1,37 @@
+# The dwarf spider droid's main cannon (SpiderDroidCannon).
+#
+# The values are the original game's: class SpiderDroidCannon
+# (ctinventory.u) with SpiderDroidCannonDefaults (Properties/properties.u)
+# on top, and its shell SpiderDroidCannonProj (data/grenades/
+# spider_droid_cannon_round.toml). In the original the shot goes off from
+# the droid's Fire animation (AnimNotify_FireWeapon, 44% into it); the
+# droid's own file times its bursts to match.
+
+name = "DSD Cannon"       # game: ItemName
+
+[fire]
+mode = "semi_auto"        # one shell per Fire animation
+shot_delay = 1.0          # game: SpiderDroidCannonDefaults ShotDelay
+aim_error = 0
+
+[ammo]
+max_ammo = 1000           # game: SpiderDroidCannonAmmo MaxAmmo
+recharge_rate = 100       # never runs dry (Ammunition bInfiniteClipsForNonPlayers)
+
+[shot]
+kind = "lobbed"           # it flies as a grenade does, with no gravity (see the shell's file)
+speed = 5000              # game: SpiderDroidCannonProj Speed
+grenade = "spider_droid_cannon_round"
+
+[melee]
+range = 0                 # the spider droid has no close-up hit with the cannon
+damage = 0
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_dSpdCanFire_01"] # game: SpiderDroidCannonDefaults FireSound
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the cannon is part of the droid's own model
+offset = [0, 0, 0]        # our choice: fired from the droid's eye (the 'muzzle' bone isn't used yet)

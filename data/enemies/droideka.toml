@@ -1,0 +1,76 @@
+# Droideka (destroyer droid): rolls in as a wheel, unfolds, raises its
+# energy shield and fires its twin blasters without moving.
+#
+# Numbers marked "game:" are the original's: Droideka (ctcharacters.u,
+# parent Droid) with DroidekaDefaults (Properties/properties.u) on top, and
+# its brain DroidekaBot. How it fights is StateDroidekaAttack, which is
+# compiled code (ctgame.dll, read for reference only): every update it
+# faces its best enemy and, when it has a shot, fires (GOAL_Shoot for up to
+# 5 s with its BurstCount), then waits 1 s (GOAL_Sleep 1.0). It never moves
+# while fighting (holds_ground). "our choice" marks the rest. Anything not
+# listed takes the battle droid's value (battle_droid.toml).
+#
+# Not done yet: the shield bubble you see (ForceField, shown only while it
+# stands still), the rolling sound (MovementSound drd_GEN_droideka_roll_lp),
+# unfolding when it stops (Unfold), losing an arm (LeftArmHealth/
+# RightArmHealth halve its rate of fire), its four muzzles taking turns,
+# running over battle droids (Bump), the shield's own damage table
+# (ShieldDamageVariance DV_DroidsDroidekaShieldDamage) and the death
+# explosion (DeathExplode_Droideka).
+
+[type]
+id = "droideka"
+name = "droideka"
+classes = ["Droideka*"]   # game: the map class (geo_05b, geo_05c)
+body = "droid"
+
+[movement]
+ground_speed = 728        # game: Droideka GroundSpeed (rolling; DroidekaBot doesn't set bShouldWalk)
+walk_speed_ratio = 0.187  # game: Droideka WalkSpeedRatio
+side_speed_ratio = 1.125  # game: Droideka SideSpeedRatio
+collision_radius = 75     # game: Droideka CollisionRadius
+collision_height = 90     # game: Droideka CollisionHeight
+crouch_radius = 65        # game: Droideka CrouchRadius
+crouch_height = 55        # game: Droideka CrouchHeight
+base_eye_height = 60      # game: Droideka BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: DroidekaDefaults SightRadius
+
+[combat]
+health = 400              # game: DroidekaDefaults MaxHealth (Pawn sets Health = MaxHealth at spawn)
+shields = 800             # game: DroidekaDefaults MaxShields (Pawn sets Shields = MaxShields at spawn)
+shield_recharge_rate = 0  # game: ShieldRechargeRate isn't set for the droideka
+accuracy = 0.95           # game: DroidekaDefaults Accuracy
+weapon = "droideka_blaster" # game: RequiredEquipment DroidekaBlaster (data/weapons/droideka_blaster.toml)
+burst_count = 20          # game: DroidekaBot and DroidekaBlaster BurstCount
+shot_delay = 0.2          # game: DroidekaBlaster ShotDelay
+burst_pause_min = 1.0     # game: StateDroidekaAttack's GOAL_Sleep(1.0) after each shoot goal
+burst_pause_max = 1.0     # game: the same
+weapon_range = 7000       # game: Weapon ValidRange max (DroidekaBlaster keeps it)
+holds_ground = true       # game: StateDroidekaAttack gives no move goals
+uses_cover = false        # game: the same
+can_crouch = false        # game: Droideka bCanCrouch false
+drops = ""                # game: the blasters are built in
+damage_table = "DV_DroidsDroidekaDamage" # game: DroidekaDefaults MyDamageVariance
+
+[sound]
+# game: no AudioTable for Droideka or Droid, so it says nothing.
+package = "character_voice"
+spotted = []
+hurt = []
+death = []
+
+[look]
+package = "GameData/Animations/droid.ukx"   # game: Mesh Droid.Droideka
+mesh = "Droideka"
+idle = "ActionBreathe"                       # game: DroidekaSet
+walk = "RunForward"                          # game: DroidekaSet has one way to move, rolling
+run = "RunForward"
+walk_back = "RunForward"
+step_left = "StepLeft"
+step_right = "StepRight"
+fire = "Fire"
+crouch = "ActionBreathe"                     # game: it can't crouch
+crouch_fire = "Fire"
+death = "Death"

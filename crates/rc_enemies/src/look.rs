@@ -95,6 +95,12 @@ pub struct DroidLook {
     /// The mesh's whole animation sets, for animations a level script
     /// names (`ACTION_PlayAnim`).
     pub anims: Vec<MeshAnimation>,
+    /// When (0 to 1 through it) each animation, by name in lower case,
+    /// has an `AnimNotify_GoRagdoll`. The engine's notify
+    /// (`UAnimNotify_GoRagdoll::Notify`, Engine.dll) hands a pawn still
+    /// alive 1,000,000 damage, so the character dies there: geo_05b's
+    /// intro droideka at the end of its scripted `DroidekaIntro`.
+    pub ragdoll_at: HashMap<String, Vec<f32>>,
     pub skin: Option<(String, Rgba)>,
     /// Triangle corners as wedge numbers, already in Bevy's winding.
     pub indices: Vec<u32>,
@@ -166,6 +172,26 @@ impl DroidLook {
                 )),
             }
         }
+        let mut ragdoll_at: HashMap<String, Vec<f32>> = HashMap::new();
+        for (_, anim) in &anims {
+            for seq in &anim.sequences {
+                for n in &seq.notifies {
+                    let ObjectRef::Export(i) = ObjectRef::from_index(n.object) else {
+                        continue;
+                    };
+                    if pkg
+                        .exports
+                        .get(i)
+                        .is_some_and(|e| pkg.export_class_name(e) == "AnimNotify_GoRagdoll")
+                    {
+                        ragdoll_at
+                            .entry(seq.name.to_ascii_lowercase())
+                            .or_default()
+                            .push(n.time);
+                    }
+                }
+            }
+        }
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
         let mut used_sets: Vec<&str> = Vec::new();
@@ -234,6 +260,7 @@ impl DroidLook {
             weights,
             clips,
             anims: anims.iter().map(|(_, a)| a.clone()).collect(),
+            ragdoll_at,
             skin,
             indices,
             lift: 0.0,

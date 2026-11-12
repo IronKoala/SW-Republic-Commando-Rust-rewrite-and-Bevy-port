@@ -1,0 +1,81 @@
+# Dwarf spider droid: a big four-legged walker with a cannon, a missile
+# rack and a scanner, heavily armoured.
+#
+# Numbers marked "game:" are the original's: DwarfSpiderDroid
+# (ctcharacters.u, parent Droid) with DwarfSpiderDroidDefaults
+# (Properties/properties.u) on top, and its brain DwarfSpiderDroidBot. How
+# it fights is StateSpiderDroidAttack, compiled code (ctgame.dll, read for
+# reference only). It never moves while fighting (holds_ground). When its
+# enemy is in front of it, it turns to it and plays its Fire animation
+# ceil(random x BurstCount) times (BurstCount 1: once), whose
+# AnimNotify_FireWeapon fires the cannon 44% in (1.32 s of 3 s), then waits
+# 1.5 s (GOAL_Sleep 1.5). "our choice" marks the rest. Anything not listed
+# takes the battle droid's value (battle_droid.toml).
+#
+# Not done yet (all in StateSpiderDroidAttack): the missile attack (missile
+# rack, chance GrenadeProbability 0.3 at most every MinGrenadeTime 10 s,
+# 600 to 5000 uu, played as EnterDefensiveBreathe, ScanArea, FireRockets,
+# ExitDefensiveBreathe while its knee shields last, else the Stand... set);
+# blocking with its knee shields when shot at from the front
+# (MinDefenseInterval 10 s); stepping aside (StepLeft/StepRight, 5% chance
+# a decision when there is room); the ProximityDefense electric shock when
+# 2 or more enemies (or the player) come within 600 uu (at most every 12 s:
+# StatusEffect 10 s, radius 700); its eye blinking, lights and scanner
+# beam; shields and scanner that can be shot off; the death explosion.
+
+[type]
+id = "dwarf_spider_droid"
+name = "dwarf spider droid"
+classes = ["DwarfSpiderDroid*"] # game: the map class (geo_04d, geo_05b)
+body = "droid"
+
+[movement]
+ground_speed = 100        # game: DwarfSpiderDroid GroundSpeed (DwarfSpiderDroidBot bShouldWalk; WalkSpeedRatio 1)
+walk_speed_ratio = 1      # game: DwarfSpiderDroid WalkSpeedRatio
+accel_rate = 1000         # game: DwarfSpiderDroid AccelRate
+collision_radius = 310    # game: DwarfSpiderDroidDefaults CollisionRadius
+collision_height = 175    # game: DwarfSpiderDroid CollisionHeight
+crouch_radius = 350       # game: DwarfSpiderDroid CrouchRadius
+crouch_height = 175       # game: DwarfSpiderDroid CrouchHeight
+base_eye_height = 10      # game: DwarfSpiderDroid BaseEyeHeight
+
+[senses]
+sight_radius = 5000       # game: DwarfSpiderDroidDefaults SightRadius
+enemy_memory_time = 30    # game: DwarfSpiderDroidBot EnemyMemoryTime
+
+[combat]
+health = 5000             # game: DwarfSpiderDroidDefaults MaxHealth (Pawn sets Health = MaxHealth at spawn)
+accuracy = 0.9            # game: DwarfSpiderDroidDefaults Accuracy
+weapon = "spider_droid_cannon" # game: RequiredEquipment SpiderDroidCannon (data/weapons/spider_droid_cannon.toml)
+burst_count = 1           # game: CTBot BurstCount 1 (one Fire animation each time)
+fire_wind_up = 1.32       # game: the Fire animation's AnimNotify_FireWeapon at 0.44 of its 90 frames at 30 a second
+burst_pause_min = 3.18    # game: the rest of the Fire animation (1.68 s) plus GOAL_Sleep(1.5)
+burst_pause_max = 3.18    # game: the same
+weapon_range = 5000       # game: SpiderDroidCannonAmmo Range
+max_aim_yaw = 30          # game: DwarfSpiderDroid MaxAimYaw
+holds_ground = true       # game: StateSpiderDroidAttack gives no move goals
+uses_cover = false        # game: the same
+can_crouch = false        # game: DwarfSpiderDroid bCanCrouch false
+drops = ""                # game: the cannon is built in
+damage_table = "DV_DSD"   # game: DwarfSpiderDroidDefaults MyDamageVariance
+
+[sound]
+# game: no AudioTable for DwarfSpiderDroid or Droid, so it says nothing.
+package = "character_voice"
+spotted = []
+hurt = []
+death = []
+
+[look]
+package = "GameData/Animations/droid.ukx"   # game: Mesh Droid.DwarfSpiderDroid
+mesh = "DwarfSpiderDroid"
+idle = "ActionBreathe"                       # game: DwarfSpiderDroidSet
+walk = "WalkForward"
+run = "WalkForward"                          # game: bCanRun false
+walk_back = "WalkBackward"
+step_left = "StepLeft"
+step_right = "StepRight"
+fire = "Fire"
+crouch = "ActionBreathe"                     # game: it can't crouch
+crouch_fire = "Fire"
+death = "Death"
