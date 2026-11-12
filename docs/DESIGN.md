@@ -4560,6 +4560,48 @@ there is no `Death` animation), the electric and fire death animations,
 death sounds (`PlayDeathCue`), death effects (`DeathEffectContainerClass`)
 and dropping the weapon. The rifle stays in the dead trooper's hand.
 
+**Flying gunships and fighters: patrols and factories** (since
+2026-11-12). The gunship and fighter flybys of geo_04a and geo_04d are
+pawns that follow a patrol: one stop whose `Animation` is the whole
+flight and whose `Event` the level script waits for before it takes the
+ship away (`DestroyActor`). How a patrol runs is compiled code
+(ctgame.dll's `UStatePatrol`; how a switched-off pawn wakes,
+`UStateShutdown`; disassembled locally for reference, nothing committed)
+and is described in `rc_cast/src/patrol.rs`: a 0.2 s wait when it
+starts, then each stop's pause and animation (`NumAnimLoops` times, at
+least once), and when those are done the stop's event, then the next
+stop by `PatrolMode` (`PM_Once`: the patrol ends after the last stop's
+event; `PM_Loop` wraps round and so never sends the last stop's event).
+geo_04d's placed flyers have `StartState` `SS_Shutdown`: they stay still
+until an event named by their tag (Dispatcher3's `FighterFlyby01`,
+`GunshipFlyby02`...) triggers them (CTGame.u's `CTBot.Trigger` posts the
+"triggered" stimulus that ends the shutdown). Only patrols whose stops
+name no `Node` are read; walking a patrol isn't done, and such a
+character keeps standing (logged).
+
+Three `PawnFactory`s make flyers (geo_04a `GunshipChase` makes a
+`GunshipHigh` and a `GeoFighter`, geo_04d `GunshipFactory00` a
+`GunshipLow`). Nothing else spawns `Vehicles` classes, so the cast does
+(`read::factory_vehicles`): the made pawn stands at the factory with what
+CTGame.u's `PawnFactory.SetupNewActor` and `Factory.SetupNewActor` give
+it (its tag `PawnTagFromFactory`, `PatrolRouteFromFactory`,
+`StartStateFromFactory`, physics `InitialPhysicsFromFactory`, 12 here, so
+it is drawn with its flight's travel) and appears when the factory's tag
+event comes, once (all three have `Capacity` 1; other factory settings
+are logged and left out).
+
+Can they be shot down? No: every placed flyer sets `bCollideActors`,
+`bBlockZeroExtentTraces` and `bProjTarget` off, the scripts make them
+invulnerable (`MakeInvulnerable`), and their `Destroy...` events come
+from the patrol, not from damage. The port leaves vehicles unhurt, as
+before.
+
+The placed flyers keep their class's `Physics` 4 (flying). By the engine
+rule above, a flying pawn's move-bone travel isn't drawn, so they turn
+and roll where they are; the geo_04d flight clips (`Walker01FlyBy`...)
+carry most of their travel on the move bone (`Walker04Flyby` has none at
+all). Not compared with the original by eye.
+
 ## Character shadows (`rc_shadows`)
 
 **What the original does** (read from its install: the script text and

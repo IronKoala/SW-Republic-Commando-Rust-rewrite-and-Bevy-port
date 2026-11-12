@@ -764,6 +764,16 @@ copy of the game.
   opening briefing, Republic gunships and Geonosian fighters fly over the
   arena, and battle explosions go off near you. 397 such spawners on 55
   maps. Their on/off state is kept in save files.
+- **Gunship and fighter flybys (since 2026-11-12, tested in the cloud
+  only, not on Windows or by playing).** In geo_04a and geo_04d the
+  Republic gunships and Geonosian fighters now fly their flight when the
+  level sends them off, and the level hears when each is done (the
+  original's events), so the scripts take them away as the original's do.
+  The ships made during the level (the geo_04a chase, the geo_04d dive)
+  appear too. The ones already placed in geo_04d turn in place rather
+  than crossing the sky (the engine's rule for flying ships, as far as we
+  can tell; not compared by eye). They can't be shot down, as in the
+  original.
 - **Projectile spawners (since 2026-11-11, tested in the cloud only, not
   on Windows or by playing).** The maps' `ProjectileFactory` actors now
   run too: in geo_01a the air bombardment falls on the arena and the

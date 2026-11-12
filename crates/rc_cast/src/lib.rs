@@ -29,8 +29,13 @@
 //! The original throws many deaths into a ragdoll instead (all deaths
 //! by explosion); there are no ragdolls here yet. The cast doesn't fight
 //! and isn't kept in save files (the cutscene maps have no checkpoints).
+//! Characters with a patrol of animations (the flying gunships and
+//! fighters) follow it as the original's AI does (see [`patrol`]), and the
+//! gunships and fighters that pawn factories make are made here when their
+//! factory is switched on (`read::factory_vehicles`).
 //! Everything it does is logged with the prefix `cast:`.
 
+pub mod patrol;
 pub mod read;
 
 use bevy::asset::RenderAssetUsages;
@@ -38,6 +43,7 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use patrol::{PatrolRun, Step};
 use rc_anim::Clip;
 use rc_combat::{Died, Health, Hittable};
 use rc_game_core::units::{to_bevy, to_unreal, UU_PER_UNIT};
@@ -74,7 +80,15 @@ impl Plugin for CastPlugin {
             .add_systems(OnEnter(GameState::Loading), load_cast)
             .add_systems(
                 Update,
-                (spawn_cast, follow_orders, trigger_props, move_cast, die)
+                (
+                    spawn_cast,
+                    factories,
+                    follow_orders,
+                    trigger_props,
+                    move_cast,
+                    patrols,
+                    die,
+                )
                     .chain()
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
@@ -118,6 +132,8 @@ pub struct CastPlan {
     pub weapons: HashMap<String, Arc<HeldModel>>,
     pub settings: Option<Arc<CastFile>>,
     pub spawned: bool,
+    /// Members a factory makes that have been made (by index).
+    pub made: Vec<usize>,
 }
 
 pub use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
@@ -231,9 +247,31 @@ fn load_cast(
     let (Some(lib), Some(meshes)) = (cache.classes.clone(), cache.meshes.clone()) else {
         return;
     };
-    let (members, notes) = read::find_cast(&scripts.actors, &lib, &meshes, &file, &map_skins);
+    let (mut members, notes) = read::find_cast(&scripts.actors, &lib, &meshes, &file, &map_skins);
     for n in notes {
         log_line(&log, n);
+    }
+    // Gunships and fighters that pawn factories make.
+    let mut notes = Vec::new();
+    let made = read::factory_vehicles(&scripts.actors, &lib, &mut notes);
+    let (made_actors, factory_tags): (Vec<_>, Vec<_>) = made.into_iter().unzip();
+    let (made_members, more) = read::find_cast(&made_actors, &lib, &meshes, &file, &HashMap::new());
+    for n in notes.into_iter().chain(more) {
+        log_line(&log, n);
+    }
+    for mut m in made_members {
+        let i = made_actors.iter().position(|a| a.obj.name == m.name);
+        m.made_by = i.map(|i| factory_tags[i].clone());
+        log_line(
+            &log,
+            format!(
+                "{} ({}) is made when {} is switched on",
+                m.name,
+                m.class,
+                m.made_by.as_deref().unwrap_or("?")
+            ),
+        );
+        members.push(m);
     }
     let mut list = Vec::new();
     for m in members {
@@ -271,7 +309,7 @@ fn load_cast(
         log_line(
             &log,
             format!(
-                "{} ({}) at ({:.0}, {:.0}, {:.0}) facing {:.0} deg: {} from {}{}{}{}{}",
+                "{} ({}) at ({:.0}, {:.0}, {:.0}) facing {:.0} deg: {} from {}{}{}{}{}{}",
                 m.name,
                 m.class,
                 m.location[0],
@@ -290,6 +328,28 @@ fn load_cast(
                     String::new()
                 },
                 if m.hidden { ", hidden" } else { "" },
+                match &m.patrol {
+                    Some(p) => format!(
+                        ", patrols {} ({:?}{})",
+                        p.points
+                            .iter()
+                            .map(|s| format!(
+                                "{} x{} then {}",
+                                s.anim.as_deref().unwrap_or("-"),
+                                s.loops.max(1),
+                                s.event.as_deref().unwrap_or("-")
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                        p.mode,
+                        if m.shutdown {
+                            ", switched off until triggered"
+                        } else {
+                            ""
+                        }
+                    ),
+                    None => String::new(),
+                },
                 if m.skins.is_empty() {
                     String::new()
                 } else {
@@ -371,6 +431,8 @@ pub struct Cast {
     life: Option<Life>,
     /// When it died (`time`), once dead.
     died_at: Option<f32>,
+    /// Its patrol, when it has one (see [`patrol`]).
+    patrol: Option<PatrolRun>,
 }
 
 impl Cast {
@@ -382,6 +444,13 @@ impl Cast {
     /// What its death triggers (the map's `Event` for it), if it can die.
     pub fn death_event(&self) -> Option<&str> {
         self.life.as_ref().and_then(|l| l.event.as_deref())
+    }
+
+    /// It is following a patrol that hasn't ended.
+    pub fn patrolling(&self) -> bool {
+        self.patrol
+            .as_ref()
+            .is_some_and(|p| !p.asleep && !p.ended())
     }
 
     /// The animation a script or its death plays, if any.
@@ -462,7 +531,12 @@ fn first_clip(model: &Model, names: &[String]) -> Option<Clip> {
     names.iter().find_map(|n| model.named_clip(n))
 }
 
-#[allow(clippy::too_many_arguments)]
+type CastAssets<'a> = (
+    ResMut<'a, Assets<Mesh>>,
+    ResMut<'a, Assets<StandardMaterial>>,
+    ResMut<'a, Assets<Image>>,
+);
+
 fn spawn_cast(
     mut commands: Commands,
     mut plan: ResMut<CastPlan>,
@@ -483,97 +557,192 @@ fn spawn_cast(
         _ => None,
     };
     let mut drawn = 0;
-    for (m, model) in &plan.members {
-        let feet = [m.location[0], m.location[1], m.location[2] - m.half_height];
-        let mut e = commands.spawn((
-            Transform::from_translation(to_bevy(rc_movement::Vec3::new(feet[0], feet[1], feet[2])))
-                .with_rotation(Quat::from_rotation_y(-m.yaw)),
-            if m.hidden {
-                Visibility::Hidden
-            } else {
-                Visibility::Inherited
-            },
-            ScriptTags {
-                tag: Some(m.tag.clone()),
-                script: m.script.clone(),
-                follows_orders: true,
-            },
-            DespawnOnExit(GameState::InGame),
-            Name::new(format!("cast {}", m.name)),
-        ));
-        if let Some(l) = &m.life {
-            // The hit cylinder's middle is the map place: the body stands
-            // `half_height` below it (0 for one drawn from its origin).
-            e.insert((
-                Health::new(l.health),
-                Hittable {
-                    radius: l.radius,
-                    half_height: l.half_height,
-                    center_up: m.half_height,
-                },
-            ));
+    let mut placed = 0;
+    for (i, (m, model)) in plan.members.iter().enumerate() {
+        if m.made_by.is_some() {
+            continue; // made later, by its factory
         }
-        if m.shadow {
-            e.insert(rc_shadows::CastsShadow {
-                middle: m.half_height / UU_PER_UNIT,
-            });
+        placed += 1;
+        if spawn_member(
+            &mut commands,
+            &plan,
+            i,
+            m,
+            model.as_ref(),
+            &file,
+            assets.as_mut(),
+        ) {
+            drawn += 1;
         }
-        let look = match (model, assets.as_mut()) {
-            (Some(model), Some((meshes, materials, images))) => {
-                drawn += 1;
-                let mut look = spawn_pieces(
-                    model.clone(),
-                    m,
-                    file.ambient,
-                    file.light_scale,
-                    m.weapon
-                        .as_ref()
-                        .and_then(|w| plan.weapons.get(&w.to_ascii_lowercase())),
-                    &mut e,
-                    meshes,
-                    materials,
-                    images,
-                );
-                look.idle = m
-                    .prop_anim
-                    .as_ref()
-                    .and_then(|(a, _)| model.named_clip(a))
-                    .or_else(|| first_clip(model, &file.idle));
-                look.walk = first_clip(model, &file.walk);
-                look.run = first_clip(model, &file.run);
-                Some(look)
-            }
-            _ => None,
-        };
-        e.insert(Cast {
-            name: m.name.clone(),
-            class: m.class.clone(),
-            location: m.location,
-            half_height: m.half_height,
-            yaw: m.yaw,
-            run_speed: m.ground_speed,
-            walk_speed: m.ground_speed * file.walk_speed_ratio,
-            goal: Goal::Stand,
-            waiting: None,
-            scripted: None,
-            moving: None,
-            look,
-            time: 0.0,
-            tag: m.tag.clone(),
-            trigger: m.prop_trigger.clone(),
-            life: m.life.clone(),
-            died_at: None,
-        });
     }
     if !plan.members.is_empty() {
         log_line(
             &log,
-            format!(
-                "{} cast members in the level, {drawn} drawn with their models",
-                plan.members.len()
-            ),
+            format!("{placed} cast members in the level, {drawn} drawn with their models"),
         );
     }
+}
+
+/// Pawn factories that make cast members (the flying gunships and
+/// fighters) make theirs when an event with the factory's tag switches
+/// them on. Each makes one (capacity 1): later events do nothing.
+fn factories(
+    mut commands: Commands,
+    mut plan: ResMut<CastPlan>,
+    mut events: MessageReader<ScriptEvent>,
+    meshes: Option<ResMut<Assets<Mesh>>>,
+    materials: Option<ResMut<Assets<StandardMaterial>>>,
+    images: Option<ResMut<Assets<Image>>>,
+    log: Option<Res<GameLog>>,
+) {
+    let names: Vec<ScriptEvent> = events.read().cloned().collect();
+    if names.is_empty() {
+        return;
+    }
+    let Some(file) = plan.settings.clone() else {
+        return;
+    };
+    let mut assets = match (meshes, materials, images) {
+        (Some(a), Some(b), Some(c)) => Some((a, b, c)),
+        _ => None,
+    };
+    let mut now = Vec::new();
+    for e in &names {
+        for (i, (m, _)) in plan.members.iter().enumerate() {
+            if m.made_by
+                .as_deref()
+                .is_some_and(|t| t.eq_ignore_ascii_case(&e.name))
+                && !plan.made.contains(&i)
+                && !now.contains(&i)
+            {
+                log_line(
+                    &log,
+                    format!(
+                        "{} switched on by {} ({}): makes {} ({}) at ({:.0}, {:.0}, {:.0})",
+                        e.name,
+                        e.name,
+                        e.by,
+                        m.name,
+                        m.class,
+                        m.location[0],
+                        m.location[1],
+                        m.location[2]
+                    ),
+                );
+                now.push(i);
+            }
+        }
+    }
+    for i in now {
+        plan.made.push(i);
+        let (m, model) = &plan.members[i];
+        spawn_member(
+            &mut commands,
+            &plan,
+            i,
+            m,
+            model.as_ref(),
+            &file,
+            assets.as_mut(),
+        );
+    }
+}
+
+/// Spawn one cast member; whether it is drawn with its model.
+fn spawn_member(
+    commands: &mut Commands,
+    plan: &CastPlan,
+    index: usize,
+    m: &CastMember,
+    model: Option<&Arc<Model>>,
+    file: &CastFile,
+    assets: Option<&mut CastAssets>,
+) -> bool {
+    let feet = [m.location[0], m.location[1], m.location[2] - m.half_height];
+    let mut e = commands.spawn((
+        Transform::from_translation(to_bevy(rc_movement::Vec3::new(feet[0], feet[1], feet[2])))
+            .with_rotation(Quat::from_rotation_y(-m.yaw)),
+        if m.hidden {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        },
+        ScriptTags {
+            tag: Some(m.tag.clone()),
+            script: m.script.clone(),
+            follows_orders: true,
+        },
+        DespawnOnExit(GameState::InGame),
+        Name::new(format!("cast {}", m.name)),
+    ));
+    if let Some(l) = &m.life {
+        // The hit cylinder's middle is the map place: the body stands
+        // `half_height` below it (0 for one drawn from its origin).
+        e.insert((
+            Health::new(l.health),
+            Hittable {
+                radius: l.radius,
+                half_height: l.half_height,
+                center_up: m.half_height,
+            },
+        ));
+    }
+    if m.shadow {
+        e.insert(rc_shadows::CastsShadow {
+            middle: m.half_height / UU_PER_UNIT,
+        });
+    }
+    let look = match (model, assets) {
+        (Some(model), Some((meshes, materials, images))) => {
+            let mut look = spawn_pieces(
+                model.clone(),
+                m,
+                file.ambient,
+                file.light_scale,
+                m.weapon
+                    .as_ref()
+                    .and_then(|w| plan.weapons.get(&w.to_ascii_lowercase())),
+                &mut e,
+                meshes,
+                materials,
+                images,
+            );
+            look.idle = m
+                .prop_anim
+                .as_ref()
+                .and_then(|(a, _)| model.named_clip(a))
+                .or_else(|| first_clip(model, &file.idle));
+            look.walk = first_clip(model, &file.walk);
+            look.run = first_clip(model, &file.run);
+            Some(look)
+        }
+        _ => None,
+    };
+    let drawn = look.is_some();
+    e.insert(Cast {
+        name: m.name.clone(),
+        class: m.class.clone(),
+        location: m.location,
+        half_height: m.half_height,
+        yaw: m.yaw,
+        run_speed: m.ground_speed,
+        walk_speed: m.ground_speed * file.walk_speed_ratio,
+        goal: Goal::Stand,
+        waiting: None,
+        scripted: None,
+        moving: None,
+        look,
+        time: 0.0,
+        tag: m.tag.clone(),
+        trigger: m.prop_trigger.clone(),
+        life: m.life.clone(),
+        died_at: None,
+        patrol: m
+            .patrol
+            .clone()
+            .map(|p| PatrolRun::new(p, m.shutdown, index as u32 + 1)),
+    });
+    drawn
 }
 
 /// The model's meshes as children of the cast member.
@@ -1012,6 +1181,136 @@ fn move_cast(
     }
 }
 
+/// Patrols (see [`patrol`]): a switched-off one wakes when an event named
+/// by its tag comes; a running one waits, plays its stops' animations and
+/// sends their events as the original's AI does.
+fn patrols(
+    time: Res<Time>,
+    mut events: MessageReader<ScriptEvent>,
+    mut cast: Query<&mut Cast>,
+    mut raise: MessageWriter<RaiseEvent>,
+    log: Option<Res<GameLog>>,
+) {
+    let dt = time.delta_secs();
+    let names: Vec<ScriptEvent> = events.read().cloned().collect();
+    for mut c in &mut cast {
+        let c = &mut *c;
+        if c.died_at.is_some() {
+            continue;
+        }
+        let Some(run) = c.patrol.as_mut() else {
+            continue;
+        };
+        if run.asleep {
+            if let Some(e) = names.iter().find(|e| e.name.eq_ignore_ascii_case(&c.tag)) {
+                log_line(
+                    &log,
+                    format!(
+                        "t={:.2} {} triggered by {} ({}): wakes and starts its patrol",
+                        c.time, c.name, e.name, e.by
+                    ),
+                );
+                run.start();
+            }
+            continue;
+        }
+        if run.ended() {
+            continue;
+        }
+        // Up to a few goals a frame, so a stop with nothing to do doesn't
+        // cost a frame each.
+        for _ in 0..8 {
+            match run.goals.front().cloned() {
+                Some(Step::Wait(secs)) => {
+                    run.waited += dt;
+                    if run.waited + 1e-6 < secs {
+                        break;
+                    }
+                    run.goal_done();
+                }
+                Some(Step::Anim(name)) => {
+                    if !run.started {
+                        run.started = true;
+                        let clip = c.look.as_ref().and_then(|l| l.model.named_clip(&name));
+                        match clip {
+                            Some(clip) => {
+                                let secs = clip.num_frames / clip.rate.max(1.0);
+                                log_line(
+                                    &log,
+                                    format!(
+                                        "t={:.2} {} patrol plays {name} ({secs:.2} s)",
+                                        c.time, c.name
+                                    ),
+                                );
+                                c.scripted = Some(Scripted {
+                                    clip,
+                                    looping: false,
+                                });
+                                if let Some(l) = c.look.as_mut() {
+                                    l.playing = None;
+                                }
+                                break;
+                            }
+                            None => {
+                                log_line(
+                                    &log,
+                                    format!(
+                                        "t={:.2} {} has no animation {name}{}; patrol goes on",
+                                        c.time,
+                                        c.name,
+                                        if c.look.is_none() { " (no model)" } else { "" }
+                                    ),
+                                );
+                                run.goal_done();
+                                continue;
+                            }
+                        }
+                    }
+                    let ended = match (&c.scripted, &c.look) {
+                        (Some(s), Some(l)) => {
+                            s.clip.name.eq_ignore_ascii_case(&name)
+                                && l.playing.as_deref() == Some(&*s.clip.name)
+                                && l.frame >= (s.clip.num_frames - 1.0).max(0.0)
+                        }
+                        // Something else took over the animation.
+                        _ => true,
+                    };
+                    if !ended {
+                        break;
+                    }
+                    run.goal_done();
+                }
+                None => {
+                    let next = run.advance();
+                    if let Some(name) = next.event {
+                        log_line(
+                            &log,
+                            format!("t={:.2} {} patrol stop done: sends {name}", c.time, c.name),
+                        );
+                        raise.write(RaiseEvent {
+                            name,
+                            by: format!("{} patrol", c.name),
+                        });
+                    }
+                    if next.invulnerable {
+                        log_line(
+                            &log,
+                            format!(
+                                "t={:.2} {}: patrol stop makes it invulnerable (not done here)",
+                                c.time, c.name
+                            ),
+                        );
+                    }
+                    if next.ended {
+                        log_line(&log, format!("t={:.2} {} patrol ends", c.time, c.name));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Characters whose health ran out die as engine.u's `Pawn.Died` and
 /// `PlayDying`: the map's `Event` for them is triggered, they stop, and
 /// they play `Death` (`PlayDyingAnim`, for a character not on a turret or
@@ -1162,6 +1461,7 @@ fn animate_cast(
     let mut weapons_moved = Vec::new();
     for (entity, mut c, shown, at) in &mut cast {
         let name_of = c.name.clone();
+        let patrolling = c.patrolling();
         let Cast {
             scripted,
             moving,
@@ -1235,7 +1535,10 @@ fn animate_cast(
             again.push(entity);
         }
         // Hidden or far away ones aren't posed; a still pose only once.
-        let far = reach > 0.0 && eye.is_some_and(|e| e.distance(at.translation) > reach);
+        // A patrolling flyer is always posed: its flight carries it far
+        // from where it stands (the original moves it with its flight).
+        let far =
+            reach > 0.0 && !patrolling && eye.is_some_and(|e| e.distance(at.translation) > reach);
         if !shown.get() || (far && look.posed_once) || (clip.is_none() && look.posed_once) {
             continue;
         }

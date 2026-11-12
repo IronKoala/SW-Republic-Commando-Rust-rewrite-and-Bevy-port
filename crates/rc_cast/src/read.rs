@@ -152,6 +152,195 @@ pub struct CastMember {
     /// How it can be hurt and die; `None` for props and for characters
     /// this part leaves unhurt (vehicles, classes with no `Health`).
     pub life: Option<Life>,
+    /// Its patrol (`PatrolRoute` and `PatrolMode`), when it has one this
+    /// part can follow (see [`Patrol`]).
+    pub patrol: Option<Patrol>,
+    /// It starts switched off (`StartState` `SS_Shutdown`): it does
+    /// nothing until an event named by its tag wakes it.
+    pub shutdown: bool,
+    /// Made by a pawn factory (its `Tag`) rather than placed: it appears
+    /// when an event with that name switches the factory on.
+    pub made_by: Option<String>,
+}
+
+/// engine.u's `Pawn.EPatrolMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatrolMode {
+    Loop,
+    PingPong,
+    Random,
+    Once,
+}
+
+/// One stop of a patrol (engine.u's `Pawn.PatrolPoint`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatrolPoint {
+    /// `PauseTime`, seconds.
+    pub pause: f32,
+    /// `Animation`, played `NumAnimLoops` times (at least once).
+    pub anim: Option<String>,
+    pub loops: i32,
+    /// `Event`, sent once this stop is done.
+    pub event: Option<String>,
+    /// `MakeInvulnerable`.
+    pub make_invulnerable: bool,
+}
+
+/// A character's patrol: the stops in order and how to go through them.
+/// Only patrols whose stops name no `Node` are read (no walking between
+/// points yet): the flying gunships and fighters, whose stops are each
+/// one flight animation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Patrol {
+    pub points: Vec<PatrolPoint>,
+    pub mode: PatrolMode,
+}
+
+/// engine.u's `EStartState`: `SS_Shutdown`.
+const SS_SHUTDOWN: i32 = 4;
+
+/// A patrol from an actor's `PatrolRoute` (or a factory's
+/// `PatrolRouteFromFactory`, under `route`/`mode` names). `Err` says why
+/// it isn't followed.
+pub fn read_patrol(
+    o: &rc_level::scripts::ScriptObject,
+    route: &str,
+    mode: &str,
+) -> Result<Option<Patrol>, String> {
+    let Some(Val::Structs(list)) = o.get(route) else {
+        return Ok(None);
+    };
+    if list.is_empty() {
+        return Ok(None);
+    }
+    let text = |s: &rc_level::scripts::Vals, k: &str| match s.get(k) {
+        Some(Val::Text(t)) if !t.is_empty() && !t.eq_ignore_ascii_case("None") => Some(t.clone()),
+        _ => None,
+    };
+    let mut points = Vec::new();
+    for s in list {
+        if let Some(n) = text(s, "Node") {
+            return Err(format!(
+                "its patrol walks to {n}: walking a patrol isn't done yet"
+            ));
+        }
+        points.push(PatrolPoint {
+            pause: match s.get("PauseTime") {
+                Some(Val::Float(f)) => *f,
+                _ => 0.0,
+            },
+            anim: text(s, "Animation"),
+            loops: match s.get("NumAnimLoops") {
+                Some(Val::Int(i)) => *i,
+                Some(Val::Byte(b)) => *b as i32,
+                _ => 0,
+            },
+            event: text(s, "Event"),
+            make_invulnerable: matches!(s.get("MakeInvulnerable"), Some(Val::Bool(true))),
+        });
+    }
+    let mode = match o.int(mode).unwrap_or(0) {
+        1 => PatrolMode::PingPong,
+        2 => PatrolMode::Random,
+        3 => PatrolMode::Once,
+        _ => PatrolMode::Loop,
+    };
+    Ok(Some(Patrol { points, mode }))
+}
+
+/// The characters pawn factories make that this part draws: those whose
+/// class comes from `Vehicles` (the flying gunships and fighters; nothing
+/// else makes them). Each becomes an actor of the factory's `Prototype`
+/// standing where the factory is, with what CTGame.u's
+/// `PawnFactory.SetupNewActor` and `Factory.SetupNewActor` give it when it
+/// is made at the factory (`SpawnMode` `SPM_FromFactory`): the factory's
+/// `PawnTagFromFactory` as its tag, `AIScriptFromFactory`,
+/// `PawnEventFromFactory`, `PatrolRouteFromFactory`,
+/// `PatrolModeFromFactory`, `StartStateFromFactory` and the physics
+/// `InitialPhysicsFromFactory`. Its name is the factory's, with `made`.
+/// Returns the actors with the factory's tag for each.
+pub fn factory_vehicles(
+    actors: &[ScriptActor],
+    lib: &ClassLibrary,
+    notes: &mut Vec<String>,
+) -> Vec<(ScriptActor, String)> {
+    let mut out = Vec::new();
+    for a in actors {
+        let o = &a.obj;
+        if !lib
+            .chain(&o.class)
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case("PawnFactory"))
+        {
+            continue;
+        }
+        let Some(proto) = o.text("Prototype").and_then(|p| p.rsplit('.').next()) else {
+            continue;
+        };
+        if !lib
+            .chain(proto)
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case("Vehicles"))
+        {
+            continue;
+        }
+        let defaults = lib.defaults(&o.class);
+        let num = |k: &str, d: i32| {
+            o.int(k)
+                .or_else(|| defaults.number(k).map(|n| n as i32))
+                .unwrap_or(d)
+        };
+        // ctgame.u's Factory defaults: SpawnMode SPM_FromFactory (2).
+        let (mode, capacity) = (num("SpawnMode", 2), num("Capacity", 2));
+        if mode != 2 || capacity != 1 || o.flag("bGenerateForever", false) {
+            notes.push(format!(
+                "{} makes {proto} (spawn mode {mode}, capacity {capacity}): only factories making one at the factory are done; left out",
+                o.name
+            ));
+            continue;
+        }
+        let mut values = rc_level::scripts::Vals::new();
+        let copy = |values: &mut rc_level::scripts::Vals, from: &str, to: &str| {
+            if let Some(v) = o.get(from) {
+                values.insert(to.to_string(), v.clone());
+            }
+        };
+        copy(&mut values, "Rotation", "Rotation");
+        copy(&mut values, "PawnTagFromFactory", "Tag");
+        copy(&mut values, "AIScriptFromFactory", "AIScriptTag");
+        copy(&mut values, "PawnEventFromFactory", "Event");
+        copy(&mut values, "PatrolRouteFromFactory", "PatrolRoute");
+        copy(&mut values, "PatrolModeFromFactory", "PatrolMode");
+        copy(&mut values, "StartStateFromFactory", "StartState");
+        copy(&mut values, "InitialPhysicsFromFactory", "Physics");
+        // Values the factory always sets, from its class when the map
+        // doesn't.
+        for (from, to) in [
+            ("StartStateFromFactory", "StartState"),
+            ("InitialPhysicsFromFactory", "Physics"),
+        ] {
+            if !values.contains_key(to) {
+                let n = defaults.number(from).unwrap_or(0.0);
+                values.insert(to.to_string(), Val::Byte(n as u8));
+            }
+        }
+        // A pawn with no tag is tagged with its class (Unreal).
+        values
+            .entry("Tag".to_string())
+            .or_insert_with(|| Val::Text(proto.to_string()));
+        let made = ScriptActor {
+            obj: rc_level::scripts::ScriptObject {
+                export: o.export,
+                class: proto.to_string(),
+                name: format!("{} made", o.name),
+                values,
+            },
+            location: a.location,
+            actions: Vec::new(),
+        };
+        out.push((made, o.tag().to_string()));
+    }
+    out
 }
 
 /// A character's health and what its death does, from the map and its
@@ -476,6 +665,18 @@ pub fn find_cast(
                     .map(|v| matches!(v, Val::Bool(true)))
                     .unwrap_or_else(|| defaults.bool("bActorShadows").unwrap_or(false)),
             life,
+            patrol: match read_patrol(o, "PatrolRoute", "PatrolMode") {
+                Ok(p) => p,
+                Err(e) => {
+                    notes.push(format!("{} ({}): {e}", o.name, o.class));
+                    None
+                }
+            },
+            shutdown: o
+                .int("StartState")
+                .or_else(|| defaults.number("StartState").map(|n| n as i32))
+                == Some(SS_SHUTDOWN),
+            made_by: None,
         });
     }
     (out, notes)
