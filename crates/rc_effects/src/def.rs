@@ -151,8 +151,15 @@ pub struct EmitterDef {
     /// The emitter's object name (`SpriteEmitter12`).
     pub name: String,
     pub kind: EmitterKind,
-    /// `Disabled`: never sends anything.
+    /// `Disabled`: never sends anything (until a trigger switches it on,
+    /// see `trigger_disabled`).
     pub disabled: bool,
+    /// `TriggerDisabled` (engine.u default true): a trigger flips
+    /// `Disabled` (engine.dll `UParticleEmitter::execTrigger`).
+    pub trigger_disabled: bool,
+    /// `ResetOnTrigger` (default false): a trigger also starts it over
+    /// (`UParticleEmitter::Reset`).
+    pub reset_on_trigger: bool,
     /// `MaxParticles`: how many can be alive at once.
     pub max_particles: u32,
     /// `RespawnDeadParticles`: keep sending new ones (a looping effect).
@@ -242,6 +249,8 @@ impl Default for EmitterDef {
             name: String::new(),
             kind: EmitterKind::Sprite,
             disabled: false,
+            trigger_disabled: true,
+            reset_on_trigger: false,
             max_particles: 10,
             respawn: true,
             auto_rate: true,
