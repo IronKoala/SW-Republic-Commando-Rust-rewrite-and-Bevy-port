@@ -1100,7 +1100,11 @@ fn play_sound(
     }
     if let Some(Some(h)) = menus.sounds.get(&key) {
         // Turned down by the SOUND FX volume in music.rs, as every sound is.
-        commands.spawn((AudioPlayer(h.clone()), PlaybackSettings::DESPAWN));
+        commands.spawn((
+            AudioPlayer(h.clone()),
+            PlaybackSettings::DESPAWN,
+            rc_game_core::Dry,
+        ));
     }
 }
 

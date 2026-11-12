@@ -30,10 +30,17 @@ fn main() {
         };
         let z = &l.zone_audio;
         let with = z.zones.iter().filter(|x| x.env.is_some()).count();
-        println!("{map}: {} zones, {with} with an audio class, {} classes", z.zones.len(), z.envs.len());
+        println!(
+            "{map}: {} zones, {with} with an audio class, {} classes",
+            z.zones.len(),
+            z.envs.len()
+        );
         for (i, zone) in z.zones.iter().enumerate() {
             let env = zone.env.map(|e| z.envs[e].class.as_str()).unwrap_or("-");
-            println!("  zone {i:>2} {:<16} tag {:<16} {env}", zone.actor, zone.tag);
+            println!(
+                "  zone {i:>2} {:<16} tag {:<16} {env}",
+                zone.actor, zone.tag
+            );
         }
         for e in &z.envs {
             let s = |p: &Option<Vec<String>>| p.as_ref().map(|p| p.join(".")).unwrap_or("-".into());
@@ -41,7 +48,10 @@ fn main() {
                 "  class {}.{}: echo {}  loop {}  one-shot {} every {}..{} s, radius {}..{}",
                 e.package,
                 e.class,
-                e.reverb.as_ref().map(|r| format!("{} ({})", r.name, r.class)).unwrap_or("none".into()),
+                e.reverb
+                    .as_ref()
+                    .map(|r| format!("{} ({})", r.name, r.class))
+                    .unwrap_or("none".into()),
                 s(&e.pre_ambient),
                 s(&e.random_one_shot),
                 e.ros_interval_min,

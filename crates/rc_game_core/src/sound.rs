@@ -23,3 +23,22 @@ impl SoundAt {
         (SoundAt(at), Transform::from_translation(at))
     }
 }
+
+/// A sound the room's echo leaves alone: menu clicks. The music is left
+/// alone too (it has its own tag in the game program). **Our choice**: the
+/// game's sound code sends every sound to the echo unless the sound's
+/// flags say otherwise; which flags the menus and music use was not
+/// checked.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct Dry;
+
+/// The echo of the room the player is in now, as the game would hand it
+/// to EAX (`rc_audio::room`). Set by the level's zone sounds, played by
+/// the game program. `None`: no echo (outside a level, or a room whose
+/// audio class has no echo).
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct RoomEcho {
+    pub values: Option<rc_audio::room::EaxReverb>,
+    /// Which effect it is (`EFFECT_CASTLE_LARGEROOM1`), for the log.
+    pub name: String,
+}

@@ -243,10 +243,11 @@ pub fn read(
         let class_ref = match properties::find(map, &props, "ZoneAudioClass").map(|p| &p.value) {
             Some(Value::Object(o)) => Some(object_path(map, *o)),
             _ => looks.for_actor(map, a, open).and_then(|l| {
-                l.find("ZoneAudioClass", 0).and_then(|(pkg, p)| match p.value {
-                    Value::Object(o) => Some(object_path(&pkg.0, o)),
-                    _ => None,
-                })
+                l.find("ZoneAudioClass", 0)
+                    .and_then(|(pkg, p)| match p.value {
+                        Value::Object(o) => Some(object_path(&pkg.0, o)),
+                        _ => None,
+                    })
             }),
         };
         let env = class_ref
@@ -260,7 +261,10 @@ pub fn read(
     }
     // The classes the scripts switch zones to.
     for (i, e) in map.exports.iter().enumerate() {
-        if !map.export_class_name(e).eq_ignore_ascii_case("ACTION_ChangeZoneAudio") {
+        if !map
+            .export_class_name(e)
+            .eq_ignore_ascii_case("ACTION_ChangeZoneAudio")
+        {
             continue;
         }
         let Ok(props) = actors::read_actor_properties(map, data, i) else {
@@ -323,7 +327,10 @@ pub fn read_env(
         .for_class(package, class, open)
         .ok_or("class not found")?;
     if !look.is_a("AudioEnvironment") {
-        return Err(format!("not an AudioEnvironment ({})", look.chain.join(" < ")));
+        return Err(format!(
+            "not an AudioEnvironment ({})",
+            look.chain.join(" < ")
+        ));
     }
     let sound = |n: &str| match look.find(n, 0) {
         Some((pkg, p)) => match p.value {

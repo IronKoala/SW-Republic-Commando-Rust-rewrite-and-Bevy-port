@@ -56,6 +56,10 @@ pub struct GameSound {
     /// lower case (`params_vox.voice_ca1_2d`): a group's own, else its
     /// first member's. Look it up with [`read_audio_params`].
     pub params: Option<String>,
+    /// The sound's own `Looping` flag (for a group: any member's). The
+    /// game loops a sound only when the caller asks for a loop *and* the
+    /// sound has this set (`UAudioSubsystem::PlayUSound`).
+    pub looping: bool,
 }
 
 impl GameSound {
@@ -443,7 +447,7 @@ pub fn read_sounds(
         }
     };
     // Each export's sound, read at most once even when groups share it.
-    type One = (Handle<AudioSource>, Option<String>);
+    type One = (Handle<AudioSource>, Option<String>, bool);
     let mut cache: HashMap<usize, One> = HashMap::new();
     let mut one = |i: usize, notes: &mut Vec<String>| -> Option<One> {
         if let Some(h) = cache.get(&i) {
@@ -456,7 +460,12 @@ pub fn read_sounds(
                 let h = audio.add(AudioSource {
                     bytes: rc_audio::for_quality(snd.bytes(&data)).into_owned().into(),
                 });
-                let v = (h, params_of(&pkg, &snd.properties, package));
+                let looping = matches!(
+                    rc_package::properties::find(&pkg, &snd.properties, "Looping")
+                        .map(|p| &p.value),
+                    Some(rc_package::properties::Value::Bool(true))
+                );
+                let v = (h, params_of(&pkg, &snd.properties, package), looping);
                 cache.insert(i, v.clone());
                 Some(v)
             }
@@ -483,9 +492,10 @@ pub fn read_sounds(
         };
         let mut sound = GameSound::default();
         if pkg.export_class_name(&pkg.exports[i]) == "Sound" {
-            if let Some((h, p)) = one(i, &mut notes) {
+            if let Some((h, p, l)) = one(i, &mut notes) {
                 sound.variants.push(h);
                 sound.params = p;
+                sound.looping = l;
             }
         } else {
             match read_multiple(&pkg, &data, &pkg.exports[i]) {
@@ -497,8 +507,9 @@ pub fn read_sounds(
                                 if j < pkg.exports.len()
                                     && pkg.export_class_name(&pkg.exports[j]) == "Sound" =>
                             {
-                                if let Some((h, p)) = one(j, &mut notes) {
+                                if let Some((h, p, l)) = one(j, &mut notes) {
                                     sound.variants.push(h);
+                                    sound.looping |= l;
                                     if sound.params.is_none() {
                                         sound.params = p;
                                     }
@@ -564,6 +575,7 @@ pub fn read_sounds(
         for (p, m) in list {
             if let Some(s) = members.get(&(p.to_ascii_lowercase(), m.to_ascii_lowercase())) {
                 sound.variants.extend(s.variants.iter().cloned());
+                sound.looping |= s.looping;
                 if sound.params.is_none() {
                     sound.params = s.params.clone();
                 }

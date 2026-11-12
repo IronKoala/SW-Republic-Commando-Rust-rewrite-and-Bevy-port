@@ -443,6 +443,15 @@ copy of the game.
   each from its place in the level and quieter further away by the game's
   own rule (read from its sound code). The distant battle is set to carry
   only 10 units, so it stays very quiet until you are near its speaker.
+  Rooms sound like rooms (written and tested in the cloud, not yet
+  listened to): each area of a map has the game's own audio settings, so
+  walking from room to room switches the echo, starts that room's
+  background sound with the game's 2-second fade, and plays its
+  occasional sounds (drips, creaks, distant rumbles) around you on the
+  game's timing. geo_03d's script switches two areas to their "broken"
+  sound after the explosion, as the original does. The echo itself is our
+  own sound processor driven by the game's numbers (the original left the
+  echo to the sound card).
   Finishing a level now takes you to the next one (tested in the cloud
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the

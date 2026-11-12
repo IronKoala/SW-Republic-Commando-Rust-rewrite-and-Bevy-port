@@ -155,6 +155,13 @@ pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelAmbientSounds(pub Vec<rc_level::ambient::AmbientSound>);
 
+/// Each zone's audio class (the room's echo, its room loop and its random
+/// one-shots) and the zone tree to find the player's zone
+/// (`rc_level::zone_audio`). Present from the end of loading until the
+/// game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelZoneAudio(pub rc_level::zone_audio::ZoneAudio);
+
 /// The faces of blocking volumes that a line with no thickness passes
 /// through in the original (`bBlockZeroExtentTraces` off). They are part
 /// of `LevelCollision` too; a sight check that must see through them, as
@@ -369,6 +376,7 @@ fn forget(
     commands.remove_resource::<rc_game_core::PlaceLight>();
     commands.remove_resource::<LevelBreakables>();
     commands.remove_resource::<LevelAmbientSounds>();
+    commands.remove_resource::<LevelZoneAudio>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
     commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
 }
@@ -523,6 +531,24 @@ fn load(world: &mut World) {
         lvl.ambient_sounds.len()
     ));
     world.insert_resource(LevelAmbientSounds(std::mem::take(&mut lvl.ambient_sounds)));
+    {
+        let z = &lvl.zone_audio;
+        log.line(format!(
+            "{PART}: {} zones, {} with an audio class; {} audio classes read{}",
+            z.zones.len(),
+            z.zones.iter().filter(|z| z.env.is_some()).count(),
+            z.envs.len(),
+            if z.problems.is_empty() {
+                String::new()
+            } else {
+                format!(", {} not read", z.problems.len())
+            }
+        ));
+        for p in &z.problems {
+            log.line(format!("{PART}:   zone audio: {p}"));
+        }
+    }
+    world.insert_resource(LevelZoneAudio(std::mem::take(&mut lvl.zone_audio)));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(LineThroughVolumes(Arc::new(TriangleWorld::new(
         lvl.line_through_triangles

@@ -38,6 +38,7 @@ mod original_saves;
 mod panini;
 mod player;
 mod rebind;
+mod room_sound;
 mod screenshot;
 mod script;
 mod settings;
@@ -480,6 +481,7 @@ fn main() -> AppExit {
         panini::PaniniViewPlugin,
         graphics::GraphicsOptionsPlugin,
         sound_options::SoundOptionsPlugin,
+        room_sound::RoomSoundPlugin,
         subtitles::SubtitlesPlugin,
         helmet::HelmetPlugin,
         screenshot::ScreenshotPlugin,

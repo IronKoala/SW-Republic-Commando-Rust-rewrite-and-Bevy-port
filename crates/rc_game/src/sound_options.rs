@@ -9,6 +9,7 @@
 //! (Bevy's audio starts sounds after the transform update in `PostUpdate`).
 
 use crate::music::Track;
+use crate::room_sound::EchoReturn;
 use crate::settings::Settings;
 use bevy::audio::{PlaybackSettings, SpatialListener, SpatialScale, Volume};
 use bevy::prelude::*;
@@ -23,10 +24,15 @@ impl Plugin for SoundOptionsPlugin {
             PostUpdate,
             (adjust_new_sounds, limit_channels)
                 .chain()
+                .in_set(SoundOptionsSystems)
                 .before(bevy::transform::TransformSystems::Propagate),
         );
     }
 }
+
+/// The systems that adjust new sounds (the room's echo wraps them after).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SoundOptionsSystems;
 
 /// The distance between the listener's ears, in Bevy units (a head is
 /// about 0.2 m; a Bevy unit is 50 Unreal units, about a metre).
@@ -59,7 +65,7 @@ fn adjust_new_sounds(
     settings: Res<Settings>,
     mut new: Query<
         (&mut PlaybackSettings, Has<Voice>, Has<SoundAt>),
-        (Added<PlaybackSettings>, Without<Track>),
+        (Added<PlaybackSettings>, Without<Track>, Without<EchoReturn>),
     >,
 ) {
     for (mut p, voice, placed) in &mut new {
@@ -81,8 +87,19 @@ fn adjust_new_sounds(
 fn limit_channels(
     mut commands: Commands,
     settings: Res<Settings>,
-    playing: Query<(Entity, Has<Voice>), (With<PlaybackSettings>, Without<Track>)>,
-    new: Query<Entity, (Added<PlaybackSettings>, Without<Voice>, Without<Track>)>,
+    playing: Query<
+        (Entity, Has<Voice>),
+        (With<PlaybackSettings>, Without<Track>, Without<EchoReturn>),
+    >,
+    new: Query<
+        Entity,
+        (
+            Added<PlaybackSettings>,
+            Without<Voice>,
+            Without<Track>,
+            Without<EchoReturn>,
+        ),
+    >,
     mut effects: Local<VecDeque<Entity>>,
     mut stopped: Local<u64>,
     log: Res<GameLog>,

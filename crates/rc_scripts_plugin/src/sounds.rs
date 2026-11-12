@@ -334,6 +334,7 @@ fn read_streamed_sounds(
                     GameSound {
                         variants: vec![h],
                         params: None,
+                        looping: false,
                     },
                 );
                 n += 1;
@@ -579,12 +580,26 @@ pub(crate) fn started(
     }
 }
 
-/// Lines (and the map's looping sounds) stop while the game is paused,
+/// Lines (and the map's looping sounds and room sounds) stop while the game is paused,
 /// and go on after.
 pub(crate) fn pause(
     play: Option<Res<State<Play>>>,
-    sinks: Query<&AudioSink, Or<(With<ScriptSound>, With<crate::ambient::AmbientLoop>)>>,
-    spatial: Query<&SpatialAudioSink, Or<(With<ScriptSound>, With<crate::ambient::AmbientLoop>)>>,
+    sinks: Query<
+        &AudioSink,
+        Or<(
+            With<ScriptSound>,
+            With<crate::ambient::AmbientLoop>,
+            With<crate::zone_sounds::ZoneSound>,
+        )>,
+    >,
+    spatial: Query<
+        &SpatialAudioSink,
+        Or<(
+            With<ScriptSound>,
+            With<crate::ambient::AmbientLoop>,
+            With<crate::zone_sounds::ZoneSound>,
+        )>,
+    >,
     mut was_paused: Local<bool>,
 ) {
     let paused = play.is_some_and(|p| *p.get() == Play::Paused);
@@ -690,6 +705,7 @@ mod tests {
                 GameSound {
                     variants: vec![h],
                     params: None,
+                    looping: false,
                 },
             );
         }

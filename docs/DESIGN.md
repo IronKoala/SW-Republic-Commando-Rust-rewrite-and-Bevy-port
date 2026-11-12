@@ -2213,6 +2213,80 @@ written to disk. The program:
   needs the ALSA development package (`libasound2-dev` on Ubuntu). Windows
   and Android are not tested yet.
 
+### Room sound: echo, room loops and one-shots (`rc_level::zone_audio`, `rc_audio::room`, `rc_scripts_plugin/src/zone_sounds.rs`, `rc_game/src/room_sound.rs`)
+
+Every zone of a map (the BSP's zones; a zone's `ZoneInfo` actor, or the
+map's `LevelInfo` for a zone without one) can name an audio class,
+`ZoneInfo.ZoneAudioClass`, a subclass of `AudioEnvironment` in
+`Properties/AudioEnv.u`. The class's defaults give the room:
+
+- `Effect`: an `I3DL2Listener` object (classes in `Reverb.u`, defaults in
+  `engine.u`): the room's echo, as EAX 3.0 values;
+- `PreAmbient`: a sound that plays while the camera is in the room;
+- `RandomOneShot` with `ROSintervalMin/Max` and `ROSradiusMin/Max`: a
+  sound that plays now and then, from around the player.
+
+**Reading** (`rc_level::zone_audio`): the zone table after the BSP's
+vertices (`NumZones`, then per zone the actor, two 8-byte masks and a
+float) gives each zone's actor; its `Tag` and `ZoneAudioClass` (map value,
+else class default) are read, and each class once. The classes named by
+the map's `ACTION_ChangeZoneAudio` steps are read too. `cargo run -p
+rc_level --example zone_audio -- <game folder> [--effects] <map>...` lists
+them. All 57 single-player maps read with no problems.
+
+**The game's rules** (from `Engine.dll` and `ALAudio.dll`, read by
+disassembly on the PC/cloud scratch, never committed):
+
+- `FListener::Update`: the room is the zone the camera is in.
+- `UAudioSubsystem::UpdateAudioEnvData`, on a change of class: the old
+  `PreAmbient` stops with a 2-second fade unless the new class has the same
+  one; the new one starts heard everywhere (flags `0x102`), with a
+  2-second fade in. `PlayUSound` loops it only if the `Sound` has its
+  `Looping` flag.
+- `PlayEnvironmentalAudio`: when the time has come and the one-shot is not
+  playing, the next time is now + min + random × (max − min) (the first one
+  plays at once; the time is not reset by a room change). `ROSradiusMax`
+  of 0 or less: heard everywhere (`0x100`); else at the listener +
+  (cos a, sin a, 0) × r, a = random × 2π, r = min + random × (max − min).
+- `SetAudioEnvReverb` (ALAudio): the `I3DL2Listener` values go 1:1 into
+  EAX 3.0's listener properties, sent only when they change; no `Effect`
+  means all levels at −10000 mB (silent). `VisionMode.EAXEffect`, when set,
+  replaces the room's echo (not done).
+- Each sound's EAX `Room` send is 0 mB (full) unless the sound's flags
+  have `0x8` or `0x10`; script sounds never do. The echo does not fall
+  with distance unless `RoomRolloffFactor` is above 0 (4 effects of 123).
+- `ACTION_ChangeZoneAudio` (gameplay.u script): sets `ZoneAudioClass` on
+  every `ZoneInfo` whose `Tag` is `ZoneInfoTag`. geo_03d swaps two areas to
+  `GEO_03D_Broken1_sfx01` and `Broken2` this way.
+
+Data: 81 of the 123 effect uses leave `Room` at the engine default of
+−10000 mB, so the original plays no echo there (many
+`EFFECT_CASTLE_LARGEROOM` rooms). Every effect has `ModulationDepth` 0.
+
+**Our parts**:
+
+- `rc_audio::room::RoomReverb`, the echo itself. EAX was processed by the
+  sound card driver, and how isn't published, so this is our own
+  processor following the published meaning of each value (pre-delay,
+  two diffusers for the reflections, a 4-line feedback delay network for
+  the tail with low/high decay shelves, `bDecayHFLimit` from air
+  absorption). The echo effect (`EchoTime/Depth`), reflection/tail panning
+  and `RoomRolloffFactor` are not done.
+- `rc_game/src/room_sound.rs` wires it into Bevy: each new
+  `AudioPlayer<AudioSource>` (not music, not `rc_game_core::Dry` menu
+  sounds) becomes an `AudioPlayer<RoomSound>` that converts the sound to
+  the sound card's rate in stereo and adds it to one shared send while it
+  plays; one endless sound plays the echo. A looping sound loops inside
+  the wrapper (Bevy's own looping replays a recording that would not reach
+  the send). Each sound's send is its volume divided by its distance
+  loudness (`Placed::gain`), so the echo keeps its level with distance.
+- `rc_scripts_plugin/src/zone_sounds.rs` follows the camera, sets
+  `rc_game_core::RoomEcho`, plays the room loops and one-shots, and carries
+  out `ACTION_ChangeZoneAudio`. The fades are straight lines (the curve is
+  in ALAudio.dll, not read), the random numbers a fixed sequence, and the
+  loudness the scripts' `[sound] volume`, as for the map's other loops.
+
+
 ## Delta Squad (`rc_squad`, `rc_squad_plugin`)
 
 Sev (07), Fixer (40) and Scorch (62) follow the player and take the four
