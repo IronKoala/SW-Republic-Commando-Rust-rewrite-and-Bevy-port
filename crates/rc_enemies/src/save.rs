@@ -5,7 +5,7 @@
 
 use crate::Fight;
 use bevy::prelude::*;
-use rc_ai::{BattleSnapshot, Birth, FighterSnapshot, Mode, SpawnerSnapshot};
+use rc_ai::{BattleSnapshot, Birth, DispenserSnapshot, FighterSnapshot, Mode, SpawnerSnapshot};
 use rc_combat::Health;
 use rc_game_core::save::SavePart;
 use rc_game_core::GameLog;
@@ -33,6 +33,79 @@ pub struct SpawnerSave {
     /// The spawn point it uses next.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub next_spot: usize,
+    /// A droid dispenser's own state (see `rc_ai::battle::dispense`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispenser: Option<DispenserSave>,
+}
+
+/// A droid dispenser: where it is in its steps (offline, intro, warm_up,
+/// wait_online, online, waiting, shutdown, destroyed), its health and
+/// damage steps, and the droids it made that are still about.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DispenserSave {
+    pub phase: String,
+    /// When its intro, warm-up or wait ends (seconds into the fight).
+    pub until: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ending: bool,
+    pub health: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub slightly: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub heavily: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub init_done: bool,
+    pub max_alive: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spawned: Vec<u32>,
+    /// The event it answers now (its tag, or its online tag).
+    pub tag: String,
+    pub remaining: u32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub check_exhausted: bool,
+    /// Its intro has ended: it stands where the intro carried it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub entered: bool,
+}
+
+impl From<&DispenserSnapshot> for DispenserSave {
+    fn from(d: &DispenserSnapshot) -> Self {
+        DispenserSave {
+            phase: d.phase.clone(),
+            until: d.until,
+            ending: d.ending,
+            health: d.health,
+            slightly: d.slightly,
+            heavily: d.heavily,
+            init_done: d.init_done,
+            max_alive: d.max_alive,
+            spawned: d.spawned.clone(),
+            tag: d.tag.clone(),
+            remaining: d.remaining,
+            check_exhausted: d.check_exhausted,
+            entered: d.entered,
+        }
+    }
+}
+
+impl From<&DispenserSave> for DispenserSnapshot {
+    fn from(d: &DispenserSave) -> Self {
+        DispenserSnapshot {
+            phase: d.phase.clone(),
+            until: d.until,
+            ending: d.ending,
+            health: d.health,
+            slightly: d.slightly,
+            heavily: d.heavily,
+            init_done: d.init_done,
+            max_alive: d.max_alive,
+            spawned: d.spawned.clone(),
+            tag: d.tag.clone(),
+            remaining: d.remaining,
+            check_exhausted: d.check_exhausted,
+            entered: d.entered,
+        }
+    }
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -118,6 +191,7 @@ impl SavePart for EnemiesSave {
                     made: s.made,
                     next_spawn: s.next_spawn,
                     next_spot: s.next_spot,
+                    dispenser: s.dispenser.as_ref().map(DispenserSave::from),
                 })
                 .collect(),
             droids,
@@ -140,6 +214,7 @@ impl SavePart for EnemiesSave {
                     made: s.made,
                     next_spawn: s.next_spawn,
                     next_spot: s.next_spot,
+                    dispenser: s.dispenser.as_ref().map(DispenserSnapshot::from),
                 })
                 .collect(),
             fighters: d
@@ -162,6 +237,7 @@ impl SavePart for EnemiesSave {
         };
         let events = fight.battle.restore(&snap)?;
         fight.restored = events;
+        fight.dispensers_restored = true;
         fight.restored_health = d.droids.iter().map(|f| (f.id, f.health)).collect();
         let on = d.spawners.iter().filter(|s| s.on).count();
         let fighting = d.droids.iter().filter(|f| f.mode != "idle").count();

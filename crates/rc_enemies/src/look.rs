@@ -291,6 +291,47 @@ impl DroidLook {
         local
     }
 
+    /// Like [`Self::local_clip`], with the root bone's travel removed
+    /// up and down too: for an animation whose root bone moves the droid
+    /// itself (`DispUnfold`, see [`Self::root_travel`]).
+    pub fn local_clip_rooted(&self, clip: &Clip, frame: f32) -> Vec<Transform> {
+        let mut local = clip.sample(&self.skeleton, frame);
+        if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
+            l.pos = rest.pos;
+        }
+        local
+    }
+
+    /// How far the root bone (the skeleton's first, `Move`) carries the
+    /// droid through animation `name`, from where it was at the first
+    /// frame, in the droid's own axes (Unreal units, X forward, Z up): at
+    /// each frame, (seconds in, offset). Also the animation's length,
+    /// seconds. This is what the original's root-motion movement
+    /// (`PHYS_RootMotion`, which `DroidDispenser.Dispense` sets) moves the
+    /// droid by while it unfolds.
+    pub fn root_travel(&self, name: &str) -> Option<(f32, Vec<(f32, [f32; 3])>)> {
+        let clip = self.named_clip(name)?;
+        let root = |frame: f32| {
+            let pose = globals(&self.skeleton.parents, &clip.sample(&self.skeleton, frame));
+            let p = pose.first().map(|g| g.pos).unwrap_or([0.0; 3]);
+            mesh_point(&self.mesh, p)
+        };
+        let start = root(0.0);
+        let rate = clip.rate.max(1.0);
+        let frames = clip.num_frames.max(1.0);
+        let mut out = Vec::new();
+        let mut f = 0.0;
+        while f <= frames - 1.0 + 1e-3 {
+            let p = root(f);
+            out.push((
+                f / rate,
+                [p[0] - start[0], p[1] - start[1], p[2] - start[2]],
+            ));
+            f += 1.0;
+        }
+        Some((frames / rate, out))
+    }
+
     /// Each bone's local transform at `frame` of `pose`.
     pub fn local_pose(&self, pose: Pose, frame: f32) -> Vec<Transform> {
         self.local_clip(self.clip(pose), frame)
