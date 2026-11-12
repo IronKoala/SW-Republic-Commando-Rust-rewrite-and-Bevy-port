@@ -136,6 +136,17 @@ copy of the game.
   still have to be read from the game. Droids still only shoot at you, not
   at the squad.
 
+- **Enemies placed straight in the map appear (tested in the cloud
+  sandbox by numbers, not yet on Windows or by eye).** Besides the ones
+  spawners make, the maps place 92 enemies of kinds the game has (battle
+  and super battle droids, Geonosians, Grievous's guards, Trandoshans) on
+  24 maps. They are now there from the moment the level starts, as in the
+  original, with their own names, scripts and events, so the level
+  scripts can find them: on geo_01a the Geonosian at the gunship door
+  and Rocky. Placed kinds the game doesn't have yet (droidekas, spider
+  droids, Wookiees, vehicles, ...) still don't appear. List them with
+  `rc_placed_enemies` (an example in `rc_enemies`).
+
 - **Clone troopers fight the droids (tested in the cloud sandbox by
   numbers, not yet on Windows or by eye).** geo_01a's 16 clone trooper
   spawners now make troopers with the original's numbers (health,
@@ -244,6 +255,10 @@ copy of the game.
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
 
+- **The HUD blinks where the first levels teach it (since 2026-11-12;
+  tested in the cloud, not yet on Windows).** The map's `BlinkHUD` steps
+  now work: the health meters, the squad panels and the grenade panel
+  flash as the original's do, for as long as the map says.
 - **Level scripts give and take grenades (since 2026-11-12; tested in the
   cloud, not yet on Windows).** The map's `AddAmmo` steps now work, so
   geo_01a starts with no grenades, as in the original (pick them up from
@@ -796,8 +811,11 @@ copy of the game.
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
   doors, barricades, damage to the player, bacta dispensers, prompts,
-  objectives (kept, not shown), checkpoints, enemy spawners, level
-  changes, and lines of dialogue and sounds (the game's own, read from its
+  objectives (kept, not shown), the objective tracker (the original's
+  tipped ring with its arrow and the distance at the bottom of the screen,
+  and the four pulsing arrows round the goal once it is in view; since
+  2026-11-12, tested in the cloud, not yet on Windows), checkpoints, enemy
+  spawners, level changes, and lines of dialogue and sounds (the game's own, read from its
   sound files; a script waiting for a line waits for its real length).
   Since 2026-11-09 a scripted sound comes from its place in the level
   (the droid, gunship or spot it belongs to) and gets quieter with

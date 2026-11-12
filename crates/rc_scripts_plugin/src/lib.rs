@@ -55,6 +55,7 @@ pub mod breakables;
 pub mod characters;
 pub mod cutscene;
 pub mod fx_factories;
+pub mod hud_blink;
 pub mod markers;
 pub mod music;
 pub mod objectives;
@@ -63,6 +64,7 @@ pub mod projectiles;
 pub mod save;
 pub mod sight;
 pub mod sounds;
+pub mod tracker;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
@@ -117,6 +119,9 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
             .add_message::<rc_game_core::ShowHint>()
+            .add_message::<tracker::TrackerAsk>()
+            .init_resource::<tracker::ObjectiveTracker>()
+            .add_systems(Startup, tracker::load_look)
             .add_save_part::<save::ScriptsSave>()
             .add_save_part::<fx_factories::FxFactoriesSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
@@ -146,6 +151,8 @@ impl Plugin for ScriptsPlugin {
                     sight::look,
                     run,
                     send_ammo,
+                    blink_hud,
+                    tracker::track,
                     fx_factories::run,
                     placed_emitters::run,
                     projectiles::fly,
@@ -169,6 +176,7 @@ impl Plugin for ScriptsPlugin {
                     sounds::forget,
                     cutscene::forget,
                     projectiles::forget,
+                    tracker::forget,
                 ),
             );
     }
@@ -253,6 +261,9 @@ pub struct LevelScript {
     sounds: Vec<sounds::SoundRequest>,
     /// Ammo the scripts give or take this frame (`ACTION_AddAmmo`).
     ammo: Vec<rc_game_core::pickups::AddAmmo>,
+    /// The HUD parts the scripts are blinking (`ACTION_BlinkHUDHealth`
+    /// and the rest), read by the HUD.
+    pub hud_blink: hud_blink::HudBlink,
     /// Squad marker anchors (charges, consoles, door locks) and what they
     /// set off (see `markers.rs`).
     pub anchors: Vec<markers::Anchor>,
@@ -280,6 +291,7 @@ impl LevelScript {
             places: characters::Places::new(Vec::new()),
             sounds: Vec::new(),
             ammo: Vec::new(),
+            hud_blink: Default::default(),
             started: true,
             scene: cutscene::Scene::default(),
             stats: PlayStats::default(),
@@ -315,6 +327,8 @@ pub struct PlayStats {
     pub music_cues: usize,
     /// Hint screens passed on to the game (`ShowHint`).
     pub hints: usize,
+    /// Objective tracker steps passed on to the tracker.
+    pub tracker_asks: usize,
     /// The sounds played from a place in the level (not heard everywhere).
     pub sounds_placed: Vec<String>,
     pub not_done: usize,
@@ -341,6 +355,8 @@ pub struct PlayStats {
     pub turret_orders: Vec<String>,
     /// Ammo given or taken (`ACTION_AddAmmo`): `WeaponClass +N`.
     pub add_ammo: Vec<String>,
+    /// HUD blinks started (`ACTION_BlinkHUD...`): `Kind seconds`.
+    pub hud_blinks: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
@@ -394,18 +410,19 @@ fn begin(
         .and_then(|(p, d)| {
             rc_level::actors::read_level(&p, &d)
                 .map(|l| {
-                    (
-                        rc_level::scripts::read(&p, &d, &l),
-                        rc_level::scripts::places(&p, &d, &l),
-                    )
+                    let m = rc_level::scripts::read(&p, &d, &l);
+                    // What the map's objective tracker steps point at.
+                    let targets = tracker::read_targets(&p, &d, &l, &m, &paths, &log);
+                    (m, rc_level::scripts::places(&p, &d, &l), targets)
                 })
                 .map_err(|e| e.to_string())
         });
     match read {
-        Ok((m, places)) => {
+        Ok((m, places, targets)) => {
             for f in &m.failures {
                 log.line(format!("{PART}: unreadable: {f}"));
             }
+            commands.insert_resource(targets);
             commands.insert_resource(Loaded(m, settings, places));
         }
         Err(e) => {
@@ -631,6 +648,7 @@ fn build(
         places,
         sounds: Vec::new(),
         ammo: Vec::new(),
+        hud_blink: Default::default(),
         anchors,
         started: false,
         scene: cutscene::Scene::default(),
@@ -660,6 +678,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<placed_emitters::LevelEmitters>();
     commands.remove_resource::<Objectives>();
     commands.remove_resource::<Loaded>();
+    commands.remove_resource::<tracker::TrackerTargets>();
 }
 
 fn text_of(v: Option<&Val>) -> String {
@@ -687,16 +706,21 @@ fn run(
         MessageReader<RaiseEvent>,
         MessageReader<rc_game_core::CharacterOrderDone>,
     ),
-    (mut factories, mut turrets): (MessageWriter<FactoryOrder>, MessageWriter<TurretOrder>),
+    (mut factories, mut turrets, mut collisions): (
+        MessageWriter<FactoryOrder>,
+        MessageWriter<TurretOrder>,
+        MessageWriter<rc_game_core::CharacterCollision>,
+    ),
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief, mut music, mut hints): (
+    (mut checkpoints, mut change, mut debrief, mut music, mut hints, mut tracker_asks): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
         MessageWriter<rc_game_core::MusicCue>,
         MessageWriter<rc_game_core::ShowHint>,
+        MessageWriter<tracker::TrackerAsk>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -971,6 +995,14 @@ fn run(
                     music.write(cue);
                     continue;
                 }
+                if let Some(tag) = tracker::asked(&call.action) {
+                    script.stats.tracker_asks += 1;
+                    tracker_asks.write(tracker::TrackerAsk {
+                        tag,
+                        from: format!("t={now:.2} {} #{}", call.script, call.index),
+                    });
+                    continue;
+                }
                 carry_out(
                     script,
                     call,
@@ -982,6 +1014,7 @@ fn run(
                     &mut damage,
                     &mut factories,
                     &mut turrets,
+                    &mut collisions,
                     &use_key,
                     &log,
                 );
@@ -1012,6 +1045,7 @@ fn carry_out(
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
     turrets: &mut MessageWriter<TurretOrder>,
+    collisions: &mut MessageWriter<rc_game_core::CharacterCollision>,
     use_key: &str,
     log: &GameLog,
 ) {
@@ -1023,6 +1057,14 @@ fn carry_out(
             let tag = a.text("CollideActorTag").unwrap_or("");
             let on = a.flag("bCollideActors", true);
             let n = parts.as_ref().map_or(0, |p| p.set_solid(tag, on));
+            // Characters with that tag too (the parts that own them apply
+            // it; nothing happens if there are none).
+            if !script.director.is_teleporter(tag) && !tag.is_empty() {
+                collisions.write(rc_game_core::CharacterCollision {
+                    tag: tag.to_string(),
+                    on,
+                });
+            }
             if script.director.is_teleporter(tag) {
                 log.line(format!(
                     "{at}: level exit {tag} {}",
@@ -1039,7 +1081,7 @@ fn carry_out(
             } else {
                 script.stats.not_done += 1;
                 log.line(format!(
-                    "{at}: {tag} collision {on} (not a level part; characters not done yet)"
+                    "{at}: {tag} collision {on} (not a level part; sent to the characters with that tag)"
                 ));
             }
         }
@@ -1222,6 +1264,21 @@ fn carry_out(
                 ));
             }
         }
+        // Read by the HUD (rc_game's original HUD and data/ui/hud.toml).
+        k if hud_blink::HudBlink::kind_of(k).is_ok() => {
+            let time = a.float("BlinkTime").unwrap_or(0.0);
+            let what = kind.strip_prefix("BlinkHUD").unwrap_or(kind);
+            script.stats.hud_blinks.push(format!("{what} {time}"));
+            match hud_blink::HudBlink::kind_of(k) {
+                Ok(Some(part)) => {
+                    log.line(format!("{at}: the HUD's {part} blinks for {time} s"));
+                    script.hud_blink.start(part, time);
+                }
+                _ => log.line(format!(
+                    "{at}: blink the squad command prompt for {time} s: the original shows nothing for it"
+                )),
+            }
+        }
         // Handed to the combat part (rc_combat::script_ammo), which keeps
         // the count between none and the most carried.
         "addammo" => {
@@ -1281,6 +1338,15 @@ fn carry_out(
                 .unwrap_or_default();
             log.line(format!("{at} {}{comment} (not done yet)", what.join(" ")));
         }
+    }
+}
+
+/// The HUD parts the scripts blink run their time out (the original adds
+/// the time between drawings of the HUD).
+fn blink_hud(script: Option<ResMut<LevelScript>>, time: Res<Time>) {
+    let Some(mut script) = script else { return };
+    if script.hud_blink != hud_blink::HudBlink::default() {
+        script.hud_blink.tick(time.delta_secs());
     }
 }
 

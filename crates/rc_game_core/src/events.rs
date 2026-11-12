@@ -59,6 +59,18 @@ pub enum FactoryOrder {
     Reset { tag: String },
 }
 
+/// A script switched the collision of the actors tagged `tag` on or off
+/// (`ACTION_SetCollision`, `bCollideActors`). In Unreal an actor that
+/// doesn't collide with actors is passed through by shots and traces, so
+/// a character switched off can't be hit (and isn't aimed at). Sent by the
+/// level scripts part for every such action that isn't a level exit; the
+/// parts that own characters apply it to theirs with that tag.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct CharacterCollision {
+    pub tag: String,
+    pub on: bool,
+}
+
 /// What a character answers to in the level's scripts. Put it on every
 /// character's entity (squad mates, enemies; the player is found by
 /// `Player`). `tag` is the name scripts aim actions at (`PawnTag`, or a

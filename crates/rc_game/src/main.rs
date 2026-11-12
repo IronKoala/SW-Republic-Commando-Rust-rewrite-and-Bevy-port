@@ -27,6 +27,7 @@ mod levels;
 mod menu;
 mod menu_video;
 mod music;
+mod objective_tracker;
 mod option_settings;
 mod original_credits;
 mod original_hud;
@@ -528,6 +529,7 @@ fn main() -> AppExit {
     app.add_plugins(hints::HintsPlugin);
     app.add_plugins(visor::GameVisorPlugin);
     app.add_plugins(cutscene::CutscenePlugin);
+    app.add_plugins(objective_tracker::ObjectiveTrackerPlugin);
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),
