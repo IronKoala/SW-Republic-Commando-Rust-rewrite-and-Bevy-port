@@ -3227,6 +3227,68 @@ builds the name `Properties.%sDefaults`), and that sets
 as a child of each new fighter (`HeldWeapon`), and moves it onto the bone
 `weaponAttach_R` each time the body is posed (`DroidLook::bone_frame`).
 
+**Droid dispensers.** The maps' `BDDispenser` and `SBDDispenser` actors
+(26 in 14 maps; the 3 `DroidekaDispenser`s name no prototype and make
+nothing yet) are factories too. `rc_ai::read_factories` reads them with
+their class defaults (`Dispenser::class_defaults`, numbers from
+ctgame.u's `DroidDispenser`, `BDDispenser(Defaults)` and
+`SBDDispenser(Defaults)`) under the map's own values, and the battle runs
+their script (`rc_ai/src/dispense.rs`, after `DroidDispenser`, `Factory`
+and `PawnFactory` in ctgame.u): offline until an event with its tag
+plays its intro (`IntroAnim`, or `ActionBreathe`); when the intro ends it
+warms up (`WarmUpInfo`, `WarmUpTime`) or, with an `OnlineTag`, waits for
+that event; online it makes one droid at once and then one per
+`SpawnInterval` (random up to `SpawnIntervalMax`), its first
+`NumInitDroids` as a wave and then up to `MaxAlive`, waiting for a death
+when full (`bStartTimerAfterDeath`), within `MaxInWorld`. Each droid
+rides slot `NextSpawnPoint` (bone `droidAttach<n>`, its centre its own
+collision height out along the bone's Z axis, turned like the bone) in
+`DispBreathe` while the machine plays `Dispense<n>`; at the slot
+animation's `AnimNotify_ReleaseDroid` it is let go (`SpawnEvent`), plays
+`DispUnfold` once while that animation's root bone carries it
+(`PHYS_RootMotion`), then walks, can be hit and fights. Health steps at
+66 % and 33 % show `SlightlyDamagedInfo` and `HeavilyDamagedInfo`; at 0 it
+shows `DamagedInfo` (the maps put their "dispenser destroyed" event
+here), the droid still on its slot is destroyed with it, and once its
+droids are dead it sends `ExhaustedEvent`. Each look step (`TransitionInfo`)
+swaps the model's first material, replaces its one effect (centre plus
+offset, moving with it), plays its animation and sends its event. The
+machine's own `Physics` is `PHYS_RootMotion`: its intro's root bone
+(`Move`) carries it, which is why the maps place `entranceSky` dispensers
+3000 uu above the floor (it drops in), `EntranceSky704` ones 704 uu up and
+the slavers' `SlaversPushDispencer` 1105 uu back (it is pushed in).
+`rc_enemies/src/dispensers.rs` draws it from `Dispensers.ukx` with
+`rc_model`, holding the root bone still (`Model::posed_rooted`) and
+moving the entity instead (`Battle::dispenser_location`), gives the
+battle its animation numbers (`DispenserMotion`: intro length and travel,
+each slot's length, release moment and bone path), plays its
+animations' sounds, and passes its `Health` changes (its damage table
+`DV_DroidDispenser`: blaster bolts do nothing) to the battle. Saves keep
+each dispenser's step, health, damage looks and droids
+(`SpawnerSave::dispenser`). A droid on a slot takes the slot bone's
+rotation (Engine.dll's `UpdateAttachments`), keeps it when let go
+(`DetachFromBone` is only `SetBase(None)`) and while unfolding (its `Move`
+bone doesn't turn). The intro animations' `AnimNotify_Effect`s
+(`Dispenser_Landing_Dirt`, `Dispenser_Landing_Metal`, at the `root` bone)
+start their effects as Engine.dll's `UAnimNotify_Effect::Notify` places
+them (`rc_model::NotifyEffect`). `TransitionSound` and `DispenseSound`
+play when a map gives one (no class default does).
+`rc_enemies/src/dispenser_world.rs` puts the machines in the world: one
+with an `AttachTag` rides the mover tagged or named so (`UGameEngine::LoadMap`
+bases it; `ULevel::MoveActor` carries it rigidly: `rc_ai::Carry`, set each
+frame from `LevelMovers`), which flies ras_04a's and ras_04b's dispensers
+in; its cylinder is solid for bodies (it wraps `LevelCollision`; shots
+still hit it as a target, and a body that starts inside may walk out);
+and while it plays `entranceSky`, `EntranceSky704` or `EntranceSky384`
+whoever it touches takes their full health as `Crushed` damage each frame
+(`DroidDispenser.Bump`; the engine bumps both ways on a blocked move).
+Not done: the falling machine isn't held up by who it lands on, sight
+lines pass through it, and `Crushed` kills the player outright in the
+original (`bKillsNotIncapacitatesPlayer`) where the port treats it like
+any death. `rc_dispenser_check` (no window) runs every map's dispensers
+and checks their steps, timing and where the droids come out;
+`rc_dispenser_view` shows one in a window and takes pictures.
+
 **Checking without looking.** `rc_droidsim` (no window) and
 `rc_droidview --check` (a window) run a stand-in player into a spawner's
 trigger on a real map and log every spawn, sighting, state change, route,

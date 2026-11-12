@@ -158,6 +158,20 @@ copy of the game.
   commandos' DC-17m), as the level's other troopers do. Settings:
   `data/enemies/clone_trooper*.toml`.
 
+- **Droid dispensers make droids (tested in the cloud sandbox by numbers
+  and pictures, not yet on Windows or in a full level).** The battle droid
+  and super battle droid dispensers (26 in 14 maps) now work like the
+  original's script: an event drops or pushes the machine in (its intro
+  animation moves it, as in the game), it warms up, goes online and makes
+  droids one slot at a time; each droid rides out folded, is let go when
+  the slot's animation says, unfolds and fights. Hits show its damage
+  looks and effects, and at zero health it explodes, takes the droid on
+  its slot with it and sends the map's event. Machines dropping in raise
+  their landing dust and crush whoever they land on, they are solid, and
+  the ones that arrive on transports (ras_04a, ras_04b) ride them in.
+  Droideka dispensers make nothing yet. Check: `rc_dispenser_check` (every map, no window),
+  `rc_dispenser_view MAP N` (one dispenser in a window, with pictures).
+
 - **The squad takes cover (tested in the cloud sandbox by numbers, not yet
   on Windows or with eyes).** In a fight, squad mates run to the map's
   cover points (the same ones the droids use), crouch behind them between
