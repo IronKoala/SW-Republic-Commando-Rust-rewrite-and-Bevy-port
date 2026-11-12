@@ -313,6 +313,9 @@ pub struct PlayStats {
     pub not_done: usize,
     /// Orders sent to characters: `KIND WHO`.
     pub character_orders: Vec<String>,
+    /// `PlayPropAnim`s on the player's own body (not drawn in first
+    /// person, as in the original).
+    pub player_body_anims: Vec<String>,
     /// Characters that finished an order the script waited for:
     /// `SCRIPT #INDEX`.
     pub character_done: Vec<String>,

@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: The script's "play prop animation" no longer holds the opening back (rc_scripts, rc_scripts_plugin)
+
+- **Changed:** `PlayPropAnim` no longer makes the level script wait (it waited our fixed 1.5 s each time). It now plays `BaseAnim` once on every cast member whose tag is `AnimPropTag`. On the player's own body (`PlayerCommando`) it is logged and nothing is drawn. New `ScriptStats::player_body_anims`.
+- **Why:** The user said the opening on the gunship isn't like the original's. The gap audit found the rope animation `EntranceRope600` (and three `ActionBreathe`s) logged as "not done yet".
+- **Where it comes from:** gameplay.u's `ACTION_PlayPropAnim` source text (`extends ScriptedAction`, `ForEach AllActors(class'Actor', A, AnimPropTag) A.PlayAnim(...)`, `return false`). ctcharacters.u says the player's tag is `PlayerCommando`. engine.u: `Pawn` sets `bOwnerNoSee`, and the first-person camera is `Location + EyePosition()` (`EyeHeight`, bob, shake), with no bone. No class from `PlayerCommando` up to `Pawn` changes either. No actor in geo_01a has the tags `CloneRope62` or `CloneRope40`.
+- **Tested how:** `cargo test -p rc_scripts -p rc_scripts_plugin` (new `play_prop_anim_does_not_hold_the_script`); `rc_script_check geo_01a` before and after, with the game's files in the cloud.
+- **Result:** Tests pass. geo_01a's opening events now come 4.6 to 6 s sooner, at the original's pace: `SpawnLandingZone` at 0.05 s (was 4.65 s), `Rappel` at 3.10 s (was 7.65 s), `GunshipIdle` at 9.10 s (was 15.15 s).
+- **Still broken / not tested:** Not tested in the game window or on Windows. The rope animation itself shows nothing, as in the original's first-person view. How the player gets from the gunship to the ground (the script takes away `PlayerStand`'s collision) wasn't checked here. `PlayPropAnim` on level props drawn by `rc_level_plugin::anim_props` isn't routed yet; no geo_01a prop needs it.
+- **Next:** User check on Windows.
+
 ## 2026-11-12: geo_01a's gunship rests where the original's does, and the ground dust (rc_anim, rc_model, rc_cast, rc_effects, rc_effects_plugin, rc_scripts_plugin)
 
 - **Changed:** Characters and vehicles the cast draws no longer show the travel of their skeleton's `Move` bone, unless their `Physics` is 12 (root motion): `rc_anim::globals_in_game`, `rc_anim::move_bone`, `rc_model::Model::posed_in_game` and `bone_frame_in_game`, `rc_cast::read::CastMember::root_motion`. New `rc_scripts_plugin/src/placed_emitters.rs`: every effect a map places as an actor (`Emitter` classes) runs from the start of the level at its map place and turn; a level event naming its tag triggers it as engine.dll does (each emitter with `TriggerDisabled` flips `Disabled`; a disabled emitter is neither moved nor drawn; `ResetOnTrigger` starts it over). New `rc_effects::read::Library::is_emitter`, `SpawnEffect::endless`, `rc_effects_plugin::TriggerEffect`, `EffectState::trigger`, `EmitterDef::trigger_disabled` and `reset_on_trigger`.

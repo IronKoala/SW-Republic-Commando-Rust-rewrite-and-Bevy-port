@@ -4306,6 +4306,17 @@ it and sends `CharacterOrder`s:
 - `PlayAnim` by name from its own sets, looping or once; `WaitForAnimEnd`
   waits for the one playing. A name its sets don't have is logged and the
   script carries on.
+- `PlayPropAnim` (gameplay.u's `ACTION_PlayPropAnim`, a plain
+  `ScriptedAction`): every actor whose `Tag` is `AnimPropTag` plays
+  `BaseAnim` once, and the script goes straight on without waiting. Its
+  most common target is `PlayerCommando`, the player's own body (the
+  player pawn's tag, as ctcharacters.u's `ACTION_AttachToGunship` notes):
+  the original plays it there, but the first-person view never shows that
+  body (engine.u's `Pawn` sets `bOwnerNoSee`; the view is the pawn's place
+  plus its eye height), so the port logs it and draws nothing. geo_01a's
+  rope descent `EntranceRope600` is one of these. A tag no actor has does
+  nothing, as the original's `ForEach` finds nobody (geo_01a's
+  `CloneRope62` and `CloneRope40`).
 - `WaitForPlayer` waits for the player to come within the distance, but
   only `wait_for_player_limit` seconds (our choice, 20): our player may
   stand where the original's wouldn't, and a stuck cutscene is worse.
