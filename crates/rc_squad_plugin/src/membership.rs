@@ -247,6 +247,13 @@ pub(crate) fn follow_script_orders(
                     log_line(&log, format!("{at}: {e}"));
                 }
             }
+            // ctcharacters.u: only a `BriefingGunship` takes passengers.
+            CharacterAct::AttachPassenger { .. } => {
+                log_line(
+                    &log,
+                    format!("{at} is not a BriefingGunship: AttachToGunship does nothing"),
+                );
+            }
             act if !away => {
                 log_line(
                     &log,

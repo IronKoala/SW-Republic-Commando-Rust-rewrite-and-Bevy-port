@@ -34,9 +34,9 @@ use bevy::prelude::*;
 use rc_combat::{CannotDie, Damage, DamageKind, Invulnerable};
 use rc_game_core::units::to_unreal;
 use rc_game_core::{
-    CharacterAct, CharacterOrder, GameLog, Player, ScriptTags, SquadMembership, SquadStanceOrder,
+    CharacterAct, CharacterOrder, GameLog, Passenger, Player, ScriptTags, SquadMembership, SquadStanceOrder,
 };
-use rc_level::scripts::{Place, ScriptObject};
+use rc_level::scripts::{Place, ScriptObject, Val};
 use std::collections::{HashMap, HashSet};
 
 /// An action on characters waiting to be carried out.
@@ -70,6 +70,7 @@ pub const KINDS: &[&str] = &[
     "destroypawn",
     "changesquadstance",
     "changesquadmember",
+    "attachtogunship",
 ];
 
 /// Where scripts can send characters, by lower-case tag and by name.
@@ -214,6 +215,12 @@ pub(crate) fn cast(
         // original (it doesn't fall back on the sequence's own character).
         if call.kind == "changesquadmember" && named(a, "MemberTag").is_none() {
             log.line(format!("{at}: no MemberTag; nothing to do"));
+            continue;
+        }
+        // ctcharacters.u's `ACTION_AttachToGunship` does nothing without an
+        // `AttachActorTag`.
+        if call.kind == "attachtogunship" && named(a, "AttachActorTag").is_none() {
+            log.line(format!("{at}: no AttachActorTag; nothing to do"));
             continue;
         }
         // Who it means.
@@ -410,6 +417,44 @@ pub(crate) fn cast(
             }),
             "destroypawn" | "destroyactor" => Some(CharacterAct::Remove),
             "sethidden" => Some(CharacterAct::Hidden(a.flag("bHidden", false))),
+            "attachtogunship" => {
+                let t = named(a, "AttachActorTag").unwrap_or_default();
+                let passenger = if script.director.settings.is_player(&t) {
+                    Some(Passenger::Player)
+                } else {
+                    chars
+                        .iter()
+                        .find(|(_, st, _)| st.tag.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(&t)))
+                        .map(|(e, _, _)| Passenger::Character(e))
+                };
+                match passenger {
+                    Some(passenger) => Some(CharacterAct::AttachPassenger {
+                        passenger,
+                        bone: named(a, "AttachBone").unwrap_or_default(),
+                        offset: match a.get("LocationOffset") {
+                            Some(Val::Vector(v)) => *v,
+                            _ => [0.0; 3],
+                        },
+                        rotation: match a.get("RotationOffset") {
+                            Some(Val::Raw(b)) if b.len() >= 12 => {
+                                let i = |k: usize| {
+                                    i32::from_le_bytes([b[k], b[k + 1], b[k + 2], b[k + 3]])
+                                };
+                                [i(0), i(4), i(8)]
+                            }
+                            _ => [0; 3],
+                        },
+                        attach: a.flag("bAttach", true),
+                    }),
+                    None => {
+                        log.line(format!(
+                            "{at}: {t} is not a character or the player (a kind of actor the game can't hang on a bone yet); not attached"
+                        ));
+                        script.stats.no_character.push(t);
+                        None
+                    }
+                }
+            }
             _ => None,
         };
         let Some(act) = act else {

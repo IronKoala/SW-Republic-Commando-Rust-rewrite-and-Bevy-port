@@ -66,8 +66,8 @@ pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder,
-    CharacterOrderDone, FactoryOrder, LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim,
-    RaiseEvent, ScriptEvent, ScriptTags, ShowDebriefing, ShowTitleCard, SquadMembership,
+    CharacterOrderDone, FactoryOrder, LevelScriptsRun, MarkerJob, MarkerJobStep, Passenger,
+    PropAnim, RaiseEvent, Riding, ScriptEvent, ScriptTags, ShowDebriefing, ShowTitleCard, SquadMembership,
     SquadStanceOrder, UseClaimed,
 };
 pub use hud::{

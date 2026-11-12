@@ -94,14 +94,26 @@ impl Plugin for PlayerPlugin {
 /// Share the body's centre and look with the other parts
 /// ([`rc_game_core::PlayerPawn`]).
 fn publish_pawn(
-    bodies: Query<&Body, With<rc_game_core::Player>>,
+    bodies: Query<(&Body, Option<&rc_game_core::Riding>), With<rc_game_core::Player>>,
     mut pawn: ResMut<rc_game_core::PlayerPawn>,
 ) {
-    if let Ok(b) = bodies.single() {
+    if let Ok((b, riding)) = bodies.single() {
+        // Riding, the look in the world is the relative look turned with
+        // the body.
+        let (yaw, pitch) = match riding {
+            Some(_) => {
+                let f = riding_view(b, riding).rotation * Vec3::NEG_Z;
+                (
+                    f.z.atan2(f.x).rem_euclid(std::f32::consts::TAU),
+                    f.y.clamp(-1.0, 1.0).asin(),
+                )
+            }
+            None => (b.yaw, b.pitch),
+        };
         let now = rc_game_core::PlayerPawn {
             centre: arr(b.pawn.location),
-            yaw: b.yaw,
-            pitch: b.pitch,
+            yaw,
+            pitch,
         };
         if *pawn != now {
             *pawn = now;
@@ -195,6 +207,27 @@ fn eye_view(body: &Body) -> Transform {
     Transform::from_translation(to_bevy(body.pawn.eye()))
         .with_rotation(view_rotation(body.yaw, body.pitch))
 }
+
+/// [`eye_view`] for a body that may be riding a briefing gunship: its
+/// yaw and pitch are then the look relative to the body, turned with it
+/// (Engine.dll `APlayerController::UpdateRotation`: the view is the
+/// relative look times the pawn's rotation). The eyes stay straight above
+/// the body's middle, as the original's `Pawn.EyePosition` (EyeHeight
+/// along the world's up).
+fn riding_view(body: &Body, riding: Option<&rc_game_core::Riding>) -> Transform {
+    let mut t = eye_view(body);
+    if let Some(r) = riding {
+        t.rotation = r.rotation * t.rotation;
+    }
+    t
+}
+
+/// The engine's pitch range for the look (UpdateRotation clamps the pitch
+/// to -16384..18000, 65536 a turn).
+const RIDING_PITCH: (f32, f32) = (
+    -16384.0 * std::f32::consts::TAU / 65536.0,
+    18000.0 * std::f32::consts::TAU / 65536.0,
+);
 
 /// Unreal yaw and pitch to a Bevy rotation (Bevy cameras look along -Z).
 pub fn view_rotation(yaw: f32, pitch: f32) -> Quat {
@@ -296,13 +329,14 @@ fn move_body(
             &mut Transform,
             Has<rc_combat::Dead>,
             Option<&Manning>,
+            Option<Ref<rc_game_core::Riding>>,
         ),
         With<Player>,
     >,
     log: Res<GameLog>,
     mut faced: Local<bool>,
 ) {
-    let Ok((mut body, mut t, down, manning)) = body.single_mut() else {
+    let Ok((mut body, mut t, down, manning, riding)) = body.single_mut() else {
         return;
     };
     let dt = time.delta_secs().min(0.25);
@@ -334,6 +368,39 @@ fn move_body(
         body.time += dt;
         t.translation = to_bevy(body.pawn.feet());
         t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
+        return;
+    }
+    // Carried on a briefing gunship's bone (ctcharacters.u's
+    // `BriefingGunship.AttachPassenger`: no collision, no physics): the
+    // body is where the bone puts it. The look is relative to the body
+    // (Engine.dll `APlayerController::UpdateRotation`), starting from the
+    // controller's own relative rotation, which nothing has set (0), so
+    // the view starts facing the way the body faces. A cutscene's look
+    // limits apply to that relative look, as the engine clamps it there.
+    if let Some(r) = riding {
+        kicks.clear();
+        if r.is_added() {
+            body.yaw = 0.0;
+            body.pitch = 0.0;
+            log.line(format!(
+                "player: t={:.2} rides {}; the look is now relative to the body",
+                body.time, r.base
+            ));
+        }
+        body.yaw = (body.yaw + actions.look.x).rem_euclid(std::f32::consts::TAU);
+        body.pitch += actions.look.y;
+        if let Some(held) = &cut.held {
+            let (yaw, pitch) = held.limit(body.yaw, body.pitch);
+            body.yaw = yaw;
+            body.pitch = pitch;
+        }
+        body.pitch = body.pitch.clamp(RIDING_PITCH.0, RIDING_PITCH.1);
+        let [x, y, z] = r.centre;
+        body.pawn.location = UVec3::new(x, y, z);
+        body.pawn.velocity = UVec3::ZERO;
+        body.time += dt;
+        t.translation = to_bevy(body.pawn.feet());
+        t.rotation = r.rotation * Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
         return;
     }
     // Recoil adds to the look. (The original springs back afterwards; not
@@ -424,16 +491,16 @@ fn move_body(
 pub(crate) fn place_camera(
     fov: Res<FieldOfView>,
     weapon: Option<Res<rc_game_core::WeaponReadout>>,
-    body: Query<&Body, With<Player>>,
+    body: Query<(&Body, Option<&rc_game_core::Riding>), With<Player>>,
     area: Option<Res<crate::display::PlayArea>>,
     log: Res<GameLog>,
     mut logged: Local<(f32, f32, f32)>,
     mut view: Query<(&mut Transform, &mut Projection), With<PlayerCamera>>,
 ) {
-    let (Ok(body), Ok((mut t, mut proj))) = (body.single(), view.single_mut()) else {
+    let (Ok((body, riding)), Ok((mut t, mut proj))) = (body.single(), view.single_mut()) else {
         return;
     };
-    *t = eye_view(body);
+    *t = riding_view(body, riding);
     // Bevy's field of view is up and down, and it widens the sides to fit
     // the window's shape: that is "Hor+" as long as the up-and-down view
     // doesn't change with the shape. On screens longer than `widest_shape`,

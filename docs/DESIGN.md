@@ -4392,16 +4392,59 @@ and limits its own way; nothing here assumes a flat screen.
 
 **Our reading, not the game's code.** What each action does comes from
 its name, its values in the maps and its class defaults; the classes
-themselves are compiled code we don't read. Not done yet: the player
-riding the gunship (`ACTION_AttachToGunship` to a bone of the
-`BriefingGunship`, whose `GEO01fly` animation carries the camera through
-the sky), drawing what the player holds (`BriefingWeapon`: the baby's and
+themselves are compiled code we don't read. Not done yet: drawing what the player holds (`BriefingWeapon`: the baby's and
 boy's hands, the briefing helmet; for now nothing is drawn), characters brought in by factories during
 a scene (placed ones are the cast, see `rc_cast` below), hiding and
 showing actors that aren't level parts (the hologram text), view shakes,
 the credits, and the cutscene state in save files (the
 cutscene maps have no checkpoints, so only a quick save mid-scene would
 lose the hold).
+
+### Riding the briefing gunship (`rc_cast`, `rc_game/src/player.rs`)
+
+geo_01briefing's `BriefingGunship0` (ctcharacters.u class
+`BriefingGunship`, a `Vehicles` pawn drawn by `rc_cast`) runs
+`ScriptedSequence4`, whose `ACTION_AttachToGunship` steps hang passengers
+on its bones. From the script text: the step acts only when the
+script's pawn is a `BriefingGunship`; it takes the first actor with
+`AttachActorTag` (the player's tag is `PlayerCommando`) and calls
+`AttachPassenger` (`bAttach`, class default true) or `DetachPassenger`.
+`AttachPassenger` turns off the passenger's collision and physics and
+`bAlignBottom`, `AttachToBone`s it, and sets `RelativeLocation` and
+`RelativeRotation` from `LocationOffset` and `RotationOffset`. The
+gunship's `Trigger` plays its `BriefingAnim` (the map's `GEO01fly`), so the
+level event `BriefingGunship` starts its flight, and the animation's
+notifies send `DoorSlam` (7.67 s) and `StartCameraShake` (13.33 s).
+
+What the engine does with an attached actor is compiled code, read
+locally from Engine.dll (decompiled for reference, nothing committed):
+`AActor::UpdateAttachments` places it at its relative place and turn
+taken through the bone's coordinates (`carried_at`, with UE2's rotation
+matrix), and `APlayerController::UpdateRotation`, for a pawn with a base
+and a bone, keeps the look as the controller's own relative rotation
+(starting at 0, which nothing set), clamps it with the view limits
+(`Min/MaxPlayerYaw/Pitch`, the cutscene's `HeldView`) and the pitch range
+-16384..18000, and makes the view the relative look times the pawn's
+rotation. The camera stays at the pawn's place plus `EyeHeight` straight
+up (engine.u's `CalcFirstPersonView` and `Pawn.EyePosition`).
+
+In the port the scripts part sends `CharacterAct::AttachPassenger` to the
+gunship; `rc_cast` keeps the riders and works out each one's place from
+the bone every frame (`carry_riders`): cast members are drawn there from
+their model's origin, and the player gets `rc_game_core::Riding`, which
+`player.rs` uses for the body and the view. The gunship is posed as the
+game draws it (the move bone's travel isn't shown, see
+`Model::posed_in_game`), so it stays where the map puts it and its
+passengers move only with the small sway of its bones. The cast takes
+orders even while play is paused: the attach steps come in the frame the
+title card pauses play. Not done: the actors on the list that aren't
+characters (`GunshipAttachMover`, the mover the interior lights and
+effects follow by `AttachTag`; `CoreshipHologram`, `CanyonHologram`,
+`HoloLight`, `CloneLight`, `CloneLight2`, which no actor in the map has as
+a tag), riding in save files, and the original's `DrawScale` handling in
+`AttachToBone` (the gunship's `DrawScale` is 1, so it changes nothing
+here). `StartGlow`, `StopGlow` and `StartGunshipInteriorLight` are events
+no game file sends.
 
 ### The title card (`rc_menus::titlecard`, `rc_game/src/title_card.rs`)
 

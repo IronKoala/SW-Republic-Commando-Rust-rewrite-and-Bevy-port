@@ -128,6 +128,43 @@ pub enum CharacterAct {
     Remove,
     /// `ACTION_SetHidden`.
     Hidden(bool),
+    /// `ACTION_AttachToGunship` (ctcharacters.u), sent to the characters
+    /// running the script: when one is a `BriefingGunship`, its
+    /// `AttachPassenger` hangs `passenger` on its bone `bone` at
+    /// `offset` (Unreal units, in the bone's axes) turned by `rotation`
+    /// (Unreal's pitch, yaw, roll, 65536 a turn); `attach` false
+    /// (`bAttach`) takes it off again.
+    AttachPassenger {
+        passenger: Passenger,
+        bone: String,
+        offset: [f32; 3],
+        rotation: [i32; 3],
+        attach: bool,
+    },
+}
+
+/// Who an [`CharacterAct::AttachPassenger`] carries: the first actor with
+/// the action's `AttachActorTag`, as the original's `ForEach AllActors`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Passenger {
+    Player,
+    Character(Entity),
+}
+
+/// On the player while a briefing gunship carries it (set by the part
+/// that draws the gunship, every frame). As the original's
+/// `APlayerController::UpdateRotation` for a pawn attached to a bone, the
+/// player's own yaw and pitch are then the look relative to the body,
+/// and the body's world turn is `rotation`.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct Riding {
+    /// The gunship's name in the map, for the log.
+    pub base: String,
+    /// Where the body is (the middle of its collision), Unreal units.
+    pub centre: [f32; 3],
+    /// The body's turn in the world, Bevy axes: the bone's turn times the
+    /// action's `RotationOffset`.
+    pub rotation: Quat,
 }
 
 /// A character finished a [`CharacterOrder`] (arrived, turned, the

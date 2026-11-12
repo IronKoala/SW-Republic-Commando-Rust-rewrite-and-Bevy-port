@@ -199,6 +199,11 @@ pub(crate) fn follow_orders(
                 log.line(format!("{at} removed (no death event)"));
                 finished = true;
             }
+            // ctcharacters.u: only a `BriefingGunship` takes passengers.
+            CharacterAct::AttachPassenger { .. } => {
+                log.line(format!("{at} is not a BriefingGunship: AttachToGunship does nothing"));
+                finished = true;
+            }
         }
         fight.stats.scripted.extend(noted);
         if o.waits {
