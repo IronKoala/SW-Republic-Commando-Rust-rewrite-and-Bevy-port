@@ -40,12 +40,9 @@ damage_type = "CTDamageElectricityEMPGrenade" # game: MyDamageType
 damage_kind = "electrical"
 
 [status]
-# game: ExplosionStatusEffect StatusEffect_ElectrocuteEMPGrenade
+class = "StatusEffect_ElectrocuteEMPGrenade" # game: ExplosionStatusEffect (what it does: data/status_effects)
 max_time = 9              # game: StatusEffectMaxDuration
 damage_per_sec = 50       # game: StatusEffectDamagePerSec
-damage_type = "CTDamageElectricityEMPGrenade" # game: the status effect's DamageType
-damage_kind = "electrical"
-half_on_commandos = true  # game: electrocution lasts half as long on clone commandos
 
 [sound]
 # The blast sound is the SpawnSound of the grenade's ExplosionEffect

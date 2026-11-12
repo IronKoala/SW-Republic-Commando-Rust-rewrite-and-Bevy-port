@@ -97,6 +97,7 @@ impl SavePart for CombatSave {
             health,
             shield,
             Team::Republic,
+            crate::status::Commando,
             Hittable::COMMANDO,
             Arsenal { weapons, current },
         ));

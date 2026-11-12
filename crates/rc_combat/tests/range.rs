@@ -7,7 +7,7 @@ use bevy::state::app::StatesPlugin;
 use bevy::time::TimeUpdateStrategy;
 use rc_combat::{
     Arsenal, Blast, Body, CombatPlugin, Damage, DamageTable, Dead, Died, FireShot, Grenades,
-    Health, Hittable, Shield, ShotLanded, Stunned, Team, ThrowGrenade, WeaponLibrary,
+    Health, Hittable, Shield, ShotLanded, StatusEffect, Team, ThrowGrenade, WeaponLibrary,
 };
 use rc_game_core::{
     Action, ActionState, CorePlugin, GamePaths, GameState, LevelCollision, Player, PlayerCamera,
@@ -551,7 +551,7 @@ fn thermal_blast_falls_off_with_distance() {
         assert!(seen.damage.iter().all(|d| d.target != r.player));
     }
     // Battle droids don't burn (CTDamageFire x0 in their table).
-    assert!(r.app.world().get::<Stunned>(r.droid).is_none());
+    assert!(r.app.world().get::<StatusEffect>(r.droid).is_none());
 }
 
 #[test]
@@ -569,11 +569,14 @@ fn thermal_sets_an_organic_alight_close_up() {
     let s = r
         .app
         .world()
-        .get::<Stunned>(r.droid)
+        .get::<StatusEffect>(r.droid)
         .expect("burning")
         .clone();
-    assert!(!s.stops, "burning doesn't stop it");
-    assert_eq!(s.damage_per_sec, st.damage_per_sec);
+    // Burning stops a computer-controlled character too
+    // (StatusEffect_Immolate.Activate), and hurts 15 a second give or take
+    // 0.5 (CreateStatusEffects adds FRand() - 0.5).
+    assert!(s.stops);
+    assert!((s.damage_per_sec - st.damage_per_sec).abs() <= 0.5);
     assert!(s.left > 0.0 && s.left < st.max_time, "{}", s.left);
     // It hurts 15 a second until it wears off.
     r.seconds(2.0, &[]);
@@ -597,7 +600,7 @@ fn flash_stuns_organics_but_not_droids() {
         .iter()
         .all(|d| d.amount == 0.0 || d.target != r.droid));
     assert!(
-        r.app.world().get::<Stunned>(r.droid).is_none(),
+        r.app.world().get::<StatusEffect>(r.droid).is_none(),
         "droids ignore CTDamageStun"
     );
     // An organic without a table is stunned, for up to 18 s.
@@ -607,7 +610,7 @@ fn flash_stuns_organics_but_not_droids() {
         .remove::<DamageTable>()
         .insert(Body::Organic);
     drop_grenade(&mut r, "flash_grenade", (300.0, 0.0, 10.0));
-    let s = r.app.world().get::<Stunned>(r.droid).expect("stunned");
+    let s = r.app.world().get::<StatusEffect>(r.droid).expect("stunned");
     let max = p.status.as_ref().unwrap().max_time;
     assert!(s.stops && s.left > 0.0 && s.left <= max, "{}", s.left);
 }
@@ -623,13 +626,20 @@ fn emp_electrocutes_droids() {
     let s = r
         .app
         .world()
-        .get::<Stunned>(r.droid)
+        .get::<StatusEffect>(r.droid)
         .expect("electrocuted")
         .clone();
     assert!(s.stops);
     assert!(s.left > 0.0 && s.left <= st.max_time, "{}", s.left);
-    let m = r.droid_takes(&st.damage_type);
-    assert_eq!(s.damage_per_sec, st.damage_per_sec * m);
+    let lib = r.app.world().resource::<WeaponLibrary>();
+    let ty = lib
+        .status
+        .get(&st.class)
+        .expect("its kind")
+        .damage_type
+        .clone();
+    let m = r.droid_takes(&ty);
+    assert!((s.damage_per_sec - st.damage_per_sec * m).abs() <= 0.5 * m);
     // 100 health at 50 a second: down in about 2 s.
     r.seconds(2.5, &[]);
     let seen = r.seen();
@@ -1016,7 +1026,10 @@ fn a_flash_on_the_player_sends_no_damage_and_the_shield_recharges() {
         .current = 50.0;
     // In front of the player (who looks along +X), so they see the flash.
     drop_grenade(&mut r, "flash_grenade", (-300.0, 0.0, 10.0));
-    assert!(r.app.world().get::<Stunned>(r.player).is_some(), "flashed");
+    assert!(
+        r.app.world().get::<StatusEffect>(r.player).is_some(),
+        "flashed"
+    );
     r.seconds(5.0, &[]);
     let seen = r.seen();
     assert!(
@@ -1227,4 +1240,82 @@ fn taking_a_box_says_what_it_was_and_plays_its_sound() {
         got[0].sound,
         Some(("GEN_Sound".to_string(), "GenericWeaponPickup".to_string()))
     );
+}
+
+/// Send one `SpawnStatusEffect` and run two frames.
+fn spawn_status(r: &mut Range, from: rc_combat::StatusFrom, radius: f32, max_time: f32, dps: f32) {
+    r.app
+        .world_mut()
+        .write_message(rc_combat::SpawnStatusEffect {
+            class: "StatusEffect_Electrocute".into(),
+            from,
+            radius,
+            max_time,
+            damage_per_sec: dps,
+            instigator: None,
+            by: "test".into(),
+        });
+    r.run(2, &[]);
+}
+
+#[test]
+fn a_script_electrocutes_what_is_in_reach() {
+    let mut r = Range::new();
+    // geo_05a's racks: 15 s, radius 256, no damage set (0). From 100 uu in
+    // front of the droid's middle (500, 0, 84).
+    spawn_status(&mut r, rc_combat::StatusFrom::Point(b(400.0, 0.0, 84.0)), 256.0, 15.0, 0.0);
+    let s = r
+        .app
+        .world()
+        .get::<StatusEffect>(r.droid)
+        .expect("electrocuted")
+        .clone();
+    assert_eq!(s.class, "StatusEffect_Electrocute");
+    assert!(s.stops);
+    // 15 x (1 - 100 / (256 - 40)), less the two frames run since.
+    let want = 15.0 * (1.0 - 100.0 / 216.0) - 2.0 * STEP;
+    assert!((s.left - want).abs() < 0.05, "{} vs {want}", s.left);
+    // Damage a second 0 plus FRand() - 0.5, by the droid's table.
+    assert!(s.damage_per_sec.abs() <= 0.5 * r.droid_takes("CTDamageElectricity"));
+    // The player, 400 uu away, is out of reach.
+    assert!(r.app.world().get::<StatusEffect>(r.player).is_none());
+    // The same kind again adds its time.
+    let before = s.left;
+    spawn_status(&mut r, rc_combat::StatusFrom::Point(b(500.0, 0.0, 84.0)), 256.0, 15.0, 0.0);
+    let after = r.app.world().get::<StatusEffect>(r.droid).unwrap().left;
+    assert!((after - (before + 15.0 - 2.0 * STEP)).abs() < 0.05, "{after}");
+}
+
+#[test]
+fn a_radius_of_0_reaches_nobody() {
+    let mut r = Range::new();
+    let droid = r.droid;
+    // geo_01a's bunker script: from the tagged character itself, radius 0,
+    // `AffectTaggedActor` off. The engine's radius check finds nobody, and
+    // the character it starts from is left out.
+    spawn_status(
+        &mut r,
+        rc_combat::StatusFrom::Character {
+            entity: droid,
+            also_them: false,
+        },
+        0.0,
+        20.0,
+        5.0,
+    );
+    assert!(r.app.world().get::<StatusEffect>(r.droid).is_none());
+    assert!(r.app.world().get::<StatusEffect>(r.player).is_none());
+    // With `AffectTaggedActor` on, the character gets the full time.
+    spawn_status(
+        &mut r,
+        rc_combat::StatusFrom::Character {
+            entity: droid,
+            also_them: true,
+        },
+        0.0,
+        20.0,
+        5.0,
+    );
+    let s = r.app.world().get::<StatusEffect>(r.droid).expect("them too");
+    assert!((s.left - (20.0 - 2.0 * STEP)).abs() < 0.05);
 }

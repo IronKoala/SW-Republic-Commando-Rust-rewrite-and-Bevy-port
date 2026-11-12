@@ -37,7 +37,7 @@ use look::{DroidLook, Pose};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
-    Hittable, MeleeAttack, Shield, ShotLanded, Stunned, Team, ThrowGrenade,
+    Hittable, MeleeAttack, Shield, ShotLanded, StatusEffect, Team, ThrowGrenade,
 };
 use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_game_core::save::SaveAppExt;
@@ -276,6 +276,11 @@ pub struct Droid {
     /// An animation a level script is playing on it, in place of the one
     /// its moves choose.
     pub scripted: Option<scripted::ScriptedAnim>,
+    /// The animation a status effect plays on it while it is stopped
+    /// (`ElectrocutionBreathe`, `OnFireBreathe`, `StunnedBreathe`).
+    pub status_anim: Option<scripted::ScriptedAnim>,
+    /// A status animation its set doesn't have (looked for once).
+    status_anim_missing: Option<String>,
     /// Its animation while a dispenser makes it: `DispBreathe` on the
     /// slot, then `DispUnfold` (see `dispensers.rs`).
     pub dispense: Option<scripted::ScriptedAnim>,
@@ -1160,6 +1165,8 @@ fn think(
                         last_fire: f32::NEG_INFINITY,
                         mesh: mesh.clone(),
                         scripted: None,
+                        status_anim: None,
+                        status_anim_missing: None,
                         dispense: None,
                     },
                     match fight.restored_health.remove(&id) {
@@ -1434,7 +1441,7 @@ fn react_to_combat(
     mut shots: MessageReader<FireShot>,
     mut landed: MessageReader<ShotLanded>,
     mut blasts: MessageReader<Blast>,
-    stunned: Query<(&Droid, &Stunned), Added<Stunned>>,
+    stunned: Query<(&Droid, Ref<StatusEffect>)>,
     droids: Query<&Droid>,
     players: Query<(), With<Player>>,
     transforms: Query<&Transform>,
@@ -1556,20 +1563,20 @@ fn react_to_combat(
     for b in blasts.read() {
         fight.battle.hear(to_unreal(b.point));
     }
+    // A status effect that stops a computer-controlled character
+    // (electrocution, burning, a stun): it stands still and does nothing
+    // until it wears off. More time for one it has keeps it longer.
     for (droid, s) in &stunned {
         if !s.stops {
-            // Burning hurts but doesn't stop it.
-            log.line(format!(
-                "{PART}: t={now:.1}s droid {} burning for {:.1} s",
-                droid.id, s.left
-            ));
             continue;
         }
         fight.battle.stun(droid.id, s.left);
-        log.line(format!(
-            "{PART}: t={now:.1}s droid {} stunned for {:.1} s",
-            droid.id, s.left
-        ));
+        if s.is_added() {
+            log.line(format!(
+                "{PART}: t={now:.1}s droid {} stopped by {} for {:.1} s (plays {})",
+                droid.id, s.class, s.left, s.anim
+            ));
+        }
     }
     for l in landed.read() {
         if !droids.contains(l.shooter) {
@@ -1663,11 +1670,13 @@ fn choose_pose(f: &rc_ai::Fighter, just_fired: bool, now: f32) -> Pose {
 }
 
 /// Advance each droid's animation and pose its mesh.
+#[allow(clippy::too_many_arguments)]
 fn animate(
     time: Res<Time>,
     fight: Res<Fight>,
     looks: Res<Looks>,
-    mut droids: Query<(&mut Droid, Option<&HeldWeapon>)>,
+    mut droids: Query<(&mut Droid, Option<&HeldWeapon>, Option<&StatusEffect>)>,
+    log: Res<GameLog>,
     mut held: Query<&mut Transform, Without<Droid>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
 ) {
@@ -1680,7 +1689,7 @@ fn animate(
         let Some(&e) = fight.entities.get(&f.id) else {
             continue;
         };
-        let Ok((mut d, weapon)) = droids.get_mut(e) else {
+        let Ok((mut d, weapon, status)) = droids.get_mut(e) else {
             continue;
         };
         let d = &mut *d;
@@ -1726,24 +1735,67 @@ fn animate(
                 d.frame = 0.0;
             }
         }
-        if let Some(sa) = d.scripted.as_mut() {
+        // A status effect that stops it plays its own animation for the
+        // time (the original's `AddReflexAnimGoal`), unless a script holds
+        // it; a set without that animation keeps its standing pose.
+        match status.filter(|s| s.stops && !s.anim.is_empty()) {
+            Some(s) if f.mode != Mode::Dead && d.scripted.is_none() && now < f.stunned_until => {
+                let have = d.status_anim.as_ref().is_some_and(|a| a.name == s.anim)
+                    || d.status_anim_missing.as_deref() == Some(s.anim.as_str());
+                if !have {
+                    match tl.and_then(|t| t.look.named_clip(&s.anim)) {
+                        Some(clip) => {
+                            d.status_anim = Some(scripted::ScriptedAnim {
+                                name: s.anim.clone(),
+                                clip,
+                                looping: true,
+                                frame: 0.0,
+                            });
+                            log.line(format!(
+                                "{PART}: t={now:.1}s droid {} plays {} ({})",
+                                f.id, s.anim, s.class
+                            ));
+                        }
+                        None => {
+                            d.status_anim = None;
+                            d.status_anim_missing = Some(s.anim.clone());
+                            log.line(format!(
+                                "{PART}: t={now:.1}s droid {} ({}) has no animation {} for {}; it stands still",
+                                f.id, d.kind, s.anim, s.class
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {
+                d.status_anim = None;
+                d.status_anim_missing = None;
+            }
+        }
+        let Droid {
+            scripted,
+            status_anim,
+            showing_script,
+            blend,
+            mesh,
+            ..
+        } = d;
+        if let Some(sa) = scripted.as_mut().or(status_anim.as_mut()) {
             sa.advance(dt);
             // Blend into the script's animation as into any other.
-            if d.showing_script {
-                d.blend.advance(dt);
+            if *showing_script {
+                blend.advance(dt);
             } else {
-                d.showing_script = true;
-                d.blend.start(f.params.look.blend_time);
+                *showing_script = true;
+                blend.start(f.params.look.blend_time);
             }
-            let (Some(look), Some(handle), Some(meshes)) = (
-                looks.by_type.get(&d.kind).map(|t| &t.look),
-                &d.mesh,
-                meshes.as_mut(),
-            ) else {
+            let (Some(look), Some(handle), Some(meshes)) =
+                (tl.map(|t| &t.look), &*mesh, meshes.as_mut())
+            else {
                 continue;
             };
             let target = look.local_clip(&sa.clip, sa.frame);
-            let local = d.blend.apply(target);
+            let local = blend.apply(target);
             place_weapon(local);
             let points = look.posed_local(local);
             let (pos, normals) = look.wedge_attributes(&points);

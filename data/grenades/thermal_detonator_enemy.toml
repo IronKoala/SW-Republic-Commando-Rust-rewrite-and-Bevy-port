@@ -39,13 +39,10 @@ damage_type = "CTDamageExplosion" # game: CTProjExplosive MyDamageType (the enem
 damage_kind = "explosion"
 
 [status]
-# game: ExplosionStatusEffect StatusEffect_Immolate (burning)
+class = "StatusEffect_Immolate" # game: ExplosionStatusEffect (what it does: data/status_effects)
 max_time = 12             # game: StatusEffectMaxDuration
 damage_per_sec = 15       # game: StatusEffectDamagePerSec
 radius_change = -400      # game: StatusEffectRadiusModifier (burns within 200 uu)
-damage_type = "CTDamageFire" # game: StatusEffect_Immolate DamageType
-damage_kind = "fire"
-stops = false             # our reading: burning hurts but doesn't stop anyone
 
 [sound]
 package = "gen_sound"

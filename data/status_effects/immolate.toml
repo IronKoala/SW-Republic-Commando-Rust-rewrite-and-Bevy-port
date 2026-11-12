@@ -1,0 +1,17 @@
+# Burning (the original's StatusEffect_Immolate, ctgame.u): the thermal
+# detonator's after-effect, and geo_01a's script for the Geonosians in the
+# small bunker.
+class = "StatusEffect_Immolate"
+damage_type = "CTDamageFire"         # game: DamageType
+damage_kind = "fire"
+effect = "GEO_Warrior_BodyBurn"      # game: EffectClass (not drawn yet: its particles start on the character's bones)
+random_damage = true                 # game: StatusEffect.CreateStatusEffects adds FRand() - 0.5 to the damage a second
+
+[commando]
+ai_max_time = 5                      # game: Activate, a computer-controlled clone burns 5 s at most, then plays 'Extinguish'
+
+[ai]
+anim = "OnFireBreathe"               # game: Activate, AddReflexAnimGoal('OnFireBreathe') for the time
+
+# On the player the game does nothing more (its screen effects are
+# commented out in the script).

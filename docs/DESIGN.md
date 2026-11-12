@@ -3278,19 +3278,58 @@ takes the full damage; every other character within `blast.radius` (plus
 its own radius) whose centre the blast can see takes `damage x (1 -
 (distance - its radius) / radius)`, so full damage up close and nothing at
 the edge. Each hit is then multiplied by the target's damage table for
-`blast.damage_type`. A `[status]` section adds a lasting effect
-(`Stunned`) to every character that can see the blast within the radius
-(plus `status.radius_change`): it lasts `status.max_time` at the centre,
-falling to nothing at the edge, and hurts `status.damage_per_sec`. A
-character whose table gives `status.damage_type` x0 is immune (droids
-aren't stunned or set alight). `half_on_commandos` halves it on clone
-commandos (the EMP), `player_must_face` spares a player looking away (the
-flash), and `stops = false` lets characters keep acting (the thermal's
-burn).
+`blast.damage_type`. A `[status]` section names a status effect kind
+(`status.class`, see "Status effects" below) that starts where the grenade
+went off, reaching `blast.radius + status.radius_change`, for up to
+`status.max_time` at `status.damage_per_sec`.
+
+### Status effects (`status.rs`, `status_run.rs`, `data/status_effects`)
+
+Electrocution, burning and stuns are one system, as in the original
+(`Engine.StatusEffect` and its ctgame.u kinds). Anyone sends
+`SpawnStatusEffect { class, from, radius, max_time, damage_per_sec }`:
+grenades do, and so does the level script step `ACTION_SpawnStatusEffect`
+(`rc_scripts_plugin/src/characters.rs`; geo_05a's sparking droid racks).
+
+- **Who it reaches:** every character whose middle is closer than the
+  radius (strictly, so a radius of 0 reaches nobody) with a clear line from
+  the start to that middle, except a character it starts from. This is the
+  engine's native check (Engine.dll `execVisibleCollidingActors` and
+  `FOctreeNode::ActorRadiusCheck`, read from the disassembly locally; none
+  of it is in the repo). Each gets `max_time x (1 - distance / (radius -
+  its collision radius))`, kept between 0 and `max_time`, and the damage
+  a second plus a random -0.5 to +0.5 (not for the stun).
+- **One at a time:** a character whose damage table gives the kind's
+  damage type x0 never gets it. A character that has one already gets
+  more time if the one it has is that kind (or a kind of it); any other
+  kind is ignored.
+- **While it lasts:** it hurts `damage a second x time` (when above 0),
+  also on a dead body (which takes no more harm) until its time is up. A
+  computer-controlled character stops: droids stand still and play the
+  kind's `ai.anim` if their set has it (`rc_enemies`), squad mates stand
+  still and don't shoot (`rc_squad`'s `stop`). The player keeps control.
+- **The kinds' numbers** are files in `data/status_effects`: the class
+  name, `parent` (an EMP electrocution is a kind of electrocution), damage
+  type and kind, the effect drawn on the character, `random_damage`,
+  `player_must_face` (the stun), `commando.time_scale` (electrocution:
+  half on the player and squad), `commando.ai_max_time` (burning: 5 s on a
+  squad mate) and `ai.anim`.
+- **`ACTION_SpawnStatusEffect`:** with an `ActorTag`, from each character
+  with that tag (and to them too with `AffectTaggedActor`), or from each
+  map actor with that tag when no character has it; with none, from the
+  script's characters, or a `ScriptedTrigger`'s own spot. Its values
+  default to 0 (gameplay.u), so geo_01a's bunker step (`ActorTag`
+  `SmallBunkerWarriors`, no radius, `AffectTaggedActor` off) reaches
+  nobody, in the original too.
+- **Not done yet:** the effect drawn on the character (`EffectClass`: its
+  particles start on the character's bones, which the particle code can't
+  do yet), the player's screen effects (blur, colour, bloom), the clone
+  burning out (`Extinguish`), the stun's long `Stunned` animation and turret
+  sleep, and electrocution reaching droid dispensers.
 
 `throw.rs` is the Bevy side: the throw and next-grenade buttons, the
 `ThrowGrenade` message (anyone can throw), grenades in flight, the `Blast`
-message when one goes off, stuns wearing off, and the grenade line on the
+message when one goes off, and the grenade line on the
 display. The player's kinds and their order are `grenades` in
 `data/combat/player.toml`; each starts with its file's `start_count`.
 

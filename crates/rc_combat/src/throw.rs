@@ -3,11 +3,12 @@
 
 use crate::damage_types::DamageTable;
 use crate::fire::{to_bevy, to_unreal};
-use crate::grenade::{blast_scale, status_time, Flight, GrenadeParams, Grenades, Touch};
+use crate::grenade::{blast_scale, Flight, GrenadeParams, Grenades, Touch};
 use crate::health::{Damage, DamageKind, Dead};
 use crate::library::WeaponLibrary;
 use crate::shot;
-use crate::{Hittable, Team};
+use crate::status::{SpawnStatusEffect, StatusFrom};
+use crate::Hittable;
 use bevy::audio::{PlaybackSettings, Volume};
 use bevy::prelude::*;
 use rc_game_core::{
@@ -16,7 +17,7 @@ use rc_game_core::{
 
 /// The player's field of view for "is the player looking at the flash",
 /// degrees (the original's default `FovAngle`).
-const PLAYER_FOV: f32 = 85.0;
+pub(crate) const PLAYER_FOV: f32 = 85.0;
 
 /// "Throw this grenade from here at this speed." Anyone can send it (the
 /// player's button does; squad mates and enemies can too). Bevy space,
@@ -77,24 +78,6 @@ impl Body {
             Body::Droid => "droid",
         }
     }
-}
-
-/// Under a grenade's lasting effect for `left` seconds (the flash
-/// grenade's stun, the EMP grenade's electrocution, the thermal's burn).
-/// When `stops` is set, computer-controlled characters can't act while it
-/// lasts; the player can, as in the original.
-/// It may hurt `damage_per_sec` (already scaled by the character's damage
-/// table) each second.
-#[derive(Component, Debug, Clone, PartialEq)]
-pub struct Stunned {
-    pub left: f32,
-    pub damage_per_sec: f32,
-    pub kind: DamageKind,
-    pub stops: bool,
-    pub instigator: Option<Entity>,
-    /// Damage built up since the last quarter-second hit (sent in steps so
-    /// the log isn't a line a frame).
-    pub pending: f32,
 }
 
 /// A grenade in the air, on the ground or stuck to something.
@@ -214,8 +197,6 @@ struct Victim {
     hit: Hittable,
     table: Option<String>,
     body: Body,
-    commando: bool,
-    player: bool,
 }
 
 /// Fly every grenade; the ones whose fuse is done (or that touched what sets
@@ -233,8 +214,6 @@ pub(crate) fn fly_grenades(
             &Hittable,
             Option<&Body>,
             Option<&DamageTable>,
-            Option<&Team>,
-            Has<Player>,
         ),
         Without<Dead>,
     >,
@@ -242,6 +221,7 @@ pub(crate) fn fly_grenades(
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     mut damage: MessageWriter<Damage>,
     mut blasts: MessageWriter<Blast>,
+    mut status: MessageWriter<SpawnStatusEffect>,
     log: Option<Res<GameLog>>,
 ) {
     let dt = time.delta_secs();
@@ -249,21 +229,15 @@ pub(crate) fn fly_grenades(
         return;
     }
     let listener = camera.single().ok().map(|c| to_unreal(c.translation()));
-    let player_view = camera.single().ok().map(|c| {
-        let f = c.forward();
-        Vec3::new(f.x, f.z, f.y)
-    });
     let v = |p: Vec3| rc_movement::Vec3::new(p.x, p.y, p.z);
     let victims: Vec<Victim> = targets
         .iter()
-        .map(|(e, gt, hit, body, table, team, player)| Victim {
+        .map(|(e, gt, hit, body, table)| Victim {
             entity: e,
             centre: to_unreal(gt.translation()) + Vec3::Z * hit.center_up,
             hit: *hit,
             table: table.map(|t| t.0.clone()),
             body: body.copied().unwrap_or(Body::Organic),
-            commando: team == Some(&Team::Republic),
-            player,
         })
         .collect();
     let feet_of = |e: Entity| {
@@ -390,15 +364,14 @@ pub(crate) fn fly_grenades(
             continue;
         }
         let hit_count = blast(
-            &mut commands,
             &lib,
             p,
             &g,
             direct,
             &victims,
-            player_view,
             &sees,
             &mut damage,
+            &mut status,
             &log,
             why,
         );
@@ -422,22 +395,18 @@ pub(crate) fn fly_grenades(
 /// - a character it went off on takes the full damage directly;
 /// - everyone else within reach whose centre the blast can see takes
 ///   damage falling off with distance (`blast_scale`);
-/// - its status effect reaches every character it can see within the
-///   radius, for a time falling off with distance (`status_time`), unless
-///   their damage table makes them immune; the player only when looking
-///   towards a flash; clone commandos half as long for the EMP;
+/// - its status effect starts where it went off (`crate::status`);
 /// - every hit is scaled by the target's damage table.
 #[allow(clippy::too_many_arguments)]
 fn blast(
-    commands: &mut Commands,
     lib: &WeaponLibrary,
     p: &GrenadeParams,
     g: &GrenadeFlight,
     direct: Option<Entity>,
     victims: &[Victim],
-    player_view: Option<Vec3>,
     sees: &dyn Fn(Vec3, Vec3) -> bool,
     damage: &mut MessageWriter<Damage>,
+    status: &mut MessageWriter<SpawnStatusEffect>,
     log: &Option<Res<GameLog>>,
     why: &str,
 ) -> u32 {
@@ -472,42 +441,6 @@ fn blast(
                 if is_direct { "direct" } else { "blast" }
             ));
         }
-        if let Some(st) = &p.status {
-            let facing = !vic.player
-                || !st.player_must_face
-                || player_view.is_some_and(|f| {
-                    f.normalize_or_zero()
-                        .dot((point - vic.centre).normalize_or_zero())
-                        > (PLAYER_FOV.to_radians() * 0.5).cos()
-                });
-            let m = types.multiplier(vic.table.as_deref(), &st.damage_type);
-            let mut secs = status_time(
-                st.max_time,
-                dist,
-                vic.hit.radius,
-                p.radius + st.radius_change,
-            );
-            if st.half_on_commandos && vic.commando {
-                secs *= 0.5;
-            }
-            if visible && facing && m != 0.0 && secs > 0.0 {
-                commands.entity(vic.entity).insert(Stunned {
-                    left: secs,
-                    damage_per_sec: st.damage_per_sec * m,
-                    kind: st.damage_kind,
-                    stops: st.stops,
-                    instigator: Some(g.thrower),
-                    pending: 0.0,
-                });
-                what.push(format!(
-                    "{:.1} s of its effect ({:.0} damage a second)",
-                    secs,
-                    st.damage_per_sec * m
-                ));
-            } else if visible && secs > 0.0 && m == 0.0 {
-                what.push("immune to its effect".into());
-            }
-        }
         if !what.is_empty() {
             hit_count += 1;
             say(
@@ -522,6 +455,19 @@ fn blast(
                 ),
             );
         }
+    }
+    // Its lasting effect, from where it went off (`CreateStatusEffects`
+    // from the grenade, reaching `DamageRadius + StatusEffectRadiusModifier`).
+    if let Some(st) = &p.status {
+        status.write(SpawnStatusEffect {
+            class: st.class.clone(),
+            from: StatusFrom::Point(to_bevy(point)),
+            radius: p.radius + st.radius_change,
+            max_time: st.max_time,
+            damage_per_sec: st.damage_per_sec,
+            instigator: Some(g.thrower),
+            by: format!("grenade {}", g.grenade),
+        });
     }
     say(
         log,
@@ -600,40 +546,6 @@ pub(crate) fn explosions(
             instigator: x.instigator,
             hit,
         });
-    }
-}
-
-/// Stuns and electrocutions wear off; electrocution hurts while it lasts.
-pub(crate) fn wear_off_stuns(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut q: Query<(Entity, &mut Stunned), Without<Dead>>,
-    mut damage: MessageWriter<Damage>,
-    transforms: Query<&GlobalTransform>,
-) {
-    let dt = time.delta_secs();
-    for (e, mut s) in &mut q {
-        if s.damage_per_sec > 0.0 {
-            s.pending += s.damage_per_sec * dt.min(s.left.max(0.0));
-        }
-        let last = s.left - dt <= 0.0;
-        // Nothing to send for an effect that doesn't hurt (a stun): a 0-damage
-        // hit would still hold off the shield's recharge.
-        if s.pending > 0.0 && (s.pending >= s.damage_per_sec * 0.25 || last) {
-            let amount = std::mem::take(&mut s.pending);
-            damage.write(Damage {
-                target: e,
-                amount,
-                kind: s.kind,
-                instigator: s.instigator,
-                point: transforms.get(e).map_or(Vec3::ZERO, |t| t.translation()),
-                direction: Vec3::ZERO,
-            });
-        }
-        s.left -= dt;
-        if s.left <= 0.0 {
-            commands.entity(e).remove::<Stunned>();
-        }
     }
 }
 
