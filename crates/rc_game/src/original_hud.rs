@@ -224,6 +224,18 @@ struct OriginalLayout {
     shield_flash: f32,
 }
 
+/// The visor frame's alpha at low health (Engine.dll `UHelmet::DrawHUD`
+/// 0x10431b9a): at health level 1 or 0 it is `150 + 105 * sin(t)^2` with
+/// `t` the engine's time times 2.5, cut to a whole number; above that the
+/// frame doesn't pulse.
+pub fn frame_pulse(health: f32, time: f32) -> Option<u8> {
+    if rc_menus::hud::health_level(health) > 1 {
+        return None;
+    }
+    let s = (time * 2.5).sin();
+    Some((150.0 + 105.0 * s * s) as u8)
+}
+
 /// The original helmet's `ShieldFlashDuration` (engine.u Helmet default).
 const SHIELD_FLASH_DURATION: f32 = 0.5;
 
@@ -528,6 +540,7 @@ fn draw_layout(
     }
     now.shield_hit_steps = swell;
     now.shield_hit_red = red;
+    now.frame_pulse = frame_pulse(now.health, time.elapsed_secs());
     if let Ok(b) = bodies.single() {
         let c = original.compass.get_or_insert(compass_target(b.yaw));
         *c = compass_follow(*c, compass_target(b.yaw), time.delta_secs());
@@ -653,11 +666,7 @@ fn draw_layout(
         ));
     }
     for q in quads.iter().chain(&page_quads) {
-        let k = (
-            q.texture.to_ascii_lowercase(),
-            gpu::variant_over_scene(q.render_style),
-            q.color,
-        );
+        let k = picture_key(q);
         if original.images.contains_key(&k) {
             continue;
         }
@@ -699,6 +708,18 @@ fn draw_layout(
     original.drawn = drawn;
 }
 
+/// Which copy of a picture a quad needs: by texture, blend and tint. A
+/// see-through picture's copy is made at full alpha and its alpha given
+/// when drawn, so a pulsing alpha doesn't make a copy per step.
+fn picture_key(q: &Quad) -> (String, gpu::Variant, [u8; 4]) {
+    let v = gpu::variant_over_scene(q.render_style);
+    let mut c = q.color;
+    if v == gpu::Variant::OverScene {
+        c[3] = 255;
+    }
+    (q.texture.to_ascii_lowercase(), v, c)
+}
+
 /// One HUD root holding `quads` (screen fractions of its target): on the
 /// screen, or on the helmet's page when `page` names its camera.
 fn spawn_quads(
@@ -725,12 +746,13 @@ fn spawn_quads(
     }
     root.with_children(|root| {
             for q in quads {
-                let Some(image) = images.get(&(
-                    q.texture.to_ascii_lowercase(),
-                    gpu::variant_over_scene(q.render_style),
-                    q.color,
-                )) else {
+                let Some(image) = images.get(&picture_key(q)) else {
                     continue;
+                };
+                // See-through pictures keep their alpha here, not baked in.
+                let alpha = match gpu::variant_over_scene(q.render_style) {
+                    gpu::Variant::OverScene => q.color[3] as f32 / 255.0,
+                    _ => 1.0,
                 };
                 // A mirrored part has its left edge after its right.
                 let (x0, x1) = (q.src[0].min(q.src[2]), q.src[0].max(q.src[2]));
@@ -739,8 +761,9 @@ fn spawn_quads(
                         image: image.clone(),
                         rect: Some(Rect::new(x0, q.src[1], x1, q.src[3])),
                         flip_x: q.src[0] > q.src[2],
-                        // The tint is baked into the picture (gpu.rs).
-                        color: Color::WHITE,
+                        // The tint is baked into the picture (gpu.rs),
+                        // all but a see-through picture's alpha.
+                        color: Color::srgba(1.0, 1.0, 1.0, alpha),
                         image_mode: NodeImageMode::Stretch,
                         ..default()
                     },
@@ -1213,6 +1236,14 @@ pub fn reticle_showing(w: &mut World) -> bool {
 mod tests {
     use super::*;
     use crate::theme::Theme;
+
+    #[test]
+    fn frame_pulses_only_below_half_health() {
+        assert_eq!(frame_pulse(0.6, 1.0), None);
+        assert_eq!(frame_pulse(0.4, 0.0), Some(150));
+        // sin(2.5 * 0.6283) = sin(pi / 2) = 1: the brightest.
+        assert_eq!(frame_pulse(0.4, std::f32::consts::PI / 5.0), Some(255));
+    }
 
     #[test]
     fn shield_flash_runs_as_the_original() {

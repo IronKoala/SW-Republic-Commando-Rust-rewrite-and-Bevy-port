@@ -187,6 +187,7 @@ const ELEMENT_KEYS: &[&str] = &[
     "grow_with",
     "grow",
     "redden_with",
+    "alpha_with",
     "colour_by",
     "colours",
     "scroll",
@@ -356,6 +357,10 @@ pub struct Picture {
     /// and blue: the original's shield parts flash red when hit.
     #[serde(default)]
     pub redden_with: Option<String>,
+    /// Use this alpha (see `HudValues::alpha`) in place of the colour's
+    /// while it has one: the original's visor frame pulses at low health.
+    #[serde(default)]
+    pub alpha_with: Option<String>,
     /// Flip the picture left to right (to reuse one side's art).
     #[serde(default)]
     pub mirror: bool,
@@ -440,6 +445,10 @@ pub struct HudValues {
     /// `int(ShieldFlashTime / ShieldFlashDuration * 155)` while the shields
     /// aren't charging, else 0.
     pub shield_hit_red: u8,
+    /// The visor frame's alpha while it pulses (health level 1 or 0):
+    /// Engine.dll `UHelmet::DrawHUD` gives it `150 + 105 * sin(2.5 *
+    /// time)^2`. `None` when it doesn't pulse.
+    pub frame_pulse: Option<u8>,
 }
 
 /// How hurt, as the original sorts it (Engine.dll
@@ -536,6 +545,15 @@ impl HudValues {
     pub fn redden(&self, name: &str) -> Option<u8> {
         match name {
             "shield_hit" => Some(self.shield_hit_red),
+            _ => None,
+        }
+    }
+
+    /// An alpha by name (for `alpha_with`): `Some(None)` when known but
+    /// not in use now, `None` if unknown.
+    pub fn alpha(&self, name: &str) -> Option<Option<u8>> {
+        match name {
+            "frame_pulse" => Some(self.frame_pulse),
             _ => None,
         }
     }
@@ -697,6 +715,14 @@ impl HudLayout {
                     if HudValues::default().redden(f).is_none() {
                         return Err(format!(
                             "{}: redden_with \"{f}\" is not \"shield_hit\"",
+                            e.group
+                        ));
+                    }
+                }
+                if let Some(f) = &p.alpha_with {
+                    if HudValues::default().alpha(f).is_none() {
+                        return Err(format!(
+                            "{}: alpha_with \"{f}\" is not \"frame_pulse\"",
                             e.group
                         ));
                     }
@@ -933,6 +959,9 @@ pub fn hud_quads_of(
                     if let Some(r) = p.redden_with.as_deref().and_then(|g| values.redden(g)) {
                         colour[1] = colour[1].saturating_sub(r);
                         colour[2] = colour[2].saturating_sub(r);
+                    }
+                    if let Some(a) = p.alpha_with.as_deref().and_then(|g| values.alpha(g)).flatten() {
+                        colour[3] = a;
                     }
                     if let Some(f) = &p.fill {
                         let v = values.fraction(f, member).unwrap_or(1.0);

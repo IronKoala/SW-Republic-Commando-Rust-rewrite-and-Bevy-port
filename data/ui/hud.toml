@@ -137,8 +137,9 @@ text_fade_in = 0.5
 # 432, mirrored at 795), the short pieces at the top (106, 22, 86 x 19,
 # mirrored at 694) and the compass strip between them (194, 25, 414 x 11:
 # `CompassGraphic` repeated, sliding as you turn). White at 130 while
-# health is high; otherwise the health colour at 165 (the original pulses
-# it between 150 and 255 when below half: not done, shown at 150).
+# health is high; otherwise the health colour at 165, and below half
+# health pulsing between 150 and 255 (`alpha_with = "frame_pulse"`:
+# 150 + 105 * sin(2.5 * time)^2).
 # Group "visor" may overlap the others.
 
 [[element]]
@@ -151,6 +152,7 @@ part = [0, 0, 142, 442]
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
 colour = [255, 255, 255, 130]
+alpha_with = "frame_pulse"
 glass = true
 
 [[element]]
@@ -164,6 +166,7 @@ mirror = true
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
 colour = [255, 255, 255, 130]
+alpha_with = "frame_pulse"
 glass = true
 
 [[element]]
@@ -176,6 +179,7 @@ part = [143, 0, 229, 19]
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
 colour = [255, 255, 255, 130]
+alpha_with = "frame_pulse"
 glass = true
 
 [[element]]
@@ -189,6 +193,7 @@ mirror = true
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
 colour = [255, 255, 255, 130]
+alpha_with = "frame_pulse"
 glass = true
 
 [[element]]
@@ -202,6 +207,7 @@ scroll = "compass"
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 150], "1" = [246, 139, 31, 150], "2" = [255, 250, 110, 165], "3" = [255, 255, 255, 130] }
 colour = [255, 255, 255, 130]
+alpha_with = "frame_pulse"
 glass = true
 
 # --- The bottom corners and meters, as the original helmet draws them ----
