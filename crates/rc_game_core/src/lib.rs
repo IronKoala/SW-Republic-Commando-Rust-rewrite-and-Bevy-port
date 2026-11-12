@@ -107,6 +107,7 @@ impl Plugin for CorePlugin {
             .add_message::<MusicCue>()
             .add_message::<HudMessage>()
             .add_message::<pickups::PickedUp>()
+            .add_message::<pickups::AddAmmo>()
             .add_message::<ViewKick>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()

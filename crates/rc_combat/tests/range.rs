@@ -162,6 +162,7 @@ fn every_weapon_file_reads() {
             "bowcaster",
             "concussion_rifle",
             "core_ship_turret",
+            "dc15_blaster_clone",
             "dc15_blaster_clone_tm",
             "dc15s_pistol",
             "dc17m_antiarmor",
