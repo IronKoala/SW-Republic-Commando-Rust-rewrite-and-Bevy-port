@@ -4385,10 +4385,30 @@ was held for good.
 
 **Not done.** Characters brought in by `PawnFactory`s during a cutscene
 (the prologue's walking young clones), riding vehicles, lighting by zone (a steady
-`ambient` share of their own colour, as the squad), damage and death (the
-cast can't be hurt), and saving their places (the cutscene maps have no
-checkpoints). In missions, the placed troopers, walkers and the scripted
-spider droid now stand and move as their scripts say but don't fight.
+`ambient` share of their own colour, as the squad), and saving their
+places (the cutscene maps have no checkpoints). In missions, the placed
+troopers, walkers and the scripted spider droid now stand and move as
+their scripts say but don't fight.
+
+**Damage and death** (since 2026-11-12). A cast character whose class has
+`Health` (read with the class's "...Defaults" class laid on top, as the
+game does) gets `rc_combat`'s `Health` and a `Hittable` cylinder from its
+`CollisionRadius` and `CollisionHeight`, so bolts, blasts and a script's
+`HurtActor` hurt it. Vehicles (`Vehicles` subclasses: the gunship,
+walkers, spider droids) are left unhurt for now. When health runs out,
+`rc_cast::die` does what engine.u's `Pawn.Died` and `PlayDying` do for
+a character on the ground: it triggers the map's `Event` for the
+character (`RaiseEvent`, geo_01a's `GunshipTrooper02Death`), stops it,
+and plays its `Death` animation, holding the last frame. From then on it
+ignores the scripts' orders apart from hiding and removal
+(`Controller.PawnDied` destroys an AI's controller, so its script stops).
+The body is taken away `RagdollLifeSpan` seconds later (60 for a clone
+trooper) unless the map or class sets `bSaveMyCorpse`. Not done: the
+original's ragdolls (`TryToRagdoll`: always for explosions, whose
+`RagdollOnDeathProbability` is 1, half the time by default, and whenever
+there is no `Death` animation), the electric and fire death animations,
+death sounds (`PlayDeathCue`), death effects (`DeathEffectContainerClass`)
+and dropping the weapon. The rifle stays in the dead trooper's hand.
 
 ## Character shadows (`rc_shadows`)
 
