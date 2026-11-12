@@ -13,6 +13,16 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Still broken / not tested:** Not tested in the game window or on Windows. Only the maps copied to the cloud were checked for volumes like this.
 - **Next:** User check on Windows.
 
+## 2026-11-12: Level scripts give and take grenades (rc_combat, rc_scripts_plugin, rc_game_core, data/grenades)
+
+- **Changed:** The scripts' `AddAmmo` step (the original's `ACTION_AddAmmo`) is carried out. `rc_scripts_plugin` reads `WhichWeapon` and `AmmoAmount` and sends `rc_game_core::pickups::AddAmmo`; new `rc_combat::script_ammo` finds the grenade whose file names that class (new `game_class` key in the four player grenade files) and changes the count with `Grenades::add_ammo`, kept between 0 and the most carried. Steps sent before the player has grenades wait until they do. New `rc_game --script` check "geo_01a starts with no grenades, as the map's script says".
+- **Why:** geo_01a's opening script takes every grenade away (ScriptedTrigger52: FlashBang -5, EMPGrenade -2, SonicDetonator -2, ThermalDetonator -2), and later levels hand out 5 of each; the port ignored the step, so the player started with 2 of each. Gap 6 in the missing-features audit.
+- **Where it comes from:** `ACTION_AddAmmo` in gameplay.u (find the weapon with `FindInventoryType`; if not carried, nothing happens; else `AmmoType.AddAmmo`) and `Ammunition.AddAmmo` in engine.u (`Min(MaxAmmo, AmmoAmount + n)`, then not below 0), read from the game's script text. Each grenade's class and ammo name read with `rc_probe --class`. All 40 uses across the maps name one of the four grenades.
+- **Tested how:** `cargo test -p rc_combat --lib` (new `geo_01a_starts_with_no_grenades`, `steps_wait_for_the_player`, `script_add_ammo_stays_between_none_and_the_most`), `cargo test -p rc_scripts_plugin`; `rc_game --script` in the cloud with the game's files copied read only from the PC.
+- **Result:** All tests pass. Game script: the new check passes, "script steps [FlashBang -5, EMPGrenade -2, SonicDetonator -2, ThermalDetonator -2]; carried thermal_detonator 0, sonic_detonator 0, emp_grenade 0, flash_grenade 0".
+- **Still broken / not tested:** Not tested on Windows. A step naming a weapon (not a grenade) is logged and skipped; no map uses one. The port still gives each level fresh grenades, where the original carries them from level to level, so the later levels' "+5" and "-n" start from 2. Loading the level-start save (made before the scripts run) has not been tested with this.
+- **Next:** The scripts' BlinkHUD teaching steps (separate PR).
+
 ## 2026-11-12: The script's "play prop animation" no longer holds the opening back (rc_scripts, rc_scripts_plugin)
 
 - **Changed:** `PlayPropAnim` no longer makes the level script wait (it waited our fixed 1.5 s each time). It now plays `BaseAnim` once on every cast member whose tag is `AnimPropTag`. On the player's own body (`PlayerCommando`) it is logged and nothing is drawn. New `ScriptStats::player_body_anims`.

@@ -1654,6 +1654,7 @@ and carries out the effects:
 | walking into an open level exit, `ChangeLevel`, a debriefing's `NewLevel` | `ChangeLevel { map, portal }` (see "Going on to the next map") |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
+| `AddAmmo` | `rc_game_core::pickups::AddAmmo` to `rc_combat::script_ammo`: the player's grenade of that class (the grenade file's `game_class`) gets the amount added, kept between 0 and the most carried, as the original's `Ammunition.AddAmmo`; nothing if not carried. Only grenades: no map names a gun |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
