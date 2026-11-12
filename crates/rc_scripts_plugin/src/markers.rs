@@ -301,6 +301,7 @@ mod tests {
         w.insert_resource(GameLog::terminal());
         w.init_resource::<Messages<MarkerJob>>();
         w.insert_resource(LevelScript {
+            shakes: Default::default(),
             director: Director::new(&m, &[], Settings::default()),
             dispensers: vec![],
             hidden: Default::default(),

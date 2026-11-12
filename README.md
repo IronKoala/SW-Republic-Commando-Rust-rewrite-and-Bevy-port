@@ -10,6 +10,14 @@ copy of the game.
 
 ## What works
 
+- **Screen shake from the level scripts (unit-tested, not tested in the
+  full game).** The scripts' 129 `ACTION_ShakeView` steps and the map's
+  `ViewShaker`s shake the view with the original's own rules: fade in,
+  hold, fade out, a random wobble that moves the camera and turns the
+  view, and a weaker shake can't cut a stronger one short. Numbers come
+  from the maps and the game's `Gameplay.u`. See docs/DESIGN.md "Screen
+  shake".
+
 - **Reading game packages (tested).** `rc_probe` opens any of the game's package
   files (`.u .ctm .utx .uax .usx .ukx`) read-only and reads the header, the name
   table, the import table and the export table. Tested on Windows against a full
@@ -763,6 +771,11 @@ copy of the game.
   game yet.
 
 ## What doesn't work yet
+
+- Screen shake: only the level scripts' shakes (`ACTION_ShakeView`) and
+  `ViewShaker`s are done (since 2026-11-12, not tested in the full game
+  or on Windows). Explosions, weapons, animations and cutscene camera
+  shakes don't shake the view yet.
 
 - Turrets: squad mates on turrets say nothing (no turret voice lines
   yet), stand still in their usual pose, and are held where the player's

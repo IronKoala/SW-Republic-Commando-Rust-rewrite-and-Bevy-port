@@ -665,6 +665,7 @@ mod tests {
         let mut director = Director::new(&MapScripts::default(), &[], Settings::default());
         director.add_breakables(&list);
         w.insert_resource(LevelScript {
+            shakes: Default::default(),
             director,
             dispensers: vec![],
             hidden: Default::default(),

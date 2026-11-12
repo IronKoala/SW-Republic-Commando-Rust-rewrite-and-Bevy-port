@@ -4919,6 +4919,43 @@ it (the original asks for the crosshair on it). The Trandoshan turret's
 four barrels fire one after another for a character gunner. The turret
 weapons' first-person offsets and the E-Web's reload time are guesses.
 
+## Screen shake (`rc_game_core::shake`, `rc_game/src/player.rs`, `rc_scripts_plugin/src/shake.rs`)
+
+Every shake in the original ends in one call on the player's controller,
+`ShakeView(InTime, SustainTime, OutTime, X, Y, Z, YawMag, PitchMag,
+Frequency)`. The port has the same single entry: a `ShakeView` message.
+Anything that wants to shake the view (scripts now; explosions and weapons
+later) sends one.
+
+- **The rules** (`rc_game_core::shake::ShakeState`) follow the game's
+  `Engine.u` script text: a new shake is ignored while a stronger one runs;
+  the strength fades in over `InTime`, holds, and falls as
+  `1 - elapsed / end`; each axis has a value that walks toward a new random
+  target in -1..1 by at most `Frequency` a frame; the turn (Unreal rotation
+  units, cut to a whole number) is added to where the player looks every
+  frame and stays; the movement (Unreal units, world axes) is added to the
+  eye position. A rotation's `Yaw` value shakes up and down and its `Pitch`
+  value left and right, as the original swaps them.
+- **When** (`rc_game/src/player.rs`, `shake_view`): once a frame, right
+  after the player's own turning and its limits, also on a turret, as the
+  engine's `UpdateRotation` does (read from Engine.dll). The camera
+  (`place_camera`) adds `ViewShake::offset` to the eyes.
+- **Where the numbers come from** (`rc_scripts_plugin/src/shake.rs`):
+  `ACTION_ShakeView` steps and `ViewShaker` actors in the map; anything a
+  map leaves out is the class default, read from `Gameplay.u` at level load.
+  If those can't be read, those shakes are skipped and logged, not guessed.
+  A `ViewShaker` shakes only if the player is closer than its
+  `ShakeRadius`; the campaign's four set none, so (as in the original) they
+  never do.
+- **For a VR mod**: the shake is one resource, `ViewShake`, with two
+  switches. `turn_view = false` stops it turning the player's view (a
+  must in VR); `move_camera = false` stops the camera movement. Nothing
+  else depends on them.
+- **Log**: `scripts: ... ShakeView: shake the view: ...` when a script
+  asks, `player: t=... shake from ...` when the view takes it (or
+  ignores it), and `player: ... shake from ... over: N frames, camera moved
+  up to X uu, turned up to P pitch / Y yaw a frame` when it ends.
+
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 
 Every pull request, and every push to `main`, is built and tested by GitHub's
