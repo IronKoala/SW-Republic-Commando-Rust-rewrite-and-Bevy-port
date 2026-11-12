@@ -673,6 +673,7 @@ mod tests {
             calls: vec![],
             places: Default::default(),
             sounds: vec![],
+            ammo: vec![],
             started: true,
             scene: crate::cutscene::Scene::default(),
             stats: PlayStats::default(),

@@ -66,7 +66,8 @@ pub mod use_item;
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
-    ArrivalPortal, ChangeLevel, CharacterAct, CharacterOrder, CharacterOrderDone, FactoryOrder,
+    ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone,
+    FactoryOrder,
     LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
     ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
 };
@@ -81,7 +82,7 @@ pub use shake::{ShakeView, StopShake, ViewShake};
 pub use sound::{SoundAt, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
-    MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerStart,
+    MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
 };
 pub use turrets::{Manning, OnTurret, TurretOrder};
 pub use use_item::{UseItem, UseLock, UsePanel};
@@ -109,6 +110,7 @@ impl Plugin for CorePlugin {
             .add_message::<MusicCue>()
             .add_message::<HudMessage>()
             .add_message::<pickups::PickedUp>()
+            .add_message::<pickups::AddAmmo>()
             .add_message::<ViewKick>()
             .add_message::<ShakeView>()
             .add_message::<StopShake>()
@@ -118,6 +120,7 @@ impl Plugin for CorePlugin {
             .add_message::<FactoryOrder>()
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()
+            .add_message::<CharacterCollision>()
             .add_message::<SquadStanceOrder>()
             .add_message::<SquadMembership>()
             .add_message::<MarkerJob>()

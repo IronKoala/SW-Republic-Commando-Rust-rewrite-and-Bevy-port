@@ -83,6 +83,11 @@ pub struct SpawnEffect {
     /// axes), for an effect hung on a bone (`AttachToBone` with no turn of
     /// its own takes the bone's). Used instead of `rotation` when given.
     pub axes: Option<[[f32; 3]; 3]>,
+    /// Runs for as long as its carrier (`follow`) is there, however long
+    /// that is: an emitter placed in the map, which in the original
+    /// sends particles for the whole level. Without it, an effect that
+    /// never ends is stopped after a minute.
+    pub endless: bool,
 }
 
 impl Default for SpawnEffect {
@@ -99,8 +104,16 @@ impl Default for SpawnEffect {
             follow: None,
             vanish_with_carrier: false,
             axes: None,
+            endless: false,
         }
     }
+}
+
+/// A level event names a placed emitter: every effect carried by
+/// `carrier` is triggered ([`rc_effects::sim::EffectState::trigger`]).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct TriggerEffect {
+    pub carrier: Entity,
 }
 
 /// An effect started with an `id` is over (its life ended or its last
@@ -240,6 +253,8 @@ pub struct RunningEffect {
     follow: Option<Entity>,
     /// Taken away at once when the carrier goes (see `SpawnEffect`).
     vanish_with_carrier: bool,
+    /// Not stopped after a minute while its carrier is there.
+    endless: bool,
     /// Its `AmbientSound`, looping while it is there.
     ambient: Option<Entity>,
     pub state: EffectState,
@@ -262,6 +277,7 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SpawnEffect>()
             .add_message::<EffectEnded>()
+            .add_message::<TriggerEffect>()
             .add_message::<PreloadEffect>()
             .init_resource::<Effects>()
             .init_resource::<EffectStats>()
@@ -768,6 +784,7 @@ fn spawn(
                 by: a.by.clone(),
                 follow: a.follow,
                 vanish_with_carrier: a.vanish_with_carrier,
+                endless: a.endless && a.follow.is_some(),
                 ambient,
                 state,
                 parts,
@@ -799,12 +816,19 @@ fn step(
     carriers: Query<&GlobalTransform>,
     mut stats: ResMut<EffectStats>,
     mut ended: MessageWriter<EffectEnded>,
+    mut triggers: MessageReader<TriggerEffect>,
     log: Option<Res<GameLog>>,
 ) {
     let dt = time.delta_secs().min(0.1);
+    let triggered: Vec<Entity> = triggers.read().map(|t| t.carrier).collect();
     let mut live = 0;
     for (e, mut r) in &mut running {
         let def = r.loaded.def.clone();
+        if let Some(c) = r.follow {
+            for _ in triggered.iter().filter(|t| **t == c) {
+                r.state.trigger(&def);
+            }
+        }
         let mut vanish = false;
         if let Some(c) = r.follow {
             match carriers.get(c) {
@@ -824,8 +848,12 @@ fn step(
             r.state.step(&def, dt);
             live += r.state.live();
         }
-        // Safety: an effect that loops forever ends after a minute.
-        if vanish || r.state.done(&def) || r.state.age > 60.0 {
+        // Safety: an effect that loops forever ends after a minute. A
+        // placed emitter stays while its carrier is there, as the map's
+        // actor does, even with every emitter switched off (a trigger can
+        // switch them on again).
+        let endless = r.endless && r.follow.is_some();
+        if vanish || (!endless && (r.state.done(&def) || r.state.age > 60.0)) {
             say(
                 &log,
                 format!(

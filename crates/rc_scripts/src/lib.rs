@@ -770,7 +770,10 @@ impl Director {
 
     /// Health left on a prop, by export index.
     pub fn prop_health(&self, export: usize) -> Option<f32> {
-        self.props.iter().find(|p| p.export == export).map(|p| p.health)
+        self.props
+            .iter()
+            .find(|p| p.export == export)
+            .map(|p| p.health)
     }
 
     fn hurt_index(&mut self, i: usize, amount: f32) -> PropHurt {
@@ -1371,9 +1374,10 @@ impl Director {
                     {
                         self.sound_length(a.text("Sound").unwrap_or(""))
                     }
-                    "playanim" | "playpropanim" if a.flag("bWaitUntilAnimEnd", true) => {
-                        self.settings.anim_seconds
-                    }
+                    // `ACTION_PlayPropAnim` is a plain `ScriptedAction`
+                    // (gameplay.u): it starts the animation and the script
+                    // goes straight on.
+                    "playanim" if a.flag("bWaitUntilAnimEnd", true) => self.settings.anim_seconds,
                     _ => 0.0,
                 };
                 // Character actions the game finishes: the script waits
@@ -1435,8 +1439,7 @@ impl Director {
                         owner: None,
                         waits: false,
                     });
-                    let debriefing =
-                        (kind == "showdebriefingscreen").then(|| Debriefing::of(&a));
+                    let debriefing = (kind == "showdebriefingscreen").then(|| Debriefing::of(&a));
                     self.out.push(Effect::ChangeLevel {
                         url: url.to_string(),
                         by: name,
@@ -1590,7 +1593,10 @@ pub fn dispatcher_actions(o: &ScriptObject) -> Vec<ScriptObject> {
         if let Some(sound) = text(e, "Sound") {
             let mut v = Vals::from([
                 ("Sound".to_string(), Val::Text(sound)),
-                ("bWaitForFinish".to_string(), Val::Bool(flag(e, "bWaitForSound"))),
+                (
+                    "bWaitForFinish".to_string(),
+                    Val::Bool(flag(e, "bWaitForSound")),
+                ),
             ]);
             if let Some(src) = text(e, "SoundSource") {
                 v.insert("SoundSourceTag".to_string(), Val::Text(src));

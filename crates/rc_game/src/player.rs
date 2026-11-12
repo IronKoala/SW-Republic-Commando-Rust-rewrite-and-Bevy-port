@@ -74,9 +74,11 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_save_part::<PlayerSave>()
             .add_systems(OnEnter(GameState::InGame), spawn_player)
+            .init_resource::<rc_game_core::PlayerPawn>()
             .add_systems(
                 Update,
-                move_body
+                (move_body, publish_pawn)
+                    .chain()
                     .in_set(GameSet::Simulate)
                     .in_set(PlayerMoveSet)
                     .run_if(playing),
@@ -87,6 +89,24 @@ impl Plugin for PlayerPlugin {
                     .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
             );
+    }
+}
+
+/// Share the body's centre and look with the other parts
+/// ([`rc_game_core::PlayerPawn`]).
+fn publish_pawn(
+    bodies: Query<&Body, With<rc_game_core::Player>>,
+    mut pawn: ResMut<rc_game_core::PlayerPawn>,
+) {
+    if let Ok(b) = bodies.single() {
+        let now = rc_game_core::PlayerPawn {
+            centre: arr(b.pawn.location),
+            yaw: b.yaw,
+            pitch: b.pitch,
+        };
+        if *pawn != now {
+            *pawn = now;
+        }
     }
 }
 

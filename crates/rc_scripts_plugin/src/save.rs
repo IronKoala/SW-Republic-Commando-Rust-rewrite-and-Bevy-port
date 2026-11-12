@@ -294,6 +294,7 @@ mod tests {
             calls: vec![],
             places: Default::default(),
             sounds: vec![],
+            ammo: vec![],
             anchors: vec![],
             started: false,
             scene: crate::cutscene::Scene::default(),

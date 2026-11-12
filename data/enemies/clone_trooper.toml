@@ -6,9 +6,10 @@
 # Numbers marked "game:" are the original's, read with `rc_probe --class`:
 # CloneTrooper (System/ctcharacters.u) and Pawn (engine.u); its brain
 # CloneTrooperBot (ctcharacters.u) and CTBot (ctgame.u); its rifle
-# CTInventory.DC17mBlaster, the commandos' DC-17m
-# (data/weapons/dc17m_blaster.toml). Anything not listed takes the
-# battle droid's value (battle_droid.toml).
+# Properties.DC15BlasterClone (data/weapons/dc15_blaster_clone.toml), which
+# CloneTrooperDefaults (Properties/properties.u) sets in place of the class's
+# own CTInventory.DC17mBlaster. Anything not listed takes the battle
+# droid's value (battle_droid.toml).
 #
 # Not found in the files, so not done: CloneTrooperBot's attack state is
 # StateTrandoshanAttack (CoverHideTime 0.5 to 2 s, MinStepInterval 10,
@@ -45,13 +46,13 @@ turn_rate = 110           # game: Pawn RotationRate yaw 20000 per second
 [combat]
 health = 100              # game: CloneTrooper Health
 accuracy = 0.6            # game: CloneTrooper Accuracy
-weapon = "dc17m_blaster"  # game: CloneTrooper RequiredEquipment CTInventory.DC17mBlaster
-burst_count = 15          # game: CloneTrooperBot BurstCount (the rifle's own BurstCount is 10)
-shot_delay = 0.1          # game: DC17mBlaster ShotDelay (the Weapon class's)
+weapon = "dc15_blaster_clone" # game: CloneTrooperDefaults RequiredEquipment Properties.DC15BlasterClone
+burst_count = 15          # game: CloneTrooperBot BurstCount (the rifle's own BurstCount is 4)
+shot_delay = 0.15         # game: DC15BlasterClone ShotDelay
 weapon_range = 7000       # game: Weapon ValidRange max
 max_aim_yaw = 80          # game: Pawn MaxAimYaw
 can_crouch = false        # game: CloneTrooper bCanCrouch = false
-drops = ""                # not found: DC17mBlaster names a DroppedPickupClass, but whether a fallen trooper leaves it is in the compiled code
+drops = ""                # game: DC15BlasterClone has no DroppedPickupClass
 damage_table = ""         # game: no MyDamageVariance on the trooper classes: every hit counts in full
 
 [sound]
@@ -76,7 +77,7 @@ death_fall = []
 package = "GameData/Animations/clone.ukx"
 mesh = "CloneTrooper"
 skin = ""
-held_weapon = "DC17mBlaster" # game: RequiredEquipment; its AttachmentClass model hangs on bone weaponAttach_R
+held_weapon = "DC15BlasterClone" # game: CloneTrooperDefaults RequiredEquipment; its AttachmentClass model hangs on bone weaponAttach_R
 throw = "ThrowGrenade"    # not used: troopers carry no grenades
 ambient = 0.5             # the same as the cast's troopers (data/cast/cast.toml)
 light_scale = 1.1         # the same as the cast's troopers
