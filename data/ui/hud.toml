@@ -344,6 +344,252 @@ colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250
 colour = [72, 255, 72, 255]
 glass = true
 
+# --- The shields, as the original helmet draws them ----------------------
+# Engine.dll `UHelmet::DrawHUD`, helmet-on drawing, after the meters (page
+# of 800 x 600; times 0.8 here). s = shields / most shields.
+# Left bar: a faint back (0, 458, 163 x 18, texels 165,153-169,174), its
+# end (163, 458, 13 x 18, texels 164,153-179,174) and the end's foot (163,
+# 477, 13 x 9, texels 164,176-179,182), in white. The bright fill in
+# (200, 200, 200), only while s > 0: (163 - 163s, 458, 163s - 4 x 16,
+# texels 165,184-169,204 stretched), its outer cap riding on its edge
+# (163 - 163s - 18, 458, 18 x 16, texels 150,184-164,204) and its inner cap
+# (159, 458, 13 x 16, texels 164,184-179,204). The right bar is the same
+# mirrored about 400. So the bars empty from the screen's edges toward the
+# middle.
+# When the shields drop, the original "flashes" them for ShieldFlashDuration
+# (0.5 s, engine.u): every part swells int(left * 6) up and down (the foot
+# only moves up), and the white parts lose int(left / 0.5 * 155) of their
+# green and blue (go red) unless the shields are charging. (Not done: the
+# "CHARGING SHIELDS" start-up sequence, the bBlinkShields blink that level
+# scripts can switch on, and the charging sounds.)
+# Then a thin strip across the top of the glass in the same colour: (0, 14,
+# 381 x 10, texels 149,26-157,37) and (381, 14, 9 x 10, texels
+# 175,26-183,37), mirrored at 800 and 419.
+# Group "visor" (drawn round everything) so they may overlap the meters,
+# as in the original.
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-320, -113.6]
+size = [130.4, 14.4]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [165, 153, 169, 174]
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-189.6, -113.6]
+size = [10.4, 14.4]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 153, 179, 174]
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-189.6, -98.4]
+size = [10.4, 7.2]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 176, 179, 182]
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, -0.8]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-320, -113.6]
+size = [130.4, 12.8]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [165, 184, 169, 204]
+fill = "shield"
+fill_toward = "right"
+fill_stretch = true
+fill_inset = 3.2
+colour = [200, 200, 200, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-204, -113.6]
+size = [14.4, 12.8]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [150, 184, 164, 204]
+slide_with = "shield"
+slide = [-130.4, 0]
+colour = [200, 200, 200, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-192.8, -113.6]
+size = [10.4, 12.8]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 184, 179, 204]
+colour = [200, 200, 200, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [189.6, -113.6]
+size = [130.4, 14.4]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [165, 153, 169, 174]
+mirror = true
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [179.2, -113.6]
+size = [10.4, 14.4]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 153, 179, 174]
+mirror = true
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [179.2, -98.4]
+size = [10.4, 7.2]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 176, 179, 182]
+mirror = true
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, -0.8]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [189.6, -113.6]
+size = [130.4, 12.8]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [165, 184, 169, 204]
+mirror = true
+fill = "shield"
+fill_toward = "left"
+fill_stretch = true
+fill_inset = 3.2
+colour = [200, 200, 200, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [189.6, -113.6]
+size = [14.4, 12.8]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [150, 184, 164, 204]
+mirror = true
+slide_with = "shield"
+slide = [130.4, 0]
+colour = [200, 200, 200, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [182.4, -113.6]
+size = [10.4, 12.8]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 184, 179, 204]
+mirror = true
+colour = [200, 200, 200, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top"
+at = [-320, 11.2]
+size = [304.8, 8]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [149, 26, 157, 37]
+mirror = false
+colour = [255, 255, 255, 255]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top"
+at = [-15.2, 11.2]
+size = [7.2, 8]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [175, 26, 183, 37]
+mirror = false
+colour = [255, 255, 255, 255]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top"
+at = [15.2, 11.2]
+size = [304.8, 8]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [149, 26, 157, 37]
+mirror = true
+colour = [255, 255, 255, 255]
+redden_with = "shield_hit"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top"
+at = [8, 11.2]
+size = [7.2, 8]
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [175, 26, 183, 37]
+mirror = true
+colour = [255, 255, 255, 255]
+redden_with = "shield_hit"
+glass = true
+
 # Grenades, bottom right: the same panel mirrored (682..725, 414), the
 # grenade's picture at (690, 422) 26 x 26 by its class (FlashBang,
 # SonicDetonator, EMPGrenade, ThermalDetonator), and the count ("%i")

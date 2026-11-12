@@ -18,6 +18,16 @@
 //! each copy (one copy per tint colour), and alpha is adjusted so that the
 //! GPU's linear-light result over black equals the original's sRGB result.
 //! Over brighter backgrounds the result is close but not exact.
+//!
+//! The in-game HUD is drawn over the 3D world, not over black, so it uses
+//! [`Variant::OverScene`] for see-through pictures instead: the original's
+//! alpha as it is. The adjustment above makes a faint picture far fainter
+//! (a 25% see-through visor frame becomes about 5%), which is right over
+//! black but nearly hides it over the world: over a mid-tone (sRGB 0.6)
+//! the original gives 0.675, the plain alpha 0.69 and the adjusted one
+//! 0.62. Over dark ground the plain alpha is a little brighter than the
+//! original. Matching exactly would need blending in sRGB numbers, which
+//! Bevy doesn't do.
 
 use crate::layout::{STY_ADDITIVE, STY_MASKED, STY_NORMAL, STY_TRANSLUCENT};
 
@@ -28,6 +38,17 @@ pub enum Variant {
     Opaque,
     Masked,
     Added,
+    /// See-through, drawn over the 3D world: the tint baked in and the
+    /// alpha as it is (see the top of this file).
+    OverScene,
+}
+
+/// [`variant`] for pictures drawn over the 3D world (the in-game HUD).
+pub fn variant_over_scene(render_style: u8) -> Variant {
+    match variant(render_style) {
+        Variant::AsIs => Variant::OverScene,
+        v => v,
+    }
 }
 
 pub fn variant(render_style: u8) -> Variant {
@@ -66,6 +87,10 @@ pub fn prepare(pixels: &mut [u8], v: Variant, tint: [u8; 4]) {
         }
         match v {
             Variant::AsIs => p[3] = (p[3] as f32 * t[3]).round() as u8,
+            Variant::OverScene => {
+                p[3] = (p[3] as f32 * t[3]).round() as u8;
+                continue;
+            }
             // As in `render.rs`: Normal ignores alpha, Masked only cuts.
             Variant::Opaque => p[3] = 255,
             Variant::Masked => p[3] = if p[3] as f32 * t[3] >= 128.0 { 255 } else { 0 },
@@ -117,6 +142,13 @@ mod tests {
             let got = to_srgb(to_linear(px[k] as f32 / 255.0) * a) * 255.0;
             assert!((got - want).abs() < 2.5, "channel {k}: {got} vs {want}");
         }
+    }
+
+    #[test]
+    fn over_scene_keeps_the_alpha() {
+        let mut px = [190u8, 230, 240, 120];
+        prepare(&mut px, Variant::OverScene, [255, 250, 110, 165]);
+        assert_eq!(px, [190, 225, 104, 78]);
     }
 
     #[test]

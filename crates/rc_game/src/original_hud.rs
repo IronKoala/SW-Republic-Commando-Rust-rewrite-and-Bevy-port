@@ -218,6 +218,34 @@ struct OriginalLayout {
     glass: Option<(u32, rc_menus::helmet::GlassMap)>,
     /// Where the compass strip has slid to (it follows the view's turn).
     compass: Option<f32>,
+    /// The shields last frame (the original helmet's `LastShield`) and
+    /// the seconds of hit flash left (`ShieldFlashTime`).
+    last_shield: Option<f32>,
+    shield_flash: f32,
+}
+
+/// The original helmet's `ShieldFlashDuration` (engine.u Helmet default).
+const SHIELD_FLASH_DURATION: f32 = 0.5;
+
+/// The shield hit flash, as Engine.dll `UHelmet::DrawHUD` keeps it: when
+/// the shields drop the flash starts again at `ShieldFlashDuration` and runs
+/// down with time. While it runs the bars swell by `int(left * 6)` and,
+/// unless the shields are charging, lose `int(left / duration * 155)` of
+/// their green and blue. Returns (swell, red) and keeps `last`/`left`.
+pub fn shield_flash(last: &mut Option<f32>, left: &mut f32, shield: f32, dt: f32) -> (u32, u8) {
+    let before = last.unwrap_or(shield);
+    if before > shield {
+        *left = SHIELD_FLASH_DURATION;
+    }
+    *left = (*left - dt).max(0.0);
+    let swell = (*left * 6.0) as u32;
+    let red = if *left > 0.0 && before >= shield {
+        (*left / SHIELD_FLASH_DURATION * 155.0) as u8
+    } else {
+        0
+    };
+    *last = Some(shield);
+    (swell, red)
 }
 
 #[derive(Component)]
@@ -480,6 +508,26 @@ fn draw_layout(
         original.objective = (objective, 0.0);
     }
     let mut now = values(&vitals, &weapon, &squad, &original.messages);
+    let (swell, red) = shield_flash(
+        &mut original.last_shield,
+        &mut original.shield_flash,
+        now.shield,
+        time.delta_secs(),
+    );
+    if swell > 0
+        && now.shield_hit_steps == 0
+        && original
+            .drawn_for
+            .as_ref()
+            .is_some_and(|d| d.0.shield_hit_steps == 0)
+    {
+        log.line(format!(
+            "original hud: shields hit, now {:.3}: bars flash",
+            now.shield
+        ));
+    }
+    now.shield_hit_steps = swell;
+    now.shield_hit_red = red;
     if let Ok(b) = bodies.single() {
         let c = original.compass.get_or_insert(compass_target(b.yaw));
         *c = compass_follow(*c, compass_target(b.yaw), time.delta_secs());
@@ -607,7 +655,7 @@ fn draw_layout(
     for q in quads.iter().chain(&page_quads) {
         let k = (
             q.texture.to_ascii_lowercase(),
-            gpu::variant(q.render_style),
+            gpu::variant_over_scene(q.render_style),
             q.color,
         );
         if original.images.contains_key(&k) {
@@ -679,7 +727,7 @@ fn spawn_quads(
             for q in quads {
                 let Some(image) = images.get(&(
                     q.texture.to_ascii_lowercase(),
-                    gpu::variant(q.render_style),
+                    gpu::variant_over_scene(q.render_style),
                     q.color,
                 )) else {
                     continue;
@@ -1165,6 +1213,21 @@ pub fn reticle_showing(w: &mut World) -> bool {
 mod tests {
     use super::*;
     use crate::theme::Theme;
+
+    #[test]
+    fn shield_flash_runs_as_the_original() {
+        let (mut last, mut left) = (None, 0.0);
+        // Steady: nothing.
+        assert_eq!(shield_flash(&mut last, &mut left, 1.0, 0.016), (0, 0));
+        // Hit: starts at 0.5 less this frame, swells 2 (0.484 * 6), red 150.
+        assert_eq!(shield_flash(&mut last, &mut left, 0.8, 0.016), (2, 150));
+        // A quarter second on: 0.234 left, swell 1, red 72.
+        assert_eq!(shield_flash(&mut last, &mut left, 0.8, 0.25), (1, 72));
+        // Charging while it runs: swells but no red.
+        assert_eq!(shield_flash(&mut last, &mut left, 0.81, 0.016), (1, 0));
+        // Ended.
+        assert_eq!(shield_flash(&mut last, &mut left, 0.82, 1.0), (0, 0));
+    }
 
     #[test]
     fn compass_slides_with_the_turn_as_the_original() {

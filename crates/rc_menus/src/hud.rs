@@ -180,6 +180,13 @@ const ELEMENT_KEYS: &[&str] = &[
     "fill_toward",
     "fill_steps",
     "fill_least_gap",
+    "fill_stretch",
+    "fill_inset",
+    "slide_with",
+    "slide",
+    "grow_with",
+    "grow",
+    "redden_with",
     "colour_by",
     "colours",
     "scroll",
@@ -322,6 +329,33 @@ pub struct Picture {
     /// bar, so any hurt shows.
     #[serde(default)]
     pub fill_least_gap: f32,
+    /// Show the whole `part` squeezed into the shorter bar, instead of
+    /// cutting the part down with it (the original's shield bars stretch
+    /// a few texels across whatever width is left).
+    #[serde(default)]
+    pub fill_stretch: bool,
+    /// Units taken off the bar's fixed end (the end it empties toward)
+    /// while it shows at all: the original's shield fill is 4 shorter
+    /// than its share.
+    #[serde(default)]
+    pub fill_inset: f32,
+    /// Move the element by `slide` units (x, y) times this 0..1 value
+    /// (see `HudValues::fraction`): the end cap riding on a bar's edge.
+    #[serde(default)]
+    pub slide_with: Option<String>,
+    #[serde(default)]
+    pub slide: [f32; 2],
+    /// Move the top and bottom edges by `grow` units (top, bottom) times
+    /// this count (see `HudValues::steps`): the original's shield bars
+    /// swell for a moment when hit.
+    #[serde(default)]
+    pub grow_with: Option<String>,
+    #[serde(default)]
+    pub grow: [f32; 2],
+    /// Take this amount (see `HudValues::redden`) off the colour's green
+    /// and blue: the original's shield parts flash red when hit.
+    #[serde(default)]
+    pub redden_with: Option<String>,
     /// Flip the picture left to right (to reuse one side's art).
     #[serde(default)]
     pub mirror: bool,
@@ -399,6 +433,13 @@ pub struct HudValues {
     /// `UHelmet::DrawHUD`: the view's yaw, 65536 a turn, modulo 65535,
     /// times 0.0001, followed at 3 a second).
     pub compass: f32,
+    /// The original's shield hit flash (Engine.dll `UHelmet::DrawHUD`):
+    /// `int(ShieldFlashTime * 6)`, how far the shield bars swell, 0..3.
+    pub shield_hit_steps: u32,
+    /// How much green and blue the shield parts lose while flashing:
+    /// `int(ShieldFlashTime / ShieldFlashDuration * 155)` while the shields
+    /// aren't charging, else 0.
+    pub shield_hit_red: u8,
 }
 
 /// How hurt, as the original sorts it (Engine.dll
@@ -482,6 +523,23 @@ impl HudValues {
         }
     }
 
+    /// A whole count by name (for `grow_with`), `None` if unknown.
+    pub fn steps(&self, name: &str) -> Option<u32> {
+        match name {
+            "shield_hit" => Some(self.shield_hit_steps),
+            _ => None,
+        }
+    }
+
+    /// How much green and blue to take off by name (for `redden_with`),
+    /// `None` if unknown.
+    pub fn redden(&self, name: &str) -> Option<u8> {
+        match name {
+            "shield_hit" => Some(self.shield_hit_red),
+            _ => None,
+        }
+    }
+
     /// A yes/no by name, for `when` and `alert_when`.
     pub fn flag(&self, name: &str, member: Option<&SquadLine>) -> Option<bool> {
         let (not, name) = match name.strip_prefix('!') {
@@ -494,6 +552,7 @@ impl HudValues {
             "reserve" => !self.weapon.is_empty() && self.reserve.is_some(),
             "grenade" => self.grenade.is_some(),
             "grenades_left" => self.grenade.as_ref().is_some_and(|g| g.1 > 0),
+            "shield" => self.shield > 0.0,
             "shield_low" => self.shield < 0.25,
             "health_low" => self.health < 0.25,
             "health_full" => self.health >= 0.999,
@@ -616,6 +675,30 @@ impl HudLayout {
                 if let Some(f) = &p.scroll {
                     if HudValues::default().scroll(f).is_none() {
                         return Err(format!("{}: scroll \"{f}\" is not \"compass\"", e.group));
+                    }
+                }
+                if let Some(f) = &p.slide_with {
+                    if !known_fill.contains(&f.as_str()) {
+                        return Err(format!(
+                            "{}: slide_with \"{f}\" is not one of {known_fill:?}",
+                            e.group
+                        ));
+                    }
+                }
+                if let Some(f) = &p.grow_with {
+                    if HudValues::default().steps(f).is_none() {
+                        return Err(format!(
+                            "{}: grow_with \"{f}\" is not \"shield_hit\"",
+                            e.group
+                        ));
+                    }
+                }
+                if let Some(f) = &p.redden_with {
+                    if HudValues::default().redden(f).is_none() {
+                        return Err(format!(
+                            "{}: redden_with \"{f}\" is not \"shield_hit\"",
+                            e.group
+                        ));
                     }
                 }
                 if let Some(f) = &p.fill {
@@ -837,13 +920,39 @@ pub fn hud_quads_of(
                         }
                     }
                     let mut dst = rect;
+                    if let Some(f) = &p.slide_with {
+                        let v = values.fraction(f, member).unwrap_or(0.0);
+                        for k in 0..4 {
+                            dst[k] += p.slide[k % 2] * v * unit;
+                        }
+                    }
+                    if let Some(n) = p.grow_with.as_deref().and_then(|g| values.steps(g)) {
+                        dst[1] += p.grow[0] * n as f32 * unit;
+                        dst[3] += p.grow[1] * n as f32 * unit;
+                    }
+                    if let Some(r) = p.redden_with.as_deref().and_then(|g| values.redden(g)) {
+                        colour[1] = colour[1].saturating_sub(r);
+                        colour[2] = colour[2].saturating_sub(r);
+                    }
                     if let Some(f) = &p.fill {
                         let v = values.fraction(f, member).unwrap_or(1.0);
                         let v = stepped(v, p.fill_steps, p.fill_least_gap);
                         if v <= 0.0 {
                             continue;
                         }
+                        let keep = src;
                         cut(&mut src, &mut dst, v, p.fill_toward.as_deref(), p.mirror);
+                        if p.fill_stretch {
+                            src = keep;
+                        }
+                        if p.fill_inset != 0.0 {
+                            inset(&mut dst, p.fill_inset * unit, p.fill_toward.as_deref());
+                            // The original then draws a sliver turned
+                            // round; too small to matter, so nothing.
+                            if dst[2] <= dst[0] || dst[3] <= dst[1] {
+                                continue;
+                            }
+                        }
                     }
                     let slide = p.scroll.as_deref().and_then(|k| values.scroll(k));
                     let pieces = match slide {
@@ -975,6 +1084,17 @@ fn cut(src: &mut [f32; 4], dst: &mut [f32; 4], v: f32, toward: Option<&str>, mir
     };
     shorten(src, v, src_toward);
     shorten(dst, v, toward);
+}
+
+/// Take `by` pixels off the end of `r` a bar empties toward (its fixed
+/// end).
+fn inset(r: &mut [f32; 4], by: f32, toward: Option<&str>) {
+    match toward.unwrap_or("left") {
+        "right" => r[2] -= by,
+        "down" => r[3] -= by,
+        "up" => r[1] += by,
+        _ => r[0] += by,
+    }
 }
 
 fn shorten(r: &mut [f32; 4], v: f32, toward: &str) {

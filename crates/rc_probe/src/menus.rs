@@ -423,6 +423,8 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         objective: String::new(),
         objective_fade: 0.0,
         compass: 0.37,
+        shield_hit_steps: 0,
+        shield_hit_red: 0,
     };
     // The objective shows when nobody speaks and no message is up.
     let objective_only = HudValues {
@@ -460,7 +462,17 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
             .map(|m| rc_menus::helmet::GlassMap::new(m, &plan, wf / hf));
         let place = |p: [f32; 2]| glass.as_ref().map_or(p, |g| g.place(p));
         let place: Option<&dyn Fn([f32; 2]) -> [f32; 2]> = glass.as_ref().map(|_| &place as _);
-        for (name, v) in [("hud", &values), ("hud_objective", &objective_only)] {
+        // The shields just hit: the bars swell and go red for a moment.
+        let shield_hit = HudValues {
+            shield_hit_steps: 2,
+            shield_hit_red: 150,
+            ..values.clone()
+        };
+        for (name, v) in [
+            ("hud", &values),
+            ("hud_objective", &objective_only),
+            ("hud_shield_hit", &shield_hit),
+        ] {
             let quads = hud_quads(&layout, v, wf, hf, 16.0 / 9.0, &mut assets, place);
             let picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);
             let _ = std::fs::create_dir_all(out_dir);
