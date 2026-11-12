@@ -133,6 +133,13 @@ pub struct PreloadEffect {
     pub def: Option<Arc<EffectDef>>,
 }
 
+/// On a carrier entity: the effect's own turn now, as Unreal pitch, yaw
+/// and roll, for an effect riding on something that turns (a placed
+/// emitter with an `AttachTag`). Without it the effect keeps the turn it
+/// was started with.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct CarrierTurn(pub [i32; 3]);
+
 /// "A level event names this effect": the effect carried by `carrier`
 /// does what engine.u's `Emitter.Trigger` does (see
 /// `rc_effects::EffectState::trigger`): parts with `TriggerDisabled` are
@@ -878,7 +885,7 @@ fn step(
     mut commands: Commands,
     time: Res<Time>,
     mut running: Query<(Entity, &mut RunningEffect)>,
-    carriers: Query<&GlobalTransform>,
+    carriers: Query<(&GlobalTransform, Option<&CarrierTurn>)>,
     mut stats: ResMut<EffectStats>,
     mut ended: MessageWriter<EffectEnded>,
     log: Option<Res<GameLog>>,
@@ -890,7 +897,12 @@ fn step(
         let mut vanish = false;
         if let Some(c) = r.follow {
             match carriers.get(c) {
-                Ok(g) => r.state.move_to(&def, to_unreal(g.translation())),
+                Ok((g, turn)) => {
+                    r.state.move_to(&def, to_unreal(g.translation()));
+                    if let Some(t) = turn {
+                        r.state.axes = rc_effects::sim::rotation_axes(t.0);
+                    }
+                }
                 Err(_) if r.vanish_with_carrier => {
                     // `Destroy`: gone at once, with its sound.
                     vanish = true;

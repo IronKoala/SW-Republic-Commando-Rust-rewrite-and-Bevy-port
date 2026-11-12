@@ -6,6 +6,8 @@ description = "Level scripts in the game: runs the map's own scripting (rc_scrip
 
 [dependencies]
 rc_audio = { path = "../rc_audio" }
+# Characters and vehicles the scripts move: placed effects ride on them.
+rc_cast = { path = "../rc_cast" }
 rc_combat = { path = "../rc_combat" }
 # The level's effect spawners (FXFactory): their rules.
 rc_effects = { path = "../rc_effects" }
@@ -16,6 +18,7 @@ rc_level = { path = "../rc_level" }
 rc_level_plugin = { path = "../rc_level_plugin" }
 rc_level_viewer = { path = "../rc_level_viewer" }
 rc_movement = { path = "../rc_movement" }
+rc_movers = { path = "../rc_movers" }
 rc_movers_plugin = { path = "../rc_movers_plugin" }
 rc_package = { path = "../rc_package" }
 rc_scripts = { path = "../rc_scripts" }

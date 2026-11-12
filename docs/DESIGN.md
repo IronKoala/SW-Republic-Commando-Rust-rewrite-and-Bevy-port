@@ -4919,9 +4919,28 @@ reads the actor's `DrawScale`; `UParticleEmitter::Scale`, which would,
 is only called by the editor, which wrote the scaled values into the
 map's copies. So it is only logged.
 
-**Not done.** `AttachTag` (98 placed effects ride on something that
-moves, such as a droid dispenser's landing thrusters; ours stay at
-their map place), the `Emitter`'s bloom and camera-shake values,
+**Riding on something (`AttachTag`, from engine.dll).**
+`UGameEngine::LoadMap`, after every actor's `PostBeginPlay`, goes
+through the level's actors in order and bases each one whose
+`AttachTag` is set on the first other actor whose `Tag` or object name
+is that tag (`SetBase`, with the floor normal (0, 0, 1)). `SetBase`
+keeps the rider's place relative to the base (`RelativeLocation`, the
+difference of the two places) and its turn relative to the base's.
+When the base moves, `ULevel::MoveActor` moves each attached actor that
+isn't on a bone by the base's move plus the swing of its relative place
+by the base's change of turn, and turns it by the base's change of turn
+(rotator added). `placed_emitters::ride` does this each frame from where
+the base was when the level started (`rider_now`, using
+`rc_movers::Motion`); the effect's own turn reaches the effects part on
+the carrier (`rc_effects_plugin::CarrierTurn`). Of the campaign's 98
+riders, 92 ride on movers (`LevelMovers::pose_of_export`), 1 on
+geo_05c's `GunshipHigh` (a cast vehicle; `rc_cast::Cast`, which only
+turns about the vertical) and 5 on `KarmaProp`s (ras_04d's `WakeShip`,
+two geo_05b droid dispensers). The port has no Karma physics, so those
+props never move and their effects stay put. Particles already sent
+stay where they are, apart from `PTCS_Relative` emitters' (as before).
+
+**Not done.** The `Emitter`'s bloom and camera-shake values,
 `AutoReset`, and keeping which parts are off in save files.
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)

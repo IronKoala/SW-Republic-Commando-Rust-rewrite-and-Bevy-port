@@ -147,6 +147,7 @@ impl Plugin for ScriptsPlugin {
                     send_ammo,
                     fx_factories::run,
                     placed_emitters::run,
+                    placed_emitters::ride,
                     projectiles::fly,
                     breakables::show,
                     characters::cast,

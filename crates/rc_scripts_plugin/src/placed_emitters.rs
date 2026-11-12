@@ -30,16 +30,28 @@
 //!   reads it; the editor's `UParticleEmitter::Scale` already wrote any
 //!   scaling into the map's copies), so it is only logged.
 //!
-//! Not done: `AttachTag` (98 placed effects ride on something that moves,
-//! such as a droid dispenser's thrusters; they stay at their map place),
-//! the Bloom and camera-shake values of an `Emitter`, and keeping which
-//! parts are off in save files. Logged with the `scripts:` prefix.
+//! - an effect with an `AttachTag` rides on the actor it names
+//!   (`UGameEngine::LoadMap`: after `PostBeginPlay`, each actor whose
+//!   `AttachTag` is set is based, `SetBase`, on the first actor in the
+//!   level's list, itself left out, whose `Tag` or object name is that
+//!   tag). When the base moves (`ULevel::MoveActor`), the rider moves by
+//!   the base's move and is swung round the base's origin by its turn (its
+//!   place relative to the base, `RelativeLocation`, kept), and its own
+//!   turn gets the base's change of turn added (`Rotation` plus the
+//!   rotator difference). 98 of the campaign's placed effects ride: 92 on
+//!   movers (droid dispensers' thrusters, ships' engine glows), 5 on
+//!   `KarmaProp`s and 1 on geo_05c's `GunshipHigh`. See [`ride`].
+//!
+//! Not done: riding on a `KarmaProp` (the port has no Karma physics, so
+//! they never move and the effect stays put, as it would on a prop at
+//! rest), the Bloom and camera-shake values of an `Emitter`, and keeping
+//! which parts are off in save files. Logged with the `scripts:` prefix.
 
 use crate::PART;
 use bevy::prelude::*;
 use rc_effects::def::EffectDef;
 use rc_effects::read::PlacedEffect;
-use rc_effects_plugin::{SpawnEffect, TriggerEffect};
+use rc_effects_plugin::{CarrierTurn, SpawnEffect, TriggerEffect};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{GameLog, ScriptEvent};
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
@@ -59,8 +71,10 @@ pub struct PlacedEmitter {
     /// The actor's `DrawScale` when the map sets one (logged; the engine
     /// doesn't use it while playing).
     pub draw_scale: Option<f32>,
-    /// `AttachTag`: what it rides on in the original (not done; logged).
+    /// `AttachTag`: what it rides on.
     pub attach_tag: Option<String>,
+    /// The actor `attach_tag` names, found as the engine does.
+    pub base: Option<Base>,
     /// What it sends (the map's copies), `None` if they couldn't be read.
     pub def: Option<Arc<EffectDef>>,
     /// Why `def` is missing.
@@ -76,12 +90,59 @@ pub struct PlacedEmitter {
     pub key: String,
 }
 
+/// The actor a placed effect rides on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Base {
+    pub export: usize,
+    pub name: String,
+    pub class: String,
+}
+
+/// Where a base is and how it is turned (Unreal units and angle units).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BasePose {
+    pub pos: [f32; 3],
+    pub rot: [f32; 3],
+}
+
+/// Where a rider is now, from where it and its base were when it was
+/// based (`start`, `base_start`) and where the base is now. As
+/// engine.dll's `ULevel::MoveActor` moves an attached actor: its place
+/// relative to the base turns with the base, and its own turn gets the
+/// base's change of turn added. Unreal units and angle units.
+pub fn rider_now(
+    start: [f32; 3],
+    start_rot: [i32; 3],
+    base_start: BasePose,
+    base_now: BasePose,
+) -> ([f32; 3], [i32; 3]) {
+    let motion = rc_movers::Motion::new(
+        rc_movers::Pose {
+            pos: UVec3::new(base_start.pos[0], base_start.pos[1], base_start.pos[2]),
+            rot: base_start.rot,
+        },
+        rc_movers::Pose {
+            pos: UVec3::new(base_now.pos[0], base_now.pos[1], base_now.pos[2]),
+            rot: base_now.rot,
+        },
+    );
+    let p = motion.apply(UVec3::new(start[0], start[1], start[2]));
+    let rot = [0, 1, 2]
+        .map(|k| start_rot[k].wrapping_add((base_now.rot[k] - base_start.rot[k]).round() as i32));
+    ([p.x, p.y, p.z], rot)
+}
+
 /// The level's placed effects while it is played.
 #[derive(Resource, Default)]
 pub struct LevelEmitters {
     pub list: Vec<PlacedEmitter>,
     /// The entity carrying each one's effect, once started.
     carriers: Vec<Option<Entity>>,
+    /// Where each one's base was when the effect started.
+    base_start: Vec<Option<BasePose>>,
+    /// How far each rider has been carried from its map place (uu), for
+    /// the log and the self-tests.
+    pub carried: Vec<f32>,
     started: bool,
     /// For the self-tests: names of effects a level event reached, in order.
     pub triggered: Vec<String>,
@@ -91,6 +152,8 @@ impl LevelEmitters {
     pub fn new(list: Vec<PlacedEmitter>) -> Self {
         LevelEmitters {
             carriers: vec![None; list.len()],
+            base_start: vec![None; list.len()],
+            carried: vec![0.0; list.len()],
             list,
             started: false,
             triggered: Vec::new(),
@@ -124,6 +187,25 @@ pub fn read(map: &MapScripts, map_name: &str, placed: &[PlacedEffect]) -> Vec<Pl
         .iter()
         .map(|p| {
             let actor = map.actors.iter().find(|a| a.obj.export == p.export);
+            let attach_tag = actor
+                .and_then(|a| a.obj.text("AttachTag").map(str::to_string))
+                .filter(|t| !t.eq_ignore_ascii_case("None"));
+            // As `UGameEngine::LoadMap`: the first actor in the level's
+            // list, the rider left out, whose tag or object name is it.
+            let base = attach_tag.as_ref().and_then(|t| {
+                map.actors
+                    .iter()
+                    .find(|a| {
+                        a.obj.export != p.export
+                            && (a.obj.tag().eq_ignore_ascii_case(t)
+                                || a.obj.name.eq_ignore_ascii_case(t))
+                    })
+                    .map(|a| Base {
+                        export: a.obj.export,
+                        name: a.obj.name.clone(),
+                        class: a.obj.class.clone(),
+                    })
+            });
             let (def, problem) = match &p.def {
                 Ok(d) => (Some(Arc::new(d.clone())), None),
                 Err(e) => (None, Some(e.clone())),
@@ -135,7 +217,8 @@ pub fn read(map: &MapScripts, map_name: &str, placed: &[PlacedEffect]) -> Vec<Pl
                 location: actor.map_or([0.0; 3], |a| a.location),
                 rotation: actor.map_or([0; 3], |a| rotation(&a.obj)),
                 draw_scale: actor.and_then(|a| a.obj.float("DrawScale")),
-                attach_tag: actor.and_then(|a| a.obj.text("AttachTag").map(str::to_string)),
+                attach_tag,
+                base,
                 def,
                 problem: problem.or_else(|| {
                     actor
@@ -187,10 +270,11 @@ pub fn log_list(list: &[PlacedEmitter], log: &GameLog) {
             e.draw_scale
                 .map(|s| format!(", map draw scale {s} (not used while playing, as in the engine)"))
                 .unwrap_or_default(),
-            e.attach_tag
-                .as_ref()
-                .map(|t| format!(", rides on {t} (not done: stays at its place)"))
-                .unwrap_or_default(),
+            match (&e.attach_tag, &e.base) {
+                (Some(t), Some(b)) => format!(", rides on {t} ({} {})", b.class, b.name),
+                (Some(t), None) => format!(", rides on {t}, which the map doesn't have (stays at its place)"),
+                _ => String::new(),
+            },
             e.problem
                 .as_ref()
                 .map(|p| format!(", NOT SHOWN: {p}"))
@@ -276,6 +360,81 @@ pub fn run(
     }
 }
 
+/// Where a base is now: a mover (`rc_movers_plugin`), or a character or
+/// vehicle the cast part moves (`rc_cast::Cast`, which only turns about
+/// the vertical). `None` for a base that never moves in the port.
+fn base_pose(
+    b: &Base,
+    movers: Option<&rc_movers_plugin::LevelMovers>,
+    cast: &Query<&rc_cast::Cast>,
+) -> Option<BasePose> {
+    if let Some(p) = movers.and_then(|m| m.pose_of_export(b.export)) {
+        return Some(BasePose {
+            pos: [p.pos.x, p.pos.y, p.pos.z],
+            rot: p.rot,
+        });
+    }
+    cast.iter()
+        .find(|c| c.name.eq_ignore_ascii_case(&b.name))
+        .map(|c| BasePose {
+            pos: c.location,
+            rot: [0.0, c.yaw * 65536.0 / std::f32::consts::TAU, 0.0],
+        })
+}
+
+/// Placed effects ride on their bases (`AttachTag`), as engine.dll's
+/// `ULevel::MoveActor` moves attached actors with their base.
+pub fn ride(
+    mut commands: Commands,
+    em: Option<ResMut<LevelEmitters>>,
+    movers: Option<Res<rc_movers_plugin::LevelMovers>>,
+    cast: Query<&rc_cast::Cast>,
+    log: Res<GameLog>,
+) {
+    let Some(mut em) = em else { return };
+    let em = &mut *em;
+    for i in 0..em.list.len() {
+        let (Some(base), Some(carrier)) = (em.list[i].base.clone(), em.carriers[i]) else {
+            continue;
+        };
+        let Some(now) = base_pose(&base, movers.as_deref(), &cast) else {
+            continue;
+        };
+        let e = &em.list[i];
+        let start = match em.base_start[i] {
+            Some(s) => s,
+            None => {
+                log.line(format!(
+                    "{PART}: effect {} rides on {} {} at ({:.0}, {:.0}, {:.0})",
+                    e.name, base.class, base.name, now.pos[0], now.pos[1], now.pos[2]
+                ));
+                em.base_start[i] = Some(now);
+                now
+            }
+        };
+        let (at, rot) = rider_now(e.location, e.rotation, start, now);
+        let far = (0..3)
+            .map(|k| (at[k] - e.location[k]).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        if far >= 16.0 && em.carried[i] < 16.0 {
+            log.line(format!(
+                "{PART}: effect {} carried by {} {} ({far:.0} uu from its map place so far, turned {rot:?})",
+                e.name, base.class, base.name
+            ));
+        }
+        em.carried[i] = em.carried[i].max(far);
+        let at = to_bevy(UVec3::new(at[0], at[1], at[2]));
+        if let Ok(mut c) = commands.get_entity(carrier) {
+            c.insert((
+                Transform::from_translation(at),
+                GlobalTransform::from_translation(at),
+                CarrierTurn(rot),
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,5 +480,29 @@ mod tests {
         assert_eq!(e.location, [2309.69, 1708.559, -2569.9277]);
         assert_eq!(e.key, "geo_01a.REP_Gunship_GroundDust0");
         assert!(e.def.is_some() && e.problem.is_none());
+    }
+
+    #[test]
+    fn a_rider_moves_and_turns_with_its_base() {
+        // A base 100 uu east of the rider turns a quarter (yaw 16384) and
+        // rises 50: the rider swings round the base's origin and its own
+        // turn gets the quarter added, as ULevel::MoveActor does.
+        let start = BasePose {
+            pos: [100.0, 0.0, 0.0],
+            rot: [0.0; 3],
+        };
+        let now = BasePose {
+            pos: [100.0, 0.0, 50.0],
+            rot: [0.0, 16384.0, 0.0],
+        };
+        let (at, rot) = rider_now([0.0, 0.0, 0.0], [0, 1000, 0], start, now);
+        // Was 100 uu behind the base (-X); a quarter turn puts it at -Y.
+        assert!((at[0] - 100.0).abs() < 0.01, "{at:?}");
+        assert!((at[1] + 100.0).abs() < 0.01, "{at:?}");
+        assert!((at[2] - 50.0).abs() < 0.01, "{at:?}");
+        assert_eq!(rot, [0, 17384, 0]);
+        // Not moved: stays where it was.
+        let (at, rot) = rider_now([1.0, 2.0, 3.0], [5, 6, 7], start, start);
+        assert_eq!((at, rot), ([1.0, 2.0, 3.0], [5, 6, 7]));
     }
 }
