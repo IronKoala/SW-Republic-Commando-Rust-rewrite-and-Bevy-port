@@ -62,6 +62,7 @@ pub const KINDS: &[&str] = &[
     "turntowardplayer",
     "teleporttopoint",
     "playanim",
+    "playpropanim",
     "waitforanimend",
     "waitforplayer",
     "makeinvulnerable",
@@ -123,6 +124,7 @@ fn tag_field(kind: &str) -> Option<&'static str> {
         "destroyactor" => "DestroyTag",
         "sethidden" => "HideActorTag",
         "changesquadmember" => "MemberTag",
+        "playpropanim" => "AnimPropTag",
         _ => return None,
     })
 }
@@ -255,7 +257,12 @@ pub(crate) fn cast(
             .unwrap_or_else(|| "nobody".into());
         if targets.is_empty() {
             if now < call.deadline && (tag.is_some() || call.owner.is_some()) {
-                blocked.insert(call.script.clone());
+                // `PlayPropAnim` doesn't hold the script (gameplay.u: it
+                // plays on whatever has the tag and goes on); it is only
+                // tried again while the level's characters appear.
+                if call.kind != "playpropanim" {
+                    blocked.insert(call.script.clone());
+                }
                 keep.push(call);
                 continue;
             }
@@ -391,6 +398,12 @@ pub(crate) fn cast(
                 name,
                 looping: a.flag("bLoopAnim", false),
             }),
+            // gameplay.u's `ACTION_PlayPropAnim`: every actor with the tag
+            // `PlayAnim`s it once.
+            "playpropanim" => named(a, "BaseAnim").map(|name| CharacterAct::PlayAnim {
+                name,
+                looping: false,
+            }),
             "waitforanimend" => Some(CharacterAct::WaitForAnimEnd),
             "waitforplayer" => Some(CharacterAct::WaitForPlayer {
                 distance: a.float("Distance").unwrap_or(256.0),
@@ -419,7 +432,17 @@ pub(crate) fn cast(
                 sent += 1;
             }
         }
-        if sent == 0 {
+        if sent == 0 && is_player && call.kind == "playpropanim" && targets.len() == 1 {
+            // The player's own body (`PlayerCommando`, the player pawn's
+            // tag) plays it in the original, but nobody sees it: engine.u's
+            // `Pawn` sets `bOwnerNoSee` (no class below overrides it), and
+            // the first-person view is the pawn's place plus its eye height
+            // (engine.u `CalcFirstPersonView`, `EyePosition`), not a bone.
+            script.stats.player_body_anims.push(format!("{act:?}"));
+            log.line(format!(
+                "{at}: {who}: {act:?} on the player's own body, which the first-person view never shows (Pawn bOwnerNoSee); nothing to draw"
+            ));
+        } else if sent == 0 {
             script.stats.not_done += 1;
             log.line(format!(
                 "{at}: {who} {}: {act:?} (not done yet for this character)",

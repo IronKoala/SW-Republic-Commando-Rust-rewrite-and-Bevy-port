@@ -121,6 +121,11 @@ pub struct EmitterState {
     pub delay: f32,
     /// Part of a particle owed from earlier steps.
     pub owed: f32,
+    /// Switched off (`Disabled` as it is now: the emitter's own value,
+    /// flipped by each [`EffectState::trigger`]). engine.dll's
+    /// `AEmitter::Tick` and `AEmitter::Render` skip an emitter that is
+    /// off: its particles neither move nor show until it is back on.
+    pub off: bool,
 }
 
 /// An effect running at `origin` (uu).
@@ -181,6 +186,7 @@ impl EffectState {
                 sent: 0,
                 delay: rng.range(e.initial_delay),
                 owed: 0.0,
+                off: e.disabled,
             })
             .collect();
         EffectState {
@@ -229,6 +235,26 @@ impl EffectState {
         self
     }
 
+    /// A level event names the effect (engine.u `Emitter.Trigger` calls
+    /// each emitter's native `Trigger`). As engine.dll's
+    /// `UParticleEmitter::execTrigger` does: an emitter with
+    /// `TriggerDisabled` flips `Disabled`; one with `ResetOnTrigger` then
+    /// starts over (`UParticleEmitter::Reset`: no particles, a new
+    /// initial delay).
+    pub fn trigger(&mut self, def: &EffectDef) {
+        for (d, s) in def.emitters.iter().zip(&mut self.emitters) {
+            if d.trigger_disabled {
+                s.off = !s.off;
+            }
+            if d.reset_on_trigger {
+                s.particles.clear();
+                s.sent = 0;
+                s.owed = 0.0;
+                s.delay = self.rng.range(d.initial_delay);
+            }
+        }
+    }
+
     /// Particles alive now, in all emitters.
     pub fn live(&self) -> usize {
         self.emitters.iter().map(|e| e.particles.len()).sum()
@@ -244,7 +270,7 @@ impl EffectState {
             return self.live() == 0;
         }
         def.emitters.iter().zip(&self.emitters).all(|(d, s)| {
-            d.disabled || (!d.respawn && s.sent >= d.max_particles && s.particles.is_empty())
+            s.off || (!d.respawn && s.sent >= d.max_particles && s.particles.is_empty())
         })
     }
 
@@ -340,7 +366,7 @@ impl EffectState {
     pub fn step(&mut self, def: &EffectDef, dt: f32) {
         self.age += dt;
         for (i, d) in def.emitters.iter().enumerate() {
-            if d.disabled
+            if self.emitters[i].off
                 || !matches!(
                     d.kind,
                     crate::def::EmitterKind::Sprite
@@ -431,6 +457,9 @@ impl EffectState {
         let (Some(d), Some(s)) = (def.emitters.get(i), self.emitters.get(i)) else {
             return Vec::new();
         };
+        if s.off {
+            return Vec::new();
+        }
         let frames = d.frames();
         s.particles
             .iter()
@@ -569,6 +598,34 @@ mod tests {
         let mut s = EffectState::new(&def, [0.0; 3], 5).placed([0, 16384, 0], 1.0);
         s.step(&def, 0.01);
         assert!((s.emitters[0].particles[0].velocity[0] - 8000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn a_trigger_switches_an_emitter_off_and_on_as_engine_dll_does() {
+        let mut def = burst();
+        def.emitters[0].respawn = true;
+        let mut s = EffectState::new(&def, [0.0; 3], 9);
+        s.step(&def, 0.1);
+        let before = s.emitters[0].particles.clone();
+        assert!(!before.is_empty());
+        // TriggerDisabled (the default): Disabled flips; a disabled
+        // emitter is neither moved nor drawn.
+        s.trigger(&def);
+        assert!(s.emitters[0].off);
+        assert!(s.sprites(&def, 0).is_empty());
+        s.step(&def, 0.5);
+        assert_eq!(s.emitters[0].particles.len(), before.len());
+        assert_eq!(s.emitters[0].particles[0].age, before[0].age);
+        // A second trigger: back on, with the same particles.
+        s.trigger(&def);
+        assert!(!s.emitters[0].off);
+        assert_eq!(s.sprites(&def, 0).len(), before.len());
+        // Without TriggerDisabled nothing flips; ResetOnTrigger starts over.
+        def.emitters[0].trigger_disabled = false;
+        def.emitters[0].reset_on_trigger = true;
+        s.trigger(&def);
+        assert!(!s.emitters[0].off);
+        assert_eq!((s.emitters[0].particles.len(), s.emitters[0].sent), (0, 0));
     }
 
     #[test]
