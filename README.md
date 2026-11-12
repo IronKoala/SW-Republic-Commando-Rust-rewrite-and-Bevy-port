@@ -649,7 +649,10 @@ copy of the game.
   come near, the EMP electrocutes droids, and the flash stuns anyone looking
   at it. Switch to the DC-17m's sniper (two zoom steps; zoomed shots hit
   1.72 times harder) and anti-armour attachments, hit with melee, and pick
-  up a fallen enemy's weapon. Every character takes more or less damage by
+  up a fallen enemy's weapon. As in the original, each level starts you with
+  the DC-17m plus what its start point lists (the pistol, and the
+  attachments once the story has given them); geo_03a's sniper attachment
+  and geo_04d's anti-armour attachment are picked up in the level. Every character takes more or less damage by
   type, from the game's own damage tables (battle droids shrug off sniper
   rounds but fall to melee). Super battle droids, Geonosian warriors and
   Trandoshan mercenaries each have their own settings file in

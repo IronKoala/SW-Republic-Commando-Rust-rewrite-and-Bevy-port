@@ -51,3 +51,8 @@ bolt_colour = [1.0, 0.6, 0.2]
 mesh = "HudArmsTranRifle" # game: TrandoshanRifle's Mesh
 fov = 85                  # game: DisplayFOV
 brightness = 0.75         # our choice, as the other weapons
+
+[events]
+# Level events this weapon sends (game: TrandoshanRifleMP's class defaults with its
+# "...Defaults" class on top; see docs/DESIGN.md "Events the player sends").
+first_draw = "TrandoshanRifleEvent"         # FirstTimeSwitchEvent: the first time the player brings it up

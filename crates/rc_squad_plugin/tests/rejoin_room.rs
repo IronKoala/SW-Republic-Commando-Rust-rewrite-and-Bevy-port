@@ -60,6 +60,8 @@ fn map() -> MapSquadInfo {
             yaw: 0.0,
             tag: "Delta07".into(),
             script: Some("SevScript".into()),
+            event: Some("SevDown".into()),
+            revive_event: Some("SevUp".into()),
         }],
         factories: vec![SquadFactory {
             actor: "PawnFactory2".into(),
@@ -69,6 +71,7 @@ fn map() -> MapSquadInfo {
             tag: "BringFixer".into(),
             pawn_tag: "Delta40".into(),
             script: Some("SS-Commando".into()),
+            pawn_event: Some("FixerDown".into()),
         }],
         has_squad_actor: true,
         ..Default::default()
@@ -334,4 +337,67 @@ fn a_map_that_cant_be_read_puts_all_three_with_the_player() {
         assert!(dist_2d(f, UVec3::ZERO) < 300.0, "{name} at {f:?}");
         assert!(body(&mut app, name).is_some(), "{name} has no body");
     }
+}
+
+#[derive(Resource, Default)]
+struct Raised(Vec<(String, String)>);
+
+fn collect_raised(mut r: MessageReader<rc_game_core::RaiseEvent>, mut got: ResMut<Raised>) {
+    got.0
+        .extend(r.read().map(|e| (e.name.clone(), e.by.clone())));
+}
+
+fn put_down(app: &mut App, e: Entity, down: bool) {
+    let mut m = app.world_mut().entity_mut(e);
+    if down {
+        m.get_mut::<Health>().unwrap().current = 0.0;
+        m.insert(rc_combat::Dead);
+    } else {
+        let mut h = m.get_mut::<Health>().unwrap();
+        h.current = h.max;
+        m.remove::<rc_combat::Dead>();
+    }
+}
+
+/// Going down and being revived send the map's events for that mate: a
+/// placed one its `Event` / `ReviveEvent`, one a spawner made the
+/// spawner's `PawnEventFromFactory` and nothing on revive.
+#[test]
+fn squad_mates_send_their_down_and_revived_events() {
+    let mut app = app();
+    app.init_resource::<Raised>()
+        .add_systems(Update, collect_raised);
+    run(&mut app, 0.5);
+    let (sev, _) = body(&mut app, "Sev").expect("Sev has a body");
+    put_down(&mut app, sev, true);
+    run(&mut app, 0.1);
+    put_down(&mut app, sev, false);
+    run(&mut app, 0.1);
+    app.world_mut().write_message(ScriptEvent {
+        name: "BringFixer".into(),
+        by: "test".into(),
+    });
+    run(&mut app, 0.5);
+    let (fixer, _) = body(&mut app, "Fixer").expect("Fixer came in");
+    put_down(&mut app, fixer, true);
+    run(&mut app, 0.1);
+    put_down(&mut app, fixer, false);
+    run(&mut app, 0.1);
+    let got: Vec<(String, String)> = app
+        .world()
+        .resource::<Raised>()
+        .0
+        .iter()
+        .filter(|(n, _)| !n.ends_with("Event") && !n.starts_with("Player"))
+        .cloned()
+        .collect();
+    println!("raised: {got:?}");
+    assert_eq!(
+        got,
+        [
+            ("SevDown".to_string(), "Sev".to_string()),
+            ("SevUp".to_string(), "Sev".to_string()),
+            ("FixerDown".to_string(), "Fixer".to_string()),
+        ]
+    );
 }

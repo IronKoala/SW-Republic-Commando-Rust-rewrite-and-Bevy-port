@@ -10,10 +10,25 @@ shield = 100                 # MaxShields (CloneCommando)
 shield_recharge_rate = 20    # ShieldRechargeRate: per second
 shield_recharge_delay = 3    # ShieldRechargeDelay: seconds after a hit
 damage_table = "DV_OrganicCTPlayerDamage"   # DamageVariance: how much each damage type hurts (combat/damage_types.toml)
-weapons = ["dc17m_blaster", "dc17m_sniper", "dc17m_antiarmor", "dc15s_pistol"]   # first one in hand; files in weapons/
+# The weapons every level starts with; first one in hand; files in weapons/.
+# Game: RequiredEquipment (PlayerCommandoDefaults) gives only the DC-17m
+# blaster. Each map's PlayerStart adds more (its StartInventory: the DC-15s
+# pistol in every Geonosis map, the sniper attachment from geo_03c on, the
+# anti-armour attachment from geo_05b on); before that the attachments are
+# picked up in the level (geo_03a, geo_04d), which sends the events their
+# scripts wait for.
+weapons = ["dc17m_blaster"]
 # Grenade kinds carried, in the order the "next grenade" button cycles; the
 # first is selected. Each starts with its file's start_count (grenades/).
 grenades = ["thermal_detonator", "sonic_detonator", "emp_grenade", "flash_grenade"]
+
+# The level events the player sends (game: PlayerCommando's Event and
+# ReviveEvent). Event is sent when the player goes down
+# (Pawn.OnIncapacitated in engine.u) and ReviveEvent when a revive is done
+# (Pawn state Reviving, through CloneCommando.PlayReviveCue).
+[events]
+down = "PlayerIncapacitated"
+revived = "PlayerRevived"
 
 # The melee button's hit, when the weapon in hand has no [melee] section
 # of its own (each weapon file's [melee] wins: the DC-17m's is 220 damage

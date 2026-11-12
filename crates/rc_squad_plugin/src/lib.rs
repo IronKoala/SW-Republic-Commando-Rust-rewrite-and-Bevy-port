@@ -35,11 +35,11 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
-pub mod carry;
 mod ammo;
+pub mod carry;
 pub mod look;
-pub mod save;
 pub mod membership;
+pub mod save;
 pub mod voice;
 
 use bevy::prelude::*;
@@ -52,7 +52,7 @@ use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
     LevelCollision, MarkerJob, MarkerJobStep, MovingFloors, OnTurret, Player, PlayerCamera,
-    SquadMember, SquadReadout, SquadStatus, TurretOrder,
+    RaiseEvent, SquadMember, SquadReadout, SquadStatus, TurretOrder,
 };
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
@@ -133,6 +133,13 @@ pub struct MateTags {
     /// What scripts called them before any spawner went off.
     pub placed_tag: String,
     pub placed_script: Option<String>,
+    /// The level events they send on going down and when a revive brings
+    /// them back (the map's `Event` and `ReviveEvent` on them; a spawner's
+    /// `PawnEventFromFactory` and no revive event for one it made).
+    pub event: Option<String>,
+    pub revive_event: Option<String>,
+    /// The same before any spawner went off.
+    pub placed_events: (Option<String>, Option<String>),
 }
 
 impl MateTags {
@@ -141,11 +148,14 @@ impl MateTags {
     pub fn replay(&mut self, used: &[String]) {
         self.tag = self.placed_tag.clone();
         self.script = self.placed_script.clone();
+        (self.event, self.revive_event) = self.placed_events.clone();
         self.factories_used.clear();
         for u in used {
             if let Some(f) = self.factories.iter().find(|f| f.actor == *u) {
                 self.tag = f.pawn_tag.clone();
                 self.script = f.script.clone();
+                self.event = f.pawn_event.clone();
+                self.revive_event = None;
             }
             self.factories_used.push(u.clone());
         }
@@ -423,6 +433,7 @@ impl Plugin for SquadPlugin {
             .add_message::<SquadJobDone>()
             .add_message::<rc_game_core::SquadMembership>()
             .add_message::<rc_game_core::ScriptEvent>()
+            .add_message::<RaiseEvent>()
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<MarkerJob>()
@@ -698,9 +709,17 @@ fn spawn_squad(
             Some(src) => (src.tag().to_string(), src.script().map(str::to_string)),
             None => (class.clone(), None),
         };
+        // A mate a spawner makes later has no events until it goes off.
+        let placed_events = match source {
+            Some(src @ rc_squad::MateSource::Placed(_)) => src.events(),
+            _ => (None, None),
+        };
         state.mates.push(MateTags {
             placed_tag: tag.clone(),
             placed_script: script.clone(),
+            event: placed_events.0.clone(),
+            revive_event: placed_events.1.clone(),
+            placed_events,
             tag,
             script,
             factories,
@@ -741,10 +760,7 @@ fn spawn_squad(
                 squad.members[i].presence = rc_squad::Presence::Gone;
                 log_line(
                     &log,
-                    format!(
-                        "{} is not in this map",
-                        squad.members[i].settings.name
-                    ),
+                    format!("{} is not in this map", squad.members[i].settings.name),
                 );
             }
         }
@@ -1022,7 +1038,10 @@ fn take_orders(
         let mut use_key = a.just_pressed(Action::Use);
         // At a switched-on bacta dispenser the shared key uses it.
         if (context || use_key) && use_claimed.is_some_and(|u| u.0) {
-            log_line(&log, "context order left alone: the player is using something");
+            log_line(
+                &log,
+                "context order left alone: the player is using something",
+            );
             context = false;
             use_key = false;
         }
@@ -1669,12 +1688,20 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
 
 /// Health at 0 (or `Dead` from combat) puts a squad mate down; health
 /// back above 0 with `Dead` gone (a revive) brings them back.
+///
+/// Going down sends the mate's level event (the map's `Event` on them,
+/// game: `Pawn.OnIncapacitated`), and coming back sends their
+/// `ReviveEvent` (game: when state `Reviving` ends, after the get-up
+/// animation, `CloneCommando.PlayReviveCue`; the port has no get-up
+/// animation yet, so it goes as the revive is done).
 fn check_down(
     mut state: ResMut<SquadState>,
     mates: Query<(&SquadMate, &Health, Has<Dead>)>,
     mut heard: ResMut<voice::SquadHeard>,
+    mut raise: MessageWriter<RaiseEvent>,
     log: Option<Res<GameLog>>,
 ) {
+    let state = &mut *state;
     let Some(squad) = state.squad.as_mut() else {
         return;
     };
@@ -1682,6 +1709,27 @@ fn check_down(
         let down = dead || health.is_dead();
         if let Some(e) = squad.set_down(mate.index, down) {
             log_line(&log, format!("t={:.2} {e}", squad.time));
+            let tags = state.mates.get(mate.index);
+            let event = match &e {
+                SquadEvent::Down { .. } => tags.and_then(|t| t.event.clone()),
+                SquadEvent::Revived { .. } => tags.and_then(|t| t.revive_event.clone()),
+                _ => None,
+            };
+            if let Some(name) = event {
+                log_line(
+                    &log,
+                    format!(
+                        "t={:.2} {} {}: sends {name}",
+                        squad.time,
+                        mate.name,
+                        if down { "went down" } else { "was revived" }
+                    ),
+                );
+                raise.write(RaiseEvent {
+                    name,
+                    by: mate.name.clone(),
+                });
+            }
             heard.0.push(e);
         }
     }

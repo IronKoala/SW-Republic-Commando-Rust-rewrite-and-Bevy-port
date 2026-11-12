@@ -22,6 +22,11 @@ pub struct MapCollision {
     /// Feet position and facing (radians, Unreal yaw) of the first
     /// PlayerStart.
     pub start: Option<(Vec3, f32)>,
+    /// What that PlayerStart adds to the player's equipment
+    /// (`StartInventory`, like `CTInventory.DC15s`): the original gives
+    /// the player `PlayerCommando`'s `RequiredEquipment` and then this
+    /// (`PlayerCommando.AddDefaultInventory` in ctcharacters.u).
+    pub start_inventory: Vec<String>,
     pub bsp_nodes: usize,
     pub mesh_actors: usize,
     pub mesh_failures: usize,
@@ -235,6 +240,7 @@ pub fn load(
     let mut shot_only: Vec<(Placement, (usize, i32))> = Vec::new();
     let mut looks = ClassLooks::new();
     let mut start = None;
+    let mut start_inventory = Vec::new();
     let mut arrivals = Vec::new();
     let mut mesh_failures = 0;
     let mut class_mesh_actors = 0;
@@ -257,6 +263,15 @@ pub fn load(
             ];
             let yaw = p.rotation[1] as f32 / 65536.0 * std::f32::consts::TAU;
             start = Some((feet, yaw));
+            if let Ok(props) = actors::read_actor_properties(&map.0, &map.1, a) {
+                start_inventory = props
+                    .iter()
+                    .filter(|q| map.0.name(q.name).eq_ignore_ascii_case("StartInventory"))
+                    .filter_map(rc_package::class::string_list_value)
+                    .flatten()
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
         }
         if p.class == "Teleporter" {
             // Arriving pawns stand with their centre on it, as at a
@@ -481,6 +496,7 @@ pub fn load(
         parts,
         breakables,
         start,
+        start_inventory,
         arrivals,
         ammo_boxes,
         weapons,

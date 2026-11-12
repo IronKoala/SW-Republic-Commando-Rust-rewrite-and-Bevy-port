@@ -28,6 +28,7 @@
 DC17mBlaster = "dc17m_blaster"
 DC17mSniper = "dc17m_sniper"
 DC17mAntiArmor = "dc17m_antiarmor"
+DC15s = "dc15s_pistol"    # no pickup; the maps' player starts give it (StartInventory)
 SMG = "trandoshan_smg"
 Shotgun = "acp_array_gun"
 Bowcaster = "bowcaster"

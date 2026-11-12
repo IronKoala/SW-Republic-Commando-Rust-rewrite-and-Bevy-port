@@ -74,6 +74,8 @@ pub(crate) fn factory_arrivals(
             t.factories_used.push(f.actor.clone());
             t.tag = f.pawn_tag.clone();
             t.script = f.script.clone();
+            t.event = f.pawn_event.clone();
+            t.revive_event = None;
             let feet = f.location - UVec3::new(0.0, 0.0, mate_half_height());
             let name = squad.members[i].settings.name.clone();
             if squad.members[i].presence == Presence::Gone {

@@ -34,6 +34,7 @@ struct Seen {
     damage: Vec<Damage>,
     blasts: Vec<Blast>,
     taken: Vec<rc_combat::WeaponTaken>,
+    raised: Vec<String>,
 }
 
 fn record(
@@ -43,7 +44,9 @@ fn record(
     mut h: MessageReader<Damage>,
     mut x: MessageReader<Blast>,
     mut t: MessageReader<rc_combat::WeaponTaken>,
+    mut e: MessageReader<rc_game_core::RaiseEvent>,
 ) {
+    seen.raised.extend(e.read().map(|e| e.name.clone()));
     seen.taken.extend(t.read().cloned());
     seen.blasts.extend(x.read().cloned());
     seen.landed.extend(l.read().cloned());
@@ -69,6 +72,17 @@ impl Range {
             // No game folder: no sounds or models, which these checks don't need.
             .insert_resource(GamePaths::new("/nonexistent-game", vec![data]))
             .insert_resource(LevelCollision(Arc::new(rc_movement::room::test_room())))
+            // geo_05b's player start: the attachments and the pistol come
+            // from the map, on top of player.toml's DC-17m.
+            .insert_resource(rc_game_core::pickups::LevelStartInventory(
+                [
+                    "CTInventory.DC17mSniper",
+                    "CTInventory.DC17mAntiArmor",
+                    "CTInventory.DC15s",
+                ]
+                .map(String::from)
+                .to_vec(),
+            ))
             .init_resource::<Seen>()
             .add_systems(Last, record);
         // The player stands at (-500, 0) facing +X, eye 144 uu above the feet.
@@ -809,6 +823,7 @@ fn place_weapons(r: &mut Range, list: &[(&str, &str, Vec3, u32)]) {
             sound: Some(("GEN_Sound".into(), format!("{weapon}Sound"))),
             radius: 60.0,
             height: 15.0,
+            event: None,
         })
         .collect();
     r.app
@@ -875,7 +890,11 @@ fn level_weapons_are_placed_and_one_enemy_weapon_is_carried_at_a_time() {
     r.run(1, &[]);
     let a = r.arsenal();
     let ids: Vec<&str> = a.weapons.iter().map(|w| w.0.as_str()).collect();
-    assert_eq!(ids.iter().filter(|i| **i == "bowcaster").count(), 0, "{ids:?}");
+    assert_eq!(
+        ids.iter().filter(|i| **i == "bowcaster").count(),
+        0,
+        "{ids:?}"
+    );
     assert_eq!(a.current().unwrap().0, "trandoshan_smg");
     let t = taken(&mut r);
     assert_eq!(t[0].dropped.as_deref(), Some("bowcaster"));
@@ -900,11 +919,7 @@ fn walking_into_a_carried_weapon_takes_its_ammo() {
     let mut r = Range::new();
     // Use some sniper ammo first.
     {
-        let mut a = r
-            .app
-            .world_mut()
-            .get_mut::<Arsenal>(r.player)
-            .unwrap();
+        let mut a = r.app.world_mut().get_mut::<Arsenal>(r.player).unwrap();
         let s = a
             .weapons
             .iter_mut()
@@ -915,7 +930,12 @@ fn walking_into_a_carried_weapon_takes_its_ammo() {
     }
     place_weapons(
         &mut r,
-        &[("DC17mSniperWeaponPickup0", "DC17mSniper", b(-480.0, 0.0, 15.0), 20)],
+        &[(
+            "DC17mSniperWeaponPickup0",
+            "DC17mSniper",
+            b(-480.0, 0.0, 15.0),
+            20,
+        )],
     );
     let a = r.arsenal();
     let s = &a.weapons.iter().find(|w| w.0 == "dc17m_sniper").unwrap().1;
@@ -1226,5 +1246,136 @@ fn taking_a_box_says_what_it_was_and_plays_its_sound() {
     assert_eq!(
         got[0].sound,
         Some(("GEN_Sound".to_string(), "GenericWeaponPickup".to_string()))
+    );
+}
+
+/// The level events raised since the last call.
+fn raised(r: &mut Range) -> Vec<String> {
+    std::mem::take(&mut r.app.world_mut().resource_mut::<Seen>().raised)
+}
+
+#[test]
+fn the_start_kit_is_the_rifle_and_the_maps_start_list() {
+    let mut r = Range::new();
+    let ids: Vec<String> = r.arsenal().weapons.iter().map(|w| w.0.clone()).collect();
+    assert_eq!(
+        ids,
+        [
+            "dc17m_blaster",
+            "dc17m_sniper",
+            "dc17m_antiarmor",
+            "dc15s_pistol"
+        ],
+        "player.toml's DC-17m, then the player start's StartInventory"
+    );
+}
+
+#[test]
+fn weapons_send_their_first_time_and_out_of_ammo_events() {
+    let mut r = Range::new();
+    // The rifle in hand at the start counts as brought up.
+    assert_eq!(raised(&mut r), ["DC17mBlasterEvent"]);
+    r.run(1, &[Action::WeaponSniper]);
+    r.run(1, &[]);
+    assert_eq!(raised(&mut r), ["DC17mSniperEvent"]);
+    // Back to the rifle and to the sniper again: nothing new.
+    r.run(1, &[Action::WeaponBlaster]);
+    r.run(1, &[]);
+    r.run(1, &[Action::WeaponSniper]);
+    r.run(1, &[]);
+    r.run(1, &[Action::WeaponBlaster]);
+    r.run(1, &[]);
+    assert!(raised(&mut r).is_empty());
+    // The rifle runs dry in hand: its out-of-ammo event, once.
+    {
+        let mut a = r.app.world_mut().get_mut::<Arsenal>(r.player).unwrap();
+        let w = &mut a.weapons[0].1;
+        w.clip = 0.0;
+        w.reserve = 0;
+    }
+    r.run(5, &[]);
+    assert_eq!(raised(&mut r), ["BlasterOutOfAmmoEvent"]);
+    // Brought up again while empty: sent again (the game's Idle state
+    // calls SwitchToWeaponWithAmmo each time). The pistol recharges and
+    // sends no such event.
+    r.run(1, &[Action::WeaponPistol]);
+    r.run(1, &[]);
+    assert_eq!(raised(&mut r), ["PistolEvent"]);
+    r.run(1, &[Action::WeaponBlaster]);
+    r.run(1, &[]);
+    assert_eq!(raised(&mut r), ["BlasterOutOfAmmoEvent"]);
+}
+
+#[test]
+fn the_player_going_down_and_back_up_sends_the_players_events() {
+    let mut r = Range::new();
+    raised(&mut r);
+    r.app.world_mut().entity_mut(r.player).insert(Dead);
+    r.run(2, &[]);
+    assert_eq!(raised(&mut r), ["PlayerIncapacitated"]);
+    r.app.world_mut().entity_mut(r.player).remove::<Dead>();
+    r.run(2, &[]);
+    assert_eq!(raised(&mut r), ["PlayerRevived"]);
+}
+
+#[test]
+fn a_placed_weapon_sends_its_event_only_when_taken_into_the_hands() {
+    let mut r = Range::new();
+    place_weapons(
+        &mut r,
+        &[
+            ("BowcasterPickup0", "Bowcaster", b(-480.0, 0.0, 15.0), 24),
+            (
+                "DC17mSniperWeaponPickup0",
+                "DC17mSniper",
+                b(-480.0, 600.0, 15.0),
+                20,
+            ),
+        ],
+    );
+    {
+        let mut q = r.app.world_mut().query::<&mut rc_combat::WeaponPickup>();
+        for mut p in q.iter_mut(r.app.world_mut()) {
+            let name = p.placed.as_ref().unwrap().1.clone();
+            p.event = Some(format!("{name}Event"));
+        }
+    }
+    raised(&mut r);
+    r.run(1, &[Action::Use]);
+    r.run(2, &[]);
+    assert_eq!(r.arsenal().current().unwrap().0, "bowcaster");
+    let got = raised(&mut r);
+    assert!(
+        got.contains(&"BowcasterPickup0Event".to_string()),
+        "{got:?}"
+    );
+    // A sniper attachment the player already carries: walking into it
+    // only takes ammo (here: none needed), and no event (the game's own
+    // weapon handles the pickup).
+    {
+        let mut a = r.app.world_mut().get_mut::<Arsenal>(r.player).unwrap();
+        let s = a
+            .weapons
+            .iter_mut()
+            .find(|w| w.0 == "dc17m_sniper")
+            .unwrap();
+        s.1.clip = 1.0;
+        s.1.reserve = 0;
+    }
+    r.app
+        .world_mut()
+        .entity_mut(r.player)
+        .insert(Transform::from_translation(b(-480.0, 600.0, 0.0)));
+    r.run(3, &[]);
+    let t = taken(&mut r);
+    assert!(
+        t.iter()
+            .any(|t| !t.new_weapon && t.weapon == "dc17m_sniper"),
+        "{t:?}"
+    );
+    let got = raised(&mut r);
+    assert!(
+        !got.iter().any(|e| e.starts_with("DC17mSniperWeaponPickup")),
+        "{got:?}"
     );
 }

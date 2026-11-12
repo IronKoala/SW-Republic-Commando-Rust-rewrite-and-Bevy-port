@@ -75,6 +75,10 @@ pub struct SquadFactory {
     /// The `ScriptedSequence` what it makes follows
     /// (`AIScriptFromFactory`), if any.
     pub script: Option<String>,
+    /// The event what it makes sends when it goes down
+    /// (`PawnEventFromFactory`, which `PawnFactory` gives the pawn as its
+    /// `Event`). What it makes has no revive event (the class has none).
+    pub pawn_event: Option<String>,
 }
 
 /// A squad mate placed in the map.
@@ -93,6 +97,13 @@ pub struct PlacedMate {
     pub tag: String,
     /// The `ScriptedSequence` they follow (`AIScriptTag`), if any.
     pub script: Option<String>,
+    /// The event they send when they go down (`Event`; `Pawn` sends it
+    /// from `OnIncapacitated`), like geo_01b's `40Wounded`.
+    pub event: Option<String>,
+    /// The event they send when a revive has brought them back
+    /// (`ReviveEvent`; `CloneCommando.PlayReviveCue`), like geo_05b's
+    /// `Delta40Revived`.
+    pub revive_event: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -154,6 +165,14 @@ impl MateSource<'_> {
         match self {
             MateSource::Placed(p) => p.script.as_deref(),
             MateSource::Factory(f) => f.script.as_deref(),
+        }
+    }
+
+    /// The events the mate sends on going down and on being revived.
+    pub fn events(&self) -> (Option<String>, Option<String>) {
+        match self {
+            MateSource::Placed(p) => (p.event.clone(), p.revive_event.clone()),
+            MateSource::Factory(f) => (f.pawn_event.clone(), None),
         }
     }
 }
@@ -260,6 +279,8 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
                 yaw: yaw_of(p),
                 tag: name("Tag").unwrap_or_else(|| p.class.clone()),
                 script: name("AIScriptTag"),
+                event: name("Event"),
+                revive_event: name("ReviveEvent"),
             });
         } else if class == "SquadMarkerSpot" {
             spots.push(Spot {
@@ -288,6 +309,7 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
                     tag: name("Tag").unwrap_or_default(),
                     pawn_tag: name("PawnTagFromFactory").unwrap_or_else(|| proto_name.clone()),
                     script: name("AIScriptFromFactory"),
+                    pawn_event: name("PawnEventFromFactory"),
                     class: proto_name,
                 });
             }
