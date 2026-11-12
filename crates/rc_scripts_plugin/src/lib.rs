@@ -64,6 +64,7 @@ pub mod projectiles;
 pub mod save;
 pub mod sight;
 pub mod sounds;
+pub mod tracker;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
@@ -117,6 +118,9 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
+            .add_message::<tracker::TrackerAsk>()
+            .init_resource::<tracker::ObjectiveTracker>()
+            .add_systems(Startup, tracker::load_look)
             .add_save_part::<save::ScriptsSave>()
             .add_save_part::<fx_factories::FxFactoriesSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
@@ -147,6 +151,7 @@ impl Plugin for ScriptsPlugin {
                     run,
                     send_ammo,
                     blink_hud,
+                    tracker::track,
                     fx_factories::run,
                     placed_emitters::run,
                     projectiles::fly,
@@ -170,6 +175,7 @@ impl Plugin for ScriptsPlugin {
                     sounds::forget,
                     cutscene::forget,
                     projectiles::forget,
+                    tracker::forget,
                 ),
             );
     }
@@ -318,6 +324,8 @@ pub struct PlayStats {
     pub sounds_missing: Vec<String>,
     /// Music actions passed on to the music.
     pub music_cues: usize,
+    /// Objective tracker steps passed on to the tracker.
+    pub tracker_asks: usize,
     /// The sounds played from a place in the level (not heard everywhere).
     pub sounds_placed: Vec<String>,
     pub not_done: usize,
@@ -399,18 +407,19 @@ fn begin(
         .and_then(|(p, d)| {
             rc_level::actors::read_level(&p, &d)
                 .map(|l| {
-                    (
-                        rc_level::scripts::read(&p, &d, &l),
-                        rc_level::scripts::places(&p, &d, &l),
-                    )
+                    let m = rc_level::scripts::read(&p, &d, &l);
+                    // What the map's objective tracker steps point at.
+                    let targets = tracker::read_targets(&p, &d, &l, &m, &paths, &log);
+                    (m, rc_level::scripts::places(&p, &d, &l), targets)
                 })
                 .map_err(|e| e.to_string())
         });
     match read {
-        Ok((m, places)) => {
+        Ok((m, places, targets)) => {
             for f in &m.failures {
                 log.line(format!("{PART}: unreadable: {f}"));
             }
+            commands.insert_resource(targets);
             commands.insert_resource(Loaded(m, settings, places));
         }
         Err(e) => {
@@ -666,6 +675,7 @@ fn forget(mut commands: Commands) {
     commands.remove_resource::<placed_emitters::LevelEmitters>();
     commands.remove_resource::<Objectives>();
     commands.remove_resource::<Loaded>();
+    commands.remove_resource::<tracker::TrackerTargets>();
 }
 
 fn text_of(v: Option<&Val>) -> String {
@@ -693,15 +703,20 @@ fn run(
         MessageReader<RaiseEvent>,
         MessageReader<rc_game_core::CharacterOrderDone>,
     ),
-    (mut factories, mut turrets): (MessageWriter<FactoryOrder>, MessageWriter<TurretOrder>),
+    (mut factories, mut turrets, mut collisions): (
+        MessageWriter<FactoryOrder>,
+        MessageWriter<TurretOrder>,
+        MessageWriter<rc_game_core::CharacterCollision>,
+    ),
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief, mut music): (
+    (mut checkpoints, mut change, mut debrief, mut music, mut tracker_asks): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
         MessageWriter<rc_game_core::MusicCue>,
+        MessageWriter<tracker::TrackerAsk>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -953,6 +968,14 @@ fn run(
                     music.write(cue);
                     continue;
                 }
+                if let Some(tag) = tracker::asked(&call.action) {
+                    script.stats.tracker_asks += 1;
+                    tracker_asks.write(tracker::TrackerAsk {
+                        tag,
+                        from: format!("t={now:.2} {} #{}", call.script, call.index),
+                    });
+                    continue;
+                }
                 carry_out(
                     script,
                     call,
@@ -964,6 +987,7 @@ fn run(
                     &mut damage,
                     &mut factories,
                     &mut turrets,
+                    &mut collisions,
                     &use_key,
                     &log,
                 );
@@ -994,6 +1018,7 @@ fn carry_out(
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
     turrets: &mut MessageWriter<TurretOrder>,
+    collisions: &mut MessageWriter<rc_game_core::CharacterCollision>,
     use_key: &str,
     log: &GameLog,
 ) {
@@ -1005,6 +1030,14 @@ fn carry_out(
             let tag = a.text("CollideActorTag").unwrap_or("");
             let on = a.flag("bCollideActors", true);
             let n = parts.as_ref().map_or(0, |p| p.set_solid(tag, on));
+            // Characters with that tag too (the parts that own them apply
+            // it; nothing happens if there are none).
+            if !script.director.is_teleporter(tag) && !tag.is_empty() {
+                collisions.write(rc_game_core::CharacterCollision {
+                    tag: tag.to_string(),
+                    on,
+                });
+            }
             if script.director.is_teleporter(tag) {
                 log.line(format!(
                     "{at}: level exit {tag} {}",
@@ -1021,7 +1054,7 @@ fn carry_out(
             } else {
                 script.stats.not_done += 1;
                 log.line(format!(
-                    "{at}: {tag} collision {on} (not a level part; characters not done yet)"
+                    "{at}: {tag} collision {on} (not a level part; sent to the characters with that tag)"
                 ));
             }
         }

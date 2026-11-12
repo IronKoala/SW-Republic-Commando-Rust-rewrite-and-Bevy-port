@@ -1195,6 +1195,15 @@ whether it stops players (`bBlockPlayers`), the AI (`bBlockActors`) and
 shots (`bBlockZeroExtentTraces`). The ones that stop players are added to
 the walking collision. Check: only 11 of 8,942 AI path points are inside a
 volume (107 with `PrePivot` ignored, 115 turned a quarter wrong).
+Other volumes block too when the map turns their `bBlockPlayers` or
+`bBlockActors` on (engine.u's `Actor` leaves both off; `BlockingVolume`
+turns them on). geo_01a's `PhysicsVolume1`, tag `PlayerStand`, is the
+floor you stand on inside the gunship; the intro script's `SetCollision`
+takes it away after the rope order, and you drop about 590 units to the
+ground (gravity -1100, landing at about 1,140 units a second, under
+`MaxFallSpeed` 1200, so no fall damage). The original's `Briefing` state
+only turns the view (`PlayerMove`: `UpdateRotation`), so the body still
+falls. These volumes don't stop shots here.
 
 **The sky.** Unreal 2 draws the sky from a small sky box somewhere in the
 map, marked by a `SkyZoneInfo`. Windows onto it are BSP surfaces flagged
@@ -1932,6 +1941,80 @@ the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
 `GotoState` on characters, characters the game doesn't spawn yet (placed
 clone troopers and the like are logged and skipped), one sequence run
 separately per character, and `ScriptPriority`.
+
+### The objective tracker (`rc_scripts_plugin/src/tracker.rs`, `rc_game/src/objective_tracker.rs`)
+
+Level scripts point the player at the next goal with
+`ACTION_ShowActorObjectiveTracker` (178 steps in 36 maps). Everything below
+was read from the original's files on 2026-11-12: the script step's
+UnrealScript text in ctgame.u, the `Helmet` defaults in engine.u, and the
+native helmet drawing (`UHelmet::DrawHelmet`, `FCanvasUtil::DrawRotatedTile`
+and `DrawRotatedIcon`, `UHelmet::ActorDestroyed`) in Engine.dll,
+disassembled and partly run in an emulator locally for reference. Only
+numbers and rules were taken; no code from the game is in the repository.
+All numbers are in `data/ui/objective_tracker.toml`.
+
+- **The step.** Finds the first actor whose `Tag` is `ActorTag`, in the
+  map's actor order (`AllActors`), and hands it to the helmet; when none
+  has it, or the tag is None, it hides the tracker. When the map is read,
+  `tracker::read_targets` finds the first placed actor for every tag the
+  map's tracker steps name (an actor with no `Tag` is tagged with its class
+  name, as in UE2) and writes each to the log. A placed character (its
+  class comes from `Pawn`) is followed while the game's character with that
+  tag lives; a tag no placed actor has is matched against characters the
+  game spawned; with neither, the tracker hides, as the original's does.
+- **The goal.** Its actor's `Location`, followed each frame. Its size is
+  the bounding sphere radius of the actor's static mesh (the map's own
+  setting, else its class default, through `ClassLibrary::object_path`), 0
+  without one.
+- **Ring or arrows.** If the view is within 45 degrees of the line from the
+  eye to the goal, the line is checked through the level and its movers to
+  250 units short of the goal: at once when the goal comes ahead, then
+  every 0.25 s (`VisCheckFrequency`) while it stays clear. Clear: the four
+  corner arrows. Otherwise the ring.
+- **The ring.** `HUDTextures.Icons.ObjectiveRing` (256x256), centred at
+  (400, 463) on the 800x600 screen, turned clockwise by 65535 minus (the
+  view's yaw minus the goal's yaw seen from the pawn), then flattened by
+  cos(12288) (tipped back 67.5 degrees). Colour (200, 240, 255): a shadow 5
+  units lower at opacity 63, then the ring. The engine's sine table (16384
+  steps) is used for every turn.
+- **The distance.** `"%.1f"` of the distance from the pawn's `Location`
+  (the centre of its collision box, `rc_game_core::PlayerPawn`) to the
+  goal, in hundreds of units, in `OrbitFonts.OrbitBold8`, (200, 240, 255),
+  centred on the ring's centre, each letter its size times the screen
+  scale in whole pixels.
+- **The arrows.** Four corners half the goal's radius out to the sides and
+  up and down, square to the line from the eye, put on the screen with the
+  camera; the box is pushed out to at least 78 pixels each way. At each
+  corner the triangle of `HUDTextures.Icons.LargeVisorIcons` (texels 0,360
+  to 39,399) is drawn 39 units across, turned to point inward (24575, 8191,
+  -8193, -24577), in (200, 240, 255) with opacity = the low byte of
+  int(sin(time x 2.5) x 200 + 55), then again at 1.25 and 0.75 times the
+  size at a quarter of that opacity.
+- **Wide screens.** The original scales its 800x600 units to the screen
+  both ways; the port uses the screen height over 600 both ways and keeps
+  the middle in the middle (the same as the original on a 4:3 screen).
+- **Blocking volumes.** The original's sight line (`SingleLineCheck`
+  flags 0x286: movers, level, level geometry) doesn't stop at blocking
+  volumes. The port's `LevelCollision` holds their faces, so the map's
+  reader keeps the faces of volumes that lines pass
+  (`bBlockZeroExtentTraces` off) apart as well
+  (`MapCollision::line_through_triangles`, resource
+  `rc_level_plugin::LineThroughVolumes`), and the tracker's line goes on
+  past a hit on one of them.
+- **Moving goals.** A door or lift as the goal is followed where it has
+  moved to (the mover's pose), as the original's `Location` is.
+- **While the player is down.** The original keeps drawing it: the helmet
+  is drawn (`FPlayerSceneNode` calls `UHelmet::DrawHelmet`) unless the view
+  isn't the normal render mode, there is no pawn or one player-controller
+  flag is set, and `DrawHelmet` only checks `bDraw` (changed only by the
+  `DrawHUD` console command) and `bShowObjectiveTracker`. The down state
+  (`CTPlayer` state `CtrlIncapacitated`) changes none of these, so the port
+  keeps it too.
+- **Ours, not the original's:** the tracker isn't kept in save files, so
+  after a load it shows again at the next tracker step; the port's view
+  yaw is in radians and is rounded to the engine's units; and the sight
+  check runs in the game's update rather than while drawing.
 
 ### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
 
@@ -2834,6 +2917,22 @@ squad:
      checked; `bStartTimerAfterDeath` and `bAlwaysUseFactorySettings` are
      ignored; `SpawnEvent` is sent only when a droid is actually made (the
      original also sends it when the player is out of the factory's range).
+   - *Placed in the map*: characters can also stand in the map with no
+     factory. The original gives every placed pawn its AI as the level
+     starts (Engine.u `Pawn.PostBeginPlay`, read only: through its
+     `AIScriptTag`'s script when it names one, unless `bDontPossess` is
+     set), at full health. Its own `Tag`, `Event` (sent when it dies),
+     `FirstDamagedEvent`, `StartState`, `TeamIndex` and `AIScriptTag` are
+     the same values a factory copies onto what it makes (CTGame.u
+     `PawnFactory.SetupNewActor`), and a placed actor with no stored
+     `Tag` has its class name as its tag. `rc_ai::read_placed` turns each
+     one into a one-character factory (`Factory::placed`) at its own
+     place: `Battle` makes them all on its first step (no "one per step"
+     and no `max_alive_total` limit, since the original has them all from
+     the start) and never again; events, `StopFactorySpawning`,
+     `ResetFactory` and walk-in triggers leave them alone. They go after
+     the real factories, so saves from before they were made still load
+     (they then start as on a fresh level).
    `Battle` runs all of this for a map; the game plugin and `rc_droidsim`
    both use it.
 
@@ -2841,7 +2940,14 @@ squad:
    - On `OnEnter(Loading)` it reads the map's paths and spawners and the
      settings file through `GamePaths::data_file`, so a mod's file wins.
      It logs each spawner it runs (tag, type, capacity, where, its tags
-     and events).
+     and events). It also reads the characters placed straight in the map
+     (`rc_enemies::placed_enemies`): an actor counts when the game's
+     classes (`GameData/System` and `Properties`, read once per run into
+     `PawnClasses`) say it is a `Pawn` and an enemy file claims its class.
+     Placed clone troopers are left to the cast (`rc_cast`), and placed
+     kinds no file claims are logged and left out. Each one made is
+     logged as "placed ... is a ...", and its body as "placed in the map
+     as ...".
    - It hears the level's events (`rc_game_core::ScriptEvent`) and the
      scripts' `FactoryOrder`s, and sends what its spawners and droids
      send (`BattleEvent::Event`) back as `rc_game_core::RaiseEvent`; the
@@ -2895,6 +3001,9 @@ walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
 
+To see which characters are placed straight in each map and which file
+makes each one, run `rc_placed_enemies` (an example in `rc_enemies`, same
+setup; writes `logs/placed_enemies.log`).
 To see which file claims each map's spawners, and which classes no file
 claims yet, run `rc_enemy_spawners` (an example in `rc_enemies`, needs the
 game folder in `RC_GAME_DIR`; writes `logs/enemy_spawners.log`). A new
@@ -3005,8 +3114,13 @@ What the files don't say is listed in `clone_trooper_tm.toml`: the
 troopers' attack state (`StateTrandoshanAttack`) works in compiled code,
 so they fight the way our droids do. A type's `[look] held_weapon` names
 the weapon class whose model it holds (the original's `RequiredEquipment`:
-`DC17mBlaster` for `CloneTrooper`, `DC15BlasterCloneTM` for
-`CloneTrooperTM`). `rc_enemies` reads it once per type with
+`DC15BlasterClone` for `CloneTrooper`, `DC15BlasterCloneTM` for
+`CloneTrooperTM`). `CloneTrooper`'s own value in ctcharacters.u is the
+commandos' `CTInventory.DC17mBlaster`, but the game lays
+`CloneTrooperDefaults` (Properties/properties.u) over the class (core.dll
+builds the name `Properties.%sDefaults`), and that sets
+`Properties.DC15BlasterClone`; its numbers are in
+`data/weapons/dc15_blaster_clone.toml`. `rc_enemies` reads it once per type with
 `rc_effects_plugin::held::HeldModel` (as the level's cast does), hangs it
 as a child of each new fighter (`HeldWeapon`), and moves it onto the bone
 `weaponAttach_R` each time the body is posed (`DroidLook::bone_frame`).
@@ -4263,7 +4377,9 @@ start instead of being stood on the ground. Cast members are drawn by
 the level's light where they stand (`rc_game_core::LitByPlace`, the
 data file's `light_scale`, 1.1 as the squad and droids), so a trooper in
 shade is dark; holograms keep their own glow. A character whose class names a weapon
-(`RequiredEquipment`, "CTInventory.DC17mBlaster" on `CloneTrooper`)
+(`RequiredEquipment`, taken from the class's "...Defaults" class in
+Properties/properties.u when that sets it, as the game does:
+"Properties.DC15BlasterClone" from `CloneTrooperDefaults` on `CloneTrooper`)
 holds its model: the weapon's `AttachmentClass` (engine.u's `Weapon`;
 `DC17mBlasterAttachment`) gives a `StaticMesh`, read with
 `rc_effects::projectile::ClassPackages::held_weapon` and drawn on the
@@ -4344,10 +4460,30 @@ was held for good.
 
 **Not done.** Characters brought in by `PawnFactory`s during a cutscene
 (the prologue's walking young clones), riding vehicles, lighting by zone (a steady
-`ambient` share of their own colour, as the squad), damage and death (the
-cast can't be hurt), and saving their places (the cutscene maps have no
-checkpoints). In missions, the placed troopers, walkers and the scripted
-spider droid now stand and move as their scripts say but don't fight.
+`ambient` share of their own colour, as the squad), and saving their
+places (the cutscene maps have no checkpoints). In missions, the placed
+troopers, walkers and the scripted spider droid now stand and move as
+their scripts say but don't fight.
+
+**Damage and death** (since 2026-11-12). A cast character whose class has
+`Health` (read with the class's "...Defaults" class laid on top, as the
+game does) gets `rc_combat`'s `Health` and a `Hittable` cylinder from its
+`CollisionRadius` and `CollisionHeight`, so bolts, blasts and a script's
+`HurtActor` hurt it. Vehicles (`Vehicles` subclasses: the gunship,
+walkers, spider droids) are left unhurt for now. When health runs out,
+`rc_cast::die` does what engine.u's `Pawn.Died` and `PlayDying` do for
+a character on the ground: it triggers the map's `Event` for the
+character (`RaiseEvent`, geo_01a's `GunshipTrooper02Death`), stops it,
+and plays its `Death` animation, holding the last frame. From then on it
+ignores the scripts' orders apart from hiding and removal
+(`Controller.PawnDied` destroys an AI's controller, so its script stops).
+The body is taken away `RagdollLifeSpan` seconds later (60 for a clone
+trooper) unless the map or class sets `bSaveMyCorpse`. Not done: the
+original's ragdolls (`TryToRagdoll`: always for explosions, whose
+`RagdollOnDeathProbability` is 1, half the time by default, and whenever
+there is no `Death` animation), the electric and fire death animations,
+death sounds (`PlayDeathCue`), death effects (`DeathEffectContainerClass`)
+and dropping the weapon. The rifle stays in the dead trooper's hand.
 
 ## Character shadows (`rc_shadows`)
 

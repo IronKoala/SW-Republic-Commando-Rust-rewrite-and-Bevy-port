@@ -142,6 +142,10 @@ pub struct Battle {
     next_id: u32,
     births: HashMap<u32, Birth>,
     rng: Rng,
+    /// Fighters a level script switched collision off for
+    /// (`ACTION_SetCollision`): shots pass through them, so the other
+    /// side doesn't aim at them.
+    pub not_colliding: HashSet<u32>,
 }
 
 /// What came of a spawner's try at making a character.
@@ -174,9 +178,11 @@ impl Battle {
             spawners: factories
                 .into_iter()
                 .map(|(factory, params)| Spawner {
+                    // A character placed in the map is made as the level
+                    // starts.
+                    active: factory.placed,
                     factory,
                     params,
-                    active: false,
                     disabled: false,
                     made: 0,
                     next_spawn: 0.0,
@@ -190,6 +196,7 @@ impl Battle {
             next_id: 1,
             births: HashMap::new(),
             rng: Rng::new(7),
+            not_colliding: HashSet::new(),
         }
     }
 
@@ -257,7 +264,7 @@ impl Battle {
         let mut out = Vec::new();
         for i in 0..self.spawners.len() {
             let sp = &mut self.spawners[i];
-            if !sp.factory.tag.eq_ignore_ascii_case(event) || sp.disabled {
+            if sp.factory.placed || !sp.factory.tag.eq_ignore_ascii_case(event) || sp.disabled {
                 continue;
             }
             if sp.active {
@@ -281,7 +288,8 @@ impl Battle {
     pub fn stop(&mut self, tag: &str, for_good: bool, remove_offspring: bool) -> Vec<BattleEvent> {
         let mut out = Vec::new();
         for i in 0..self.spawners.len() {
-            if !self.spawners[i].factory.tag.eq_ignore_ascii_case(tag) {
+            let f = &self.spawners[i].factory;
+            if f.placed || !f.tag.eq_ignore_ascii_case(tag) {
                 continue;
             }
             if remove_offspring {
@@ -316,7 +324,7 @@ impl Battle {
     pub fn reset(&mut self, tag: &str) -> usize {
         let mut n = 0;
         for sp in &mut self.spawners {
-            if sp.factory.tag.eq_ignore_ascii_case(tag) {
+            if !sp.factory.placed && sp.factory.tag.eq_ignore_ascii_case(tag) {
                 sp.made = 0;
                 n += 1;
             }
@@ -370,7 +378,9 @@ impl Battle {
         for f in self.alive() {
             let k = f.params.kind.republic() as usize;
             friends[k].push(f.pawn.location);
-            as_target[k].push(f.as_target());
+            if !self.not_colliding.contains(&f.id) {
+                as_target[k].push(f.as_target());
+            }
         }
         let mut heard = Vec::new();
         // Separatists fight the player, the squad and the clone troopers;
@@ -601,7 +611,14 @@ impl Battle {
     /// start alerted toward where they last saw the enemy; the rest of
     /// their plans start over.
     pub fn restore(&mut self, s: &BattleSnapshot) -> Result<Vec<BattleEvent>, String> {
-        if s.spawners.len() != self.spawners.len() {
+        // Saves from before characters placed in the map were made have
+        // only the real factories; those characters (listed after them)
+        // then start as on a fresh level.
+        let older = s.spawners.len() < self.spawners.len()
+            && self.spawners[s.spawners.len()..]
+                .iter()
+                .all(|sp| sp.factory.placed);
+        if s.spawners.len() != self.spawners.len() && !older {
             return Err(format!(
                 "the save has {} spawners, this map has {}",
                 s.spawners.len(),
@@ -683,7 +700,7 @@ impl Battle {
         let within = self.params.spawning.activate_unscripted_within;
         for i in 0..self.spawners.len() {
             let sp = &self.spawners[i];
-            if sp.active || sp.disabled || !sp.factory.can_spawn() {
+            if sp.active || sp.disabled || sp.factory.placed || !sp.factory.can_spawn() {
                 continue;
             }
             let f = &sp.factory;
@@ -702,11 +719,21 @@ impl Battle {
     }
 
     /// Spawners that are on try to make a character when their timer is
-    /// up. At most one new droid per step, to spread the work.
+    /// up. At most one new droid per step, to spread the work, apart from
+    /// characters placed in the map: they are all there as the level
+    /// starts, as in the original.
     fn spawn(&mut self, player: Option<Vec3>, out: &mut Vec<BattleEvent>) {
         if !self.scripted {
             if let Some(p) = player {
                 self.switch_on_unscripted(p, out);
+            }
+        }
+        for i in 0..self.spawners.len() {
+            let sp = &mut self.spawners[i];
+            if sp.active && sp.factory.placed {
+                // Made once, then never again (it isn't a real factory).
+                sp.active = false;
+                self.place(i, out);
             }
         }
         let mut made_one = false;
@@ -744,6 +771,30 @@ impl Battle {
                 }
             }
         }
+    }
+
+    /// Make the character placed in the map that spawner `i` stands for,
+    /// at its own place. No limits apply: the original has it in the
+    /// level from the start.
+    fn place(&mut self, i: usize, out: &mut Vec<BattleEvent>) {
+        let sp = &mut self.spawners[i];
+        let f = &sp.factory;
+        let params = sp.params.clone();
+        let feet = f.location - Vec3::new(0.0, 0.0, params.movement.collision_height);
+        let (yaw, start) = (f.yaw, f.offspring.start_state.clone());
+        sp.made += 1;
+        let id = self.next_id;
+        self.next_id += 1;
+        self.fighters
+            .push(Fighter::new(id, params, feet, yaw, start));
+        self.made_by.push(i);
+        self.births.insert(id, Birth::default());
+        out.push(BattleEvent::Spawned {
+            id,
+            spawner: i,
+            feet,
+            yaw,
+        });
     }
 
     fn alive_from(&self, spawner: usize) -> u32 {
