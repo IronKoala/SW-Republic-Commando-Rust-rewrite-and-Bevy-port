@@ -741,6 +741,11 @@ copy of the game.
   machine parts and ammo clips, geo_04a's falling rocks and
   geo_05c's docking ring only break once the script allows it, and
   geo_04c's `TurretDestroyed` now comes when its machine part is shot.
+  Level scripts also switch squad markers on and off and put charges,
+  consoles and door locks in their states (since 2026-11-12, tested in the
+  cloud only): a switched-off marker can't be ordered, a breach lock locks
+  or unlocks its doors, a disabled charge is hidden, and geo_01c's balcony
+  sniper post can't be recalled while its scene runs.
 - **Particle effects (since 2026-11-10, tested in the cloud only, not on
   Windows or by playing).** Explosions now show the game's own fireball,
   smoke, sparks and flying debris, read from its effect classes (all 575

@@ -39,6 +39,11 @@ pub struct ScriptsSave {
     pub objective_states: Vec<u8>,
     #[serde(default)]
     pub objective_current: i32,
+    /// The state each order marker and anchor is in ("name state", lower
+    /// case; see `rc_scripts::marker_states`). Saves from before this was
+    /// kept have none and leave them as the level started them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marker_states: Vec<String>,
     pub director: DirectorSave,
 }
 
@@ -105,6 +110,13 @@ impl SavePart for ScriptsSave {
             objective,
             objective_states,
             objective_current,
+            marker_states: script
+                .marker_states
+                .actors
+                .iter()
+                .filter(|a| !a.state.is_empty())
+                .map(|a| format!("{} {}", a.name, a.state))
+                .collect(),
             director: script.director.snapshot(),
         })
     }
@@ -141,6 +153,24 @@ impl SavePart for ScriptsSave {
         script.started = true;
         script.hidden = d.hidden.iter().copied().collect();
         script.held = d.held_checkpoints.clone();
+        for line in &d.marker_states {
+            let mut w = line.split_whitespace();
+            let (Some(name), Some(state)) = (w.next(), w.next()) else {
+                continue;
+            };
+            match script
+                .marker_states
+                .actors
+                .iter_mut()
+                .find(|a| a.name.eq_ignore_ascii_case(name))
+            {
+                Some(a) => {
+                    a.state = state.to_string();
+                    a.initialized = true;
+                }
+                None => unknown.push(name.to_string()),
+            }
+        }
         for s in &d.dispenser {
             match script
                 .dispensers
@@ -296,6 +326,8 @@ mod tests {
             ammo: vec![],
             hud_blink: Default::default(),
             anchors: vec![],
+            marker_states: Default::default(),
+            state_effects: Vec::new(),
             started: false,
             scene: crate::cutscene::Scene::default(),
             stats: PlayStats::default(),
@@ -380,6 +412,7 @@ mod tests {
             }],
             objective_states: vec![2, 1, 0],
             objective_current: 1,
+            marker_states: vec!["BreachDoorGeo0 unlocked".into()],
             director: DirectorSave {
                 time: 31.25,
                 random_state: -5,

@@ -231,6 +231,34 @@ pub struct MarkerJob {
     pub by: String,
 }
 
+/// What a level script (or a marker's anchor) does to an order marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerChange {
+    /// `Enabled`: it can be ordered again.
+    On,
+    /// `Disabled` (or made obsolete by its anchor): it can't be ordered;
+    /// a squad mate on it leaves it unless it can't be cancelled.
+    Off,
+    /// `ACTION_SetCanCancelMarker`: whether a recall takes the squad mate
+    /// off it once its job is under way.
+    CanCancel(bool),
+}
+
+/// Change the order marker called `marker` (its actor name, like
+/// `MarkerSnipe1`). Sent by the level scripts part; the squad part
+/// carries it out.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct MarkerSwitch {
+    pub marker: String,
+    pub change: MarkerChange,
+    /// Only when no squad mate is on it (an anchor changing state leaves
+    /// a marker that's running alone: ctgame.u's `!bMarkerActive`
+    /// checks).
+    pub only_if_free: bool,
+    /// Why, for the log.
+    pub by: String,
+}
+
 /// Play animation `anim` (the model's own sequence name, such as `Load`)
 /// on the map actor called `actor` (`BactaDispenserGEO0`), for props drawn
 /// with an animated model (`rc_level_plugin::anim_props`). The animation's

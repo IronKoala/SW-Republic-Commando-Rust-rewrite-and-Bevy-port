@@ -32,9 +32,11 @@
 
 use crate::{LevelScript, PART};
 use bevy::prelude::*;
-use rc_game_core::{GameLog, MarkerJob, MarkerJobStep};
+use rc_game_core::{GameLog, MarkerChange, MarkerJob, MarkerJobStep, MarkerSwitch};
 use rc_level_plugin::LevelParts;
+use rc_movers_plugin::Behaviour;
 use rc_movers_plugin::LevelMovers;
+pub use rc_scripts::marker_states::StateEffect;
 pub use rc_scripts::markers::{read_anchors, Anchor, AnchorKind};
 
 /// Carry out marker job steps: send the anchor's events, open its doors,
@@ -134,6 +136,87 @@ pub fn run(
             ));
             if opened {
                 script.stats.doors_unlocked.push(d.clone());
+            }
+        }
+    }
+}
+
+/// Carry out what order markers' and anchors' state changes set off
+/// (`rc_scripts::marker_states`): tell the squad, lock or unlock doors,
+/// send map events, hide or show a charge.
+pub fn apply_states(
+    script: Option<ResMut<LevelScript>>,
+    movers: Option<Res<LevelMovers>>,
+    mut switches: MessageWriter<MarkerSwitch>,
+    log: Res<GameLog>,
+) {
+    let Some(mut script) = script else {
+        return;
+    };
+    let script = &mut *script;
+    let now = script.director.time;
+    for e in std::mem::take(&mut script.state_effects) {
+        match e {
+            StateEffect::Marker {
+                name,
+                on,
+                only_if_free,
+            } => {
+                switches.write(MarkerSwitch {
+                    marker: name,
+                    change: if on {
+                        MarkerChange::On
+                    } else {
+                        MarkerChange::Off
+                    },
+                    only_if_free,
+                    by: format!("{PART}: t={now:.2}"),
+                });
+            }
+            StateEffect::CanCancel { name, can } => {
+                switches.write(MarkerSwitch {
+                    marker: name,
+                    change: MarkerChange::CanCancel(can),
+                    only_if_free: false,
+                    by: format!("{PART}: t={now:.2}"),
+                });
+            }
+            StateEffect::Fire { event, by } => {
+                log.line(format!("{PART}: t={now:.2} {by} sends {event}"));
+                script.director.fire(&event, &by);
+            }
+            StateEffect::Doors { names, lock } => {
+                let (behaviour, close) = if lock {
+                    // Mover state `Locked`, label `Close`: shut, and
+                    // nothing opens it but a script.
+                    (Behaviour::Static, true)
+                } else {
+                    (Behaviour::TriggerControl, false)
+                };
+                for d in &names {
+                    let found = movers
+                        .as_ref()
+                        .is_some_and(|m| m.set_behaviour_named(d, behaviour, close));
+                    log.line(format!(
+                        "{PART}: t={now:.2} door {d} {}",
+                        match (found, lock) {
+                            (false, _) => "not found among the doors",
+                            (true, true) => "locked shut",
+                            (true, false) => "unlocked: opens while its trigger is touched",
+                        }
+                    ));
+                }
+            }
+            StateEffect::Hide { export, hidden } => {
+                if hidden {
+                    script.hidden.insert(export);
+                } else {
+                    script.hidden.remove(&export);
+                }
+            }
+            StateEffect::NotDone(what) => {
+                script.stats.not_done += 1;
+                log.line(format!("{PART}: t={now:.2} {what} (not done yet)"));
             }
         }
     }
@@ -311,6 +394,8 @@ mod tests {
             ammo: vec![],
             hud_blink: Default::default(),
             anchors: read_anchors(&m),
+            marker_states: rc_scripts::marker_states::MarkerStates::read(&m),
+            state_effects: Vec::new(),
             scene: crate::cutscene::Scene::default(),
             breaking: Default::default(),
             props: Default::default(),

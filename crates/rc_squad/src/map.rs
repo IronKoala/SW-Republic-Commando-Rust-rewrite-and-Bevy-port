@@ -56,6 +56,9 @@ pub struct MarkerSpot {
     pub aim: Vec3,
     /// A grenade marker's target area (its `WeaponTarget`).
     pub target: Option<Vec3>,
+    /// The order marker's actor name (`MarkerSnipe1`), which level scripts
+    /// switch on and off; empty when the job has none (bacta).
+    pub order: String,
 }
 
 /// Where a map's own scripts bring in a squad mate.
@@ -321,6 +324,7 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
                 yaw: o.yaw,
                 aim: o.at,
                 target: o.target,
+                order: o.name.clone(),
             });
             continue;
         }
@@ -336,6 +340,7 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
                 yaw: spots[i].yaw,
                 aim: o.at,
                 target: o.target,
+                order: o.name.clone(),
             });
         }
     }
@@ -355,6 +360,7 @@ pub fn read(pkg: &Package, data: &[u8]) -> Result<MapSquadInfo, String> {
             yaw: sp.yaw,
             aim: sp.anchor.and_then(location_of).unwrap_or(sp.stand),
             target: None,
+            order: String::new(),
         });
     }
     Ok(info)

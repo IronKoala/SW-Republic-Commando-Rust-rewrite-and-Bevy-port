@@ -681,6 +681,8 @@ mod tests {
             stats: PlayStats::default(),
             breaking: Breakables::new(&list),
             anchors: vec![],
+            marker_states: Default::default(),
+            state_effects: Vec::new(),
             props: PropStats::default(),
         });
         w.insert_resource(Objectives::default());

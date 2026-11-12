@@ -682,6 +682,8 @@ pub struct MoverSnapshot {
     pub touched: bool,
     /// When the run under way started, in the set's seconds.
     pub run_started: f32,
+    /// What it does now (a script can change it); `None` keeps the map's.
+    pub behaviour: Option<Behaviour>,
 }
 
 /// One touch trigger's state, for a saved game.
@@ -875,6 +877,7 @@ impl MoverSet {
                     used: m.used,
                     touched: m.was_touched,
                     run_started: m.run_started,
+                    behaviour: Some(m.behaviour),
                 })
                 .collect(),
             triggers: self
@@ -926,6 +929,9 @@ impl MoverSet {
             m.used = s.used;
             m.was_touched = s.touched;
             m.run_started = s.run_started;
+            if let Some(b) = s.behaviour {
+                m.behaviour = b;
+            }
             m.to_send.clear();
             m.pose = match m.phase {
                 Phase::Moving { .. } => m.advance(0.0).0,
@@ -1006,6 +1012,36 @@ impl MoverSet {
         };
         let now = self.time;
         self.movers[i].start_opening(i, now, events);
+        self.send_queued(events);
+        true
+    }
+
+    /// A script puts the mover with this actor name in another state
+    /// (`GotoState`): from now on it does what `behaviour` does, and with
+    /// `close` it starts closing (the original's `Close` label, as
+    /// `BreachDoor.LockDoor` sends its doors to `Locked`, `Close`).
+    /// Returns whether there is such a mover.
+    pub fn set_behaviour_named(
+        &mut self,
+        name: &str,
+        behaviour: Behaviour,
+        close: bool,
+        events: &mut Vec<MoverEvent>,
+    ) -> bool {
+        let Some(i) = self
+            .movers
+            .iter()
+            .position(|m| m.info.place.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        let now = self.time;
+        let m = &mut self.movers[i];
+        m.behaviour = behaviour;
+        m.held = false;
+        if close {
+            m.start_closing(i, now, events);
+        }
         self.send_queued(events);
         true
     }

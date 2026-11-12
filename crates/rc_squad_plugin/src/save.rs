@@ -31,6 +31,12 @@ pub struct SquadSave {
     /// Each marked spot on the map, in order: open, done, or the index of
     /// the mate on it ("mate 2").
     pub markers: Vec<String>,
+    /// What the level scripts set on each marked spot, in the same order:
+    /// "" (switched on), "off", "no_cancel" or
+    /// "off no_cancel". Saves from before this was kept have none and
+    /// keep the map's start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub switches: Vec<String>,
     pub members: Vec<MemberSave>,
 }
 
@@ -186,6 +192,19 @@ impl SavePart for SquadSave {
             leader_down: squad.leader_down,
             player_revive: squad.player_revive,
             markers: squad.markers.iter().map(|(_, m)| marker_name(*m)).collect(),
+            switches: (0..squad.markers.len())
+                .map(|k| {
+                    let sw = squad.switches_of(k);
+                    let mut w = Vec::new();
+                    if sw.off {
+                        w.push("off");
+                    }
+                    if sw.no_cancel {
+                        w.push("no_cancel");
+                    }
+                    w.join(" ")
+                })
+                .collect(),
             members: squad
                 .members
                 .iter()
@@ -285,6 +304,17 @@ fn put_back_squad(world: &mut World, d: &SquadSave) -> Vec<String> {
     squad.player_revive = d.player_revive.filter(|(i, _)| *i < squad.members.len());
     for ((_, m), name) in squad.markers.iter_mut().zip(&d.markers) {
         *m = marker(name);
+    }
+    if !d.switches.is_empty() {
+        squad.switches = (0..squad.markers.len())
+            .map(|k| {
+                let w = d.switches.get(k).map(String::as_str).unwrap_or("");
+                rc_squad::MarkerSwitches {
+                    off: w.split_whitespace().any(|x| x == "off"),
+                    no_cancel: w.split_whitespace().any(|x| x == "no_cancel"),
+                }
+            })
+            .collect();
     }
     if d.markers.len() != squad.markers.len() {
         problems.push(format!(

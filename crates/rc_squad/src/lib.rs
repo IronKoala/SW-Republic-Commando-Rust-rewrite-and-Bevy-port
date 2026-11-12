@@ -37,7 +37,7 @@ pub use settings::{
     CoverSettings, FightSettings, ReviveSettings, Spawn, SquadSettings, StanceSettings, Tether,
 };
 pub use squad::{
-    aimed_spot, Leader, MarkerState, MemberState, MemberStatus, Order, Squad, SquadEvent, Stance,
+    aimed_spot, Leader, MarkerState, MarkerSwitches, MemberState, MemberStatus, Order, Squad, SquadEvent, Stance,
 };
 pub use voice::{Chatter, Heard, Say, Trigger, VoiceLine, VoiceSettings, Who};
 

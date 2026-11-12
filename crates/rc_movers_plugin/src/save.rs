@@ -51,6 +51,11 @@ pub struct MoverSave {
     pub touched: bool,
     #[serde(default)]
     pub run_started: f32,
+    /// What it does at the time of the save (a script can change it, as
+    /// unlocking a door makes it `trigger_control`); saves from before
+    /// this was kept have none and keep the map's.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub behaviour: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +87,10 @@ impl From<&MoverSnapshot> for MoverSave {
             used: m.used,
             touched: m.touched,
             run_started: m.run_started,
+            behaviour: m
+                .behaviour
+                .map(|b| b.name().to_string())
+                .unwrap_or_default(),
         }
     }
 }
@@ -113,6 +122,13 @@ impl MoverSave {
             used: self.used,
             touched: self.touched,
             run_started: self.run_started,
+            behaviour: match self.behaviour.as_str() {
+                "" => None,
+                b => Some(
+                    rc_movers::Behaviour::from_name(b)
+                        .ok_or_else(|| format!("{}: unknown behaviour {b:?}", self.name))?,
+                ),
+            },
         })
     }
 }
@@ -335,6 +351,7 @@ mod tests {
                 used: true,
                 touched: false,
                 run_started: 4.5,
+                behaviour: Some(rc_movers::Behaviour::TriggerControl),
             };
             let save = MoversSave {
                 time: 9.0,

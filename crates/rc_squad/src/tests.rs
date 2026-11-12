@@ -1783,3 +1783,86 @@ fn after_giving_up_on_a_box_they_go_back_before_trying_another() {
         SquadEvent::FetchAmmo { member, name, .. } if member == "Sev" && name == "DC17mBlasterBox2"
     )));
 }
+
+/// Level scripts switch order markers off and on (engine.u
+/// `SquadMarker`'s `Disabled` and `Enabled`), and say whether a recall
+/// takes a squad mate off one that's under way
+/// (`ACTION_SetCanCancelMarker`).
+#[test]
+fn scripts_switch_markers_and_their_cancelling() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    let post = Vec3::new(-300.0, 0.0, 0.0);
+    squad.set_markers(vec![MarkerSpot {
+        name: "MarkerSnipe1".into(),
+        marker_class: "MarkerSnipe".into(),
+        anchor: "MarkerSnipeAnchorRAS1".into(),
+        anchor_class: "MarkerSnipeAnchorRAS".into(),
+        stand: post,
+        aim: post,
+        order: "BalconySnipe".into(),
+        ..Default::default()
+    }]);
+    let eye = Vec3::new(0.0, 0.0, 60.0);
+    let aim = post - eye;
+    assert_eq!(squad.marker_in_aim(eye, aim, 3000.0, 0.2), Some(0));
+    // Off: can't be aimed at or ordered.
+    let mut ev = Vec::new();
+    assert_eq!(
+        squad.switch_marker("balconysnipe", false, false, &mut ev),
+        1
+    );
+    assert_eq!(squad.marker_in_aim(eye, aim, 3000.0, 0.2), None);
+    let ev = squad.command(Order::Marker(0), start, &world);
+    assert!(
+        has(
+            &ev,
+            |e| matches!(e, SquadEvent::OrderIgnored { why, .. } if why.contains("switched off"))
+        ),
+        "{ev:?}"
+    );
+    // On again, ordered, posted.
+    squad.switch_marker("BalconySnipe", true, false, &mut Vec::new());
+    squad.command(Order::Marker(0), start, &world);
+    run(&mut squad, start, 4.0, &world);
+    let on_post = squad
+        .members
+        .iter()
+        .position(|m| m.marker == Some(0))
+        .expect("someone took the post");
+    assert_eq!(squad.members[on_post].state, MemberState::Posted);
+    // An anchor's change leaves a marker a squad mate is on alone.
+    squad.switch_marker("BalconySnipe", false, true, &mut Vec::new());
+    assert!(!squad.switches_of(0).off);
+    // Can't be cancelled once under way: a recall leaves them on it.
+    assert_eq!(squad.set_marker_can_cancel("BalconySnipe", false), 1);
+    let ev = squad.command(Order::Cancel, start, &world);
+    assert_eq!(squad.members[on_post].marker, Some(0), "{ev:?}");
+    // Switched off now: with no cancelling, they stay...
+    let mut ev = Vec::new();
+    squad.switch_marker("BalconySnipe", false, false, &mut ev);
+    assert!(ev.is_empty(), "{ev:?}");
+    assert_eq!(squad.members[on_post].marker, Some(0));
+    // ...but a recall takes them off a switched-off marker.
+    squad.command(Order::Cancel, start, &world);
+    assert_eq!(squad.members[on_post].marker, None);
+    // Cancellable and switched off while on it: they leave at once.
+    squad.set_marker_can_cancel("BalconySnipe", true);
+    squad.switch_marker("BalconySnipe", true, false, &mut Vec::new());
+    squad.command(Order::Marker(0), start, &world);
+    run(&mut squad, start, 4.0, &world);
+    let mut ev = Vec::new();
+    squad.switch_marker("BalconySnipe", false, false, &mut ev);
+    assert!(
+        has(&ev, |e| matches!(e, SquadEvent::MarkerCancelled { .. })),
+        "{ev:?}"
+    );
+    assert!(squad.members.iter().all(|m| m.marker.is_none()));
+    assert_eq!(squad.markers[0].1, MarkerState::Open);
+    // Not one of this map's markers.
+    assert_eq!(
+        squad.switch_marker("Nobody", false, false, &mut Vec::new()),
+        0
+    );
+}

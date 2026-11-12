@@ -710,6 +710,8 @@ mod tests {
             ammo: vec![],
             hud_blink: Default::default(),
             anchors: vec![],
+            marker_states: Default::default(),
+            state_effects: Vec::new(),
             started: true,
             scene: crate::cutscene::Scene::default(),
             stats: Default::default(),

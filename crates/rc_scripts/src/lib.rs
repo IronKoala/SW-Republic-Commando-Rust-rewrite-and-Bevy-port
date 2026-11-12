@@ -24,6 +24,7 @@
 //! sound lasts, the random seed) are in `data/scripts/scripts.toml`
 //! ([`Settings`]).
 
+pub mod marker_states;
 pub mod markers;
 pub mod save;
 pub mod settings;

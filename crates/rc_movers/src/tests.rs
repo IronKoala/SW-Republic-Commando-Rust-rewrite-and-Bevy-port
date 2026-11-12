@@ -467,3 +467,40 @@ fn carry_moves_nobody_after_forget_moves() {
     assert_eq!(ride.on, Some(0));
     assert_eq!(ride.moved_by, Vec3::ZERO);
 }
+
+/// A breach lock's doors (`BreachDoor.UnlockDoor`, `LockDoor`): a script
+/// unlocks a `Locked` double door, so its trigger opens it while touched;
+/// locking it again shuts it and the trigger does nothing.
+#[test]
+fn scripts_lock_and_unlock_a_door() {
+    let door = box_tris(Vec3::new(-10.0, -100.0, 0.0), Vec3::new(10.0, 100.0, 200.0));
+    let mut set = set_of(mover("Locked", &[[0.0; 3], [0.0, 0.0, 190.0]], 1.0, 0.0), door);
+    let fixed = floor();
+    let mut p = far_player();
+    let mut ev = Vec::new();
+    // Locked: the trigger does nothing.
+    set.send("door1", &mut ev);
+    for _ in 0..120 {
+        set.step(DT, &fixed, &mut p);
+    }
+    assert!(set.movers[0].is_closed());
+    assert!(!set.set_behaviour_named("NoSuchDoor", Behaviour::TriggerControl, false, &mut ev));
+    assert!(set.set_behaviour_named("mover0", Behaviour::TriggerControl, false, &mut ev));
+    set.send("door1", &mut ev);
+    for _ in 0..120 {
+        set.step(DT, &fixed, &mut p);
+    }
+    assert!(!set.movers[0].is_closed());
+    assert_eq!(set.snapshot().movers[0].behaviour, Some(Behaviour::TriggerControl));
+    // Locked again while open: it shuts and stays shut.
+    set.set_behaviour_named("Mover0", Behaviour::Static, true, &mut ev);
+    for _ in 0..120 {
+        set.step(DT, &fixed, &mut p);
+    }
+    assert!(set.movers[0].is_closed());
+    set.send("door1", &mut ev);
+    for _ in 0..120 {
+        set.step(DT, &fixed, &mut p);
+    }
+    assert!(set.movers[0].is_closed());
+}
