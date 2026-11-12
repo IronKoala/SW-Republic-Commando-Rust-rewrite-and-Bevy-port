@@ -2567,7 +2567,13 @@ mod tests {
             paused.command("restartmissionselected"),
             Some(&PageCmd::Restart)
         );
-        for p in &plans {
+        // The loading screens are shown by loading itself, never opened by
+        // a button (`loading_screen.rs`).
+        let by_loading = [
+            crate::loading_screen::LOADING_PAGE,
+            crate::loading_screen::LOADING_INFO_PAGE,
+        ];
+        for p in plans.iter().filter(|p| !by_loading.contains(&p.page.as_str())) {
             assert!(page_from_key(&p.page).is_some(), "unknown page {}", p.page);
         }
     }
