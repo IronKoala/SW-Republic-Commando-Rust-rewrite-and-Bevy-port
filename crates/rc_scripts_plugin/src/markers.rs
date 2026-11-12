@@ -309,6 +309,7 @@ mod tests {
             places: Default::default(),
             sounds: vec![],
             ammo: vec![],
+            hud_blink: Default::default(),
             anchors: read_anchors(&m),
             scene: crate::cutscene::Scene::default(),
             breaking: Default::default(),
