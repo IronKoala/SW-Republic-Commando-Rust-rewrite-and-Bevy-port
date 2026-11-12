@@ -663,6 +663,20 @@ ctgame.u, ctinventory.u, engine.u, Properties/properties.u).
 - Pawn defaults the troopers keep: SightRadius 10000, PeripheralVision
   0.2, AutoDetectRadius 200, CollisionRadius 40, CrouchRadius 40,
   WalkSpeedRatio 0.5, MaxAimYaw 80, RotationRate yaw 20000.
+- Dying (engine.u's script text, read 2026-11-12): `Pawn.Died` triggers
+  the pawn's map `Event`, then runs `DeathEffectContainerClass` if set,
+  otherwise `PlayDying`. `PlayDying` sets `LifeSpan = RagdollLifeSpan`
+  unless `bSaveMyCorpse`, then `TryToRagdoll`: a ragdoll if falling or
+  flying, if `frand() < RagdollOnDeathProbability` of the damage type
+  (DamageType default 0.5, CTDamageExplosion 1), or if there is no `Death`
+  animation. Otherwise `PlayDyingAnim` plays `Death` (or, half the time,
+  `ElectrocutionDeath` / `OnFireDeath` for electric and fire damage when
+  the mesh has both). An AI's controller is destroyed when its pawn dies
+  (`Controller.PawnDied`). `CloneTrooper`: RagdollLifeSpan 60,
+  MaxDeathLoopTime 2, RagdollOverride "CloneTrooper". Its
+  `CloneTrooperDefaults` (properties.u, a child class of `CloneTrooper`)
+  sets RequiredEquipment `Properties.DC15BlasterClone`, KParams, BurntMaterial
+  `CloneTrooper_Burn` and RagImpactSounds.
 - geo_01a spawners (`rc_enemy_spawners`): `CloneTrooper` 7 (tags
   SpawnWalkerGuys, SpawnBarricadeTroopers, SpawnGunshipArea,
   SpawnDeadTrooper01), `CloneTrooperTM` 9 (SpawnTrench01, SpawnTrench02,
