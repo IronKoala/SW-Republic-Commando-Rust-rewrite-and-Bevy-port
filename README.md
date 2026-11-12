@@ -269,6 +269,10 @@ copy of the game.
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
 
+- **The HUD blinks where the first levels teach it (since 2026-11-12;
+  tested in the cloud, not yet on Windows).** The map's `BlinkHUD` steps
+  now work: the health meters, the squad panels and the grenade panel
+  flash as the original's do, for as long as the map says.
 - **Level scripts give and take grenades (since 2026-11-12; tested in the
   cloud, not yet on Windows).** The map's `AddAmmo` steps now work, so
   geo_01a starts with no grenades, as in the original (pick them up from
