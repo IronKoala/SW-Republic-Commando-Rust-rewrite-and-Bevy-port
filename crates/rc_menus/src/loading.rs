@@ -305,6 +305,94 @@ pub fn set_progress(layout: &mut MenuLayout, fraction: f32) -> bool {
     }
 }
 
+/// How full the original's bar is: `LoadProgressFraction`, kept by the
+/// engine's loading feedback in `Engine.dll` (read in the install, nothing
+/// copied) and handed to the screen's `UpdateLoadingProgress` by
+/// `UGameEngine::UpdateProgress`. The rules:
+///
+/// - `BeginSlowTask` (outermost only): the bar is 0, the stage is 0 to 1,
+///   and the time is noted;
+/// - `SetProgressRange(a, b)`: a stage from `a` to `b`, or, with `a`
+///   below 0, the next stage takes share `b` of what is left after the
+///   last one; then the bar moves up to the stage's start;
+/// - `StatusUpdatef(num, den)`: the bar moves up to `num / den` of the
+///   way through the stage (0 if `den` is 0);
+/// - both only move it if more than 0.1 s passed since it last moved,
+///   and never move it back;
+/// - `EndSlowTask` (outermost only): the bar is full.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Progress {
+    /// The bar's value.
+    pub fraction: f32,
+    lo: f32,
+    hi: f32,
+    last: f64,
+}
+
+/// The stages `UGameEngine::LoadMap` sets, in order: the map's package
+/// (0.05 to 0.65), then four more, each a share of what is left.
+pub const LOAD_MAP_STAGES: [(f32, f32); 5] = [
+    (0.05, 0.65),
+    (-1.0, 0.5),
+    (-1.0, 0.2),
+    (-1.0, 0.25),
+    (-1.0, 0.25),
+];
+
+impl Progress {
+    /// `BeginSlowTask`, at time `now` (seconds).
+    pub fn begin(now: f64) -> Self {
+        Self {
+            fraction: 0.0,
+            lo: 0.0,
+            hi: 1.0,
+            last: now,
+        }
+    }
+
+    fn raise(&mut self, value: f32, now: f64) -> bool {
+        if now > self.last + 0.1 && value > self.fraction {
+            self.fraction = value;
+            self.last = now;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// `SetProgressRange`. True if the bar moved.
+    pub fn set_range(&mut self, a: f32, b: f32, now: f64) -> bool {
+        if a >= 0.0 {
+            self.lo = a;
+            self.hi = b;
+        } else {
+            self.lo = self.hi;
+            self.hi += (1.0 - self.hi) * b;
+        }
+        self.raise(self.lo, now)
+    }
+
+    /// `StatusUpdatef(num, den)`. True if the bar moved.
+    pub fn status(&mut self, num: u32, den: u32, now: f64) -> bool {
+        if now <= self.last + 0.1 {
+            return false;
+        }
+        let f = if den == 0 {
+            0.0
+        } else {
+            num as f32 / den as f32
+        };
+        self.raise(self.lo + (self.hi - self.lo) * f, now)
+    }
+
+    /// `EndSlowTask`.
+    pub fn end(&mut self) {
+        self.fraction = 1.0;
+        self.lo = 0.0;
+        self.hi = 1.0;
+    }
+}
+
 /// The screen once loading has finished, for a class that pauses
 /// ([`pauses_when_done`]): `CTLoadingInfo.Init("LOADINGDONE")` keeps the
 /// picture, title and text (`TransferTransientElements`), hides the bar,
@@ -327,6 +415,43 @@ mod tests {
     use super::*;
 
     const INT: &str = "[LevelLoadingInfo]\r\n\r\nMapName[0]=\"GEO_01A\"\r\nLoadingMenuClass[0]=\"Pkg.Info\"\r\nLoadingPic[0]=\"Pics.One\"\r\nLoadingTitle[0]=\"FIRST\"\r\nLoadingText[0]=\"SOME TEXT.\"\r\nLoadingShowHints[0]=1\r\n\r\nMapName[1]=\"GEO_01B\"\r\nLoadingTitle[1]=\"SECOND\"\r\n\r\nMapName[3]=\"LOST\"\r\n";
+
+    #[test]
+    fn progress_follows_load_map() {
+        let mut p = Progress::begin(10.0);
+        // Too soon after BeginSlowTask: the first stage doesn't show yet.
+        assert!(!p.set_range(0.05, 0.65, 10.05));
+        assert_eq!(p.fraction, 0.0);
+        assert!(p.status(1, 2, 10.2));
+        assert!((p.fraction - 0.35).abs() < 1e-6);
+        // The next stage takes half of what is left: 0.65 to 0.825.
+        assert!(p.set_range(-1.0, 0.5, 10.4));
+        assert!((p.fraction - 0.65).abs() < 1e-6);
+        assert!(p.status(1, 1, 10.6));
+        assert!((p.fraction - 0.825).abs() < 1e-6);
+        // Never back, never faster than every 0.1 s.
+        assert!(!p.status(0, 1, 10.8));
+        assert!(!p.set_range(-1.0, 0.2, 10.85));
+        assert!((p.fraction - 0.825).abs() < 1e-6);
+        p.end();
+        assert_eq!(p.fraction, 1.0);
+    }
+
+    #[test]
+    fn load_map_stage_ends() {
+        let mut p = Progress::begin(0.0);
+        let mut t = 0.0;
+        let mut ends = Vec::new();
+        for (a, b) in LOAD_MAP_STAGES {
+            t += 1.0;
+            p.set_range(a, b, t);
+            ends.push(p.hi);
+        }
+        let want = [0.65, 0.825, 0.86, 0.895, 0.92125];
+        for (e, w) in ends.iter().zip(want) {
+            assert!((e - w).abs() < 1e-5, "{ends:?}");
+        }
+    }
 
     fn classes() -> EngineClasses {
         EngineClasses {

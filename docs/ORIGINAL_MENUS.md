@@ -225,14 +225,31 @@ chosen the way the original's `UGameEngine::LoadMap` chooses it (read from
   the top `BarWidth / High * Value` wide, both with the canvas's
   stretched-tile rule (`rc_menus::quads::progress_bar_quads`).
 
-What is ours, not the original's: how full the bar is at a given moment.
-The original fills it from its own loader (`LoadProgressFraction`); here it
-is the share of this port's loading parts (`LoadingGate`) that are done.
-Not checked: which map name the original looks up when it loads a saved
-game (it comes from the package's own name); here a save's map follows the
-same rule as a fresh start. Not traced: how the D3D renderer blends a
-picture flagged `bAlphaTexture` drawn in the normal style; the bar is
-drawn alpha-blended.
+- The bar is drawn with standard alpha blending, as `D3DDrv.dll` sets
+  it for a texture flagged `bAlphaTexture` (`SetSimpleMaterial` picks
+  final blend 2, which `ApplyFinalBlend` turns into source alpha /
+  inverse source alpha).
+- A loaded save shows the screen of the map it was saved in. The
+  original's `LoadMap` looks up the save package's first import, which is
+  the level it was saved in (checked on real saves: `GEO_04B`,
+  `GEO_03A`); a map file whose first import is `myLevel` falls back to the
+  file's own name. The port looks a save's map up the same way.
+- How full the bar is follows the original engine's rules
+  (`rc_menus::loading::Progress`): `LoadProgressFraction` starts at 0;
+  `LoadMap` sets five stages (the map's package 0.05 to 0.65, then 0.65 to
+  0.825, 0.86, 0.895 and 0.92125); the bar moves only forward, at most
+  every 0.1 s, and is full when loading ends. `UGameEngine::UpdateProgress`
+  hands the value to the screen's `UpdateLoadingProgress`.
+
+What is ours, not the original's: where in the port's loading the bar
+moves. The original's first stage moves as each object of the map's
+package loads (`EndLoad`: objects loaded out of objects known plus 32);
+the port reads the map in one step, so the bar waits until it is read and
+then starts the next stage. The port's other loading parts (scripts,
+cast, enemies, movers and so on) count through that next stage as they
+finish; the original's later stages are its own steps (actor collision,
+ten `BeginPlay` passes, audio), which don't match the port's parts one
+to one.
 
 `rc_probe --menu XInterfaceCTMenus.CTLoadingInfo` (or `CTLoading`) paints
 a screen; `RC_PROBE_LOADING_MAP` picks the map (default GEO_01A),

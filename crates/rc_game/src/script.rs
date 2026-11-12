@@ -3021,7 +3021,12 @@ fn run(world: &mut World) {
                 done = at >= chars.len();
             }
             Step::FocusAfter(a, want) => {
+                // One frame with nothing held first: a `FocusOn` just
+                // before may have ended on a frame that held the same
+                // action, and a held action is not a new press.
                 if frames == 0 {
+                    done = false;
+                } else if frames == 1 {
                     held.insert(a);
                     done = false;
                 } else {

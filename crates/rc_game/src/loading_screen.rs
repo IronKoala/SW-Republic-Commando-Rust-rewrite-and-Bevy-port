@@ -5,8 +5,8 @@
 //! `LevelLoadingInfo.int` names the screen: the briefing screen
 //! (`CTLoadingInfo`: picture, mission name, mission text) or the plain one
 //! (`CTLoading`: black, mission name); a map with no row gets the plain
-//! screen with no name, as in the original. The bar fills as this port's
-//! parts finish loading (see below). When a briefing screen's level has
+//! screen with no name, as in the original. The bar fills by the original
+//! engine's rules (see below). When a briefing screen's level has
 //! loaded, play is paused and the same screen shows START; START
 //! un-pauses (as the original's `LoadingFinished` and
 //! `CTLoadingInfo.OnAButton` do). The plain screen just goes away.
@@ -17,10 +17,12 @@
 //! (`menu.rs`) shows instead and the log says why.
 //!
 //! The bar: the original fills it from its own loader's progress
-//! (`GameEngine.LoadProgressFraction`, passed to `UpdateLoadingProgress`).
-//! This port loads differently, so the bar shows the share of this port's
-//! loading parts (`LoadingGate`) that have finished. It is drawn exactly
-//! as the original draws a bar; how full it is at a given moment is ours.
+//! (`GameEngine.LoadProgressFraction`, which `UGameEngine::UpdateProgress`
+//! passes to `UpdateLoadingProgress`). The port keeps that value by the
+//! same rules and stages as the original's `LoadMap` (`rules::Progress`),
+//! moved at the matching points of this port's loading (`progress`). It
+//! is drawn exactly as the original draws a bar (standard alpha blending,
+//! as `D3DDrv.dll` sets for a `bAlphaTexture` texture).
 
 use crate::menu::{Menu, Page, PlaceholderLoadingScreen};
 use crate::original_menu::{self, OriginalMenus};
@@ -51,8 +53,14 @@ struct LoadingRules {
 struct Showing {
     /// The page, when it pauses when done (`CTLoadingInfo`).
     pauses: bool,
-    /// The most parts seen waiting at once, for the bar.
-    most_waiting: usize,
+    /// The original's bar (`rules::Progress`) and the next of
+    /// `LoadMap`'s stages to start.
+    bar: Option<rules::Progress>,
+    stage: usize,
+    /// The map itself (`rc_level_plugin`'s part) has been seen loading.
+    saw_level: bool,
+    /// The most other parts seen waiting at once.
+    most_others: usize,
     /// The bar's value last drawn.
     shown_fill: f32,
     /// A level was showing when loading started (not the front end).
@@ -158,11 +166,19 @@ fn start(
     current: Res<CurrentLevel>,
     paths: Res<GamePaths>,
     log: Res<GameLog>,
+    time: Res<Time<Real>>,
 ) {
     menus.loading_page = None;
     done.waiting = false;
+    // `LoadMap`: BeginSlowTask, then the first stage (the map's package).
+    let now = time.elapsed_secs_f64();
+    let mut bar = rules::Progress::begin(now);
+    let (a, b) = rules::LOAD_MAP_STAGES[0];
+    bar.set_range(a, b, now);
     *showing = Showing {
         from_level: showing.from_level,
+        bar: Some(bar),
+        stage: 1,
         ..Default::default()
     };
     if !rules_read.read {
@@ -239,22 +255,54 @@ fn start(
     menus.mark_dirty();
 }
 
-/// The bar: the share of loading parts finished so far.
+/// The bar, moved by the rules the original's engine uses
+/// (`rules::Progress`) at the points of the port's loading that match
+/// `LoadMap`'s: the map is read in the first stage; the next stage starts
+/// when it's done; the port's other loading parts (scripts, cast,
+/// enemies, movers and so on) count through that stage as they finish;
+/// when all are done the remaining stages start and the bar fills, as at
+/// `EndSlowTask`. Ours, not the original's: the original's first stage
+/// moves as the package's objects load (`EndLoad`), but the port reads
+/// the map in one step with nothing to count, and which of the port's
+/// parts count in which of the original's later stages is the port's
+/// choice (they don't match one to one).
 fn progress(
     gate: Res<LoadingGate>,
+    time: Res<Time<Real>>,
     mut showing: ResMut<Showing>,
     mut menus: ResMut<OriginalMenus>,
 ) {
     let Some(key) = menus.loading_page.clone() else {
         return;
     };
-    let waiting = gate.waiting().count();
-    showing.most_waiting = showing.most_waiting.max(waiting);
-    let fill = if showing.most_waiting == 0 {
-        0.0
-    } else {
-        1.0 - waiting as f32 / showing.most_waiting as f32
+    let Some(mut bar) = showing.bar else {
+        return;
     };
+    let now = time.elapsed_secs_f64();
+    let level = rc_level_plugin::PART;
+    let level_waiting = gate.waiting().any(|p| p == level);
+    showing.saw_level |= level_waiting;
+    let others = gate.waiting().filter(|p| *p != level).count();
+    showing.most_others = showing.most_others.max(others);
+    if showing.saw_level && !level_waiting {
+        if showing.stage == 1 {
+            let (a, b) = rules::LOAD_MAP_STAGES[1];
+            bar.set_range(a, b, now);
+            showing.stage = 2;
+        }
+        if gate.is_clear() {
+            while let Some(&(a, b)) = rules::LOAD_MAP_STAGES.get(showing.stage) {
+                bar.set_range(a, b, now);
+                showing.stage += 1;
+            }
+            bar.end();
+        } else if showing.most_others > 0 {
+            let most = showing.most_others as u32;
+            bar.status(most - others as u32, most, now);
+        }
+    }
+    showing.bar = Some(bar);
+    let fill = bar.fraction;
     if (fill - showing.shown_fill).abs() < 1e-4 {
         return;
     }
