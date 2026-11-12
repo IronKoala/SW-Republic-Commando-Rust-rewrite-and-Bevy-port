@@ -102,6 +102,14 @@ pub struct Model {
     /// With [`ModelSpec::keep_sets`], every kept animation's too, by the
     /// animation's own name.
     pub triggers: HashMap<String, Vec<(f32, NotifyTrigger)>>,
+    /// Every notify of each animation read, by our name for the animation:
+    /// when (0 to 1 through it) and the notify's class
+    /// (`AnimNotify_ReleaseDroid`, `AnimNotify_Effect`, ...).
+    pub notify_classes: HashMap<String, Vec<(f32, String)>>,
+    /// Effects each animation starts (`AnimNotify_Effect`), by our name for
+    /// the animation: when (0 to 1 through it) and what. Notifies with no
+    /// effect class are left out (the engine's `Notify` does nothing).
+    pub effects: HashMap<String, Vec<(f32, NotifyEffect)>>,
     /// Every animation set read, first set first, when
     /// [`ModelSpec::keep_sets`] asked for them (empty otherwise).
     pub sets: Vec<rc_package::animation::MeshAnimation>,
@@ -205,6 +213,84 @@ fn find_in(pkg: &Package, path: &str, class: Option<&str>) -> Option<usize> {
                 Some(want) => c.eq_ignore_ascii_case(want),
                 None => materials.iter().any(|m| c.eq_ignore_ascii_case(m)) || c.starts_with("Hs"),
             }
+    })
+}
+
+/// An `AnimNotify_Effect`: an emitter the animation starts. Engine.dll's
+/// `UAnimNotify_Effect::Notify` (read 2026-11-12): with `bone` on a
+/// skeletal mesh, the effect goes at the bone (world) plus `offset` along
+/// the bone's axes, turned as the bone plus `offset_rotation`; without,
+/// at the actor's location, turned as the actor (no offset). Its `Tag`,
+/// `DrawScale` and `DrawScale3D` become the effect's; with `attach` it is
+/// attached to the bone (or based on the actor), `offset` and
+/// `offset_rotation` becoming its place relative to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NotifyEffect {
+    /// The emitter class's name (`Dispenser_Landing_Dirt`).
+    pub class: String,
+    /// Its package and name (`CTEffects.Dispenser_Landing_Dirt`).
+    pub path: String,
+    pub bone: Option<String>,
+    pub offset: [f32; 3],
+    /// Pitch, yaw, roll (Unreal angle units).
+    pub offset_rotation: [i32; 3],
+    pub attach: bool,
+    pub tag: Option<String>,
+    pub draw_scale: f32,
+    pub draw_scale_3d: [f32; 3],
+}
+
+/// What an `AnimNotify_Effect` object starts (its class's defaults:
+/// `DrawScale` 1, `DrawScale3D` (1, 1, 1)). `None` without `EffectClass`.
+fn notify_effect(pkg: &Package, data: &[u8], object: i32) -> Option<NotifyEffect> {
+    let ObjectRef::Export(k) = ObjectRef::from_index(object) else {
+        return None;
+    };
+    let e = pkg.exports.get(k)?;
+    if !pkg
+        .export_class_name(e)
+        .eq_ignore_ascii_case("AnimNotify_Effect")
+    {
+        return None;
+    }
+    let props = export_props(pkg, data, e).ok()?;
+    let get = |n: &str| properties::find(pkg, &props, n).map(|p| p.value.clone());
+    let class = match get("EffectClass")? {
+        Value::Object(o) if o != 0 => o,
+        _ => return None,
+    };
+    let name = |v: Option<Value>| match v {
+        Some(Value::Name(n)) => {
+            let n = pkg.name(n);
+            (!n.is_empty() && !n.eq_ignore_ascii_case("None")).then(|| n.to_string())
+        }
+        _ => None,
+    };
+    let floats = |v: Option<Value>| match v {
+        Some(Value::Raw(b)) if b.len() >= 12 => {
+            Some([0, 4, 8].map(|i| f32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])))
+        }
+        _ => None,
+    };
+    let ints = |v: Option<Value>| match v {
+        Some(Value::Raw(b)) if b.len() >= 12 => {
+            Some([0, 4, 8].map(|i| i32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])))
+        }
+        _ => None,
+    };
+    Some(NotifyEffect {
+        class: pkg.object_name(class).to_string(),
+        path: rc_package::class::object_path(pkg, class),
+        bone: name(get("Bone")),
+        offset: floats(get("OffsetLocation")).unwrap_or([0.0; 3]),
+        offset_rotation: ints(get("OffsetRotation")).unwrap_or([0; 3]),
+        attach: matches!(get("Attach"), Some(Value::Bool(true))),
+        tag: name(get("Tag")),
+        draw_scale: match get("DrawScale") {
+            Some(Value::Float(f)) => f,
+            _ => 1.0,
+        },
+        draw_scale_3d: floats(get("DrawScale3D")).unwrap_or([1.0; 3]),
     })
 }
 
@@ -481,6 +567,8 @@ impl Model {
         let mut clips = HashMap::new();
         let mut sounds = HashMap::new();
         let mut triggers = HashMap::new();
+        let mut notify_classes = HashMap::new();
+        let mut effects = HashMap::new();
         let mut read_sets: Vec<Option<rc_package::animation::MeshAnimation>> =
             (0..sets.len()).map(|_| None).collect();
         for (key, seq_name) in &spec.sequences {
@@ -520,6 +608,30 @@ impl Model {
                         .collect();
                     if !sent.is_empty() {
                         triggers.insert(key.clone(), sent);
+                    }
+                    let classes: Vec<(f32, String)> = seq
+                        .notifies
+                        .iter()
+                        .filter_map(|n| match ObjectRef::from_index(n.object) {
+                            ObjectRef::Export(k) => pkg
+                                .exports
+                                .get(k)
+                                .map(|e| (n.time, pkg.export_class_name(e).to_string())),
+                            ObjectRef::Import(k) => pkg
+                                .imports
+                                .get(k)
+                                .map(|m| (n.time, pkg.name(m.class_name).to_string())),
+                            ObjectRef::None => None,
+                        })
+                        .collect();
+                    notify_classes.insert(key.clone(), classes);
+                    let started: Vec<(f32, NotifyEffect)> = seq
+                        .notifies
+                        .iter()
+                        .filter_map(|n| notify_effect(&pkg, &data, n.object).map(|e| (n.time, e)))
+                        .collect();
+                    if !started.is_empty() {
+                        effects.insert(key.clone(), started);
                     }
                     if k > 0 {
                         notes.push(format!(
@@ -663,6 +775,8 @@ impl Model {
             flipped,
             sounds,
             triggers,
+            notify_classes,
+            effects,
             sets: Vec::new(),
         };
         if spec.keep_sets {
@@ -943,6 +1057,68 @@ impl Model {
             .into_iter()
             .map(|p| to_bevy(mesh_point(&self.mesh, p)))
             .collect()
+    }
+
+    /// As [`Model::posed_from_origin`], but placed as the original game
+    /// poses a mesh ([`rc_anim::globals_in_game`]): the bones hanging from
+    /// the move bone don't follow it. For an actor whose physics is root
+    /// motion, that travel moves the actor instead (see
+    /// [`Model::root_offset`]); the droid dispensers' intro drops.
+    pub fn posed_rooted(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {
+        let local = match self.clips.get(key) {
+            Some(clip) => clip.sample(&self.skeleton, frame),
+            None => self.skeleton.local.clone(),
+        };
+        let mv = rc_anim::move_bone(&self.skeleton.names);
+        let pose = rc_anim::globals_in_game(&self.skeleton.parents, &local, mv);
+        skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
+            .into_iter()
+            .map(|p| to_bevy(mesh_point(&self.mesh, p)))
+            .collect()
+    }
+
+    /// [`Model::bone_from_origin`] as the original game places bones (see
+    /// [`Model::posed_rooted`]).
+    pub fn bone_from_origin_in_game(
+        &self,
+        key: &str,
+        frame: f32,
+        bone: &str,
+    ) -> Option<([f32; 3], [[f32; 3]; 3])> {
+        let i = self.skeleton.find(bone)?;
+        let local = match self.clips.get(key) {
+            Some(clip) => clip.sample(&self.skeleton, frame),
+            None => self.skeleton.local.clone(),
+        };
+        let mv = rc_anim::move_bone(&self.skeleton.names);
+        let pose = rc_anim::globals_in_game(&self.skeleton.parents, &local, mv);
+        let g = pose.get(i)?;
+        let at = mesh_point(&self.mesh, g.pos);
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|d| {
+            let tip = mesh_point(&self.mesh, g.apply(d));
+            let v = [tip[0] - at[0], tip[1] - at[1], tip[2] - at[2]];
+            let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+            v.map(|c| c / len)
+        });
+        Some((at, axes))
+    }
+
+    /// How far the root bone (the skeleton's first) is from its rest place
+    /// at `frame` of animation `key`, in Unreal units in the model's own
+    /// axes (as [`Model::bone_from_origin`]). With `PHYS_RootMotion` this
+    /// is what moves the actor.
+    pub fn root_offset(&self, key: &str, frame: f32) -> [f32; 3] {
+        let Some(clip) = self.clips.get(key) else {
+            return [0.0; 3];
+        };
+        let local = clip.sample(&self.skeleton, frame);
+        let pose = globals(&self.skeleton.parents, &local);
+        let rest = globals(&self.skeleton.parents, &self.skeleton.local);
+        let (Some(a), Some(b)) = (pose.first(), rest.first()) else {
+            return [0.0; 3];
+        };
+        let (a, b) = (mesh_point(&self.mesh, a.pos), mesh_point(&self.mesh, b.pos));
+        [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
     }
 
     /// Where bone `bone` is at `frame` of animation `key` (the mesh's own
