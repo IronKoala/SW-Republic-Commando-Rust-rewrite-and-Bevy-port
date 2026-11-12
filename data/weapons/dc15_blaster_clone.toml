@@ -1,0 +1,46 @@
+# The rifle geo_01a's placed clone troopers carry (class CloneTrooper).
+# CloneTrooper's own RequiredEquipment (System/ctcharacters.u) is the
+# commandos' DC-17m, but the game lays CloneTrooperDefaults
+# (Properties/properties.u) over the class (core.dll builds the name
+# "Properties.%sDefaults"), and that sets RequiredEquipment =
+# Properties.DC15BlasterClone: this rifle (parent CTWeaponRecharging).
+# Its ammo is DC15BlasterCloneAmmo and its bolt DC17BlasterProj with
+# DC17BlasterProjDefaults on top: the same bolt as the player's DC-17m.
+#
+# Every value is the original's, read with `rc_probe --class`; the class
+# that holds it is named on each line.
+
+name = "DC-15 Blaster (clone trooper)"
+
+[fire]
+mode = "automatic"        # FireMode 2 (DC15BlasterClone)
+shot_delay = 0.15         # ShotDelay (DC15BlasterClone)
+aim_error = 0             # AimError: not set, the Weapon class's 0
+offset = [57.4, 20, -6.56] # FPFireOffset (CTWeaponRecharging)
+
+[ammo]
+max_ammo = 100            # MaxAmmo (CTAmmoRecharging)
+recharge_rate = 100       # RechargeRate (DC15BlasterCloneAmmo)
+
+[shot]
+kind = "bolt"             # DC17BlasterProj: bLaserBolt
+accel = 60000             # AccelFactor (Projectile)
+max_speed = 10000         # MaxSpeed (DC17BlasterProjDefaults)
+life_span = 10            # LifeSpan (DC17BlasterProj)
+damage = 20               # Damage (DC17BlasterProjDefaults)
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyDC17" # MyDamageType (DC17BlasterProjDefaults; Projectile.ProcessTouch in engine.u hurts with the bolt's own MyDamageType)
+
+[melee]
+range = 150               # MeleeRange (DC15BlasterClone)
+damage = 100              # MeleeDamage (DC15BlasterClone, CTDamageMelee)
+
+[sound]
+package = "gen_sound"
+fire = ["DC17_CommandoFire"] # FireSound (DC15BlasterClone): a SoundMultiple group in gen_sound.uax
+
+[model]
+package = "weapons"
+mesh = "DC15Blaster"      # StaticMesh of its AttachmentClass DC15AttachmentClone
+offset = [40, 12, -14]    # our choice, as the other weapon files (only used if a player held it)
+bolt_colour = [0.3, 0.7, 1.0]  # our choice, the same blue as the DC-17m: DC17BlasterProjDefaults LightHue 122

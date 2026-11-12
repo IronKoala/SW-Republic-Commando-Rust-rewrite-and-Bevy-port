@@ -3352,8 +3352,9 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
 
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
-/// geo_01a's clone troopers hold the game's DC-17m model (their class's
-/// `RequiredEquipment`), hung on their weapon bone.
+/// geo_01a's clone troopers hold the game's DC-15 rifle model (their
+/// class's `RequiredEquipment` as `CloneTrooperDefaults` in
+/// Properties/properties.u sets it), hung on their weapon bone.
 fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
     let mut q = w.query::<&rc_cast::Cast>();
     let troopers: Vec<_> = q
@@ -3362,9 +3363,9 @@ fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
         .collect();
     let armed = troopers
         .iter()
-        .filter(|c| c.held_weapon() == Some("DC17mBlaster"))
+        .filter(|c| c.held_weapon() == Some("DC15BlasterClone"))
         .count();
-    let msg = format!("{armed} of {} clone troopers hold a DC17mBlaster", troopers.len());
+    let msg = format!("{armed} of {} clone troopers hold a DC15BlasterClone", troopers.len());
     if !troopers.is_empty() && armed == troopers.len() {
         Ok(msg)
     } else {
