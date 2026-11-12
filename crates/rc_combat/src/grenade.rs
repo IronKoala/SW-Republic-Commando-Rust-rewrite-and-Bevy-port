@@ -44,6 +44,10 @@ pub struct GrenadeParams {
     /// File name without `.toml`, like `thermal_detonator`.
     pub id: String,
     pub name: String,
+    /// The original's weapon class this grenade is (`ThermalDetonator`),
+    /// for level scripts that name it (`ACTION_AddAmmo`'s `WhichWeapon`).
+    /// `None` for grenades the player never carries.
+    pub game_class: Option<String>,
     /// Most carried (`MaxAmmo`), and how many at the start
     /// (`InitAmmoAmount`).
     pub max_count: u32,
@@ -135,6 +139,7 @@ impl GrenadeParams {
         let p = GrenadeParams {
             id: id.to_string(),
             name: t.text("name")?.unwrap_or_else(|| id.to_string()),
+            game_class: t.text("game_class")?,
             max_count: need(t.number("ammo.max_count")?, "ammo.max_count")? as u32,
             start_count: t.number("ammo.start_count")?.unwrap_or(0.0) as u32,
             speed: need(t.number("throw.speed")?, "throw.speed")?,
@@ -422,6 +427,19 @@ impl Grenades {
         Some(id.clone())
     }
 
+    /// The original's `Ammunition.AddAmmo` (engine.u), which level scripts
+    /// call through `ACTION_AddAmmo` (gameplay.u): add `amount` (it may be
+    /// below 0) and keep the result between 0 and `max`. Only for a kind
+    /// already carried (the script finds the weapon in the player's
+    /// inventory and does nothing if it isn't there). Returns the count
+    /// before and after.
+    pub fn add_ammo(&mut self, id: &str, amount: i32, max: u32) -> Option<(u32, u32)> {
+        let (_, c) = self.carried.iter_mut().find(|(i, _)| i == id)?;
+        let before = *c;
+        *c = (before as i64 + amount as i64).clamp(0, max as i64) as u32;
+        Some((before, *c))
+    }
+
     /// Add `n` (a pickup), up to the most carried.
     pub fn add(&mut self, id: &str, n: u32, max: u32) -> u32 {
         match self.carried.iter_mut().find(|(i, _)| i == id) {
@@ -459,8 +477,29 @@ mod tests {
         let p = GrenadeParams::from_text("test", TEST).unwrap();
         assert_eq!((p.fuse_time, p.after_impact), (12.0, 1.0));
         assert_eq!((p.max_count, p.start_count), (4, 2));
+        assert_eq!(p.game_class, None);
+        let p =
+            GrenadeParams::from_text("t", &format!("game_class = \"FlashBang\"\n{TEST}")).unwrap();
+        assert_eq!(p.game_class.as_deref(), Some("FlashBang"));
         let e = GrenadeParams::from_text("t", &TEST.replace("toss_up", "tos_up")).unwrap_err();
         assert!(e.contains("unknown setting `throw.tos_up`"), "{e}");
+    }
+
+    #[test]
+    fn script_add_ammo_stays_between_none_and_the_most() {
+        let mut g = Grenades {
+            carried: vec![("thermal".into(), 2), ("flash".into(), 2)],
+            ..Default::default()
+        };
+        // geo_01a's level start: -5 on 2 leaves none, never below.
+        assert_eq!(g.add_ammo("flash", -5, 5), Some((2, 0)));
+        assert_eq!(g.add_ammo("thermal", -2, 5), Some((2, 0)));
+        // geo_04a: +5 fills to the most carried and no further.
+        assert_eq!(g.add_ammo("thermal", 5, 5), Some((0, 5)));
+        assert_eq!(g.add_ammo("thermal", 5, 5), Some((5, 5)));
+        // A kind not carried: nothing happens.
+        assert_eq!(g.add_ammo("sonic", 5, 5), None);
+        assert_eq!(g.carried.len(), 2);
     }
 
     #[test]

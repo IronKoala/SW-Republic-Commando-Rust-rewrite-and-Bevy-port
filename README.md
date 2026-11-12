@@ -243,6 +243,11 @@ copy of the game.
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
 
+- **Level scripts give and take grenades (since 2026-11-12; tested in the
+  cloud, not yet on Windows).** The map's `AddAmmo` steps now work, so
+  geo_01a starts with no grenades, as in the original (pick them up from
+  the crate by the start), and the levels that hand out a full set do.
+
 - **Ammo and grenade boxes (since 2026-11-09; tested in the cloud, not
   yet on Windows or by playing).** The 477 boxes the campaign maps place
   (DC-17m, sniper and anti-armour ammo; thermal, sonic, EMP and flash

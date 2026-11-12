@@ -11,6 +11,7 @@
 # Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
 
 name = "Flash Detonator"  # game: FlashBangDefaults ItemName
+game_class = "FlashBang"  # game: the weapon class; level scripts name it (ACTION_AddAmmo WhichWeapon)
 
 [ammo]
 max_count = 5             # game: FlashBangAmmoDefaults MaxAmmo
