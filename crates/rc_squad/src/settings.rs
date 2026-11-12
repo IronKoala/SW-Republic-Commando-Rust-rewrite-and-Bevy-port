@@ -824,6 +824,7 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
                 .collect()
         }
         "weapon" => j.weapon = text(value)?,
+        "anim" => j.anim = text(value)?,
         "preferred" => j.preferred = text(value)?,
         "kind" => {
             j.kind = match text(value)?.as_str() {
@@ -883,6 +884,8 @@ fn set_job(j: &mut JobSettings, key: &str, value: Value) -> Result<(), String> {
             match key {
                 "work_time" => j.work_time = v,
                 "fuse" => j.fuse = v,
+                "place_at" => j.place_at = v,
+                "arm_at" => j.arm_at = v,
                 "blast_damage" => j.blast_damage = v,
                 "blast_radius" => j.blast_radius = v,
                 "sight_radius" => j.sight_radius = v,

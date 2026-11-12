@@ -341,7 +341,13 @@ pub struct SquadLooks {
 }
 
 impl SquadLooks {
-    fn load(&mut self, paths: Option<&GamePaths>, keys: &[String], log: &Option<Res<GameLog>>) {
+    fn load(
+        &mut self,
+        paths: Option<&GamePaths>,
+        keys: &[String],
+        job_anims: &[String],
+        log: &Option<Res<GameLog>>,
+    ) {
         if self.tried {
             return;
         }
@@ -370,7 +376,7 @@ impl SquadLooks {
         };
         for key in keys {
             let t = std::time::Instant::now();
-            let model = match look::load_model(paths, &looks, key) {
+            let model = match look::load_model(paths, &looks, key, job_anims) {
                 Ok((m, notes)) => {
                     for n in notes {
                         log_line(log, format!("{key}: {n}"));
@@ -426,6 +432,7 @@ impl Plugin for SquadPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<MarkerJob>()
+            .add_message::<rc_game_core::AnchorGone>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadOptions>()
@@ -471,6 +478,7 @@ impl Plugin for SquadPlugin {
                     check_down,
                     ride_movers,
                     take_orders,
+                    anchors_gone,
                     gather_threats,
                     ammo::gather_boxes,
                     run_squad,
@@ -500,6 +508,29 @@ impl Plugin for SquadPlugin {
                     .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
             );
+    }
+}
+
+/// Markers whose anchor the level took away (a proximity mine gone with
+/// its barrel) are closed.
+fn anchors_gone(
+    mut gone: MessageReader<rc_game_core::AnchorGone>,
+    mut state: ResMut<SquadState>,
+    log: Option<Res<GameLog>>,
+) {
+    for g in gone.read() {
+        let Some(squad) = state.squad.as_mut() else {
+            continue;
+        };
+        let t = squad.time;
+        let events = squad.close_anchor(&g.anchor);
+        log_line(
+            &log,
+            format!("t={t:.2} markers at {} closed: {}", g.anchor, g.why),
+        );
+        for e in events {
+            log_line(&log, format!("t={t:.2} {e}"));
+        }
     }
 }
 
@@ -837,7 +868,14 @@ fn sync_bodies(
             .iter()
             .map(|m| m.settings.key.clone())
             .collect();
-        looks.load(paths.as_deref(), &keys, &log);
+        let job_anims: Vec<String> = squad
+            .settings
+            .jobs
+            .iter()
+            .map(|j| j.anim.clone())
+            .filter(|a| !a.is_empty())
+            .collect();
+        looks.load(paths.as_deref(), &keys, &job_anims, &log);
     }
     let mut assets = match (meshes, materials, images) {
         (Some(meshes), Some(materials), Some(images)) => Some((meshes, materials, images)),
@@ -1248,6 +1286,24 @@ fn run_squad(
                         marker_jobs.write(MarkerJob {
                             anchor: spot.anchor.clone(),
                             step,
+                            by: member.clone(),
+                        });
+                    }
+                }
+            }
+            // A proximity mine set and armed partway through the
+            // placing animation.
+            SquadEvent::AnchorStep { member, marker, arm } => {
+                log_line(&log, format!("t={:.2} {e}", squad.time));
+                if let Some((spot, _)) = squad.markers.iter().find(|(s, _)| &s.name == marker) {
+                    if !spot.anchor.is_empty() {
+                        marker_jobs.write(MarkerJob {
+                            anchor: spot.anchor.clone(),
+                            step: if *arm {
+                                MarkerJobStep::Armed
+                            } else {
+                                MarkerJobStep::Placed
+                            },
                             by: member.clone(),
                         });
                     }

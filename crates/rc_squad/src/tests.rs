@@ -714,6 +714,56 @@ fn demolition_charge_blows_after_its_fuse_and_triggers_the_anchor() {
 }
 
 #[test]
+fn proximity_mine_is_set_then_armed_during_the_animation() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    let mut s = spot(
+        "SquadMarkerSpot26",
+        "ProximityMine16",
+        "ProximityMine",
+        Vec3::new(500.0, 0.0, 0.0),
+    );
+    s.marker_class = "MarkerSetProximityMine".into();
+    squad.set_markers(vec![s]);
+    assert_eq!(squad.job_of(0).map(|j| j.key.as_str()), Some("proximity_mine"));
+    let ev = squad.command(Order::Marker(0), start, &world);
+    // Scorch: the marker's PreferredPawnClass (Commando62Delta).
+    assert!(
+        has(
+            &ev,
+            |e| matches!(e, SquadEvent::MarkerAssigned { member, .. } if member == "Scorch")
+        ),
+        "{ev:?}"
+    );
+    let mut all = Vec::new();
+    let mut started_at = None;
+    let mut steps = Vec::new();
+    for k in 0..(8.0 / 0.05) as usize {
+        let ev = run(&mut squad, start, 0.05, &world);
+        let t = k as f32 * 0.05;
+        for e in &ev {
+            match e {
+                SquadEvent::MarkerStarted { .. } => started_at = Some(t),
+                SquadEvent::AnchorStep { arm, .. } => steps.push((*arm, t)),
+                _ => {}
+            }
+        }
+        all.extend(ev);
+    }
+    let start_t = started_at.expect("work started");
+    assert_eq!(steps.len(), 2, "{all:?}");
+    assert!(!steps[0].0 && steps[1].0, "set first, then armed: {steps:?}");
+    // Set 0.73 s and armed 1.43 s into the 2.67 s animation.
+    assert!((steps[0].1 - start_t - 0.733).abs() < 0.11, "{steps:?} from {start_t}");
+    assert!((steps[1].1 - start_t - 1.433).abs() < 0.11, "{steps:?} from {start_t}");
+    assert!(has(&all, |e| matches!(e, SquadEvent::MarkerDone { .. })));
+    // The mine goes off by itself later: no blast or result from the job.
+    assert!(!has(&all, |e| matches!(e, SquadEvent::Blast { .. } | SquadEvent::JobResult { .. })));
+    assert_eq!(squad.markers[0].1, MarkerState::Done);
+}
+
+#[test]
 fn breach_fills_every_spot_and_starts_when_all_are_in_place() {
     let world = test_room();
     let start = leader_at(0.0, 0.0, 0.0);
@@ -898,8 +948,7 @@ fn job_settings_read_from_the_file() {
     let bacta = s.jobs.iter().find(|j| j.key == "bacta").unwrap();
     assert_eq!(bacta.work_time, 1.5);
     assert_eq!(bacta.result, JobResult::Heal);
-    let turret = s.jobs.last().unwrap();
-    assert_eq!(turret.key, "turret");
+    let turret = s.jobs.iter().find(|j| j.key == "turret").unwrap();
     assert_eq!(turret.matches, ["turret", "gun"]);
     assert_eq!(turret.kind, JobKind::Post);
     let err = SquadSettings::default()

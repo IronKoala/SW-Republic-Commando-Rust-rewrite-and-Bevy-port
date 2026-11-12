@@ -80,6 +80,14 @@ pub struct JobSettings {
     pub mount: bool,
     /// Seconds from the end of the work to the blast and the result.
     pub fuse: f32,
+    /// Once: the animation played while working (the marker's
+    /// `MarkerAnims`), "" for the usual standing one.
+    pub anim: String,
+    /// Once: seconds into the work when the anchor is set (`place_at`,
+    /// a proximity mine's `PlaceEvent`) and armed (`arm_at`, its
+    /// `ArmEvent`). The game sends these from its animation. Below 0: never.
+    pub place_at: f32,
+    pub arm_at: f32,
     /// A blast at the anchor when the fuse runs out: damage at the middle,
     /// falling to nothing at `blast_radius`. 0 = no blast.
     pub blast_damage: f32,
@@ -135,6 +143,9 @@ impl JobSettings {
             pullable: false,
             mount: false,
             fuse: 0.0,
+            anim: String::new(),
+            place_at: -1.0,
+            arm_at: -1.0,
             blast_damage: 0.0,
             blast_radius: 0.0,
             weapon: String::new(),
@@ -192,6 +203,15 @@ impl JobSettings {
                 }
                 if self.fuse > 0.0 {
                     s += &format!(", fuse {} s", self.fuse);
+                }
+                if !self.anim.is_empty() {
+                    s += &format!(", plays {}", self.anim);
+                }
+                if self.place_at >= 0.0 {
+                    s += &format!(", sets the anchor at {} s", self.place_at);
+                }
+                if self.arm_at >= 0.0 {
+                    s += &format!(", arms it at {} s", self.arm_at);
                 }
                 if self.blast_damage > 0.0 {
                     s += &format!(
@@ -316,6 +336,21 @@ pub fn default_jobs() -> Vec<JobSettings> {
     turret.pullable = true;
     turret.mount = true;
 
+    // Numbers from the game: MarkerSetProximityMine (PreferredPawnClass,
+    // MarkerAnims) and its animation SetProximityMine (80 frames at 30/s,
+    // MproxMinePlace at 0.275 of it, ProxMineArm at 0.5375).
+    let mut mine = JobSettings::new(
+        "proximity_mine",
+        "Proximity mine",
+        &["proximitymine"],
+        JobKind::Once,
+    );
+    mine.preferred = "Commando62Delta".into();
+    mine.anim = "SetProximityMine".into();
+    mine.work_time = 2.6667; // 80 / 30
+    mine.place_at = 0.7333; // 0.275 * 80 / 30
+    mine.arm_at = 1.4333; // 0.5375 * 80 / 30
+
     vec![
         bacta,
         demolition,
@@ -325,5 +360,6 @@ pub fn default_jobs() -> Vec<JobSettings> {
         grenade,
         anti_armour,
         turret,
+        mine,
     ]
 }

@@ -1349,6 +1349,14 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             .into_iter()
             .map(|b| b.export),
         );
+        // And proximity mines, which go when they explode.
+        mover_exports.extend(
+            rc_level::mines::read(&mut class_looks, pkg, data, &level, &mut |n: &str| {
+                mats.package(n)
+            })
+            .into_iter()
+            .map(|m| m.export),
+        );
     }
     ctx.stats.movers = movers.movers.len();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();

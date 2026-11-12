@@ -346,6 +346,13 @@ pub enum SquadEvent {
         marker: String,
         job: String,
     },
+    /// Partway through the work, the anchor is set (`arm` false) or
+    /// armed (`arm` true): a proximity mine's place and arm moments.
+    AnchorStep {
+        member: String,
+        marker: String,
+        arm: bool,
+    },
     /// A charge is set: the result comes in `seconds`.
     FuseLit {
         member: String,
@@ -515,6 +522,9 @@ impl fmt::Display for SquadEvent {
             }
             SquadEvent::Posted { member, marker, job } => {
                 write!(f, "{member} holds {marker} ({job}) until recalled")
+            }
+            SquadEvent::AnchorStep { member, marker, arm } => {
+                write!(f, "{member} {} the anchor of {marker}", if *arm { "arms" } else { "sets" })
             }
             SquadEvent::FuseLit { member, marker, seconds } => {
                 write!(f, "{member} set the charge at {marker}: {seconds:.1} s")
@@ -764,6 +774,33 @@ impl Squad {
             .into_iter()
             .find(|s| !s.is_empty())?;
         self.settings.jobs.iter().find(|j| j.fits(key))
+    }
+
+    /// The level took away the thing the markers with this `anchor` are
+    /// for (a proximity mine whose barrel blew up): those markers are done,
+    /// and anyone on the way to one of them is free again (the original's
+    /// `SquadMarker.MakeObsolete`).
+    pub fn close_anchor(&mut self, anchor: &str) -> Vec<SquadEvent> {
+        let mut events = Vec::new();
+        for k in 0..self.markers.len() {
+            if !self.markers[k].0.anchor.eq_ignore_ascii_case(anchor)
+                || self.markers[k].1 == MarkerState::Done
+            {
+                continue;
+            }
+            if let MarkerState::Assigned(i) = self.markers[k].1 {
+                if self.members[i].marker == Some(k) {
+                    self.members[i].marker = None;
+                    self.members[i].state = MemberState::Idle;
+                    events.push(SquadEvent::MarkerCancelled {
+                        member: self.members[i].settings.name.clone(),
+                        marker: format!("{} (its {anchor} is gone)", self.markers[k].0.name),
+                    });
+                }
+            }
+            self.markers[k].1 = MarkerState::Done;
+        }
+        events
     }
 
     /// Put in the map's markers, each named after its job.
@@ -1410,6 +1447,7 @@ impl Squad {
             self.tick_revive(i, dt, &mut events);
             // Marked jobs count down.
             if let MemberState::Working { left } = self.members[i].state {
+                self.anchor_steps(i, left, dt, &mut events);
                 let left = left - dt;
                 if left <= 0.0 {
                     self.finish_job(i, &mut events);
@@ -1590,6 +1628,27 @@ impl Squad {
             crouch: false,
             walk,
         };
+    }
+
+    /// The moments partway through a job's work when its anchor is set
+    /// and armed (`place_at`, `arm_at`), crossed between `left` and
+    /// `left - dt` seconds before the end.
+    fn anchor_steps(&self, i: usize, left: f32, dt: f32, events: &mut Vec<SquadEvent>) {
+        let Some(k) = self.members[i].marker else {
+            return;
+        };
+        let Some(job) = self.job_of(k) else { return };
+        let (before, after) = (job.work_time - left, job.work_time - left + dt);
+        for (at, arm) in [(job.place_at, false), (job.arm_at, true)] {
+            // The last frame of the work counts too (`after` may pass the end).
+            if at >= 0.0 && at >= before && at < after {
+                events.push(SquadEvent::AnchorStep {
+                    member: self.members[i].settings.name.clone(),
+                    marker: self.markers[k].0.name.clone(),
+                    arm,
+                });
+            }
+        }
     }
 
     /// Member `i` finished the work at its marker (and, for a group job,

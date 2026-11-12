@@ -75,6 +75,9 @@ pub struct MapCollision {
     /// Props weapons can break (`crate::breakables`). They are parts too,
     /// so their triangles can go when they break.
     pub breakables: Vec<crate::breakables::Breakable>,
+    /// Proximity mines (`crate::mines`). Parts too, so they can be taken
+    /// away when they go off.
+    pub mines: Vec<crate::mines::MineInfo>,
     /// Places to arrive at from another map: each `Teleporter`'s `Tag`,
     /// feet position and facing, as for `start`. A level address like
     /// `RAS_03B.ctm#FromA` names one by its tag.
@@ -380,6 +383,12 @@ pub fn load(
             .entry(b.export)
             .or_insert_with(|| (b.class.clone(), b.tag.clone()));
     }
+    let mines = crate::mines::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
+    for m in &mines {
+        parts
+            .entry(m.export)
+            .or_insert_with(|| (m.class.clone(), m.class.clone()));
+    }
     parts.retain(|a, _| !is_mover.contains(a));
     let mut part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // Ammo boxes, dropped onto what is below them.
@@ -480,6 +489,7 @@ pub fn load(
         part_triangles,
         parts,
         breakables,
+        mines,
         start,
         arrivals,
         ammo_boxes,

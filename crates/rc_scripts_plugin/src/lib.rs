@@ -57,6 +57,7 @@ pub mod cutscene;
 pub mod fx_factories;
 pub mod hud_blink;
 pub mod markers;
+pub mod mines;
 pub mod music;
 pub mod objectives;
 pub mod placed_emitters;
@@ -75,7 +76,7 @@ use rc_game_core::{
     RaiseEvent, TurretOrder,
 };
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
-use rc_level_plugin::{LevelBreakables, LevelMoverData, LevelParts};
+use rc_level_plugin::{LevelBreakables, LevelMines, LevelMoverData, LevelParts};
 use rc_level_viewer::draw::MoverPart;
 use rc_movers_plugin::{Happened, LevelMovers, MoverHappened};
 use rc_scripts::{Director, Effect, PlayerBody, Settings};
@@ -115,6 +116,7 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<projectiles::Projectiles>()
             .add_message::<TurretOrder>()
             .add_message::<rc_game_core::MarkerJob>()
+            .add_message::<rc_game_core::AnchorGone>()
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
@@ -143,7 +145,7 @@ impl Plugin for ScriptsPlugin {
                 (
                     bacta::heal,
                     bacta::zap,
-                    markers::run,
+                    (markers::run, mines::run).chain(),
                     breakables::shots,
                     breakables::blasts,
                     breakables::explode,
@@ -155,7 +157,7 @@ impl Plugin for ScriptsPlugin {
                     fx_factories::run,
                     placed_emitters::run,
                     projectiles::fly,
-                    breakables::show,
+                    (breakables::show, mines::show).chain(),
                     characters::cast,
                     sounds::play,
                     hide_parts,
@@ -275,6 +277,8 @@ pub struct LevelScript {
     pub breaking: breakables::Breakables,
     /// What weapons did to props.
     pub props: breakables::PropStats,
+    /// Proximity mines (see `mines.rs`).
+    pub mines: mines::Mines,
 }
 
 impl LevelScript {
@@ -297,6 +301,7 @@ impl LevelScript {
             breaking: breakables::Breakables::new(&[]),
             props: breakables::PropStats::default(),
             anchors: Vec::new(),
+            mines: mines::Mines::default(),
         }
     }
 }
@@ -469,6 +474,7 @@ fn build(
     loaded: Option<Res<Loaded>>,
     movers: Option<Res<LevelMoverData>>,
     breakable: Option<Res<LevelBreakables>>,
+    level_mines: Option<Res<LevelMines>>,
     mut gate: ResMut<LoadingGate>,
     paths: Res<GamePaths>,
     audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
@@ -485,6 +491,30 @@ fn build(
     director.add_breakables(&breakable);
     // Their explosions and sounds are read now, not at the first bang.
     breakables::preload(&breakable, &mut preload);
+    // Proximity mines, on their barrels.
+    let level_mines = level_mines.map(|m| m.0.clone()).unwrap_or_default();
+    mines::preload(&level_mines, &mut preload);
+    let mine_list = mines::Mines::new(&level_mines, &|name: &str| {
+        breakable
+            .iter()
+            .find(|b| b.name.eq_ignore_ascii_case(name))
+            .map(|b| b.export)
+    });
+    for m in &mine_list.list {
+        log.line(format!(
+            "mines: {} on {} ({}), marker {}: radius {} uu, alert {} s, arms in {} s, blast {} within {} uu{}",
+            m.info.name,
+            m.info.prop_to_destroy.as_deref().unwrap_or("nothing"),
+            if m.barrel.is_some() { "a prop that can break" } else { "NOT a prop the game can break" },
+            m.info.squad_marker.as_deref().unwrap_or("none"),
+            m.info.trigger_radius,
+            m.info.alert_time_limit,
+            m.info.armed.duration,
+            m.info.explode.damage,
+            m.info.explode.damage_radius,
+            m.info.explode.effect.as_ref().map(|e| format!(", effect {e}")).unwrap_or_default()
+        ));
+    }
     // Characters really walk and animate in the game: scripts wait for them.
     director.game_runs_characters = true;
     let places = characters::Places::new(places.clone());
@@ -652,6 +682,7 @@ fn build(
         stats: PlayStats::default(),
         breaking: breakables::Breakables::new(&breakable),
         props: breakables::PropStats::default(),
+        mines: mine_list,
     });
     let mission = objectives::MissionList::from_map(map);
     if let Some(m) = &mission {

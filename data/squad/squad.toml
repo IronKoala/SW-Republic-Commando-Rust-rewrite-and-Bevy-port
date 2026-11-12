@@ -380,6 +380,17 @@ kind = "post"
 pullable = "yes"          # game: MarkerTurretNative bCancelIfMembersNeeded
 mount = "yes"             # gets on the anchor and fires the turret (data/turrets/*.toml [auto]), not their own gun
 
+[job.proximity_mine]
+name = "Proximity mine"
+match = "proximitymine"   # MarkerSetProximityMine at a ProximityMine (geo_05c)
+kind = "once"
+preferred = "Commando62Delta"  # game: MarkerSetProximityMine PreferredPawnClass (Scorch)
+anim = "SetProximityMine"      # game: MarkerSetProximityMine MarkerAnims
+work_time = 2.6667        # game: SetProximityMine is 80 frames at 30/s
+place_at = 0.7333         # game: its MproxMinePlace notify, at 0.275 of the animation
+arm_at = 1.4333           # game: its ProxMineArm notify, at 0.5375
+result = "none"           # the mine goes off on its own (rc_scripts::mines)
+
 # The squad. `class` is the original's character class (CTCharacters),
 # `number` and `name` are what its HUD shows, `hud_slot` its place on the
 # HUD (SquadHUDSlot), and `slot` the formation slot above. `colour` is each
