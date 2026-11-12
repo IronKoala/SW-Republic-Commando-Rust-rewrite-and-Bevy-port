@@ -1,0 +1,43 @@
+# The droideka's twin arm blasters (DroidekaBlaster).
+#
+# The values are the original game's: class DroidekaBlaster (ctinventory.u,
+# parent CTWeaponRecharging) with DroidekaBlasterDefaults
+# (Properties/properties.u) on top, and its bolt DroidekaBlasterProj
+# (+Defaults). The droideka fires it in bursts of BurstCount 20; its four
+# muzzles (muzzle_L1, L2, R1, R2) take turns (Droideka.GetWeaponBoneFor).
+# How well it aims is the droideka's own business (its Accuracy).
+
+name = "DroidekaBlaster"  # game: ItemName
+
+[fire]
+mode = "automatic"        # game: FireMode 2
+shot_delay = 0.2          # game: DroidekaBlaster ShotDelay
+aim_error = 0
+offset = [57.4, 20, -6.56] # game: FPFireOffset (CTWeaponRecharging)
+
+[ammo]
+max_ammo = 100            # game: CTAmmoRecharging MaxAmmo
+recharge_rate = 100       # game: DroidekaBlasterAmmo RechargeRate (never runs dry: bCanReload false)
+
+[shot]
+kind = "bolt"
+accel = 60000             # game: AccelFactor (Projectile's default)
+max_speed = 5000          # game: DroidekaBlasterProj Speed and MaxSpeed
+life_span = 10            # game: DroidekaBlasterProj LifeSpan
+damage = 40               # game: DroidekaBlasterProjDefaults Damage
+damage_kind = "blaster"
+damage_type = "CTDamageEnergyDroids" # game: DroidekaBlasterProjDefaults MyDamageType
+
+[melee]
+range = 0                 # the droideka has no close-up hit
+damage = 0
+
+[sound]
+package = "gen_sound"
+fire = ["wep_GEN_droidekaFire_01"]   # game: DroidekaBlasterDefaults FireSound
+
+[model]
+package = "weapons"
+mesh = "DroidBlaster"     # placeholder: the blasters are part of the droideka's own model
+offset = [40, 12, -14]
+bolt_colour = [1.0, 0.1, 0.1]  # our choice, from the bolt light's hue 5, saturation 235 (red)

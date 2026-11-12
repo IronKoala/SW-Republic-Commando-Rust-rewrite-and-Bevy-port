@@ -630,6 +630,11 @@ fn every_enemy_file_reads_and_claims_its_classes() {
         Some("super_battle_droid")
     );
     assert_eq!(who("CloneCommando"), None);
+    assert_eq!(who("Droideka").as_deref(), Some("droideka"));
+    assert_eq!(
+        who("DwarfSpiderDroid").as_deref(),
+        Some("dwarf_spider_droid")
+    );
     // The clone troopers fight on the player's side.
     assert_eq!(who("CloneTrooper").as_deref(), Some("clone_trooper"));
     assert_eq!(who("CloneTrooperTM").as_deref(), Some("clone_trooper_tm"));
@@ -1951,4 +1956,90 @@ fn saves_from_before_placed_characters_still_load() {
     assert_eq!(back.len(), 1);
     steps(&mut again, 30);
     assert_eq!(again.fighters.len(), 1);
+}
+
+fn from_file(name: &str, start: StartState) -> Fighter {
+    let path = format!(
+        "{}/../../data/enemies/{name}.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).unwrap();
+    let params = AiParams::battle_droid().with_overrides(&text).unwrap();
+    Fighter::new(1, Arc::new(params), Vec3::ZERO, 0.0, start)
+}
+
+/// The droideka and the dwarf spider droid never move in a fight
+/// (StateDroidekaAttack / StateSpiderDroidAttack give no move goals), even
+/// when the enemy is far beyond the distance others close in to, and even
+/// when shot in the open.
+#[test]
+fn droideka_and_spider_hold_their_ground() {
+    let world = flat_floor(vec![]);
+    for name in ["droideka", "dwarf_spider_droid"] {
+        let mut f = from_file(name, StartState::Idle);
+        let mut events = Vec::new();
+        f.on_damaged(Some(Vec3::new(4000.0, 0.0, 84.0)), 0.0, &mut events);
+        let ev = run(&mut f, &world, Some(target_at(4000.0, 0.0)), 12.0);
+        assert!(
+            f.pawn.location.length_2d() < 5.0,
+            "{name} moved to {:?}",
+            f.pawn.location
+        );
+        assert!(
+            ev.iter().any(|(_, e)| matches!(e, AiEvent::Fire { .. })),
+            "{name} never fired"
+        );
+        assert_eq!(f.maneuver, Maneuver::Hold, "{name}");
+    }
+}
+
+/// The droideka fires bursts of 20, 0.2 s apart, with 1 s between bursts.
+#[test]
+fn droideka_fires_bursts_of_twenty() {
+    let world = flat_floor(vec![]);
+    let mut f = from_file("droideka", StartState::Idle);
+    let ev = run(&mut f, &world, Some(target_at(2000.0, 0.0)), 12.0);
+    let shots: Vec<f32> = ev
+        .iter()
+        .filter(|(_, e)| matches!(e, AiEvent::Fire { .. }))
+        .map(|(t, _)| *t)
+        .collect();
+    assert!(shots.len() >= 40, "{} shots", shots.len());
+    let gaps: Vec<f32> = shots.windows(2).map(|w| w[1] - w[0]).collect();
+    // 19 short gaps then one long one.
+    assert!(
+        gaps[..19].iter().all(|g| (g - 0.2).abs() < 0.05),
+        "{gaps:?}"
+    );
+    assert!((gaps[19] - 1.0).abs() < 0.05, "{gaps:?}");
+}
+
+/// The dwarf spider droid's cannon goes off 1.32 s into its Fire
+/// animation, then 3.18 s rest: one shot every 4.5 s.
+#[test]
+fn spider_cannon_waits_for_its_fire_animation() {
+    let world = flat_floor(vec![]);
+    let mut f = from_file("dwarf_spider_droid", StartState::Idle);
+    let ev = run(&mut f, &world, Some(target_at(2000.0, 0.0)), 15.0);
+    let shots: Vec<f32> = ev
+        .iter()
+        .filter(|(_, e)| matches!(e, AiEvent::Fire { .. }))
+        .map(|(t, _)| *t)
+        .collect();
+    assert!(shots.len() >= 2, "{shots:?}");
+    let attack = ev
+        .iter()
+        .find(|(_, e)| {
+            matches!(
+                e,
+                AiEvent::ModeChanged {
+                    to: Mode::Attack,
+                    ..
+                }
+            )
+        })
+        .map(|(t, _)| *t)
+        .expect("never attacked");
+    assert!((shots[0] - attack - 1.32).abs() < 0.1, "{attack} {shots:?}");
+    assert!((shots[1] - shots[0] - 4.5).abs() < 0.1, "{shots:?}");
 }

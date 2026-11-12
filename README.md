@@ -143,9 +143,24 @@ copy of the game.
   24 maps. They are now there from the moment the level starts, as in the
   original, with their own names, scripts and events, so the level
   scripts can find them: on geo_01a the Geonosian at the gunship door
-  and Rocky. Placed kinds the game doesn't have yet (droidekas, spider
-  droids, Wookiees, vehicles, ...) still don't appear. List them with
+  and Rocky; on geo_05b the intro droideka. Placed kinds the game doesn't
+  have yet (Wookiees, vehicles, ...) still don't appear. List them with
   `rc_placed_enemies` (an example in `rc_enemies`).
+
+- **Droidekas and dwarf spider droids appear and fight (tested in the
+  cloud sandbox by numbers, not yet on Windows or by eye).** The 9
+  droideka and 4 dwarf spider droid spawners on geo_04d, geo_05b and
+  geo_05c and geo_05b's placed intro droideka now make their droids, so
+  `SpiderDead` (geo_04d's next objective, geo_05b's spider door) and
+  `IntroDead` come. Both stand their ground and fire, as the original's
+  compiled attack code does: the droideka in bursts of 20 behind an
+  800-point shield, the spider droid one cannon shell (250 damage, 512 uu
+  blast) every 4.5 s. The intro droideka dies at the end of its scripted
+  `DroidekaIntro`, as the animation's ragdoll notify does in the engine.
+  Not done yet: the spider's missiles, knee-shield blocking, side steps,
+  electric proximity shock, scanner and lights; the droideka's visible
+  shield bubble, rolling sound, unfolding and lost arms; both death
+  explosions. Check: `rc_heavy_droid_check` (an example in `rc_enemies`).
 
 - **Clone troopers fight the droids (tested in the cloud sandbox by
   numbers, not yet on Windows or by eye).** geo_01a's 16 clone trooper
@@ -932,7 +947,7 @@ copy of the game.
   (slowly, 200 uu/s) instead of flying and dodging in the air, their wings
   are drawn with the body's skin, their beam is drawn as a tracer line,
   how fast the beam does its damage is our own guess, and the player can't
-  pick up their beam yet. Droidekas, dwarf spider droids, Phidna, drones,
+  pick up their beam yet. Phidna, drones,
   seeker droids and placed clone troopers still don't appear
   (`rc_enemy_spawners` lists them). Trandoshan scavenger droids move along the
   ground instead of flying, and don't blow up; slavers don't go berserk;

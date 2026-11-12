@@ -245,6 +245,9 @@ pub struct Fighter {
     // Shooting.
     burst_left: u32,
     next_shot: f32,
+    /// The firing animation has started winding up for the next burst
+    /// (`Combat::fire_wind_up`).
+    winding_up: bool,
     // Counters, for the log.
     pub shots_fired: u32,
     pub distance_walked: f32,
@@ -331,6 +334,7 @@ impl Fighter {
             wants_cover: false,
             next_search: 0.0,
             next_shot: 0.0,
+            winding_up: false,
             shots_fired: 0,
             distance_walked: 0.0,
             ally_in_way_since: None,
@@ -923,6 +927,16 @@ impl Fighter {
         if self.try_grenade(view, enemy, events) {
             return;
         }
+        // The droideka and the dwarf spider droid never move in a fight
+        // (`Combat::holds_ground`): they turn, aim and shoot where they are.
+        if c.holds_ground {
+            self.follower = None;
+            self.wants_cover = false;
+            if self.maneuver != Maneuver::Hold {
+                self.set_maneuver(Maneuver::Hold, now, events);
+            }
+            return;
+        }
         // A melee fighter rushes in when the enemy is close enough (always,
         // if it has no gun), following it as it moves.
         if c.melee_range > 0.0
@@ -1252,6 +1266,13 @@ impl Fighter {
         if in_cover && self.pawn.crouched {
             return; // stand up first
         }
+        // A burst's first shot waits for the firing animation to wind up.
+        if c.fire_wind_up > 0.0 && self.burst_left == c.burst_count && !self.winding_up {
+            self.winding_up = true;
+            self.next_shot = now + c.fire_wind_up;
+            return;
+        }
+        self.winding_up = false;
         let (fwd, right) = rc_movement::axes(self.facing);
         let origin = self.eye() - Vec3::new(0.0, 0.0, 10.0) + fwd * 30.0 + right * 10.0;
         // Aim at the middle of the body; if that's hidden (behind a wall

@@ -1670,6 +1670,7 @@ fn animate(
     mut droids: Query<(&mut Droid, Option<&HeldWeapon>)>,
     mut held: Query<&mut Transform, Without<Droid>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
+    mut damage: MessageWriter<Damage>,
 ) {
     let dt = time.delta_secs();
     // Held weapons to move onto their bones.
@@ -1727,7 +1728,27 @@ fn animate(
             }
         }
         if let Some(sa) = d.scripted.as_mut() {
+            let before = sa.frame;
             sa.advance(dt);
+            // An `AnimNotify_GoRagdoll` passed: the engine kills a living
+            // pawn there with 1,000,000 damage (see `DroidLook::ragdoll_at`).
+            if f.mode != Mode::Dead {
+                let last = (sa.clip.num_frames - 1.0).max(1.0);
+                let (from, to) = (before / last, sa.frame / last);
+                let passed = tl
+                    .and_then(|t| t.look.ragdoll_at.get(&sa.name.to_ascii_lowercase()))
+                    .is_some_and(|ts| ts.iter().any(|&t| from < t && t <= to + 1e-4));
+                if passed {
+                    damage.write(Damage {
+                        target: e,
+                        amount: 1_000_000.0,
+                        kind: rc_combat::DamageKind::Other,
+                        instigator: None,
+                        point: Vec3::ZERO,
+                        direction: Vec3::ZERO,
+                    });
+                }
+            }
             // Blend into the script's animation as into any other.
             if d.showing_script {
                 d.blend.advance(dt);

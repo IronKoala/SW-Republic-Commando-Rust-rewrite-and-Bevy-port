@@ -2996,7 +2996,14 @@ matches any ending) and its `body` (droid or organic). When a map loads,
 each spawner's `Prototype` class is matched to a type, and that spawner's
 enemies get the type's health, size, speed, weapon, accuracy, look and
 sounds. A spawner whose class no file claims (squad mates, turrets) is
-left to other parts and logged. `combat.uses_cover = false` makes an enemy
+left to other parts and logged. `combat.holds_ground = true` makes an
+enemy never move once it fights: no cover, no closing in, no backing off
+(droidekas and dwarf spider droids, whose attack states in the original
+give only turn, aim, shoot and wait goals). `combat.fire_wind_up` delays a
+burst's first shot while the firing animation winds up (the spider droid's
+cannon goes off 1.32 s into its Fire animation). An `AnimNotify_GoRagdoll`
+in an animation a level script plays on an enemy kills it there, as the
+engine's notify does (`DroidLook::ragdoll_at`). `combat.uses_cover = false` makes an enemy
 walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
