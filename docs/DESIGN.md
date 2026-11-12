@@ -2820,11 +2820,30 @@ decompiled is kept in the repository) and is copied step by step in
   plays, and the room music comes back when they end. A room state a
   script sets during an episode waits for its end.
 
-Where the port differs: "touching" a battle volume is tested with the
-player's or enemy's centre point and the point 50 units above it (the
-engine uses the collision cylinder); the port doesn't tell being down from being dead
-yet (it has one "down" flag), so the "lost" end isn't reached. The fade curve shapes (linear, sine, log,
-inverse log) are still our guess. Not done: the death stinger,
+- "In a battle volume" is the engine's `IsInVolume`: the volume is in the
+  character's `Touching` list. `ULevel::MoveActor` (Engine.dll 0x1043fb30)
+  fills that list by sweeping the character's collision box, half-size
+  `CollisionRadius`, `CollisionRadius`, `CollisionHeight` (the inlined
+  `GetCylinderExtent`, 0x1033d570), so any part of the body counts. The
+  port tests the same box (smaller while crouched) against the volume's
+  faces (`BlockingVolume::overlaps_box`). Distances are measured from the
+  body's centre (`Pawn.Location`) for the player and the enemies alike.
+  Factories belong to a volume when their location is inside it
+  (`Encompasses`).
+- Fades follow the engine's fader (set up at 0x103d1cf0, advanced at
+  0x103d2851, read at 0x103d1dc0). A fade moves a position from where the
+  sound is now to the target in the fade's time, and the loudness is a
+  curve of that position: linear `x`; sine `sin(x * pi / 2)`; log
+  `10^((100x - 100) * 0.05)` (a decibel ramp from -100 dB to 0 dB);
+  inverse log `2x - 10^((100x - 100) * 0.05)`. Sine starts from
+  `asin(now) * 2 / pi`, so a fade that begins part way does not jump. A
+  piece starts silent and fades in with its own fade-in; stopping it uses
+  its own fade-out (overlays too, as 0x103aac30 does).
+
+Where the port differs: the port doesn't tell being down from being dead
+yet (it has one "down" flag), so the "lost" end isn't reached. Room music
+volumes still use the feet and the point 50 units above them (not part of
+this work, not checked against the engine). Not done: the death stinger,
 debriefing, credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
@@ -3975,11 +3994,30 @@ decompiled is kept in the repository) and is copied step by step in
   plays, and the room music comes back when they end. A room state a
   script sets during an episode waits for its end.
 
-Where the port differs: "touching" a battle volume is tested with the
-player's or enemy's centre point and the point 50 units above it (the
-engine uses the collision cylinder); the port doesn't tell being down from being dead
-yet (it has one "down" flag), so the "lost" end isn't reached. The fade curve shapes (linear, sine, log,
-inverse log) are still our guess. Not done: the death stinger,
+- "In a battle volume" is the engine's `IsInVolume`: the volume is in the
+  character's `Touching` list. `ULevel::MoveActor` (Engine.dll 0x1043fb30)
+  fills that list by sweeping the character's collision box, half-size
+  `CollisionRadius`, `CollisionRadius`, `CollisionHeight` (the inlined
+  `GetCylinderExtent`, 0x1033d570), so any part of the body counts. The
+  port tests the same box (smaller while crouched) against the volume's
+  faces (`BlockingVolume::overlaps_box`). Distances are measured from the
+  body's centre (`Pawn.Location`) for the player and the enemies alike.
+  Factories belong to a volume when their location is inside it
+  (`Encompasses`).
+- Fades follow the engine's fader (set up at 0x103d1cf0, advanced at
+  0x103d2851, read at 0x103d1dc0). A fade moves a position from where the
+  sound is now to the target in the fade's time, and the loudness is a
+  curve of that position: linear `x`; sine `sin(x * pi / 2)`; log
+  `10^((100x - 100) * 0.05)` (a decibel ramp from -100 dB to 0 dB);
+  inverse log `2x - 10^((100x - 100) * 0.05)`. Sine starts from
+  `asin(now) * 2 / pi`, so a fade that begins part way does not jump. A
+  piece starts silent and fades in with its own fade-in; stopping it uses
+  its own fade-out (overlays too, as 0x103aac30 does).
+
+Where the port differs: the port doesn't tell being down from being dead
+yet (it has one "down" flag), so the "lost" end isn't reached. Room music
+volumes still use the feet and the point 50 units above them (not part of
+this work, not checked against the engine). Not done: the death stinger,
 debriefing, credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,

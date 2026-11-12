@@ -486,6 +486,25 @@ fn fade_shapes_run_from_zero_to_one() {
         assert!(s.gain(0.0).abs() < 1e-5, "{s:?}");
         assert!((s.gain(1.0) - 1.0).abs() < 1e-5, "{s:?}");
     }
-    assert!(FadeShape::Log.gain(0.2) > 0.2);
-    assert!(FadeShape::LogInverse.gain(0.2) < 0.2);
+    // Engine.dll's curves: "log" is 100 decibels spread evenly over the
+    // fade (quiet for most of it), "inverse log" is 2t minus that, held at
+    // full once it gets there (just past half way).
+    assert!((FadeShape::Log.gain(0.5) - 10f32.powf(-2.5)).abs() < 1e-5);
+    assert!((FadeShape::LogInverse.gain(0.25) - (0.5 - 10f32.powf(-3.75))).abs() < 1e-5);
+    assert_eq!(FadeShape::LogInverse.gain(0.8), 1.0);
+    assert!((FadeShape::Sine.gain(0.5) - (std::f32::consts::FRAC_PI_4).sin()).abs() < 1e-5);
+}
+
+#[test]
+fn a_fade_out_starts_from_the_current_loudness() {
+    // Half way into a sine fade in, then a 1 s sine fade out: the
+    // position goes back from asin(v) * 2/pi to 0.
+    let mut f = Fader::at(0.0);
+    f.start(1.0, 2.0, FadeShape::Sine);
+    f.advance(1.0);
+    let v = f.value();
+    f.start(0.0, 1.0, FadeShape::Sine);
+    assert!((f.value() - v).abs() < 1e-6);
+    f.advance(0.25);
+    assert!((f.value() - (0.375f32 * std::f32::consts::FRAC_PI_2).sin()).abs() < 1e-4);
 }

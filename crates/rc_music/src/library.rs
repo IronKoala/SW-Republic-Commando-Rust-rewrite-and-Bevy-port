@@ -52,21 +52,131 @@ impl FadeShape {
         }
     }
 
-    /// Loudness (0 to 1) a fraction `t` (0 to 1) of the way into a fade in.
-    /// A fade out plays the same curve backwards: `gain(1 - t)`.
-    ///
-    /// The engine's exact curves aren't known (its code is native). These
-    /// are the usual meanings: `Log` rises quickly then levels off,
-    /// `LogInverse` starts slowly then rises quickly, `Sine` is a quarter
-    /// sine wave.
-    pub fn gain(self, t: f32) -> f32 {
-        let t = t.clamp(0.0, 1.0);
+    /// The engine's curve from a fader position to a loudness (Engine.dll
+    /// 0x103d1dc0, which calls 0x103d1b70, 0x103d1c50 and 0x103d1ca0).
+    /// Positions at or past the ends give 0 or 1 (except linear, which
+    /// passes the position on unchanged).
+    pub fn curve(self, x: f32) -> f32 {
         match self {
-            FadeShape::Linear => t,
-            FadeShape::Sine => (t * std::f32::consts::FRAC_PI_2).sin(),
-            FadeShape::Log => (1.0 + 9.0 * t).log10(),
-            FadeShape::LogInverse => (10f32.powf(t) - 1.0) / 9.0,
+            FadeShape::Linear => x,
+            _ if x >= 1.0 => 1.0,
+            _ if x <= 0.0 => 0.0,
+            // sin(x * pi/2)
+            FadeShape::Sine => (x * std::f32::consts::FRAC_PI_2).sin(),
+            // 10 ^ ((x * 100 - 100) * 0.05): a fade of 100 decibels.
+            FadeShape::Log => db_curve(x),
+            // 2x - the "log" curve; it goes over 1 past x = 0.5, and the
+            // fader then holds it at its target (see [`Fader`]).
+            FadeShape::LogInverse => 2.0 * x - db_curve(x),
         }
+    }
+
+    /// The engine's way back from a loudness to a fader position, used
+    /// when a fade starts (Engine.dll 0x103d1cf0, which calls 0x103d1b30,
+    /// 0x103d1bb0 and 0x103d1c00). For "sine" it is the true inverse
+    /// (`asin(v) * 2/pi`); for "log" and "inverse log" the engine calls the
+    /// same functions as [`FadeShape::curve`], so a fade between 0 and 1
+    /// runs the position from 0 to 1 (or 1 to 0).
+    pub fn position(self, v: f32) -> f32 {
+        match self {
+            FadeShape::Linear => v,
+            _ if v >= 1.0 => 1.0,
+            _ if v <= 0.0 => 0.0,
+            FadeShape::Sine => v.asin() * std::f32::consts::FRAC_2_PI,
+            FadeShape::Log => db_curve(v),
+            FadeShape::LogInverse => 2.0 * v - db_curve(v),
+        }
+    }
+
+    /// Loudness a fraction `t` (0 to 1) of the way into a fade in from
+    /// silence to full: what a [`Fader`] gives.
+    pub fn gain(self, t: f32) -> f32 {
+        let mut f = Fader::at(0.0);
+        f.start(1.0, 1.0, self);
+        f.advance(t.clamp(0.0, 1.0));
+        f.value()
+    }
+}
+
+fn db_curve(x: f32) -> f32 {
+    10f32.powf((x * 100.0 - 100.0) * 0.05)
+}
+
+/// The engine's music fader (Engine.dll: set up at 0x103d1cf0, moved on and
+/// read at 0x103d2851 and 0x103d1dc0). A fade moves a position at a steady
+/// rate from `position(current)` to `position(target)` over its time; the
+/// loudness is `curve(position)`, never past the target on the side it is
+/// heading (going up it stops at the target; going down it stops at it).
+/// Pieces start at 0 and fade to 1; their own loudness multiplies this.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fader {
+    pos: f32,
+    end: f32,
+    rate: f32,
+    value: f32,
+    target: f32,
+    shape: FadeShape,
+}
+
+impl Fader {
+    /// At `value`, not fading.
+    pub fn at(value: f32) -> Fader {
+        Fader {
+            pos: -1.0,
+            end: -1.0,
+            rate: 0.0,
+            value,
+            target: value,
+            shape: FadeShape::Linear,
+        }
+    }
+
+    /// Fade from where it is to `target` over `seconds` (0: at once).
+    pub fn start(&mut self, target: f32, seconds: f32, shape: FadeShape) {
+        self.target = target;
+        self.shape = shape;
+        if seconds == 0.0 {
+            self.pos = -1.0;
+            self.end = -1.0;
+            self.rate = 0.0;
+            self.value = target;
+            return;
+        }
+        self.end = shape.position(target);
+        self.pos = shape.position(self.value);
+        self.rate = (self.end - self.pos) / seconds;
+    }
+
+    /// Move on by `dt` seconds.
+    pub fn advance(&mut self, dt: f32) {
+        if self.value == self.target {
+            return;
+        }
+        self.pos += self.rate * dt;
+        if self.rate > 0.0 {
+            if self.pos > self.end {
+                self.pos = self.end;
+            }
+        } else if self.end > self.pos {
+            self.pos = self.end;
+        }
+        let mut v = self.shape.curve(self.pos);
+        if self.rate > 0.0 {
+            if v > self.target {
+                v = self.target;
+            }
+        } else if self.target > v {
+            v = self.target;
+        }
+        self.value = v;
+    }
+
+    pub fn value(&self) -> f32 {
+        self.value
+    }
+
+    pub fn target(&self) -> f32 {
+        self.target
     }
 }
 

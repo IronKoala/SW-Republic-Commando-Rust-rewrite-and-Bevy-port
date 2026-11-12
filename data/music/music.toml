@@ -10,9 +10,6 @@
 # - menu music: each menu's BackgroundMusic in XInterfaceCTMenus.u
 # See "Music" in docs/DESIGN.md.
 
-# Fade, in seconds, for room overlays cut short by a fight or a script.
-overlay_stop_fade = 1.0
-
 # The "player down" loop, for levels whose battle music doesn't name one
 # (every battle group in the game names this same piece).
 player_down = "musGEN_playerincap_lp"

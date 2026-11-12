@@ -873,7 +873,8 @@ copy of the game.
   music starts and ends, including the 28 battle volumes in 17 Geonosis
   and Kashyyyk maps, follows the original engine's own code (since
   2026-11-12; checked by the music tests in the cloud, not yet heard on
-  Windows). Our guess: the fade curves. Not done: the death stinger, debriefing, credits and title-card
+  Windows). Fade curves and the "inside a battle volume" test (the whole
+  body, not its centre) come from the engine's code too. Not done: the death stinger, debriefing, credits and title-card
   music, music in save games.
 - 13 "streamed" ambient loops for the RAS level name files that don't
   exist in the PC install. `SoundMultiple` groups (a set of takes the game

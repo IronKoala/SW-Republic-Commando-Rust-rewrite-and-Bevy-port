@@ -56,8 +56,10 @@ pub enum MusicCue {
 pub struct MusicThreat {
     /// Stays the same while it lives (a fight remembers its enemies).
     pub id: u64,
-    /// Where it stands, in Unreal units.
+    /// Its centre, in Unreal units.
     pub at: [f32; 3],
+    /// Half-size of its collision box (radius, radius, height).
+    pub extent: [f32; 3],
     /// It has seen or heard the squad.
     pub engaged: bool,
 }

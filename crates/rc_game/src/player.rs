@@ -100,6 +100,7 @@ fn publish_pawn(
     if let Ok(b) = bodies.single() {
         let now = rc_game_core::PlayerPawn {
             centre: arr(b.pawn.location),
+            extent: arr(b.pawn.extent()),
             yaw: b.yaw,
             pitch: b.pitch,
         };

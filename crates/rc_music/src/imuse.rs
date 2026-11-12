@@ -169,8 +169,6 @@ pub mod engine {
 /// Our choices where the game's data says nothing (see `data/music/music.toml`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tuning {
-    /// Fade for the overlay layer when a fight or a script stops it.
-    pub overlay_stop_fade: f32,
     /// The "player down" piece when the battle music names none.
     pub player_down: String,
 }
@@ -178,7 +176,6 @@ pub struct Tuning {
 impl Default for Tuning {
     fn default() -> Self {
         Tuning {
-            overlay_stop_fade: 1.0,
             player_down: "musGEN_playerincap_lp".into(),
         }
     }
@@ -390,12 +387,11 @@ impl Imuse {
         }
     }
 
+    /// The overlay fades out with its own fade-out time and shape: the
+    /// engine fades every other playing piece that way when it starts one
+    /// (Engine.dll 0x103aac30).
     fn stop_overlays(&mut self) {
-        let fade = Fade {
-            seconds: self.tuning.overlay_stop_fade,
-            ..Fade::NONE
-        };
-        self.stop(Layer::Overlay, Some(fade));
+        self.stop(Layer::Overlay, None);
         if let Some(o) = &mut self.overlays {
             o.next_at = None;
         }

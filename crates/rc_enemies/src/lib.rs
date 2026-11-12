@@ -979,9 +979,11 @@ fn tell_music(
     let threats_now = fight.battle.alive().filter(|f| !f.params.kind.republic());
     threats.0.extend(threats_now.map(|f| {
         let at = f.pawn.location;
+        let half = f.pawn.extent();
         rc_game_core::MusicThreat {
             id: f.id as u64,
             at: [at.x, at.y, at.z],
+            extent: [half.x, half.y, half.z],
             engaged: matches!(f.mode, Mode::Alerted | Mode::Attack),
         }
     }));
