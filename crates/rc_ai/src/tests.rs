@@ -546,7 +546,10 @@ fn clone_troopers_and_droids_fight_each_other_not_the_player() {
     alone.made_by.push(0);
     for _ in 0..60 {
         let ev = alone.step_with(1.0 / 30.0, &world, Some(target_at(800.0, 0.0)), &[]);
-        assert!(fire_directions(&ev).is_empty(), "a trooper fired at the player");
+        assert!(
+            fire_directions(&ev).is_empty(),
+            "a trooper fired at the player"
+        );
     }
     assert!(!alone.in_fight());
 }
@@ -834,6 +837,7 @@ fn tagged_factory(tag: &str, x: f32) -> Factory {
             start_state: StartState::StationaryAttack,
             team: None,
             script: Some(format!("{tag}AI")),
+            ..Default::default()
         },
         ..Default::default()
     }
@@ -1434,6 +1438,7 @@ fn placed(name: &str, x: f32) -> Factory {
             start_state: StartState::Idle,
             team: None,
             script: Some(format!("{name}AI")),
+            ..Default::default()
         },
         placed: true,
         ..Default::default()

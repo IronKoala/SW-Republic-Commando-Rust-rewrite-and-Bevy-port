@@ -23,6 +23,7 @@
 //! Everything it does is logged to the game log with the prefix `enemies:`.
 
 pub mod look;
+mod patrol;
 pub mod save;
 pub mod scripted;
 
@@ -32,12 +33,12 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
-use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
     Hittable, MeleeAttack, Shield, ShotLanded, Stunned, Team, ThrowGrenade,
 };
+use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -81,6 +82,7 @@ impl Plugin for EnemiesPlugin {
                     hear_level,
                     scripted::set_collision,
                     scripted::follow_orders,
+                    patrol::walk,
                     think,
                     place_droids,
                 )
@@ -138,6 +140,9 @@ pub struct Fight {
     pub script_waits: HashMap<u32, (String, usize)>,
     /// Droids that finished a script's order this frame.
     pub script_done: Vec<u32>,
+    /// Fighters walking a patrol route, by id (see `patrol.rs`).
+    pub patrols: HashMap<u32, rc_ai::PatrolRun>,
+    patrol_rng: rc_ai::Rng,
 }
 
 /// Counts for the log and for tests.
@@ -190,6 +195,8 @@ impl Fight {
             queued: Vec::new(),
             script_waits: HashMap::new(),
             script_done: Vec::new(),
+            patrols: HashMap::new(),
+            patrol_rng: rc_ai::Rng::new(11),
         }
     }
 }
@@ -555,11 +562,23 @@ fn load_fight(
         .and_then(|data| {
             let pkg = Package::parse(&data).map_err(|e| e.to_string())?;
             let nav = NavGraph::from_map(&pkg, &data)?;
-            let factories = rc_ai::read_factories(&pkg, &data)?;
+            let mut factories = rc_ai::read_factories(&pkg, &data)?;
             // Characters placed straight in the map. Without the game's
             // classes we can't tell which actors are characters.
             let placed = match classes.get(&paths, &log) {
-                Some(lib) => placed_enemies(&pkg, &data, &lib, &types)?,
+                Some(lib) => {
+                    // Patrol points name a node; where a character walks
+                    // to depends on the node's class (`GetAnchor`).
+                    let is_a = |class: &str, base: &str| {
+                        lib.chain(class)
+                            .iter()
+                            .any(|c| c.eq_ignore_ascii_case(base))
+                    };
+                    for n in rc_ai::resolve_patrol_anchors(&pkg, &data, &mut factories, &is_a) {
+                        log.line(format!("{PART}: patrols: {n}"));
+                    }
+                    placed_enemies(&pkg, &data, &lib, &types)?
+                }
                 None => (
                     Vec::new(),
                     vec!["no class library: placed characters left out".into()],
@@ -934,7 +953,11 @@ fn summary(f: &Fight, log: &GameLog) {
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
-    let clones = f.battle.alive().filter(|f| f.params.kind.republic()).count();
+    let clones = f
+        .battle
+        .alive()
+        .filter(|f| f.params.kind.republic())
+        .count();
     if clones > 0 || s.clones_destroyed > 0 {
         log.line(format!(
             "{PART}: t={:.1}s clone troopers: {clones} alive, {} destroyed; {} clone shots, {} hit droids, {} hit other clones by mistake; {} droid bolts hit clones",
@@ -1130,6 +1153,16 @@ fn think(
                 // What the level's scripts call it, and the script it
                 // follows.
                 let o = fight.battle.offspring(id).unwrap_or_default();
+                if !o.patrol.is_empty() {
+                    log.line(format!(
+                        "{PART}: t={now:.1}s droid {id} walks a patrol route of {} points ({:?})",
+                        o.patrol.len(),
+                        o.patrol_mode
+                    ));
+                    fight
+                        .patrols
+                        .insert(id, rc_ai::PatrolRun::new(o.patrol.clone(), o.patrol_mode));
+                }
                 e.insert(ScriptTags {
                     tag: o.tag,
                     script: o.script,
@@ -1272,7 +1305,9 @@ fn think(
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
                         }
-                        log.line(format!("{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"));
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"
+                        ));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: {} -> {}",

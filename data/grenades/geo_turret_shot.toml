@@ -1,0 +1,35 @@
+# The Geonosian sonic turret's shot (GeoTurretProj): flies straight, with
+# no fall, and goes off on touching anything.
+#
+# See dc17m_antiarmor_round.toml for how grenade files work. "game:" values
+# are GeoTurretProj (ctinventory.u) and its parent CTProjExplosive.
+# GeoTurretProjDefaults (properties.u) changes nothing here.
+
+name = "Geonosian Turret Shot"
+
+[ammo]
+max_count = 1             # not carried by hand; the weapon's ammo counts
+
+[throw]
+speed = 5000              # game: GeoTurretProj Speed and MaxSpeed (the weapon's shot.speed sets it)
+
+[fuse]
+time = 10                 # game: GeoTurretProj FuseTime (and LifeSpan 10)
+after_impact = 1          # game: CTProjExplosive PostImpactFuseTime
+on_actor = true           # game: bActorDetonate
+on_world = true           # game: bWorldDetonate
+
+[flight]
+bounce = 1                # game: GeoTurretProj BounceDampening
+actor_bounce = 0.05       # game: CTProjExplosive ActorBounceDampening
+rest_speed = 20           # game: CTProjExplosive RestSpeed
+gravity = 0               # game: GeoTurretProj Physics 6 (PHYS_Projectile: no fall)
+
+[blast]
+damage = 75               # game: GeoTurretProj Damage
+radius = 256              # game: GeoTurretProj DamageRadius
+damage_type = "CTDamageEnergy" # game: GeoTurretProj MyDamageType
+damage_kind = "blaster"
+
+[model]
+blast_colour = [0.6, 0.9, 0.4]  # our choice: the shot's look (its particle effect) isn't read yet

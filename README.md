@@ -794,7 +794,7 @@ copy of the game.
 - Turrets: squad mates on turrets say nothing (no turret voice lines
   yet), stand still in their usual pose, and are held where the player's
   body goes on that turret (not compared with the original); the Rishi
-  ceiling turrets and Geonosis anti-air turrets aren't done, and only the
+  ceiling turrets aren't done, and only the
   core ship turrets can be destroyed (no explosion or broken pieces yet).
   The last level's ending also needs the
   rockets that hit the ship, which aren't done.

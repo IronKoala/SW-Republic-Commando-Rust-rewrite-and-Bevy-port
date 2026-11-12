@@ -204,6 +204,10 @@ pub struct LevelTurrets {
     use_taken: bool,
     /// Character gunners: when each turret last fired, seconds.
     last_shot: Vec<f32>,
+    /// Character gunners: when each turret began firing since it last
+    /// cooled down, and when it began cooling down (`BeginFireTime`,
+    /// `BeginCooldownTime`; see `rc_turrets::fire_cycle`).
+    cycles: Vec<(Option<f32>, Option<f32>)>,
     /// Squad mates on turrets: each one's entity, by turret.
     squad_gunners: HashMap<usize, Entity>,
     /// Automatic turrets: when each was last switched on, seconds (for its
@@ -290,6 +294,7 @@ impl LevelTurrets {
             offered: None,
             use_taken: false,
             last_shot: vec![f32::NEG_INFINITY; n],
+            cycles: vec![(None, None); n],
             squad_gunners: HashMap::new(),
             switched_on: vec![f32::NEG_INFINITY; n],
             time: 0.0,
@@ -567,6 +572,7 @@ fn load(
         offered: None,
         use_taken: false,
         last_shot: vec![f32::NEG_INFINITY; n],
+        cycles: vec![(None, None); n],
         squad_gunners: HashMap::new(),
         switched_on: vec![f32::NEG_INFINITY; n],
         time: 0.0,
@@ -1173,7 +1179,12 @@ fn characters(
                     Err(_) => (who, e, None, true, true),
                 }
             }
-            _ => continue,
+            _ => {
+                // Nobody works it: the next gunner starts afresh (the
+                // original's `AutoTurret` state does on entering).
+                lt.cycles[i] = (None, None);
+                continue;
+            }
         };
         if dead {
             let name = lt.list[i].place.name.clone();
@@ -1229,7 +1240,19 @@ fn characters(
             continue;
         };
         lt.list[i].turn_toward(pivot, target, dt);
-        if now - lt.last_shot[i] < p.auto.shot_delay {
+        let (mut since, mut cooling) = lt.cycles[i];
+        let mut last = lt.last_shot[i];
+        let fire = rc_turrets::fire_cycle(
+            &mut since,
+            &mut cooling,
+            &mut last,
+            now,
+            p.auto.shot_delay,
+            p.auto.fire_for,
+            p.auto.cool_down,
+        );
+        lt.cycles[i] = (since, cooling);
+        if !fire {
             continue;
         }
         // From the muzzles; from the gunner with no model.

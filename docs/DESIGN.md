@@ -3136,6 +3136,33 @@ rc_enemies` runs the plugin with the real combat plugin in a test room: a
 droid spawns, spots the player in under a second, fires bursts that
 sometimes hit, and dies to the player's DC-17.
 
+### Patrol routes
+
+**What the original does.** A spawner can give each character it makes a
+patrol route (`PatrolRouteFromFactory`, `PatrolModeFromFactory`). The
+walking is compiled code, read from CTGame.dll `UStatePatrol`
+(decompiled locally for reference, nothing committed): on starting it
+waits 0.2 s; for each point it goes to the point's node's anchor
+(`GetAnchor`: a navigation point is its own anchor, a turret its first
+exit spot `NavPts[0]`), running if `RunToNode`, turns to the node's
+facing if `OrientToNode`, waits `PauseTime`, plays `Animation`
+`NumAnimLoops` times (at least once), and at its next update sends the
+point's `Event`. Modes: loop, ping-pong, random (never the same point
+twice running), once.
+
+**How we split it.** `rc_ai::spawns` reads the routes and
+`resolve_patrol_anchors` finds each node's anchor; `rc_ai::patrol::
+PatrolRun` turns a route into steps (move, face, wait, animation, event,
+invulnerable). `rc_enemies::patrol::walk` gives those steps to the
+character as script goals and sends the events to the level scripts. A
+character's level script (`ScriptedSequence`) goes first: the route waits
+while the script holds the character.
+
+**Not done.** `ShootWhileMoving` and `PatrolPriority` (the route always
+wins until done), nodes that are characters or bacta dispensers (their
+anchors aren't read; the character does that point where it stands, and the map is noted in the log), and patrols
+aren't saved.
+
 ## Weapons, shots and damage (`rc_combat`, `rc_shoot`)
 
 `rc_combat` is the game's weapons and health, as a Bevy plugin
@@ -5119,6 +5146,38 @@ fire every 0.05 s.
 it (the original asks for the crosshair on it). The Trandoshan turret's
 four barrels fire one after another for a character gunner. The turret
 weapons' first-person offsets and the E-Web's reload time are guesses.
+
+### Geonosis turrets (geo_03c sonic turret, geo_04b anti-air turret)
+
+**Sonic turret.** `SonicTurret` (CTCharacters.u) is a `Turret` with the
+values in `data/turrets/sonic_turret.toml` (from SonicTurretDefaults in
+Properties.u and the class defaults: speed 20000, yaw +-16384, lowest
+pitch -4097, collision 190 x 125). Its gun is `GeoTurret`
+(`data/weapons/geo_turret.toml`): an explosive shot `GeoTurretProj`
+(`data/grenades/geo_turret_shot.toml`, speed 5000, damage 75 in 256
+units) every 2.1 s; its ammo never runs out (`DeductAmmo` is empty). A
+character on it (`state AutoTurret` sets `bIsAuto`) fires for
+`TimeUntilCooldown` 4.2 s, then waits `CooldownDuration` 2 s
+(`Turret.Fire`): `rc_turrets::fire_cycle`, keyed `fire_for` and
+`cool_down` in the `[auto]` table.
+
+**The geo_03c gunner.** The spawner tagged `SpawnTurretGunner` gives its
+Geonosian a patrol route of one point (the turret `SonicTurret1`, run
+there, then send `GunnerGetOnTurret`); its script `Gunner` waits for that
+event and then `AttachToTurret SonicTurret01`. Patrol routes are in the
+enemies section.
+
+**Anti-air turret.** geo_04b's `AATurret` is not a `Turret` but an
+`AnimProp` (AnimPropProperties.u) with the model `Turrets.AATurret`. The
+level's `LevelInfo.CustomMeshSets` links that model to the animation set
+`cGEO04AATurretSet`, whose `TurretBreathe` (800 frames) the map makes its
+`AnimHealthy`: an `AnimProp` plays `AnimHealthy` from the start (auto
+state `Invulnerable`), looping as the map says. The firing sounds are the
+animation's own 18 `AnimNotify_Sound`s. `rc_level_plugin::anim_props`
+draws every placed `AnimProp` that has an `AnimHealthy` (so ropes and the
+end-of-level icon are drawn too, as their class defaults have one),
+lowered by the collision height (`bAlignBottom`), and a level event named
+by the prop's `Tag` toggles its `AnimTriggered`.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

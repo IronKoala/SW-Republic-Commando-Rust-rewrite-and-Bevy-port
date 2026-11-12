@@ -174,6 +174,7 @@ fn every_weapon_file_reads() {
             "elite_beam",
             "elite_beam_enemy",
             "eweb_turret",
+            "geo_turret",
             "grievous_missile_rack",
             "gunship_turret",
             "heavy_repeater_mp",
@@ -479,6 +480,7 @@ fn every_grenade_file_reads_and_the_player_carries_them() {
             "dc17m_antiarmor_round",
             "emp_grenade",
             "flash_grenade",
+            "geo_turret_shot",
             "grievous_missile",
             "rocket_launcher_rocket",
             "sonic_detonator",
@@ -875,7 +877,11 @@ fn level_weapons_are_placed_and_one_enemy_weapon_is_carried_at_a_time() {
     r.run(1, &[]);
     let a = r.arsenal();
     let ids: Vec<&str> = a.weapons.iter().map(|w| w.0.as_str()).collect();
-    assert_eq!(ids.iter().filter(|i| **i == "bowcaster").count(), 0, "{ids:?}");
+    assert_eq!(
+        ids.iter().filter(|i| **i == "bowcaster").count(),
+        0,
+        "{ids:?}"
+    );
     assert_eq!(a.current().unwrap().0, "trandoshan_smg");
     let t = taken(&mut r);
     assert_eq!(t[0].dropped.as_deref(), Some("bowcaster"));
@@ -900,11 +906,7 @@ fn walking_into_a_carried_weapon_takes_its_ammo() {
     let mut r = Range::new();
     // Use some sniper ammo first.
     {
-        let mut a = r
-            .app
-            .world_mut()
-            .get_mut::<Arsenal>(r.player)
-            .unwrap();
+        let mut a = r.app.world_mut().get_mut::<Arsenal>(r.player).unwrap();
         let s = a
             .weapons
             .iter_mut()
@@ -915,7 +917,12 @@ fn walking_into_a_carried_weapon_takes_its_ammo() {
     }
     place_weapons(
         &mut r,
-        &[("DC17mSniperWeaponPickup0", "DC17mSniper", b(-480.0, 0.0, 15.0), 20)],
+        &[(
+            "DC17mSniperWeaponPickup0",
+            "DC17mSniper",
+            b(-480.0, 0.0, 15.0),
+            20,
+        )],
     );
     let a = r.arsenal();
     let s = &a.weapons.iter().find(|w| w.0 == "dc17m_sniper").unwrap().1;

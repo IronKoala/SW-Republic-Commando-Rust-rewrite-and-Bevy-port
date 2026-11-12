@@ -1,0 +1,38 @@
+# The Geonosian sonic turret (geo_03c): a sonic cannon on a stand. A
+# Geonosian gunner gets on it by script; the player can get on it too.
+#
+# See wookiee_heavy_turret.toml for how these files work. "game:" values
+# are SonicTurret (ctcharacters.u), Turret and Pawn (engine.u) and
+# SonicTurretDefaults (Properties/properties.u) on top.
+
+name = "Geonosian Sonic Turret"
+classes = ["SonicTurret"]
+
+[model]
+mesh = "GeoTurret"                 # game: Mesh
+pose = "Fire"                      # game: its only animation; frame 0 is at rest
+muzzles = ["muzzle"]               # game: SonicTurret FireProjectile fires from 'muzzle'
+
+[aim]
+speed = 20000                      # game: SonicTurretDefaults Speed
+min_yaw = -16384                   # game: SonicTurretDefaults MinYaw
+max_yaw = 16384                    # game: SonicTurretDefaults MaxYaw
+min_pitch = -4097                  # game: SonicTurretDefaults MinPitch
+max_pitch = 8194                   # game: Turret MaxPitch
+
+[gunner]
+height = 120                       # game: SonicTurret TurretHeight
+sit = false                        # game: SitToUse (not set)
+player_usable = true               # game: Turret bPlayerUsable
+radius = 190                       # game: SonicTurretDefaults CollisionRadius
+half_height = 125                  # game: SonicTurret CollisionHeight
+reach = 100                        # our choice, as the other turrets
+exit = [-210, 0, -50]              # game: SonicTurret NavPtLocs offset (maps give a spot instead)
+weapon = "geo_turret"              # game: FPWeaponClass GeoTurret (weapons/geo_turret.toml)
+
+[auto]
+weapon = "geo_turret"              # game: AmmoName GeoTurretAmmo, the same shot
+shot_delay = 2.1                   # game: SonicTurretDefaults ShotDelay
+range = 5000                       # game: GeoTurretAmmo Range
+fire_for = 4.2                     # game: SonicTurretDefaults TimeUntilCooldown
+cool_down = 2                      # game: SonicTurretDefaults CooldownDuration

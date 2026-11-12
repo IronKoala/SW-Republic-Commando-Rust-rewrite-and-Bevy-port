@@ -98,6 +98,198 @@ pub struct Offspring {
     /// The level script it runs: the tag of a `ScriptedSequence`
     /// (`AIScriptFromFactory` / `AIScriptTag`).
     pub script: Option<String>,
+    /// The route it walks (`PatrolRouteFromFactory` / `PatrolRoute`) and
+    /// how (`PatrolModeFromFactory` / `PatrolMode`). Empty: none.
+    pub patrol: Vec<PatrolPoint>,
+    pub patrol_mode: PatrolMode,
+}
+
+/// How a character goes round its patrol route (Engine.u
+/// `Pawn.EPatrolMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PatrolMode {
+    /// From the first point to the last, then the first again.
+    #[default]
+    Loop,
+    /// To the last and back, and so on.
+    PingPong,
+    /// A random point each time.
+    Random,
+    /// Once to the last, then it stops patrolling.
+    Once,
+}
+
+impl PatrolMode {
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            1 => PatrolMode::PingPong,
+            2 => PatrolMode::Random,
+            3 => PatrolMode::Once,
+            _ => PatrolMode::Loop,
+        }
+    }
+}
+
+/// One point of a patrol route (Engine.u `Pawn.PatrolPoint`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PatrolPoint {
+    /// The actor it goes to (`Node`), by name; `None`: it stays where it
+    /// is for this point.
+    pub node: Option<String>,
+    /// Where it walks for the node: the node's "anchor" (see
+    /// [`resolve_patrol_anchors`]); `None` when the node has none.
+    pub anchor: Option<Vec3>,
+    /// The node's facing, radians (for `orient`).
+    pub node_yaw: f32,
+    /// Seconds it waits there (`PauseTime`).
+    pub pause: f32,
+    /// An animation it plays there (`Animation`), `NumAnimLoops` times
+    /// (at least once).
+    pub animation: Option<String>,
+    pub loops: i32,
+    /// Sent once it has done all of the above (`Event`).
+    pub event: Option<String>,
+    /// Runs rather than walks (`RunToNode`).
+    pub run: bool,
+    /// May fight on the way (`ShootWhileMoving`).
+    pub shoot_while_moving: bool,
+    /// Turns to the node's facing there (`OrientToNode`).
+    pub orient: bool,
+    /// Can't be hurt from this point on, until a point without it
+    /// (`MakeInvulnerable`).
+    pub invulnerable: bool,
+}
+
+/// Read a patrol route (`key`, a list of `PatrolPoint` structs) and its
+/// mode (`mode_key`) from the actor `export`.
+fn read_patrol(
+    pkg: &Package,
+    data: &[u8],
+    export: usize,
+    key: &str,
+    mode_key: &str,
+) -> (Vec<PatrolPoint>, PatrolMode) {
+    use rc_level::scripts::Val;
+    let Ok(obj) = rc_level::scripts::read_object(pkg, data, export) else {
+        return (Vec::new(), PatrolMode::Loop);
+    };
+    let mode = match obj.get(mode_key) {
+        Some(Val::Byte(b)) => PatrolMode::from_byte(*b),
+        _ => PatrolMode::Loop,
+    };
+    let list = match obj.get(key) {
+        Some(Val::Structs(l)) => l.clone(),
+        Some(Val::Struct(v)) => vec![v.clone()],
+        _ => Vec::new(),
+    };
+    let text = |v: &rc_level::scripts::Vals, k: &str| match v.get(k) {
+        Some(Val::Text(t)) if !t.is_empty() && !t.eq_ignore_ascii_case("None") => Some(t.clone()),
+        _ => None,
+    };
+    let flag = |v: &rc_level::scripts::Vals, k: &str| matches!(v.get(k), Some(Val::Bool(true)));
+    let num = |v: &rc_level::scripts::Vals, k: &str| match v.get(k) {
+        Some(Val::Float(f)) => *f,
+        Some(Val::Int(i)) => *i as f32,
+        _ => 0.0,
+    };
+    let points = list
+        .iter()
+        .map(|v| PatrolPoint {
+            node: text(v, "Node"),
+            anchor: None,
+            node_yaw: 0.0,
+            pause: num(v, "PauseTime"),
+            animation: text(v, "Animation"),
+            loops: num(v, "NumAnimLoops") as i32,
+            event: text(v, "Event"),
+            run: flag(v, "RunToNode"),
+            shoot_while_moving: flag(v, "ShootWhileMoving"),
+            orient: flag(v, "OrientToNode"),
+            invulnerable: flag(v, "MakeInvulnerable"),
+        })
+        .collect();
+    (points, mode)
+}
+
+/// Where a character walks for each patrol point: the node's anchor, as
+/// the original's patrol (CTGame.dll `UStatePatrol::UpdateSelf`, which
+/// asks the node for `GetAnchor()`, read in Engine.dll) does: a
+/// navigation point is its own anchor, a turret's is the first of its
+/// `NavPts` (where its gunner stands), a plain actor has none (the
+/// character doesn't move for that point). `is_a(class, ancestor)` says
+/// whether a map class comes from another. Not done (listed in the
+/// returned notes): a character as the node (the original takes its
+/// anchor where it is then), a turret with no `NavPts` (the same), and a
+/// bacta dispenser (its own `GetAnchor` in CTGame.dll, not read).
+pub fn resolve_patrol_anchors(
+    pkg: &Package,
+    data: &[u8],
+    factories: &mut [Factory],
+    is_a: &dyn Fn(&str, &str) -> bool,
+) -> Vec<String> {
+    use rc_level::scripts::Val;
+    let mut notes = Vec::new();
+    let Ok(level) = actors::read_level(pkg, data) else {
+        return notes;
+    };
+    let find = |name: &str| {
+        level.actors.iter().flatten().copied().find(|&a| {
+            pkg.name(pkg.exports[a].object_name)
+                .eq_ignore_ascii_case(name)
+        })
+    };
+    let place = |a: usize| -> Option<(Vec3, f32)> {
+        let props = actors::read_actor_properties(pkg, data, a).ok()?;
+        let get = |n: &str| properties::find(pkg, &props, n).map(|p| p.value.clone());
+        let at = get("Location").and_then(|v| vec3(&v))?;
+        Some((at, yaw(get("Rotation").as_ref())))
+    };
+    for f in factories.iter_mut() {
+        let spots = f.spots.iter_mut().map(|s| &mut s.offspring);
+        for o in std::iter::once(&mut f.offspring).chain(spots) {
+            for p in o.patrol.iter_mut() {
+                let Some(node) = p.node.clone() else { continue };
+                let Some(a) = find(&node) else {
+                    notes.push(format!("{}: patrol node {node} is not in the map", f.name));
+                    continue;
+                };
+                let class = pkg.export_class_name(&pkg.exports[a]).to_string();
+                if let Some((_, y)) = place(a) {
+                    p.node_yaw = y;
+                }
+                let nav_pts =
+                    rc_level::scripts::read_object(pkg, data, a)
+                        .ok()
+                        .and_then(|o| match o.get("NavPts") {
+                            Some(Val::List(l)) => l.first().cloned(),
+                            _ => None,
+                        });
+                let mut why = "";
+                if is_a(&class, "NavigationPoint") {
+                    p.anchor = place(a).map(|(at, _)| at);
+                } else if is_a(&class, "Turret") {
+                    p.anchor = nav_pts
+                        .and_then(|spot| find(&spot))
+                        .and_then(place)
+                        .map(|(at, _)| at);
+                    why = " (a turret with no NavPts: not done)";
+                } else if is_a(&class, "Pawn") || is_a(&class, "BactaDispenser") {
+                    why = " (not done)";
+                } else {
+                    // A plain actor (`AActor::GetAnchor` gives none): the
+                    // character stays where it is for this point.
+                    continue;
+                }
+                if p.anchor.is_none() {
+                    notes.push(format!(
+                        "{}: patrol node {node} ({class}) has no place to walk to{why}",
+                        f.name
+                    ));
+                }
+            }
+        }
+    }
+    notes
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +424,7 @@ fn yaw(v: Option<&Value>) -> f32 {
 }
 
 struct Actor {
+    export: usize,
     class: String,
     name: String,
     props: Vec<Property>,
@@ -249,6 +442,7 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
         }
         if let Ok(props) = actors::read_actor_properties(pkg, data, a) {
             list.push(Actor {
+                export: a,
                 class,
                 name: pkg.name(e.object_name).to_string(),
                 props,
@@ -304,6 +498,8 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
                     start_state: state(a, "StartState"),
                     team: team(a, "TeamIndex"),
                     script: label(a, "AIScriptTag"),
+                    patrol: read_patrol(pkg, data, a.export, "PatrolRoute", "PatrolMode").0,
+                    patrol_mode: read_patrol(pkg, data, a.export, "PatrolRoute", "PatrolMode").1,
                 },
             })
             .collect();
@@ -350,6 +546,22 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
                 start_state: state(f, "StartStateFromFactory"),
                 team: team(f, "TeamIndexFromFactory"),
                 script: label(f, "AIScriptFromFactory"),
+                patrol: read_patrol(
+                    pkg,
+                    data,
+                    f.export,
+                    "PatrolRouteFromFactory",
+                    "PatrolModeFromFactory",
+                )
+                .0,
+                patrol_mode: read_patrol(
+                    pkg,
+                    data,
+                    f.export,
+                    "PatrolRouteFromFactory",
+                    "PatrolModeFromFactory",
+                )
+                .1,
             },
             start_state: state(f, "StartStateFromFactory"),
             team: int(f, "TeamIndexFromFactory"),
@@ -423,6 +635,8 @@ pub fn read_placed(
                 _ => None,
             },
             script: label("AIScriptTag"),
+            patrol: read_patrol(pkg, data, a, "PatrolRoute", "PatrolMode").0,
+            patrol_mode: read_patrol(pkg, data, a, "PatrolRoute", "PatrolMode").1,
         };
         out.push(Placed {
             factory: Factory {

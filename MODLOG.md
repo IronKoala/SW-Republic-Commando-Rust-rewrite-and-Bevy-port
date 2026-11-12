@@ -3,6 +3,26 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: Geonosis sonic turret and its gunner, patrol routes (rc_turrets, rc_turrets_plugin, rc_ai, rc_enemies, data/turrets, data/weapons, data/grenades)
+
+- **Changed:** New `data/turrets/sonic_turret.toml`, `data/weapons/geo_turret.toml` and `data/grenades/geo_turret_shot.toml` for geo_03c's Geonosian sonic turrets. A character on a turret now fires for `fire_for` seconds then rests `cool_down` seconds (`rc_turrets::fire_cycle`, new `[auto]` keys). Spawners' patrol routes are read (`rc_ai::spawns`: `PatrolPoint`, `PatrolMode`, `resolve_patrol_anchors`) and walked (`rc_ai::patrol::PatrolRun`, `rc_enemies::patrol::walk`), so geo_03c's gunner runs to the turret and sends `GunnerGetOnTurret`, which its script waits for before putting it on the turret.
+- **Why:** Items 14 of the Geonosis gap list: the gunner never got on the turret, and the turret had no settings.
+- **Where it comes from:** SonicTurret, GeoTurret, GeoTurretAmmo and GeoTurretProj class defaults (CTCharacters.u, CTInventory.u) and SonicTurretDefaults/GeoTurretDefaults (Properties.u); the fire-then-cool rule from `Turret.Fire`'s script; the map's PawnFactory1 and ScriptedSequence1. How a patrol route is walked is compiled code: read from CTGame.dll `UStatePatrol` (OnActivate, UpdateSelf, OnShutdown) and Engine.dll `GetAnchor`, decompiled locally for reference, nothing committed. Marked as our choice in the files: the shot's colour, the reach to get on the turret.
+- **Tested how:** `cargo test -p rc_turrets` (new `a_manned_sonic_turret_fires_then_cools_down`), `cargo test -p rc_ai` (3 new patrol tests), `cargo test -p rc_enemies --test patrol_route` (with the game's files: geo_03c's gunner gets one point, anchor SquadMarkerSpot21 at (3774, -40467), steps wait 0.2 s, run, then the event), `cargo test -p rc_combat` (the new weapon and shot files read), `rc_turret_check geo_03c` (both sonic turrets claimed).
+- **Result:** All pass. Not watched in the running game.
+- **Still broken / not tested:** Not tested in the running game or on Windows. The shot's explosion picture and sound aren't known yet (the turret's own firing sound is used). Not done: `SetThreat` (the gunner isn't left alone by the squad until it's on the turret), `ShootWhileMoving` and `PatrolPriority`, patrol points on characters or bacta dispensers, and saving a patrol halfway.
+- **Next:** Playtest geo_03c on Windows.
+
+## 2026-11-12: Geonosis anti-air turret plays its original animation (rc_level, rc_level_plugin)
+
+- **Changed:** `rc_level::class_look` reads each animated prop's `AnimHealthy`, `AnimTriggered` and `Tag` (`prop_anims`) and the level's `CustomMeshSets` (`custom_mesh_sets`). `rc_level_plugin::anim_props` draws every placed `AnimProp` that has an `AnimHealthy`, with the animation set the level links to its model, plays it from the start (looping as the map says) and toggles `AnimTriggered` on the prop's tag. New test `rc_level_plugin/tests/anim_prop_loops.rs`.
+- **Why:** Item 15 of the Geonosis gap list: geo_04b's anti-air turrets stood still.
+- **Where it comes from:** `AATurret` (AnimPropProperties.u) is an `AnimProp` with the model `Turrets.AATurret`; geo_04b sets `AnimHealthy` `TurretBreathe` looping; the LevelInfo's `CustomMeshSets` links the model to `cGEO04AATurretSet` (800 frames, 18 firing sounds of its own). `AnimProp`'s script plays `AnimHealthy` in its first state and toggles `AnimTriggered` on Trigger. Ropes and the end-of-level icon have an `AnimHealthy` in their class defaults, so they are now drawn as in the original.
+- **Tested how:** `cargo test -p rc_level_plugin --test anim_prop_loops` with the game's files.
+- **Result:** Passes: geo_04b draws 9 animated props (the anti-air turret, 4 ropes, the end-of-level icon, 3 dispensers); the turret loops all 800 frames and plays its sounds again each time round (19 or more heard); Rope0 starts `CloneEntrance1760` on `CloneRope07`.
+- **Still broken / not tested:** Not tested in the running game or on Windows. The turrets fire no shots: in the original they don't either (only the animation and sounds), as far as the files show.
+- **Next:** Playtest geo_04b on Windows.
+
 ## 2026-11-12: The HUD blinks where the level scripts teach it (rc_scripts_plugin, rc_menus, rc_game, data/ui/hud.toml)
 
 - **Changed:** The scripts' `BlinkHUDHealth`, `BlinkHUDSquad`, `BlinkHUDGrenade`, `BlinkHUDShields` and `BlinkHUDSquadCommandPrompt` steps are carried out. New `rc_scripts_plugin::hud_blink` (`LevelScript::hud_blink`) keeps which parts blink and for how long; new `blink` key for HUD elements in `data/ui/hud.toml` (health, squad, grenade, shields) and `rc_menus::hud::blink_alpha`; `rc_game`'s original HUD draws a blinking element with the blink's opacity. Marked in hud.toml: the four health-coloured meter parts (not their white backs), the squad panel, and the grenade panel, picture and count. New `rc_game --script` check "the script blinks the HUD's health meters".

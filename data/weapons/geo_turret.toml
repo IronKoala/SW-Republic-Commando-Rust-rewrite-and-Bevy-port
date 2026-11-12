@@ -1,0 +1,44 @@
+# What the player fires from the Geonosian sonic turret (the original's
+# first-person turret weapon GeoTurret, handed to the player while on the
+# turret). Its ammo never runs down (GeoTurretAmmo.DeductAmmo does
+# nothing), so it never reloads.
+#
+# Numbers marked "game:" are GeoTurret (ctinventory.u) with
+# GeoTurretDefaults (Properties/properties.u) on top, and its ammo
+# GeoTurretAmmo and shot GeoTurretProj (grenades/geo_turret_shot.toml).
+
+name = "Geonosian Sonic Turret"
+
+[fire]
+mode = "automatic"        # game: GeoTurretDefaults FireMode 2 (FM_Automatic)
+shot_delay = 2.1          # game: GeoTurretDefaults ShotDelay
+aim_error = 0
+offset = [0, -1, -25]     # game: GeoTurretDefaults FPFireOffset
+zoom_fovs = [65]          # game: GeoTurret ZoomFOVs[1], NumZoomFOVs 2
+
+[ammo]
+clip_size = 10000         # game: never runs down (DeductAmmo does nothing)
+max_ammo = 10000          # game: Turret AmmoAmount 10000
+start_ammo = 10000
+
+[shot]
+kind = "lobbed"           # a flying shot (here: a grenade file with no fall)
+speed = 5000              # game: GeoTurretProj Speed
+grenade = "geo_turret_shot"
+
+[recoil]
+kick = [80, 80, 80]       # game: GeoTurretDefaults WeaponKick
+spring = 0.1              # game: GeoTurretDefaults RecoilConstant
+
+[sound]
+package = "geo_sound"
+fire = ["wep_GEO_geoTrrtFire_m_01"] # game: GeoTurretDefaults FireSound (GEO_Sound.GEO_01)
+
+[model]
+package = "weapons"
+mesh = "DC17mBlaster"     # placeholder: shown only if the arms below can't be read
+
+[arms]
+mesh = "HudArmsGeoTurret" # game: GeoTurret Mesh
+fov = 85                  # game: Weapon DisplayFOV
+brightness = 0.75         # our choice, as the other weapons

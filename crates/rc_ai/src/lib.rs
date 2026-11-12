@@ -22,9 +22,14 @@ pub use battle::{
     Battle, BattleEvent, BattleSnapshot, Birth, FighterSnapshot, Spawner, SpawnerSnapshot,
     SwitchedOn,
 };
-pub use brain::{AiEvent, Fighter, Maneuver, Mode, ScriptGoal, Target, View};
+pub use brain::{AiEvent, Fighter, Maneuver, Mode, Rng, ScriptGoal, Target, View};
 pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
-pub use spawns::{read_factories, read_placed, Factory, Offspring, Placed, SpawnSpot, StartState};
+pub mod patrol;
+pub use patrol::{PatrolRun, PatrolStep};
+pub use spawns::{
+    read_factories, read_placed, resolve_patrol_anchors, Factory, Offspring, PatrolMode,
+    PatrolPoint, Placed, SpawnSpot, StartState,
+};
 
 #[cfg(test)]
 mod tests;
