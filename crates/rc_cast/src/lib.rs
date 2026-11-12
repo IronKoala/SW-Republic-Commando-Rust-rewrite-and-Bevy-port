@@ -500,6 +500,7 @@ fn spawn_cast(
             },
             DespawnOnExit(GameState::InGame),
             Name::new(format!("cast {}", m.name)),
+            rc_game_core::GameClass(m.class.clone()),
         ));
         if let Some(l) = &m.life {
             // The hit cylinder's middle is the map place: the body stands

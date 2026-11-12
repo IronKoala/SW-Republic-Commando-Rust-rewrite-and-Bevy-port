@@ -344,6 +344,7 @@ pub(crate) fn cast(
                 };
                 for (e, _, at_point) in &targets {
                     damage.write(Damage {
+                        rules: Default::default(),
                         target: *e,
                         amount,
                         kind,

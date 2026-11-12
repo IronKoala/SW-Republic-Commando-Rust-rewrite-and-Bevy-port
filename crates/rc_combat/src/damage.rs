@@ -1,13 +1,20 @@
 //! Applying damage, recharging shields, and the player's health readout.
 
 use crate::health::{
-    take_damage, CannotDie, Damage, Dead, Died, Difficulty, Health, Invulnerable, Shield,
+    take_damage, CannotDie, Damage, Dead, Died, Difficulty, Health, Invulnerable, Killed, Shield,
 };
 use bevy::prelude::*;
 use rc_game_core::{GameLog, Player, PlayerVitals};
 
 /// Apply every `Damage` sent this frame, shield first. Sends `Died` once
 /// when health reaches 0 and marks the entity `Dead`.
+///
+/// A hit whose damage class kills outright (`DamageRules`, as the
+/// original's `Pawn.Died` decides: `bKillsNotIncapacitatesPlayer` for the
+/// player, `bKillsNotIncapacitates` for everyone else) also marks it
+/// `Killed`, even through `CannotDie`, and kills a commando who is already
+/// down (the original's `Incapacitated.TakeDamage`). A hit that bypasses
+/// shields goes straight to health and leaves the shield alone.
 pub(crate) fn apply_damage(
     mut commands: Commands,
     mut hurt: MessageReader<Damage>,
@@ -18,6 +25,7 @@ pub(crate) fn apply_damage(
         Has<Dead>,
         Has<Invulnerable>,
         Has<CannotDie>,
+        Has<Killed>,
     )>,
     names: Query<&Name>,
     difficulty: Res<Difficulty>,
@@ -25,12 +33,38 @@ pub(crate) fn apply_damage(
     log: Option<Res<GameLog>>,
 ) {
     for d in hurt.read() {
-        let Ok((mut health, shield, is_player, dead, invulnerable, cannot_die)) =
+        let Ok((mut health, shield, is_player, dead, invulnerable, cannot_die, killed)) =
             targets.get_mut(d.target)
         else {
             continue;
         };
-        if dead || invulnerable {
+        if invulnerable {
+            continue;
+        }
+        let kills = if is_player {
+            d.rules.kills_player
+        } else {
+            d.rules.kills
+        };
+        let who = || {
+            names
+                .get(d.target)
+                .map_or_else(|_| format!("{:?}", d.target), |n| n.to_string())
+        };
+        if dead {
+            // Down already: only damage that kills outright does anything.
+            if kills && !killed && d.amount > 0.0 {
+                commands.entity(d.target).insert(Killed);
+                let line = format!(
+                    "combat: {} is dead for good ({:?} damage while down)",
+                    who(),
+                    d.kind
+                );
+                match &log {
+                    Some(l) => l.line(line),
+                    None => println!("{line}"),
+                }
+            }
             continue;
         }
         let amount = if is_player {
@@ -39,14 +73,17 @@ pub(crate) fn apply_damage(
             d.amount
         };
         let mut shield = shield;
-        let mut taken = take_damage(&mut health, shield.as_deref_mut(), amount);
-        if cannot_die && taken.killed {
+        let to_shield = if d.rules.bypass_shields {
+            None
+        } else {
+            shield.as_deref_mut()
+        };
+        let mut taken = take_damage(&mut health, to_shield, amount);
+        if cannot_die && taken.killed && !kills {
             health.current = 1.0;
             taken.killed = false;
         }
-        let who = names
-            .get(d.target)
-            .map_or_else(|_| format!("{:?}", d.target), |n| n.to_string());
+        let who = who();
         // Who did it, so a health drop can be traced from the log alone.
         // No instigator means a level script, a fall or the like.
         let from = match d.instigator {
@@ -75,11 +112,18 @@ pub(crate) fn apply_damage(
         }
         if taken.killed {
             commands.entity(d.target).insert(Dead);
+            if kills {
+                commands.entity(d.target).insert(Killed);
+            }
             died.write(Died {
                 entity: d.target,
                 killer: d.instigator,
             });
-            let line = format!("combat: {who} is down");
+            let line = if kills {
+                format!("combat: {who} is dead for good")
+            } else {
+                format!("combat: {who} is down")
+            };
             match &log {
                 Some(l) => l.line(line),
                 None => println!("{line}"),
@@ -97,10 +141,10 @@ pub(crate) fn recharge_shields(time: Res<Time>, mut shields: Query<&mut Shield, 
 
 /// The player's health and shield for the on-screen display.
 pub(crate) fn player_vitals(
-    players: Query<(&Health, Option<&Shield>, Has<Dead>), With<Player>>,
+    players: Query<(&Health, Option<&Shield>, Has<Dead>, Has<Killed>), With<Player>>,
     mut out: ResMut<PlayerVitals>,
 ) {
-    let Ok((h, s, dead)) = players.single() else {
+    let Ok((h, s, dead, killed)) = players.single() else {
         return;
     };
     let new = PlayerVitals {
@@ -108,7 +152,8 @@ pub(crate) fn player_vitals(
         max_health: h.max,
         shield: s.map_or(0.0, |s| s.current),
         max_shield: s.map_or(0.0, |s| s.max),
-        incapacitated: dead,
+        // Down and waiting for a revive; dead for good isn't.
+        incapacitated: dead && !killed,
     };
     if *out != new {
         *out = new;

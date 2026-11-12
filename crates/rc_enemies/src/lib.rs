@@ -32,12 +32,12 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
-use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
     Hittable, MeleeAttack, Shield, ShotLanded, Stunned, Team, ThrowGrenade,
 };
+use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -934,7 +934,11 @@ fn summary(f: &Fight, log: &GameLog) {
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
-    let clones = f.battle.alive().filter(|f| f.params.kind.republic()).count();
+    let clones = f
+        .battle
+        .alive()
+        .filter(|f| f.params.kind.republic())
+        .count();
     if clones > 0 || s.clones_destroyed > 0 {
         log.line(format!(
             "{PART}: t={:.1}s clone troopers: {clones} alive, {} destroyed; {} clone shots, {} hit droids, {} hit other clones by mistake; {} droid bolts hit clones",
@@ -1130,6 +1134,11 @@ fn think(
                 // What the level's scripts call it, and the script it
                 // follows.
                 let o = fight.battle.offspring(id).unwrap_or_default();
+                // The class its spawner makes, for rules that pick
+                // characters by class (pain volumes).
+                e.insert(rc_game_core::GameClass(
+                    fight.battle.spawners[spawner].factory.prototype.clone(),
+                ));
                 e.insert(ScriptTags {
                     tag: o.tag,
                     script: o.script,
@@ -1272,7 +1281,9 @@ fn think(
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
                         }
-                        log.line(format!("{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"));
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"
+                        ));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: {} -> {}",

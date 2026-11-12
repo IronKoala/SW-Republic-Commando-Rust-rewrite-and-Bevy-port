@@ -241,3 +241,11 @@ pub struct PropAnim {
     pub actor: String,
     pub anim: String,
 }
+
+/// The original's class a character stands for: `PlayerCommando` for the
+/// player, a squad mate's `Commando07Delta`, the class a spawner makes
+/// (`BattleDroidTM`). Rules that pick characters by class (a pain volume's
+/// `ClassProximityType`) read it, with the class tree from the game's
+/// script packages.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct GameClass(pub String);

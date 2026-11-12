@@ -789,7 +789,21 @@ copy of the game.
   elites come in after you shoot its turret). Not tried in a running
   game yet.
 
+- **Pits, crushers and fires hurt (since 2026-11-12, tested in the cloud
+  only).** The 60 pain volumes the maps place (in 20 single-player maps,
+  most in geo_04a to geo_04d) hurt whoever they are meant for, once on
+  the way in and then once a second, with the original's numbers. Falling
+  into a pit (`DamageFallToDeath`) goes past the shield and kills
+  outright: the player and squad mates are dead for good, not down
+  waiting for a revive, and nobody comes to revive them. Being crushed
+  kills the player outright too. Check:
+  `RC_GAME_DIR=<game folder> cargo run -p rc_scripts_plugin --example pain_check`.
+
 ## What doesn't work yet
+
+- Dying for good: the original then fades the screen to white over 5
+  seconds and opens the pause menu by itself (LOAD LAST SAVE). The port
+  doesn't do that yet: press Esc to get that menu.
 
 - Turrets: squad mates on turrets say nothing (no turret voice lines
   yet), stand still in their usual pose, and are held where the player's

@@ -499,6 +499,7 @@ fn land(
             }
         }
         damage.write(Damage {
+            rules: Default::default(),
             target: t,
             amount,
             kind: p.damage_kind,
@@ -545,6 +546,7 @@ pub(crate) fn fly_bolts(
             let point = from + (to - from) * h.t;
             if let Some(target) = h.entity {
                 damage.write(Damage {
+                    rules: Default::default(),
                     target,
                     amount: against(&lib, &tables, target, &b.damage_type, b.damage),
                     kind: b.kind,

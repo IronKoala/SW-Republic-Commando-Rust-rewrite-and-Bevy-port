@@ -459,6 +459,7 @@ fn blast(
             let amount = p.damage * scale * m;
             if amount > 0.0 {
                 damage.write(Damage {
+                    rules: Default::default(),
                     target: vic.entity,
                     amount,
                     kind: p.damage_kind,
@@ -571,6 +572,7 @@ pub(crate) fn explosions(
             }
             hit += 1;
             damage.write(Damage {
+                rules: Default::default(),
                 target: e,
                 amount,
                 kind: x.kind,
@@ -622,6 +624,7 @@ pub(crate) fn wear_off_stuns(
         if s.pending > 0.0 && (s.pending >= s.damage_per_sec * 0.25 || last) {
             let amount = std::mem::take(&mut s.pending);
             damage.write(Damage {
+                rules: Default::default(),
                 target: e,
                 amount,
                 kind: s.kind,

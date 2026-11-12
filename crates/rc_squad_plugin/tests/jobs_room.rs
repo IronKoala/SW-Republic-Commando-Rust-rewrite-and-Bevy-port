@@ -135,6 +135,7 @@ fn bacta_heals_and_a_demolition_charge_blows_up_what_is_near_it() {
     // Hurt everyone, then send someone to the bacta dispenser.
     for (e, _, _) in mates(&mut app) {
         app.world_mut().write_message(Damage {
+            rules: Default::default(),
             target: e,
             amount: 350.0,
             kind: DamageKind::Other,

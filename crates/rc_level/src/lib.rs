@@ -14,6 +14,7 @@ pub mod lightmap;
 pub mod map_collision;
 pub mod movers;
 pub mod music;
+pub mod pain;
 pub mod pickups;
 pub mod scripts;
 pub mod settle;

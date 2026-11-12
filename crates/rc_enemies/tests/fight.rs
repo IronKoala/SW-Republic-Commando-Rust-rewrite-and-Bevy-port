@@ -410,6 +410,7 @@ fn with_level_scripts_the_spawner_waits_for_its_event_and_droids_report_their_de
     assert_eq!(droids.len(), 1, "its event switched the spawner on");
     let d = droids[0];
     r.app.world_mut().write_message(Damage {
+        rules: Default::default(),
         target: d,
         amount: 1000.0,
         kind: rc_combat::DamageKind::Other,

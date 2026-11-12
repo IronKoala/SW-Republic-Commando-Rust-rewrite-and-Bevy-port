@@ -59,6 +59,7 @@ pub mod hud_blink;
 pub mod markers;
 pub mod music;
 pub mod objectives;
+pub mod pain;
 pub mod placed_emitters;
 pub mod projectiles;
 pub mod save;
@@ -120,6 +121,7 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::ShowDebriefing>()
             .add_message::<tracker::TrackerAsk>()
             .init_resource::<tracker::ObjectiveTracker>()
+            .init_resource::<pain::PainClasses>()
             .add_systems(Startup, tracker::load_look)
             .add_save_part::<save::ScriptsSave>()
             .add_save_part::<fx_factories::FxFactoriesSave>()
@@ -149,6 +151,7 @@ impl Plugin for ScriptsPlugin {
                     breakables::explode,
                     sight::look,
                     run,
+                    pain::run,
                     send_ammo,
                     blink_hud,
                     tracker::track,
@@ -176,6 +179,7 @@ impl Plugin for ScriptsPlugin {
                     cutscene::forget,
                     projectiles::forget,
                     tracker::forget,
+                    pain::forget,
                 ),
             );
     }
@@ -386,10 +390,12 @@ fn begin(
     mut gate: ResMut<LoadingGate>,
     paths: Res<GamePaths>,
     current: Res<CurrentLevel>,
+    mut pain_classes: ResMut<pain::PainClasses>,
     log: Res<GameLog>,
 ) {
     gate.wait(PART);
     commands.remove_resource::<bacta::BactaAssets>();
+    commands.remove_resource::<pain::LevelPain>();
     commands.remove_resource::<bacta::BactaStats>();
     let settings = load_settings(&paths, &log);
     let Some(map) = &current.map else {
@@ -410,6 +416,9 @@ fn begin(
                     let m = rc_level::scripts::read(&p, &d, &l);
                     // What the map's objective tracker steps point at.
                     let targets = tracker::read_targets(&p, &d, &l, &m, &paths, &log);
+                    // Pits and crushers that hurt whoever is inside.
+                    let lib = pain::classes(&paths, &mut pain_classes, &log);
+                    commands.insert_resource(pain::read(&p, &d, &l, &lib, &log));
                     (m, rc_level::scripts::places(&p, &d, &l), targets)
                 })
                 .map_err(|e| e.to_string())
@@ -1064,6 +1073,7 @@ fn carry_out(
             if script.director.settings.is_player(tag) {
                 if let Ok((e, t)) = player.single() {
                     damage.write(Damage {
+                        rules: Default::default(),
                         target: e,
                         amount,
                         kind: if a.text("Type").is_some_and(|t| t.contains("Explosion")) {

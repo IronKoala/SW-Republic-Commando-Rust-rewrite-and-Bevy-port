@@ -116,6 +116,9 @@ pub struct Member {
     /// original: they lie where they fell until revived. A downed member
     /// takes no orders and doesn't move on its own.
     pub down: bool,
+    /// Dead for good (killed by damage that kills outright, such as a fall
+    /// into a pit): stays down and is never revived.
+    pub dead: bool,
     /// The downed commando they're going to revive, if any.
     pub revive: Option<Patient>,
     pub fight: FightState,
@@ -396,16 +399,32 @@ pub enum SquadEvent {
     },
     /// Left the squad (a level script's `ChangeSquadMember`): they stop
     /// following and do what the level's scripts tell them.
-    LeftSquad { member: String, at: Vec3 },
+    LeftSquad {
+        member: String,
+        at: Vec3,
+    },
     /// Back in the squad (or in it for the first time).
-    JoinedSquad { member: String, at: Vec3 },
+    JoinedSquad {
+        member: String,
+        at: Vec3,
+    },
     /// Came into the level (placed in the map, or made by a spawner),
     /// `in_squad` or not.
-    CameIn { member: String, at: Vec3, in_squad: bool },
+    CameIn {
+        member: String,
+        at: Vec3,
+        in_squad: bool,
+    },
     /// Taken out of the level (a script's `DestroyPawn`).
-    Removed { member: String },
+    Removed {
+        member: String,
+    },
     /// Got where a level script sent them (away from the squad).
-    ScriptArrived { member: String, index: usize, at: Vec3 },
+    ScriptArrived {
+        member: String,
+        index: usize,
+        at: Vec3,
+    },
     /// A grenade thrown from a grenade post, or on their own (`own`); it
     /// goes off in `fuse` seconds.
     Throw {
@@ -594,6 +613,9 @@ pub struct Squad {
     pub threats: Vec<Threat>,
     /// The leader (the player) is down, set by the game.
     pub leader_down: bool,
+    /// The leader is dead for good (fell to their death, crushed): down,
+    /// and nobody goes to revive them. Set by the game.
+    pub leader_dead: bool,
     /// The player reviving a squad mate: who, and seconds so far.
     pub player_revive: Option<(usize, f32)>,
     pub(crate) rng: Rng,
@@ -699,6 +721,7 @@ impl Squad {
                     marker_since: 0.0,
                     engaging: None,
                     down: false,
+                    dead: false,
                     revive: None,
                     fight: FightState::default(),
                     throw_in: 0.0,
@@ -736,6 +759,7 @@ impl Squad {
             markers: Vec::new(),
             threats: Vec::new(),
             leader_down: false,
+            leader_dead: false,
             player_revive: None,
             rng: Rng::new(0x0D17_DE17),
             time: 0.0,
@@ -927,7 +951,11 @@ impl Squad {
                 }
                 let order_name = format!("{} ({})", spot.name, spot.job);
                 self.pull_for(k, &mut events);
-                if !self.members.iter().any(|m| m.marker.is_none() && m.available()) {
+                if !self
+                    .members
+                    .iter()
+                    .any(|m| m.marker.is_none() && m.available())
+                {
                     events.push(SquadEvent::OrderIgnored {
                         order: order_name,
                         why: if self.auto_pull {

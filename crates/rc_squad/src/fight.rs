@@ -225,6 +225,14 @@ impl Squad {
         }
     }
 
+    /// Dead for good: no revive brings them back.
+    fn patient_dead(&self, p: Patient) -> bool {
+        match p {
+            Patient::Mate(i) => self.members.get(i).is_some_and(|m| m.dead),
+            Patient::Leader => self.leader_dead,
+        }
+    }
+
     pub(crate) fn patient_feet(&self, p: Patient, leader: Leader) -> Vec3 {
         match p {
             Patient::Mate(i) => self.members[i].pawn.feet(),
@@ -251,7 +259,8 @@ impl Squad {
             let Some(p) = self.members[i].revive else {
                 continue;
             };
-            if !self.patient_down(p) || self.members[i].down {
+            let gone = self.patient_dead(p);
+            if !self.patient_down(p) || gone || self.members[i].down {
                 let name = self.patient_name(p);
                 let m = &mut self.members[i];
                 m.revive = None;
@@ -267,6 +276,8 @@ impl Squad {
                     patient: name,
                     why: if m.down {
                         "went down".into()
+                    } else if gone {
+                        "dead for good".into()
                     } else {
                         "already back up".into()
                     },
@@ -274,7 +285,7 @@ impl Squad {
             }
         }
         let mut patients: Vec<Patient> = Vec::new();
-        if self.leader_down && self.settings.revive.revive_player {
+        if self.leader_down && !self.leader_dead && self.settings.revive.revive_player {
             patients.push(Patient::Leader);
         }
         patients.extend(
@@ -282,7 +293,9 @@ impl Squad {
                 // Mates away from the squad are the level scripts' to
                 // look after.
                 .filter(|&i| {
-                    self.members[i].down && self.members[i].presence == crate::Presence::InSquad
+                    self.members[i].down
+                        && !self.members[i].dead
+                        && self.members[i].presence == crate::Presence::InSquad
                 })
                 .map(Patient::Mate),
         );
@@ -372,7 +385,11 @@ impl Squad {
             return events;
         }
         let near = (0..self.members.len())
-            .filter(|&i| self.members[i].down && self.members[i].presence != crate::Presence::Gone)
+            .filter(|&i| {
+                self.members[i].down
+                    && !self.members[i].dead
+                    && self.members[i].presence != crate::Presence::Gone
+            })
             .map(|i| (i, dist_2d(self.members[i].pawn.feet(), leader.feet)))
             .filter(|(i, d)| {
                 *d <= self.settings.revive.reach

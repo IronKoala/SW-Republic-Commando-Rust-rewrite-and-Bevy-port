@@ -35,17 +35,17 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
-pub mod carry;
 mod ammo;
+pub mod carry;
 pub mod look;
-pub mod save;
 pub mod membership;
+pub mod save;
 pub mod voice;
 
 use bevy::prelude::*;
 use rc_combat::{
-    CombatSet, Damage, DamageKind, DamageTable, Dead, Died, FireShot, Health, Hittable, Shield,
-    ShotLanded, Team, WeaponLibrary,
+    CombatSet, Damage, DamageKind, DamageTable, Dead, Died, FireShot, Health, Hittable, Killed,
+    Shield, ShotLanded, Team, WeaponLibrary,
 };
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
@@ -741,10 +741,7 @@ fn spawn_squad(
                 squad.members[i].presence = rc_squad::Presence::Gone;
                 log_line(
                     &log,
-                    format!(
-                        "{} is not in this map",
-                        squad.members[i].settings.name
-                    ),
+                    format!("{} is not in this map", squad.members[i].settings.name),
                 );
             }
         }
@@ -872,6 +869,7 @@ fn sync_bodies(
                 follows_orders: true,
             },
             Hittable::COMMANDO,
+            rc_game_core::GameClass(m.settings.class.clone()),
             // The original's squad damage table: droid bolts x0.15,
             // explosions x0.4, stuns x0.
             DamageTable("DV_OrganicCTSquadDamage".into()),
@@ -1022,7 +1020,10 @@ fn take_orders(
         let mut use_key = a.just_pressed(Action::Use);
         // At a switched-on bacta dispenser the shared key uses it.
         if (context || use_key) && use_claimed.is_some_and(|u| u.0) {
-            log_line(&log, "context order left alone: the player is using something");
+            log_line(
+                &log,
+                "context order left alone: the player is using something",
+            );
             context = false;
             use_key = false;
         }
@@ -1142,7 +1143,16 @@ fn ride_movers(
 fn run_squad(
     time: Res<Time>,
     mut state: ResMut<SquadState>,
-    mut player: Query<(Entity, &Transform, Option<&mut Health>, Has<Dead>), With<Player>>,
+    mut player: Query<
+        (
+            Entity,
+            &Transform,
+            Option<&mut Health>,
+            Has<Dead>,
+            Has<Killed>,
+        ),
+        With<Player>,
+    >,
     mut mates: Query<(Entity, &SquadMate, &mut Health), Without<Player>>,
     actions: Option<Res<ActionState>>,
     collision: Option<Res<LevelCollision>>,
@@ -1157,7 +1167,7 @@ fn run_squad(
     mut heard: ResMut<voice::SquadHeard>,
     log: Option<Res<GameLog>>,
 ) {
-    let (Ok((player_e, pt, mut player_health, player_dead)), Some(collision)) =
+    let (Ok((player_e, pt, mut player_health, player_dead, player_killed)), Some(collision)) =
         (player.single_mut(), collision)
     else {
         return;
@@ -1169,6 +1179,16 @@ fn run_squad(
         return;
     };
     squad.threats.clone_from(&threats.0);
+    if player_killed && !squad.leader_dead {
+        log_line(
+            &log,
+            format!(
+                "t={:.2} the player is dead for good: nobody revives them",
+                squad.time
+            ),
+        );
+    }
+    squad.leader_dead = player_killed;
     if squad.leader_down != player_dead {
         squad.leader_down = player_dead;
         let n = stats.down_since.len();
@@ -1515,6 +1535,7 @@ fn carry_out_jobs(
                     let falloff = 1.0 - d / radius;
                     let dir = (centre - at).normalize_or_zero();
                     damage.write(Damage {
+                        rules: Default::default(),
                         target,
                         amount: amount * falloff,
                         kind: DamageKind::Explosion,
@@ -1671,14 +1692,26 @@ pub fn status_line(squad: &Squad, leader: Leader) -> String {
 /// back above 0 with `Dead` gone (a revive) brings them back.
 fn check_down(
     mut state: ResMut<SquadState>,
-    mates: Query<(&SquadMate, &Health, Has<Dead>)>,
+    mates: Query<(&SquadMate, &Health, Has<Dead>, Has<Killed>)>,
     mut heard: ResMut<voice::SquadHeard>,
     log: Option<Res<GameLog>>,
 ) {
     let Some(squad) = state.squad.as_mut() else {
         return;
     };
-    for (mate, health, dead) in &mates {
+    for (mate, health, dead, killed) in &mates {
+        if let Some(m) = squad.members.get_mut(mate.index) {
+            if killed && !m.dead {
+                log_line(
+                    &log,
+                    format!(
+                        "t={:.2} {} is dead for good: nobody revives them",
+                        squad.time, mate.name
+                    ),
+                );
+            }
+            m.dead = killed;
+        }
         let down = dead || health.is_dead();
         if let Some(e) = squad.set_down(mate.index, down) {
             log_line(&log, format!("t={:.2} {e}", squad.time));

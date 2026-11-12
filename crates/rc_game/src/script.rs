@@ -1083,6 +1083,7 @@ fn steps() -> Vec<Step> {
                 return;
             };
             w.write_message(rc_combat::Damage {
+                rules: Default::default(),
                 target: e,
                 amount: 500.0,
                 kind: rc_combat::DamageKind::Other,
@@ -3162,10 +3163,7 @@ fn health_meters_blink(w: &mut World) -> Result<String, String> {
     let quads = crate::original_hud::layout_drawn(w);
     let meters: Vec<u8> = quads
         .iter()
-        .filter(|q| {
-            (q.widget == "vitals" || q.widget == "ammo")
-                && q.color[..3] != [255, 255, 255]
-        })
+        .filter(|q| (q.widget == "vitals" || q.widget == "ammo") && q.color[..3] != [255, 255, 255])
         .map(|q| q.color[3])
         .collect();
     let got = format!("script steps {steps:?}; blinking {now:?}; meter opacities {meters:?}");
@@ -3504,7 +3502,10 @@ fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
         .iter()
         .filter(|c| c.held_weapon() == Some("DC15BlasterClone"))
         .count();
-    let msg = format!("{armed} of {} clone troopers hold a DC15BlasterClone", troopers.len());
+    let msg = format!(
+        "{armed} of {} clone troopers hold a DC15BlasterClone",
+        troopers.len()
+    );
     if !troopers.is_empty() && armed == troopers.len() {
         Ok(msg)
     } else {
@@ -4249,6 +4250,7 @@ fn level_spawn_destroy(w: &mut World) {
     };
     for e in entities {
         w.write_message(rc_combat::Damage {
+            rules: Default::default(),
             target: e,
             amount: 100_000.0,
             kind: rc_combat::DamageKind::Other,

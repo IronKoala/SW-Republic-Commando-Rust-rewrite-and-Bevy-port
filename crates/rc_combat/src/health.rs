@@ -143,6 +143,27 @@ pub enum Team {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Dead;
 
+/// Dead for good: killed by damage that kills rather than putting a
+/// commando down to wait for a revive (the damage class's
+/// `bKillsNotIncapacitates`, or `bKillsNotIncapacitatesPlayer` for the
+/// player: a fall to death, being crushed). Always comes with [`Dead`]. A
+/// commando who has it is not revived.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Killed;
+
+/// How a hit follows the rules of its damage class (the original's
+/// `DamageType` defaults). The default is an ordinary hit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DamageRules {
+    /// Goes straight to health, past the shield (`bBypassesShields`).
+    pub bypass_shields: bool,
+    /// Kills every character outright, even one that would otherwise be
+    /// put down or can't die (`bKillsNotIncapacitates`).
+    pub kills: bool,
+    /// Kills the player outright (`bKillsNotIncapacitatesPlayer`).
+    pub kills_player: bool,
+}
+
 /// How one hit was split between shield and health.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Taken {
@@ -184,6 +205,8 @@ pub struct Damage {
     pub target: Entity,
     pub amount: f32,
     pub kind: DamageKind,
+    /// Its damage class's rules (shields, killing outright).
+    pub rules: DamageRules,
     /// Who did it, if anyone.
     pub instigator: Option<Entity>,
     /// Where it hit.

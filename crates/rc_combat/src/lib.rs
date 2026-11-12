@@ -51,7 +51,8 @@ pub use arms_view::{ArmsCamera, ArmsHistory, ArmsReadout, ARMS_CAMERA_ORDER, ARM
 pub use damage_types::{DamageTable, DamageTypes};
 pub use grenade::{GrenadeParams, Grenades};
 pub use health::{
-    CannotDie, Damage, DamageKind, Dead, Died, Difficulty, Health, Invulnerable, Shield, Team,
+    CannotDie, Damage, DamageKind, DamageRules, Dead, Died, Difficulty, Health, Invulnerable,
+    Killed, Shield, Team,
 };
 pub use library::{
     read_audio_params, read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary,

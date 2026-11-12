@@ -167,6 +167,7 @@ pub(crate) fn player_melee(
                 ),
             );
             damage.write(Damage {
+                rules: Default::default(),
                 target: e,
                 amount,
                 kind: DamageKind::Melee,
@@ -268,6 +269,7 @@ pub(crate) fn melee_attacks(
         );
         if amount > 0.0 {
             damage.write(Damage {
+                rules: Default::default(),
                 target: e,
                 amount,
                 kind: DamageKind::Melee,

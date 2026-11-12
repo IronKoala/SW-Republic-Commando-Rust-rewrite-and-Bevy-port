@@ -5120,6 +5120,34 @@ it (the original asks for the crosshair on it). The Trandoshan turret's
 four barrels fire one after another for a character gunner. The turret
 weapons' first-person offsets and the E-Web's reload time are guesses.
 
+## Pits, crushers and fires (`rc_level::pain`, `rc_scripts_plugin::pain`)
+
+Maps place invisible `PhysicsVolume`s that hurt whoever is inside: the
+bottom of a pit (`DamageFallToDeath`), a crushing machine (`Crushed`), a
+fire (`CTDamageFire`). `rc_level::pain` reads each volume with a
+`DamagePerSec` other than 0 (its shape, `bPainCausing`, `DamageType`,
+`ClassProximityType`, `Tag`), filling what the map leaves out from the
+volume class's defaults. `rc_scripts_plugin::pain` reads them while the
+map loads (`LevelPain`) and runs the original's rules each frame:
+
+- A character starts touching a hurting volume that is meant for it (its
+  `GameClass` is `ClassProximityType` or under it in the game's class
+  tree; no class means everyone): it is hurt at once and the volume's
+  timer starts if it isn't running.
+- The timer goes off every 1.0 s and hurts everyone meant for it who is
+  still touching; with nobody there, or the volume switched off, it stops.
+- A hurt is `int(DamagePerSec)` of the volume's damage class, times the
+  character's damage table. Below 0 it heals, up to full health.
+- An event named like the volume's `Tag` switches it on or off.
+
+The damage class's defaults decide what the hit does, carried in
+`rc_combat::DamageRules` on the `Damage` message: going past shields, and
+killing outright instead of putting a commando down. A character killed
+outright gets `rc_combat::Killed` as well as `Dead`; the squad never
+revives it, and the player's vitals say "dead", not "down". "Touching" is
+tested at 11 points of the character's cylinder (the original's exact
+shape test is compiled code).
+
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 
 Every pull request, and every push to `main`, is built and tested by GitHub's

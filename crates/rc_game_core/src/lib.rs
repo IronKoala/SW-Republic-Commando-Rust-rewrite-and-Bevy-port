@@ -53,8 +53,8 @@ mod hud;
 mod log;
 pub mod music;
 pub mod paths;
-pub mod place_light;
 pub mod pickups;
+pub mod place_light;
 pub mod save;
 pub mod sound;
 mod state;
@@ -65,10 +65,10 @@ pub mod use_item;
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
-    ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone,
-    FactoryOrder,
-    LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
-    ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
+    ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder,
+    CharacterOrderDone, FactoryOrder, GameClass, LevelScriptsRun, MarkerJob, MarkerJobStep,
+    PropAnim, RaiseEvent, ScriptEvent, ScriptTags, ShowDebriefing, SquadMembership,
+    SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,

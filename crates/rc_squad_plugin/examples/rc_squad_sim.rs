@@ -762,6 +762,7 @@ fn drive_player(
                 for (e, mate, _, _) in &mates {
                     if mate.index == i {
                         damage.write(Damage {
+                            rules: Default::default(),
                             target: e,
                             amount: 10_000.0,
                             kind: DamageKind::Other,
@@ -776,6 +777,7 @@ fn drive_player(
             Step::KnockDownPlayer => {
                 if let Some(e) = player_entity {
                     damage.write(Damage {
+                        rules: Default::default(),
                         target: e,
                         amount: 10_000.0,
                         kind: DamageKind::Other,

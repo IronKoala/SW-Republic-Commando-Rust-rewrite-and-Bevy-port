@@ -257,6 +257,10 @@ fn spawn_player(
     let view = eye_view(&body);
     commands.spawn((
         Player,
+        // The player's character class: CTGame.u's player team default
+        // is `CTCharacters.PlayerCommando`, and Engine.u's
+        // `Pawn.IsPlayerPawn` asks for that class.
+        rc_game_core::GameClass("PlayerCommando".into()),
         body,
         Transform::from_translation(to_bevy(feet)),
         DespawnOnExit(GameState::InGame),

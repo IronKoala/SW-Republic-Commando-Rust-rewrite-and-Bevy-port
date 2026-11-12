@@ -50,6 +50,7 @@ fn run(app: &mut App, seconds: f32) {
 
 fn hurt(app: &mut App, target: Entity, amount: f32) {
     app.world_mut().write_message(Damage {
+        rules: Default::default(),
         target,
         amount,
         kind: DamageKind::Blaster,

@@ -334,7 +334,9 @@ const CLASS_PACKAGES: [&str; 8] = [
     "GameData/Properties/MarkerProperties.u",
 ];
 
-fn class_library(paths: &GamePaths) -> (rc_package::class_library::ClassLibrary, Vec<String>) {
+pub(crate) fn class_library(
+    paths: &GamePaths,
+) -> (rc_package::class_library::ClassLibrary, Vec<String>) {
     let mut lib = rc_package::class_library::ClassLibrary::new();
     let mut missing = Vec::new();
     let mut rels: Vec<String> = CLASS_PACKAGES.iter().map(|s| s.to_string()).collect();

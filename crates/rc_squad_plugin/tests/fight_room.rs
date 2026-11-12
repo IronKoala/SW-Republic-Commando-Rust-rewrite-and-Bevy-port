@@ -81,6 +81,7 @@ fn droid(app: &mut App, feet: UVec3) -> Entity {
 
 fn knock_down(app: &mut App, target: Entity) {
     app.world_mut().write_message(Damage {
+        rules: Default::default(),
         target,
         amount: 10_000.0,
         kind: DamageKind::Other,
