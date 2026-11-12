@@ -608,12 +608,13 @@ copy of the game.
   size is our guess. **The HUD now uses the original's pictures and
   fonts**, matched by eye to a screenshot of the original (tested in the
   cloud sandbox with the install, not yet on Windows): squad numbers over
-  order panels at the bottom left, green shield and magazine meters either
-  side of the bottom middle, the grenade and its count at the bottom
-  right. Which meter shows what is our guess, set in `data/ui/hud.toml`,
-  and a test checks nothing overlaps at 18 screen shapes from 4:3 to 32:9
-  (phones on their side; upright phones aren't supported). Not drawn yet:
-  the visor frame, visor cracks and blood. If the HUD pictures can't be
+  order panels at the bottom left, the health meters either side of the
+  bottom middle, the blue shield bars along the bottom edges (they flash
+  red when hit), the visor frame down the sides, the grenade and its count
+  at the bottom right, all placed as the original's engine code places
+  them (`data/ui/hud.toml`), and a test checks nothing overlaps at 18
+  screen shapes from 4:3 to 32:9 (phones on their side; upright phones
+  aren't supported). Not drawn yet: visor cracks and blood. If the HUD pictures can't be
   read the amber placeholder HUD comes back and `logs/rc_game.log` says
   why.
 

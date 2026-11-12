@@ -4059,8 +4059,8 @@ down both sides (5, 22, 112 x 432 from `CloneVisorIcons` 0, 0 to 142,
 442, mirrored at 795), the short pieces at the top (106, 22, 86 x 19,
 mirrored at 694) and the compass strip between them (194, 25, 414 x 11,
 `CompassGraphic` repeated). White at 130 while health is high, else the
-health colour (165 at level 2, 150 below; the original pulses that, not
-done). The compass slides with the way you face: the picture's offset is
+health colour (165 at level 2; below half it pulses, `150 + 105 *
+sin(2.5 t)^2`, `alpha_with = "frame_pulse"`). The compass slides with the way you face: the picture's offset is
 the yaw (0..65535) times 0.0001, followed at 3 per second
 (`original_hud::compass_follow`); `scroll = "compass"` on an element
 slides its picture, which repeats (`rc_menus::hud` `tiles`). Group
@@ -4074,10 +4074,34 @@ premultiplied see-through material. So the HUD bends with the glass and
 what lies past the glass's edge isn't seen. The parts not on the glass
 (crosshair, pickup line) are drawn on the screen as before.
 
-Not done yet: the pulsing (squad mates down, no grenades, low health),
-the arrow round each squad panel pointing to that mate, the timer ring
-while a mate works on something, which order uses which picture (ours),
-the shield bars.
+**The shield bars** (Engine.dll `UHelmet::DrawHUD`, right after the
+compass; every number in `data/ui/hud.toml`): along the bottom edge on
+both sides, a faint back, an end and its foot in white, then the bright
+fill in (200, 200, 200) with an outer cap riding on its edge and an inner
+cap. The fill is a few texels of `CloneVisorIcons` stretched over
+whatever width is left (`fill_stretch`), 4 shorter than its share
+(`fill_inset`), and empties from the screen's edge toward the middle; the
+outer cap rides along (`slide_with`). When the shields drop, the bars
+flash for `ShieldFlashDuration` (0.5 s): they swell `int(left * 6)` up
+and down (`grow_with = "shield_hit"`) and the white parts lose `int(left
+/ 0.5 * 155)` of their green and blue unless the shields are charging
+(`redden_with`). `original_hud::shield_flash` keeps that clock, as the
+original's `LastShield` and `ShieldFlashTime`. A thin strip across the
+top of the glass is drawn in the same colour.
+
+**See-through HUD pictures over the world** (`gpu::Variant::OverScene`):
+the menus' pictures get their alpha lowered so Bevy's linear-light
+blending matches the original over black. The HUD is drawn over the 3D
+world instead, where that made faint pictures (the visor frame: 25% see
+through became 5%) almost vanish, so the HUD keeps the original's alpha
+as it is. Over mid-tone ground that is within a few percent of the
+original; over dark ground it is a little brighter.
+
+Not done yet: the pulsing (squad mates down, no grenades, low health), the arrow round each squad panel pointing to that
+mate, the timer ring while a mate works on something, which order uses
+which picture (ours), the shields' start-up sequence ("CHARGING
+SHIELDS") and their charging sounds. The shield parts blink with
+`blink = "shields"`.
 
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
