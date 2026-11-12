@@ -3167,9 +3167,17 @@ Ours, or left out, where the files or the code we read don't say:
   port character dodges or takes such cover yet).
 - The game also writes a "next move" time (`CoverBoredomTime` ahead) when
   it looks for cover; what reads it was not found, so it is not used.
-- Becoming alerted (seeing, hearing, the reaction time) and giving up
-  after `EnemyMemoryTime` are still our droids' rules; the original's
-  StateIdle and StateInvestigate are not read yet.
+- **Noticing the enemy is not the original's yet.** How a trooper first
+  notices a droid, which one it picks, and when it switches into or out
+  of this attack state still use our droids' stand-in rules: the sight
+  numbers (`SightRadius`, `PeripheralVision`, `AutoDetectRadius`,
+  `EnemyMemoryTime`) are the game's, but the 0.5 s reaction time, the
+  2500 uu hearing range and the nearest-visible-enemy choice are ours.
+  The original does this in compiled code we have found but not read
+  yet: a stimulus system (CTBot's `ReceiveStimulus`/`ProcessStimulus`,
+  `GetBestEnemy`, `LocalSituation.Assess`), each state's
+  `EstimateUtility` (the bot runs the state with the highest), and
+  Engine.dll's `SeeActor`. Reading and porting it is the next piece.
 - Placed troopers (the map's own `CloneTrooper` actors, which the cast
   shows) don't use it: only troopers the map's spawners make.
 
