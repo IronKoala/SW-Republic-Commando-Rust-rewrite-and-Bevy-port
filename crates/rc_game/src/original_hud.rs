@@ -483,10 +483,11 @@ fn draw_layout(
     log: Res<GameLog>,
     use_item: Option<Res<rc_game_core::UseItem>>,
     hud: Res<OriginalHud>,
-    (spoken, objectives, time): (
+    (spoken, objectives, time, script): (
         Option<Res<Spoken>>,
         Option<Res<rc_scripts_plugin::Objectives>>,
         Res<Time>,
+        Option<Res<rc_scripts_plugin::LevelScript>>,
     ),
     (helmet, helmet_readout, bodies, page): (
         Res<Helmet>,
@@ -541,6 +542,17 @@ fn draw_layout(
     now.shield_hit_steps = swell;
     now.shield_hit_red = red;
     now.frame_pulse = frame_pulse(now.health, time.elapsed_secs());
+    // The parts the level's scripts blink, all with the opacity the
+    // original works out from the level's time.
+    if let Some(s) = &script {
+        let a = rc_menus::hud::blink_alpha(s.director.time);
+        now.blinking = s
+            .hud_blink
+            .now()
+            .into_iter()
+            .map(|k| (k.to_string(), a))
+            .collect();
+    }
     if let Ok(b) = bodies.single() {
         let c = original.compass.get_or_insert(compass_target(b.yaw));
         *c = compass_follow(*c, compass_target(b.yaw), time.delta_secs());

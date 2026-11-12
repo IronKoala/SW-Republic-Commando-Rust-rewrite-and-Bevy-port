@@ -198,7 +198,21 @@ const ELEMENT_KEYS: &[&str] = &[
     "font",
     "wrap",
     "glass",
+    "blink",
 ];
+
+/// The HUD parts a level script can make blink (the original's
+/// `BlinkHUDHealth`, `BlinkHUDSquad`, `BlinkHUDGrenade`, `BlinkHUDShields`),
+/// for an element's `blink`.
+pub const BLINK_KINDS: &[&str] = &["health", "squad", "grenade", "shields"];
+
+/// The opacity a blinking HUD part is drawn with, `t` seconds into the
+/// level (Engine.dll `UHelmet::DrawHUD`: `sin(5 t) * 200 + 55`, cut to a
+/// whole number toward zero and kept as a byte, so below 0 it wraps round:
+/// -145 is drawn as 111).
+pub fn blink_alpha(t: f32) -> u8 {
+    ((5.0 * t).sin() as f64 * 200.0 + 55.0) as i32 as u8
+}
 
 /// Which corner or edge of the HUD area an element is pinned to.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -286,6 +300,11 @@ pub struct Element {
     /// of the HUD picture. Only while the helmet is drawn.
     #[serde(default)]
     pub glass: bool,
+    /// While a level script makes this part of the HUD blink (one of
+    /// [`BLINK_KINDS`]), the element's opacity is the blink's
+    /// ([`blink_alpha`]) instead of its own.
+    #[serde(default)]
+    pub blink: Option<String>,
     #[serde(flatten)]
     pub kind: Kind,
 }
@@ -449,6 +468,9 @@ pub struct HudValues {
     /// Engine.dll `UHelmet::DrawHUD` gives it `150 + 105 * sin(2.5 *
     /// time)^2`. `None` when it doesn't pulse.
     pub frame_pulse: Option<u8>,
+    /// The HUD parts blinking now (see [`BLINK_KINDS`]) and the opacity
+    /// they are drawn with this frame.
+    pub blinking: Vec<(String, u8)>,
 }
 
 /// How hurt, as the original sorts it (Engine.dll
@@ -556,6 +578,14 @@ impl HudValues {
             "frame_pulse" => Some(self.frame_pulse),
             _ => None,
         }
+    }
+
+    /// The opacity of a blinking HUD part, `None` when it isn't blinking.
+    pub fn blink(&self, kind: &str) -> Option<u8> {
+        self.blinking
+            .iter()
+            .find(|(k, _)| k == kind)
+            .map(|(_, a)| *a)
     }
 
     /// A yes/no by name, for `when` and `alert_when`.
@@ -738,6 +768,14 @@ impl HudLayout {
             }
             let probe = HudValues::default();
             let member = SquadLine::default();
+            if let Some(b) = &e.blink {
+                if !BLINK_KINDS.contains(&b.as_str()) {
+                    return Err(format!(
+                        "{}: blink \"{b}\" is not one of {BLINK_KINDS:?}",
+                        e.group
+                    ));
+                }
+            }
             for w in [&e.when, &e.alert_when].into_iter().flatten() {
                 if probe.flag(w, Some(&member)).is_none() {
                     return Err(format!("{}: unknown condition \"{w}\"", e.group));
@@ -924,6 +962,9 @@ pub fn hud_quads_of(
                 (true, Some(c)) => c,
                 _ => chosen.unwrap_or(e.colour),
             };
+            if let Some(a) = e.blink.as_deref().and_then(|k| values.blink(k)) {
+                colour[3] = a;
+            }
             if let Some(f) = &e.fade {
                 let v = values.fraction(f, member).unwrap_or(1.0);
                 if v <= 0.0 {
@@ -1326,6 +1367,76 @@ mod tests {
             faded([255, 200, 100, 255], 0.5, &text, Some("alpha")),
             [255, 200, 100, 128]
         );
+    }
+
+    #[test]
+    fn the_opacity_wraps_like_a_byte() {
+        // sin = 1: 255; sin = 0: 55; sin = -1: -145 kept as a byte, 111.
+        assert_eq!(blink_alpha(std::f32::consts::FRAC_PI_2 / 5.0), 255);
+        assert_eq!(blink_alpha(0.0), 55);
+        assert_eq!(blink_alpha(3.0 * std::f32::consts::FRAC_PI_2 / 5.0), 111);
+        // A little below 0 (sin -0.3): -5 kept as a byte, 251.
+        let t = (-0.3f32).asin() / 5.0;
+        assert_eq!(blink_alpha(t), 251);
+    }
+
+    /// The shipped layout blinks the parts the original does: the
+    /// health-coloured meter parts (not their white backs), the squad
+    /// panels, the grenade panel and picture; nothing else changes.
+    #[test]
+    fn script_blinks_reach_the_original_parts() {
+        struct Stub;
+        impl Sizes for Stub {
+            fn texture_size(&mut self, _: &str) -> Option<(f32, f32)> {
+                Some((256.0, 512.0))
+            }
+            fn font(&mut self, _: &str) -> Option<FontData> {
+                None
+            }
+        }
+        let layout = shipped();
+        let mut v = HudValues {
+            health: 1.0,
+            shield: 1.0,
+            weapon: "DC-17m Blaster".into(),
+            grenade: Some(("THERMAL DETONATOR".into(), 2)),
+            squad: vec![SquadLine {
+                health: 1.0,
+                order: "FORM UP".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let draw = |v: &HudValues| hud_quads(&layout, v, 1920.0, 1080.0, 3.0, &mut Stub, None);
+        let plain = draw(&v);
+        for kind in ["health", "squad", "grenade"] {
+            v.blinking = vec![(kind.to_string(), 7)];
+            let blinking = draw(&v);
+            assert_eq!(plain.len(), blinking.len());
+            let mut changed = 0;
+            for (a, b) in plain.iter().zip(&blinking) {
+                let expect = match kind {
+                    "health" => {
+                        (a.widget == "vitals" || a.widget == "ammo")
+                            && a.color != [255, 255, 255, 130]
+                    }
+                    "squad" => a.widget == "squad" && a.color == [255, 255, 255, 240],
+                    _ => a.widget == "grenade",
+                };
+                if expect {
+                    assert_eq!(b.color[3], 7, "{kind}: {} {:?}", a.widget, a.color);
+                    changed += 1;
+                } else {
+                    assert_eq!(a.color, b.color, "{kind}: {}", a.widget);
+                }
+            }
+            let want = match kind {
+                "health" => 4,
+                "squad" => 1,
+                _ => 2,
+            };
+            assert_eq!(changed, want, "{kind}");
+        }
     }
 
     #[test]

@@ -113,6 +113,13 @@ prompt_wrap = 21
 # Sliding (`scroll`, in picture widths, the picture repeating): compass.
 # Colours by a text (`colour_by` with `colours`): {health_level} and
 # {squad_health_level} are 0 to 3, the original's `CalcHealthLevel`.
+# Blinking (`blink`): health, squad, grenade, shields. While a level
+# script blinks that part of the HUD (the original's BlinkHUDHealth and so
+# on, which teach the player the HUD in the first levels), the element's
+# opacity follows the original's blink (Engine.dll `UHelmet::DrawHUD`):
+# health blinks the health-coloured meter parts, squad the squad panels,
+# grenade the grenade panel, picture and count, shields the shield bars
+# and the strip across the top, as the original does.
 # Texts can also name their `font` (one of the fonts below, scaled to the
 # line height), `wrap` onto more lines, and be drawn through the helmet's
 # glass (`glass = true`), as the original draws its HUD.
@@ -245,6 +252,7 @@ repeat_squad = [32, 0]
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [148, 354, 192, 396]
 colour = [255, 255, 255, 240]
+blink = "squad"
 glass = true
 
 # The original picks the picture from a grid in CloneVisorIcons (25 x 25
@@ -291,6 +299,7 @@ part = [181, 36, 256, 95]
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
 colour = [72, 255, 72, 255]
+blink = "health"
 glass = true
 
 [[element]]
@@ -307,6 +316,7 @@ fill_least_gap = 0.0909
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
 colour = [72, 255, 72, 255]
+blink = "health"
 glass = true
 
 [[element]]
@@ -331,6 +341,7 @@ mirror = true
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
 colour = [72, 255, 72, 255]
+blink = "health"
 glass = true
 
 [[element]]
@@ -348,6 +359,7 @@ fill_least_gap = 0.0909
 colour_by = "{health_level}"
 colours = { "0" = [255, 94, 72, 255], "1" = [246, 139, 31, 255], "2" = [255, 250, 110, 255], "3" = [72, 255, 72, 255] }
 colour = [72, 255, 72, 255]
+blink = "health"
 glass = true
 
 # --- The shields, as the original helmet draws them ----------------------
@@ -365,9 +377,10 @@ glass = true
 # When the shields drop, the original "flashes" them for ShieldFlashDuration
 # (0.5 s, engine.u): every part swells int(left * 6) up and down (the foot
 # only moves up), and the white parts lose int(left / 0.5 * 155) of their
-# green and blue (go red) unless the shields are charging. (Not done: the
-# "CHARGING SHIELDS" start-up sequence, the bBlinkShields blink that level
-# scripts can switch on, and the charging sounds.)
+# green and blue (go red) unless the shields are charging. While a level
+# script blinks the shields (bBlinkShields), every part here, fill
+# included, takes the blink's opacity (`blink = "shields"`). (Not done: the
+# "CHARGING SHIELDS" start-up sequence and the charging sounds.)
 # Then a thin strip across the top of the glass in the same colour: (0, 14,
 # 381 x 10, texels 149,26-157,37) and (381, 14, 9 x 10, texels
 # 175,26-183,37), mirrored at 800 and 419.
@@ -385,6 +398,7 @@ colour = [255, 255, 255, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -398,6 +412,7 @@ colour = [255, 255, 255, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -411,6 +426,7 @@ colour = [255, 255, 255, 255]
 grow_with = "shield_hit"
 grow = [-0.8, -0.8]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -428,6 +444,7 @@ fill_inset = 3.2
 colour = [200, 200, 200, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
+blink = "shields"
 glass = true
 
 [[element]]
@@ -443,6 +460,7 @@ slide = [-130.4, 0]
 colour = [200, 200, 200, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
+blink = "shields"
 glass = true
 
 [[element]]
@@ -456,6 +474,7 @@ part = [164, 184, 179, 204]
 colour = [200, 200, 200, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
+blink = "shields"
 glass = true
 
 [[element]]
@@ -470,6 +489,7 @@ colour = [255, 255, 255, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -484,6 +504,7 @@ colour = [255, 255, 255, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -498,6 +519,7 @@ colour = [255, 255, 255, 255]
 grow_with = "shield_hit"
 grow = [-0.8, -0.8]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -516,6 +538,7 @@ fill_inset = 3.2
 colour = [200, 200, 200, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
+blink = "shields"
 glass = true
 
 [[element]]
@@ -532,6 +555,7 @@ slide = [130.4, 0]
 colour = [200, 200, 200, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
+blink = "shields"
 glass = true
 
 [[element]]
@@ -546,6 +570,7 @@ mirror = true
 colour = [200, 200, 200, 255]
 grow_with = "shield_hit"
 grow = [-0.8, 0.8]
+blink = "shields"
 glass = true
 
 [[element]]
@@ -558,6 +583,7 @@ part = [149, 26, 157, 37]
 mirror = false
 colour = [255, 255, 255, 255]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -570,6 +596,7 @@ part = [175, 26, 183, 37]
 mirror = false
 colour = [255, 255, 255, 255]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -582,6 +609,7 @@ part = [149, 26, 157, 37]
 mirror = true
 colour = [255, 255, 255, 255]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 [[element]]
@@ -594,6 +622,7 @@ part = [175, 26, 183, 37]
 mirror = true
 colour = [255, 255, 255, 255]
 redden_with = "shield_hit"
+blink = "shields"
 glass = true
 
 # Grenades, bottom right: the same panel mirrored (682..725, 414), the
@@ -606,6 +635,7 @@ anchor = "bottom_right"
 at = [-93.6, -169.2]
 size = [32, 21.6]
 when = "grenade"
+blink = "grenade"
 text = "{grenades}"
 align = "centre"
 font = "OrbitFonts.OrbitBold15"
@@ -621,6 +651,7 @@ anchor = "bottom_right"
 at = [-94.4, -148.8]
 size = [34.4, 32]
 when = "grenade"
+blink = "grenade"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [148, 354, 192, 396]
 mirror = true
@@ -632,6 +663,7 @@ anchor = "bottom_right"
 at = [-88, -142.4]
 size = [20.8, 20.8]
 when = "grenade"
+blink = "grenade"
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [148, 323, 173, 348]
 choose_by = "{grenade}"

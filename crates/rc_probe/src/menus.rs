@@ -426,6 +426,7 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         shield_hit_steps: 0,
         shield_hit_red: 0,
         frame_pulse: None,
+        blinking: vec![],
     };
     // The objective shows when nobody speaks and no message is up.
     let objective_only = HudValues {

@@ -1655,6 +1655,7 @@ and carries out the effects:
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
 | `AddAmmo` | `rc_game_core::pickups::AddAmmo` to `rc_combat::script_ammo`: the player's grenade of that class (the grenade file's `game_class`) gets the amount added, kept between 0 and the most carried, as the original's `Ammunition.AddAmmo`; nothing if not carried. Only grenades: no map names a gun |
+| `BlinkHUDHealth`, `BlinkHUDSquad`, `BlinkHUDGrenade`, `BlinkHUDShields`, `BlinkHUDSquadCommandPrompt` | `LevelScript::hud_blink` (`hud_blink.rs`), read by `rc_game`'s original HUD: elements with that `blink` in `data/ui/hud.toml` are drawn with `rc_menus::hud::blink_alpha` (Engine.dll `UHelmet::DrawHUD`: sin(5 t) * 200 + 55, kept as a byte) until `BlinkTime` has passed. The squad command prompt's blink shows nothing in the original, so nothing here |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
@@ -4037,8 +4038,8 @@ original; over dark ground it is a little brighter.
 Not done yet: the pulsing (squad mates down, no grenades, low health), the arrow round each squad panel pointing to that
 mate, the timer ring while a mate works on something, which order uses
 which picture (ours), the shields' start-up sequence ("CHARGING
-SHIELDS"), their blink that level scripts can switch on, and their
-charging sounds.
+SHIELDS") and their charging sounds. The shield parts blink with
+`blink = "shields"`.
 
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 
