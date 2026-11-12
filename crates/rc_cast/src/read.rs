@@ -149,6 +149,29 @@ pub struct CastMember {
     /// Casts a shadow (`bActorShadows`, from the map or the class). Only
     /// characters: in the original only a `Pawn` makes a shadow projector.
     pub shadow: bool,
+    /// How it can be hurt and die; `None` for props and for characters
+    /// this part leaves unhurt (vehicles, classes with no `Health`).
+    pub life: Option<Life>,
+}
+
+/// A character's health and what its death does, from the map and its
+/// class (the class's "...Defaults" class first, as the game lays it on
+/// top: see `find_cast`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Life {
+    /// `Health` (CloneTrooper 100).
+    pub health: f32,
+    /// The hit cylinder: `CollisionRadius` and `CollisionHeight`.
+    pub radius: f32,
+    pub half_height: f32,
+    /// `Event`: engine.u's `Pawn.Died` triggers it when the character
+    /// dies (geo_01a's `GunshipTrooper02Death`).
+    pub event: Option<String>,
+    /// Seconds the body stays after death: `Pawn.PlayDying` sets
+    /// `LifeSpan = RagdollLifeSpan` unless `bSaveMyCorpse`. `None` keeps
+    /// it (`bSaveMyCorpse`, or a life span of 0, which Unreal reads as
+    /// forever).
+    pub corpse_time: Option<f32>,
 }
 
 /// Every skeletal mesh in the animation packages, by lower-case name: the
@@ -347,6 +370,30 @@ pub fn find_cast(
             continue;
         };
         let number = |k: &str, d: f32| o.float(k).or_else(|| defaults.number(k)).unwrap_or(d);
+        // The game lays a class's "...Defaults" class from properties.u
+        // over it (core.dll's `Properties.%sDefaults`):
+        // `CloneTrooperDefaults` is a child of `CloneTrooper`, so its own
+        // defaults with its parents' cover the whole class.
+        let laid = Some(format!("{}Defaults", o.class))
+            .filter(|d| lib.has_class(d))
+            .map(|d| lib.defaults(&d));
+        let full = laid.as_ref().unwrap_or(&defaults);
+        let full_number = |k: &str| o.float(k).or_else(|| full.number(k));
+        let is_vehicle = chain.iter().any(|c| c.eq_ignore_ascii_case("Vehicles"));
+        let life = full_number("Health")
+            .filter(|h| is_pawn && !is_vehicle && *h > 0.0)
+            .map(|health| Life {
+                health,
+                radius: full_number("CollisionRadius").unwrap_or(40.0),
+                half_height: full_number("CollisionHeight").unwrap_or(78.0),
+                event: o.text("Event").map(str::to_string),
+                corpse_time: if o.flag("bSaveMyCorpse", full.bool("bSaveMyCorpse").unwrap_or(false))
+                {
+                    None
+                } else {
+                    full_number("RagdollLifeSpan").filter(|t| *t > 0.0)
+                },
+            });
         let align_bottom = o.flag(
             "bAlignBottom",
             defaults.bool("bAlignBottom").unwrap_or(true),
@@ -428,6 +475,7 @@ pub fn find_cast(
                 && o.get("bActorShadows")
                     .map(|v| matches!(v, Val::Bool(true)))
                     .unwrap_or_else(|| defaults.bool("bActorShadows").unwrap_or(false)),
+            life,
         });
     }
     (out, notes)
@@ -454,5 +502,33 @@ mod tests {
             f.override_for("commando07delta").map(|o| o.skins.len()),
             Some(1)
         );
+    }
+
+    /// The enemies part makes every placed character an enemy file claims
+    /// (apart from clone troopers), so the cast must leave each of those
+    /// classes out or it would be there twice.
+    #[test]
+    fn every_enemy_files_classes_are_left_out() {
+        let f = CastFile::default();
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/enemies");
+        let mut checked = 0;
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let text = std::fs::read_to_string(e.path()).unwrap();
+            let v: toml::Value = toml::from_str(&text).unwrap();
+            let t = &v["type"];
+            if t.get("side").and_then(|s| s.as_str()) == Some("republic") {
+                continue;
+            }
+            for c in t["classes"].as_array().unwrap() {
+                let c = c.as_str().unwrap().trim_end_matches('*');
+                assert!(
+                    f.leaves_out(&[c.to_string()]),
+                    "{c} ({}) is an enemy but the cast doesn't leave it out",
+                    e.path().display()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 10);
     }
 }

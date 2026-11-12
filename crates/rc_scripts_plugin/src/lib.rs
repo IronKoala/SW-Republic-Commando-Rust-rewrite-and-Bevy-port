@@ -684,7 +684,11 @@ fn run(
         MessageReader<RaiseEvent>,
         MessageReader<rc_game_core::CharacterOrderDone>,
     ),
-    (mut factories, mut turrets): (MessageWriter<FactoryOrder>, MessageWriter<TurretOrder>),
+    (mut factories, mut turrets, mut collisions): (
+        MessageWriter<FactoryOrder>,
+        MessageWriter<TurretOrder>,
+        MessageWriter<rc_game_core::CharacterCollision>,
+    ),
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
@@ -955,6 +959,7 @@ fn run(
                     &mut damage,
                     &mut factories,
                     &mut turrets,
+                    &mut collisions,
                     &use_key,
                     &log,
                 );
@@ -985,6 +990,7 @@ fn carry_out(
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
     turrets: &mut MessageWriter<TurretOrder>,
+    collisions: &mut MessageWriter<rc_game_core::CharacterCollision>,
     use_key: &str,
     log: &GameLog,
 ) {
@@ -996,6 +1002,14 @@ fn carry_out(
             let tag = a.text("CollideActorTag").unwrap_or("");
             let on = a.flag("bCollideActors", true);
             let n = parts.as_ref().map_or(0, |p| p.set_solid(tag, on));
+            // Characters with that tag too (the parts that own them apply
+            // it; nothing happens if there are none).
+            if !script.director.is_teleporter(tag) && !tag.is_empty() {
+                collisions.write(rc_game_core::CharacterCollision {
+                    tag: tag.to_string(),
+                    on,
+                });
+            }
             if script.director.is_teleporter(tag) {
                 log.line(format!(
                     "{at}: level exit {tag} {}",
@@ -1012,7 +1026,7 @@ fn carry_out(
             } else {
                 script.stats.not_done += 1;
                 log.line(format!(
-                    "{at}: {tag} collision {on} (not a level part; characters not done yet)"
+                    "{at}: {tag} collision {on} (not a level part; sent to the characters with that tag)"
                 ));
             }
         }

@@ -66,12 +66,14 @@ impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Looks>()
             .init_resource::<EnemySounds>()
+            .init_resource::<PawnClasses>()
             .add_save_part::<save::EnemiesSave>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
             .add_message::<FactoryOrder>()
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
+            .add_message::<rc_game_core::CharacterCollision>()
             .init_resource::<rc_game_core::MusicThreats>()
             .init_resource::<dispensers::DispenserSounds>()
             .init_resource::<dispensers::DispenserStats>()
@@ -86,7 +88,13 @@ impl Plugin for EnemiesPlugin {
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
                 Update,
-                (hear_level, scripted::follow_orders, think, place_droids)
+                (
+                    hear_level,
+                    scripted::set_collision,
+                    scripted::follow_orders,
+                    think,
+                    place_droids,
+                )
                     .chain()
                     .in_set(GameSet::Simulate)
                     .before(CombatSet::Fire)
@@ -271,6 +279,121 @@ pub struct Droid {
     /// Its animation while a dispenser makes it: `DispBreathe` on the
     /// slot, then `DispUnfold` (see `dispensers.rs`).
     pub dispense: Option<scripted::ScriptedAnim>,
+}
+
+/// The game's script classes (`GameData/System` and `Properties`), read
+/// once and kept between maps: which map actors are characters (pawns).
+#[derive(Resource, Default)]
+pub struct PawnClasses {
+    tried: bool,
+    pub library: Option<Arc<rc_package::class_library::ClassLibrary>>,
+}
+
+impl PawnClasses {
+    fn get(
+        &mut self,
+        paths: &GamePaths,
+        log: &GameLog,
+    ) -> Option<Arc<rc_package::class_library::ClassLibrary>> {
+        if !self.tried {
+            self.tried = true;
+            let t = std::time::Instant::now();
+            let (lib, notes) = read_class_library(&paths.game_data());
+            for n in notes {
+                log.line(format!("{PART}: classes: {n}"));
+            }
+            log.line(format!(
+                "{PART}: the game's classes read in {:.0} ms",
+                t.elapsed().as_secs_f64() * 1000.0
+            ));
+            self.library = Some(Arc::new(lib));
+        }
+        self.library.clone()
+    }
+}
+
+/// Every script package in `GameData/System` and `GameData/Properties`.
+pub fn read_class_library(
+    game_data: &std::path::Path,
+) -> (rc_package::class_library::ClassLibrary, Vec<String>) {
+    let mut lib = rc_package::class_library::ClassLibrary::new();
+    let mut notes = Vec::new();
+    for dir in ["System", "Properties"] {
+        let d = rc_game_core::paths::resolve(game_data, dir);
+        let mut files: Vec<_> = match std::fs::read_dir(&d) {
+            Ok(r) => r.flatten().map(|e| e.path()).collect(),
+            Err(e) => {
+                notes.push(format!("can't list {}: {e}", d.display()));
+                continue;
+            }
+        };
+        files.sort();
+        for f in files {
+            if !f.extension().is_some_and(|x| x.eq_ignore_ascii_case("u")) {
+                continue;
+            }
+            let name = f
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match std::fs::read(&f) {
+                Ok(data) => {
+                    if let Err(e) = lib.add_package(&name, data) {
+                        notes.push(format!("{}: {e}", f.display()));
+                    }
+                }
+                Err(e) => notes.push(format!("can't read {}: {e}", f.display())),
+            }
+        }
+    }
+    (lib, notes)
+}
+
+/// Each map character (pawn) placed straight in the map whose class an
+/// enemy file claims, with the type that claims it, as a one-character
+/// spawner (`rc_ai::read_placed`). Clone troopers placed in the map are
+/// left to the cast (rc_cast), which draws them and runs their scripts.
+/// Returns the spawners and lines for the log.
+pub fn placed_enemies(
+    pkg: &Package,
+    data: &[u8],
+    classes: &rc_package::class_library::ClassLibrary,
+    types: &[Arc<AiParams>],
+) -> Result<(Vec<(rc_ai::Factory, Arc<AiParams>)>, Vec<String>), String> {
+    let is_pawn = |class: &str| {
+        classes
+            .chain(class)
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case("Pawn"))
+    };
+    let all = rc_ai::read_placed(pkg, data, &|c: &str| is_pawn(c))?;
+    let mut out = Vec::new();
+    let mut notes = Vec::new();
+    let mut unclaimed: std::collections::BTreeMap<String, u32> = Default::default();
+    for p in all {
+        let Some(t) = types.iter().find(|t| t.kind.matches(&p.class)) else {
+            *unclaimed.entry(p.class.clone()).or_default() += 1;
+            continue;
+        };
+        if t.kind.republic() {
+            notes.push(format!(
+                "placed {} ({}): a clone trooper, left to the cast",
+                p.name, p.class
+            ));
+            continue;
+        }
+        if let Some(why) = p.left_out {
+            notes.push(format!("placed {} ({}): not made: {why}", p.name, p.class));
+            continue;
+        }
+        out.push((p.factory, t.clone()));
+    }
+    if !unclaimed.is_empty() {
+        notes.push(format!(
+            "placed characters no enemy file claims (left to other parts): {unclaimed:?}"
+        ));
+    }
+    Ok((out, notes))
 }
 
 /// Each enemy type's mesh, read once from the game and kept between maps.
@@ -481,6 +604,7 @@ fn load_fight(
     log: Res<GameLog>,
     mut looks: ResMut<Looks>,
     mut sounds: ResMut<EnemySounds>,
+    mut classes: ResMut<PawnClasses>,
     audio: Option<ResMut<Assets<AudioSource>>>,
     images: Option<ResMut<Assets<Image>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
@@ -498,9 +622,18 @@ fn load_fight(
             let pkg = Package::parse(&data).map_err(|e| e.to_string())?;
             let nav = NavGraph::from_map(&pkg, &data)?;
             let factories = rc_ai::read_factories(&pkg, &data)?;
-            Ok((nav, factories))
+            // Characters placed straight in the map. Without the game's
+            // classes we can't tell which actors are characters.
+            let placed = match classes.get(&paths, &log) {
+                Some(lib) => placed_enemies(&pkg, &data, &lib, &types)?,
+                None => (
+                    Vec::new(),
+                    vec!["no class library: placed characters left out".into()],
+                ),
+            };
+            Ok((nav, factories, placed))
         });
-    let (nav, factories) = match read {
+    let (nav, factories, (placed, placed_notes)) = match read {
         Ok(r) => r,
         Err(e) => {
             log.line(format!("{PART}: no droids on this map: {e}"));
@@ -526,6 +659,44 @@ fn load_fight(
     let triggered = droids.iter().filter(|f| !f.0.triggers.is_empty()).count();
     log.line(format!(
         "{PART}: {map}: spawners by enemy type {per_type:?}; spawners no enemy file claims {unclaimed:?}"
+    ));
+    for n in placed_notes {
+        log.line(format!("{PART}: {map}: {n}"));
+    }
+    // Characters placed in the map go after the real spawners, so saves
+    // from before they were made still fit (see `Battle::restore`).
+    let mut placed_by_type: std::collections::BTreeMap<String, u32> = Default::default();
+    for (f, t) in &placed {
+        *placed_by_type.entry(t.kind.id.clone()).or_default() += 1;
+        *per_type.entry(t.kind.id.clone()).or_default() += 0;
+        let o = &f.offspring;
+        log.line(format!(
+            "{PART}:   placed {} ({}) is a {}: at ({:.0}, {:.0}, {:.0}), tag {}{}{}{}, starts {:?}",
+            f.name,
+            f.prototype,
+            t.kind.id,
+            f.location.x,
+            f.location.y,
+            f.location.z,
+            o.tag.as_deref().unwrap_or("-"),
+            o.script
+                .as_ref()
+                .map(|s| format!(", runs script {s}"))
+                .unwrap_or_default(),
+            o.event
+                .as_ref()
+                .map(|e| format!(", sends {e} when destroyed"))
+                .unwrap_or_default(),
+            o.first_damaged_event
+                .as_ref()
+                .map(|e| format!(", sends {e} when first hurt"))
+                .unwrap_or_default(),
+            o.start_state,
+        ));
+    }
+    log.line(format!(
+        "{PART}: {map}: {} characters placed in the map, made as the level starts: {placed_by_type:?}",
+        placed.len()
     ));
     let scripted = scripts.is_some();
     let how = if scripted {
@@ -652,6 +823,7 @@ fn load_fight(
             )),
         }
     }
+    droids.extend(placed);
     let mut battle = Battle::with_types(params, nav, droids);
     battle.scripted = scripted;
     commands.insert_resource(Fight::new(battle));
@@ -1058,9 +1230,14 @@ fn think(
                 fight.entities.insert(id, e.id());
                 fight.stats.spawned += 1;
                 log.line(format!(
-                    "{PART}: t={now:.1}s droid {id} ({}, health {}) spawned by {} at ({:.0}, {:.0}, {:.0}) facing {:.0} deg",
+                    "{PART}: t={now:.1}s droid {id} ({}, health {}) {} {} at ({:.0}, {:.0}, {:.0}) facing {:.0} deg",
                     p.kind.id,
                     p.combat.health,
+                    if fight.battle.spawners[spawner].factory.placed {
+                        "placed in the map as"
+                    } else {
+                        "spawned by"
+                    },
                     fight.battle.spawners[spawner].factory.name,
                     feet.x,
                     feet.y,
@@ -1233,9 +1410,8 @@ fn place_droids(
         };
         t.translation = to_bevy(f.pawn.feet());
         t.rotation = Quat::from_rotation_y(-f.facing);
-        let Some(mut hit) = hit else {
-            continue;
-        };
+        // A droid whose collision a script switched off has no body to hit.
+        let Some(mut hit) = hit else { continue };
         let h = if f.pawn.crouched {
             f.params.movement.crouch_height
         } else {

@@ -38,6 +38,18 @@
 //! Droid dispensers (`BDDispenser`, `SBDDispenser`, `DroidekaDispenser`)
 //! are pawn factories too (CTGame.u `DroidDispenser extends PawnFactory`)
 //! with their own rules; see [`Dispenser`] and `crate::battle`.
+//! Characters can also be placed straight in the map, with no factory
+//! (Engine.u `Pawn.PostBeginPlay`, read only): every placed pawn that is
+//! alive when the level starts (its health is set to its full health
+//! just before) gets its controller (its AI) straight away,
+//! through its `AIScriptTag`'s script when it names one, unless
+//! `bDontPossess` is set, and is handed its default weapons. Its own
+//! `Tag`, `Event` (sent when it dies), `FirstDamagedEvent`, `StartState`,
+//! `TeamIndex` and `AIScriptTag` are the same values a factory copies onto
+//! the characters it makes (CTGame.u `PawnFactory.SetupNewActor`).
+//! [`read_placed`] turns each one into a [`Factory`] that makes exactly
+//! that one character, at its own place, as the level starts
+//! ([`Factory::placed`]).
 
 use rc_level::actors;
 use rc_movement::Vec3;
@@ -144,6 +156,11 @@ pub struct Factory {
     /// A droid dispenser's own rules and looks; `None` for a plain pawn
     /// factory.
     pub dispenser: Option<Dispenser>,
+    /// Not a real factory: a character placed straight in the map (see
+    /// [`read_placed`]). It makes that one character when the level
+    /// starts and nothing else; events, scripts' factory orders and
+    /// walk-in triggers leave it alone.
+    pub placed: bool,
 }
 
 impl Default for Factory {
@@ -174,6 +191,7 @@ impl Default for Factory {
             triggers: Vec::new(),
             start_timer_after_death: false,
             dispenser: None,
+            placed: false,
         }
     }
 }
@@ -621,6 +639,96 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
             team: int(f, "TeamIndexFromFactory"),
             triggers,
             dispenser,
+            placed: false,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// One character placed straight in a map, as [`read_placed`] found it.
+#[derive(Debug, Clone)]
+pub struct Placed {
+    /// The actor's name in the map, e.g. `GeonosianWarriorNoWeap0`.
+    pub name: String,
+    pub class: String,
+    /// The one-character factory that puts it in the level.
+    pub factory: Factory,
+    /// Why the original gives it no AI at the start, if it doesn't
+    /// (`bDontPossess` set). The game leaves such characters out for now:
+    /// it only makes characters that fight.
+    pub left_out: Option<&'static str>,
+}
+
+/// Every character placed straight in the map whose class `wanted` says
+/// yes to (the caller checks it is a pawn of a kind it can make), each as a
+/// one-character [`Factory`] (see the module notes). Sorted by name.
+pub fn read_placed(
+    pkg: &Package,
+    data: &[u8],
+    wanted: &dyn Fn(&str) -> bool,
+) -> Result<Vec<Placed>, String> {
+    let level = actors::read_level(pkg, data).map_err(|e| format!("level: {e}"))?;
+    let mut out = Vec::new();
+    for &a in level.actors.iter().flatten() {
+        let e = &pkg.exports[a];
+        let class = pkg.export_class_name(e).to_string();
+        if !wanted(&class) {
+            continue;
+        }
+        let Ok(props) = actors::read_actor_properties(pkg, data, a) else {
+            continue;
+        };
+        let get = |n: &str| properties::find(pkg, &props, n).map(|p| p.value.clone());
+        let label = |n: &str| match get(n) {
+            Some(Value::Name(i)) => {
+                Some(pkg.name(i).to_string()).filter(|s| !s.eq_ignore_ascii_case("None"))
+            }
+            _ => None,
+        };
+        let name = pkg.name(e.object_name).to_string();
+        let location = get("Location").and_then(|v| vec3(&v)).unwrap_or(Vec3::ZERO);
+        let left_out = if matches!(get("bDontPossess"), Some(Value::Bool(true))) {
+            Some("bDontPossess is set: the original gives it no AI")
+        } else {
+            None
+        };
+        let offspring = Offspring {
+            // Unreal gives a placed actor its class name as its tag when
+            // the map stores none.
+            tag: Some(label("Tag").unwrap_or_else(|| class.clone())),
+            event: label("Event"),
+            first_damaged_event: label("FirstDamagedEvent"),
+            start_state: match get("StartState") {
+                Some(Value::Byte(b)) => StartState::from_byte(b),
+                _ => StartState::Idle,
+            },
+            team: match get("TeamIndex") {
+                Some(Value::Int(t)) if t >= 0 => Some(t),
+                _ => None,
+            },
+            script: label("AIScriptTag"),
+        };
+        out.push(Placed {
+            factory: Factory {
+                name: name.clone(),
+                // No event switches it on or off.
+                tag: String::new(),
+                prototype: class.clone(),
+                location,
+                yaw: yaw(get("Rotation").as_ref()),
+                capacity: 1,
+                max_alive: 1,
+                spawn_mode: 2,
+                start_state: offspring.start_state.clone(),
+                team: offspring.team,
+                offspring,
+                placed: true,
+                ..Factory::default()
+            },
+            name,
+            class,
+            left_out,
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));

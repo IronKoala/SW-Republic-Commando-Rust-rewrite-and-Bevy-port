@@ -26,8 +26,8 @@ pub use battle::{
 pub use brain::{AiEvent, Fighter, Maneuver, Mode, ScriptGoal, Target, View};
 pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
 pub use spawns::{
-    read_factories, Dispenser, Factory, Offspring, SpawnSpot, StartState, Transition,
-    DISPENSER_CLASSES,
+    read_factories, read_placed, Dispenser, Factory, Offspring, Placed, SpawnSpot, StartState,
+    Transition, DISPENSER_CLASSES,
 };
 
 #[cfg(test)]

@@ -136,6 +136,17 @@ copy of the game.
   still have to be read from the game. Droids still only shoot at you, not
   at the squad.
 
+- **Enemies placed straight in the map appear (tested in the cloud
+  sandbox by numbers, not yet on Windows or by eye).** Besides the ones
+  spawners make, the maps place 92 enemies of kinds the game has (battle
+  and super battle droids, Geonosians, Grievous's guards, Trandoshans) on
+  24 maps. They are now there from the moment the level starts, as in the
+  original, with their own names, scripts and events, so the level
+  scripts can find them: on geo_01a the Geonosian at the gunship door
+  and Rocky. Placed kinds the game doesn't have yet (droidekas, spider
+  droids, Wookiees, vehicles, ...) still don't appear. List them with
+  `rc_placed_enemies` (an example in `rc_enemies`).
+
 - **Clone troopers fight the droids (tested in the cloud sandbox by
   numbers, not yet on Windows or by eye).** geo_01a's 16 clone trooper
   spawners now make troopers with the original's numbers (health,
@@ -760,6 +771,11 @@ copy of the game.
   only).** They take the light of where they stand, and hold their rifles:
   the game's own DC-15 model (from `CloneTrooperDefaults`), on their hand
   bone. They don't fire yet.
+  Since 2026-11-12 they can be hurt and die (100 health, from the game's
+  files): they fall with the game's own death animation, the level hears
+  of it (the map's death event for them), and the body goes after 60
+  seconds, as in the original. There are no ragdolls yet, so a blast
+  doesn't throw them.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to

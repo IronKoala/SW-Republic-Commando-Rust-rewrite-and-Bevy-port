@@ -1059,6 +1059,32 @@ fn steps() -> Vec<Step> {
         // stood on the ground.
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
         Check("the clone troopers hold their rifles", troopers_hold_rifles),
+        Check("the Geonosians placed in the map are made", placed_geonosians),
+        // Troopers can be hurt and die (their class's `Health`), as
+        // engine.u's `Pawn.Died`: the map's `Event` for them goes off and
+        // they play their `Death` animation. CloneTrooper1 has no script
+        // and no event, so killing it changes nothing else in the level.
+        Check("the clone troopers can be hurt and die", troopers_can_die),
+        Note(|w| {
+            let mut q = w.query::<(Entity, &rc_cast::Cast)>();
+            let Some(e) = q
+                .iter(w)
+                .find(|(_, c)| c.name == "CloneTrooper1")
+                .map(|(e, _)| e)
+            else {
+                return;
+            };
+            w.write_message(rc_combat::Damage {
+                target: e,
+                amount: 500.0,
+                kind: rc_combat::DamageKind::Other,
+                instigator: None,
+                point: Vec3::ZERO,
+                direction: Vec3::NEG_Y,
+            });
+        }),
+        Wait(1.0),
+        Check("a clone trooper dies with the game's Death animation", trooper_died),
         Note(view_gunship),
         Wait(0.5),
         Shot("gunship"),
@@ -3379,6 +3405,52 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a places two Geonosians straight in the map (no spawner): the
+/// one at the gunship door (`GeonosianIntroWarrior01`, script
+/// `WarriorIntroAI`) and Rocky (`RockyAI`). Both must be made as the level
+/// starts and the intro warrior's script must have taken it over.
+fn placed_geonosians(w: &mut World) -> Result<String, String> {
+    let fight = w
+        .get_resource::<rc_enemies::Fight>()
+        .ok_or("no fight on this map")?;
+    let b = &fight.battle;
+    let find = |tag: &str| {
+        b.fighters.iter().find(|f| {
+            b.offspring(f.id)
+                .and_then(|o| o.tag)
+                .is_some_and(|t| t.eq_ignore_ascii_case(tag))
+        })
+    };
+    let placed = b.spawners.iter().filter(|s| s.factory.placed).count();
+    let rocky = find("Rocky").map(|f| (f.id, f.params.kind.id.clone(), f.mode));
+    let intro = find("GeonosianIntroWarrior01").map(|f| (f.id, f.params.kind.id.clone()));
+    let intro_scripted: Vec<&String> = intro
+        .as_ref()
+        .map(|(id, _)| {
+            fight
+                .stats
+                .scripted
+                .iter()
+                .filter(|s| s.split_whitespace().any(|x| x == id.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let msg = format!(
+        "{placed} placed; Rocky {rocky:?}; intro warrior {intro:?}, its script steps {intro_scripted:?}"
+    );
+    // Its script may already have removed it (no death event): a removed
+    // fighter stays in the battle's list, so it is found either way.
+    if placed == 2
+        && rocky.as_ref().is_some_and(|r| r.1 == "geonosian")
+        && intro.as_ref().is_some_and(|i| i.1 == "geonosian_no_weapon")
+        && !intro_scripted.is_empty()
+    {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
 /// geo_01a's clone troopers hold the game's DC-15 rifle model (their
@@ -3396,6 +3468,60 @@ fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
         .count();
     let msg = format!("{armed} of {} clone troopers hold a DC15BlasterClone", troopers.len());
     if !troopers.is_empty() && armed == troopers.len() {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// geo_01a's clone troopers have their class's 100 health and a hit
+/// cylinder, and the ramp trooper's death sends the event its script
+/// waits for.
+fn troopers_can_die(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<(
+        &rc_cast::Cast,
+        Option<&rc_combat::Health>,
+        Has<rc_combat::Hittable>,
+    )>();
+    let mut troopers = 0;
+    let mut ok = 0;
+    let mut event = None;
+    for (c, h, hit) in q.iter(w) {
+        if !c.class.eq_ignore_ascii_case("CloneTrooper") {
+            continue;
+        }
+        troopers += 1;
+        if hit && h.is_some_and(|h| h.max == 100.0) {
+            ok += 1;
+        }
+        if c.name == "CloneTrooper7" {
+            event = c.death_event().map(str::to_string);
+        }
+    }
+    let msg = format!(
+        "{ok} of {troopers} clone troopers have 100 health and can be hit; CloneTrooper7's death triggers {}",
+        event.as_deref().unwrap_or("nothing")
+    );
+    if troopers > 0 && ok == troopers && event.as_deref() == Some("GunshipTrooper02Death") {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// CloneTrooper1, hurt for 500, is dead and plays `Death`.
+fn trooper_died(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<(&rc_cast::Cast, Has<rc_combat::Dead>)>();
+    let (c, dead) = q
+        .iter(w)
+        .find(|(c, _)| c.name == "CloneTrooper1")
+        .ok_or("no CloneTrooper1 in the cast")?;
+    let msg = format!(
+        "CloneTrooper1 dead: {}, marked Dead: {dead}, playing {}",
+        c.is_dead(),
+        c.playing().unwrap_or("nothing")
+    );
+    if c.is_dead() && dead && c.playing() == Some("Death") {
         Ok(msg)
     } else {
         Err(msg)
@@ -3592,7 +3718,10 @@ fn bacta_zap(w: &mut World) -> Result<String, String> {
         .query::<&rc_scripts_plugin::bacta::BactaZap>()
         .iter(w)
         .count();
-    let hum = fx.sounds.iter().any(|s| s.eq_ignore_ascii_case("ele_GEO_genEnrgy_lp_01"));
+    let hum = fx
+        .sounds
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case("ele_GEO_genEnrgy_lp_01"));
     let msg = format!(
         "zaps {:?}, removed {}; effect sounds {:?}; still running {:?}, carriers {carriers}",
         st.zaps, st.zaps_removed, fx.sounds, still
@@ -3605,7 +3734,11 @@ fn bacta_zap(w: &mut World) -> Result<String, String> {
         && st.zaps_removed >= 1
         && still.is_empty()
         && carriers == 0;
-    if ok { Ok(msg) } else { Err(msg) }
+    if ok {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
 }
 
 /// The arms' moves while healing at the dispenser, in the game's order
