@@ -1633,6 +1633,40 @@ fn steps() -> Vec<Step> {
             (None, Page::Hint) => Ok("placeholder still showing".into()),
             other => Err(format!("{other:?}")),
         }),
+        // A second hint while one shows takes its place (ShowMenu opens the
+        // page even when play is paused; MenuOpen destroys the old one).
+        Note(|w| hint_ask_text(w, true, HINT_TEXT_2)),
+        Wait(0.5),
+        Check("a second hint takes the first one's place", |w| {
+            let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+            let by_text = w
+                .resource::<crate::hints::Hints>()
+                .showing
+                .as_ref()
+                .map(|h| h.text.clone());
+            let page_text = match shown_page(w) {
+                Some(k) => match w.resource::<OriginalMenus>().pages[&k]
+                    .screen
+                    .layout
+                    .widget("InfoText")
+                    .map(|w| &w.kind)
+                {
+                    Some(rc_menus::layout::Kind::Text(t)) => Some(t.text.clone()),
+                    _ => None,
+                },
+                None => None,
+            };
+            let got = format!("play {play:?}, hint {by_text:?}, page text {page_text:?}");
+            let placeholder = !w.resource::<OriginalMenus>().active();
+            if play == Some(Play::Paused)
+                && by_text.as_deref() == Some(HINT_TEXT_2)
+                && (placeholder || page_text.as_deref() == Some(HINT_TEXT_2))
+            {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
         Press(Action::MenuAccept), // CONTINUE WITH HINTS
         Until(
             "CONTINUE WITH HINTS goes on playing, hints still on",
@@ -4701,11 +4735,18 @@ fn level_exit_found(w: &mut World) -> Result<String, String> {
 /// A hint's text, as geo_01a's first hint has it.
 const HINT_TEXT: &str = "Crouch is useful for ducking behind cover and crawling into vents.";
 
+/// A second hint's text (the self-test's own words).
+const HINT_TEXT_2: &str = "A second hint from the self-test.";
+
 fn hint_ask(w: &mut World, for_hint_text: bool) {
+    hint_ask_text(w, for_hint_text, HINT_TEXT);
+}
+
+fn hint_ask_text(w: &mut World, for_hint_text: bool, text: &str) {
     w.write_message(rc_game_core::ShowHint {
         menu_class: rc_menus::hint::HINT_MENU.into(),
         title: String::new(),
-        text: HINT_TEXT.into(),
+        text: text.into(),
         picture: String::new(),
         for_hint_text,
         by: "the self-test".into(),

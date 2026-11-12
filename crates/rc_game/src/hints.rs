@@ -24,9 +24,12 @@
 //! If the original page can't be drawn, a placeholder page (marked as one)
 //! shows the text with the same two choices.
 //!
-//! Not done: a second hint asked for while one shows is left out (none of
-//! the 29 can do that: each waits on a timer first); what the original
-//! would do then is decided in its compiled code and wasn't checked.
+//! - A hint asked for while a page already shows (a second hint, or a
+//!   debriefing in the same frame) takes that page's place: `ShowMenu`
+//!   only skips `SetPause` when play is already paused, and the console's
+//!   `MenuOpen` (Engine.u) destroys the page that was showing. Level
+//!   scripts don't run while paused, so this can only happen within one
+//!   frame; none of the 29 does it.
 
 use crate::menu::{save_settings, Menu, Page};
 use crate::original_menu::OriginalMenus;
@@ -52,7 +55,13 @@ impl Plugin for HintsPlugin {
             .add_message::<ShowHint>()
             .add_systems(OnEnter(GameState::Loading), forget)
             .add_systems(OnEnter(GameState::MainMenu), forget)
-            .add_systems(Update, (show, answer).chain().in_set(GameSet::Hud));
+            .add_systems(
+                Update,
+                (show, answer)
+                    .chain()
+                    .in_set(GameSet::Hud)
+                    .after(crate::debriefing::DebriefingSet),
+            );
     }
 }
 
@@ -72,6 +81,7 @@ fn show(
     mut menu: ResMut<Menu>,
     mut menus: ResMut<OriginalMenus>,
     settings: Res<Settings>,
+    mut debriefing: ResMut<crate::debriefing::Debriefing>,
     mut next_play: Option<ResMut<NextState<Play>>>,
     log: Res<GameLog>,
 ) {
@@ -91,19 +101,26 @@ fn show(
             ));
             continue;
         }
-        if h.showing.is_some() {
+        // `ShowMenu` opens the page even when play is already paused (it
+        // only skips `SetPause`), and the console's `MenuOpen` destroys the
+        // page that was showing: a second hint, or a hint asked for in the
+        // same frame as a debriefing, takes that page's place.
+        if let Some(old) = &h.showing {
             log.line(format!(
-                "hints: {} {:?} left out: a hint is already showing",
+                "hints: {} {:?} takes the place of {} {:?}",
+                a.by, a.text, old.by, old.text
+            ));
+        } else if play.as_ref().is_some_and(|p| *p.get() != Play::Running) {
+            log.line(format!(
+                "hints: {} {:?} takes the place of the page that was showing",
                 a.by, a.text
             ));
-            continue;
         }
-        if play.as_ref().is_some_and(|p| *p.get() != Play::Running) {
+        if let Some(d) = debriefing.showing.take() {
             log.line(format!(
-                "hints: {} {:?} left out: play is already paused",
-                a.by, a.text
+                "hints: the debriefing {:?} is closed by the hint and doesn't go on",
+                d.title
             ));
-            continue;
         }
         if !a.menu_class.eq_ignore_ascii_case(rc_menus::hint::HINT_MENU) {
             log.line(format!(

@@ -4112,10 +4112,14 @@ wherever the focus is: the original's console (`KeyEvent` in Engine.u)
 hands `IK_GameA`/`IK_GameB` to the menu's `HandleInputGamePad` before
 anything else, the hint classes take them and return true, and on a PC
 WinDrv.dll sends DirectInput joystick button n as key 0xC8 + n (checked
-in its machine code; 0xC8 is `IK_GameA`, so button 1 is `IK_GameB`). Not
-done: the other languages' moves (the port reads only English) and a
-second hint while one shows (none of the 29 can: each waits on a timer
-first).
+in its machine code; 0xC8 is `IK_GameA`, so button 1 is `IK_GameB`). A
+hint asked for while a page shows takes that page's place, as in the
+original: `PlayerController.ShowMenu` only skips `SetPause` when play is
+already paused and still opens the page, and the console's `MenuOpen`
+(Engine.u) destroys the page that was showing. Level scripts don't run
+while paused, so this can only happen within one frame (none of the 29
+does it); a debriefing it replaces doesn't go on to its next map. Not
+done: the other languages' moves (the port reads only English).
 
 Following the first exit of each map from `pro` visits all 56 campaign
 maps in order and ends at `epilogue`; no exit names a missing map.
