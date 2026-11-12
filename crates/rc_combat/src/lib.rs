@@ -43,6 +43,8 @@ pub mod pickup_sound;
 pub mod save;
 pub mod script_ammo;
 pub mod shot;
+pub mod status;
+mod status_run;
 mod throw;
 mod view;
 pub mod weapon;
@@ -59,7 +61,8 @@ pub use library::{
 pub use melee::{MeleeAttack, MeleeSwing};
 pub use pickup::{spawn_pickup, WeaponPickup, WeaponTaken};
 pub use rc_package::sound::AudioParams;
-pub use throw::{Blast, Body, Explode, GrenadeFlight, Stunned, ThrowGrenade};
+pub use status::{Commando, SpawnStatusEffect, StatusEffect, StatusFrom};
+pub use throw::{Blast, Body, Explode, GrenadeFlight, ThrowGrenade};
 pub use weapon::{ArmsParams, WeaponParams, WeaponState};
 
 use bevy::prelude::*;
@@ -275,6 +278,7 @@ impl Plugin for WeaponsPlugin {
             .add_message::<MeleeSwing>()
             .add_message::<Blast>()
             .add_message::<Explode>()
+            .add_message::<SpawnStatusEffect>()
             .insert_resource(fire::CombatRng(shot::Rng::new(0x05EE_DD17)))
             .add_systems(
                 Update,
@@ -310,10 +314,21 @@ impl Plugin for WeaponsPlugin {
                 (
                     fire::fly_bolts,
                     throw::fly_grenades,
-                    throw::wear_off_stuns,
                     throw::explosions,
                     pickup::collect_pickups,
                 )
+                    .in_set(CombatSet::Flight)
+                    .run_if(playing)
+                    .run_if(resource_exists::<WeaponLibrary>),
+            )
+            .add_systems(
+                Update,
+                (
+                    status_run::spawn_status_effects,
+                    status_run::wear_off_status_effects,
+                )
+                    .chain()
+                    .after(throw::fly_grenades)
                     .in_set(CombatSet::Flight)
                     .run_if(playing)
                     .run_if(resource_exists::<WeaponLibrary>),

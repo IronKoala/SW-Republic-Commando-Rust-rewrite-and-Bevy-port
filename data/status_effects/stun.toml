@@ -1,0 +1,14 @@
+# Stun (the original's StatusEffect_Stun, ctgame.u): the flash grenade and
+# General Grievous's missile.
+class = "StatusEffect_Stun"
+damage_type = "CTDamageStun"         # game: DamageType
+damage_kind = "other"
+random_damage = false                # game: its own CreateStatusEffects adds no random damage
+player_must_face = true              # game: the player only when looking towards it (within half their FovAngle)
+
+[ai]
+anim = "StunnedBreathe"              # game: Activate, 'StunnedBreathe' for the time (or 'Stunned' once, half the time, when over 6.5 s)
+
+# Not done yet: on the player the game flashes the screen (BlendInAddColor
+# FlashColor, x1.5 in night vision; AnimateBloomFilter 255; AnimateBlur
+# 200), and a turret sleeps for the time instead.

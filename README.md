@@ -255,6 +255,13 @@ copy of the game.
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
 
+- **Electrocution, burning and stuns (since 2026-11-12; unit tested, not yet
+  played).** Grenades and level scripts (geo_05a's sparking droid racks)
+  start them with the original's rules: who is in reach, how long, one at
+  a time, and enemies and squad mates stop while they last. The sparks and
+  flames on the character, and the player's blurred screen, aren't drawn
+  yet.
+
 - **Level scripts give and take grenades (since 2026-11-12; tested in the
   cloud, not yet on Windows).** The map's `AddAmmo` steps now work, so
   geo_01a starts with no grenades, as in the original (pick them up from

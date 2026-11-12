@@ -116,6 +116,10 @@ pub struct Member {
     /// original: they lie where they fell until revived. A downed member
     /// takes no orders and doesn't move on its own.
     pub down: bool,
+    /// Stopped by a status effect (electrocuted, burning, stunned) until
+    /// this squad time: they stand still and don't shoot (the original's
+    /// `StatusEffect` `Activate` on a computer-controlled character).
+    pub stopped_until: f32,
     /// The downed commando they're going to revive, if any.
     pub revive: Option<Patient>,
     pub fight: FightState,
@@ -699,6 +703,7 @@ impl Squad {
                     marker_since: 0.0,
                     engaging: None,
                     down: false,
+                    stopped_until: f32::NEG_INFINITY,
                     revive: None,
                     fight: FightState::default(),
                     throw_in: 0.0,
@@ -1427,6 +1432,18 @@ impl Squad {
                 m.pawn.step(dt, &m.input, world);
                 continue;
             }
+            if self.time < self.members[i].stopped_until {
+                // Under a status effect: stands still, doesn't shoot.
+                let m = &mut self.members[i];
+                m.pawn.velocity.x = 0.0;
+                m.pawn.velocity.y = 0.0;
+                m.input = MoveInput {
+                    yaw: m.yaw,
+                    ..Default::default()
+                };
+                m.pawn.step(dt, &m.input, world);
+                continue;
+            }
             if let Some((centre, yaw)) = self.members[i].mounted {
                 // On a turret: held there, turned with it.
                 let m = &mut self.members[i];
@@ -1810,6 +1827,15 @@ impl Squad {
     /// Mark member `i` down (health ran out) or back up. A downed member
     /// drops any marked job (the spot opens again) and stops where it is.
     /// `None` when nothing changed.
+    /// A status effect stops member `i` for `seconds` from now (more time
+    /// for one they already have keeps them longer).
+    pub fn stop(&mut self, i: usize, seconds: f32) {
+        let until = self.time + seconds;
+        if let Some(m) = self.members.get_mut(i) {
+            m.stopped_until = m.stopped_until.max(until);
+        }
+    }
+
     pub fn set_down(&mut self, i: usize, down: bool) -> Option<SquadEvent> {
         let m = self.members.get_mut(i)?;
         if m.down == down {

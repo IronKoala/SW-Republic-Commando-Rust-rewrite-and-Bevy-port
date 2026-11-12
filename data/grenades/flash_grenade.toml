@@ -40,10 +40,8 @@ damage_type = "CTDamageExplosionFlashDet" # game: MyDamageType
 damage_kind = "other"
 
 [status]
-# game: ExplosionStatusEffect StatusEffect_Stun
+class = "StatusEffect_Stun" # game: ExplosionStatusEffect (what it does: data/status_effects)
 max_time = 18             # game: StatusEffectMaxDuration
-damage_type = "CTDamageStun" # game: StatusEffect_Stun DamageType
-player_must_face = true   # game: the player is only stunned facing the flash
 
 [sound]
 # The blast sound is the SpawnSound of the grenade's ExplosionEffect

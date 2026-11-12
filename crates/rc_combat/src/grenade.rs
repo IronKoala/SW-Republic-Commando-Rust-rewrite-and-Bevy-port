@@ -13,29 +13,20 @@ use bevy::math::Vec3;
 /// A blast's lasting effect on the characters it reaches (the original's
 /// `ExplosionStatusEffect`): the flash grenade stuns, the EMP grenade
 /// electrocutes, the thermal detonator sets characters near it alight.
+/// What each kind does is its own file (`data/status_effects`, see
+/// `crate::status`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusParams {
+    /// The kind's class name (`StatusEffect_Immolate`).
+    pub class: String,
     /// Seconds for a character at the centre (`StatusEffectMaxDuration`).
     /// It falls off in a straight line to nothing at the edge.
     pub max_time: f32,
     /// Damage per second while it lasts (`StatusEffectDamagePerSec`).
     pub damage_per_sec: f32,
-    /// The status effect's damage type. A character whose damage table
-    /// gives it x0 is immune (droids to stuns, for example).
-    pub damage_type: String,
-    /// Clone commandos are affected half as long (the electrocution).
-    pub half_on_commandos: bool,
-    /// Characters the player controls are only affected when looking
-    /// towards the blast (the stun: you can look away from a flash).
-    pub player_must_face: bool,
     /// Added to the blast radius for the effect's reach
     /// (`StatusEffectRadiusModifier`): the thermal's burn reaches 400 less.
     pub radius_change: f32,
-    /// Computer-controlled characters can't act while it lasts (stun and
-    /// electrocution). **Our reading**: burning doesn't stop them.
-    pub stops: bool,
-    /// The kind of the damage it does each second.
-    pub damage_kind: DamageKind,
 }
 
 /// Everything about one kind of grenade.
@@ -120,20 +111,10 @@ impl GrenadeParams {
         let status = match t.number("status.max_time")? {
             None => None,
             Some(max_time) => Some(StatusParams {
+                class: t.text("status.class")?.ok_or("`status.class` is missing")?,
                 max_time,
                 damage_per_sec: t.number("status.damage_per_sec")?.unwrap_or(0.0),
-                damage_type: t
-                    .text("status.damage_type")?
-                    .ok_or("`status.damage_type` is missing")?,
-                half_on_commandos: flag(&mut t, "status.half_on_commandos")?,
-                player_must_face: flag(&mut t, "status.player_must_face")?,
                 radius_change: t.number("status.radius_change")?.unwrap_or(0.0),
-                stops: t.boolean("status.stops")?.unwrap_or(true),
-                damage_kind: match t.text("status.damage_kind")? {
-                    None => DamageKind::Electrical,
-                    Some(k) => DamageKind::from_name(&k)
-                        .ok_or_else(|| format!("status.damage_kind `{k}` is not a known kind"))?,
-                },
             }),
         };
         let p = GrenadeParams {
@@ -357,17 +338,6 @@ impl Flight {
     }
 }
 
-/// How long a status effect lasts on a character `dist` uu from the blast:
-/// the original's rule, full time at the centre falling in a straight line
-/// to nothing at `radius` less the character's own radius.
-pub fn status_time(max_time: f32, dist: f32, character_radius: f32, radius: f32) -> f32 {
-    let reach = radius - character_radius;
-    if reach <= 0.0 {
-        return 0.0;
-    }
-    max_time * (1.0 - dist / reach).clamp(0.0, 1.0)
-}
-
 /// How much of a blast reaches a character: the engine's `HurtRadius`
 /// rule. Full at the centre, falling in a straight line to nothing at the
 /// edge, measured from the character's centre less its own radius (so a
@@ -581,6 +551,7 @@ mod tests {
         assert!((blast_scale(290.0, 40.0, 500.0) - 0.5).abs() < 1e-6);
         assert_eq!(blast_scale(540.0, 40.0, 500.0), 0.0);
         assert_eq!(blast_scale(600.0, 40.0, 500.0), 0.0);
+        use crate::status::status_time;
         assert_eq!(status_time(18.0, 0.0, 40.0, 4096.0), 18.0);
         assert!((status_time(18.0, 2028.0, 40.0, 4096.0) - 9.0).abs() < 1e-3);
         assert_eq!(status_time(18.0, 5000.0, 40.0, 4096.0), 0.0);

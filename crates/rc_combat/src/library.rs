@@ -27,6 +27,8 @@ pub struct WeaponLibrary {
     /// Damage types and every character's damage table
     /// (`data/combat/damage_types.toml`).
     pub damage_types: DamageTypes,
+    /// Every status effect kind (`data/status_effects/*.toml`).
+    pub status: crate::status::StatusClasses,
     /// Files that didn't read, with the reason. They are left out.
     pub errors: Vec<String>,
     /// Sound name to Bevy sound. Empty when there is no audio (tests).
@@ -250,6 +252,49 @@ pub(crate) fn load(
             Err(e) => {
                 let e = format!("{}: {e}", path.display());
                 say(&log, format!("grenades: FAILED to read {e}"));
+                lib.errors.push(e);
+            }
+        }
+    }
+    for (id, path) in data_files(&paths, "status_effects") {
+        let read = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| crate::status::StatusClass::from_text(&text));
+        match read {
+            Ok(c) => {
+                say(
+                    &log,
+                    format!(
+                        "status effects: {id}: {} (kind of {}), {} ({}), effect {}, random damage {}, player must face {}, commando time x{}, commando AI max {:?} s, AI anim {}",
+                        c.class,
+                        c.parent.as_deref().unwrap_or("StatusEffect"),
+                        c.damage_type,
+                        c.damage_kind.name(),
+                        c.effect.as_deref().unwrap_or("none"),
+                        c.random_damage,
+                        c.player_must_face,
+                        c.commando_time_scale,
+                        c.commando_ai_max_time,
+                        c.ai_anim
+                    ),
+                );
+                lib.status.0.insert(c.class.to_ascii_lowercase(), c);
+            }
+            Err(e) => {
+                let e = format!("{}: {e}", path.display());
+                say(&log, format!("status effects: FAILED to read {e}"));
+                lib.errors.push(e);
+            }
+        }
+    }
+    for (id, p) in &lib.grenades {
+        if let Some(st) = &p.status {
+            if lib.status.get(&st.class).is_none() {
+                let e = format!(
+                    "grenade {id}: status effect {} has no file in status_effects",
+                    st.class
+                );
+                say(&log, format!("grenades: {e}"));
                 lib.errors.push(e);
             }
         }
@@ -657,6 +702,7 @@ pub(crate) fn equip_player(
             Health::new(s.health),
             Shield::new(s.shield, s.shield_recharge_rate, s.shield_recharge_delay),
             Team::Republic,
+            crate::status::Commando,
             Hittable::COMMANDO,
             Arsenal {
                 weapons,

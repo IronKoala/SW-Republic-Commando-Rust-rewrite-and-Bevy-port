@@ -1,0 +1,15 @@
+# The EMP grenade's electrocution (StatusEffect_ElectrocuteEMPGrenade,
+# Properties/properties.u), a kind of StatusEffect_Electrocute: the same
+# rules with its own damage type and effect.
+class = "StatusEffect_ElectrocuteEMPGrenade"
+parent = "StatusEffect_Electrocute"
+damage_type = "CTDamageElectricityEMPGrenade"  # game: DamageType
+damage_kind = "electrical"
+effect = "Grenade_ECDet_Electricution"         # game: EffectClass (not drawn yet)
+random_damage = true
+
+[commando]
+time_scale = 0.5
+
+[ai]
+anim = "ElectrocutionBreathe"

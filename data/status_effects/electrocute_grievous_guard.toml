@@ -1,0 +1,15 @@
+# The Magna Guards' electro-staff (StatusEffect_ElectrocuteGrievousGuard,
+# Properties/properties.u, their weapon's MeleeStatusEffect), a kind of
+# StatusEffect_Electrocute. Nothing in the port uses it yet.
+class = "StatusEffect_ElectrocuteGrievousGuard"
+parent = "StatusEffect_Electrocute"
+damage_type = "CTDamageElectricityGrievousGuard"  # game: DamageType
+damage_kind = "electrical"
+effect = "GREVG_ForcePike_Electrocution"          # game: EffectClass (not drawn yet)
+random_damage = true
+
+[commando]
+time_scale = 0.5
+
+[ai]
+anim = "ElectrocutionBreathe"

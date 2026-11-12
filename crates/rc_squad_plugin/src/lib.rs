@@ -35,11 +35,11 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
-pub mod carry;
 mod ammo;
+pub mod carry;
 pub mod look;
-pub mod save;
 pub mod membership;
+pub mod save;
 pub mod voice;
 
 use bevy::prelude::*;
@@ -741,10 +741,7 @@ fn spawn_squad(
                 squad.members[i].presence = rc_squad::Presence::Gone;
                 log_line(
                     &log,
-                    format!(
-                        "{} is not in this map",
-                        squad.members[i].settings.name
-                    ),
+                    format!("{} is not in this map", squad.members[i].settings.name),
                 );
             }
         }
@@ -862,6 +859,8 @@ fn sync_bodies(
                 m.settings.shield_recharge_delay,
             ),
             Team::Republic,
+            // A clone commando: some status effects treat them differently.
+            rc_combat::Commando,
             // Level scripts name squad mates by their `Tag` (the class
             // name unless the map gave another, like `Delta40`), and
             // walk them about while they're out of the squad
@@ -1022,7 +1021,10 @@ fn take_orders(
         let mut use_key = a.just_pressed(Action::Use);
         // At a switched-on bacta dispenser the shared key uses it.
         if (context || use_key) && use_claimed.is_some_and(|u| u.0) {
-            log_line(&log, "context order left alone: the player is using something");
+            log_line(
+                &log,
+                "context order left alone: the player is using something",
+            );
             context = false;
             use_key = false;
         }
@@ -1143,7 +1145,15 @@ fn run_squad(
     time: Res<Time>,
     mut state: ResMut<SquadState>,
     mut player: Query<(Entity, &Transform, Option<&mut Health>, Has<Dead>), With<Player>>,
-    mut mates: Query<(Entity, &SquadMate, &mut Health), Without<Player>>,
+    mut mates: Query<
+        (
+            Entity,
+            &SquadMate,
+            &mut Health,
+            Option<Ref<rc_combat::StatusEffect>>,
+        ),
+        Without<Player>,
+    >,
     actions: Option<Res<ActionState>>,
     collision: Option<Res<LevelCollision>>,
     map: Option<Res<SquadMapData>>,
@@ -1189,6 +1199,23 @@ fn run_squad(
         Some(g) => g,
         None => &StraightLine,
     };
+    // A status effect that stops a squad mate (electrocution, burning, a
+    // stun) holds them still for its time.
+    for (_, mate, _, s) in &mates {
+        let Some(s) = s else { continue };
+        if s.stops {
+            squad.stop(mate.index, s.left);
+            if s.is_added() {
+                log_line(
+                    &log,
+                    format!(
+                        "t={:.2} {} stopped by {} for {:.1} s (plays {}: not shown yet)",
+                        squad.time, mate.name, s.class, s.left, s.anim
+                    ),
+                );
+            }
+        }
+    }
     let holding_use = actions.as_ref().is_some_and(|a| a.pressed(Action::Use));
     let mut events = squad.player_use(dt, leader, holding_use);
     events.extend(squad.update(dt, leader, world, nav));
@@ -1217,7 +1244,7 @@ fn run_squad(
                     }
                     _ => weapon,
                 };
-                if let Some((entity, _, _)) = mates.iter().find(|(_, m, _)| m.index == *index) {
+                if let Some((entity, ..)) = mates.iter().find(|(_, m, ..)| m.index == *index) {
                     fire.write(FireShot {
                         shooter: entity,
                         origin: to_bevy(*origin),
@@ -1288,7 +1315,7 @@ fn run_squad(
                 // Health back and `Dead` gone: the game sees them up again.
                 match patient {
                     Patient::Mate(i) => {
-                        for (entity, mate, mut h) in &mut mates {
+                        for (entity, mate, mut h, _) in &mut mates {
                             if mate.index == *i {
                                 h.current = h.max * revive_health;
                                 commands.entity(entity).remove::<Dead>();

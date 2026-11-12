@@ -334,6 +334,8 @@ pub struct PlayStats {
     /// `MakeInvulnerable`: `WHO true|false`.
     pub invulnerable: Vec<String>,
     pub characters_hurt: usize,
+    /// `SpawnStatusEffect` steps carried out (one per place it started).
+    pub status_effects: usize,
     pub squad_orders: Vec<String>,
     /// `ChangeSquadMember`: `WHO joins|leaves`.
     pub squad_members: Vec<String>,

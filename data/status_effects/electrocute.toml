@@ -1,0 +1,18 @@
+# Electrocution (the original's StatusEffect_Electrocute, ctgame.u).
+# Level scripts use it (geo_05a's sparking droid racks). What every status
+# effect does is in crates/rc_combat/src/status.rs; these are the numbers.
+class = "StatusEffect_Electrocute"
+damage_type = "CTDamageElectricity"  # game: DamageType
+damage_kind = "electrical"
+effect = "EMP_Electrocution"         # game: EffectClass (not drawn yet: its particles start on the character's bones)
+random_damage = true                 # game: StatusEffect.CreateStatusEffects adds FRand() - 0.5 to the damage a second
+
+[commando]
+time_scale = 0.5                     # game: Activate, "only make it last half as long on clones"
+
+[ai]
+anim = "ElectrocutionBreathe"        # game: Activate, AddReflexAnimGoal('ElectrocutionBreathe') for the time
+
+# Not done yet: on the player the game blurs the screen (AnimateBlur 200,
+# in 0.25 s, held for the time less 2 s, out over 1.75 s) and blends in
+# FadeColor (raw bytes ff ff ff 00); it also reaches droid dispensers.

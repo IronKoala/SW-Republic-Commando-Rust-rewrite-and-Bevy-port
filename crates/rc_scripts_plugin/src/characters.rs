@@ -31,8 +31,8 @@
 
 use crate::{LevelScript, PART};
 use bevy::prelude::*;
-use rc_combat::{CannotDie, Damage, DamageKind, Invulnerable};
-use rc_game_core::units::to_unreal;
+use rc_combat::{CannotDie, Damage, DamageKind, Invulnerable, SpawnStatusEffect, StatusFrom};
+use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
     CharacterAct, CharacterOrder, GameLog, Player, ScriptTags, SquadMembership, SquadStanceOrder,
 };
@@ -70,6 +70,7 @@ pub const KINDS: &[&str] = &[
     "destroypawn",
     "changesquadstance",
     "changesquadmember",
+    "spawnstatuseffect",
 ];
 
 /// Where scripts can send characters, by lower-case tag and by name.
@@ -105,6 +106,20 @@ impl Places {
             .map(|&i| &self.list[i])
     }
 
+    /// The actor with this name (`ScriptedTrigger55`).
+    pub fn by_name(&self, name: &str) -> Option<&Place> {
+        self.by_name
+            .get(&name.to_ascii_lowercase())
+            .map(|&i| &self.list[i])
+    }
+
+    /// Every actor with this tag.
+    pub fn all_tagged(&self, tag: &str) -> Vec<&Place> {
+        self.by_tag
+            .get(&tag.to_ascii_lowercase())
+            .map_or(Vec::new(), |v| v.iter().map(|&i| &self.list[i]).collect())
+    }
+
     pub fn len(&self) -> usize {
         self.list.len()
     }
@@ -125,6 +140,7 @@ fn tag_field(kind: &str) -> Option<&'static str> {
         "sethidden" => "HideActorTag",
         "changesquadmember" => "MemberTag",
         "playpropanim" => "AnimPropTag",
+        "spawnstatuseffect" => "ActorTag",
         _ => return None,
     })
 }
@@ -161,6 +177,7 @@ pub(crate) fn cast(
     mut damage: MessageWriter<Damage>,
     mut squad: MessageWriter<SquadStanceOrder>,
     mut membership: MessageWriter<SquadMembership>,
+    mut status: MessageWriter<SpawnStatusEffect>,
     log: Res<GameLog>,
 ) {
     let Some(mut script) = script else { return };
@@ -216,6 +233,30 @@ pub(crate) fn cast(
             log.line(format!("{at}: no MemberTag; nothing to do"));
             continue;
         }
+        // `SpawnStatusEffect` from a `ScriptedTrigger` (no pawn) with no
+        // `ActorTag`: from the script's own spot (its controller is spawned
+        // there).
+        if call.kind == "spawnstatuseffect"
+            && named(a, "ActorTag").is_none()
+            && call.owner.is_none()
+        {
+            match script.places.by_name(&call.script) {
+                Some(p) => {
+                    let ask = status_ask(a, StatusFrom::Point(place_bevy(p.location)), &at);
+                    log.line(format!(
+                        "{at}: {} from the script's spot ({:.0}, {:.0}, {:.0}), radius {}, up to {} s, {} damage a second",
+                        ask.class, p.location[0], p.location[1], p.location[2], ask.radius, ask.max_time, ask.damage_per_sec
+                    ));
+                    script.stats.status_effects += 1;
+                    status.write(ask);
+                }
+                None => {
+                    script.stats.not_done += 1;
+                    log.line(format!("{at}: the script's spot isn't known; skipped"));
+                }
+            }
+            continue;
+        }
         // Who it means.
         let tag = tag_field(&call.kind).and_then(|k| named(a, k));
         let mut targets: Vec<(Entity, bool, Vec3)> = Vec::new();
@@ -255,6 +296,29 @@ pub(crate) fn cast(
                     .map(|o| format!("the characters running {o}"))
             })
             .unwrap_or_else(|| "nobody".into());
+        // A status effect from actors that aren't characters (a spot in
+        // the map with that tag).
+        if targets.is_empty() && call.kind == "spawnstatuseffect" {
+            if let Some(t) = &tag {
+                let spots = script.places.all_tagged(t);
+                if !spots.is_empty() {
+                    for p in &spots {
+                        status.write(status_ask(
+                            a,
+                            StatusFrom::Point(place_bevy(p.location)),
+                            &at,
+                        ));
+                    }
+                    script.stats.status_effects += spots.len();
+                    log.line(format!(
+                        "{at}: {} from {} actor(s) tagged {t} (not characters)",
+                        a.text("StatusEffectClass").unwrap_or("?"),
+                        spots.len()
+                    ));
+                    continue;
+                }
+            }
+        }
         if targets.is_empty() {
             if now < call.deadline && (tag.is_some() || call.owner.is_some()) {
                 // `PlayPropAnim` doesn't hold the script (gameplay.u: it
@@ -279,6 +343,35 @@ pub(crate) fn cast(
         let n = targets.len();
         // Done here, for any character.
         match call.kind.as_str() {
+            "spawnstatuseffect" => {
+                // From each of them; `AffectTaggedActor` gives them the
+                // effect too (only with an `ActorTag`; gameplay.u).
+                let also_them = tag.is_some() && a.flag("AffectTaggedActor", false);
+                for (e, _, _) in &targets {
+                    status.write(status_ask(
+                        a,
+                        StatusFrom::Character {
+                            entity: *e,
+                            also_them,
+                        },
+                        &at,
+                    ));
+                }
+                script.stats.status_effects += n;
+                log.line(format!(
+                    "{at}: {} from {who} ({n}){}, radius {}, up to {} s, {} damage a second",
+                    a.text("StatusEffectClass").unwrap_or("?"),
+                    if also_them {
+                        ", them too"
+                    } else {
+                        ", not them"
+                    },
+                    a.float("Radius").unwrap_or(0.0),
+                    a.float("MaxDuration").unwrap_or(0.0),
+                    a.float("DamagePerSecond").unwrap_or(0.0)
+                ));
+                continue;
+            }
             "changesquadmember" => {
                 // The original adds to the player's squad unless `SquadTag`
                 // names another `Squad` actor; the maps only ever name the
@@ -464,4 +557,22 @@ pub(crate) fn cast(
         }
     }
     script.calls = keep;
+}
+
+/// An `ACTION_SpawnStatusEffect`'s numbers (its class defaults are all 0
+/// or none; gameplay.u).
+fn status_ask(a: &ScriptObject, from: StatusFrom, by: &str) -> SpawnStatusEffect {
+    SpawnStatusEffect {
+        class: a.text("StatusEffectClass").unwrap_or("").to_string(),
+        from,
+        radius: a.float("Radius").unwrap_or(0.0),
+        max_time: a.float("MaxDuration").unwrap_or(0.0),
+        damage_per_sec: a.float("DamagePerSecond").unwrap_or(0.0),
+        instigator: None,
+        by: by.to_string(),
+    }
+}
+
+fn place_bevy(p: [f32; 3]) -> Vec3 {
+    to_bevy(rc_movement::Vec3::new(p[0], p[1], p[2]))
 }
