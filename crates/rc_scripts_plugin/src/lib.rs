@@ -144,6 +144,7 @@ impl Plugin for ScriptsPlugin {
                     breakables::explode,
                     sight::look,
                     run,
+                    send_ammo,
                     fx_factories::run,
                     placed_emitters::run,
                     projectiles::fly,
@@ -249,6 +250,8 @@ pub struct LevelScript {
     pub places: characters::Places,
     /// Sounds the scripts asked for this frame.
     sounds: Vec<sounds::SoundRequest>,
+    /// Ammo the scripts give or take this frame (`ACTION_AddAmmo`).
+    ammo: Vec<rc_game_core::pickups::AddAmmo>,
     /// Squad marker anchors (charges, consoles, door locks) and what they
     /// set off (see `markers.rs`).
     pub anchors: Vec<markers::Anchor>,
@@ -275,6 +278,7 @@ impl LevelScript {
             calls: Vec::new(),
             places: characters::Places::new(Vec::new()),
             sounds: Vec::new(),
+            ammo: Vec::new(),
             started: true,
             scene: cutscene::Scene::default(),
             stats: PlayStats::default(),
@@ -332,6 +336,8 @@ pub struct PlayStats {
     /// Orders sent to turrets: `attach TAG`, `detach TAG`, `usable TAG`,
     /// `unusable TAG`.
     pub turret_orders: Vec<String>,
+    /// Ammo given or taken (`ACTION_AddAmmo`): `WeaponClass +N`.
+    pub add_ammo: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
@@ -621,6 +627,7 @@ fn build(
         calls: Vec::new(),
         places,
         sounds: Vec::new(),
+        ammo: Vec::new(),
         anchors,
         started: false,
         scene: cutscene::Scene::default(),
@@ -1188,6 +1195,23 @@ fn carry_out(
                 ));
             }
         }
+        // Handed to the combat part (rc_combat::script_ammo), which keeps
+        // the count between none and the most carried.
+        "addammo" => {
+            let class = a.text("WhichWeapon").unwrap_or("").to_string();
+            let amount = a.int("AmmoAmount").unwrap_or(0);
+            if class.is_empty() {
+                log.line(format!("{at}: no weapon named; nothing happens"));
+            } else {
+                log.line(format!("{at}: {amount:+} for the player's {class}"));
+                script.stats.add_ammo.push(format!("{class} {amount:+}"));
+                script.ammo.push(rc_game_core::pickups::AddAmmo {
+                    weapon_class: class,
+                    amount,
+                    by: format!("{} #{}", call.script, call.index),
+                });
+            }
+        }
         "changelevel" => {
             log.line(format!(
                 "{at}: on to {}",
@@ -1230,6 +1254,17 @@ fn carry_out(
                 .unwrap_or_default();
             log.line(format!("{at} {}{comment} (not done yet)", what.join(" ")));
         }
+    }
+}
+
+/// Hand the ammo the scripts gave or took to the combat part.
+fn send_ammo(
+    script: Option<ResMut<LevelScript>>,
+    mut out: MessageWriter<rc_game_core::pickups::AddAmmo>,
+) {
+    let Some(mut script) = script else { return };
+    if !script.ammo.is_empty() {
+        out.write_batch(std::mem::take(&mut script.ammo));
     }
 }
 

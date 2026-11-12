@@ -1195,6 +1195,15 @@ whether it stops players (`bBlockPlayers`), the AI (`bBlockActors`) and
 shots (`bBlockZeroExtentTraces`). The ones that stop players are added to
 the walking collision. Check: only 11 of 8,942 AI path points are inside a
 volume (107 with `PrePivot` ignored, 115 turned a quarter wrong).
+Other volumes block too when the map turns their `bBlockPlayers` or
+`bBlockActors` on (engine.u's `Actor` leaves both off; `BlockingVolume`
+turns them on). geo_01a's `PhysicsVolume1`, tag `PlayerStand`, is the
+floor you stand on inside the gunship; the intro script's `SetCollision`
+takes it away after the rope order, and you drop about 590 units to the
+ground (gravity -1100, landing at about 1,140 units a second, under
+`MaxFallSpeed` 1200, so no fall damage). The original's `Briefing` state
+only turns the view (`PlayerMove`: `UpdateRotation`), so the body still
+falls. These volumes don't stop shots here.
 
 **The sky.** Unreal 2 draws the sky from a small sky box somewhere in the
 map, marked by a `SkyZoneInfo`. Windows onto it are BSP surfaces flagged
@@ -1645,6 +1654,7 @@ and carries out the effects:
 | walking into an open level exit, `ChangeLevel`, a debriefing's `NewLevel` | `ChangeLevel { map, portal }` (see "Going on to the next map") |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
+| `AddAmmo` | `rc_game_core::pickups::AddAmmo` to `rc_combat::script_ammo`: the player's grenade of that class (the grenade file's `game_class`) gets the amount added, kept between 0 and the most carried, as the original's `Ammunition.AddAmmo`; nothing if not carried. Only grenades: no map names a gun |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
@@ -3021,8 +3031,13 @@ What the files don't say is listed in `clone_trooper_tm.toml`: the
 troopers' attack state (`StateTrandoshanAttack`) works in compiled code,
 so they fight the way our droids do. A type's `[look] held_weapon` names
 the weapon class whose model it holds (the original's `RequiredEquipment`:
-`DC17mBlaster` for `CloneTrooper`, `DC15BlasterCloneTM` for
-`CloneTrooperTM`). `rc_enemies` reads it once per type with
+`DC15BlasterClone` for `CloneTrooper`, `DC15BlasterCloneTM` for
+`CloneTrooperTM`). `CloneTrooper`'s own value in ctcharacters.u is the
+commandos' `CTInventory.DC17mBlaster`, but the game lays
+`CloneTrooperDefaults` (Properties/properties.u) over the class (core.dll
+builds the name `Properties.%sDefaults`), and that sets
+`Properties.DC15BlasterClone`; its numbers are in
+`data/weapons/dc15_blaster_clone.toml`. `rc_enemies` reads it once per type with
 `rc_effects_plugin::held::HeldModel` (as the level's cast does), hangs it
 as a child of each new fighter (`HeldWeapon`), and moves it onto the bone
 `weaponAttach_R` each time the body is posed (`DroidLook::bone_frame`).
@@ -4279,7 +4294,9 @@ start instead of being stood on the ground. Cast members are drawn by
 the level's light where they stand (`rc_game_core::LitByPlace`, the
 data file's `light_scale`, 1.1 as the squad and droids), so a trooper in
 shade is dark; holograms keep their own glow. A character whose class names a weapon
-(`RequiredEquipment`, "CTInventory.DC17mBlaster" on `CloneTrooper`)
+(`RequiredEquipment`, taken from the class's "...Defaults" class in
+Properties/properties.u when that sets it, as the game does:
+"Properties.DC15BlasterClone" from `CloneTrooperDefaults` on `CloneTrooper`)
 holds its model: the weapon's `AttachmentClass` (engine.u's `Weapon`;
 `DC17mBlasterAttachment`) gives a `StaticMesh`, read with
 `rc_effects::projectile::ClassPackages::held_weapon` and drawn on the
@@ -4360,10 +4377,30 @@ was held for good.
 
 **Not done.** Characters brought in by `PawnFactory`s during a cutscene
 (the prologue's walking young clones), riding vehicles, lighting by zone (a steady
-`ambient` share of their own colour, as the squad), damage and death (the
-cast can't be hurt), and saving their places (the cutscene maps have no
-checkpoints). In missions, the placed troopers, walkers and the scripted
-spider droid now stand and move as their scripts say but don't fight.
+`ambient` share of their own colour, as the squad), and saving their
+places (the cutscene maps have no checkpoints). In missions, the placed
+troopers, walkers and the scripted spider droid now stand and move as
+their scripts say but don't fight.
+
+**Damage and death** (since 2026-11-12). A cast character whose class has
+`Health` (read with the class's "...Defaults" class laid on top, as the
+game does) gets `rc_combat`'s `Health` and a `Hittable` cylinder from its
+`CollisionRadius` and `CollisionHeight`, so bolts, blasts and a script's
+`HurtActor` hurt it. Vehicles (`Vehicles` subclasses: the gunship,
+walkers, spider droids) are left unhurt for now. When health runs out,
+`rc_cast::die` does what engine.u's `Pawn.Died` and `PlayDying` do for
+a character on the ground: it triggers the map's `Event` for the
+character (`RaiseEvent`, geo_01a's `GunshipTrooper02Death`), stops it,
+and plays its `Death` animation, holding the last frame. From then on it
+ignores the scripts' orders apart from hiding and removal
+(`Controller.PawnDied` destroys an AI's controller, so its script stops).
+The body is taken away `RagdollLifeSpan` seconds later (60 for a clone
+trooper) unless the map or class sets `bSaveMyCorpse`. Not done: the
+original's ragdolls (`TryToRagdoll`: always for explosions, whose
+`RagdollOnDeathProbability` is 1, half the time by default, and whenever
+there is no `Death` animation), the electric and fire death animations,
+death sounds (`PlayDeathCue`), death effects (`DeathEffectContainerClass`)
+and dropping the weapon. The rifle stays in the dead trooper's hand.
 
 ## Character shadows (`rc_shadows`)
 

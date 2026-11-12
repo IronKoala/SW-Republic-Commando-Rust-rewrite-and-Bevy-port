@@ -113,8 +113,9 @@ pub struct CastMember {
     /// cylinder"; ctcharacters.u's `Gunship` sets it false), whose model's
     /// origin is `location` itself, as a prop's.
     pub half_height: f32,
-    /// The weapon class it holds (`RequiredEquipment`, `DC17mBlaster` from
-    /// "CTInventory.DC17mBlaster"); characters only.
+    /// The weapon class it holds (`RequiredEquipment`, with the class's
+    /// "...Defaults" class on top: `DC15BlasterClone` from
+    /// "Properties.DC15BlasterClone" for a clone trooper); characters only.
     pub weapon: Option<String>,
     /// `bAlignBottom` (engine.u's `Pawn` and `AnimProp` default true):
     /// false draws the model from its own origin at `location`.
@@ -148,6 +149,29 @@ pub struct CastMember {
     /// Casts a shadow (`bActorShadows`, from the map or the class). Only
     /// characters: in the original only a `Pawn` makes a shadow projector.
     pub shadow: bool,
+    /// How it can be hurt and die; `None` for props and for characters
+    /// this part leaves unhurt (vehicles, classes with no `Health`).
+    pub life: Option<Life>,
+}
+
+/// A character's health and what its death does, from the map and its
+/// class (the class's "...Defaults" class first, as the game lays it on
+/// top: see `find_cast`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Life {
+    /// `Health` (CloneTrooper 100).
+    pub health: f32,
+    /// The hit cylinder: `CollisionRadius` and `CollisionHeight`.
+    pub radius: f32,
+    pub half_height: f32,
+    /// `Event`: engine.u's `Pawn.Died` triggers it when the character
+    /// dies (geo_01a's `GunshipTrooper02Death`).
+    pub event: Option<String>,
+    /// Seconds the body stays after death: `Pawn.PlayDying` sets
+    /// `LifeSpan = RagdollLifeSpan` unless `bSaveMyCorpse`. `None` keeps
+    /// it (`bSaveMyCorpse`, or a life span of 0, which Unreal reads as
+    /// forever).
+    pub corpse_time: Option<f32>,
 }
 
 /// Every skeletal mesh in the animation packages, by lower-case name: the
@@ -346,6 +370,30 @@ pub fn find_cast(
             continue;
         };
         let number = |k: &str, d: f32| o.float(k).or_else(|| defaults.number(k)).unwrap_or(d);
+        // The game lays a class's "...Defaults" class from properties.u
+        // over it (core.dll's `Properties.%sDefaults`):
+        // `CloneTrooperDefaults` is a child of `CloneTrooper`, so its own
+        // defaults with its parents' cover the whole class.
+        let laid = Some(format!("{}Defaults", o.class))
+            .filter(|d| lib.has_class(d))
+            .map(|d| lib.defaults(&d));
+        let full = laid.as_ref().unwrap_or(&defaults);
+        let full_number = |k: &str| o.float(k).or_else(|| full.number(k));
+        let is_vehicle = chain.iter().any(|c| c.eq_ignore_ascii_case("Vehicles"));
+        let life = full_number("Health")
+            .filter(|h| is_pawn && !is_vehicle && *h > 0.0)
+            .map(|health| Life {
+                health,
+                radius: full_number("CollisionRadius").unwrap_or(40.0),
+                half_height: full_number("CollisionHeight").unwrap_or(78.0),
+                event: o.text("Event").map(str::to_string),
+                corpse_time: if o.flag("bSaveMyCorpse", full.bool("bSaveMyCorpse").unwrap_or(false))
+                {
+                    None
+                } else {
+                    full_number("RagdollLifeSpan").filter(|t| *t > 0.0)
+                },
+            });
         let align_bottom = o.flag(
             "bAlignBottom",
             defaults.bool("bAlignBottom").unwrap_or(true),
@@ -379,8 +427,14 @@ pub fn find_cast(
             },
             align_bottom,
             weapon: if is_pawn {
-                defaults
-                    .string("RequiredEquipment")
+                // The game lays the class's "...Defaults" class in
+                // Properties/properties.u over it (core.dll builds the
+                // name "Properties.%sDefaults"): CloneTrooperDefaults swaps
+                // the trooper's DC-17m for Properties.DC15BlasterClone.
+                Some(format!("{}Defaults", o.class))
+                    .filter(|d| lib.has_class(d))
+                    .and_then(|d| lib.defaults(&d).string("RequiredEquipment"))
+                    .or_else(|| defaults.string("RequiredEquipment"))
                     .and_then(|w| w.rsplit('.').next().map(str::to_string))
                     .filter(|w| !w.is_empty() && !w.eq_ignore_ascii_case("None"))
             } else {
@@ -421,6 +475,7 @@ pub fn find_cast(
                 && o.get("bActorShadows")
                     .map(|v| matches!(v, Val::Bool(true)))
                     .unwrap_or_else(|| defaults.bool("bActorShadows").unwrap_or(false)),
+            life,
         });
     }
     (out, notes)

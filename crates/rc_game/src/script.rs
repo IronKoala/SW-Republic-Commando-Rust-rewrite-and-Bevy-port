@@ -1036,6 +1036,14 @@ fn steps() -> Vec<Step> {
         // landing-zone barricade opens once the player heals at the bacta
         // dispenser the scripts switch on.
         Check("the level's scripts run", level_script_running),
+        // geo_01a's level start takes every grenade away
+        // (ScriptedTrigger52's four ACTION_AddAmmo steps).
+        Until(
+            "geo_01a starts with no grenades, as the map's script says",
+            |w| no_grenades_at_start(w).is_ok(),
+            10.0,
+        ),
+        Check("geo_01a starts with no grenades, as the map's script says", no_grenades_at_start),
         Until(
             "the scripts start playing the level's lines",
             |w| level_script_lines(w).is_ok(),
@@ -1072,6 +1080,31 @@ fn steps() -> Vec<Step> {
         // stood on the ground.
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
         Check("the clone troopers hold their rifles", troopers_hold_rifles),
+        // Troopers can be hurt and die (their class's `Health`), as
+        // engine.u's `Pawn.Died`: the map's `Event` for them goes off and
+        // they play their `Death` animation. CloneTrooper1 has no script
+        // and no event, so killing it changes nothing else in the level.
+        Check("the clone troopers can be hurt and die", troopers_can_die),
+        Note(|w| {
+            let mut q = w.query::<(Entity, &rc_cast::Cast)>();
+            let Some(e) = q
+                .iter(w)
+                .find(|(_, c)| c.name == "CloneTrooper1")
+                .map(|(e, _)| e)
+            else {
+                return;
+            };
+            w.write_message(rc_combat::Damage {
+                target: e,
+                amount: 500.0,
+                kind: rc_combat::DamageKind::Other,
+                instigator: None,
+                point: Vec3::ZERO,
+                direction: Vec3::NEG_Y,
+            });
+        }),
+        Wait(1.0),
+        Check("a clone trooper dies with the game's Death animation", trooper_died),
         Note(view_gunship),
         Wait(0.5),
         Shot("gunship"),
@@ -3166,6 +3199,27 @@ fn level_script_running(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a's level start: the script's four AddAmmo steps ran and the
+/// player carries all four grenade kinds, none of each.
+fn no_grenades_at_start(w: &mut World) -> Result<String, String> {
+    let steps = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .map(|s| s.stats.add_ammo.clone())
+        .unwrap_or_default();
+    let mut q = w.query_filtered::<&rc_combat::Grenades, With<Player>>();
+    let carried = q
+        .iter(w)
+        .next()
+        .map(|g| g.carried.clone())
+        .ok_or("the player has no grenades component")?;
+    let got = format!("script steps {steps:?}; carried {carried:?}");
+    if steps.len() == 4 && carried.len() == 4 && carried.iter().all(|(_, n)| *n == 0) {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 /// The level's lines and sounds (`rc_scripts_plugin::sounds`): every sound
 /// geo_01a's scripts name was read from the game's packages with its
 /// length, at least two lines have played and reached the sound card, and
@@ -3431,8 +3485,9 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
 
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
-/// geo_01a's clone troopers hold the game's DC-17m model (their class's
-/// `RequiredEquipment`), hung on their weapon bone.
+/// geo_01a's clone troopers hold the game's DC-15 rifle model (their
+/// class's `RequiredEquipment` as `CloneTrooperDefaults` in
+/// Properties/properties.u sets it), hung on their weapon bone.
 fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
     let mut q = w.query::<&rc_cast::Cast>();
     let troopers: Vec<_> = q
@@ -3441,10 +3496,64 @@ fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
         .collect();
     let armed = troopers
         .iter()
-        .filter(|c| c.held_weapon() == Some("DC17mBlaster"))
+        .filter(|c| c.held_weapon() == Some("DC15BlasterClone"))
         .count();
-    let msg = format!("{armed} of {} clone troopers hold a DC17mBlaster", troopers.len());
+    let msg = format!("{armed} of {} clone troopers hold a DC15BlasterClone", troopers.len());
     if !troopers.is_empty() && armed == troopers.len() {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// geo_01a's clone troopers have their class's 100 health and a hit
+/// cylinder, and the ramp trooper's death sends the event its script
+/// waits for.
+fn troopers_can_die(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<(
+        &rc_cast::Cast,
+        Option<&rc_combat::Health>,
+        Has<rc_combat::Hittable>,
+    )>();
+    let mut troopers = 0;
+    let mut ok = 0;
+    let mut event = None;
+    for (c, h, hit) in q.iter(w) {
+        if !c.class.eq_ignore_ascii_case("CloneTrooper") {
+            continue;
+        }
+        troopers += 1;
+        if hit && h.is_some_and(|h| h.max == 100.0) {
+            ok += 1;
+        }
+        if c.name == "CloneTrooper7" {
+            event = c.death_event().map(str::to_string);
+        }
+    }
+    let msg = format!(
+        "{ok} of {troopers} clone troopers have 100 health and can be hit; CloneTrooper7's death triggers {}",
+        event.as_deref().unwrap_or("nothing")
+    );
+    if troopers > 0 && ok == troopers && event.as_deref() == Some("GunshipTrooper02Death") {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// CloneTrooper1, hurt for 500, is dead and plays `Death`.
+fn trooper_died(w: &mut World) -> Result<String, String> {
+    let mut q = w.query::<(&rc_cast::Cast, Has<rc_combat::Dead>)>();
+    let (c, dead) = q
+        .iter(w)
+        .find(|(c, _)| c.name == "CloneTrooper1")
+        .ok_or("no CloneTrooper1 in the cast")?;
+    let msg = format!(
+        "CloneTrooper1 dead: {}, marked Dead: {dead}, playing {}",
+        c.is_dead(),
+        c.playing().unwrap_or("nothing")
+    );
+    if c.is_dead() && dead && c.playing() == Some("Death") {
         Ok(msg)
     } else {
         Err(msg)
@@ -3641,7 +3750,10 @@ fn bacta_zap(w: &mut World) -> Result<String, String> {
         .query::<&rc_scripts_plugin::bacta::BactaZap>()
         .iter(w)
         .count();
-    let hum = fx.sounds.iter().any(|s| s.eq_ignore_ascii_case("ele_GEO_genEnrgy_lp_01"));
+    let hum = fx
+        .sounds
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case("ele_GEO_genEnrgy_lp_01"));
     let msg = format!(
         "zaps {:?}, removed {}; effect sounds {:?}; still running {:?}, carriers {carriers}",
         st.zaps, st.zaps_removed, fx.sounds, still
@@ -3654,7 +3766,11 @@ fn bacta_zap(w: &mut World) -> Result<String, String> {
         && st.zaps_removed >= 1
         && still.is_empty()
         && carriers == 0;
-    if ok { Ok(msg) } else { Err(msg) }
+    if ok {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
 }
 
 /// The arms' moves while healing at the dispenser, in the game's order
