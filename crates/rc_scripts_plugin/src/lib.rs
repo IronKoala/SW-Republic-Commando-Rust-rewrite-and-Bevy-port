@@ -56,6 +56,7 @@ pub mod characters;
 pub mod cutscene;
 pub mod fx_factories;
 pub mod hud_blink;
+pub mod interference;
 pub mod markers;
 pub mod music;
 pub mod objectives;
@@ -154,6 +155,7 @@ impl Plugin for ScriptsPlugin {
                     tracker::track,
                     fx_factories::run,
                     placed_emitters::run,
+                    interference::run,
                     projectiles::fly,
                     breakables::show,
                     characters::cast,
@@ -176,6 +178,7 @@ impl Plugin for ScriptsPlugin {
                     cutscene::forget,
                     projectiles::forget,
                     tracker::forget,
+                    interference::forget,
                 ),
             );
     }
@@ -471,7 +474,7 @@ fn build(
     breakable: Option<Res<LevelBreakables>>,
     mut gate: ResMut<LoadingGate>,
     paths: Res<GamePaths>,
-    audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
+    mut audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
     mut preload: MessageWriter<rc_effects_plugin::PreloadEffect>,
     log: Res<GameLog>,
 ) {
@@ -490,9 +493,9 @@ fn build(
     let places = characters::Places::new(places.clone());
     // The lines and sounds the scripts play, and how long each lasts.
     // Without audio (tests) there's nothing to read them into.
-    match audio {
-        Some(mut audio) => {
-            let s = sounds::load(map, &paths, &mut audio, &log);
+    match audio.as_mut() {
+        Some(audio) => {
+            let s = sounds::load(map, &paths, audio, &log);
             for (name, secs) in &s.lengths {
                 director.set_sound_length(name, *secs);
             }
@@ -636,6 +639,14 @@ fn build(
         });
     }
     commands.insert_resource(placed_emitters::LevelEmitters::new(emitters));
+    // Interference generators (geo_03a's jamming device): static on the
+    // helmet's view near one that is on.
+    let mut no_audio = Assets::<bevy::audio::AudioSource>::default();
+    let audio_store = match audio.as_mut() {
+        Some(a) => &mut **a,
+        None => &mut no_audio,
+    };
+    commands.insert_resource(interference::prepare(map, &paths, audio_store, &log));
     commands.insert_resource(LevelScript {
         director,
         dispensers,

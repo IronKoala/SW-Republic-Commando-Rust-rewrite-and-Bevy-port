@@ -83,3 +83,20 @@ fade_seconds = 0.2
 fallback_grain = 0.12
 fallback_grain_tiles = [9.0, 6.5]
 fallback_fog = [555.0, 4500.0]
+
+# Static on the view near a jamming device's interference generator (geo_03a).
+# As in the original, the static is added to the vision mode's own film
+# grain: in low light mode to the night-vision grain, in normal and tactical
+# mode the plain modes' shaders add only grain to the picture. Their grain
+# repeats are read at run time from the modes named below. Every line can be
+# left out.
+[helmet_static]
+# false: no static picture (the hiss still plays).
+picture = true
+normal_mode = "FrameFX.VisionModes.VisionNormal"
+tactical_mode = "FrameFX.VisionModes.VisionEnhance"
+# The shader a mode uses when it names none (the original's default).
+default_shader = "FrameFX.VisionShaders.VisionShaderNormal"
+# Used only when the game folder can't be read: grain repeats across and
+# down a 4:3 screen.
+fallback_tiles = [6.3, 6.7]

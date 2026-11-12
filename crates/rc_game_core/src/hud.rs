@@ -102,3 +102,15 @@ pub struct ViewKick {
     pub pitch: f32,
     pub yaw: f32,
 }
+
+/// Static on the helmet's view: the original HUD's `StaticAlpha`
+/// (engine.u `HUD`), 0 for none. The original sets it from the nearest
+/// switched-on `InterferenceGenerator` (ctgame.u `CTHUD.Tick`); the
+/// renderer adds it to the vision mode's film grain and the HUD plays its
+/// static hiss while it is above 0 (engine.dll, see `rc_scripts_plugin`'s
+/// `interference.rs`). Written by the level scripts part, read by the
+/// visor.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HudStatic {
+    pub alpha: i32,
+}

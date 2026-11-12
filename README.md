@@ -742,6 +742,14 @@ copy of the game.
   trail of the last picture. Checked by `cargo run -p rc_visor --example
   visor_check` and `rc_game --script`.
 
+- **Static near a jamming device (2026-11-12, not tested in game or on
+  Windows).** geo_03a's interference generators put the original's film
+  grain static on the view and play its hiss as you get within 1000 units,
+  stronger the closer you are, until the jamming device is destroyed. The
+  rules are the original's (scripts and decompiled engine code, see
+  docs/DESIGN.md). Checked by `visor_check` (grain on, then gone) and the
+  geo_03a file test in `rc_scripts_plugin`.
+
 - **Breakable props (since 2026-11-09, tested in the cloud only, not on
   Windows or by playing).** Explosive barrels, geo_05b's fuel dispensers
   and clamps, holo machines, consoles, rock cover, drone eggs and wall
