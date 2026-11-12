@@ -144,6 +144,8 @@ fn switch_on(
         rotation: e.rotation,
         follow: Some(carrier),
         endless: true,
+        // Its looping sound plays from its place in `crate::ambient`.
+        skip_ambient_sound: true,
         ..default()
     });
     em.carriers[i] = Some(carrier);

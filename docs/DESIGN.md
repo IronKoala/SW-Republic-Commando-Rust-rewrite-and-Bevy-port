@@ -1731,9 +1731,12 @@ sound plays in full out to `Radius` and at `Radius / distance` beyond. The
 battle loop's `Ambience_PS_01` has `Radius` 10, so the game keeps it very
 quiet until you are near it; they pause with the game and
 stop when the level ends. geo_01a has 6 (`cargo run -p rc_level --example
-ambient_sounds -- <game folder> geo_01a`). The placed emitters' particles
-themselves are still not drawn: only their sound plays. If they are added
-later, their `AmbientSound` must not be played twice.
+ambient_sounds -- <game folder> geo_01a`). The placed emitters' particles are drawn
+by `placed_emitters` through the effects part, which leaves their
+`AmbientSound` to this (`SpawnEffect::skip_ambient_sound`), so it plays
+once, from its place. Switching an emitter off with a level event stops
+its particles only: the sound belongs to the actor, not its particle
+emitters.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).
