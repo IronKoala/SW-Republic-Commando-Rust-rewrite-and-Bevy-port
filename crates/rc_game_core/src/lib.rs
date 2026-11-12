@@ -69,6 +69,7 @@ pub use events::{
     FactoryOrder,
     LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
     ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
+    ScriptSpawnActor,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
@@ -112,6 +113,7 @@ impl Plugin for CorePlugin {
             .add_message::<ViewKick>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
+            .add_message::<ScriptSpawnActor>()
             .add_message::<FactoryOrder>()
             .add_message::<CharacterOrder>()
             .add_message::<CharacterOrderDone>()

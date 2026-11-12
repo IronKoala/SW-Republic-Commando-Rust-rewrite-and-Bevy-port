@@ -1350,10 +1350,19 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             .map(|b| b.export),
         );
     }
+    // And loose physics props (`rc_level::karma`): the physics part moves
+    // them. Their models are drawn where the map puts them; the physics
+    // part lets them fall from there, as the original does.
+    let (karma_bodies, script_spawns) = {
+        let mats = &mut *ctx.mats;
+        let mut open = |n: &str| mats.package(n);
+        let (bodies, _) = rc_level::karma::read(&mut class_looks, &map, &level, &mut open);
+        let spawns = rc_level::karma::script_spawns(&mut class_looks, &map, &level, &mut open);
+        (bodies, spawns)
+    };
+    mover_exports.extend(karma_bodies.iter().filter_map(|b| b.export));
     ctx.stats.movers = movers.movers.len();
     let mut placed: Vec<(Placement, Rc<(StaticMesh, Loaded)>)> = Vec::new();
-    #[allow(clippy::type_complexity)]
-    let mut loose: Vec<LooseProp> = Vec::new();
     // Ammo boxes, dropped onto the ground like the game drops them
     // (`rc_level::pickups::rest_on_ground`).
     let mut boxes: Vec<LooseProp> = Vec::new();
@@ -1505,19 +1514,6 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
                 ctx.stats.movers_drawn += mover
                     .is_some_and(|m| movers.movers.iter().any(|x| x.place.export == m))
                     as usize;
-                // Physics props that fall as the level starts (loose
-                // rocks) are drawn after the ground is known, moved down
-                // onto it (`rc_level::settle`).
-                let is_karma = rc_level::settle::starts_awake(pkg, data, p.export) && {
-                    let mats = &mut *ctx.mats;
-                    class_looks
-                        .for_actor(pkg, p.export, &mut |n: &str| mats.package(n))
-                        .is_some_and(|l| l.is_a("KarmaProp"))
-                };
-                if is_karma {
-                    loose.push((p, m, colours, bump_light, in_sky, mover));
-                    continue;
-                }
                 // No stored light (props that can move or appear later):
                 // lit from the map's lights once they are all read.
                 if colours.is_none() && !in_sky && !p.unlit && p.static_mesh_instance == 0 {
@@ -1540,6 +1536,43 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             Err(e) => *ctx.stats.mesh_failures.entry(e).or_default() += 1,
         }
     }
+    // Physics props the level's scripts make (geo_04's falling rocks):
+    // drawn once each where its script puts it, as a hidden model the
+    // physics part copies for every rock it makes (tagged `MoverPart`
+    // with the action's export index). Unreal lights such actors from the
+    // lights around them as it draws them; here that light is worked out
+    // where the script puts them, as for other props with no stored light.
+    for sp in &script_spawns {
+        let Ok(body) = &sp.body else { continue };
+        let found = (|| {
+            let (first, rest) = body.mesh_path.split_first()?;
+            let owner = ctx.mats.package(first)?;
+            let k = crate::materials::find_export(&owner.0, rest)?;
+            let mesh = static_mesh::read_static_mesh(&owner.0, &owner.1, &owner.0.exports[k]).ok()?;
+            Some(Rc::new((mesh, owner)))
+        })();
+        let Some(m) = found else {
+            ctx.stats.mesh_failures.entry(format!("script prop {}: model not read", sp.class)).and_modify(|n| *n += 1).or_insert(1);
+            continue;
+        };
+        let p = Placement {
+            export: sp.action,
+            class: sp.class.clone(),
+            name: sp.script.clone(),
+            location: body.location,
+            rotation: body.rotation,
+            draw_scale: 1.0,
+            draw_scale_3d: body.scale,
+            pre_pivot: [0.0; 3],
+            static_mesh: 0,
+            skins: Vec::new(),
+            hidden: false,
+            unlit: false,
+            static_mesh_instance: 0,
+        };
+        let zone = prop_zone(&bsp, &p, &m.0, &mut ctx.stats);
+        unbaked.push((p, m, zone, Some(sp.action)));
+    }
     for (p, m, zone, mover) in unbaked {
         let ambient = zone
             .and_then(|z| zone_ambient.get(&z))
@@ -1558,7 +1591,10 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
             None,
             mover,
         );
-        placed.push((p, m));
+        // The script props' hidden models aren't level ground.
+        if !script_spawns.iter().any(|sp| sp.action == p.export) {
+            placed.push((p, m));
+        }
     }
     let (terrains, terrain_failures) =
         rc_level::terrain::read_terrains(pkg, data, level.actors.iter().flatten().copied());
@@ -1569,24 +1605,6 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         let mut ground = rc_level::collision::collision_triangles(&bsp, &pairs);
         rc_level::collision::add_terrains(&mut ground, &terrains);
         let ground = rc_level::settle::Ground::new(&ground.triangles);
-        for (mut p, m, colours, bump_light, in_sky, mover) in loose {
-            if let Some(d) = rc_level::settle::settle(&mut p, &m.0, &ground) {
-                ctx.stats.props_settled += 1;
-                ctx.stats.settle_drop_max = ctx.stats.settle_drop_max.max(d);
-            }
-            add_mesh_actor(
-                &mut b,
-                &mut ctx,
-                in_sky,
-                &p,
-                &m.0,
-                &m.1,
-                colours.as_deref(),
-                bump_light.as_deref(),
-                mover,
-            );
-            placed.push((p, m));
-        }
         for (mut p, m, colours, bump_light, in_sky, mover) in boxes {
             let found = {
                 let mats = &mut *ctx.mats;

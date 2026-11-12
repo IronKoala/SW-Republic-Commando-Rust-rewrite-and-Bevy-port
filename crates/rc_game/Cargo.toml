@@ -45,6 +45,8 @@ rc_combat = { path = "../rc_combat" }
 rc_enemies = { path = "../rc_enemies" }
 rc_squad_plugin = { path = "../rc_squad_plugin" }
 rc_turrets_plugin = { path = "../rc_turrets_plugin" }
+# Loose physics props, MegaForce pushers, falling rocks.
+rc_physics = { path = "../rc_physics" }
 # The characters placed in maps that no other part owns (cutscene casts).
 rc_cast = { path = "../rc_cast" }
 # Character shadows (cutscene characters).

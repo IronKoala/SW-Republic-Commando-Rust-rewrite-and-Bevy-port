@@ -149,6 +149,25 @@ pub struct LevelMoverData {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
 
+/// Loose physics props (`rc_level::karma`), what pushes them, and the
+/// level as solid ground for them, for the physics part (`rc_physics`).
+/// Unreal units. Present from the end of loading until the game leaves
+/// `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelKarma {
+    pub bodies: Vec<rc_level::karma::KarmaBody>,
+    /// Props the level's scripts make, by the action that makes them.
+    pub spawns: Vec<rc_level::karma::ScriptSpawn>,
+    pub megaforces: Vec<rc_level::karma::MegaForce>,
+    /// The level's fixed collision triangles.
+    pub ground: Vec<[[f32; 3]; 3]>,
+    /// The triangles of the parts a script may switch off (not the
+    /// physics props' own), by export index.
+    pub parts: std::collections::HashMap<usize, Vec<[[f32; 3]; 3]>>,
+    /// `KDamageImpulse`, `KDeathUpKick` by lower-case damage type.
+    pub impulses: std::collections::HashMap<String, (f32, f32)>,
+}
+
 /// The faces of blocking volumes that a line with no thickness passes
 /// through in the original (`bBlockZeroExtentTraces` off). They are part
 /// of `LevelCollision` too; a sight check that must see through them, as
@@ -362,6 +381,7 @@ fn forget(
     commands.remove_resource::<LineThroughVolumes>();
     commands.remove_resource::<rc_game_core::PlaceLight>();
     commands.remove_resource::<LevelBreakables>();
+    commands.remove_resource::<LevelKarma>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
     commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
 }
@@ -488,6 +508,42 @@ fn load(world: &mut World) {
         movers: lvl.movers,
         triangles: lvl.mover_triangles,
     });
+    {
+        let own: std::collections::HashSet<usize> =
+            lvl.karma.iter().filter_map(|b| b.export).collect();
+        log.line(format!(
+            "{PART}: {} physics props ({} moving from the start), {} more a script makes ({} can't be), {} MegaForce pushers; {} left out: {}",
+            lvl.karma.len(),
+            lvl.karma.iter().filter(|b| b.karma_now).count(),
+            lvl.karma_spawns.iter().filter(|s| s.body.is_ok()).count(),
+            lvl.karma_spawns.iter().filter(|s| s.body.is_err()).count(),
+            lvl.megaforces.len(),
+            lvl.karma_skipped.len(),
+            lvl.karma_skipped
+                .iter()
+                .map(|k| format!("{} ({}): {}", k.name, k.class, k.why))
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+        for sp in lvl.karma_spawns.iter() {
+            if let Err(e) = &sp.body {
+                log.line(format!("{PART}: {} makes {}: can't be done: {e}", sp.script, sp.class));
+            }
+        }
+        world.insert_resource(LevelKarma {
+            bodies: std::mem::take(&mut lvl.karma),
+            spawns: std::mem::take(&mut lvl.karma_spawns),
+            megaforces: std::mem::take(&mut lvl.megaforces),
+            ground: lvl.triangles.clone(),
+            parts: lvl
+                .part_triangles
+                .iter()
+                .filter(|(e, _)| !own.contains(e))
+                .map(|(e, t)| (*e, t.clone()))
+                .collect(),
+            impulses: std::mem::take(&mut lvl.damage_impulses),
+        });
+    }
     let parts = LevelParts::with_shots_only(
         Arc::new(tw),
         &lvl.parts,

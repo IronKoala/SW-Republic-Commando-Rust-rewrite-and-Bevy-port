@@ -40,6 +40,10 @@ pub struct Blast {
     pub instigator: Option<Entity>,
     /// Characters it hurt or stunned.
     pub hit: u32,
+    /// Damage at the centre and its damage type class (`MyDamageType`):
+    /// physics props are pushed by it (`rc_physics`).
+    pub damage: f32,
+    pub damage_type: String,
 }
 
 /// "Something blew up here": a barrel, a fuel dispenser, anything that
@@ -411,6 +415,8 @@ pub(crate) fn fly_grenades(
             radius: p.radius,
             instigator: Some(thrower),
             hit: hit_count,
+            damage: p.damage,
+            damage_type: p.damage_type.clone(),
         });
         commands.entity(e).despawn();
     }
@@ -599,6 +605,8 @@ pub(crate) fn explosions(
             radius: x.radius,
             instigator: x.instigator,
             hit,
+            damage: x.damage,
+            damage_type: x.damage_type.clone(),
         });
     }
 }

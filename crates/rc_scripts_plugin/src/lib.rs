@@ -703,10 +703,11 @@ fn run(
         MessageReader<RaiseEvent>,
         MessageReader<rc_game_core::CharacterOrderDone>,
     ),
-    (mut factories, mut turrets, mut collisions): (
+    (mut factories, mut turrets, mut collisions, mut spawns): (
         MessageWriter<FactoryOrder>,
         MessageWriter<TurretOrder>,
         MessageWriter<rc_game_core::CharacterCollision>,
+        MessageWriter<rc_game_core::ScriptSpawnActor>,
     ),
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
@@ -988,6 +989,7 @@ fn run(
                     &mut factories,
                     &mut turrets,
                     &mut collisions,
+                    &mut spawns,
                     &use_key,
                     &log,
                 );
@@ -1019,6 +1021,7 @@ fn carry_out(
     factories: &mut MessageWriter<FactoryOrder>,
     turrets: &mut MessageWriter<TurretOrder>,
     collisions: &mut MessageWriter<rc_game_core::CharacterCollision>,
+    spawns: &mut MessageWriter<rc_game_core::ScriptSpawnActor>,
     use_key: &str,
     log: &GameLog,
 ) {
@@ -1026,6 +1029,18 @@ fn carry_out(
     let kind = a.class.strip_prefix("ACTION_").unwrap_or(&a.class);
     let at = format!("{PART}: t={now:.2} {} #{} {kind}", call.script, call.index);
     match kind.to_ascii_lowercase().as_str() {
+        // The part that owns the class makes it (physics props:
+        // `rc_physics`, which logs what it made). Other classes aren't
+        // made yet; it says so.
+        "spawnactor" => {
+            let class = a.text("ActorClass").unwrap_or("").to_string();
+            log.line(format!("{at}: make {class} (handed to the part that owns it)"));
+            spawns.write(rc_game_core::ScriptSpawnActor {
+                action: a.export,
+                class,
+                by: format!("{} #{}", call.script, call.index),
+            });
+        }
         "setcollision" => {
             let tag = a.text("CollideActorTag").unwrap_or("");
             let on = a.flag("bCollideActors", true);
