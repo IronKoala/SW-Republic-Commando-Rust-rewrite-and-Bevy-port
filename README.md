@@ -746,6 +746,11 @@ copy of the game.
   only).** They take the light of where they stand, and hold their rifles:
   the game's own DC-15 model (from `CloneTrooperDefaults`), on their hand
   bone. They don't fire yet.
+  Since 2026-11-12 they can be hurt and die (100 health, from the game's
+  files): they fall with the game's own death animation, the level hears
+  of it (the map's death event for them), and the body goes after 60
+  seconds, as in the original. There are no ragdolls yet, so a blast
+  doesn't throw them.
 
 - Mounted turrets: walk up to the Wookiee heavy turret, a Trandoshan
   missile turret or an E-Web and press Use. You get on, look around to
