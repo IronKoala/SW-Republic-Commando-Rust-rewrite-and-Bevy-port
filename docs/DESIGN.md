@@ -2842,6 +2842,22 @@ squad:
      checked; `bStartTimerAfterDeath` and `bAlwaysUseFactorySettings` are
      ignored; `SpawnEvent` is sent only when a droid is actually made (the
      original also sends it when the player is out of the factory's range).
+   - *Placed in the map*: characters can also stand in the map with no
+     factory. The original gives every placed pawn its AI as the level
+     starts (Engine.u `Pawn.PostBeginPlay`, read only: through its
+     `AIScriptTag`'s script when it names one, unless `bDontPossess` is
+     set), at full health. Its own `Tag`, `Event` (sent when it dies),
+     `FirstDamagedEvent`, `StartState`, `TeamIndex` and `AIScriptTag` are
+     the same values a factory copies onto what it makes (CTGame.u
+     `PawnFactory.SetupNewActor`), and a placed actor with no stored
+     `Tag` has its class name as its tag. `rc_ai::read_placed` turns each
+     one into a one-character factory (`Factory::placed`) at its own
+     place: `Battle` makes them all on its first step (no "one per step"
+     and no `max_alive_total` limit, since the original has them all from
+     the start) and never again; events, `StopFactorySpawning`,
+     `ResetFactory` and walk-in triggers leave them alone. They go after
+     the real factories, so saves from before they were made still load
+     (they then start as on a fresh level).
    `Battle` runs all of this for a map; the game plugin and `rc_droidsim`
    both use it.
 
@@ -2849,7 +2865,14 @@ squad:
    - On `OnEnter(Loading)` it reads the map's paths and spawners and the
      settings file through `GamePaths::data_file`, so a mod's file wins.
      It logs each spawner it runs (tag, type, capacity, where, its tags
-     and events).
+     and events). It also reads the characters placed straight in the map
+     (`rc_enemies::placed_enemies`): an actor counts when the game's
+     classes (`GameData/System` and `Properties`, read once per run into
+     `PawnClasses`) say it is a `Pawn` and an enemy file claims its class.
+     Placed clone troopers are left to the cast (`rc_cast`), and placed
+     kinds no file claims are logged and left out. Each one made is
+     logged as "placed ... is a ...", and its body as "placed in the map
+     as ...".
    - It hears the level's events (`rc_game_core::ScriptEvent`) and the
      scripts' `FactoryOrder`s, and sends what its spawners and droids
      send (`BattleEvent::Event`) back as `rc_game_core::RaiseEvent`; the
@@ -2903,6 +2926,9 @@ walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
 
+To see which characters are placed straight in each map and which file
+makes each one, run `rc_placed_enemies` (an example in `rc_enemies`, same
+setup; writes `logs/placed_enemies.log`).
 To see which file claims each map's spawners, and which classes no file
 claims yet, run `rc_enemy_spawners` (an example in `rc_enemies`, needs the
 game folder in `RC_GAME_DIR`; writes `logs/enemy_spawners.log`). A new

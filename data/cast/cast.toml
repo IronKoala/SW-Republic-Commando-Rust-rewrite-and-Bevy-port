@@ -48,7 +48,10 @@ wait_for_player_limit = 20
 pose_distance = 4000
 
 # Classes left to other parts of the game (enemies fight, the squad
-# follows). `*` matches any ending. A placed character whose class or any
+# follows). Enemies placed in the map are made by the enemies part (every
+# class an enemy file in data/enemies claims, apart from clone troopers),
+# so each enemy kind with a file must be listed here too. `*` matches any
+# ending. A placed character whose class or any
 # parent class matches is not part of the cast.
 leave_out = [
     "BattleDroid*",
@@ -57,6 +60,7 @@ leave_out = [
     "Droideka*",
     "Geonosian*",
     "Trandoshan*",
+    "GrievousGuard*",
     "Turret*",
     "CTPlayer",
     "PlayerPawn",
