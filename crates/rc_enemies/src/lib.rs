@@ -22,6 +22,8 @@
 //!
 //! Everything it does is logged to the game log with the prefix `enemies:`.
 
+pub mod dispenser_world;
+pub mod dispensers;
 pub mod look;
 mod patrol;
 pub mod save;
@@ -74,7 +76,16 @@ impl Plugin for EnemiesPlugin {
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::CharacterCollision>()
             .init_resource::<rc_game_core::MusicThreats>()
+            .init_resource::<dispensers::DispenserSounds>()
+            .init_resource::<dispensers::DispenserStats>()
+            .init_resource::<dispenser_world::DispenserSolids>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
+            .add_systems(
+                OnEnter(GameState::Loading),
+                dispensers::setup
+                    .after(load_fight)
+                    .run_if(resource_exists::<Fight>),
+            )
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
                 Update,
@@ -91,6 +102,51 @@ impl Plugin for EnemiesPlugin {
                     .before(CombatSet::Fire)
                     .run_if(playing)
                     .run_if(resource_exists::<Fight>),
+            )
+            .add_systems(
+                Update,
+                dispensers::show_steps
+                    .after(think)
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>),
+            )
+            .add_systems(
+                Update,
+                (dispenser_world::ride_bases, dispenser_world::be_solid)
+                    .chain()
+                    .in_set(GameSet::Simulate)
+                    .before(think)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>)
+                    .run_if(any_with_component::<dispensers::DispenserBody>),
+            )
+            .add_systems(
+                Update,
+                dispenser_world::crush
+                    .after(dispensers::show_steps)
+                    .before(CombatSet::ApplyDamage)
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>)
+                    .run_if(any_with_component::<dispensers::DispenserBody>),
+            )
+            .add_systems(
+                Update,
+                dispensers::hits
+                    .in_set(GameSet::Simulate)
+                    .after(CombatSet::ApplyDamage)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>),
+            )
+            .add_systems(
+                Update,
+                (dispensers::after_load, dispensers::animate)
+                    .chain()
+                    .in_set(GameSet::View)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>)
+                    .run_if(any_with_component::<dispensers::DispenserBody>),
             )
             .add_systems(
                 Update,
@@ -143,6 +199,11 @@ pub struct Fight {
     /// Fighters walking a patrol route, by id (see `patrol.rs`).
     pub patrols: HashMap<u32, rc_ai::PatrolRun>,
     patrol_rng: rc_ai::Rng,
+    /// What the dispensers did this frame, for `dispensers::show_steps`.
+    pub dispenser_steps: Vec<(usize, rc_ai::DispenserStep)>,
+    /// A save was just loaded: `dispensers::after_load` shows the
+    /// dispensers as saved.
+    pub dispensers_restored: bool,
 }
 
 /// Counts for the log and for tests.
@@ -197,6 +258,8 @@ impl Fight {
             script_done: Vec::new(),
             patrols: HashMap::new(),
             patrol_rng: rc_ai::Rng::new(11),
+            dispenser_steps: Vec::new(),
+            dispensers_restored: false,
         }
     }
 }
@@ -220,6 +283,9 @@ pub struct Droid {
     /// An animation a level script is playing on it, in place of the one
     /// its moves choose.
     pub scripted: Option<scripted::ScriptedAnim>,
+    /// Its animation while a dispenser makes it: `DispBreathe` on the
+    /// slot, then `DispUnfold` (see `dispensers.rs`).
+    pub dispense: Option<scripted::ScriptedAnim>,
 }
 
 /// The game's script classes (`GameData/System` and `Properties`), read
@@ -1074,6 +1140,9 @@ fn think(
                 log.line(format!("{PART}: t={now:.1}s {by} sends {name}"));
                 raise.write(RaiseEvent { name, by });
             }
+            BattleEvent::Dispenser { spawner, step } => {
+                fight.dispenser_steps.push((spawner, step));
+            }
             BattleEvent::Spawned {
                 id,
                 spawner,
@@ -1110,6 +1179,7 @@ fn think(
                         last_fire: f32::NEG_INFINITY,
                         mesh: mesh.clone(),
                         scripted: None,
+                        dispense: None,
                     },
                     match fight.restored_health.remove(&id) {
                         Some(h) => Health {
@@ -1356,6 +1426,8 @@ fn think(
 /// Put each droid's entity where its body is.
 fn place_droids(
     fight: Res<Fight>,
+    // A droid riding out of a dispenser has no `Hittable` until it has
+    // unfolded, but is still placed.
     mut droids: Query<(&Droid, &mut Transform, Option<&mut Hittable>)>,
 ) {
     for f in &fight.battle.fighters {
@@ -1650,6 +1722,31 @@ fn animate(
                 }
             }
         };
+        // Coming out of a dispenser: riding its slot, then unfolding. The
+        // battle moves it by the animation's root bone, so the pose leaves
+        // the root's travel out.
+        if let Some(da) = d.dispense.as_mut() {
+            da.advance(dt);
+            let frame = da.frame;
+            let clip = da.clip.clone();
+            let (Some(look), Some(handle), Some(meshes)) = (
+                looks.by_type.get(&d.kind).map(|t| &t.look),
+                &d.mesh,
+                meshes.as_mut(),
+            ) else {
+                continue;
+            };
+            let local = look.local_clip_rooted(&clip, frame);
+            d.blend.start(0.0);
+            place_weapon(&local);
+            let points = look.posed_local(&local);
+            let (pos, normals) = look.wedge_attributes(&points);
+            if let Some(mut m) = meshes.get_mut(handle) {
+                m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+                m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            }
+            continue;
+        }
         // A level script's animation, while the script holds it still.
         if d.scripted.is_some() {
             let holding = matches!(f.script, Some(rc_ai::ScriptGoal::Hold { .. }));
