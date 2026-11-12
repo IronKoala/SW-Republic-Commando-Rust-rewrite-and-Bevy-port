@@ -94,7 +94,7 @@ pub struct PropStats {
     pub broken_looks: Vec<String>,
 }
 
-fn in_box(p: Vec3, (lo, hi): (Vec3, Vec3), slack: f32) -> bool {
+pub(crate) fn in_box(p: Vec3, (lo, hi): (Vec3, Vec3), slack: f32) -> bool {
     (0..3).all(|i| p[i] >= lo[i] - slack && p[i] <= hi[i] + slack)
 }
 
@@ -103,23 +103,23 @@ fn to_vec(v: rc_movement::Vec3) -> Vec3 {
 }
 
 /// A Bevy position in Unreal units (kept as a Bevy `Vec3` for the maths).
-fn to_unreal(p: Vec3) -> Vec3 {
+pub(crate) fn to_unreal(p: Vec3) -> Vec3 {
     to_vec(units::to_unreal(p))
 }
 
 /// Unreal units back to a Bevy position.
-fn to_bevy(p: Vec3) -> Vec3 {
+pub(crate) fn to_bevy(p: Vec3) -> Vec3 {
     units::to_bevy(rc_movement::Vec3::new(p.x, p.y, p.z))
 }
 
-fn bounds(parts: &LevelParts, export: usize) -> Option<(Vec3, Vec3)> {
+pub(crate) fn bounds(parts: &LevelParts, export: usize) -> Option<(Vec3, Vec3)> {
     parts
         .bounds_of(export)
         .map(|(lo, hi)| (to_vec(lo), to_vec(hi)))
 }
 
 /// Hurt one prop and log what happened.
-fn hurt(script: &mut LevelScript, export: usize, amount: f32, by: &str, log: &GameLog) {
+pub(crate) fn hurt(script: &mut LevelScript, export: usize, amount: f32, by: &str, log: &GameLog) {
     let now = script.director.time;
     let name = script
         .breaking
@@ -148,7 +148,7 @@ fn hurt(script: &mut LevelScript, export: usize, amount: f32, by: &str, log: &Ga
 /// Hurt every standing breakable prop a blast at `point` (Unreal units)
 /// can see within `radius`, as `HurtRadius` does for characters.
 #[allow(clippy::too_many_arguments)]
-fn hurt_around(
+pub(crate) fn hurt_around(
     script: &mut LevelScript,
     parts: &LevelParts,
     level: Option<&LevelCollision>,
@@ -674,6 +674,7 @@ mod tests {
             sounds: vec![],
             ammo: vec![],
             hud_blink: Default::default(),
+            mines: Default::default(),
             started: true,
             scene: crate::cutscene::Scene::default(),
             stats: PlayStats::default(),

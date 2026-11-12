@@ -139,6 +139,12 @@ pub enum Team {
     Neutral,
 }
 
+/// Marks a character who is crouched right now (kept up to date by the
+/// parts that move characters). Proximity mines don't see them, as in the
+/// original (`bIsCrouched`).
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Crouched;
+
 /// Marks a character whose health reached 0. Added once, with [`Died`].
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Dead;

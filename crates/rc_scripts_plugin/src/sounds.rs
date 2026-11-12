@@ -709,6 +709,7 @@ mod tests {
             sounds: vec![],
             ammo: vec![],
             hud_blink: Default::default(),
+            mines: Default::default(),
             anchors: vec![],
             started: true,
             scene: crate::cutscene::Scene::default(),

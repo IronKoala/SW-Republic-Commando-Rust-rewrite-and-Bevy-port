@@ -1396,18 +1396,26 @@ fn think(
 
 /// Put each droid's entity where its body is.
 fn place_droids(
+    mut commands: Commands,
     fight: Res<Fight>,
     // A droid riding out of a dispenser has no `Hittable` until it has
     // unfolded, but is still placed.
-    mut droids: Query<(&Droid, &mut Transform, Option<&mut Hittable>)>,
+    mut droids: Query<(&Droid, &mut Transform, Option<&mut Hittable>, Has<rc_combat::Crouched>)>,
 ) {
     for f in &fight.battle.fighters {
         let Some(&e) = fight.entities.get(&f.id) else {
             continue;
         };
-        let Ok((_, mut t, hit)) = droids.get_mut(e) else {
+        let Ok((_, mut t, hit, was_crouched)) = droids.get_mut(e) else {
             continue;
         };
+        if f.pawn.crouched != was_crouched {
+            if f.pawn.crouched {
+                commands.entity(e).insert(rc_combat::Crouched);
+            } else {
+                commands.entity(e).remove::<rc_combat::Crouched>();
+            }
+        }
         t.translation = to_bevy(f.pawn.feet());
         t.rotation = Quat::from_rotation_y(-f.facing);
         // A droid whose collision a script switched off has no body to hit.

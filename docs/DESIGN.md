@@ -2696,6 +2696,44 @@ gives every squad mate a spot at once.
 `rc_squad_plugin::voice` gathers events in `SquadHeard`, plays lines as
 `Voice` sounds and logs every line said or skipped (`squad: ... voice:`).
 
+### Proximity mines (geo_05c)
+
+A `ProximityMine` (CTMarkers.u) sits on an explosive barrel at a
+`MarkerSetProximityMine` squad marker. Everything below comes from the
+game files: the class scripts in CTMarkers.u and Engine.u (`ActivateItem`,
+`ExplosiveCharge`, `ProximityMine`), the marker's native `Update` in
+ctmarkers.dll (decompiled locally for reference only, never committed) and
+the `SetProximityMine` animation's notifies in clone.ukx.
+
+- `rc_level::mines` reads each mine: its barrel (`PropToDestroy`),
+  `TriggerRadius`, `AlertTimeLimit`, `TeamIndex`, the two sounds, the model
+  and the four steps (`ChargeUnplaced`, `ChargePlaced`, `ChargeArmed`,
+  `ChargeExplode`), map values first, then class defaults. The level plugin
+  keeps them in `LevelMines`.
+- `rc_scripts::mines::MineRun` is the script's state code as plain Rust:
+  Unplaced (damage goes to the barrel; the mine goes if the barrel does),
+  Placed (any damage sets it off), Armed (waits `ChargeArmed.Duration`,
+  then `ActivateSound`), Watching (every 0.25 s looks for a standing, living
+  enemy of its side within `TriggerRadius`; a chirp), Alert (every 0.2 s;
+  explodes after `AlertTimeLimit` with the enemy still there, else back to
+  Watching), Exploded. `MarkerStep` is the marker's place-then-arm order.
+- The squad job `[job.proximity_mine]` in data/squad/squad.toml: Scorch
+  (`Commando62Delta`) is preferred, `anim` names the clip played while
+  working (`Pose::Work`), and `place_at` / `arm_at` are the seconds into it
+  of the animation's `MproxMinePlace` and `ProxMineArm` notifies.
+  `rc_squad` sends `SquadEvent::AnchorStep` at those times, which the squad
+  plugin turns into `MarkerJob { step: Placed / Armed }`.
+- `rc_scripts_plugin::mines` runs each mine: it places or arms it on those
+  steps (armed mines join the Republic side), passes hits and blasts to
+  it, asks droids (not crouched, not dead) for the enemy check, and on
+  exploding spawns `ChargeExplode`'s effect and sound, sends the 256/256
+  blast, breaks the barrel and hides the mine. `AnchorGone` tells the squad
+  the marker is finished. `mines::show` draws the mine with each step's
+  material picture. Log lines start with `mines:`.
+
+Not done: the player setting mines, saving mine state, the detonation
+radius preview, the squad's mine voice cues and the marker's hologram icon.
+
 ## The game program (`rc_game`)
 
 `rc_game` is built from Bevy plugins. Parts don't call each other; they

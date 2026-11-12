@@ -233,8 +233,13 @@ copy of the game.
   do these jobs yourself yet (only the squad). The
   markers are read the way the original's maps lay them out (checked on
   all 50 campaign maps), and blast sizes, fuses and who does which job
-  are the game's; how long the work takes is our guess. Traps and mines
-  aren't done yet. With "auto pull maneuvers" on (the default,
+  are the game's; how long the work takes is our guess. Proximity mines
+  (geo_05c, not tested on Windows or by playing yet): Scorch sets and arms
+  the mine on its barrel with the original's animation and timing; once
+  armed it waits 3 s, then chirps when an enemy who isn't crouched comes
+  within 512 units and goes off after 1.5 s, blowing up the barrel too;
+  shooting a set mine sets it off. You can't set mines yourself yet, and
+  traps (disarming) aren't done. With "auto pull maneuvers" on (the default,
   as in the original), ordering a new job when everyone is busy takes
   the squad mate who has held a sniper, grenade or anti-armour position
   longest off it; switch it off in `settings.toml`

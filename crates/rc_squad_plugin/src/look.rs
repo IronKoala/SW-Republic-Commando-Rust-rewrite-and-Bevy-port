@@ -43,6 +43,10 @@ pub enum Pose {
     Revive,
     /// Crouched behind cover between bursts.
     Crouch,
+    /// Doing a marked job that has its own animation (`anim` of the job in
+    /// squad.toml, the marker's `MarkerAnims`: Scorch setting a mine).
+    /// Played once from the start of the work, then held.
+    Work,
 }
 
 impl Pose {
@@ -71,12 +75,13 @@ impl Pose {
             Pose::Down => "down",
             Pose::Revive => "revive",
             Pose::Crouch => "crouch",
+            Pose::Work => "work",
         }
     }
 
     /// Played once and held on the last frame, instead of looping.
     pub fn once(self) -> bool {
-        self == Pose::Down
+        matches!(self, Pose::Down | Pose::Work)
     }
 }
 
@@ -111,6 +116,8 @@ impl Animations {
             Pose::Revive => &self.revive,
             Pose::Crouch if self.crouch.is_empty() => &self.idle,
             Pose::Crouch => &self.crouch,
+            // Each job's own animation is read under `job_clip_key`.
+            Pose::Work => &self.idle,
         }
     }
 }
@@ -198,7 +205,9 @@ impl LooksFile {
         Ok((looks, file))
     }
 
-    pub fn spec(&self, key: &str) -> Option<ModelSpec> {
+    /// The model spec of squad mate `key`, with every job animation
+    /// (`job_anims`, sequence names) read too, each under `job_clip_key`.
+    pub fn spec(&self, key: &str, job_anims: &[String]) -> Option<ModelSpec> {
         let m = self.member.get(key)?;
         Some(ModelSpec {
             package: m.package.clone(),
@@ -207,7 +216,10 @@ impl LooksFile {
             sequences: Pose::ALL
                 .iter()
                 .map(|&p| (p.key().to_string(), self.animations.get(p).to_string()))
+                .chain(job_anims.iter().map(|a| (job_clip_key(a), a.clone())))
                 .collect(),
+            // Job animations live in sets of their own.
+            search_package_sets: !job_anims.is_empty(),
             skins: m
                 .skins
                 .iter()
@@ -223,9 +235,10 @@ pub fn load_model(
     paths: &GamePaths,
     looks: &LooksFile,
     key: &str,
+    job_anims: &[String],
 ) -> Result<(Model, Vec<String>), String> {
     let spec = looks
-        .spec(key)
+        .spec(key, job_anims)
         .ok_or_else(|| format!("no [member.{key}] in {LOOKS_FILE}"))?;
     Model::load(&|rel| paths.game_file(rel), &spec)
 }
@@ -355,10 +368,24 @@ pub fn spawn_pieces(
     }
 }
 
-/// Which animation fits what the member is doing.
-pub fn choose_pose(member: &rc_squad::squad::Member, just_fired: bool, run_speed: f32) -> Pose {
+/// The clip key a job animation (a sequence name) is read under.
+pub fn job_clip_key(anim: &str) -> String {
+    format!("job:{anim}")
+}
+
+/// Which animation fits what the member is doing. `work_anim`: the
+/// animation of the job they're working at, if it has one.
+pub fn choose_pose(
+    member: &rc_squad::squad::Member,
+    just_fired: bool,
+    run_speed: f32,
+    work_anim: bool,
+) -> Pose {
     if member.down {
         return Pose::Down;
+    }
+    if work_anim && matches!(member.state, MemberState::Working { .. }) {
+        return Pose::Work;
     }
     if matches!(member.state, MemberState::Reviving { .. }) {
         return Pose::Revive;
@@ -409,7 +436,12 @@ pub fn animate(
         let Some(member) = squad.members.get(mate.index) else {
             continue;
         };
-        animate_one(member, &mut mm, dt, meshes.as_deref_mut());
+        let work = member
+            .marker
+            .and_then(|k| squad.job_of(k))
+            .map(|j| job_clip_key(&j.anim))
+            .filter(|k| mm.model.clip(k).is_some());
+        animate_one(member, &mut mm, dt, work.as_deref(), meshes.as_deref_mut());
     }
 }
 
@@ -417,6 +449,7 @@ fn animate_one(
     member: &rc_squad::squad::Member,
     mm: &mut MateModel,
     dt: f32,
+    work: Option<&str>,
     meshes: Option<&mut Assets<Mesh>>,
 ) {
     if member.fight.shots != mm.shots {
@@ -429,7 +462,12 @@ fn animate_one(
         member,
         mm.since_shot < FIRE_POSE_TIME,
         rc_movement::MoveParams::player_commando().ground_speed,
+        work.is_some(),
     );
+    let key = match (pose, work) {
+        (Pose::Work, Some(k)) => k,
+        _ => pose.key(),
+    };
     if pose != mm.pose {
         mm.pose = pose;
         mm.frame = 0.0;
@@ -438,7 +476,7 @@ fn animate_one(
     } else {
         mm.blend.advance(dt);
     }
-    let (rate, frames) = match mm.model.clip(pose.key()) {
+    let (rate, frames) = match mm.model.clip(key) {
         Some(c) => (c.rate, c.num_frames),
         None => (0.0, 1.0),
     };
@@ -456,7 +494,7 @@ fn animate_one(
     let Some(meshes) = meshes else {
         return;
     };
-    let target = mm.model.local_pose(pose.key(), mm.frame);
+    let target = mm.model.local_pose(key, mm.frame);
     let points = mm.model.posed_local(mm.blend.apply(target));
     let normals = mm.model.normals(&points);
     for p in &mm.pieces {

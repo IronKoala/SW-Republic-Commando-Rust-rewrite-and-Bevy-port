@@ -116,7 +116,7 @@ fn main() -> AppExit {
     let mut models = Vec::new();
     for key in KEYS {
         let t = std::time::Instant::now();
-        match look::load_model(&paths, &looks, key) {
+        match look::load_model(&paths, &looks, key, &[]) {
             Ok((m, notes)) => {
                 for n in notes {
                     log.line(format!("{key}: {n}"));

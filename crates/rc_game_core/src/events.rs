@@ -208,8 +208,12 @@ pub enum MarkerJobStep {
     /// Someone started on it: placing a charge, slicing a console or a
     /// door, or taking up a sniper post. The anchor's `EventUnderway`.
     Started,
+    /// A proximity mine is set on its barrel (not armed yet): the squad
+    /// marker's `PlaceEvent`.
+    Placed,
     /// A charge is set and its fuse is burning (a demolition charge's
-    /// `ChargeArmed`).
+    /// `ChargeArmed`), or a proximity mine is armed (its marker's
+    /// `ArmEvent`).
     Armed,
     /// Finished: the charge went off, the console or door is sliced, the
     /// door is breached.
@@ -229,6 +233,17 @@ pub struct MarkerJob {
     pub step: MarkerJobStep,
     /// Who did it, for the log.
     pub by: String,
+}
+
+/// The level took away a squad marker's anchor (`anchor`, a map actor
+/// name such as `ProximityMine16`): its markers are no longer offered and
+/// a squad mate on the way to one stops. Sent by the level scripts part,
+/// read by the squad part.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct AnchorGone {
+    pub anchor: String,
+    /// Why, for the log.
+    pub why: String,
 }
 
 /// Play animation `anim` (the model's own sequence name, such as `Load`)

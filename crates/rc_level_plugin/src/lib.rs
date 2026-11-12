@@ -149,6 +149,12 @@ pub struct LevelMoverData {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
 
+/// Proximity mines (`rc_level::mines`). Each is also a part in
+/// `LevelParts`, by its export index. Present from the end of loading
+/// until the game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelMines(pub Vec<rc_level::mines::MineInfo>);
+
 /// The faces of blocking volumes that a line with no thickness passes
 /// through in the original (`bBlockZeroExtentTraces` off). They are part
 /// of `LevelCollision` too; a sight check that must see through them, as
@@ -362,6 +368,7 @@ fn forget(
     commands.remove_resource::<LineThroughVolumes>();
     commands.remove_resource::<rc_game_core::PlaceLight>();
     commands.remove_resource::<LevelBreakables>();
+    commands.remove_resource::<LevelMines>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
     commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
 }
@@ -511,6 +518,22 @@ fn load(world: &mut World) {
         lvl.breakables.iter().filter(|b| b.broken_event().is_some()).count()
     ));
     world.insert_resource(LevelBreakables(std::mem::take(&mut lvl.breakables)));
+    if !lvl.mines.is_empty() {
+        log.line(format!(
+            "{PART}: {} proximity mines ({})",
+            lvl.mines.len(),
+            lvl.mines
+                .iter()
+                .map(|m| format!(
+                    "{} on {}",
+                    m.name,
+                    m.prop_to_destroy.as_deref().unwrap_or("nothing")
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    world.insert_resource(LevelMines(std::mem::take(&mut lvl.mines)));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(LineThroughVolumes(Arc::new(TriangleWorld::new(
         lvl.line_through_triangles

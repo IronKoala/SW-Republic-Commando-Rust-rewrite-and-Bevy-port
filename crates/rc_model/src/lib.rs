@@ -41,6 +41,10 @@ pub struct ModelSpec {
     /// played later by name ([`Model::named_clip`]): for characters that
     /// level scripts animate.
     pub keep_sets: bool,
+    /// Also look in the package's animation sets that the mesh doesn't link
+    /// to, for sequences not found in the linked ones (the commandos'
+    /// marker animations, like `SetProximityMine` in `mProximityMineSet`).
+    pub search_package_sets: bool,
 }
 
 /// A material's picture.
@@ -575,6 +579,19 @@ impl Model {
         let set_name = pkg.name(first.object_name).to_string();
         let mut sets = vec![first];
         sets.extend(linked.into_iter().filter(|e| !std::ptr::eq(*e, first)));
+        // Last, if asked, the package's other animation sets. Only read
+        // when a sequence isn't found in the linked ones.
+        if spec.search_package_sets {
+            let others: Vec<&Export> = pkg
+                .exports
+                .iter()
+                .filter(|e| {
+                    pkg.export_class_name(e) == "MeshAnimation"
+                        && !sets.iter().any(|s| std::ptr::eq(*s, *e))
+                })
+                .collect();
+            sets.extend(others);
+        }
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
         let mut sounds = HashMap::new();

@@ -53,6 +53,10 @@ pub fn run(
     let script = &mut *script;
     let now = script.director.time;
     for job in jobs.read() {
+        // Proximity mines have their own part (`mines.rs`).
+        if script.mines.knows(&job.anchor) {
+            continue;
+        }
         let Some(i) = script
             .anchors
             .iter()
@@ -65,6 +69,8 @@ pub fn run(
             continue;
         };
         let slot = match job.step {
+            // Only proximity mines are placed; `mines.rs` has them.
+            MarkerJobStep::Placed => continue,
             MarkerJobStep::Started => 0,
             MarkerJobStep::Armed => 1,
             MarkerJobStep::Done => 2,
@@ -310,6 +316,7 @@ mod tests {
             sounds: vec![],
             ammo: vec![],
             hud_blink: Default::default(),
+            mines: Default::default(),
             anchors: read_anchors(&m),
             scene: crate::cutscene::Scene::default(),
             breaking: Default::default(),
