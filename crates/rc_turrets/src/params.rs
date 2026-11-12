@@ -175,6 +175,15 @@ pub struct Auto {
     /// every muzzle at once.
     #[serde(default)]
     pub muzzles_in_turn: bool,
+    /// After firing this long without a break, seconds, it stops to cool
+    /// down (`TimeUntilCooldown`; 0: never)...
+    #[serde(default)]
+    pub fire_for: f32,
+    /// ... for this long, seconds (`CooldownDuration`). The original's
+    /// `Turret.Fire` cools down a turret a character mans too (its
+    /// `AutoTurret` state sets `bIsAuto`).
+    #[serde(default)]
+    pub cool_down: f32,
 }
 
 impl TurretParams {
@@ -188,6 +197,9 @@ impl TurretParams {
         }
         if p.aim.min_pitch > p.aim.max_pitch || p.aim.min_yaw > p.aim.max_yaw {
             return Err("aim: a min is more than its max".into());
+        }
+        if p.auto.fire_for < 0.0 || p.auto.cool_down < 0.0 {
+            return Err("auto: fire_for and cool_down can't be less than 0".into());
         }
         if let Some(a) = &p.automatic {
             if !["separatist", "republic"].contains(&a.side.as_str()) {

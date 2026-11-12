@@ -23,11 +23,13 @@ pub use battle::{
     DispenserSnapshot, DispenserStep, Dispensing, FighterSnapshot, Phase, SlotMotion, Spawner,
     SpawnerSnapshot, SwitchedOn, Unfold,
 };
-pub use brain::{AiEvent, Fighter, Maneuver, Mode, ScriptGoal, Target, View};
+pub use brain::{AiEvent, Fighter, Maneuver, Mode, Rng, ScriptGoal, Target, View};
 pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
+pub mod patrol;
+pub use patrol::{PatrolRun, PatrolStep};
 pub use spawns::{
-    read_factories, read_placed, Dispenser, Factory, Offspring, Placed, SpawnSpot, StartState,
-    Transition, DISPENSER_CLASSES,
+    read_factories, read_placed, resolve_patrol_anchors, Dispenser, Factory, Offspring,
+    PatrolMode, PatrolPoint, Placed, SpawnSpot, StartState, Transition, DISPENSER_CLASSES,
 };
 
 #[cfg(test)]

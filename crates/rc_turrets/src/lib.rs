@@ -342,25 +342,17 @@ impl Turret {
         if !has_target || !a.on || a.dead || now < a.ready_at {
             return false;
         }
-        // Firing for the first time since it last cooled down.
-        if a.firing_since.is_none() && a.cooling_since.is_none() {
-            a.firing_since = Some(now);
-        }
-        if now - a.last_shot <= shot_delay {
+        if !fire_cycle(
+            &mut a.firing_since,
+            &mut a.cooling_since,
+            &mut a.last_shot,
+            now,
+            shot_delay,
+            fire_for,
+            cool_down,
+        ) {
             return false;
         }
-        if let Some(c) = a.cooling_since {
-            if now >= c + cool_down {
-                a.cooling_since = None;
-            }
-            return false;
-        }
-        if fire_for > 0.0 && a.firing_since.is_some_and(|f| now >= f + fire_for) {
-            a.firing_since = None;
-            a.cooling_since = Some(now);
-            return false;
-        }
-        a.last_shot = now;
         a.shots += 1;
         true
     }
@@ -553,3 +545,44 @@ pub fn first_tagged(list: &[Turret], tag: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests;
+
+/// The original's firing rhythm for a turret firing by itself (an
+/// automatic turret, or a character's gun while the character mans it:
+/// `Turret.Fire` while `bIsAuto`, which the `AutoTurret` state sets), with
+/// a target in its sights at time `now`: should it fire now? A shot at most
+/// every `shot_delay` seconds; after firing for `fire_for` seconds since
+/// it last cooled down (`TimeUntilCooldown`; 0: never) it stops for
+/// `cool_down` seconds (`CooldownDuration`). `firing_since`,
+/// `cooling_since` and `last_shot` are `BeginFireTime`,
+/// `BeginCooldownTime` and `LastFireTime`.
+pub fn fire_cycle(
+    firing_since: &mut Option<f32>,
+    cooling_since: &mut Option<f32>,
+    last_shot: &mut f32,
+    now: f32,
+    shot_delay: f32,
+    fire_for: f32,
+    cool_down: f32,
+) -> bool {
+    // Firing for the first time since it last cooled down
+    // (`DetectTarget`).
+    if firing_since.is_none() && cooling_since.is_none() {
+        *firing_since = Some(now);
+    }
+    if now - *last_shot <= shot_delay {
+        return false;
+    }
+    if let Some(c) = *cooling_since {
+        if now >= c + cool_down {
+            *cooling_since = None;
+        }
+        return false;
+    }
+    if fire_for > 0.0 && firing_since.is_some_and(|f| now >= f + fire_for) {
+        *firing_since = None;
+        *cooling_since = Some(now);
+        return false;
+    }
+    *last_shot = now;
+    true
+}

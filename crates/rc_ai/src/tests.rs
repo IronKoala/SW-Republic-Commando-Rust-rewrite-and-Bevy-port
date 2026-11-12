@@ -837,6 +837,7 @@ fn tagged_factory(tag: &str, x: f32) -> Factory {
             start_state: StartState::StationaryAttack,
             team: None,
             script: Some(format!("{tag}AI")),
+            ..Default::default()
         },
         ..Default::default()
     }
@@ -1472,6 +1473,7 @@ fn placed(name: &str, x: f32) -> Factory {
             start_state: StartState::Idle,
             team: None,
             script: Some(format!("{name}AI")),
+            ..Default::default()
         },
         placed: true,
         ..Default::default()

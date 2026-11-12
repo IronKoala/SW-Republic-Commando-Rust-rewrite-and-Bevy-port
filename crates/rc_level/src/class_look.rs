@@ -315,7 +315,9 @@ pub fn apply_class_look(
 /// win over the class's. `None` for anything else, or a hidden actor.
 ///
 /// Only things the player uses (`ActivateItem`: bacta and ammo
-/// dispensers). Other actors with an animated model are characters,
+/// dispensers), and animated props (`AnimProp`) that play an animation of
+/// their own from the start (an `AnimHealthy` animation: geo_04b's
+/// anti-air turret). Other actors with an animated model are characters,
 /// vehicles and ropes the scripts bring in and move; drawn here they would
 /// stand frozen in the wrong place.
 ///
@@ -336,10 +338,18 @@ pub fn anim_mesh_of(
     }
     let look = looks.for_actor(map, place.export, open)?;
     if !look.is_a("ActivateItem") {
-        return None;
+        // An animated prop is drawn when it animates by itself from the
+        // start (see `prop_anims`).
+        let anims = prop_anims(looks, map, map_data, place, open)?;
+        anims.healthy.as_ref()?;
     }
+    let look = looks.for_actor(map, place.export, open)?;
     let props = crate::actors::read_actor_properties(map, map_data, place.export).ok()?;
-    let own = |n: &str| props.iter().find(|p| map.name(p.name).eq_ignore_ascii_case(n));
+    let own = |n: &str| {
+        props
+            .iter()
+            .find(|p| map.name(p.name).eq_ignore_ascii_case(n))
+    };
     let draw_type = own("DrawType")
         .and_then(|p| match p.value {
             Value::Byte(b) => Some(b),
@@ -373,7 +383,10 @@ pub fn anim_mesh_of(
     };
     let height = own("CollisionHeight")
         .and_then(|p| float(&p.value))
-        .or_else(|| look.find("CollisionHeight", 0).and_then(|(_, p)| float(&p.value)))
+        .or_else(|| {
+            look.find("CollisionHeight", 0)
+                .and_then(|(_, p)| float(&p.value))
+        })
         .unwrap_or(0.0);
     // Package and mesh name; a group in between doesn't matter.
     match path.as_slice() {
@@ -448,4 +461,95 @@ pub fn blocks_players(
     open: &mut dyn FnMut(&str) -> Option<Loaded>,
 ) -> bool {
     blocks(looks, map, map_data, actor, open).players
+}
+
+/// What an animated prop (`AnimProp`, Engine.u) plays: `AnimHealthy` as
+/// the level starts (its first state, `Invulnerable`, plays it in
+/// `BeginState`), and `AnimTriggered` when an event with its `Tag` comes
+/// (`AnimProp.Trigger`: the same event again stops it). Each is the
+/// animation's name and whether it loops (`bLoop`). The map's values win
+/// over the class's.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PropAnims {
+    pub healthy: Option<(String, bool)>,
+    pub triggered: Option<(String, bool)>,
+    /// Its `Tag` (the class name when the map gives none, as in UE2).
+    pub tag: String,
+}
+
+/// [`PropAnims`] for an actor, `None` if it isn't an `AnimProp`.
+pub fn prop_anims(
+    looks: &mut ClassLooks,
+    map: &Package,
+    map_data: &[u8],
+    place: &crate::actors::Placement,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> Option<PropAnims> {
+    use crate::scripts::{to_val, Val};
+    let look = looks.for_actor(map, place.export, open)?;
+    if !look.is_a("AnimProp") {
+        return None;
+    }
+    let props = crate::actors::read_actor_properties(map, map_data, place.export).ok()?;
+    let value = |key: &str| -> Option<Val> {
+        if let Some(p) = props
+            .iter()
+            .find(|p| p.array_index == 0 && map.name(p.name).eq_ignore_ascii_case(key))
+        {
+            return Some(to_val(map, p));
+        }
+        look.find(key, 0).map(|(l, p)| to_val(&l.0, p))
+    };
+    let anim = |key: &str| -> Option<(String, bool)> {
+        let Some(Val::Struct(v)) = value(key) else {
+            return None;
+        };
+        let name = match v.get("Anim") {
+            Some(Val::Text(t)) if !t.is_empty() && !t.eq_ignore_ascii_case("None") => t.clone(),
+            _ => return None,
+        };
+        Some((name, matches!(v.get("bLoop"), Some(Val::Bool(true)))))
+    };
+    Some(PropAnims {
+        healthy: anim("AnimHealthy"),
+        triggered: anim("AnimTriggered"),
+        tag: match value("Tag") {
+            Some(Val::Text(t)) => t,
+            _ => place.class.clone(),
+        },
+    })
+}
+
+/// The level's `CustomMeshSets` (on its `LevelInfo`): an animation set the
+/// level links to a mesh, as (mesh, set) names. geo_04b gives its
+/// anti-air turret's model (`AATurret`) the set `cGEO04AATurretSet`.
+pub fn custom_mesh_sets(
+    map: &Package,
+    map_data: &[u8],
+    actors: &[Option<usize>],
+) -> Vec<(String, String)> {
+    use crate::scripts::Val;
+    let mut out = Vec::new();
+    for &a in actors.iter().flatten() {
+        if !map
+            .export_class_name(&map.exports[a])
+            .eq_ignore_ascii_case("LevelInfo")
+        {
+            continue;
+        }
+        let Ok(obj) = crate::scripts::read_object(map, map_data, a) else {
+            continue;
+        };
+        let list = match obj.get("CustomMeshSets") {
+            Some(Val::Structs(l)) => l.clone(),
+            Some(Val::Struct(s)) => vec![s.clone()],
+            _ => continue,
+        };
+        for s in list {
+            if let (Some(Val::Text(m)), Some(Val::Text(set))) = (s.get("Mesh"), s.get("Set")) {
+                out.push((m.clone(), set.clone()));
+            }
+        }
+    }
+    out
 }

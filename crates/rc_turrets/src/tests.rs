@@ -405,3 +405,50 @@ fn a_turret_with_no_health_cant_be_hurt() {
     let mut g = Turret::new(placed(), "w", &params());
     assert_eq!(g.hurt(1000.0), Hurt::default());
 }
+
+#[test]
+fn a_manned_sonic_turret_fires_then_cools_down() {
+    // geo_03c's sonic turret: a shot every 2.1 s, 4.2 s of firing, then
+    // 2 s cooling down (SonicTurretDefaults).
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data/turrets/sonic_turret.toml"),
+    )
+    .unwrap();
+    let p = TurretParams::from_text(&text).unwrap();
+    assert_eq!(
+        (p.auto.shot_delay, p.auto.fire_for, p.auto.cool_down),
+        (2.1, 4.2, 2.0)
+    );
+    let (mut since, mut cooling, mut last) = (None, None, f32::NEG_INFINITY);
+    let mut shots = Vec::new();
+    let mut t = 0.0f32;
+    while t < 12.0 {
+        if fire_cycle(&mut since, &mut cooling, &mut last, t, 2.1, 4.2, 2.0) {
+            shots.push((t * 10.0).round() / 10.0);
+        }
+        t += 0.05;
+    }
+    // Fires at 0, 2.15 and 4.3 s (4.3 is past 4.2: it starts cooling
+    // instead), cools from 4.3 s to 6.3 s, then starts again.
+    assert_eq!(shots[0], 0.0);
+    assert!((2.1..=2.2).contains(&shots[1]), "{shots:?}");
+    assert!(shots.len() >= 3, "{shots:?}");
+    assert!(shots[2] >= 6.3, "a pause to cool down: {shots:?}");
+    // A turret with no cooldown just keeps the shot delay.
+    let (mut since, mut cooling, mut last) = (None, None, f32::NEG_INFINITY);
+    let n = (0..240)
+        .filter(|i| {
+            fire_cycle(
+                &mut since,
+                &mut cooling,
+                &mut last,
+                *i as f32 * 0.05,
+                2.1,
+                0.0,
+                0.0,
+            )
+        })
+        .count();
+    assert_eq!(n, 6);
+}

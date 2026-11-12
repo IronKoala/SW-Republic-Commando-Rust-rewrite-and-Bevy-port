@@ -67,7 +67,7 @@ fn turret_models_point_and_turn_the_way_they_aim() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/turrets");
     let (files, errors) = rc_turrets::params::load_folders(&[&root]);
     assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(files.len(), 5);
+    assert_eq!(files.len(), 6);
     for (id, p) in &files {
         let (kl, notes) = load_look(&paths, p).unwrap_or_else(|e| panic!("{id}: {e}"));
         assert!(

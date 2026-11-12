@@ -84,6 +84,12 @@ pub struct MapCollision {
     /// stands (moved down by its collision height, so the model's base is
     /// on the floor), and the package and skeletal mesh. Not solid yet.
     pub anim_props: Vec<(Placement, String, String)>,
+    /// What the animated props among them (`AnimProp`) play by themselves,
+    /// by export index (`class_look::prop_anims`).
+    pub prop_anims: HashMap<usize, crate::class_look::PropAnims>,
+    /// Animation sets the level links to meshes (`LevelInfo`
+    /// `CustomMeshSets`): (mesh, set).
+    pub custom_mesh_sets: Vec<(String, String)>,
     /// Ammo and grenade boxes (`crate::pickups`), resting on the ground
     /// under them as the game drops them at the start. Pickups are left
     /// out of `triangles`: the player walks into them to take them.
@@ -239,6 +245,7 @@ pub fn load(
     let mut mesh_failures = 0;
     let mut class_mesh_actors = 0;
     let mut anim_props = Vec::new();
+    let mut prop_anims = HashMap::new();
     let mut not_solid = 0;
     let mut pickups_not_solid = 0;
     // Physics props that fall as the level starts, moved down onto the
@@ -282,6 +289,17 @@ pub fn load(
                     if let Some((package, mesh, height)) =
                         anim_mesh_of(&mut looks, &map.0, &map.1, &p, &mut |n| pkgs.get(n))
                     {
+                        if let Some(a) = crate::class_look::prop_anims(
+                            &mut looks,
+                            &map.0,
+                            &map.1,
+                            &p,
+                            &mut |n| pkgs.get(n),
+                        ) {
+                            prop_anims.insert(p.export, a);
+                        }
+                        // Drawn with its base at the bottom of its
+                        // collision cylinder (`bAlignBottom`).
                         let mut p = p;
                         p.location[2] -= height;
                         anim_props.push((p, package, mesh));
@@ -496,5 +514,7 @@ pub fn load(
         terrain_triangles,
         terrain_failures,
         anim_props,
+        prop_anims,
+        custom_mesh_sets: crate::class_look::custom_mesh_sets(&map.0, &map.1, &level.actors),
     })
 }

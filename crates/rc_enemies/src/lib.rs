@@ -25,6 +25,7 @@
 pub mod dispenser_world;
 pub mod dispensers;
 pub mod look;
+mod patrol;
 pub mod save;
 pub mod scripted;
 
@@ -92,6 +93,7 @@ impl Plugin for EnemiesPlugin {
                     hear_level,
                     scripted::set_collision,
                     scripted::follow_orders,
+                    patrol::walk,
                     think,
                     place_droids,
                 )
@@ -194,6 +196,9 @@ pub struct Fight {
     pub script_waits: HashMap<u32, (String, usize)>,
     /// Droids that finished a script's order this frame.
     pub script_done: Vec<u32>,
+    /// Fighters walking a patrol route, by id (see `patrol.rs`).
+    pub patrols: HashMap<u32, rc_ai::PatrolRun>,
+    patrol_rng: rc_ai::Rng,
     /// What the dispensers did this frame, for `dispensers::show_steps`.
     pub dispenser_steps: Vec<(usize, rc_ai::DispenserStep)>,
     /// A save was just loaded: `dispensers::after_load` shows the
@@ -251,6 +256,8 @@ impl Fight {
             queued: Vec::new(),
             script_waits: HashMap::new(),
             script_done: Vec::new(),
+            patrols: HashMap::new(),
+            patrol_rng: rc_ai::Rng::new(11),
             dispenser_steps: Vec::new(),
             dispensers_restored: false,
         }
@@ -621,11 +628,23 @@ fn load_fight(
         .and_then(|data| {
             let pkg = Package::parse(&data).map_err(|e| e.to_string())?;
             let nav = NavGraph::from_map(&pkg, &data)?;
-            let factories = rc_ai::read_factories(&pkg, &data)?;
+            let mut factories = rc_ai::read_factories(&pkg, &data)?;
             // Characters placed straight in the map. Without the game's
             // classes we can't tell which actors are characters.
             let placed = match classes.get(&paths, &log) {
-                Some(lib) => placed_enemies(&pkg, &data, &lib, &types)?,
+                Some(lib) => {
+                    // Patrol points name a node; where a character walks
+                    // to depends on the node's class (`GetAnchor`).
+                    let is_a = |class: &str, base: &str| {
+                        lib.chain(class)
+                            .iter()
+                            .any(|c| c.eq_ignore_ascii_case(base))
+                    };
+                    for n in rc_ai::resolve_patrol_anchors(&pkg, &data, &mut factories, &is_a) {
+                        log.line(format!("{PART}: patrols: {n}"));
+                    }
+                    placed_enemies(&pkg, &data, &lib, &types)?
+                }
                 None => (
                     Vec::new(),
                     vec!["no class library: placed characters left out".into()],
@@ -1204,6 +1223,16 @@ fn think(
                 // What the level's scripts call it, and the script it
                 // follows.
                 let o = fight.battle.offspring(id).unwrap_or_default();
+                if !o.patrol.is_empty() {
+                    log.line(format!(
+                        "{PART}: t={now:.1}s droid {id} walks a patrol route of {} points ({:?})",
+                        o.patrol.len(),
+                        o.patrol_mode
+                    ));
+                    fight
+                        .patrols
+                        .insert(id, rc_ai::PatrolRun::new(o.patrol.clone(), o.patrol_mode));
+                }
                 e.insert(ScriptTags {
                     tag: o.tag,
                     script: o.script,
