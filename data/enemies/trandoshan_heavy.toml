@@ -27,6 +27,7 @@ base_eye_height = 70      # game: BaseEyeHeight
 sight_radius = 10000      # game: SightRadius (Pawn)
 
 [combat]
+auto_aim_offset = 0       # game: TrandoshanHeavy sets no AutoAimOffset (0)
 health = 1500             # game: TrandoshanHeavyDefaults Health and MaxHealth
 accuracy = 0.85           # game: TrandoshanHeavyDefaults Accuracy
 max_aim_yaw = 45          # game: TrandoshanHeavy MaxAimYaw

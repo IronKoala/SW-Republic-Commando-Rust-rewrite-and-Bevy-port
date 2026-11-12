@@ -25,6 +25,7 @@ base_eye_height = 60      # game: BaseEyeHeight
 sight_radius = 5000       # game: TrandoshanSlaverGrenadier SightRadius
 
 [combat]
+auto_aim_offset = 30      # game: TrandoshanSlaverGrenadier AutoAimOffset
 health = 150              # game: TrandoshanSlaver Health and MaxHealth
 accuracy = 0.65           # game: TrandoshanSlaverGrenadier Accuracy
 max_aim_yaw = 70          # game: MaxAimYaw

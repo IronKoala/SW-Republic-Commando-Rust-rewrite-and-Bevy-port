@@ -76,6 +76,7 @@ melee_damage = 0          # damage per hit, before the target's damage table
 melee_damage_type = "CTDamageMelee" # the hit's damage type (data/combat/damage_types.toml)
 melee_delay = 1.5         # guess: seconds between hits
 lunge_distance = 0        # rushes in to hit when its enemy is this close; with weapon = "" it always does
+auto_aim_offset = 30      # game: BattleDroidTM AutoAimOffset: the lowest point (above its middle) the original's aim picks on it
 leap_speed = 0            # leaps straight to a point a level script sends it to but it can't walk to, uu/s (0: it can't)
 
 [grenades]

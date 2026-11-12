@@ -3095,6 +3095,84 @@ choice is in its compiled engine. A stunned droid (flash or EMP grenade)
 stands still and does nothing until the stun wears off, and grenade blasts
 are heard like shots.
 
+**Clone trooper AI (the original's `StateTrandoshanAttack`).**
+CloneTrooperBot's `RequiredStates` names `StateTrandoshanAttack` as its
+attack state. A fighter whose file sets `[attack] state = "trandoshan"`
+fights by it (`rc_ai/src/brain/trandoshan.rs`) instead of our droids'
+rules. How the state works was read from the game's compiled AI code
+(ctgame.dll, disassembled locally for reference; nothing decompiled is in
+the repo); the numbers are the class defaults, in the `[attack]` section
+of `clone_trooper*.toml`. In our words:
+
+- *Plans.* It makes a short plan, carries it out step by step, and makes
+  the next plan only when that one is done.
+- *Starting to fight.* It turns to the enemy, then with chance
+  `EmoteProbability` (0.5) plays `EmoteSeeEnemy` (25 frames; the trooper
+  mesh finds it in CloneCommandoSPSet). Its first sidestep can come any
+  time in the next `MinStepInterval` (10 s).
+- *Cover.* Each plan it keeps its reserved cover point only if it is
+  within 100 uu and still covers it from the enemy (the enemy inside the
+  point's `FOVdegrees`, 140 by default, around the way it faces);
+  otherwise it lets it go and looks for one: free, reachable from it and
+  from the enemy, within the ammunition's `Range` (100000), covering it
+  from the enemy, on its own side of the enemy, and not taller than its
+  `GunHeight` while too narrow to step out of. The nearest wins, and one
+  farther from the enemy than it is (and over 200 uu away) counts four
+  times as far. Out to the cover it fires without a limit as it goes.
+- *The choice*, in the original's order: a close-up hit if the enemy is
+  within the rifle's `MeleeRange` (150 uu, to the edge of its body; not
+  twice in a row); go to cover; follow to 0.9 × `OptimalDist` if farther
+  than that; sidestep and shoot; stand (or, half the time, crouch) and
+  shoot; follow to arm's length (`MeleeRange`) firing; else wait 0.5 s.
+  Sidesteps need `bCanSideStep`, no step since `MinStepInterval`, and the
+  enemy in front (within 60° in the open, 78° at cover); out in the open
+  the side must be clear with floor under it, at cover the point's
+  `StrafeDistLeft`/`Right` must fit the step and its body, and the enemy
+  must be in plain view from there. Following needs a route to the enemy
+  and only happens out of cover.
+- *Shooting.* A stand-and-shoot plan fires up to 1.5 × the rifle's
+  `BurstCount` (6) over that many times its `ShotDelay` (0.9 s for the
+  DC-15). A sidestep plays StepLeft or StepRight (they move 160 uu, the
+  end of their root bone's track), fires the rifle's own burst of 4 (over
+  4 × `ShotDelay` × 1.5 + 0.5 s), and steps back the other way; at cover
+  it first faces the way the cover faces and keeps that facing. The gun
+  fires every `ShotDelay` while the plan wants it, re-checking every half
+  second that no friend stands in the way and nothing of the level is
+  between gun and enemy (`PostWorldCheckFireDuration`, 0 for troopers,
+  would let it keep firing that long after the line closed).
+- *Aim.* At the enemy's middle plus a random height between its
+  `AutoAimOffset` and its eyes; an aim more than 30° off the gun's facing
+  shoots along the gun instead. Then the yaw is moved by up to
+  ±(1 − Accuracy) × 30° and the pitch by a fifth of that, evenly.
+- *Hiding.* After a plan at cover, if the cover is "crouch cover" (between
+  1.5 × `CrouchHeight` and twice `CollisionHeight`), or it can't see the
+  enemy and the cover is at least 1.9 × `CollisionHeight` tall, it waits
+  `CoverHideTime` (0.5 to 2 s).
+- *The close-up hit.* It turns to the enemy and plays MeleeAttack (30
+  frames); the hit lands at the animation's `AnimNotify_MeleeHit` (0.296
+  of the way), for the rifle's `MeleeDamage` (100, CTDamageMelee).
+
+Ours, or left out, where the files or the code we read don't say:
+- Turning to the enemy counts as done within 10°, and following re-plans
+  its route every half second (the original's turn and follow goals were
+  not read).
+- The sidestep slides the body 160 uu evenly over the animation; the
+  original follows the root bone's own curve.
+- It only knows where the enemy was last seen; the original always knows
+  its enemy's real place.
+- Leans (troopers have no `bCanLean`), grenades (they carry none) and
+  reloading (the DC-15's `ReloadCount` is 10000 and it recharges) are left
+  out. `bSmartShot` (aiming at the head of an enemy behind cover) and
+  aiming where a dodging enemy stood before its dodge are left out (no
+  port character dodges or takes such cover yet).
+- The game also writes a "next move" time (`CoverBoredomTime` ahead) when
+  it looks for cover; what reads it was not found, so it is not used.
+- Becoming alerted (seeing, hearing, the reaction time) and giving up
+  after `EnemyMemoryTime` are still our droids' rules; the original's
+  StateIdle and StateInvestigate are not read yet.
+- Placed troopers (the map's own `CloneTrooper` actors, which the cast
+  shows) don't use it: only troopers the map's spawners make.
+
 **Two sides: clone troopers fight the droids.** A type's `[type] side`
 is `"separatist"` (the default) or `"republic"` (the original's
 `TeamIndex`: droids 5, clone troopers 2). The clone troopers
@@ -3110,9 +3188,8 @@ against its own `max_alive_total`, and gets `rc_combat::Team::Republic`
 or `Separatist`, so the player's crosshair and the squad treat troopers as
 friends. The music's battle rules count only separatists. `[combat]
 can_crouch = false` (the original's `bCanCrouch`) keeps troopers standing.
-What the files don't say is listed in `clone_trooper_tm.toml`: the
-troopers' attack state (`StateTrandoshanAttack`) works in compiled code,
-so they fight the way our droids do. A type's `[look] held_weapon` names
+Spawned troopers fight with the game's own attack state, below
+("Clone trooper AI"). A type's `[look] held_weapon` names
 the weapon class whose model it holds (the original's `RequiredEquipment`:
 `DC15BlasterClone` for `CloneTrooper`, `DC15BlasterCloneTM` for
 `CloneTrooperTM`). `CloneTrooper`'s own value in ctcharacters.u is the

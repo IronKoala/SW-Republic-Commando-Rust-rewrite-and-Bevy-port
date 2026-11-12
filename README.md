@@ -152,8 +152,10 @@ copy of the game.
   spawners now make troopers with the original's numbers (health,
   accuracy, speed, rifle, the `CloneTrooper` model). They shoot the
   droids, the droids shoot them, and they leave you and the squad alone.
-  They fight the way our droids do, since the original's trooper tactics
-  are compiled code. They hold their DC-15 rifles (the game's own model; the
+  They fight the way the game's own trooper AI does (read from its
+  compiled code): short bursts, sidesteps out to shoot and back, cover
+  points that face the enemy, a rifle-butt hit up close, and now and then
+  a "spotted" gesture (not yet tried on Windows). They hold their DC-15 rifles (the game's own model; the
   game's `CloneTrooperDefaults` gives `CloneTrooper` the DC-15, not the
   commandos' DC-17m), as the level's other troopers do. Settings:
   `data/enemies/clone_trooper*.toml`.

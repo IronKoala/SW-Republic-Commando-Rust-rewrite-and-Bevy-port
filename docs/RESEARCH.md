@@ -670,7 +670,8 @@ ctgame.u, ctinventory.u, engine.u, Properties/properties.u).
   `StateTrandoshanAttack`, `StateIdle`, `StateInvestigate`.
   `StateTrandoshanAttack`: CoverHideTime 0.5 to 2, MinStepInterval 10,
   AllySearchRadius 1000 (ReadyDistance 800, SafeDistance 1200 from
-  `StateAbstractAttack`). How these are used is compiled code.
+  `StateAbstractAttack`). How these are used is compiled code, read on
+  2026-11-12 (below).
 - `DC15BlasterCloneTM` (parents `DC15BlasterClone`, `CTWeaponRecharging`):
   ShotDelay 0.1, FireMode 2, BurstCount 4, FireSound `wep_GEN_DC17_PRO`,
   AttachmentClass `DC15AttachmentCloneTM` (StaticMesh `DC15Blaster`, no
@@ -699,6 +700,31 @@ ctgame.u, ctinventory.u, engine.u, Properties/properties.u).
   SpawnDeadTrooper01), `CloneTrooperTM` 9 (SpawnTrench01, SpawnTrench02,
   SpawnTrenchRim01Troops, SpawnBattleFieldTroopers,
   SpawnFieldChargeTrooper, SpawnGunshipArea).
+
+### The trooper attack state (read 2026-11-12)
+
+`StateTrandoshanAttack` and the goals it uses live in System/ctgame.dll.
+They were disassembled locally with `objdump` for reference only; nothing
+decompiled is kept in the repo, and the rules are written up in our own
+words in docs/DESIGN.md "Clone trooper AI". Notes for reading it again:
+
+- Field offsets come from the script classes (the .u files list the
+  properties in the C++ order). In this build every dynamic array and
+  every string field takes 8 bytes, not the 12 a plain layout gives, so a
+  field's real offset is the plain one minus 4 for each array or string
+  before it. Checked on about 20 fields.
+- Values it reads that were found in the class defaults: CTBot
+  EmoteProbability 0.5, DodgeErrorTime 1.0, PostWorldCheckFireDuration
+  unset (0); CTPawn GunHeight and StepDistance unset for troopers (0);
+  CoverPoint FOVdegrees 140, CoverHeight unset (0; 8 of geo_01a's 13 cover
+  points set it); BattleDroidTM, GeonosianWarriorNoWeap and three
+  Trandoshan classes AutoAimOffset 30, the other enemy classes 0;
+  DC15BlasterCloneAmmo Range 100000.
+- Animations (clone.ukx, CloneCommandoSet unless named): StepLeft 41
+  frames and StepRight 39 at 30 a second, their root bone ending 160 uu to
+  the side; MeleeAttack 30 frames with its `AnimNotify_MeleeHit` at 0.296;
+  `EmoteSeeEnemy` 25 frames in CloneCommandoSPSet (the CloneTrooper mesh
+  lists 11 sets, CloneCommandoSet first and CloneCommandoSPSet tenth).
 
 ## Weapons lying in the levels (read 2026-11-10)
 

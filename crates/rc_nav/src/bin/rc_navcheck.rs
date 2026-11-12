@@ -92,6 +92,7 @@ fn main() {
             strafe_right,
             distance_to_cover,
             facing,
+            ..
         } = n.kind
         {
             line(format!(

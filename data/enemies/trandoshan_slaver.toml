@@ -29,6 +29,7 @@ base_eye_height = 60      # game: BaseEyeHeight
 sight_radius = 5000       # game: TrandoshanSlaverDefaults SightRadius
 
 [combat]
+auto_aim_offset = 0       # game: TrandoshanSlaver sets no AutoAimOffset (0)
 health = 150              # game: TrandoshanSlaver Health and MaxHealth
 accuracy = 0.65           # game: TrandoshanSlaverDefaults Accuracy
 max_aim_yaw = 70          # game: MaxAimYaw

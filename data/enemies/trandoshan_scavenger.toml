@@ -34,6 +34,7 @@ base_eye_height = 5       # game: BaseEyeHeight
 sight_radius = 5000       # game: TrandoshanScavDefaults SightRadius
 
 [combat]
+auto_aim_offset = 0       # game: TrandoshanScav sets no AutoAimOffset (0)
 health = 50               # game: TrandoshanScavDefaults MaxHealth
 accuracy = 0.75           # game: TrandoshanScav Accuracy
 max_aim_yaw = 80          # game: MaxAimYaw (Pawn)

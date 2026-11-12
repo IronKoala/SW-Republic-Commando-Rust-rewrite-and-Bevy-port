@@ -17,6 +17,8 @@ fn target_at(x: f32, y: f32) -> Target {
     Target {
         centre: Vec3::new(x, y, 84.0),
         eye: Vec3::new(x, y, 144.0),
+        radius: 40.0,
+        aim_low: 0.0,
     }
 }
 
@@ -242,6 +244,8 @@ fn takes_cover_when_shot_in_the_open() {
                     strafe_right: 100.0,
                     distance_to_cover: 50.0,
                     facing: 0.0,
+                    cover_height: 0.0,
+                    fov_degrees: 140.0,
                 },
             ),
             node(
@@ -252,6 +256,8 @@ fn takes_cover_when_shot_in_the_open() {
                     strafe_right: 100.0,
                     distance_to_cover: 50.0,
                     facing: std::f32::consts::PI,
+                    cover_height: 0.0,
+                    fov_degrees: 140.0,
                 },
             ),
         ],
@@ -546,7 +552,10 @@ fn clone_troopers_and_droids_fight_each_other_not_the_player() {
     alone.made_by.push(0);
     for _ in 0..60 {
         let ev = alone.step_with(1.0 / 30.0, &world, Some(target_at(800.0, 0.0)), &[]);
-        assert!(fire_directions(&ev).is_empty(), "a trooper fired at the player");
+        assert!(
+            fire_directions(&ev).is_empty(),
+            "a trooper fired at the player"
+        );
     }
     assert!(!alone.in_fight());
 }
@@ -1510,4 +1519,287 @@ fn saves_from_before_placed_characters_still_load() {
     assert_eq!(back.len(), 1);
     steps(&mut again, 30);
     assert_eq!(again.fighters.len(), 1);
+}
+
+// The original's own attack (clone troopers: `[attack] state =
+// "trandoshan"`).
+
+/// The clone trooper's settings file, as the game loads it.
+fn trooper_file(extra: &str) -> Arc<AiParams> {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/enemies/clone_trooper.toml"
+    ))
+    .unwrap();
+    Arc::new(
+        AiParams::battle_droid()
+            .with_overrides(&text)
+            .unwrap()
+            .with_overrides(extra)
+            .unwrap(),
+    )
+}
+
+/// One frame of a fighter's life, for the original-attack tests.
+struct Frame {
+    t: f32,
+    location: Vec3,
+    action: Option<String>,
+    events: Vec<AiEvent>,
+}
+
+fn run_frames(
+    f: &mut Fighter,
+    world: &BrushWorld,
+    nav: &NavGraph,
+    target: Target,
+    seconds: f32,
+) -> Vec<Frame> {
+    let taken = HashSet::new();
+    let dt = 1.0 / 30.0;
+    let mut out = Vec::new();
+    let mut t = 0.0;
+    while t < seconds {
+        let view = View {
+            world,
+            nav,
+            time: t,
+            target: Some(target),
+            cover_taken: &taken,
+            allies: &[],
+        };
+        let events = f.tick(dt, &view);
+        out.push(Frame {
+            t,
+            location: f.pawn.location,
+            action: f.action.as_ref().map(|a| a.anim.clone()),
+            events,
+        });
+        t += dt;
+    }
+    out
+}
+
+fn shot_times(frames: &[Frame]) -> Vec<(f32, Vec3)> {
+    frames
+        .iter()
+        .flat_map(|fr| {
+            fr.events.iter().filter_map(move |e| match e {
+                AiEvent::Fire { direction, .. } => Some((fr.t, *direction)),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn trooper_file_uses_the_original_attack() {
+    let p = trooper_file("");
+    assert!(p.attack.trandoshan());
+    assert_eq!(p.attack.weapon_burst_count, 4);
+    assert_eq!(p.attack.min_step_interval, 10.0);
+    assert!(p.attack.can_side_step);
+    assert_eq!(p.combat.melee_range, 150.0);
+    assert_eq!(p.combat.max_aim_error, 30.0);
+    // The TM trooper's file too.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/enemies/clone_trooper_tm.toml"
+    ))
+    .unwrap();
+    let tm = AiParams::battle_droid().with_overrides(&text).unwrap();
+    assert!(tm.attack.trandoshan());
+    assert_eq!(tm.combat.shot_delay, 0.1);
+    let e = AiParams::battle_droid()
+        .with_overrides("[attack]\nstate = \"droideka\"\n")
+        .unwrap_err();
+    assert!(e.contains("trandoshan"), "{e}");
+}
+
+#[test]
+fn original_attack_stands_and_shoots_at_the_rifles_rate() {
+    // No sidesteps and no paths: all it can do is stand and shoot, one
+    // plan after another (each 4 x 1.5 = 6 shots over 0.9 s).
+    let p = trooper_file("[attack]\ncan_side_step = false\nemote_probability = 0\n");
+    let world = flat_floor(vec![]);
+    let mut f = Fighter::new(1, p.clone(), Vec3::ZERO, 0.0, StartState::StationaryAttack);
+    let frames = run_frames(
+        &mut f,
+        &world,
+        &NavGraph::default(),
+        target_at(2000.0, 0.0),
+        12.0,
+    );
+    let shots = shot_times(&frames);
+    assert!(shots.len() >= 40, "only {} shots", shots.len());
+    for w in shots.windows(2) {
+        let gap = w[1].0 - w[0].0;
+        assert!(gap >= p.combat.shot_delay - 0.02, "shots {gap} s apart");
+    }
+    // It never moved.
+    let moved = (frames.last().unwrap().location - frames[0].location).length_2d();
+    assert!(moved < 1.0, "moved {moved}");
+}
+
+#[test]
+fn original_aim_stays_within_the_games_spread() {
+    let p = trooper_file("[attack]\ncan_side_step = false\nemote_probability = 0\n");
+    let world = flat_floor(vec![]);
+    let mut f = Fighter::new(1, p.clone(), Vec3::ZERO, 0.0, StartState::StationaryAttack);
+    let frames = run_frames(
+        &mut f,
+        &world,
+        &NavGraph::default(),
+        target_at(2000.0, 0.0),
+        10.0,
+    );
+    let shots = shot_times(&frames);
+    assert!(!shots.is_empty());
+    // Yaw off by at most (1 - 0.6) x 60 / 2 = 12 degrees.
+    let limit = (1.0 - p.combat.accuracy) * 30.0 + 0.1;
+    let mut widest: f32 = 0.0;
+    for (_, d) in &shots {
+        let yaw = d.y.atan2(d.x).to_degrees().abs();
+        assert!(yaw <= limit, "a shot {yaw} degrees off");
+        widest = widest.max(yaw);
+    }
+    assert!(widest > 1.0, "no spread at all");
+}
+
+#[test]
+fn original_attack_starts_with_the_spotted_gesture() {
+    let p = trooper_file("[attack]\nemote_probability = 1\ncan_side_step = false\n");
+    let world = flat_floor(vec![]);
+    let mut f = Fighter::new(1, p, Vec3::ZERO, 0.0, StartState::StationaryAttack);
+    let frames = run_frames(
+        &mut f,
+        &world,
+        &NavGraph::default(),
+        target_at(2000.0, 0.0),
+        4.0,
+    );
+    let first = frames.iter().find_map(|fr| fr.action.clone());
+    assert_eq!(first.as_deref(), Some("EmoteSeeEnemy"));
+    // No shots while it gestures.
+    let gesture_end = frames
+        .iter()
+        .rev()
+        .find(|fr| fr.action.is_some())
+        .map(|fr| fr.t)
+        .unwrap();
+    let shots = shot_times(&frames);
+    assert!(shots.iter().all(|(t, _)| *t > gesture_end));
+}
+
+#[test]
+fn original_attack_sidesteps_out_shoots_four_and_steps_back() {
+    let p = trooper_file("[attack]\nemote_probability = 0\n");
+    let world = flat_floor(vec![]);
+    let mut f = Fighter::new(1, p.clone(), Vec3::ZERO, 0.0, StartState::StationaryAttack);
+    // The first step comes within MinStepInterval (10 s) of starting.
+    let frames = run_frames(
+        &mut f,
+        &world,
+        &NavGraph::default(),
+        target_at(2000.0, 0.0),
+        16.0,
+    );
+    let start = frames
+        .iter()
+        .position(|fr| matches!(fr.action.as_deref(), Some("StepLeft" | "StepRight")))
+        .expect("it never stepped");
+    let out_anim = frames[start].action.clone().unwrap();
+    let out_end = start
+        + frames[start..]
+            .iter()
+            .position(|fr| fr.action.as_deref() != Some(out_anim.as_str()))
+            .unwrap();
+    let out_by = (frames[out_end].location - frames[start].location).length_2d();
+    assert!((out_by - 160.0).abs() < 8.0, "stepped out {out_by} uu");
+    // Sideways: at right angles to the enemy (along y).
+    let d = frames[out_end].location - frames[start].location;
+    assert!(d.x.abs() < 5.0, "stepped along {d:?}");
+    // Out there, it fires the rifle's own burst of 4, then steps back.
+    let back = out_end
+        + frames[out_end..]
+            .iter()
+            .position(|fr| fr.action.is_some())
+            .expect("it never stepped back");
+    let shots_out = frames[out_end..back]
+        .iter()
+        .flat_map(|fr| &fr.events)
+        .filter(|e| matches!(e, AiEvent::Fire { .. }))
+        .count();
+    assert_eq!(shots_out, 4);
+    let back_anim = frames[back].action.clone().unwrap();
+    assert_ne!(back_anim, out_anim);
+    let back_end = back
+        + frames[back..]
+            .iter()
+            .position(|fr| fr.action.is_none())
+            .unwrap();
+    let home = (frames[back_end].location - frames[start].location).length_2d();
+    // Back near where it started (each step goes sideways from the way
+    // it faces then, and it keeps turning to the enemy in between).
+    assert!(home < 20.0, "ended {home} uu from where it stepped out");
+    // Not again for MinStepInterval.
+    let next = frames[back_end..]
+        .iter()
+        .find(|fr| fr.action.is_some())
+        .map(|fr| fr.t);
+    if let Some(t) = next {
+        assert!(t - frames[back].t >= 10.0 - 1.5, "stepped again at {t}");
+    }
+}
+
+#[test]
+fn original_attack_picks_cover_that_faces_the_enemy() {
+    use rc_nav::{reach, Link, NavNode, NodeKind};
+    let world = flat_floor(vec![]);
+    let node = |name: &str, x: f32, y: f32, kind: NodeKind| NavNode {
+        name: name.into(),
+        class: "x".into(),
+        tag: name.into(),
+        location: Vec3::new(x, y, 80.0),
+        export: 0,
+        kind,
+    };
+    let cover = |facing: f32| NodeKind::Cover {
+        strafe_left: 500.0,
+        strafe_right: 500.0,
+        distance_to_cover: 50.0,
+        facing,
+        cover_height: 0.0,
+        fov_degrees: 140.0,
+    };
+    let mut nav = NavGraph {
+        nodes: vec![
+            node("Here", 0.0, 0.0, NodeKind::Path),
+            // Nearer, but it faces away from the enemy.
+            node("Backwards", 0.0, 300.0, cover(std::f32::consts::PI)),
+            node("Facing", 0.0, -500.0, cover(0.0)),
+            node("ByEnemy", 3000.0, 0.0, NodeKind::Path),
+        ],
+        links: vec![Vec::new(); 4],
+        ..Default::default()
+    };
+    for (a, b) in [(0, 1), (1, 0), (0, 2), (2, 0), (0, 3), (3, 0)] {
+        let d = (nav.nodes[a].location - nav.nodes[b].location).length();
+        nav.links[a].push(Link {
+            to: b,
+            distance: d,
+            flags: reach::WALK,
+        });
+    }
+    let p = trooper_file("[attack]\nemote_probability = 0\ncan_side_step = false\n");
+    let mut f = Fighter::new(1, p, Vec3::ZERO, 0.0, StartState::StationaryAttack);
+    let frames = run_frames(&mut f, &world, &nav, target_at(3000.0, 0.0), 6.0);
+    assert_eq!(f.cover_node(), Some(2));
+    let end = frames.last().unwrap().location;
+    assert!(
+        (end - nav.nodes[2].location).length_2d() < 60.0,
+        "ended at {end:?}"
+    );
+    // It shot at the enemy on the way.
+    assert!(!shot_times(&frames).is_empty());
 }

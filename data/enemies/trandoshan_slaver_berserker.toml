@@ -26,6 +26,7 @@ base_eye_height = 60      # game: BaseEyeHeight
 sight_radius = 5000       # game: TrandoshanSlaverBerserker SightRadius
 
 [combat]
+auto_aim_offset = 30      # game: TrandoshanSlaverBerserker AutoAimOffset
 health = 160              # game: TrandoshanSlaverBerserker MaxHealth
 accuracy = 1              # game: TrandoshanSlaverBerserker Accuracy
 max_aim_yaw = 70          # game: MaxAimYaw

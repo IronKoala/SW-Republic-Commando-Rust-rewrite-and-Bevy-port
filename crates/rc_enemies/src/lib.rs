@@ -32,12 +32,12 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
-use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
     Hittable, MeleeAttack, Shield, ShotLanded, Stunned, Team, ThrowGrenade,
 };
+use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -213,6 +213,9 @@ pub struct Droid {
     /// An animation a level script is playing on it, in place of the one
     /// its moves choose.
     pub scripted: Option<scripted::ScriptedAnim>,
+    /// `scripted` holds a one-off move of its own AI (a sidestep, a hit,
+    /// a gesture: `Fighter::action`), started at this battle time.
+    action_started: Option<f32>,
 }
 
 /// The game's script classes (`GameData/System` and `Properties`), read
@@ -934,7 +937,11 @@ fn summary(f: &Fight, log: &GameLog) {
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
-    let clones = f.battle.alive().filter(|f| f.params.kind.republic()).count();
+    let clones = f
+        .battle
+        .alive()
+        .filter(|f| f.params.kind.republic())
+        .count();
     if clones > 0 || s.clones_destroyed > 0 {
         log.line(format!(
             "{PART}: t={:.1}s clone troopers: {clones} alive, {} destroyed; {} clone shots, {} hit droids, {} hit other clones by mistake; {} droid bolts hit clones",
@@ -959,7 +966,13 @@ fn player_target(
         .single()
         .map(|c| to_unreal(c.translation))
         .unwrap_or(centre + rc_movement::Vec3::new(0.0, 0.0, 60.0));
-    Some(Target { centre, eye })
+    // game: CloneCommando sets no AutoAimOffset (0).
+    Some(Target {
+        centre,
+        eye,
+        radius: hit.map_or(40.0, |h| h.radius),
+        aim_low: 0.0,
+    })
 }
 
 /// Run the fight for one frame: spawn, think, move, shoot.
@@ -1000,6 +1013,8 @@ fn think(
             Target {
                 centre,
                 eye: centre + rc_movement::Vec3::new(0.0, 0.0, hit.half_height * 0.7),
+                radius: hit.radius,
+                aim_low: 0.0,
             }
         })
         .collect();
@@ -1087,6 +1102,7 @@ fn think(
                         last_fire: f32::NEG_INFINITY,
                         mesh: mesh.clone(),
                         scripted: None,
+                        action_started: None,
                     },
                     match fight.restored_health.remove(&id) {
                         Some(h) => Health {
@@ -1272,7 +1288,9 @@ fn think(
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
                         }
-                        log.line(format!("{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"));
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"
+                        ));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: {} -> {}",
@@ -1615,8 +1633,32 @@ fn animate(
                 }
             }
         };
+        // A one-off move its own AI plays (the original's attack: a
+        // sidestep, a close-up hit, the spotted gesture), shown the way a
+        // script's animation is. A name its animation sets lack shows
+        // its everyday moves instead.
+        match f.action.as_ref().filter(|_| f.mode != Mode::Dead) {
+            Some(a) if d.action_started != Some(a.started) => {
+                d.action_started = Some(a.started);
+                d.scripted = tl.and_then(|t| t.look.named_clip(&a.anim)).map(|clip| {
+                    scripted::ScriptedAnim {
+                        name: a.anim.clone(),
+                        clip,
+                        looping: false,
+                        frame: 0.0,
+                    }
+                });
+            }
+            Some(_) => {}
+            None if d.action_started.is_some() => {
+                d.action_started = None;
+                d.scripted = None;
+                d.frame = 0.0;
+            }
+            None => {}
+        }
         // A level script's animation, while the script holds it still.
-        if d.scripted.is_some() {
+        if d.scripted.is_some() && d.action_started.is_none() {
             let holding = matches!(f.script, Some(rc_ai::ScriptGoal::Hold { .. }));
             if !holding || f.mode == Mode::Dead {
                 d.scripted = None;

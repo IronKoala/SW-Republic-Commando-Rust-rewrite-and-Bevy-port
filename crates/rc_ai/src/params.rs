@@ -110,9 +110,98 @@ pub struct Combat {
     /// Rushes in to hit when its enemy is this close, uu. An enemy with
     /// no gun (`weapon = ""`) always rushes in.
     pub lunge_distance: f32,
+    /// Its `AutoAimOffset`: how far above its middle the lowest point the
+    /// original's aim picks on it is, uu (BattleDroidTM 30; most classes
+    /// leave it at 0).
+    pub auto_aim_offset: f32,
     /// Leaps (flies) straight to a point a level script sends it to when
     /// it can't walk there, at this speed, uu a second. 0: it can't.
     pub leap_speed: f32,
+}
+
+/// The original's own attack state (`[attack]`), for characters whose
+/// game class names one: CloneTrooperBot's `RequiredStates` holds
+/// `StateTrandoshanAttack`. Empty `state` (the default) keeps our own
+/// rules (`Fighter::decide`). The numbers are the game's, read from the
+/// class defaults; how they are used was read from the game's compiled
+/// AI code (see docs/DESIGN.md "Clone trooper AI").
+#[derive(Debug, Clone, PartialEq)]
+pub struct OriginalAttack {
+    /// "trandoshan" for StateTrandoshanAttack, or empty for none.
+    pub state: String,
+    /// Shots in one burst of the weapon (the weapon's `BurstCount`, not
+    /// the bot's).
+    pub weapon_burst_count: u32,
+    /// The weapon's `OptimalDist`, uu.
+    pub optimal_dist: f32,
+    /// StateTrandoshanAttack `MinStepInterval`, s.
+    pub min_step_interval: f32,
+    /// StateTrandoshanAttack `CoverHideTime`, s.
+    pub cover_hide_min: f32,
+    pub cover_hide_max: f32,
+    /// CTBot `EmoteProbability`: chance of the spotted gesture when it
+    /// starts fighting.
+    pub emote_probability: f32,
+    /// The animation for that gesture, and how long it lasts, s.
+    pub emote: String,
+    pub emote_time: f32,
+    /// How far a sidestep goes, uu, and how long each one takes, s: the
+    /// end of the step animations' root bone track and their length.
+    pub step_distance: f32,
+    pub step_left_time: f32,
+    pub step_right_time: f32,
+    /// The close-up hit animation, how long it lasts (s), and how far
+    /// into it (0 to 1) the hit lands (its `AnimNotify_MeleeHit`).
+    pub melee_anim: String,
+    pub melee_time: f32,
+    pub melee_hit_at: f32,
+    /// How far the gun's own reach is when it looks for cover, uu: the
+    /// ammunition's `Range` (cover farther than this from it is skipped).
+    pub cover_range: f32,
+    /// CTBot `PostWorldCheckFireDuration`, s: keeps firing this long
+    /// after the last clear shot check.
+    pub post_world_check_fire_duration: f32,
+    /// CTBot `DodgeErrorTime`, s.
+    pub dodge_error_time: f32,
+    /// CTPawn `bCanSideStep`: it may step out sideways to shoot.
+    pub can_side_step: bool,
+    /// CTPawn `GunHeight`, uu: taller cover than this hides its gun, so it
+    /// won't stand and shoot over it.
+    pub gun_height: f32,
+}
+
+impl Default for OriginalAttack {
+    fn default() -> Self {
+        OriginalAttack {
+            state: String::new(),
+            weapon_burst_count: 4,
+            optimal_dist: 10000.0,
+            min_step_interval: 10.0,
+            cover_hide_min: 0.5,
+            cover_hide_max: 2.0,
+            emote_probability: 0.5,
+            emote: "EmoteSeeEnemy".into(),
+            emote_time: 25.0 / 30.0,
+            step_distance: 160.0,
+            step_left_time: 41.0 / 30.0,
+            step_right_time: 39.0 / 30.0,
+            melee_anim: "MeleeAttack".into(),
+            melee_time: 1.0,
+            melee_hit_at: 0.2963,
+            cover_range: 100000.0,
+            post_world_check_fire_duration: 0.0,
+            dodge_error_time: 1.0,
+            can_side_step: false,
+            gun_height: 0.0,
+        }
+    }
+}
+
+impl OriginalAttack {
+    /// Uses StateTrandoshanAttack.
+    pub fn trandoshan(&self) -> bool {
+        self.state == "trandoshan"
+    }
 }
 
 /// Grenades it throws (`[grenades]`). An empty `grenade` means none (the
@@ -259,6 +348,7 @@ pub struct AiParams {
     pub grenades: GrenadeUse,
     pub spawning: Spawning,
     pub look: Look,
+    pub attack: OriginalAttack,
 }
 
 impl AiParams {
@@ -346,6 +436,7 @@ impl AiParams {
                 melee_delay: 1.5,
                 lunge_distance: 0.0,
                 leap_speed: 0.0,
+                auto_aim_offset: 30.0,
             },
             grenades: GrenadeUse {
                 grenade: String::new(),
@@ -387,6 +478,7 @@ impl AiParams {
                 blend_time_fire: 0.05,
                 blend_time_death: 0.1,
             },
+            attack: OriginalAttack::default(),
         }
     }
 
@@ -459,7 +551,35 @@ impl AiParams {
         let k = &mut self.kind;
         let snd = &mut self.sounds;
         let g = &mut self.grenades;
+        let a = &mut self.attack;
         match (section, key) {
+            ("attack", "state") => {
+                a.state = text();
+                if !matches!(a.state.as_str(), "" | "trandoshan") {
+                    return Err("state should be \"trandoshan\" or \"\"".into());
+                }
+            }
+            ("attack", "weapon_burst_count") => a.weapon_burst_count = num()?.max(1.0) as u32,
+            ("attack", "optimal_dist") => a.optimal_dist = num()?,
+            ("attack", "min_step_interval") => a.min_step_interval = num()?,
+            ("attack", "cover_hide_min") => a.cover_hide_min = num()?,
+            ("attack", "cover_hide_max") => a.cover_hide_max = num()?,
+            ("attack", "emote_probability") => a.emote_probability = num()?.clamp(0.0, 1.0),
+            ("attack", "emote") => a.emote = text(),
+            ("attack", "step_distance") => a.step_distance = num()?,
+            ("attack", "step_left_time") => a.step_left_time = num()?.max(0.01),
+            ("attack", "step_right_time") => a.step_right_time = num()?.max(0.01),
+            ("attack", "emote_time") => a.emote_time = num()?.max(0.0),
+            ("attack", "melee_anim") => a.melee_anim = text(),
+            ("attack", "melee_time") => a.melee_time = num()?.max(0.01),
+            ("attack", "melee_hit_at") => a.melee_hit_at = num()?.clamp(0.0, 1.0),
+            ("attack", "cover_range") => a.cover_range = num()?,
+            ("attack", "post_world_check_fire_duration") => {
+                a.post_world_check_fire_duration = num()?
+            }
+            ("attack", "dodge_error_time") => a.dodge_error_time = num()?,
+            ("attack", "can_side_step") => a.can_side_step = boolean()?,
+            ("attack", "gun_height") => a.gun_height = num()?,
             ("grenades", "grenade") => g.grenade = text(),
             ("grenades", "count") => g.count = num()?.max(0.0) as u32,
             ("grenades", "probability") => g.probability = num()?.clamp(0.0, 1.0),
@@ -508,6 +628,7 @@ impl AiParams {
             ("combat", "melee_delay") => c.melee_delay = num()?,
             ("combat", "lunge_distance") => c.lunge_distance = num()?,
             ("combat", "leap_speed") => c.leap_speed = num()?,
+            ("combat", "auto_aim_offset") => c.auto_aim_offset = num()?,
             ("senses", "sight_radius") => s.sight_radius = num()?,
             ("senses", "peripheral_vision") => s.peripheral_vision = num()?,
             ("senses", "auto_detect_radius") => s.auto_detect_radius = num()?,
@@ -578,6 +699,7 @@ impl AiParams {
         out.push(format!("{:?}", self.grenades));
         out.push(format!("{:?}", self.spawning));
         out.push(format!("{:?}", self.look));
+        out.push(format!("{:?}", self.attack));
         out
     }
 }

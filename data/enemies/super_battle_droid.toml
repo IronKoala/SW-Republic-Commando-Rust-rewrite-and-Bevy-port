@@ -24,6 +24,7 @@ sight_radius = 5000       # game: SightRadius
 peripheral_vision = 0.2   # game: PeripheralVision (Pawn)
 
 [combat]
+auto_aim_offset = 0       # game: SuperBattleDroid sets no AutoAimOffset (0)
 health = 500              # game: SuperBattleDroidDefaults MaxHealth
 accuracy = 0.9            # game: Accuracy
 weapon = "sbd_blaster"    # game: RequiredEquipment SBDBlaster (data/weapons/sbd_blaster.toml)

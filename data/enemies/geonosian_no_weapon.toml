@@ -25,6 +25,7 @@ crouch_height = 70        # game: CrouchHeight
 base_eye_height = 60      # game: BaseEyeHeight
 
 [combat]
+auto_aim_offset = 30      # game: GeonosianWarriorNoWeap AutoAimOffset
 health = 300              # game: MaxHealth (the class sets 300; Pawn.PostBeginPlay sets Health = MaxHealth)
 accuracy = 0.5            # game: Accuracy (Pawn)
 max_aim_yaw = 80          # game: MaxAimYaw (Pawn)

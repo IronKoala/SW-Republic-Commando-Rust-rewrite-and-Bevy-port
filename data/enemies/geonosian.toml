@@ -24,6 +24,7 @@ crouch_height = 70        # game: CrouchHeight
 base_eye_height = 60      # game: BaseEyeHeight
 
 [combat]
+auto_aim_offset = 0       # game: GeonosianWarrior sets no AutoAimOffset (0)
 health = 100              # game: Health
 accuracy = 0.5            # game: Accuracy (Pawn)
 max_aim_yaw = 80          # game: MaxAimYaw (Pawn)

@@ -339,6 +339,8 @@ fn main() {
         let target = Some(Target {
             centre: player.location,
             eye: player.eye(),
+            radius: player.params.collision_radius,
+            aim_low: 0.0,
         });
         let mut events = battle.step(DT, &world, target);
 

@@ -44,12 +44,16 @@ pub enum NodeKind {
     /// character can step out to each side to shoot (`StrafeDistLeft`,
     /// `StrafeDistRight`), and the distance to the thing it hides behind.
     /// `facing` is the actor's yaw: the direction the cover faces
-    /// (towards the danger), radians.
+    /// (towards the danger), radians. `cover_height` is how tall the
+    /// thing it hides behind is (`CoverHeight`, uu) and `fov_degrees` how
+    /// wide a cone around `facing` it covers from (`FOVdegrees`).
     Cover {
         strafe_left: f32,
         strafe_right: f32,
         distance_to_cover: f32,
         facing: f32,
+        cover_height: f32,
+        fov_degrees: f32,
     },
     /// A good spot to fight from (`CombatPoint`). `radius` is how close
     /// counts as "there".
@@ -114,6 +118,13 @@ pub struct ReadStats {
     /// How many links had each flag value.
     pub flag_counts: Vec<(u32, usize)>,
 }
+
+/// A cover point's `CoverHeight` when the map doesn't set it: the class
+/// default (CoverPoint, Engine.u) is 0.
+const COVER_HEIGHT: f32 = 0.0;
+/// A cover point's `FOVdegrees` when the map doesn't set it: the class
+/// default (CoverPoint) is 140.
+const COVER_FOV: f32 = 140.0;
 
 fn raw_vec3(v: &Value) -> Option<Vec3> {
     match v {
@@ -218,6 +229,8 @@ impl NavGraph {
                     strafe_right: float(pkg, &props, "StrafeDistRight").unwrap_or(0.0),
                     distance_to_cover: float(pkg, &props, "DistanceToCover").unwrap_or(0.0),
                     facing: yaw,
+                    cover_height: float(pkg, &props, "CoverHeight").unwrap_or(COVER_HEIGHT),
+                    fov_degrees: float(pkg, &props, "FOVdegrees").unwrap_or(COVER_FOV),
                 },
                 "CombatPoint" => NodeKind::Combat {
                     radius: float(pkg, &props, "RadiusOverride")

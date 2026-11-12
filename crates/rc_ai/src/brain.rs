@@ -22,6 +22,8 @@ use rc_nav::{NavGraph, NodeKind, PathFollower};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+mod trandoshan;
+
 /// A small, fast random number source (xorshift), so runs repeat exactly
 /// for the same seed and no extra library is needed.
 #[derive(Debug, Clone)]
@@ -114,6 +116,12 @@ pub struct Target {
     pub centre: Vec3,
     /// Its eyes (what has to be visible for us to see it, and it us).
     pub eye: Vec3,
+    /// Its collision radius, uu (the original measures distances to an
+    /// enemy to the edge of its body).
+    pub radius: f32,
+    /// Its `AutoAimOffset`: the lowest point above `centre` the
+    /// original's aim picks, uu (it picks between this and the eyes).
+    pub aim_low: f32,
 }
 
 /// Everything the AI may look at this frame.
@@ -214,6 +222,19 @@ pub enum ScriptGoal {
     WaitForTarget { distance: f32 },
 }
 
+/// A one-off animation the fighter's own AI is playing (a sidestep, a
+/// close-up hit, a gesture), for the game to show in place of the one its
+/// moves would choose.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Action {
+    /// The animation's name in the character's animation sets.
+    pub anim: String,
+    /// Battle time it started.
+    pub started: f32,
+    /// How long it plays, s.
+    pub length: f32,
+}
+
 /// One fighter.
 #[derive(Debug, Clone)]
 pub struct Fighter {
@@ -273,6 +294,10 @@ pub struct Fighter {
     /// Leaping to a scripted point it can't walk to: (from, to, battle
     /// time it left, seconds the leap takes).
     leap: Option<(Vec3, Vec3, f32, f32)>,
+    /// A one-off animation its own AI is playing.
+    pub action: Option<Action>,
+    /// The original's attack state, for fighters that use it.
+    orig: trandoshan::Original,
     rng: Rng,
 }
 
@@ -345,6 +370,8 @@ impl Fighter {
             invulnerable: false,
             script_planned: false,
             leap: None,
+            action: None,
+            orig: trandoshan::Original::default(),
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -358,6 +385,8 @@ impl Fighter {
         Target {
             centre: self.pawn.location,
             eye: self.eye(),
+            radius: self.params.movement.collision_radius,
+            aim_low: self.params.combat.auto_aim_offset,
         }
     }
 
@@ -374,6 +403,9 @@ impl Fighter {
 
     /// The cover point it holds or is walking to.
     pub fn cover_node(&self) -> Option<usize> {
+        if self.params.attack.trandoshan() {
+            return self.orig.cover;
+        }
         match self.maneuver {
             Maneuver::ToCover(n) | Maneuver::InCover(n) => Some(n),
             _ => None,
@@ -448,6 +480,7 @@ impl Fighter {
 
     pub fn kill(&mut self, events: &mut Vec<AiEvent>) {
         self.set_mode(Mode::Dead, events);
+        self.original_stop();
         self.follower = None;
     }
 
@@ -568,9 +601,13 @@ impl Fighter {
 
         // A level script's order comes first.
         if let Some(goal) = self.script.clone() {
+            if self.params.attack.trandoshan() {
+                self.original_stop();
+            }
             self.script_tick(dt, view, goal, &mut events);
             return events;
         }
+        let original = self.params.attack.trandoshan();
 
         // 2. Decide.
         match self.mode {
@@ -580,13 +617,16 @@ impl Fighter {
             }
             Mode::Attack if now - self.last_seen_time > senses.enemy_memory_time => {
                 self.set_mode(Mode::Investigate, &mut events);
+                if original {
+                    self.original_stop();
+                }
                 self.set_maneuver(Maneuver::Hold, now, &mut events);
                 self.follower = None;
                 if let Some(p) = self.last_seen_at {
                     self.walk_to(view, p, &mut events);
                 }
             }
-            Mode::Attack if now >= self.next_decision => {
+            Mode::Attack if now >= self.next_decision && !original => {
                 self.next_decision = now + senses.decision_interval;
                 self.decide(view, &mut events);
             }
@@ -594,6 +634,12 @@ impl Fighter {
                 self.set_mode(Mode::Idle, &mut events);
             }
             _ => {}
+        }
+
+        // The original's own attack does the rest.
+        if self.original_attacking() {
+            self.original_tick(dt, view, saw, &mut events);
+            return events;
         }
 
         // Charging and now within reach: stop and hit.

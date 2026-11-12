@@ -27,6 +27,7 @@ base_eye_height = 60      # game: TrandoshanMercenary BaseEyeHeight
 sight_radius = 5000       # game: TrandoshanMercenaryGrenadier SightRadius
 
 [combat]
+auto_aim_offset = 30      # game: TrandoshanMercenaryGrenadier AutoAimOffset
 health = 220              # game: TrandoshanMercenaryGrenadier Health and MaxHealth (Shields 0)
 accuracy = 0.75           # game: TrandoshanMercenary Accuracy
 max_aim_yaw = 70          # game: MaxAimYaw

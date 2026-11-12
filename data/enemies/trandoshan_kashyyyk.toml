@@ -30,6 +30,7 @@ base_eye_height = 60      # game: TrandoshanMercenary BaseEyeHeight
 sight_radius = 10000      # game: SightRadius (Pawn; only the Defaults class shortens it)
 
 [combat]
+auto_aim_offset = 0       # game: TrandoshanMercYYYUp sets no AutoAimOffset (0)
 health = 100              # game: TrandoshanMercenary Health
 shields = 100             # game: TrandoshanMercenary Shields and MaxShields
 shield_recharge_rate = 10 # game: TrandoshanMercenary ShieldRechargeRate (per second)

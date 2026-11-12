@@ -39,6 +39,7 @@ base_eye_height = 60      # game: BaseEyeHeight
 sight_radius = 5000       # game: GrievousGuardDefaults SightRadius
 
 [combat]
+auto_aim_offset = 0       # game: GrievousGuard sets no AutoAimOffset (0)
 health = 2000             # game: GrievousGuardDefaults Health and MaxHealth
 shields = 250             # game: GrievousGuardDefaults Shields and MaxShields
 shield_recharge_rate = 0  # game: ShieldRechargeRate isn't set for the guard

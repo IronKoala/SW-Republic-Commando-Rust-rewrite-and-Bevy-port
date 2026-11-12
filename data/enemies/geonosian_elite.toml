@@ -34,6 +34,7 @@ decision_interval = 0.5   # game: CTBot DecisionInterval
 enemy_memory_time = 15    # game: CTBot EnemyMemoryTime
 
 [combat]
+auto_aim_offset = 0       # game: GeonosianElite sets no AutoAimOffset (0)
 health = 1000             # game: GeonosianEliteDefaults Health and MaxHealth
 accuracy = 0.7            # game: GeonosianEliteDefaults Accuracy
 max_aim_yaw = 90          # game: GeonosianEliteDefaults MaxAimYaw

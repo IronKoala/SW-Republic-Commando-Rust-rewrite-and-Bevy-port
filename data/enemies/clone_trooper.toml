@@ -11,11 +11,10 @@
 # own CTInventory.DC17mBlaster. Anything not listed takes the battle
 # droid's value (battle_droid.toml).
 #
-# Not found in the files, so not done: CloneTrooperBot's attack state is
-# StateTrandoshanAttack (CoverHideTime 0.5 to 2 s, MinStepInterval 10,
-# AllySearchRadius 1000), but how it uses them is in the original's
-# compiled code. Our fighters all share one way of fighting (the battle
-# droid's), so the troopers fight the way our droids do.
+# How they fight: CloneTrooperBot's attack state is the game's
+# StateTrandoshanAttack (`[attack] state = "trandoshan"`). How it uses its
+# numbers was read from the game's compiled AI code (written up in our own
+# words in docs/DESIGN.md "Clone trooper AI"); the numbers are below.
 
 [type]
 id = "clone_trooper"
@@ -52,8 +51,36 @@ shot_delay = 0.15         # game: DC15BlasterClone ShotDelay
 weapon_range = 7000       # game: Weapon ValidRange max
 max_aim_yaw = 80          # game: Pawn MaxAimYaw
 can_crouch = false        # game: CloneTrooper bCanCrouch = false
+uses_cover = true         # game: the trooper's attack state looks for cover each time it plans
+auto_aim_offset = 0       # game: CloneTrooper sets no AutoAimOffset (0)
+max_aim_error = 30        # game: the original's aim error limit is (1 - Accuracy) x 30 degrees
+melee_range = 150         # game: DC15BlasterClone MeleeRange (the rifle butt)
+melee_damage = 100        # game: DC15BlasterClone MeleeDamage
+melee_damage_type = "CTDamageMelee" # game: DC15BlasterClone MeleeDamageType
 drops = ""                # game: DC15BlasterClone has no DroppedPickupClass
 damage_table = ""         # game: no MyDamageVariance on the trooper classes: every hit counts in full
+
+[attack]
+state = "trandoshan"      # game: CloneTrooperBot RequiredStates StateTrandoshanAttack
+weapon_burst_count = 4    # game: DC15BlasterClone BurstCount (the rifle's; the bot's is 15)
+optimal_dist = 10000      # game: DC15BlasterClone OptimalDist
+cover_range = 100000      # game: DC15BlasterCloneAmmo Range (how far from it cover is looked for)
+min_step_interval = 10    # game: StateTrandoshanAttack MinStepInterval
+cover_hide_min = 0.5      # game: StateTrandoshanAttack CoverHideTime min
+cover_hide_max = 2.0      # game: StateTrandoshanAttack CoverHideTime max
+emote_probability = 0.5   # game: CTBot EmoteProbability
+emote = "EmoteSeeEnemy"   # game: the gesture the state plays; the trooper mesh finds it in CloneCommandoSPSet
+emote_time = 0.8333       # game: EmoteSeeEnemy is 25 frames at 30 a second
+can_side_step = true      # game: CloneTrooper bCanSideStep
+gun_height = 0            # game: GunHeight is not set for troopers (CTPawn default 0)
+step_distance = 160       # game: StepLeft/StepRight move the root bone 160 uu sideways
+step_left_time = 1.3667   # game: StepLeft is 41 frames at 30 a second
+step_right_time = 1.3     # game: StepRight is 39 frames at 30 a second
+melee_anim = "MeleeAttack" # game: the animation the state plays for a close-up hit
+melee_time = 1.0          # game: MeleeAttack is 30 frames at 30 a second
+melee_hit_at = 0.2963     # game: MeleeAttack's AnimNotify_MeleeHit time
+post_world_check_fire_duration = 0 # game: CTBot PostWorldCheckFireDuration is not set (0)
+dodge_error_time = 1.0    # game: CTBot DodgeErrorTime
 
 [sound]
 # game: none of the trooper classes sets an AudioTable, so they say
