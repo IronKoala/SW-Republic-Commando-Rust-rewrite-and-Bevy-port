@@ -88,11 +88,26 @@ fn plays(cmds: &[Command]) -> Vec<(Layer, String)> {
 
 const ME: Option<[f32; 3]> = Some([0.0, 0.0, 0.0]);
 
+/// An enemy at `x` whose id is its distance (enough to tell them apart).
 fn enemy(x: f32, engaged: bool) -> Threat {
     Threat {
+        id: x as u64,
         at: [x, 0.0, 0.0],
         engaged,
+        zones: Vec::new(),
     }
+}
+
+fn enemy_id(id: u64, x: f32, engaged: bool) -> Threat {
+    Threat {
+        id,
+        ..enemy(x, engaged)
+    }
+}
+
+fn in_zone(mut t: Threat, z: usize) -> Threat {
+    t.zones.push(z);
+    t
 }
 
 #[test]
@@ -166,10 +181,10 @@ fn enemies_close_start_a_fight_and_its_end_plays_the_flourish() {
     m.set_state(Some("suspense_lp"), None);
     m.take_commands();
     // Far away: nothing.
-    m.update(1.0, &[enemy(1500.0, true)], ME, false);
+    m.update(1.0, &[enemy_id(1, 1500.0, true)], ME, false);
     assert!(!m.in_fight());
     // Inside the inner radius: battle loop on the main layer.
-    m.update(1.0, &[enemy(900.0, false)], ME, false);
+    m.update(1.0, &[enemy_id(1, 900.0, false)], ME, false);
     assert!(m.in_fight());
     assert_eq!(
         plays(&m.take_commands()),
@@ -177,21 +192,152 @@ fn enemies_close_start_a_fight_and_its_end_plays_the_flourish() {
     );
     // Between the radii: the fight goes on.
     for _ in 0..10 {
-        m.update(1.0, &[enemy(1800.0, true)], ME, false);
+        m.update(1.0, &[enemy_id(1, 1800.0, true)], ME, false);
     }
     assert!(m.in_fight());
-    // Gone: after the grace time, flourish and the room music again.
-    for _ in 0..10 {
-        m.update(1.0, &[], ME, false);
-    }
+    // It died: won at the next check, flourish; the room music comes
+    // back when the flourish ends.
+    m.update(1.0, &[], ME, false);
     assert!(!m.in_fight());
     assert_eq!(
         plays(&m.take_commands()),
-        vec![
-            (Layer::Episode, "victory_ep".into()),
-            (Layer::Main, "suspense_lp".into())
-        ]
+        vec![(Layer::Episode, "victory_ep".into())]
     );
+    m.finished(Layer::Episode);
+    assert_eq!(
+        plays(&m.take_commands()),
+        vec![(Layer::Main, "suspense_lp".into())]
+    );
+}
+
+#[test]
+fn enemies_out_of_range_but_alive_end_the_fight_calmly_after_two_seconds() {
+    let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
+    m.set_state(Some("suspense_lp"), None);
+    m.update(1.0, &[enemy_id(1, 900.0, true)], ME, false);
+    assert!(m.in_fight());
+    m.take_commands();
+    // Beyond the outer radius, still alive: the end waits until a check
+    // more than 2 s after the first that found none (checks at whole
+    // seconds: here at 2 s it sets 4 s, ends at the 5 s check).
+    for _ in 0..3 {
+        m.update(1.0, &[enemy_id(1, 2500.0, true)], ME, false);
+        assert!(m.in_fight());
+    }
+    m.update(1.0, &[enemy_id(1, 2500.0, true)], ME, false);
+    assert!(!m.in_fight());
+    // No flourish; the battle loop fades out over 5 s, linear.
+    let c = m.take_commands();
+    assert_eq!(plays(&c), vec![(Layer::Main, "suspense_lp".into())]);
+    match &c[0] {
+        Command::Play { fade_out_old, .. } => {
+            assert_eq!(fade_out_old.seconds, engine::CALM_FADE);
+            assert_eq!(fade_out_old.shape, FadeShape::Linear);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_check_runs_once_a_second() {
+    let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
+    m.update(0.4, &[], ME, false);
+    m.update(0.4, &[enemy(10.0, true)], ME, false);
+    assert!(!m.in_fight(), "checked at 0.4 s, next at 1 s");
+    m.update(0.4, &[enemy(10.0, true)], ME, false);
+    assert!(m.in_fight());
+}
+
+#[test]
+fn inside_a_battle_volume_only_its_enemies_start_a_fight() {
+    let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
+    m.set_zones(Zones {
+        player_in: vec![0],
+        exhausted: vec![false],
+    });
+    // Close, but outside the volume.
+    m.update(1.0, &[enemy(500.0, true)], ME, false);
+    assert!(!m.in_fight());
+    m.update(1.0, &[in_zone(enemy(500.0, true), 0)], ME, false);
+    assert!(m.in_fight());
+}
+
+#[test]
+fn a_battle_volume_fight_lasts_while_its_factories_have_enemies_to_make() {
+    let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
+    m.set_zones(Zones {
+        player_in: vec![0],
+        exhausted: vec![false],
+    });
+    m.update(1.0, &[in_zone(enemy(500.0, true), 0)], ME, false);
+    assert!(m.in_fight());
+    // All dead, but the volume's factories aren't done: still a fight,
+    // far or near.
+    for _ in 0..10 {
+        m.update(1.0, &[], ME, false);
+    }
+    assert!(m.in_fight());
+    // A new one far away inside the volume counts too.
+    m.update(1.0, &[in_zone(enemy(9000.0, false), 0)], ME, false);
+    assert!(m.in_fight());
+    m.set_zones(Zones {
+        player_in: vec![0],
+        exhausted: vec![true],
+    });
+    m.take_commands();
+    m.update(1.0, &[], ME, false);
+    assert!(!m.in_fight());
+    assert!(plays(&m.take_commands()).contains(&(Layer::Episode, "victory_ep".into())));
+}
+
+#[test]
+fn forcing_battle_music_needs_a_battle_volume() {
+    let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
+    m.update(1.0, &[], ME, false);
+    m.force_battle();
+    assert!(!m.in_fight(), "no battle volume: nothing");
+    m.set_zones(Zones {
+        player_in: vec![0],
+        exhausted: vec![true],
+    });
+    m.force_battle();
+    assert!(!m.in_fight(), "empty and spent volume: nothing");
+    m.set_zones(Zones {
+        player_in: vec![0],
+        exhausted: vec![false],
+    });
+    m.force_battle();
+    assert!(m.in_fight(), "factories still to make enemies");
+}
+
+#[test]
+fn no_fight_starts_or_ends_while_an_episode_plays() {
+    let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
+    m.play_episode("stinger_ep", None);
+    m.update(1.0, &[enemy(10.0, true)], ME, false);
+    assert!(!m.in_fight());
+    m.finished(Layer::Episode);
+    m.update(1.0, &[enemy(10.0, true)], ME, false);
+    assert!(m.in_fight());
+}
+
+#[test]
+fn an_episode_ends_a_fight_without_a_flourish() {
+    let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
+    m.update(1.0, &[enemy(10.0, true)], ME, false);
+    assert!(m.in_fight());
+    m.take_commands();
+    m.play_episode("stinger_ep", None);
+    assert!(!m.in_fight());
+    let c = m.take_commands();
+    assert_eq!(plays(&c), vec![(Layer::Episode, "stinger_ep".into())]);
+    assert!(c.contains(&Command::Stop {
+        layer: Layer::Main,
+        fade: Fade {
+            seconds: 1.5,
+            ..Fade::NONE
+        }
+    }));
 }
 
 #[test]
@@ -238,12 +384,9 @@ fn battle_engine_off_means_no_fight_music() {
 }
 
 #[test]
-fn forced_fight_lasts_until_the_flourish() {
+fn the_victory_flourish_ends_a_fight() {
     let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
-    m.force_battle();
-    for _ in 0..20 {
-        m.update(1.0, &[], ME, false);
-    }
+    m.update(1.0, &[enemy(10.0, true)], ME, false);
     assert!(m.in_fight());
     m.force_victory();
     assert!(!m.in_fight());
@@ -309,11 +452,12 @@ fn room_overlays_start_with_first_sound_then_wait_their_spacing() {
 #[test]
 fn state_set_during_a_fight_waits_for_its_end() {
     let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
-    m.force_battle();
+    m.update(1.0, &[enemy(10.0, true)], ME, false);
     m.take_commands();
     m.set_state(Some("suspense_lp"), None);
     assert!(plays(&m.take_commands()).is_empty());
     m.force_victory();
+    m.finished(Layer::Episode);
     assert!(plays(&m.take_commands()).contains(&(Layer::Main, "suspense_lp".into())));
 }
 
@@ -322,8 +466,9 @@ fn one_shot_state_does_not_come_back_after_a_fight() {
     let mut m = Imuse::new(library(), battle(), Tuning::default(), 1);
     m.set_state(Some("stinger_ep"), None);
     m.finished(Layer::Main);
-    m.force_battle();
+    m.update(1.0, &[enemy(10.0, true)], ME, false);
     m.force_victory();
+    m.finished(Layer::Episode);
     assert!(!plays(&m.take_commands())
         .iter()
         .any(|(_, n)| n == "stinger_ep" && m.in_fight()));

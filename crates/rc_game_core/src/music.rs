@@ -54,6 +54,8 @@ pub enum MusicCue {
 /// One living enemy, as the music sees it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MusicThreat {
+    /// Stays the same while it lives (a fight remembers its enemies).
+    pub id: u64,
     /// Where it stands, in Unreal units.
     pub at: [f32; 3],
     /// It has seen or heard the squad.
@@ -63,3 +65,19 @@ pub struct MusicThreat {
 /// Every living enemy. Written by the enemies part each frame of play.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct MusicThreats(pub Vec<MusicThreat>);
+
+/// One enemy factory (a map's `PawnFactory`), for battle volumes: a fight
+/// inside a `BattleVolume` lasts until every factory in it is exhausted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MusicFactory {
+    /// Where it stands, in Unreal units.
+    pub at: [f32; 3],
+    /// `Factory.IsExhausted` (CTGame.u): never for one that makes enemies
+    /// forever; yes once switched off after having been on, or once it has
+    /// made its whole capacity.
+    pub exhausted: bool,
+}
+
+/// Every enemy factory on the map. Written by the enemies part.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct MusicFactories(pub Vec<MusicFactory>);

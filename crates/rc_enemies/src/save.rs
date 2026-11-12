@@ -29,6 +29,10 @@ pub struct SpawnerSave {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
     pub made: u32,
+    /// Has been switched on at some time (counts for battle music
+    /// volumes). Saves from before this field: on now, or made any.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub was_on: bool,
     pub next_spawn: f32,
     /// The spawn point it uses next.
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -116,6 +120,7 @@ impl SavePart for EnemiesSave {
                     on: s.active,
                     disabled: s.disabled,
                     made: s.made,
+                    was_on: s.was_on,
                     next_spawn: s.next_spawn,
                     next_spot: s.next_spot,
                 })
@@ -138,6 +143,7 @@ impl SavePart for EnemiesSave {
                     active: s.on,
                     disabled: s.disabled,
                     made: s.made,
+                    was_on: s.was_on || s.on || s.made > 0,
                     next_spawn: s.next_spawn,
                     next_spot: s.next_spot,
                 })

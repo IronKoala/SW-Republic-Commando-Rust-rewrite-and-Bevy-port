@@ -855,8 +855,11 @@ copy of the game.
 - Music: follows the original's rules, read from the game's files
   (`cargo run --release -p rc_music --bin rc_music_check` checks every
   level's music against your install). Heard on Windows on 2026-11-09:
-  the menu theme, room music and its overlays, and pausing. Our guesses:
-  exactly when a fight starts and ends, and the fade curves. Not done:
+  the menu theme, room music and its overlays, and pausing. When fight
+  music starts and ends, including the 28 battle volumes in 17 Geonosis
+  and Kashyyyk maps, follows the original engine's own code (since
+  2026-11-12; checked by the music tests in the cloud, not yet heard on
+  Windows). Our guess: the fade curves. Not done: droid dispensers in
   battle volumes, the death stinger, debriefing, credits and title-card
   music, music in save games.
 - 13 "streamed" ambient loops for the RAS level name files that don't

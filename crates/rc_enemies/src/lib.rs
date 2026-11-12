@@ -73,6 +73,7 @@ impl Plugin for EnemiesPlugin {
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::CharacterCollision>()
             .init_resource::<rc_game_core::MusicThreats>()
+            .init_resource::<rc_game_core::MusicFactories>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
             .add_systems(
@@ -885,13 +886,35 @@ fn hear_level(
 
 /// Where the living droids are and whether they're fighting, for the
 /// music's battle rules.
-fn tell_music(fight: Res<Fight>, mut threats: ResMut<rc_game_core::MusicThreats>) {
+fn tell_music(
+    fight: Res<Fight>,
+    mut threats: ResMut<rc_game_core::MusicThreats>,
+    mut factories: ResMut<rc_game_core::MusicFactories>,
+) {
+    // The map's real factories (not characters placed in the map), for
+    // battle volumes.
+    factories.0.clear();
+    factories.0.extend(
+        fight
+            .battle
+            .spawners
+            .iter()
+            .filter(|s| !s.factory.placed)
+            .map(|s| {
+                let at = s.factory.location;
+                rc_game_core::MusicFactory {
+                    at: [at.x, at.y, at.z],
+                    exhausted: s.exhausted(),
+                }
+            }),
+    );
     threats.0.clear();
     // Clone troopers are friends, not threats.
     let threats_now = fight.battle.alive().filter(|f| !f.params.kind.republic());
     threats.0.extend(threats_now.map(|f| {
         let at = f.pawn.location;
         rc_game_core::MusicThreat {
+            id: f.id as u64,
             at: [at.x, at.y, at.z],
             engaged: matches!(f.mode, Mode::Alerted | Mode::Attack),
         }
@@ -903,9 +926,11 @@ fn end_fight(
     fight: Option<Res<Fight>>,
     mut mood: ResMut<MusicMood>,
     mut threats: ResMut<rc_game_core::MusicThreats>,
+    mut factories: ResMut<rc_game_core::MusicFactories>,
     log: Res<GameLog>,
 ) {
     threats.0.clear();
+    factories.0.clear();
     if let Some(f) = fight {
         summary(&f, &log);
     }
@@ -934,7 +959,11 @@ fn summary(f: &Fight, log: &GameLog) {
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
-    let clones = f.battle.alive().filter(|f| f.params.kind.republic()).count();
+    let clones = f
+        .battle
+        .alive()
+        .filter(|f| f.params.kind.republic())
+        .count();
     if clones > 0 || s.clones_destroyed > 0 {
         log.line(format!(
             "{PART}: t={:.1}s clone troopers: {clones} alive, {} destroyed; {} clone shots, {} hit droids, {} hit other clones by mistake; {} droid bolts hit clones",
@@ -1272,7 +1301,9 @@ fn think(
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
                         }
-                        log.line(format!("{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"));
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"
+                        ));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: {} -> {}",

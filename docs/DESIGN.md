@@ -2766,8 +2766,8 @@ game's own files say, with nothing hard-coded per level:
   `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
   delay and spacing, once only).
 - `rc_level::music` reads what a map says: the `LevelInfo` battle settings
-  (battle music, how many enemies, inner and outer radius, criteria) and
-  every volume with an `AudioClass`.
+  (battle music, how many enemies, inner and outer radius, criteria),
+  every volume with an `AudioClass`, and the `BattleVolume`s.
 - `rc_music::imuse` is the director, without Bevy. Inputs: script music
   actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
   `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
@@ -2780,21 +2780,54 @@ game's own files say, with nothing hard-coded per level:
   music pauses).
 - Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
   part lists its enemies in `MusicThreats`.
-- `data/music/music.toml` holds only our own timings (how often the battle
-  check runs, how long after the last enemy the fight ends, the
-  player-down music) and an optional menu override.
+- `data/music/music.toml` holds only our own choices (the overlay stop
+  fade, the player-down music) and an optional menu override.
 
-Our reading of the battle rules (the original does this in compiled code,
-so these are guesses checked against the settings' names and defaults): a
-fight starts when the number of counted enemies inside the inner radius
-reaches the threshold; it ends when no counted enemy has been inside the
-outer radius for 3 seconds, then the "won" flourish plays and the room's
-music comes back. "Proximity" counts any living enemy, "Attack" counts
-fighting enemies anywhere, "Attack and proximity" counts fighting enemies
-in range. A state set by a script during a fight waits until the fight
-ends. The fade curves (linear, sine, log, inverse log) are our guess at
-the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
-credits and title-card music, music in save games.
+**The battle engine** (when fight music starts and ends) is native code in
+the original's `Engine.dll`. It was read from the machine code (nothing
+decompiled is kept in the repository) and is copied step by step in
+`rc_music::imuse` (the engine addresses are in its comments):
+
+- The check runs once a second (whole seconds of the clock). Out of a
+  fight it uses the level's inner radius and enemy count; in a fight, the
+  outer radius and one enemy. "Attack" counts enemies that are fighting,
+  anywhere; "Proximity" living enemies within the radius; "Attack and
+  proximity" fighting enemies within the radius. Every enemy that counts
+  joins the fight's list.
+- A fight starts when the check passes, the level has battle music, no
+  episode (one-shot piece) plays and no fight is on. If the player is in a
+  `BattleVolume`, that volume becomes the fight's and the check runs again
+  counting only enemies inside it.
+- While the player is in the fight's battle volume, the fight goes on as
+  long as any enemy is inside the volume (near or far, fighting or not) or
+  any enemy factory (`PawnFactory`) inside it still has enemies to make
+  (`BattleVolume.AreFactoriesExhausted` and `Factory.IsExhausted` in
+  CTGame.u). Which factories a volume holds is worked out once, from where
+  they stand.
+- When the check fails during a fight: if every enemy of the fight's list
+  is dead (and the battle volume's factories are spent) the fight is won
+  at once and the group's "won" flourish plays as an episode; the room
+  music comes back when it ends. If the player is dead, the group's "lost"
+  music plays and the room music becomes silence. Otherwise the fight ends
+  at the first check more than 2 seconds later, without a flourish: the
+  battle loop fades out over 5 seconds (linear) and the room music comes
+  back. A fight never ends while an episode plays.
+- `ForceBattleMusic` only works inside a battle volume: the fight starts
+  if an enemy is in it or its factories still have enemies to make;
+  otherwise nothing happens. `ForceVictoryFlourish` ends the fight as won.
+- Episodes (`PlayMusic`, the flourish, the lost music) fade out the other
+  music, end a fight without a flourish, are skipped while another episode
+  plays, and the room music comes back when they end. A room state a
+  script sets during an episode waits for its end.
+
+Where the port differs: "touching" a battle volume is tested with the
+player's or enemy's centre point and the point 50 units above it (the
+engine uses the collision cylinder); droid dispensers (`BDDispenser`, one
+in geo_05b's battle volumes 1 and 2) aren't made by the port yet, so they
+don't keep a fight going; the port doesn't tell being down from being dead
+yet (it has one "down" flag), so the "lost" end isn't reached. The fade curve shapes (linear, sine, log,
+inverse log) are still our guess. Not done: the death stinger,
+debriefing, credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each
@@ -3828,8 +3861,8 @@ game's own files say, with nothing hard-coded per level:
   `Properties/audioenv.u` (`iMuseState`, `iMuseOverlays`, overlay start
   delay and spacing, once only).
 - `rc_level::music` reads what a map says: the `LevelInfo` battle settings
-  (battle music, how many enemies, inner and outer radius, criteria) and
-  every volume with an `AudioClass`.
+  (battle music, how many enemies, inner and outer radius, criteria),
+  every volume with an `AudioClass`, and the `BattleVolume`s.
 - `rc_music::imuse` is the director, without Bevy. Inputs: script music
   actions (`SetImuseState`, `PlayMusic`, `EnableBattleEngine`,
   `SetBattleEngineParams`, `SetBattleMusicMulti`, `ForceBattleMusic`,
@@ -3842,21 +3875,54 @@ game's own files say, with nothing hard-coded per level:
   music pauses).
 - Script actions reach it as `rc_game_core::MusicCue` messages; the enemies
   part lists its enemies in `MusicThreats`.
-- `data/music/music.toml` holds only our own timings (how often the battle
-  check runs, how long after the last enemy the fight ends, the
-  player-down music) and an optional menu override.
+- `data/music/music.toml` holds only our own choices (the overlay stop
+  fade, the player-down music) and an optional menu override.
 
-Our reading of the battle rules (the original does this in compiled code,
-so these are guesses checked against the settings' names and defaults): a
-fight starts when the number of counted enemies inside the inner radius
-reaches the threshold; it ends when no counted enemy has been inside the
-outer radius for 3 seconds, then the "won" flourish plays and the room's
-music comes back. "Proximity" counts any living enemy, "Attack" counts
-fighting enemies anywhere, "Attack and proximity" counts fighting enemies
-in range. A state set by a script during a fight waits until the fight
-ends. The fade curves (linear, sine, log, inverse log) are our guess at
-the shapes. Not done: `BattleVolume`, the death stinger, debriefing,
-credits and title-card music, music in save games.
+**The battle engine** (when fight music starts and ends) is native code in
+the original's `Engine.dll`. It was read from the machine code (nothing
+decompiled is kept in the repository) and is copied step by step in
+`rc_music::imuse` (the engine addresses are in its comments):
+
+- The check runs once a second (whole seconds of the clock). Out of a
+  fight it uses the level's inner radius and enemy count; in a fight, the
+  outer radius and one enemy. "Attack" counts enemies that are fighting,
+  anywhere; "Proximity" living enemies within the radius; "Attack and
+  proximity" fighting enemies within the radius. Every enemy that counts
+  joins the fight's list.
+- A fight starts when the check passes, the level has battle music, no
+  episode (one-shot piece) plays and no fight is on. If the player is in a
+  `BattleVolume`, that volume becomes the fight's and the check runs again
+  counting only enemies inside it.
+- While the player is in the fight's battle volume, the fight goes on as
+  long as any enemy is inside the volume (near or far, fighting or not) or
+  any enemy factory (`PawnFactory`) inside it still has enemies to make
+  (`BattleVolume.AreFactoriesExhausted` and `Factory.IsExhausted` in
+  CTGame.u). Which factories a volume holds is worked out once, from where
+  they stand.
+- When the check fails during a fight: if every enemy of the fight's list
+  is dead (and the battle volume's factories are spent) the fight is won
+  at once and the group's "won" flourish plays as an episode; the room
+  music comes back when it ends. If the player is dead, the group's "lost"
+  music plays and the room music becomes silence. Otherwise the fight ends
+  at the first check more than 2 seconds later, without a flourish: the
+  battle loop fades out over 5 seconds (linear) and the room music comes
+  back. A fight never ends while an episode plays.
+- `ForceBattleMusic` only works inside a battle volume: the fight starts
+  if an enemy is in it or its factories still have enemies to make;
+  otherwise nothing happens. `ForceVictoryFlourish` ends the fight as won.
+- Episodes (`PlayMusic`, the flourish, the lost music) fade out the other
+  music, end a fight without a flourish, are skipped while another episode
+  plays, and the room music comes back when they end. A room state a
+  script sets during an episode waits for its end.
+
+Where the port differs: "touching" a battle volume is tested with the
+player's or enemy's centre point and the point 50 units above it (the
+engine uses the collision cylinder); droid dispensers (`BDDispenser`, one
+in geo_05b's battle volumes 1 and 2) aren't made by the port yet, so they
+don't keep a fight going; the port doesn't tell being down from being dead
+yet (it has one "down" flag), so the "lost" end isn't reached. The fade curve shapes (linear, sine, log,
+inverse log) are still our guess. Not done: the death stinger,
+debriefing, credits and title-card music, music in save games.
 
 **Mods.** Everything we ship as data (controls, theme, music, campaigns,
 movement) is found through `GamePaths::data_file`, which looks in each
