@@ -72,6 +72,8 @@ impl Plugin for EnemiesPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::CharacterCollision>()
+            .add_message::<rc_game_core::AnimSound>()
+            .init_resource::<rc_game_core::AnimSoundsWanted>()
             .init_resource::<rc_game_core::MusicThreats>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(OnExit(GameState::InGame), end_fight)
@@ -543,6 +545,7 @@ fn load_fight(
     images: Option<ResMut<Assets<Image>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
     scripts: Option<Res<LevelScriptsRun>>,
+    mut wanted: ResMut<rc_game_core::AnimSoundsWanted>,
 ) {
     commands.remove_resource::<Fight>();
     let Some(map) = level.map.clone() else { return };
@@ -755,6 +758,17 @@ fn load_fight(
                 "{PART}: {} mesh not loaded, they will be invisible: {e}",
                 t.kind.id
             )),
+        }
+    }
+    // The sounds their animations can play, read before play starts.
+    for t in &types {
+        if let (true, Some(tl)) = (
+            per_type.contains_key(&t.kind.id),
+            looks.by_type.get(&t.kind.id),
+        ) {
+            wanted
+                .0
+                .extend(tl.look.sounds.values().flatten().map(|(_, s)| s.clone()));
         }
     }
     droids.extend(placed);
@@ -1592,6 +1606,7 @@ fn animate(
     mut droids: Query<(&mut Droid, Option<&HeldWeapon>)>,
     mut held: Query<&mut Transform, Without<Droid>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
+    mut heard: MessageWriter<rc_game_core::AnimSound>,
 ) {
     let dt = time.delta_secs();
     // Held weapons to move onto their bones.
@@ -1624,7 +1639,27 @@ fn animate(
             }
         }
         if let Some(sa) = d.scripted.as_mut() {
+            // The script's animation's own sounds (`AnimNotify_Sound`),
+            // at the moments the game's animation files give.
+            let n = sa.clip.num_frames.max(1.0);
+            let before = if d.showing_script { sa.frame / n } else { -1.0 };
+            let ahead = (sa.frame + dt * sa.clip.rate) / n;
             sa.advance(dt);
+            if let Some(tl) = tl {
+                let mut spans = vec![(before, ahead.min(1.0))];
+                if sa.looping && ahead >= 1.0 {
+                    spans.push((-1.0, sa.frame / n));
+                }
+                for (from, to) in spans {
+                    for sound in tl.look.sounds_between(&sa.name, from, to) {
+                        heard.write(rc_game_core::AnimSound {
+                            sound,
+                            from: e,
+                            by: format!("{} {}", d.kind, sa.name),
+                        });
+                    }
+                }
+            }
             // Blend into the script's animation as into any other.
             if d.showing_script {
                 d.blend.advance(dt);

@@ -1721,6 +1721,22 @@ distance squared in Bevy units (metres): a droid 10 m away played at 1/100.
 alone and pushes that fading out past a kilometre, so only each part's
 own distance rule applies.
 
+**Animation sounds** (`rc_scripts_plugin/src/anim_sounds.rs`). Animation
+sequences carry `AnimNotify_Sound` notifies: a moment (0 to 1 through the
+sequence) and a `Sound` (`rc_package::animation::notify_sound`). The cast
+(`rc_cast`, from `rc_model::Model::sounds`, every kept set's sequences by
+their own name) and the enemies' level-script animations (`rc_enemies`,
+`DroidLook::sounds`) send `rc_game_core::AnimSound` for each notify the
+frame passes, with the character's entity. While a level loads both add
+every sound their models can play to `rc_game_core::AnimSoundsWanted`;
+`anim_sounds::load` reads the new ones, one read per package, and
+`anim_sounds::play` plays each from the character with the placed-sound
+rule (`Placed`, following the entity). The game does the same: its
+`Engine.dll` `UAnimNotify_Sound::Notify` asks the audio code to play the
+sound from the animating actor (read by disassembly, nothing copied).
+Not yet: the enemies' own (not scripted) animations, `AnimNotify_Footstep`
+and `AnimNotify_Effect`.
+
 **The map's looping sounds** (`rc_level::ambient`,
 `rc_scripts_plugin/src/ambient.rs`). Any Unreal actor can carry an
 `AmbientSound` (engine.u: `var(Sound) sound AmbientSound;`) that loops

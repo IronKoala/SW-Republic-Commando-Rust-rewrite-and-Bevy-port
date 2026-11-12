@@ -443,6 +443,10 @@ copy of the game.
   each from its place in the level and quieter further away by the game's
   own rule (read from its sound code). The distant battle is set to carry
   only 10 units, so it stays very quiet until you are near its speaker.
+  Characters' animations play their own sounds at the moments the game's
+  animation files give (same testing): the intro Geonosian's wings and
+  cry, the troopers' armour as they run, the gunship's engine as it
+  lands, the troopers' ropes.
   Finishing a level now takes you to the next one (tested in the cloud
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the

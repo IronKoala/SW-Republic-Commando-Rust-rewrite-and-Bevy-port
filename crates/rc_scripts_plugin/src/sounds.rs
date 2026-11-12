@@ -116,6 +116,10 @@ pub struct Placed {
     pub follow: Option<Entity>,
     /// The distance loudness last given to the sound card.
     pub gain: f32,
+    /// Silent past this distance (Unreal units): the game plays a map's
+    /// looping sound only within its `Radius` times 100 (see
+    /// `crate::ambient`). `None`: always heard.
+    pub cut_off: Option<f32>,
     /// The sound card's volume divided by `gain` (the SOUND options'
     /// volumes included), once it has started.
     base: Option<f32>,
@@ -129,8 +133,15 @@ impl Placed {
             falloff,
             follow,
             gain,
+            cut_off: None,
             base: None,
         }
+    }
+
+    /// The same, silent past `cut_off` Unreal units.
+    pub fn cut_off(mut self, cut_off: f32) -> Self {
+        self.cut_off = Some(cut_off);
+        self
     }
 }
 
@@ -548,6 +559,7 @@ pub(crate) fn play(
                     falloff,
                     follow,
                     gain,
+                    cut_off: None,
                     base: None,
                 },
             ));
@@ -583,8 +595,22 @@ pub(crate) fn started(
 /// and go on after.
 pub(crate) fn pause(
     play: Option<Res<State<Play>>>,
-    sinks: Query<&AudioSink, Or<(With<ScriptSound>, With<crate::ambient::AmbientLoop>)>>,
-    spatial: Query<&SpatialAudioSink, Or<(With<ScriptSound>, With<crate::ambient::AmbientLoop>)>>,
+    sinks: Query<
+        &AudioSink,
+        Or<(
+            With<ScriptSound>,
+            With<crate::ambient::AmbientLoop>,
+            With<crate::anim_sounds::AnimSoundPlaying>,
+        )>,
+    >,
+    spatial: Query<
+        &SpatialAudioSink,
+        Or<(
+            With<ScriptSound>,
+            With<crate::ambient::AmbientLoop>,
+            With<crate::anim_sounds::AnimSoundPlaying>,
+        )>,
+    >,
     mut was_paused: Local<bool>,
 ) {
     let paused = play.is_some_and(|p| *p.get() == Play::Paused);
@@ -635,7 +661,12 @@ pub(crate) fn follow(
         let base = *p
             .base
             .get_or_insert_with(|| sink.volume().to_linear() / old);
-        let gain = loudness(to_unreal(t.translation - ear).length(), p.radius, p.falloff);
+        let distance = to_unreal(t.translation - ear).length();
+        let gain = if p.cut_off.is_some_and(|c| distance > c) {
+            0.0
+        } else {
+            loudness(distance, p.radius, p.falloff)
+        };
         if (gain - p.gain).abs() > 0.005 {
             p.gain = gain;
             sink.set_volume(Volume::Linear(base * gain));

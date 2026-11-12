@@ -7,7 +7,11 @@
 //! stop while the game is paused, and are placed and fade with distance by
 //! the game's own rule (`crate::sounds`, read from its sound code): full
 //! loudness out to the sound's `Radius` (its `AudioParams`), then
-//! `Radius / distance`. The distant battle's `Radius` is 10 uu, so the
+//! `Radius / distance`, and silent past `Radius` times 100: the game's
+//! `UAudioSubsystem::UpdateAmbientList` (Engine.dll) only starts a loop
+//! within that reach, scaled down when walls are between (not done here),
+//! and plays it from its place, heard everywhere only when it belongs to
+//! the player's own actor. The distant battle's `Radius` is 10 uu, so the
 //! game itself keeps it very quiet until the player is near its speaker.
 //! Their loudness is the scripts' `[sound] volume`.
 
@@ -20,6 +24,10 @@ use std::collections::BTreeMap;
 
 use crate::sounds::{loudness, Placed};
 use crate::{LevelScript, PART};
+
+/// Core.dll's `GAudioMaxRadiusMultiplier` (100, never changed in the
+/// game's code): how many times its `Radius` away a map's loop still plays.
+pub const MAX_RADIUS_MULTIPLIER: f32 = 100.0;
 
 /// A looping sound from the map, playing.
 #[derive(Component, Debug, Clone)]
@@ -125,8 +133,19 @@ pub(crate) fn start(
             None => settings.sound_radius,
         };
         let falloff = !p.is_some_and(|p| p.no_falloff);
+        // The game plays a map's loop only while the listener is within
+        // Radius times `GAudioMaxRadiusMultiplier` (100, Core.dll), as
+        // its `UAudioSubsystem::UpdateAmbientList` does; nearer, it plays
+        // from its place like any sound.
+        let cut_off = radius * MAX_RADIUS_MULTIPLIER;
         let distance = ear.map(|e| to_unreal(at - e).length());
-        let gain = distance.map_or(1.0, |d| loudness(d, radius, falloff));
+        let gain = distance.map_or(1.0, |d| {
+            if d > cut_off {
+                0.0
+            } else {
+                loudness(d, radius, falloff)
+            }
+        });
         commands.spawn((
             AmbientLoop {
                 sound: name.clone(),
@@ -135,7 +154,7 @@ pub(crate) fn start(
             AudioPlayer(h),
             PlaybackSettings::LOOP.with_volume(Volume::Linear(settings.sound_volume * gain)),
             SoundAt::place(at),
-            Placed::new(radius, falloff, None, gain),
+            Placed::new(radius, falloff, None, gain).cut_off(cut_off),
         ));
         log.line(format!(
             "{PART}: {} loops {name} at ({:.0}, {:.0}, {:.0}), reach {radius:.0} uu{}, {} uu away, loudness {gain:.2}",

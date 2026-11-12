@@ -1100,6 +1100,10 @@ fn steps() -> Vec<Step> {
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
         Check("the clone troopers hold their rifles", troopers_hold_rifles),
         Check("the Geonosians placed in the map are made", placed_geonosians),
+        Check(
+            "the characters' animations play their own sounds (the intro warrior's wings and cry)",
+            anim_sounds_played,
+        ),
         // Troopers can be hurt and die (their class's `Health`), as
         // engine.u's `Pawn.Died`: the map's `Event` for them goes off and
         // they play their `Death` animation. CloneTrooper1 has no script
@@ -3262,6 +3266,27 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
 /// The map's looping sounds (`rc_scripts_plugin::ambient`): geo_01a's
 /// battle loop and its 4 fires and steam vent, each placed where the map
 /// puts it, all from the game's own sounds.
+fn anim_sounds_played(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::anim_sounds::AnimSounds>() else {
+        return Err("no animation sounds read".into());
+    };
+    let intro: Vec<&String> = s
+        .played
+        .iter()
+        .filter(|p| p.contains("WarriorIntro:"))
+        .collect();
+    let got = format!(
+        "{} read, {} played; the intro warrior's: {intro:?}",
+        s.sounds.len(),
+        s.played.len()
+    );
+    if intro.iter().any(|p| p.contains("GWRX7119")) && intro.len() >= 4 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 fn level_ambient_loops(w: &mut World) -> Result<String, String> {
     let wanted = w
         .get_resource::<rc_level_plugin::LevelAmbientSounds>()

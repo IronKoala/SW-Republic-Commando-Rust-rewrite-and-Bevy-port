@@ -51,6 +51,7 @@
 //! (droid factories, the squad, sounds) can hook in by name.
 
 pub mod ambient;
+pub mod anim_sounds;
 pub mod bacta;
 pub mod breakables;
 pub mod characters;
@@ -168,6 +169,11 @@ impl Plugin for ScriptsPlugin {
                     .run_if(playing),
             )
             .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
+            // The characters' animation sounds.
+            .init_resource::<anim_sounds::AnimSounds>()
+            .init_resource::<rc_game_core::AnimSoundsWanted>()
+            .add_message::<rc_game_core::AnimSound>()
+            .add_systems(Update, (anim_sounds::load, anim_sounds::play).chain())
             // The map's own looping sounds start with play.
             .add_systems(
                 Update,
@@ -180,6 +186,7 @@ impl Plugin for ScriptsPlugin {
                     forget,
                     sounds::forget,
                     ambient::forget,
+                    anim_sounds::forget,
                     cutscene::forget,
                     projectiles::forget,
                     tracker::forget,
