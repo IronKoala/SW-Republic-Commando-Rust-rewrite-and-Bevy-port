@@ -862,8 +862,21 @@ impl Model {
     /// blended), in Bevy units relative to the feet, before the
     /// character's facing is applied.
     pub fn posed_local(&self, local: &[Transform]) -> Vec<[f32; 3]> {
-        let pose = globals(&self.skeleton.parents, local);
-        skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
+        self.posed_from(&globals(&self.skeleton.parents, local))
+    }
+
+    /// [`Model::posed_local`] as the original game draws it
+    /// ([`rc_anim::globals_in_game`]): the bones hanging from the move bone
+    /// don't follow it, so an animation's travel on that bone doesn't
+    /// show. geo_01a's landing gunship: its animations lift the move bone
+    /// 757 Unreal units, yet the ship stays where the map puts it.
+    pub fn posed_in_game(&self, local: &[Transform]) -> Vec<[f32; 3]> {
+        let mv = rc_anim::move_bone(&self.skeleton.names);
+        self.posed_from(&rc_anim::globals_in_game(&self.skeleton.parents, local, mv))
+    }
+
+    fn posed_from(&self, pose: &[Transform]) -> Vec<[f32; 3]> {
+        skin(&self.mesh.points, &self.weights, &self.skeleton, pose)
             .into_iter()
             .map(|p| {
                 let p = mesh_point(&self.mesh, p);
@@ -879,12 +892,25 @@ impl Model {
     /// no bone of that name. What the original's `AttachToBone` hangs a
     /// held weapon on (`weaponAttach_R`).
     pub fn bone_frame(&self, local: &[Transform], bone: &str) -> Option<[[f32; 3]; 4]> {
+        self.bone_frame_from(&globals(&self.skeleton.parents, local), bone)
+    }
+
+    /// [`Model::bone_frame`] as the original game places bones (see
+    /// [`Model::posed_in_game`]).
+    pub fn bone_frame_in_game(&self, local: &[Transform], bone: &str) -> Option<[[f32; 3]; 4]> {
+        let mv = rc_anim::move_bone(&self.skeleton.names);
+        self.bone_frame_from(
+            &rc_anim::globals_in_game(&self.skeleton.parents, local, mv),
+            bone,
+        )
+    }
+
+    fn bone_frame_from(&self, pose: &[Transform], bone: &str) -> Option<[[f32; 3]; 4]> {
         let i = self
             .skeleton
             .names
             .iter()
             .position(|n| n.eq_ignore_ascii_case(bone))?;
-        let pose = globals(&self.skeleton.parents, local);
         let g = pose.get(i)?;
         let place = |p: [f32; 3]| {
             let q = mesh_point(&self.mesh, g.apply(p));
