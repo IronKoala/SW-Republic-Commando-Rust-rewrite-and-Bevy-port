@@ -25,6 +25,18 @@
 //! - Its own `Event` is sent when it breaks; if it has none,
 //!   `DestroyedState.Event` is.
 //!
+//! Which of these steps a prop is in is an UnrealScript state of engine.u
+//! `Prop` (its source text is in the package): the start state
+//! `Invulnerable` goes straight on to `Damagable` when the prop has health,
+//! so a prop with health can be broken from the start, and one without
+//! can't. A level script can switch a prop's state
+//! (`ACTION_GotoState`): `Damagable` makes a prop without health breakable
+//! (its first hit breaks it: health below nothing), `PropDestroyed` breaks
+//! it at once, and a state `Prop` doesn't have (or none) leaves it in no
+//! state, where damage does nothing. So the props read here are the ones
+//! with health, and the ones without that a `GotoState` in the map names
+//! (`starts_damagable` tells them apart).
+//!
 //! This is our description of how the game uses those values (read from
 //! the property names, the maps and how the original plays); the rules
 //! themselves are run by `rc_scripts::Director`. This file only reads the
@@ -156,6 +168,9 @@ pub struct Breakable {
     pub draw_scale_3d: [f32; 3],
     pub pre_pivot: [f32; 3],
     pub health: f32,
+    /// It starts in the `Damagable` state (it has health). One that
+    /// doesn't is here because a level script can switch it there.
+    pub starts_damagable: bool,
     pub damaged_ratio: f32,
     /// The actor's own `Event`, sent when it breaks (before
     /// `destroyed.event`).
@@ -216,8 +231,34 @@ fn name(v: Option<Val>) -> Option<String> {
     }
 }
 
+/// Tags (lower case) that a level script's `ACTION_GotoState` names, in
+/// this map.
+pub fn goto_state_tags(pkg: &Package, data: &[u8]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for (i, e) in pkg.exports.iter().enumerate() {
+        if !pkg
+            .export_class_name(e)
+            .eq_ignore_ascii_case("ACTION_GotoState")
+        {
+            continue;
+        }
+        let Ok(props) = actors::read_actor_properties(pkg, data, i) else {
+            continue;
+        };
+        if let Some(t) = props
+            .iter()
+            .find(|p| pkg.name(p.name).eq_ignore_ascii_case("TargetTag"))
+            .and_then(|p| name(Some(to_val(pkg, p))))
+        {
+            out.insert(t.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
 /// Every prop in the level that starts with health (so weapons can break
-/// it). `open` opens a script package by name, as for
+/// it), and every prop without health that a level script can switch to
+/// being breakable (see the top of this file). `open` opens a script package by name, as for
 /// `ClassLooks::for_actor`.
 pub fn read(
     looks: &mut ClassLooks,
@@ -227,6 +268,7 @@ pub fn read(
     open: &mut dyn FnMut(&str) -> Option<Loaded>,
 ) -> Vec<Breakable> {
     let mut out = Vec::new();
+    let switched = goto_state_tags(pkg, data);
     for &a in level.actors.iter().flatten() {
         let class = pkg.export_class_name(&pkg.exports[a]).to_string();
         // Most of a map is these; none of them are props.
@@ -256,7 +298,8 @@ pub fn read(
             look.find(key, 0).map(|(l, p)| to_val(&l.0, p))
         };
         let health = number(value("Health")).unwrap_or(0.0);
-        if health <= 0.0 {
+        let tag = name(value("Tag")).unwrap_or_else(|| class.clone());
+        if health <= 0.0 && !switched.contains(&tag.to_ascii_lowercase()) {
             continue;
         }
         // A step from the map (which stores the whole struct, every field,
@@ -295,7 +338,7 @@ pub fn read(
         out.push(Breakable {
             export: a,
             name: pkg.name(pkg.exports[a].object_name).to_string(),
-            tag: name(value("Tag")).unwrap_or_else(|| class.clone()),
+            tag,
             class,
             location: placement.as_ref().map(|p| p.location).unwrap_or_default(),
             rotation: placement.as_ref().map(|p| p.rotation).unwrap_or_default(),
@@ -303,6 +346,7 @@ pub fn read(
             draw_scale_3d: placement.as_ref().map_or([1.0; 3], |p| p.draw_scale_3d),
             pre_pivot: placement.as_ref().map(|p| p.pre_pivot).unwrap_or_default(),
             health,
+            starts_damagable: health > 0.0,
             damaged_ratio: number(value("DamagedRatio")).unwrap_or(0.0),
             event: name(value("Event")),
             damaged: transition("DamagedState"),
@@ -352,6 +396,7 @@ mod tests {
             draw_scale_3d: [1.0; 3],
             pre_pivot: [0.0; 3],
             health: 10.0,
+            starts_damagable: true,
             damaged_ratio: 0.0,
             event: None,
             damaged: Transition::default(),

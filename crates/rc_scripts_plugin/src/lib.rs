@@ -358,6 +358,8 @@ pub struct PlayStats {
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
     pub doors_unlocked: Vec<String>,
+    /// Props a `GotoState` switched: `NAME State: what happened`.
+    pub prop_states: Vec<String>,
 }
 
 impl LevelScript {
@@ -1141,7 +1143,20 @@ fn carry_out(
                     "{at}: bacta dispenser {tag} {}",
                     if on { "switched on" } else { "switched off" }
                 ));
-            } else {
+            }
+            // Props (engine.u `Prop`'s states).
+            let props = script.director.props_goto_state(tag, state);
+            for (name, what) in &props {
+                log.line(format!(
+                    "{at}: prop {name} (tag {tag}) to {state:?}: {what}"
+                ));
+                script
+                    .stats
+                    .prop_states
+                    .push(format!("{name} {state}: {what}"));
+            }
+            n += props.len();
+            if n == 0 {
                 script.stats.not_done += 1;
                 log.line(format!("{at}: {tag} to state {state} (not done yet)"));
             }

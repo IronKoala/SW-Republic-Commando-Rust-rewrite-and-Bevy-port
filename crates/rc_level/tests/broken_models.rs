@@ -26,6 +26,13 @@ fn packages(game: &Path) -> HashMap<String, PathBuf> {
 }
 
 fn barrels(game: &Path, map: &str) -> Vec<rc_level::breakables::Breakable> {
+    all_breakables(game, map)
+        .into_iter()
+        .filter(|b| b.class == "ExplosiveBarrelGEO")
+        .collect()
+}
+
+fn all_breakables(game: &Path, map: &str) -> Vec<rc_level::breakables::Breakable> {
     let files = packages(game);
     let mut cache: HashMap<String, Option<Loaded>> = HashMap::new();
     let mut open = |n: &str| -> Option<Loaded> {
@@ -49,9 +56,34 @@ fn barrels(game: &Path, map: &str) -> Vec<rc_level::breakables::Breakable> {
     let level = rc_level::actors::read_level(&pkg, &data).unwrap();
     let mut looks = ClassLooks::new();
     rc_level::breakables::read(&mut looks, &pkg, &data, &level, &mut open)
-        .into_iter()
-        .filter(|b| b.class == "ExplosiveBarrelGEO")
-        .collect()
+}
+
+/// geo_04c's machine parts have no health, but a level script switches
+/// them to `Damagable`, so they are read (not breakable at the start);
+/// Geo4MachinePart1 sends `TurretDestroyed` when it breaks.
+#[test]
+fn script_switched_props_are_read() {
+    let Some(game) = std::env::var_os("RC_GAME_DIR").map(PathBuf::from) else {
+        eprintln!("RC_GAME_DIR not set: skipped (not tested)");
+        return;
+    };
+    let all = all_breakables(&game, "geo_04c");
+    let parts: Vec<_> = all
+        .iter()
+        .filter(|b| b.class.starts_with("Geo4MachinePart"))
+        .collect();
+    assert_eq!(
+        parts.len(),
+        6,
+        "{:?}",
+        parts.iter().map(|b| &b.name).collect::<Vec<_>>()
+    );
+    assert!(parts.iter().all(|b| !b.starts_damagable && b.health == 0.0));
+    assert!(parts
+        .iter()
+        .any(|b| b.broken_event() == Some("TurretDestroyed")));
+    // Props with health still start breakable.
+    assert!(all.iter().any(|b| b.starts_damagable));
 }
 
 #[test]

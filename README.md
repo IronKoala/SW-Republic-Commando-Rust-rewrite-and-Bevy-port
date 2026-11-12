@@ -736,7 +736,11 @@ copy of the game.
   explode a moment later, hurting characters and setting off other barrels
   near them. A prop that breaks sends its event to the level scripts (53
   on Geonosis, such as geo_05b's `Clamp00`), so the scripts waiting for it
-  go on. Broken props are kept in save files.
+  go on. Broken props are kept in save files. Level scripts can switch a
+  prop between breakable and not (`GotoState`, since 2026-11-12): geo_04c's
+  machine parts and ammo clips, geo_04a's falling rocks and
+  geo_05c's docking ring only break once the script allows it, and
+  geo_04c's `TurretDestroyed` now comes when its machine part is shot.
 - **Particle effects (since 2026-11-10, tested in the cloud only, not on
   Windows or by playing).** Explosions now show the game's own fireball,
   smoke, sparks and flying debris, read from its effect classes (all 575

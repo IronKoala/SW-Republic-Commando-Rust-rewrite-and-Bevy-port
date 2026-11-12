@@ -1844,8 +1844,8 @@ have 838 of them; 53 send an event the level scripts wait for.
 
 How a prop breaks (our reading of the game, in our words):
 
-- It starts with `Health`. With none (0 or less) nothing can hurt it; only
-  a script can remove it.
+- It starts with `Health`. With none (0 or less) nothing can hurt it,
+  until a level script makes it breakable (below).
 - Damage counts after the prop's damage table, as for characters.
 - `DamagedRatio` above 0: when health falls to that share of the start,
   it goes to its damaged step (`DamagedState`): sends that step's event,
@@ -1888,6 +1888,32 @@ the burning or electric after-effect some barrels leave,
 the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
 through (geo_04c's wall components) aren't in the collision, so shots pass
 through them.
+
+#### Scripts switching a prop's state (`ACTION_GotoState`)
+
+These steps are UnrealScript states of engine.u `Prop`, whose source text
+is in the package: `Invulnerable` (the start state: its `BeginState` goes
+straight on to `Damagable` when the prop has health), `Damagable` (damage
+takes health off), `PropDamaged`, `PropDestroyed` and `Exploding`. A
+level script's `ACTION_GotoState` sends every actor with its `TargetTag`
+to a state. How `GotoState` itself behaves is compiled code; it was read
+from Core.dll's `UObject::GotoState` (disassembled locally, nothing
+kept): the name `Auto` means the class's start state; going to the state
+it is already in runs nothing; a name the class has no state for (or
+none) leaves it in no state at all, where `Prop`'s damage does nothing.
+
+So in the port (`Director::props_goto_state`, state in `PropState`):
+props without health that a `GotoState` in the map names are read too
+(`Breakable::starts_damagable` false), and take no damage until a script
+sends them to `Damagable`; then the first hit breaks them (health below
+nothing). geo_04c's machine parts work this way: the one tagged
+`TurretMachine03` sends `TurretDestroyed`. `PropDestroyed` breaks the
+prop at once, `PropDamaged` takes it to its damaged step, `Auto` and
+`Invulnerable` send it back to the start (a prop with health is
+breakable again at once), and any other name switches damage off
+(geo_03d's `Barrel04` gets an empty state until later). The state is kept
+in saves. Not done: `Exploding` sent by a script (no map does), and a
+broken prop sent back to `Damagable` (it stays broken).
 
 ### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
 

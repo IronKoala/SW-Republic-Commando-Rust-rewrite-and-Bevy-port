@@ -243,11 +243,52 @@ struct Prop {
     breaks: Option<Breaks>,
 }
 
+/// Which UnrealScript state of engine.u `Prop` a breakable prop is in
+/// (destroyed is [`Prop::destroyed`]). Only `Damagable` and `PropDamaged`
+/// take health off; in the others damage does nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropState {
+    /// No state: a level script sent it to a state `Prop` doesn't have
+    /// (or to none).
+    NoState,
+    /// `Invulnerable`, the start state: only props without health stay
+    /// in it.
+    Invulnerable,
+    Damagable,
+    /// `PropDamaged`, its damaged step.
+    Damaged,
+}
+
+impl PropState {
+    /// The state's name in the game.
+    pub fn name(self) -> &'static str {
+        match self {
+            PropState::NoState => "no state",
+            PropState::Invulnerable => "Invulnerable",
+            PropState::Damagable => "Damagable",
+            PropState::Damaged => "PropDamaged",
+        }
+    }
+
+    pub(crate) fn from_name(s: &str) -> Option<PropState> {
+        [
+            PropState::NoState,
+            PropState::Invulnerable,
+            PropState::Damagable,
+            PropState::Damaged,
+        ]
+        .into_iter()
+        .find(|p| p.name().eq_ignore_ascii_case(s))
+    }
+}
+
 /// A prop weapons can break: the steps of `rc_level::breakables`.
 #[derive(Debug, Clone, PartialEq)]
 struct Breaks {
     initial: f32,
     damaged_ratio: f32,
+    /// Its state (see [`PropState`]).
+    state: PropState,
     /// In its damaged step.
     damaged: bool,
     damaged_event: Option<String>,
@@ -730,6 +771,12 @@ impl Director {
             let breaks = Breaks {
                 initial: b.health,
                 damaged_ratio: b.damaged_ratio,
+                // `Invulnerable` goes on to `Damagable` when it has health.
+                state: if b.starts_damagable {
+                    PropState::Damagable
+                } else {
+                    PropState::Invulnerable
+                },
                 damaged: false,
                 damaged_event: b.damaged.event.clone(),
                 damaged_look: b.damaged.keeps_a_look() || b.anim_prop,
@@ -768,6 +815,90 @@ impl Director {
         }
     }
 
+    /// The state of a breakable prop, by export index (`None` if it isn't
+    /// one, or is destroyed).
+    pub fn prop_state(&self, export: usize) -> Option<PropState> {
+        self.props
+            .iter()
+            .find(|p| p.export == export && !p.destroyed)
+            .and_then(|p| p.breaks.as_ref())
+            .map(|b| b.state)
+    }
+
+    /// `ACTION_GotoState` on props: send every breakable prop with this
+    /// tag to `state`, as engine.u `Prop`'s states do (Core.dll's
+    /// `UObject::GotoState`, read from its machine code: `Auto` means the
+    /// start state; the state it is already in does nothing; a state the
+    /// class doesn't have, or none, leaves it in no state). Returns what
+    /// happened to each, by name, for the log; empty when no prop has the
+    /// tag.
+    pub fn props_goto_state(&mut self, tag: &str, state: &str) -> Vec<(String, String)> {
+        let hit: Vec<usize> = (0..self.props.len())
+            .filter(|&i| self.props[i].tag.eq_ignore_ascii_case(tag))
+            .collect();
+        let mut out = Vec::new();
+        for i in hit {
+            let name = self.props[i].name.clone();
+            if self.props[i].destroyed {
+                out.push((name, "already destroyed; nothing happens".to_string()));
+                continue;
+            }
+            let Some(now) = self.props[i].breaks.as_ref().map(|b| b.state) else {
+                out.push((name, "has no damage rules; nothing happens".to_string()));
+                continue;
+            };
+            let s = state.to_ascii_lowercase();
+            let what = match s.as_str() {
+                "propdestroyed" => {
+                    self.props[i].health = self.props[i].health.min(0.0);
+                    self.break_prop(i);
+                    "destroyed".to_string()
+                }
+                "propdamaged" => {
+                    if now == PropState::Damaged {
+                        "already damaged; nothing happens".to_string()
+                    } else {
+                        self.enter_damaged(i);
+                        "damaged".to_string()
+                    }
+                }
+                "exploding" => "Exploding (not done yet)".to_string(),
+                _ => {
+                    let new = match s.as_str() {
+                        "auto" | "invulnerable" => PropState::Invulnerable,
+                        "damagable" => PropState::Damagable,
+                        _ => PropState::NoState,
+                    };
+                    if new == now {
+                        format!("already {}; nothing happens", now.name())
+                    } else {
+                        // `Invulnerable` goes straight on to `Damagable`
+                        // when the prop has health.
+                        let end = if new == PropState::Invulnerable && self.props[i].health > 0.0 {
+                            PropState::Damagable
+                        } else {
+                            new
+                        };
+                        if let Some(b) = self.props[i].breaks.as_mut() {
+                            b.state = end;
+                            b.damaged = false;
+                            b.break_at = None;
+                        }
+                        match end {
+                            PropState::Damagable => "damagable: weapons can break it".to_string(),
+                            PropState::NoState => format!(
+                                "no state (Prop has no state {state:?}): damage does nothing"
+                            ),
+                            _ => format!("{}: damage does nothing", end.name()),
+                        }
+                    }
+                }
+            };
+            out.push((name, what));
+        }
+        out
+    }
+
     /// Health left on a prop, by export index.
     pub fn prop_health(&self, export: usize) -> Option<f32> {
         self.props
@@ -777,10 +908,16 @@ impl Director {
     }
 
     fn hurt_index(&mut self, i: usize, amount: f32) -> PropHurt {
-        let now = self.time;
         let p = &mut self.props[i];
         if p.destroyed {
             return PropHurt::AlreadyBroken;
+        }
+        if p.breaks
+            .as_ref()
+            .is_some_and(|b| matches!(b.state, PropState::NoState | PropState::Invulnerable))
+        {
+            // Damage does nothing outside `Damagable` and `PropDamaged`.
+            return PropHurt::NotBreakable;
         }
         p.health -= amount;
         let Some(b) = p.breaks.as_mut() else {
@@ -804,7 +941,18 @@ impl Director {
         if p.health > b.initial * b.damaged_ratio {
             return PropHurt::Hurt(p.health);
         }
+        self.enter_damaged(i);
+        PropHurt::Damaged
+    }
+
+    /// A prop goes to its damaged step (`PropDamaged`).
+    fn enter_damaged(&mut self, i: usize) {
+        let now = self.time;
+        let Some(b) = self.props[i].breaks.as_mut() else {
+            return;
+        };
         b.damaged = true;
+        b.state = PropState::Damaged;
         let removed = !b.damaged_look;
         if b.damaged_span > 0.0 && !removed {
             let extra = b.damaged_extra;
@@ -829,7 +977,6 @@ impl Director {
         if let Some(e) = ev {
             self.fire(&e, &by);
         }
-        PropHurt::Damaged
     }
 
     /// A prop breaks: it says so, and sends its event.
@@ -873,6 +1020,16 @@ impl Director {
 
     /// Remove every prop with this tag at once (`ACTION_DestroyActor`).
     pub fn destroy_props(&mut self, tag: &str) -> usize {
+        // Removing it doesn't depend on its state.
+        for p in &mut self.props {
+            if p.tag.eq_ignore_ascii_case(tag) {
+                if let Some(b) = p.breaks.as_mut() {
+                    if matches!(b.state, PropState::NoState | PropState::Invulnerable) {
+                        b.state = PropState::Damagable;
+                    }
+                }
+            }
+        }
         self.hurt_props(tag, f32::INFINITY)
     }
 
