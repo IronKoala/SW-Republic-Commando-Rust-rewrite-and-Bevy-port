@@ -992,6 +992,7 @@ fn breakable(export: usize, name: &str, tag: &str, health: f32) -> Breakable {
         draw_scale_3d: [1.0; 3],
         pre_pivot: [0.0; 3],
         health,
+        starts_damagable: health > 0.0,
         damaged_ratio: 0.0,
         event: None,
         damaged: rc_level::breakables::Transition::default(),
@@ -1083,6 +1084,62 @@ fn damaged_step_rules() {
         sent(&d)
     );
     assert_eq!(d.prop_health(2), Some(0.0));
+}
+
+/// geo_04c's machine parts: no health, so damage does nothing until a
+/// script switches them to `Damagable`; then the first hit breaks them
+/// and their event (`TurretDestroyed`) goes out. A prop with health sent
+/// to `Invulnerable` goes straight back to `Damagable`; one sent to a
+/// state `Prop` doesn't have (or none) takes no damage, until it is made
+/// `Damagable` again (geo_03d's Barrel04).
+#[test]
+fn scripts_switch_prop_states() {
+    let map = MapScripts::default();
+    let mut d = Director::new(&map, &[], Settings::default());
+    let mut part = breakable(3, "Geo4MachinePart1", "MachinePart", 0.0);
+    part.event = Some("TurretDestroyed".into());
+    let barrel = breakable(4, "K_GeoBarrel0", "Barrel04", 60.0);
+    d.add_breakables(&[part, barrel]);
+    assert_eq!(d.prop_state(3), Some(PropState::Invulnerable));
+    assert_eq!(d.hurt_prop(3, 50.0), PropHurt::NotBreakable);
+    assert_eq!(d.prop_health(3), Some(0.0));
+    let r = d.props_goto_state("machinepart", "Damagable");
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert_eq!(d.prop_state(3), Some(PropState::Damagable));
+    assert_eq!(
+        d.props_goto_state("MachinePart", "Damagable")[0].1,
+        "already Damagable; nothing happens"
+    );
+    assert_eq!(d.hurt_prop(3, 1.0), PropHurt::Broken);
+    run(&mut d, 0.1);
+    assert!(sent(&d).contains(&"TurretDestroyed".to_string()));
+
+    // No state: damage does nothing.
+    d.props_goto_state("Barrel04", "");
+    assert_eq!(d.prop_state(4), Some(PropState::NoState));
+    assert_eq!(d.hurt_prop(4, 100.0), PropHurt::NotBreakable);
+    // `Auto` is the start state, `Invulnerable`: with health it goes on to
+    // `Damagable`.
+    d.props_goto_state("Barrel04", "Auto");
+    assert_eq!(d.prop_state(4), Some(PropState::Damagable));
+    d.props_goto_state("Barrel04", "Destroyed");
+    assert_eq!(d.prop_state(4), Some(PropState::NoState));
+    d.props_goto_state("Barrel04", "Damagable");
+    assert_eq!(d.hurt_prop(4, 10.0), PropHurt::Hurt(50.0));
+    // `PropDestroyed` breaks it at once.
+    d.props_goto_state("Barrel04", "PropDestroyed");
+    assert_eq!(d.hurt_prop(4, 1.0), PropHurt::AlreadyBroken);
+    assert!(d.props_goto_state("Nobody", "Damagable").is_empty());
+
+    // The state is saved.
+    let mut e = Director::new(&map, &[], Settings::default());
+    e.add_breakables(&[breakable(5, "Rock1", "Rock", 0.0)]);
+    e.props_goto_state("Rock", "Damagable");
+    let snap = e.snapshot();
+    let mut f = Director::new(&map, &[], Settings::default());
+    f.add_breakables(&[breakable(5, "Rock1", "Rock", 0.0)]);
+    f.restore(&snap);
+    assert_eq!(f.prop_state(5), Some(PropState::Damagable));
 }
 
 /// A broken prop stays broken after a save and a load.

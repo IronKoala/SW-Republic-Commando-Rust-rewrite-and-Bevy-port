@@ -247,6 +247,10 @@ pub struct Mover {
     to_send: Vec<String>,
     /// When the current opening or closing run started, s.
     run_started: f32,
+    /// A level script is moving it to this key (`ACTION_MoverToKeyframe`,
+    /// the original's `ScriptTriggeredKeyframe`): it goes key by key and
+    /// stops there, with none of its opening or closing events or sounds.
+    pub script_key: Option<usize>,
 }
 
 /// Something that happened to a mover, for the log and for sounds.
@@ -297,6 +301,7 @@ impl Mover {
             was_touched: false,
             to_send: Vec::new(),
             run_started: 0.0,
+            script_key: None,
             info,
         }
     }
@@ -585,6 +590,28 @@ impl Mover {
                     self.phase = Phase::Wait { left: left - dt };
                 }
             }
+            Phase::Moving { from, to, t } if t >= 1.0 && self.script_key.is_some() => {
+                // engine.u `Mover.KeyFrameReached`: at the script's key it
+                // stops (and sends its `Event`, which the port doesn't
+                // read: no Geonosis mover moved this way has one);
+                // otherwise it goes on to the next key the same way.
+                self.key = to;
+                self.pose = key_pose(&self.info, to);
+                let target = self.script_key.unwrap_or(to);
+                let last = self.last_key();
+                if to == target {
+                    self.script_key = None;
+                    self.phase = Phase::Rest;
+                    self.opening = to > 0 && to == last;
+                } else if to > from && to < last {
+                    self.phase = Phase::Moving { from: to, to: to + 1, t: 0.0 };
+                } else if to < from && to > 0 {
+                    self.phase = Phase::Moving { from: to, to: to - 1, t: 0.0 };
+                } else {
+                    self.script_key = None;
+                    self.phase = Phase::Rest;
+                }
+            }
             Phase::Moving { from, to, t } if t >= 1.0 => {
                 self.key = to;
                 self.pose = key_pose(&self.info, to);
@@ -682,6 +709,10 @@ pub struct MoverSnapshot {
     pub touched: bool,
     /// When the run under way started, in the set's seconds.
     pub run_started: f32,
+    /// What it does now (a script can change it); `None` keeps the map's.
+    pub behaviour: Option<Behaviour>,
+    /// The key a level script is moving it to, if any.
+    pub script_key: Option<usize>,
 }
 
 /// One touch trigger's state, for a saved game.
@@ -875,6 +906,8 @@ impl MoverSet {
                     used: m.used,
                     touched: m.was_touched,
                     run_started: m.run_started,
+                    behaviour: Some(m.behaviour),
+                    script_key: m.script_key,
                 })
                 .collect(),
             triggers: self
@@ -926,6 +959,10 @@ impl MoverSet {
             m.used = s.used;
             m.was_touched = s.touched;
             m.run_started = s.run_started;
+            if let Some(b) = s.behaviour {
+                m.behaviour = b;
+            }
+            m.script_key = s.script_key.map(clamp);
             m.to_send.clear();
             m.pose = match m.phase {
                 Phase::Moving { .. } => m.advance(0.0).0,
@@ -1008,6 +1045,87 @@ impl MoverSet {
         self.movers[i].start_opening(i, now, events);
         self.send_queued(events);
         true
+    }
+
+    /// A script puts the mover with this actor name in another state
+    /// (`GotoState`): from now on it does what `behaviour` does, and with
+    /// `close` it starts closing (the original's `Close` label, as
+    /// `BreachDoor.LockDoor` sends its doors to `Locked`, `Close`).
+    /// Returns whether there is such a mover.
+    pub fn set_behaviour_named(
+        &mut self,
+        name: &str,
+        behaviour: Behaviour,
+        close: bool,
+        events: &mut Vec<MoverEvent>,
+    ) -> bool {
+        let Some(i) = self
+            .movers
+            .iter()
+            .position(|m| m.info.place.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        let now = self.time;
+        let m = &mut self.movers[i];
+        m.behaviour = behaviour;
+        m.held = false;
+        if close {
+            m.start_closing(i, now, events);
+        }
+        self.send_queued(events);
+        true
+    }
+
+    /// `ACTION_MoverToKeyframe` (gameplay.u): every mover tagged `tag`
+    /// not already at (or heading to) key `key` goes there, one key at a
+    /// time, as the original's `InterpolateTo` and `KeyFrameReached` do.
+    /// Returns each one moved, with the seconds it takes (the sum of the
+    /// `MoveTimes` on the way). With `first_only`, stops after the first
+    /// one moved (the original returns from its loop there when the script
+    /// waits for it).
+    pub fn move_to_key_tagged(&mut self, tag: &str, key: usize, first_only: bool) -> Vec<(usize, f32)> {
+        let mut out = Vec::new();
+        let now = self.time;
+        for (i, m) in self.movers.iter_mut().enumerate() {
+            if tag.is_empty() || !m.info.tag.eq_ignore_ascii_case(tag) {
+                continue;
+            }
+            // The original's `KeyNum` is the key it is heading for.
+            let at = match m.phase {
+                Phase::Moving { to, .. } => to,
+                _ => m.key,
+            };
+            if key == at {
+                continue;
+            }
+            let last = m.last_key();
+            let key = key.min(last);
+            let secs: f32 = if key > at {
+                (at..key).map(|k| m.info.segment_time(k, k + 1)).sum()
+            } else {
+                (key..at).map(|k| m.info.segment_time(k, k + 1)).sum()
+            };
+            let step_to = if key > at { at + 1 } else { at - 1 };
+            m.script_key = Some(key);
+            m.phase = match m.phase {
+                // Heading the other way: turn round where it is.
+                Phase::Moving { from, to, t } if from == step_to => {
+                    Phase::Moving { from: to, to: from, t: 1.0 - t }
+                }
+                _ => Phase::Moving {
+                    from: at,
+                    to: step_to,
+                    t: 0.0,
+                },
+            };
+            m.run_started = now;
+            out.push((i, secs));
+            if first_only {
+                break;
+            }
+        }
+        out
     }
 
     /// Start mover `i` closing. For tests and the check tool.

@@ -553,6 +553,7 @@ mod tests {
             draw_scale_3d: [1.0; 3],
             pre_pivot: [0.0; 3],
             health: 60.0,
+            starts_damagable: true,
             damaged_ratio: 0.0,
             event: None,
             damaged: Transition::default(),
@@ -616,6 +617,7 @@ mod tests {
             draw_scale_3d: [1.0; 3],
             pre_pivot: [0.0; 3],
             health: 60.0,
+            starts_damagable: true,
             damaged_ratio: 0.0,
             event: Some(format!("{name}Gone")),
             damaged: Transition::default(),
@@ -679,6 +681,10 @@ mod tests {
             stats: PlayStats::default(),
             breaking: Breakables::new(&list),
             anchors: vec![],
+            marker_states: Default::default(),
+            state_effects: Vec::new(),
+            mover_keys: Vec::new(),
+            timed_done: Vec::new(),
             props: PropStats::default(),
         });
         w.insert_resource(Objectives::default());

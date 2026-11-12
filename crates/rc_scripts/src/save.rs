@@ -95,6 +95,11 @@ pub struct PropSave {
     /// In its damaged step (breakable props). Older saves don't have it.
     #[serde(default)]
     pub damaged: bool,
+    /// Its state (`Damagable`, `Invulnerable`, ...: [`crate::PropState`]),
+    /// for breakable props. Older saves don't have it: the prop keeps its
+    /// start state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -196,6 +201,7 @@ impl Director {
                     health: p.health,
                     destroyed: p.destroyed,
                     damaged: p.breaks.as_ref().is_some_and(|b| b.damaged),
+                    state: p.breaks.as_ref().map(|b| b.state.name().to_string()),
                 })
                 .collect(),
             teleporter: self
@@ -310,6 +316,9 @@ impl Director {
             p.destroyed = s.destroyed;
             if let Some(b) = p.breaks.as_mut() {
                 b.damaged = s.damaged;
+                if let Some(st) = s.state.as_deref().and_then(crate::PropState::from_name) {
+                    b.state = st;
+                }
                 // A damaged step on a clock starts its clock again.
                 b.break_at = (s.damaged && !s.destroyed && b.damaged_span > 0.0)
                     .then_some(self.time + b.damaged_span);

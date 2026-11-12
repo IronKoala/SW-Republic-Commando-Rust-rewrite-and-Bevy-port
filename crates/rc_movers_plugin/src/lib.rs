@@ -37,6 +37,7 @@ use rc_game_core::{
 use rc_level_plugin::LevelMoverData;
 use rc_level_viewer::draw::MoverPart;
 use rc_movement::{Hit, Pawn, Vec3 as UVec3, World as MoveWorld};
+pub use rc_movers::Behaviour;
 use rc_movers::{MoverEvent, MoverSet, Settings};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
@@ -179,6 +180,28 @@ impl LevelMovers {
         let t = set.time;
         self.queue(t, events);
         found
+    }
+
+    /// A script puts the mover with this actor name in another state (see
+    /// [`MoverSet::set_behaviour_named`]). Returns whether there is one.
+    pub fn set_behaviour_named(&self, name: &str, behaviour: Behaviour, close: bool) -> bool {
+        let mut set = self.shared.set.write().unwrap_or_else(|e| e.into_inner());
+        let mut events = Vec::new();
+        let found = set.set_behaviour_named(name, behaviour, close, &mut events);
+        let t = set.time;
+        self.queue(t, events);
+        found
+    }
+
+    /// `ACTION_MoverToKeyframe`: see [`MoverSet::move_to_key_tagged`].
+    /// Returns each mover moved (its name) and the seconds it takes.
+    pub fn move_to_key_tagged(&self, tag: &str, key: usize, first_only: bool) -> Vec<(String, f32)> {
+        let mut set = self.shared.set.write().unwrap_or_else(|e| e.into_inner());
+        let moved = set.move_to_key_tagged(tag, key, first_only);
+        moved
+            .into_iter()
+            .map(|(i, secs)| (set.movers[i].info.place.name.clone(), secs))
+            .collect()
     }
 
     /// The event is over (the player left the trigger that sent it), as

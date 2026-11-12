@@ -41,6 +41,7 @@ pub mod look;
 pub mod save;
 pub mod membership;
 pub mod voice;
+pub mod switches;
 
 use bevy::prelude::*;
 use rc_combat::{
@@ -426,6 +427,8 @@ impl Plugin for SquadPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<MarkerJob>()
+            .add_message::<rc_game_core::MarkerSwitch>()
+            .init_resource::<switches::PendingSwitches>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadOptions>()
@@ -458,7 +461,16 @@ impl Plugin for SquadPlugin {
                     .before(check_down)
                     .run_if(resource_exists::<carry::PendingSquadCarry>),
             )
-            .add_systems(OnExit(GameState::InGame), clear_squad)
+            .add_systems(OnExit(GameState::InGame), (clear_squad, switches::forget))
+            .add_systems(
+                Update,
+                switches::switch_markers
+                    .in_set(GameSet::Simulate)
+                    .in_set(SquadSet)
+                    .after(spawn_squad)
+                    .before(take_orders)
+                    .run_if(playing),
+            )
             .add_systems(OnEnter(GameState::MainMenu), carry::forget_pending)
             .add_systems(
                 Update,

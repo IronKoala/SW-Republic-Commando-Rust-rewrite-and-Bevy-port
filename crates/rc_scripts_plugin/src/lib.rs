@@ -166,6 +166,15 @@ impl Plugin for ScriptsPlugin {
                     .in_set(GameSet::Simulate)
                     .run_if(playing),
             )
+            .add_systems(
+                Update,
+                markers::apply_states
+                    .in_set(ScriptSystems)
+                    .in_set(GameSet::Simulate)
+                    .after(run)
+                    .before(hide_parts)
+                    .run_if(playing),
+            )
             .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
@@ -266,6 +275,18 @@ pub struct LevelScript {
     /// Squad marker anchors (charges, consoles, door locks) and what they
     /// set off (see `markers.rs`).
     pub anchors: Vec<markers::Anchor>,
+    /// The states of the order markers and their anchors (see
+    /// `rc_scripts::marker_states`).
+    pub marker_states: rc_scripts::marker_states::MarkerStates,
+    /// What their state changes set off, carried out by
+    /// `markers::apply_states` this frame.
+    pub state_effects: Vec<rc_scripts::marker_states::StateEffect>,
+    /// Movers scripts send to a key (`ACTION_MoverToKeyframe`), carried
+    /// out by `markers::apply_states`.
+    pub mover_keys: Vec<markers::MoverKey>,
+    /// Script actions the game finishes after a time: (scripts' clock,
+    /// script, action).
+    pub timed_done: Vec<(f32, String, usize)>,
     started: bool,
     /// What the cutscene asks of the player and the screen.
     pub scene: cutscene::Scene,
@@ -297,6 +318,10 @@ impl LevelScript {
             breaking: breakables::Breakables::new(&[]),
             props: breakables::PropStats::default(),
             anchors: Vec::new(),
+            marker_states: Default::default(),
+            state_effects: Vec::new(),
+            mover_keys: Vec::new(),
+            timed_done: Vec::new(),
         }
     }
 }
@@ -358,6 +383,12 @@ pub struct PlayStats {
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
     pub doors_unlocked: Vec<String>,
+    /// Props a `GotoState` switched: `NAME State: what happened`.
+    pub prop_states: Vec<String>,
+    /// Order markers and anchors scripts sent to a state ("tag state").
+    pub marker_states: Vec<String>,
+    /// Movers scripts sent to a key ("tag key").
+    pub mover_keys: Vec<String>,
 }
 
 impl LevelScript {
@@ -577,6 +608,11 @@ fn build(
         places.len()
     ));
     let anchors = markers::read_anchors(map);
+    let marker_states = rc_scripts::marker_states::MarkerStates::read(map);
+    log.line(format!(
+        "{PART}: {} order markers and anchors with states",
+        marker_states.actors.len()
+    ));
     for a in &anchors {
         log.line(format!(
             "{PART}:   marker anchor {} ({}): started {:?}, armed {:?}, done {:?}{}{}",
@@ -647,6 +683,10 @@ fn build(
         ammo: Vec::new(),
         hud_blink: Default::default(),
         anchors,
+        marker_states,
+        state_effects: Vec::new(),
+        mover_keys: Vec::new(),
+        timed_done: Vec::new(),
         started: false,
         scene: cutscene::Scene::default(),
         stats: PlayStats::default(),
@@ -743,6 +783,8 @@ fn run(
             script.director.start_events()
         ));
         script.director.start();
+        let fx = script.marker_states.start();
+        script.state_effects.extend(fx);
     }
     // What the doors did: their own events can start scripts.
     for m in from_movers.read() {
@@ -1141,10 +1183,77 @@ fn carry_out(
                     "{at}: bacta dispenser {tag} {}",
                     if on { "switched on" } else { "switched off" }
                 ));
-            } else {
+            }
+            // Order markers and their anchors (charges, consoles, door
+            // locks).
+            let (k, fx) = script.marker_states.goto_state(tag, state);
+            if k > 0 {
+                log.line(format!(
+                    "{at}: {k} order markers or anchors tagged {tag} to {state}"
+                ));
+                script.stats.marker_states.push(format!("{tag} {state}"));
+            }
+            script.state_effects.extend(fx);
+            n += k;
+            // Props (engine.u `Prop`'s states).
+            let props = script.director.props_goto_state(tag, state);
+            for (name, what) in &props {
+                log.line(format!(
+                    "{at}: prop {name} (tag {tag}) to {state:?}: {what}"
+                ));
+                script
+                    .stats
+                    .prop_states
+                    .push(format!("{name} {state}: {what}"));
+            }
+            n += props.len();
+            if n == 0 {
                 script.stats.not_done += 1;
                 log.line(format!("{at}: {tag} to state {state} (not done yet)"));
             }
+        }
+        "movertokeyframe" => {
+            let tag = a.text("MoverTag").unwrap_or("").to_string();
+            let key = a.int("KeyFrame").unwrap_or(0).max(0) as usize;
+            log.line(format!("{at}: movers {tag} to key {key}"));
+            script.mover_keys.push(markers::MoverKey {
+                tag,
+                key,
+                waits: call.waits,
+                script: call.script.clone(),
+                index: call.index,
+            });
+        }
+        "setcancancelmarker" => {
+            let tag = a.text("MarkerTag").unwrap_or("");
+            let can = a.flag("bCanCancel", true);
+            let names = script.marker_states.markers_tagged(tag);
+            if names.is_empty() {
+                log.line(format!("{at}: {tag}: no order marker has that tag"));
+            }
+            for name in names {
+                log.line(format!(
+                    "{at}: {name} {} be cancelled once under way",
+                    if can { "can" } else { "can't" }
+                ));
+                script
+                    .state_effects
+                    .push(rc_scripts::marker_states::StateEffect::CanCancel { name, can });
+            }
+        }
+        "showmarker" => {
+            // Only the marker's icons (engine.u `AlwaysVisible`,
+            // `NotifyTargeted`): the port doesn't draw order markers' icons.
+            let tag = a.text("MarkerTag").unwrap_or("");
+            log.line(format!(
+                "{at}: {tag} icons {} (not done yet: the port draws no marker icons)",
+                if a.flag("bShow", true) {
+                    "shown"
+                } else {
+                    "hidden"
+                }
+            ));
+            script.stats.not_done += 1;
         }
         "showprompt" => {
             let text = a.text("PromptText").unwrap_or("").to_string();

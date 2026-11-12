@@ -1844,8 +1844,8 @@ have 838 of them; 53 send an event the level scripts wait for.
 
 How a prop breaks (our reading of the game, in our words):
 
-- It starts with `Health`. With none (0 or less) nothing can hurt it; only
-  a script can remove it.
+- It starts with `Health`. With none (0 or less) nothing can hurt it,
+  until a level script makes it breakable (below).
 - Damage counts after the prop's damage table, as for characters.
 - `DamagedRatio` above 0: when health falls to that share of the start,
   it goes to its damaged step (`DamagedState`): sends that step's event,
@@ -1888,6 +1888,32 @@ the burning or electric after-effect some barrels leave,
 the push on loose (Karma) props, and a prop's `DeathSpawnActorClass`. Breakable props players can walk
 through (geo_04c's wall components) aren't in the collision, so shots pass
 through them.
+
+#### Scripts switching a prop's state (`ACTION_GotoState`)
+
+These steps are UnrealScript states of engine.u `Prop`, whose source text
+is in the package: `Invulnerable` (the start state: its `BeginState` goes
+straight on to `Damagable` when the prop has health), `Damagable` (damage
+takes health off), `PropDamaged`, `PropDestroyed` and `Exploding`. A
+level script's `ACTION_GotoState` sends every actor with its `TargetTag`
+to a state. How `GotoState` itself behaves is compiled code; it was read
+from Core.dll's `UObject::GotoState` (disassembled locally, nothing
+kept): the name `Auto` means the class's start state; going to the state
+it is already in runs nothing; a name the class has no state for (or
+none) leaves it in no state at all, where `Prop`'s damage does nothing.
+
+So in the port (`Director::props_goto_state`, state in `PropState`):
+props without health that a `GotoState` in the map names are read too
+(`Breakable::starts_damagable` false), and take no damage until a script
+sends them to `Damagable`; then the first hit breaks them (health below
+nothing). geo_04c's machine parts work this way: the one tagged
+`TurretMachine03` sends `TurretDestroyed`. `PropDestroyed` breaks the
+prop at once, `PropDamaged` takes it to its damaged step, `Auto` and
+`Invulnerable` send it back to the start (a prop with health is
+breakable again at once), and any other name switches damage off
+(geo_03d's `Barrel04` gets an empty state until later). The state is kept
+in saves. Not done: `Exploding` sent by a script (no map does), and a
+broken prop sent back to `Damagable` (it stays broken).
 
 ### Characters in scripts (`rc_scripts_plugin/src/characters.rs`)
 
@@ -2059,6 +2085,83 @@ Not done: the anchor's own look changing (a lit charge, a console's
 screen, the blown lock's mesh), its sounds, the player doing a job with
 Use, and saving which steps were sent (after a load a step can be sent
 again if the squad repeats it).
+
+#### Scripts switching markers, charges, consoles and door locks (`rc_scripts::marker_states`)
+
+Level scripts switch squad markers on and off, and put their anchors in
+other states, with `ACTION_GotoState` (about 100 steps on Geonosis), and
+every one of these actors starts the level in its `InitialState`. The
+rules are the original's own script code, read as text from engine.u,
+ctgame.u and ctmarkers.u (nothing copied), plus Engine.dll and Core.dll
+read locally for the engine's part (nothing kept):
+
+| Actor | States the port carries out | What happens |
+|---|---|---|
+| Order marker (`MarkerSnipe`, `MarkerDemolition`, ...) | `Enabled` (start), `Disabled` | off: can't be aimed at or ordered; a squad mate on it leaves when it can be cancelled after it's under way |
+| `HackTerminal*` | `Standby` (start), `Disabled` | marker on / off, `StandbyState.Event` / `DisabledState.Event` |
+| `HackDoor*`, `BreachDoor*` | `Locked` (start), `Disabled`, `Unlocked` | `Locked`: event, marker on, lock the door; `Disabled`: event, marker off, lock the door; `Unlocked`: marker off, the other lock unlocked too, doors unlocked, event |
+| `DemolitionCharge` | `Unplaced` (start), `Disabled` | `Disabled`: charge hidden, marker off; back to `Unplaced`: shown, marker on |
+
+Only a breach lock moves its doors: locking sends `DoorLeft` and
+`DoorRight` to `Locked` with the `Close` label (they shut and nothing but
+a script opens them: `Behaviour::Static`) and locks the other lock on the
+door too; unlocking puts the doors in `TriggerControl`.
+An anchor only switches its marker while no squad mate is on it
+(`!SquadMarker.bMarkerActive`); a disabled charge does it regardless.
+Engine rules: `Auto` is the start state; going to the state an actor is
+already in does nothing; at the level's start each actor goes to its
+`InitialState` in the map's order unless another set it up first
+(`bScriptInitialized`), so an anchor decides its marker's start.
+
+`ACTION_SetCanCancelMarker` (`bCanCancel`, class default true) sets a
+marker's `bCanCancelAfterUnderway`. A recall (F4) leaves a squad mate on a
+job that is under way (posted, or working) when that's cleared and the
+marker is on (ctgame.dll `CancelMarker`: refused unless the marker's
+action is "cancel"). `ACTION_ShowMarker` only shows the marker's icons,
+which the port doesn't draw yet: logged and counted as not done.
+
+How it flows: `MarkerStates` (no Bevy) works out `StateEffect`s; the
+scripts part sends `rc_game_core::MarkerSwitch` to the squad
+(`Squad::switch_marker`, `Squad::set_marker_can_cancel`, kept in
+`Squad::switches` and in saves), sets doors with
+`LevelMovers::set_behaviour_named` (the mover's behaviour is saved
+too), sends the events and hides or shows the charge. Switches sent
+before the squad is in the level wait for it.
+
+Checked over the 13 Geonosis maps (a scratch listing, not committed):
+every `GotoState` on these actors is one of the states above. At the
+start geo_01c's guard room door and side door and geo_03a's breach door
+are `Unlocked`, so their doors are left to their triggers; those
+triggers (`Trigger42`, `Trigger46` in geo_01c) send no event in the map,
+so what opens these doors in the original isn't found yet and they stay
+shut as before. One more thing the code does that looks odd but is the
+original's: geo_03d's control room door has both locks `Disabled`, and
+the breach lock locking the door sends the slice lock to `Locked`, which
+switches the slice marker on.
+
+Not done: marker icons (`ShowMarker`, the `Disabled` state hiding them),
+a trigger enabling a disabled marker (no Geonosis map sends one), the
+anchor states reached through a job (`Active`, `Hacked`, `Placed`,
+`Armed`, `Explode`, `Damaged`: logged as not done when a script asks).
+
+#### Scripts moving a mover to a key (`ACTION_MoverToKeyframe`)
+
+gameplay.u's `ACTION_MoverToKeyframe` sends every mover tagged `MoverTag`
+that isn't at (or heading for) `KeyFrame` there, one key at a time
+(`InterpolateTo`, then engine.u `Mover.KeyFrameReached` chains on until
+`ScriptTriggeredKeyframe`), with none of the mover state's opening or
+closing events or sounds. With `bWaitUntilFinish` (class default true)
+the script waits the sum of the `MoveTimes` on the way, for the first
+mover moved only (the original returns from its loop there). The port:
+`MoverSet::move_to_key_tagged` and `Mover::script_key` (saved), the
+director waiting as for a character action, and the scripts part
+finishing the wait after those seconds (`LevelScript::timed_done`).
+geo_04c is the only Geonosis map that uses it: `ScriptedTrigger17` lifts
+the hidden blocker `BlastDoor01` (`Mover16`, 5 s) at the start and drops
+it again once `BlastDoorClose01` comes, then sends `BlastDoorClosed01`.
+Not done: the mover's own `Event` on arriving (no Geonosis mover moved
+this way has one), and a second order while one is under way restarts
+from the key it is heading for instead of from where it is.
 
 ### geo_01a, worked through
 

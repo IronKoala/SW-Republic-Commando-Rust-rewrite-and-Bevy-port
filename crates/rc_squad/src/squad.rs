@@ -607,6 +607,21 @@ pub struct Squad {
     /// an order that needs more squad mates than are free takes them off
     /// pullable posts. Off, the order is refused while they're busy.
     pub auto_pull: bool,
+    /// What the level scripts set on each marker (same order as
+    /// `markers`; a marker past the end has the defaults).
+    pub switches: Vec<MarkerSwitches>,
+}
+
+/// What level scripts set on a marker (engine.u `SquadMarker`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MarkerSwitches {
+    /// In the `Disabled` state: it can't be ordered, and its icons are
+    /// hidden.
+    pub off: bool,
+    /// `bCanCancelAfterUnderway` cleared (`ACTION_SetCanCancelMarker`):
+    /// once its job is under way, a recall doesn't take the squad mate
+    /// off it. Every marker class starts with it set.
+    pub no_cancel: bool,
 }
 
 /// A lit fuse.
@@ -742,6 +757,7 @@ impl Squad {
             pending: Vec::new(),
             boxes: Vec::new(),
             auto_pull: true,
+            switches: Vec::new(),
         };
         (squad, events)
     }
@@ -768,12 +784,101 @@ impl Squad {
 
     /// Put in the map's markers, each named after its job.
     pub fn set_markers(&mut self, spots: Vec<MarkerSpot>) {
+        self.switches = vec![MarkerSwitches::default(); spots.len()];
         self.markers = spots.into_iter().map(|s| (s, MarkerState::Open)).collect();
         for k in 0..self.markers.len() {
             if let Some(name) = self.job_of(k).map(|j| j.name.clone()) {
                 self.markers[k].0.job = name;
             }
         }
+    }
+
+    /// What the level scripts set on marker `k`.
+    pub fn switches_of(&self, k: usize) -> MarkerSwitches {
+        self.switches.get(k).copied().unwrap_or_default()
+    }
+
+    fn switches_mut(&mut self, k: usize) -> &mut MarkerSwitches {
+        if self.switches.len() < self.markers.len() {
+            self.switches
+                .resize(self.markers.len(), MarkerSwitches::default());
+        }
+        &mut self.switches[k]
+    }
+
+    /// The markers whose order marker is called `order` (`MarkerSnipe1`):
+    /// one per spot.
+    fn markers_named(&self, order: &str) -> Vec<usize> {
+        (0..self.markers.len())
+            .filter(|&k| {
+                let o = &self.markers[k].0.order;
+                !o.is_empty() && o.eq_ignore_ascii_case(order)
+            })
+            .collect()
+    }
+
+    /// Whether a squad mate is on the order marker `order`.
+    pub fn order_marker_busy(&self, order: &str) -> bool {
+        self.markers_named(order)
+            .iter()
+            .any(|&k| matches!(self.markers[k].1, MarkerState::Assigned(_)))
+    }
+
+    /// A level script (or the marker's anchor) switches the order marker
+    /// `order` on (`Enabled`) or off (`Disabled`, `MakeObsolete`).
+    /// Switching off a marker a squad mate is on takes them off it when
+    /// it can be cancelled after it's under way (engine.u
+    /// `SquadMarker.Disabled.BeginState`: `CancelMarker(None)` when
+    /// `bMarkerActive && bCanCancelAfterUnderway`). Returns how many
+    /// spots it has. With `only_if_free`, a marker a squad mate is on is
+    /// left as it is.
+    pub fn switch_marker(
+        &mut self,
+        order: &str,
+        on: bool,
+        only_if_free: bool,
+        events: &mut Vec<SquadEvent>,
+    ) -> usize {
+        let ks = self.markers_named(order);
+        if only_if_free
+            && ks
+                .iter()
+                .any(|&k| matches!(self.markers[k].1, MarkerState::Assigned(_)))
+        {
+            return ks.len();
+        }
+        for &k in &ks {
+            let sw = self.switches_mut(k);
+            sw.off = !on;
+            let no_cancel = sw.no_cancel;
+            if on || no_cancel {
+                continue;
+            }
+            let MarkerState::Assigned(i) = self.markers[k].1 else {
+                continue;
+            };
+            if self.members[i].marker == Some(k) {
+                self.members[i].marker = None;
+                self.members[i].state = MemberState::Idle;
+                events.push(SquadEvent::MarkerCancelled {
+                    member: self.members[i].settings.name.clone(),
+                    marker: self.markers[k].0.name.clone(),
+                });
+            }
+            self.markers[k].1 = MarkerState::Open;
+        }
+        ks.len()
+    }
+
+    /// `ACTION_SetCanCancelMarker`: whether a recall takes the squad mate
+    /// off `order` once its job is under way. Returns how many spots it
+    /// has.
+    pub fn set_marker_can_cancel(&mut self, order: &str, can: bool) -> usize {
+        let ks = self.markers_named(order);
+        for &k in &ks {
+            self.switches_mut(k).no_cancel = !can;
+        }
+        ks.len()
     }
 
     /// The turret post member `i` holds: the marker of a `mount` job they're
@@ -899,6 +1004,27 @@ impl Squad {
             }
             Order::Cancel => {
                 for i in 0..self.members.len() {
+                    // ctgame.dll `CancelMarker(Player)`: refused unless the
+                    // marker's action is "cancel": always while setting up,
+                    // but once under way only with `bCanCancelAfterUnderway`
+                    // (a switched-off marker always can).
+                    let underway = matches!(
+                        self.members[i].state,
+                        MemberState::Working { .. } | MemberState::Posted
+                    );
+                    if let Some(k) = self.members[i].marker {
+                        let sw = self.switches_of(k);
+                        if underway && sw.no_cancel && !sw.off {
+                            events.push(SquadEvent::OrderIgnored {
+                                order: format!("recall {}", self.members[i].settings.name),
+                                why: format!(
+                                    "{} can't be cancelled once under way (set by the level)",
+                                    self.markers[k].0.name
+                                ),
+                            });
+                            continue;
+                        }
+                    }
                     if let Some(k) = self.members[i].marker.take() {
                         self.markers[k].1 = MarkerState::Open;
                         events.push(SquadEvent::MarkerCancelled {
@@ -918,6 +1044,13 @@ impl Squad {
                     });
                     return events;
                 };
+                if self.switches_of(k).off {
+                    events.push(SquadEvent::OrderIgnored {
+                        order: format!("{} ({})", spot.name, spot.job),
+                        why: "switched off by the level".into(),
+                    });
+                    return events;
+                }
                 if *state != MarkerState::Open {
                     events.push(SquadEvent::OrderIgnored {
                         order: format!("{} ({})", spot.name, spot.job),
@@ -1874,7 +2007,7 @@ impl Squad {
         self.markers
             .iter()
             .enumerate()
-            .filter(|(_, (_, st))| *st == MarkerState::Open)
+            .filter(|(k, (_, st))| *st == MarkerState::Open && !self.switches_of(*k).off)
             .filter_map(|(k, (spot, _))| {
                 let to = spot.aim - eye;
                 let d = to.length();
