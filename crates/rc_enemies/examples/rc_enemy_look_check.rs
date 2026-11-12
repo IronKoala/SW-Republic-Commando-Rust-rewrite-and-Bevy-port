@@ -1,8 +1,8 @@
 //! Reads every enemy type's model the way the game does (data/enemies/*.toml
 //! `[look]`) and checks each one: the mesh is found, every animation the file
 //! names is found (a missing one is listed as a NOTE: that pose plays the
-//! idle animation), and the skin is a real picture rather than a grey
-//! stand-in. No window. Needs the game files:
+//! idle animation), the skin is a real picture rather than a grey
+//! stand-in, and the weapon it holds (`held_weapon`) loads. No window. Needs the game files:
 //!
 //! `RC_GAME_DIR=<game folder> cargo run -p rc_enemies --example rc_enemy_look_check`
 //!
@@ -100,6 +100,29 @@ fn main() {
         };
         if !ok {
             check(&mut line, false, format!("{id}: skin loads"));
+        }
+        // The weapon it holds (`[look] held_weapon`): the weapon class's
+        // AttachmentClass model.
+        if !l.held_weapon.is_empty() {
+            let game_data = paths.game_data();
+            let held = rc_effects::projectile::ClassPackages::open(&game_data).and_then(|c| {
+                let info = c.held_weapon(&l.held_weapon)?;
+                rc_effects_plugin::held::HeldModel::load(&c, &game_data, &l.held_weapon)
+                    .map(|_| info)
+            });
+            match held {
+                Ok(info) => check(
+                    &mut line,
+                    true,
+                    format!(
+                        "{id}: holds {} (model {} from {})",
+                        l.held_weapon,
+                        info.mesh.join("."),
+                        info.attachment
+                    ),
+                ),
+                Err(e) => check(&mut line, false, format!("{id}: holds {} ({e})", l.held_weapon)),
+            }
         }
         let points = look.posed(Pose::Idle, 0.0);
         let (lo, hi) = points

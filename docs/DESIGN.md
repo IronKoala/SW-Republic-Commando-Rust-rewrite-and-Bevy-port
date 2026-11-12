@@ -1195,6 +1195,15 @@ whether it stops players (`bBlockPlayers`), the AI (`bBlockActors`) and
 shots (`bBlockZeroExtentTraces`). The ones that stop players are added to
 the walking collision. Check: only 11 of 8,942 AI path points are inside a
 volume (107 with `PrePivot` ignored, 115 turned a quarter wrong).
+Other volumes block too when the map turns their `bBlockPlayers` or
+`bBlockActors` on (engine.u's `Actor` leaves both off; `BlockingVolume`
+turns them on). geo_01a's `PhysicsVolume1`, tag `PlayerStand`, is the
+floor you stand on inside the gunship; the intro script's `SetCollision`
+takes it away after the rope order, and you drop about 590 units to the
+ground (gravity -1100, landing at about 1,140 units a second, under
+`MaxFallSpeed` 1200, so no fall damage). The original's `Briefing` state
+only turns the view (`PlayerMove`: `UpdateRotation`), so the body still
+falls. These volumes don't stop shots here.
 
 **The sky.** Unreal 2 draws the sky from a small sky box somewhere in the
 map, marked by a `SkyZoneInfo`. Windows onto it are BSP surfaces flagged
@@ -1645,6 +1654,7 @@ and carries out the effects:
 | walking into an open level exit, `ChangeLevel`, a debriefing's `NewLevel` | `ChangeLevel { map, portal }` (see "Going on to the next map") |
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
+| `AddAmmo` | `rc_game_core::pickups::AddAmmo` to `rc_combat::script_ammo`: the player's grenade of that class (the grenade file's `game_class`) gets the amount added, kept between 0 and the most carried, as the original's `Ammunition.AddAmmo`; nothing if not carried. Only grenades: no map names a gun |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
@@ -3003,8 +3013,13 @@ What the files don't say is listed in `clone_trooper_tm.toml`: the
 troopers' attack state (`StateTrandoshanAttack`) works in compiled code,
 so they fight the way our droids do. A type's `[look] held_weapon` names
 the weapon class whose model it holds (the original's `RequiredEquipment`:
-`DC17mBlaster` for `CloneTrooper`, `DC15BlasterCloneTM` for
-`CloneTrooperTM`). `rc_enemies` reads it once per type with
+`DC15BlasterClone` for `CloneTrooper`, `DC15BlasterCloneTM` for
+`CloneTrooperTM`). `CloneTrooper`'s own value in ctcharacters.u is the
+commandos' `CTInventory.DC17mBlaster`, but the game lays
+`CloneTrooperDefaults` (Properties/properties.u) over the class (core.dll
+builds the name `Properties.%sDefaults`), and that sets
+`Properties.DC15BlasterClone`; its numbers are in
+`data/weapons/dc15_blaster_clone.toml`. `rc_enemies` reads it once per type with
 `rc_effects_plugin::held::HeldModel` (as the level's cast does), hangs it
 as a child of each new fighter (`HeldWeapon`), and moves it onto the bone
 `weaponAttach_R` each time the body is posed (`DroidLook::bone_frame`).
@@ -4261,7 +4276,9 @@ start instead of being stood on the ground. Cast members are drawn by
 the level's light where they stand (`rc_game_core::LitByPlace`, the
 data file's `light_scale`, 1.1 as the squad and droids), so a trooper in
 shade is dark; holograms keep their own glow. A character whose class names a weapon
-(`RequiredEquipment`, "CTInventory.DC17mBlaster" on `CloneTrooper`)
+(`RequiredEquipment`, taken from the class's "...Defaults" class in
+Properties/properties.u when that sets it, as the game does:
+"Properties.DC15BlasterClone" from `CloneTrooperDefaults` on `CloneTrooper`)
 holds its model: the weapon's `AttachmentClass` (engine.u's `Weapon`;
 `DC17mBlasterAttachment`) gives a `StaticMesh`, read with
 `rc_effects::projectile::ClassPackages::held_weapon` and drawn on the
@@ -4271,6 +4288,26 @@ every weapon; `AttachToBone`), placed again each time the body is posed
 gunship's chin gun) draws nothing and says so in the log. The reading,
 drawing and placing are `rc_effects_plugin::held::HeldModel`, shared with
 the fighters the map's spawners make (`rc_enemies`, see "Two sides").
+
+**The Move bone isn't drawn (from engine.dll).** Many of the game's
+skeletons have a first bone named `Move` that every other bone hangs
+from, and animations use it to carry the whole body (geo_01a's gunship
+clips hold it 757 to 850 Unreal units up). engine.dll's
+`USkeletalMesh::PostLoad` marks bone 0 as the move bone when its name is
+`Move`, and `USkeletalMeshInstance::ApplyAnimation`, outside the editor,
+places a bone whose parent is the move bone without the move bone's own
+travel (found by decompiling engine.dll for reference only; nothing is
+copied into this repository). The travel is used only for actors with
+`Physics` 12 (`PHYS_RootMotion`), whose place follows it
+(`AActor::physRootMotion`). So the cast poses with
+`rc_model::Model::posed_in_game` and `bone_frame_in_game`
+(`rc_anim::globals_in_game`), unless the actor's `Physics` is 12, which
+keeps the old `posed_local` way. Before this the landing gunship
+(`Physics` 4, flying) was drawn 757 units too high. One effect: the
+gunship's `GunshipAmbushSpiderdroid` clip, which flies it off at the end
+of the level, also only turns it in place now, as the engine rule says
+for a flying actor; nothing found in the files switches it to root
+motion.
 
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its
@@ -4286,6 +4323,17 @@ it and sends `CharacterOrder`s:
 - `PlayAnim` by name from its own sets, looping or once; `WaitForAnimEnd`
   waits for the one playing. A name its sets don't have is logged and the
   script carries on.
+- `PlayPropAnim` (gameplay.u's `ACTION_PlayPropAnim`, a plain
+  `ScriptedAction`): every actor whose `Tag` is `AnimPropTag` plays
+  `BaseAnim` once, and the script goes straight on without waiting. Its
+  most common target is `PlayerCommando`, the player's own body (the
+  player pawn's tag, as ctcharacters.u's `ACTION_AttachToGunship` notes):
+  the original plays it there, but the first-person view never shows that
+  body (engine.u's `Pawn` sets `bOwnerNoSee`; the view is the pawn's place
+  plus its eye height), so the port logs it and draws nothing. geo_01a's
+  rope descent `EntranceRope600` is one of these. A tag no actor has does
+  nothing, as the original's `ForEach` finds nobody (geo_01a's
+  `CloneRope62` and `CloneRope40`).
 - `WaitForPlayer` waits for the player to come within the distance, but
   only `wait_for_player_limit` seconds (our choice, 20): our player may
   stand where the original's wouldn't, and a stuck cutscene is worse.
@@ -4822,6 +4870,38 @@ the effect and sends `rc_combat::Explode`.
 (`bActorDetonate`), zone gravity other than the default, decals and
 per-surface effects (the default material effect is used), and the trails'
 ribbon emitters (not drawn).
+
+### Emitters placed in the map (`rc_scripts_plugin/src/placed_emitters.rs`)
+
+**From the files.** A map places effects as actors whose class leads,
+through its parents, to engine.u's `Emitter` (`rc_effects::read::Library::is_emitter`).
+geo_01a has 11: the dust the gunship blows up (`REP_Gunship_GroundDust0`),
+fires (`Fire_Medium`), smoke (`SpireBigSmoke`, `WhiteSmoke`), blowing
+dust and floor fog. Each one runs its class's effect (from
+`Properties/cteffects.u`) at its map place and turn from the start of the
+level, for as long as the level lasts (`SpawnEffect::endless`, carried by
+an `EmitterCarrier` entity). None of geo_01a's starts switched off.
+
+**What a level event does to it (from engine.dll).** A level event that
+names an emitter's `Tag` calls engine.u's `Emitter.Trigger`, which calls
+each particle emitter's native `Trigger()`. engine.dll (decompiled for
+reference only, nothing copied) shows `UParticleEmitter::execTrigger`
+flipping the emitter's `Disabled` when its `TriggerDisabled` is set
+(engine.u's default, kept by every geo_01a emitter and by the map's own
+copies), and calling `Reset` when `ResetOnTrigger` is set (default off).
+`AEmitter::Tick` and `AEmitter::Render` skip a disabled emitter: its
+particles stop and vanish at once, and come back where they were when a
+second event switches it on. `rc_effects::sim::EffectState::trigger` does
+this, reached through `rc_effects_plugin::TriggerEffect`; the bool order
+that maps the engine's bits to these names is engine.u's own
+`ParticleEmitter` property list. geo_01a's gunship script sends
+`REP_Gunship_GroundDust` as the gunship leaves for the spider droid at
+the end of the level. A placed emitter's effect stays while the level
+lasts, even with every emitter off, as the map's actor does.
+
+**Not done.** The map's own copies of an emitter's settings (the class's
+are drawn), the actor's `DrawScale` (logged), and keeping which are off
+in save files.
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 

@@ -646,6 +646,23 @@ ctgame.u, ctinventory.u, engine.u, Properties/properties.u).
   bCanStrafe false, bCanSideStep true, Mesh `CloneTrooper`,
   RequiredEquipment `CTInventory.DC17mBlaster`, ControllerClass
   `CloneTrooperBot`. No AudioTable, no MyDamageVariance, no Skins.
+- `CloneTrooperDefaults` (Properties, read 2026-11-12), which the game
+  lays over `CloneTrooper` (core.dll holds the name pattern
+  `Properties.%sDefaults` and `UClass::IsDefaultsOverride`):
+  RequiredEquipment `Properties.DC15BlasterClone` (so the class's
+  DC-17m is not what troopers carry), IdleInfoClassName
+  `Properties.StandardIdleInfo`, FootstepInfoClass `CloneCommando_FS`,
+  BurntMaterial `CloneTrooper_Burn`, ShieldColor, RagImpactSounds, KParams
+  `KarmaParamsSkel31`.
+- `DC15BlasterClone` (Properties, parent `CTWeaponRecharging`): ShotDelay
+  0.15, FireMode 2, BurstCount 4, OptimalDist 10000, FireSound
+  `DC17_CommandoFire` (a SoundMultiple in gen_sound.uax), MuzzleClass
+  `DC_17_MuzzFlsh`, MeleeRange 150, MeleeDamage 100, AttachmentClass
+  `DC15AttachmentClone` (StaticMesh `DC15Blaster`, MuzzleOffset (60, 0,
+  5.5)). Ammo `DC15BlasterCloneAmmo`: RechargeRate 100, bolt
+  `DC17BlasterProj` with `DC17BlasterProjDefaults` on top: Damage 20,
+  Speed 6000, MaxSpeed 10000, MyDamageType `CTDamageEnergyDC17`. No
+  DroppedPickupClass.
 - `CloneTrooperTM` (Properties): Accuracy 0.4, RequiredEquipment
   `Properties.DC15BlasterCloneTM`, FootstepInfoClass `CloneCommando_FS`,
   BurntMaterial `CloneTrooper_Burn`.

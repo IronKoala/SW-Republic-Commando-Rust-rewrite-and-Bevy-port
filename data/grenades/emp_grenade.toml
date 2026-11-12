@@ -11,6 +11,7 @@
 # Distances are Unreal units (uu, about 1.1 cm). Times are seconds.
 
 name = "EC Detonator"     # game: EMPGrenadeDefaults ItemName
+game_class = "EMPGrenade" # game: the weapon class; level scripts name it (ACTION_AddAmmo WhichWeapon)
 
 [ammo]
 max_count = 5             # game: EMPGrenadeAmmoDefaults MaxAmmo

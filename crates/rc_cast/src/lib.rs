@@ -432,6 +432,12 @@ struct Look {
     playing: Option<String>,
     frame: f32,
     posed_once: bool,
+    /// Drawn as the original draws it in the game: the bones hanging from
+    /// the model's move bone don't follow it (see `Model::posed_in_game`).
+    /// Off for a member whose physics is root motion, which the original
+    /// moves to the move bone's place: drawing the move bone's travel
+    /// shows the same, as the port doesn't move it.
+    in_game: bool,
 }
 
 /// Where the held weapon's model goes for bones placed at `local`, in the
@@ -442,10 +448,14 @@ fn weapon_transform(
     model: &Model,
     local: &[rc_anim::math::Transform],
     held: &HeldModel,
+    in_game: bool,
 ) -> Option<Transform> {
-    model
-        .bone_frame(local, WEAPON_BONE)
-        .map(|f| held.on_bone(f))
+    let frame = if in_game {
+        model.bone_frame_in_game(local, WEAPON_BONE)
+    } else {
+        model.bone_frame(local, WEAPON_BONE)
+    };
+    frame.map(|f| held.on_bone(f))
 }
 
 fn first_clip(model: &Model, names: &[String]) -> Option<Clip> {
@@ -578,7 +588,12 @@ fn spawn_pieces(
     materials: &mut Assets<StandardMaterial>,
     images: &mut Assets<Image>,
 ) -> Look {
-    let points = model.posed_local(&model.skeleton.local);
+    let in_game = !m.root_motion;
+    let points = if in_game {
+        model.posed_in_game(&model.skeleton.local)
+    } else {
+        model.posed_local(&model.skeleton.local)
+    };
     let normals = model.normals(&points);
     let a = ambient.max(0.0);
     let mut pieces = Vec::new();
@@ -687,7 +702,7 @@ fn spawn_pieces(
             // The weapon it holds, hung on its weapon bone (placed again
             // each time the body is posed).
             if let Some(h) = held {
-                let at = weapon_transform(&model, &model.skeleton.local, h);
+                let at = weapon_transform(&model, &model.skeleton.local, h, in_game);
                 let w = h.spawn(c, at, meshes, materials, images, a, light_scale);
                 weapon = Some((w, h.clone()));
             }
@@ -703,6 +718,7 @@ fn spawn_pieces(
         playing: None,
         frame: 0.0,
         posed_once: false,
+        in_game,
     }
 }
 
@@ -1226,11 +1242,15 @@ fn animate_cast(
             None => look.model.skeleton.local.clone(),
         };
         if let Some((w, h)) = &look.weapon {
-            if let Some(t) = weapon_transform(&look.model, &local, h) {
+            if let Some(t) = weapon_transform(&look.model, &local, h, look.in_game) {
                 weapons_moved.push((*w, t));
             }
         }
-        let points = look.model.posed_local(&local);
+        let points = if look.in_game {
+            look.model.posed_in_game(&local)
+        } else {
+            look.model.posed_local(&local)
+        };
         let normals = look.model.normals(&points);
         for (section, handle) in &look.pieces {
             let (pos, nrm) =

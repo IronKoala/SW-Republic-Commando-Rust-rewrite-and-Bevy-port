@@ -206,6 +206,8 @@ pub fn emitter(name: &str, kind: &str, v: &Values) -> EmitterDef {
         }
     }
     d.disabled = boolean(v, "Disabled").unwrap_or(false);
+    d.trigger_disabled = boolean(v, "TriggerDisabled").unwrap_or(d.trigger_disabled);
+    d.reset_on_trigger = boolean(v, "ResetOnTrigger").unwrap_or(d.reset_on_trigger);
     if let Some(n) = int(v, "MaxParticles") {
         d.max_particles = n.max(0) as u32;
     }
@@ -345,6 +347,28 @@ impl Library {
             return Err(format!("no effect packages in {}", dir.display()));
         }
         Ok(Library { packages })
+    }
+
+    /// Whether `class` is an effect class: one of the effect packages has
+    /// it, and its parents lead to engine.u's `Emitter`. For finding the
+    /// emitters a map places (geo_01a's `REP_Gunship_GroundDust`).
+    pub fn is_emitter(&self, class: &str) -> bool {
+        let mut c = class.to_string();
+        for _ in 0..16 {
+            if c.eq_ignore_ascii_case("Emitter") {
+                return true;
+            }
+            match self
+                .packages
+                .iter()
+                .find(|p| p.has(&c))
+                .and_then(|p| p.parent(&c))
+            {
+                Some(parent) => c = parent,
+                None => return false,
+            }
+        }
+        false
     }
 
     /// Read an effect by class name from whichever package has it.

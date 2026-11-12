@@ -142,8 +142,9 @@ copy of the game.
   accuracy, speed, rifle, the `CloneTrooper` model). They shoot the
   droids, the droids shoot them, and they leave you and the squad alone.
   They fight the way our droids do, since the original's trooper tactics
-  are compiled code. They hold their rifles (the DC-17m and the DC-15, the
-  game's own models), as the level's other troopers do. Settings:
+  are compiled code. They hold their DC-15 rifles (the game's own model; the
+  game's `CloneTrooperDefaults` gives `CloneTrooper` the DC-15, not the
+  commandos' DC-17m), as the level's other troopers do. Settings:
   `data/enemies/clone_trooper*.toml`.
 
 - **The squad takes cover (tested in the cloud sandbox by numbers, not yet
@@ -242,6 +243,11 @@ copy of the game.
   carry (three digits, like "120") and a bar that empties with the
   magazine and fills during a reload (tested in the cloud with
   `rc_shoot --script`; not yet seen on Windows).
+
+- **Level scripts give and take grenades (since 2026-11-12; tested in the
+  cloud, not yet on Windows).** The map's `AddAmmo` steps now work, so
+  geo_01a starts with no grenades, as in the original (pick them up from
+  the crate by the start), and the levels that hand out a full set do.
 
 - **Ammo and grenade boxes (since 2026-11-09; tested in the cloud, not
   yet on Windows or by playing).** The 477 boxes the campaign maps place
@@ -738,7 +744,8 @@ copy of the game.
   skipped. The trails' ribbon part isn't drawn yet.
 - **Clone troopers in missions (since 2026-11-11, tested in the cloud
   only).** They take the light of where they stand, and hold their rifles:
-  the game's own DC-17m model, on their hand bone. They don't fire yet.
+  the game's own DC-15 model (from `CloneTrooperDefaults`), on their hand
+  bone. They don't fire yet.
   Since 2026-11-12 they can be hurt and die (100 health, from the game's
   files): they fall with the game's own death animation, the level hears
   of it (the map's death event for them), and the body goes after 60

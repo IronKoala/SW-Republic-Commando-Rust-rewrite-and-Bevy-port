@@ -1015,6 +1015,14 @@ fn steps() -> Vec<Step> {
         // landing-zone barricade opens once the player heals at the bacta
         // dispenser the scripts switch on.
         Check("the level's scripts run", level_script_running),
+        // geo_01a's level start takes every grenade away
+        // (ScriptedTrigger52's four ACTION_AddAmmo steps).
+        Until(
+            "geo_01a starts with no grenades, as the map's script says",
+            |w| no_grenades_at_start(w).is_ok(),
+            10.0,
+        ),
+        Check("geo_01a starts with no grenades, as the map's script says", no_grenades_at_start),
         Until(
             "the scripts start playing the level's lines",
             |w| level_script_lines(w).is_ok(),
@@ -3112,6 +3120,27 @@ fn level_script_running(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a's level start: the script's four AddAmmo steps ran and the
+/// player carries all four grenade kinds, none of each.
+fn no_grenades_at_start(w: &mut World) -> Result<String, String> {
+    let steps = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .map(|s| s.stats.add_ammo.clone())
+        .unwrap_or_default();
+    let mut q = w.query_filtered::<&rc_combat::Grenades, With<Player>>();
+    let carried = q
+        .iter(w)
+        .next()
+        .map(|g| g.carried.clone())
+        .ok_or("the player has no grenades component")?;
+    let got = format!("script steps {steps:?}; carried {carried:?}");
+    if steps.len() == 4 && carried.len() == 4 && carried.iter().all(|(_, n)| *n == 0) {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 /// The level's lines and sounds (`rc_scripts_plugin::sounds`): every sound
 /// geo_01a's scripts name was read from the game's packages with its
 /// length, at least two lines have played and reached the sound card, and
@@ -3377,8 +3406,9 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
 
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
-/// geo_01a's clone troopers hold the game's DC-17m model (their class's
-/// `RequiredEquipment`), hung on their weapon bone.
+/// geo_01a's clone troopers hold the game's DC-15 rifle model (their
+/// class's `RequiredEquipment` as `CloneTrooperDefaults` in
+/// Properties/properties.u sets it), hung on their weapon bone.
 fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
     let mut q = w.query::<&rc_cast::Cast>();
     let troopers: Vec<_> = q
@@ -3387,12 +3417,9 @@ fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
         .collect();
     let armed = troopers
         .iter()
-        .filter(|c| c.held_weapon() == Some("DC17mBlaster"))
+        .filter(|c| c.held_weapon() == Some("DC15BlasterClone"))
         .count();
-    let msg = format!(
-        "{armed} of {} clone troopers hold a DC17mBlaster",
-        troopers.len()
-    );
+    let msg = format!("{armed} of {} clone troopers hold a DC15BlasterClone", troopers.len());
     if !troopers.is_empty() && armed == troopers.len() {
         Ok(msg)
     } else {
