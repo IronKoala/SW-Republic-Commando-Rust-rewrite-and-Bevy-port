@@ -602,7 +602,7 @@ fn every_enemy_file_reads_and_claims_its_classes() {
             );
             // The clone troopers hold their RequiredEquipment's model.
             let held = match params.kind.id.as_str() {
-                "clone_trooper" => "DC17mBlaster",
+                "clone_trooper" => "DC15BlasterClone",
                 "clone_trooper_tm" => "DC15BlasterCloneTM",
                 _ => "",
             };

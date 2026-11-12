@@ -78,14 +78,36 @@ fn is_unit_scale(pkg: &Package, props: &[Property], name: &str) -> bool {
     }
 }
 
-/// Read every `BlockingVolume` in the level.
+/// Read every `BlockingVolume` in the level, and every other volume the
+/// map makes block players or characters (engine.u's `Actor` leaves
+/// `bBlockPlayers` and `bBlockActors` off; a map can turn them on, as
+/// geo_01a's `PhysicsVolume1`, tag `PlayerStand`, does: the floor the
+/// player stands on in the gunship until the intro script takes its
+/// collision away).
 pub fn blocking_volumes(pkg: &Package, data: &[u8], level: &LevelInfo) -> VolumeReport {
     let mut out = VolumeReport::default();
     for &a in level.actors.iter().flatten() {
-        if pkg.export_class_name(&pkg.exports[a]) != "BlockingVolume" {
+        let class = pkg.export_class_name(&pkg.exports[a]);
+        let blocking = class == "BlockingVolume";
+        if !blocking && !class.ends_with("Volume") {
             continue;
         }
-        match read_volume(pkg, data, a) {
+        let result = if blocking {
+            read_volume(pkg, data, a)
+        } else {
+            // Only when the map turns blocking on: anything else is a
+            // volume for sounds, water, music and so on.
+            match actors::read_actor_properties(pkg, data, a) {
+                Ok(props)
+                    if bool_prop(pkg, &props, "bBlockPlayers", false)
+                        || bool_prop(pkg, &props, "bBlockActors", false) =>
+                {
+                    read_volume_with(pkg, data, a, false)
+                }
+                _ => continue,
+            }
+        };
+        match result {
             Ok((v, unit)) => {
                 out.scaled += !unit as usize;
                 out.volumes.push(v);
@@ -102,6 +124,18 @@ pub(crate) fn read_volume(
     pkg: &Package,
     data: &[u8],
     a: usize,
+) -> Result<(BlockingVolume, bool), String> {
+    read_volume_with(pkg, data, a, true)
+}
+
+/// `blocking_class`: a `BlockingVolume`, whose class turns `bBlockPlayers`
+/// and `bBlockActors` on (engine.u). Other volumes keep `Actor`'s off, and
+/// are left out of shots here (`block_traces` false) as before.
+fn read_volume_with(
+    pkg: &Package,
+    data: &[u8],
+    a: usize,
+    blocking_class: bool,
 ) -> Result<(BlockingVolume, bool), String> {
     let props = actors::read_actor_properties(pkg, data, a).map_err(|e| e.to_string())?;
     let place: Placement = actors::read_placement(pkg, data, a).map_err(|e| e.to_string())?;
@@ -128,9 +162,10 @@ pub(crate) fn read_volume(
             export: a,
             name: place.name.clone(),
             location: place.location,
-            block_players: bool_prop(pkg, &props, "bBlockPlayers", true),
-            block_actors: bool_prop(pkg, &props, "bBlockActors", true),
-            block_traces: bool_prop(pkg, &props, "bBlockZeroExtentTraces", false),
+            block_players: bool_prop(pkg, &props, "bBlockPlayers", blocking_class),
+            block_actors: bool_prop(pkg, &props, "bBlockActors", blocking_class),
+            block_traces: blocking_class
+                && bool_prop(pkg, &props, "bBlockZeroExtentTraces", false),
             polygons,
         },
         unit,

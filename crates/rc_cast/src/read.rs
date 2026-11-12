@@ -83,6 +83,9 @@ pub fn glob(pattern: &str, name: &str) -> bool {
     }
 }
 
+/// engine.u's `EPhysics`: `PHYS_RootMotion`.
+const PHYS_ROOT_MOTION: i32 = 12;
+
 /// What kind of cast member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -110,8 +113,9 @@ pub struct CastMember {
     /// cylinder"; ctcharacters.u's `Gunship` sets it false), whose model's
     /// origin is `location` itself, as a prop's.
     pub half_height: f32,
-    /// The weapon class it holds (`RequiredEquipment`, `DC17mBlaster` from
-    /// "CTInventory.DC17mBlaster"); characters only.
+    /// The weapon class it holds (`RequiredEquipment`, with the class's
+    /// "...Defaults" class on top: `DC15BlasterClone` from
+    /// "Properties.DC15BlasterClone" for a clone trooper); characters only.
     pub weapon: Option<String>,
     /// `bAlignBottom` (engine.u's `Pawn` and `AnimProp` default true):
     /// false draws the model from its own origin at `location`.
@@ -134,6 +138,12 @@ pub struct CastMember {
     /// (`AnimTriggered`), and whether it loops: the hologram projector's
     /// `ThrowHoloProjector`, which starts the briefings.
     pub prop_trigger: Option<(String, bool)>,
+    /// Its physics is root motion (`Physics` 12, `PHYS_RootMotion` in
+    /// engine.u), from the map or the class: the original moves such an
+    /// actor along with its animation's move bone (geo_01a's troopers in
+    /// the gunship door). Every other one stays where it is and its move
+    /// bone's travel isn't drawn.
+    pub root_motion: bool,
     /// Running speed, Unreal units a second (`GroundSpeed`).
     pub ground_speed: f32,
     /// Casts a shadow (`bActorShadows`, from the map or the class). Only
@@ -337,7 +347,10 @@ pub fn find_cast(
             continue;
         };
         let number = |k: &str, d: f32| o.float(k).or_else(|| defaults.number(k)).unwrap_or(d);
-        let align_bottom = o.flag("bAlignBottom", defaults.bool("bAlignBottom").unwrap_or(true));
+        let align_bottom = o.flag(
+            "bAlignBottom",
+            defaults.bool("bAlignBottom").unwrap_or(true),
+        );
         let prop_anim = o
             .structure("AnimHealthy")
             .and_then(|s| match s.get("Anim") {
@@ -367,8 +380,14 @@ pub fn find_cast(
             },
             align_bottom,
             weapon: if is_pawn {
-                defaults
-                    .string("RequiredEquipment")
+                // The game lays the class's "...Defaults" class in
+                // Properties/properties.u over it (core.dll builds the
+                // name "Properties.%sDefaults"): CloneTrooperDefaults swaps
+                // the trooper's DC-17m for Properties.DC15BlasterClone.
+                Some(format!("{}Defaults", o.class))
+                    .filter(|d| lib.has_class(d))
+                    .and_then(|d| lib.defaults(&d).string("RequiredEquipment"))
+                    .or_else(|| defaults.string("RequiredEquipment"))
                     .and_then(|w| w.rsplit('.').next().map(str::to_string))
                     .filter(|w| !w.is_empty() && !w.eq_ignore_ascii_case("None"))
             } else {
@@ -400,6 +419,10 @@ pub fn find_cast(
                 .unwrap_or_else(|| defaults.bool("bHidden").unwrap_or(false)),
             prop_anim,
             prop_trigger,
+            root_motion: o
+                .int("Physics")
+                .or_else(|| defaults.number("Physics").map(|p| p as i32))
+                == Some(PHYS_ROOT_MOTION),
             ground_speed: number("GroundSpeed", 440.0),
             shadow: is_pawn
                 && o.get("bActorShadows")
