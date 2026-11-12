@@ -48,6 +48,7 @@
 //! that one character, at its own place, as the level starts
 //! ([`Factory::placed`]).
 
+use crate::patrol::Patrol;
 use rc_level::actors;
 use rc_movement::Vec3;
 use rc_package::properties::{self, Property, Value};
@@ -98,6 +99,9 @@ pub struct Offspring {
     /// The level script it runs: the tag of a `ScriptedSequence`
     /// (`AIScriptFromFactory` / `AIScriptTag`).
     pub script: Option<String>,
+    /// Its patrol route, mode and priority (`PatrolRouteFromFactory` ...
+    /// / `PatrolRoute` ...), if it has a route. See [`crate::patrol`].
+    pub patrol: Option<Patrol>,
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +236,7 @@ fn yaw(v: Option<&Value>) -> f32 {
 }
 
 struct Actor {
+    export: usize,
     class: String,
     name: String,
     props: Vec<Property>,
@@ -249,6 +254,7 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
         }
         if let Ok(props) = actors::read_actor_properties(pkg, data, a) {
             list.push(Actor {
+                export: a,
                 class,
                 name: pkg.name(e.object_name).to_string(),
                 props,
@@ -276,6 +282,13 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
     };
     // TeamIndex: -1 (the default) leaves the character's own team.
     let team = |a: &Actor, n: &str| int(a, n).filter(|&t| t >= 0);
+    // The patrol, read with the scripts reader (it decodes the route's
+    // structs).
+    let patrol = |a: &Actor, route: &str, mode: &str, priority: &str| {
+        rc_level::scripts::read_object(pkg, data, a.export)
+            .ok()
+            .and_then(|o| Patrol::from_values(&o.values, route, mode, priority))
+    };
     let loc = |a: &Actor| {
         get(a, "Location")
             .and_then(|v| vec3(&v))
@@ -304,6 +317,7 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
                     start_state: state(a, "StartState"),
                     team: team(a, "TeamIndex"),
                     script: label(a, "AIScriptTag"),
+                    patrol: patrol(a, "PatrolRoute", "PatrolMode", "PatrolPriority"),
                 },
             })
             .collect();
@@ -350,6 +364,12 @@ pub fn read_factories(pkg: &Package, data: &[u8]) -> Result<Vec<Factory>, String
                 start_state: state(f, "StartStateFromFactory"),
                 team: team(f, "TeamIndexFromFactory"),
                 script: label(f, "AIScriptFromFactory"),
+                patrol: patrol(
+                    f,
+                    "PatrolRouteFromFactory",
+                    "PatrolModeFromFactory",
+                    "PatrolPriorityFromFactory",
+                ),
             },
             start_state: state(f, "StartStateFromFactory"),
             team: int(f, "TeamIndexFromFactory"),
@@ -423,6 +443,11 @@ pub fn read_placed(
                 _ => None,
             },
             script: label("AIScriptTag"),
+            patrol: rc_level::scripts::read_object(pkg, data, a)
+                .ok()
+                .and_then(|o| {
+                    Patrol::from_values(&o.values, "PatrolRoute", "PatrolMode", "PatrolPriority")
+                }),
         };
         out.push(Placed {
             factory: Factory {

@@ -914,7 +914,8 @@ copy of the game.
   (slowly, 200 uu/s) instead of flying and dodging in the air, their wings
   are drawn with the body's skin, their beam is drawn as a tracer line,
   how fast the beam does its damage is our own guess, and the player can't
-  pick up their beam yet. Droidekas, dwarf spider droids, Phidna, drones,
+  pick up their beam yet. Kreetles and Phidna wander and walk their patrol
+  routes as in the original (not tested on Windows yet). Droidekas, dwarf spider droids, drones,
   seeker droids and placed clone troopers still don't appear
   (`rc_enemy_spawners` lists them). Trandoshan scavenger droids move along the
   ground instead of flying, and don't blow up; slavers don't go berserk;

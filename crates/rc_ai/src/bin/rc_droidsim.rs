@@ -496,6 +496,7 @@ fn main() {
                     AiEvent::Melee { .. } => "melee hits",
                     AiEvent::ScriptDone => "script orders done",
                     AiEvent::Leapt => "scripted leaps",
+                    AiEvent::SendEvent { .. } => "patrol events",
                 })
                 .or_default() += 1;
         }

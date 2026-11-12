@@ -3135,6 +3135,64 @@ rc_enemies` runs the plugin with the real combat plugin in a test room: a
 droid spawns, spots the player in under a second, fires bursts that
 sometimes hit, and dies to the player's DC-17.
 
+### Wildlife: Kreetles and Phidna (`rc_ai/src/brain/ambient.rs`, `patrol.rs`)
+
+The original's ambient creatures (`Kreetle`, `Phidna`: ctcharacters.u
+`Ambient`) are enemy files with `side = "neutral"` and an `[ambient]`
+section (`data/enemies/kreetle.toml`, `phidna.toml`). They get
+`rc_combat::Team::Neutral`, the original's team 0: the squad, turrets,
+droids and the music leave them alone, they never fight, but they can be
+shot (20 health) and die with their death animation, death sound and death
+effect. They don't count toward the `max_alive_total` cap (that cap is
+ours).
+
+How they think, from the original. The parts in compiled code were
+decompiled locally from ctgame.dll and engine.dll for reference only; none
+of it is in the repo:
+
+- Their AI (`AmbientBot`) has the states `StateIdle` and `StateWander`,
+  plus `StatePatrol` when the pawn has a patrol route (`CTBot.Possess`).
+- Every `DecisionInterval` (0.5 s) times a random 0.8 to 1.2
+  (`ACTBot::Update`) it takes the state that wants it most
+  (`ACTBot::MakeDecision`, first on a tie): idle 0.1, wander 0.2, patrol
+  the pawn's `PatrolPriority` until a route in mode Once is done (then 0).
+- A state works through a queue of goals; when the queue is empty it adds
+  more, and a goal that fails empties it (`StateObject::Update`).
+- Wander: a random navigation point within 2048 uu it can reach along the
+  paths (`FindRandomNavNode`; ours uses the nearest point as the anchor
+  and the path network's links for "reachable"), walk there, wait a
+  random 0 to 5 s.
+- Patrol: send the previous point's `Event`; walk to the point unless
+  already at it, walking or running by its `RunToNode`; wait its
+  `PauseTime`; take its `PatrolPriorityOverride`; pick the next point by
+  the mode (Loop, PingPong, Random: `rand % (count - 1)`, so never the
+  last point; Once). Phidna from geo_03a's factories get the factory's
+  route in Random mode.
+- Walking or running: neither `bCanWalk` nor `bCanRun` is set for them, so
+  wandering never changes it (they run, `RunForward`) and a patrol sets
+  walking (`WalkForward`); both at 210 uu/s (`WalkSpeedRatio` 1).
+- The walk and run animations play at the creature's speed over how fast
+  the animation's `Move` bone travels (`APawn::UpdateMovementAnimation`,
+  `FSkelAnimSeq::TranslationSpeed`): `look.rate_by_speed`. KreetleSet's
+  `RunForward` moves 200 uu/s and `WalkForward` 50 uu/s.
+- `Ambient.Tick`: one that hasn't been drawn for `DeactivateTime` (1 s)
+  while on the ground stops: no collision, no movement, until drawn again.
+  **Not exactly the original:** we count it as drawn when it is inside the
+  camera's view (frustum), even behind a wall; the original uses what it
+  really drew.
+- Spawners with `bCovert` (all of geo_03a's Phidna spawners) make nothing
+  at the factory while the player can see the spot: inside half the field
+  of view of where the player looks, with nothing of the level between
+  (CTGame.u `PawnFactory.IsLocationCovert`). This now holds for every
+  covert spawner making characters at the factory, not only wildlife.
+
+Not done yet: patrol points' `Animation` and `OrientToNode` (no wildlife
+route uses them), the turn-in-place animations, `MovementSound` and
+`AmbientVocalization` (no class or map sets either), what they do when
+hurt but not killed (compiled stimulus code, not read yet), bodies going
+after `RagdollLifeSpan`, the placed geo_01briefing Phidna's team 5 (it is
+neutral here).
+
 ## Weapons, shots and damage (`rc_combat`, `rc_shoot`)
 
 `rc_combat` is the game's weapons and health, as a Bevy plugin

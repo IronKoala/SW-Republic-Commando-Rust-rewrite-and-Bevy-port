@@ -15,7 +15,10 @@
 //! (the level, the path network, where the enemy is) and gets back
 //! `AiEvent`s (shots fired, state changes) to act on and log.
 
+pub mod ambient;
+
 use crate::params::AiParams;
+use crate::patrol::Patrol;
 use crate::spawns::StartState;
 use rc_movement::{MoveInput, Pawn, Vec3, World};
 use rc_nav::{NavGraph, NodeKind, PathFollower};
@@ -184,6 +187,10 @@ pub enum AiEvent {
     /// Leapt to a point a level script sent it to but it couldn't walk to
     /// (`leap_speed` in its file).
     Leapt,
+    /// An event for the level's scripts (a patrol point's `Event`).
+    SendEvent {
+        name: String,
+    },
 }
 
 /// What a level script has a fighter do (`ACTION_MoveToPoint`,
@@ -273,6 +280,20 @@ pub struct Fighter {
     /// Leaping to a scripted point it can't walk to: (from, to, battle
     /// time it left, seconds the leap takes).
     leap: Option<(Vec3, Vec3, f32, f32)>,
+    /// Its patrol route, if it has one (see [`crate::patrol`]).
+    pub patrol: Option<Patrol>,
+    /// Walking rather than running (the original's `bIsWalking`), for
+    /// its speed and animation. Ambient creatures only so far.
+    pub walking: bool,
+    /// An ambient creature that stopped because nobody saw it for a while
+    /// (`Ambient.DeactivateTime`): it doesn't move or think, and shots
+    /// pass through it.
+    pub stasis: bool,
+    /// Battle time it was last on the player's screen, told by the game.
+    /// Starts at infinity: never told means always seen.
+    pub last_on_screen: f32,
+    /// An ambient creature's thinking (`params.ambient.enabled`).
+    pub ambient: ambient::AmbientMind,
     rng: Rng,
 }
 
@@ -345,6 +366,11 @@ impl Fighter {
             invulnerable: false,
             script_planned: false,
             leap: None,
+            patrol: None,
+            walking: false,
+            stasis: false,
+            last_on_screen: f32::INFINITY,
+            ambient: ambient::AmbientMind::default(),
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -383,7 +409,9 @@ impl Fighter {
     /// Something hurt it. `from` is where the shot came from, if known.
     /// It turns to fight, and if out in the open, looks for cover.
     pub fn on_damaged(&mut self, from: Option<Vec3>, time: f32, events: &mut Vec<AiEvent>) {
-        if self.mode == Mode::Dead {
+        // An ambient creature carries on (what the original's does when
+        // hurt but not killed isn't read yet).
+        if self.mode == Mode::Dead || self.params.ambient.enabled {
             return;
         }
         // Standing about for a script (an animation, waiting for the
@@ -415,7 +443,7 @@ impl Fighter {
     /// it turns that way and gets ready, as if it had glimpsed the enemy
     /// there. Shots farther than its hearing radius are ignored.
     pub fn hear(&mut self, at: Vec3, time: f32, events: &mut Vec<AiEvent>) {
-        if !matches!(self.mode, Mode::Idle | Mode::Investigate) {
+        if !matches!(self.mode, Mode::Idle | Mode::Investigate) || self.params.ambient.enabled {
             return;
         }
         if (at - self.pawn.location).length() > self.params.senses.hearing_radius {
@@ -431,6 +459,9 @@ impl Fighter {
     /// Put it straight into the alerted state toward `at`, however far
     /// away (a saved fight being put back).
     pub fn alert(&mut self, at: Vec3, time: f32, events: &mut Vec<AiEvent>) {
+        if self.params.ambient.enabled {
+            return;
+        }
         self.last_seen_at = Some(at);
         self.last_seen_time = time;
         self.alerted_at = time;
@@ -542,6 +573,10 @@ impl Fighter {
         let mut events = Vec::new();
         if self.mode == Mode::Dead {
             return events;
+        }
+        // Wildlife: wanders and patrols, never fights.
+        if self.params.ambient.enabled && self.script.is_none() {
+            return self.ambient_tick(dt, view);
         }
         let now = view.time;
         let senses = self.params.senses.clone();
@@ -1435,7 +1470,7 @@ pub fn angle_diff(a: f32, b: f32) -> f32 {
     wrap(a - b)
 }
 
-fn wrap(a: f32) -> f32 {
+pub(crate) fn wrap(a: f32) -> f32 {
     let t = std::f32::consts::TAU;
     let mut x = a % t;
     if x > std::f32::consts::PI {

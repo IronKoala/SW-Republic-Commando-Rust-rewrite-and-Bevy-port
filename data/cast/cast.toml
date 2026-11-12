@@ -59,6 +59,8 @@ leave_out = [
     "DwarfSpiderDroid*",
     "Droideka*",
     "Geonosian*",
+    "Kreetle",
+    "Phidna",
     "Trandoshan*",
     "GrievousGuard*",
     "Turret*",

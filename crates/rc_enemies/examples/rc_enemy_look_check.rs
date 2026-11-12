@@ -134,7 +134,10 @@ fn main() {
         let want_uu = 2.0 * params.movement.collision_height;
         check(
             &mut line,
-            tall_uu > 0.5 * want_uu && tall_uu < 2.0 * want_uu,
+            // The original gives small creatures (Kreetles: a 16 uu
+            // model) a collision cylinder much taller than they are.
+            tall_uu > if params.ambient.enabled { 0.25 } else { 0.5 } * want_uu
+                && tall_uu < 2.0 * want_uu,
             format!("{id}: standing {tall_uu:.0} uu tall (collision height {want_uu:.0} uu)"),
         );
     }

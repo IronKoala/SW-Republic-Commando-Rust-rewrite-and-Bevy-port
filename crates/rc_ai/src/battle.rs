@@ -146,6 +146,36 @@ pub struct Battle {
     /// (`ACTION_SetCollision`): shots pass through them, so the other
     /// side doesn't aim at them.
     pub not_colliding: HashSet<u32>,
+    /// What the player sees, for spawners that only make characters out
+    /// of sight (`bCovert`). The game sets it every frame; `None` (the
+    /// headless tools) counts every place as out of sight.
+    pub viewer: Option<Viewer>,
+}
+
+/// The player's view, for the original's `IsLocationCovert` (CTGame.u
+/// `PawnFactory`, read only).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Viewer {
+    /// The eye, Unreal units.
+    pub eye: Vec3,
+    /// Where it looks, length 1.
+    pub direction: Vec3,
+    /// The field of view across the screen, degrees (the original's
+    /// `FOVAngle`).
+    pub fov: f32,
+}
+
+impl Viewer {
+    /// The original's `IsLocationCovert` for one player: a place is in
+    /// sight when it is inside half the field of view of where the player
+    /// looks and nothing of the level is between it and the eye.
+    pub fn sees(&self, world: &dyn World, at: Vec3) -> bool {
+        let to = (at - self.eye).normalize_or_zero();
+        if self.direction.dot(to) <= (self.fov * 0.5).to_radians().cos() {
+            return false;
+        }
+        crate::brain::clear_line(world, at, self.eye)
+    }
 }
 
 /// What came of a spawner's try at making a character.
@@ -197,6 +227,7 @@ impl Battle {
             births: HashMap::new(),
             rng: Rng::new(7),
             not_colliding: HashSet::new(),
+            viewer: None,
         }
     }
 
@@ -344,7 +375,7 @@ impl Battle {
     /// heard the enemy). Clone troopers on their own don't count.
     pub fn in_fight(&self) -> bool {
         self.alive()
-            .filter(|f| !f.params.kind.republic())
+            .filter(|f| !f.params.kind.republic() && !f.params.kind.neutral())
             .any(|f| matches!(f.mode, Mode::Alerted | Mode::Attack))
     }
 
@@ -368,7 +399,7 @@ impl Battle {
         others: &[Target],
     ) -> Vec<BattleEvent> {
         let mut out = Vec::new();
-        self.spawn(player.map(|p| p.centre), &mut out);
+        self.spawn(player.map(|p| p.centre), world, &mut out);
         let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
         // Two sides: separatist fighters (droids, Geonosians, ...) and
         // republic ones (clone troopers). Each side's friends, so it
@@ -376,6 +407,10 @@ impl Battle {
         let mut friends: [Vec<Vec3>; 2] = [Vec::new(), Vec::new()];
         let mut as_target: [Vec<Target>; 2] = [Vec::new(), Vec::new()];
         for f in self.alive() {
+            // Wildlife is on nobody's side.
+            if f.params.kind.neutral() {
+                continue;
+            }
             let k = f.params.kind.republic() as usize;
             friends[k].push(f.pawn.location);
             if !self.not_colliding.contains(&f.id) {
@@ -399,21 +434,31 @@ impl Battle {
                 continue;
             }
             let side = f.params.kind.republic() as usize;
+            let neutral = f.params.kind.neutral();
             // A separatist with no one in sight still hunts the player.
-            let target = f
-                .choose_target(world, &targets[side])
-                .or(if side == 0 { player } else { None });
+            let target = if neutral {
+                None
+            } else {
+                f.choose_target(world, &targets[side])
+                    .or(if side == 0 { player } else { None })
+            };
             let view = View {
                 world,
                 nav: &self.nav,
                 time: self.time,
                 target,
                 cover_taken: &taken,
-                allies: &friends[side],
+                allies: if neutral { &[] } else { &friends[side] },
             };
             for e in f.tick(dt, &view) {
                 if let AiEvent::Fire { origin, .. } = e {
                     heard.push(origin);
+                }
+                if let AiEvent::SendEvent { name } = &e {
+                    out.push(BattleEvent::Event {
+                        name: name.clone(),
+                        by: format!("droid {} (patrol point)", f.id),
+                    });
                 }
                 out.push(BattleEvent::Ai { id: f.id, event: e });
             }
@@ -649,12 +694,16 @@ impl Battle {
             ))?;
             // Its spawner's enemy type, not the battle's default, and the
             // first behaviour its spawn point (or factory) gave it.
-            let start = match f.birth.spot.and_then(|i| sp.factory.spots.get(i)) {
-                Some(spot) => spot.offspring.start_state.clone(),
-                None => sp.factory.offspring.start_state.clone(),
+            let offspring = match f.birth.spot.and_then(|i| sp.factory.spots.get(i)) {
+                Some(spot) => &spot.offspring,
+                None => &sp.factory.offspring,
             };
+            let start = offspring.start_state.clone();
+            let patrol = offspring.patrol.clone();
             let params = sp.params.clone();
             let mut fighter = Fighter::new(f.id, params, f.feet, f.facing, start);
+            // Its patrol starts over from the first point.
+            fighter.set_patrol(patrol);
             if let Some(n) = f.grenades_left {
                 fighter.grenades_left = n.min(fighter.grenades_left);
             }
@@ -722,7 +771,7 @@ impl Battle {
     /// up. At most one new droid per step, to spread the work, apart from
     /// characters placed in the map: they are all there as the level
     /// starts, as in the original.
-    fn spawn(&mut self, player: Option<Vec3>, out: &mut Vec<BattleEvent>) {
+    fn spawn(&mut self, player: Option<Vec3>, world: &dyn World, out: &mut Vec<BattleEvent>) {
         if !self.scripted {
             if let Some(p) = player {
                 self.switch_on_unscripted(p, out);
@@ -749,7 +798,7 @@ impl Battle {
                 f.spawn_interval
             };
             self.spawners[i].next_spawn = self.time + wait.max(0.1);
-            match self.try_make(i, player, out) {
+            match self.try_make(i, player, world, out) {
                 Try::Made => made_one = true,
                 Try::NotNow => {}
                 Try::Spent => {
@@ -782,11 +831,13 @@ impl Battle {
         let params = sp.params.clone();
         let feet = f.location - Vec3::new(0.0, 0.0, params.movement.collision_height);
         let (yaw, start) = (f.yaw, f.offspring.start_state.clone());
+        let patrol = f.offspring.patrol.clone();
         sp.made += 1;
         let id = self.next_id;
         self.next_id += 1;
-        self.fighters
-            .push(Fighter::new(id, params, feet, yaw, start));
+        let mut fighter = Fighter::new(id, params, feet, yaw, start);
+        fighter.set_patrol(patrol);
+        self.fighters.push(fighter);
         self.made_by.push(i);
         self.births.insert(id, Birth::default());
         out.push(BattleEvent::Spawned {
@@ -805,21 +856,28 @@ impl Battle {
             .count() as u32
     }
 
-    fn try_make(&mut self, i: usize, player: Option<Vec3>, out: &mut Vec<BattleEvent>) -> Try {
+    fn try_make(
+        &mut self,
+        i: usize,
+        player: Option<Vec3>,
+        world: &dyn World,
+        out: &mut Vec<BattleEvent>,
+    ) -> Try {
         let alive_here = self.alive_from(i);
         // The cap on fighters alive at once counts each side on its own,
-        // so clone troopers don't take the droids' places.
-        let side = self.spawners[i].params.kind.republic();
-        let alive_total = self
-            .alive()
-            .filter(|f| f.params.kind.republic() == side)
-            .count() as u32;
+        // so clone troopers don't take the droids' places. Wildlife has no
+        // cap (the cap is ours, not the original's).
+        let side = self.spawners[i].params.kind.side.clone();
+        let alive_total = self.alive().filter(|f| f.params.kind.side == side).count() as u32;
+        let capped = side != "neutral";
         let sp = &self.spawners[i];
         let f = &sp.factory;
         if !f.generate_forever && sp.made >= f.capacity {
             return Try::Spent;
         }
-        if alive_here >= f.max_alive || alive_total >= self.params.spawning.max_alive_total {
+        if alive_here >= f.max_alive
+            || (capped && alive_total >= self.params.spawning.max_alive_total)
+        {
             return Try::NotNow;
         }
         if f.max_in_world > 0.0 {
@@ -857,6 +915,16 @@ impl Battle {
             Some(k) => f.spots[k].clone(),
             None => f.spot(0),
         };
+        // A covert spawner makes nothing at the factory while the player
+        // can see the place (CTGame.u `PawnFactory`: `SPM_FromFactory`
+        // checks `IsLocationCovert`).
+        if f.covert && spot_index.is_none() {
+            if let Some(v) = self.viewer {
+                if v.sees(world, spot.location) {
+                    return Try::NotNow;
+                }
+            }
+        }
         if f.min_player_range < f.max_player_range {
             if let Some(p) = player {
                 let d = (spot.location - p).length();
@@ -886,13 +954,15 @@ impl Battle {
         let sp = &mut self.spawners[i];
         sp.made += 1;
         sp.next_spot = next_spot;
-        self.fighters.push(Fighter::new(
+        let mut fighter = Fighter::new(
             id,
             params,
             feet,
             spot.yaw,
             spot.offspring.start_state.clone(),
-        ));
+        );
+        fighter.set_patrol(spot.offspring.patrol.clone());
+        self.fighters.push(fighter);
         self.made_by.push(i);
         self.births.insert(
             id,

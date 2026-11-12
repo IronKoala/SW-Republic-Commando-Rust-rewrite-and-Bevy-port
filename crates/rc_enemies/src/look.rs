@@ -92,6 +92,9 @@ pub struct DroidLook {
     pub skeleton: Skeleton,
     pub weights: Vec<Vec<(usize, f32)>>,
     pub clips: HashMap<Pose, Clip>,
+    /// How fast each pose's animation moves the character, uu a second,
+    /// where the animation says (see [`translation_speed`]).
+    pub translation_speeds: HashMap<Pose, f32>,
     /// The mesh's whole animation sets, for animations a level script
     /// names (`ACTION_PlayAnim`).
     pub anims: Vec<MeshAnimation>,
@@ -116,6 +119,48 @@ fn mesh_point(mesh: &SkeletalMesh, p: [f32; 3]) -> [f32; 3] {
     let yaw = mesh.rot_origin[1] as f32 * std::f32::consts::TAU / 65536.0;
     let (sin, cos) = yaw.sin_cos();
     [q[0] * cos - q[1] * sin, q[0] * sin + q[1] * cos, q[2]]
+}
+
+/// How fast an animation moves the character, uu a second, or 0 when it
+/// doesn't say. Engine.dll (decompiled locally for reference): when an
+/// animation set loads, each sequence whose set's first bone is named
+/// `Move` (and whose Republic Commando field at +0x50 is 0) keeps the
+/// distance that bone travels from its first key to its last
+/// (`RootDelta`); the speed is that distance times the frame rate over
+/// the number of frames less one (`FSkelAnimSeq::TranslationSpeed`).
+/// `APawn::UpdateMovementAnimation` then plays walking and running at
+/// the character's speed divided by this.
+pub fn translation_speed(
+    anim: &MeshAnimation,
+    seq: &rc_package::animation::Sequence,
+    version: u32,
+) -> f32 {
+    if !anim
+        .bones
+        .first()
+        .is_some_and(|b| b.name.eq_ignore_ascii_case("Move"))
+    {
+        return 0.0;
+    }
+    // Where the +0x50 field lands in `Sequence::unknown` (see how
+    // rc_package reads a sequence): after the fields older or newer
+    // packages add.
+    let at = (version >= 115) as usize + 3 + (version >= 144) as usize + (version < 143) as usize;
+    if seq.unknown.get(at).is_some_and(|&v| v != 0.0) {
+        return 0.0;
+    }
+    let Some(track) = seq.tracks.first() else {
+        return 0.0;
+    };
+    let keys = track.key_positions();
+    let (Some(a), Some(b)) = (keys.first(), keys.last()) else {
+        return 0.0;
+    };
+    let d = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+    if seq.num_frames <= 1 {
+        return 0.0;
+    }
+    d * seq.rate / (seq.num_frames - 1) as f32
 }
 
 /// Unreal (Z up) to Bevy (Y up), the same rule as `rc_game_core::units`.
@@ -168,6 +213,7 @@ impl DroidLook {
         }
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
+        let mut translation_speeds = HashMap::new();
         let mut used_sets: Vec<&str> = Vec::new();
         for pose in Pose::ALL {
             let name = pose.sequence(look);
@@ -183,6 +229,10 @@ impl DroidLook {
             match found {
                 Some((set_name, anim, seq)) => {
                     clips.insert(pose, Clip::new(anim, seq, &skeleton));
+                    let speed = translation_speed(anim, seq, pkg.summary.version as u32);
+                    if speed > 0.0 {
+                        translation_speeds.insert(pose, speed);
+                    }
                     if !used_sets.contains(&set_name.as_str()) {
                         used_sets.push(set_name);
                     }
@@ -233,6 +283,7 @@ impl DroidLook {
             skeleton,
             weights,
             clips,
+            translation_speeds,
             anims: anims.iter().map(|(_, a)| a.clone()).collect(),
             skin,
             indices,

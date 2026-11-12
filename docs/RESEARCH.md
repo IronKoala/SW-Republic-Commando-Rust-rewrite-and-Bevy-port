@@ -845,3 +845,32 @@ Read from the script text and defaults in `ctcharacters.u`, `engine.u`,
   `Event` `Security00`, `FirstDamagedEvent` `TurretsShot`, which
   `ScriptedTrigger42` waits for before `EliteStart`) and `CoreShipTurret2`
   (`SBDTurret00`); geo_05c three tagged `Lasers01`.
+
+## Wildlife: Kreetles, Phidna (read 2026-11-12)
+
+Read only, with `rc_probe --class` and the UnrealScript text in the .u
+files; compiled parts decompiled locally from ctgame.dll and engine.dll for
+reference only (nothing decompiled is in the repo). How it works is in
+docs/DESIGN.md "Wildlife".
+
+- `Kreetle`, `Phidna` (ctcharacters.u, parent `Ambient`, `CTPawn`): Health
+  20, GroundSpeed 210, AccelRate 1000, WalkSpeedRatio 1, collision 20 x 20,
+  BaseEyeHeight 5, bCanCrouch and bCanStrafe false, AudioTable
+  KreetleAudio, meshes `Kreetle` and `Phidna` in Animations/ambient.ukx
+  (both use KreetleSet: ActionBreathe, WalkForward, RunForward, TurnLeft,
+  TurnRight, ActionBreatheIdle, Death; first bone `Move`).
+- `KreetleDefaults`: DeathEffect DeathExplode_SmallCreature, no
+  auto-aim. `PhidnaDefaults`: DeathEffect Phidna_Death_Explo, no auto-aim.
+- `Ambient`: ControllerClass AmbientBot, DeactivateTime 1, Accuracy 0; its
+  `Tick` stops one not drawn for DeactivateTime while walking.
+  MovementSound and AmbientVocalization are set by no class or map.
+- `AmbientBot` (parent CTBot): RequiredStates StateIdle, StateWander;
+  CTBot DecisionInterval 0.5. Pawn RotationRate yaw 20000, PatrolPriority
+  0.3; PawnFactory PatrolPriorityFromFactory 0.3.
+- KreetleAudio (ctaudio.u): Character_Voice.Kreetle.KRT_DieQuiet, DieFall,
+  DieExplosion, DieLargeArms, DieSmallArms, HurtSmallArms.
+- Maps: geo_04a 16 Kreetles, geo_04b 18 (StartState Wander, tag Kreetle);
+  geo_03a six Phidna PawnFactories (bCovert, bGenerateForever, patrol
+  Random at priority 1.0, tags SpawnFirstRoom, SpawnEggRoom and
+  Disabled_SpawnJammingDeviceArea); geo_01briefing one placed Phidna
+  (TeamIndex 5).

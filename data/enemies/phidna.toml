@@ -1,0 +1,79 @@
+# Phidna: the Geonosian parasites. geo_03a's egg rooms make them from 6
+# spawners (each walks a random patrol route); geo_01briefing places one.
+# They fight nobody and nobody fights them (the original's neutral team),
+# but they can be shot. They wander about and walk their patrol route as
+# the original's ambient AI does (rc_ai brain/ambient.rs).
+#
+# Numbers marked "game:" are the original's: Phidna (System/ctcharacters.u,
+# parent Ambient, CTPawn, Pawn), PhidnaDefaults (Properties/properties.u)
+# and AmbientBot / CTBot (the AI). Compiled behaviour (ctgame.dll, engine.dll)
+# was decompiled locally for reference only.
+
+[type]
+id = "phidna"
+name = "Phidna"
+classes = ["Phidna"]      # game: the map class
+body = "organic"
+side = "neutral"          # game: TeamIndex 0 (TeamNeutral), everyone's relation to it is neutral
+
+[movement]
+ground_speed = 210        # game: GroundSpeed
+accel_rate = 1000         # game: AccelRate
+walk_speed_ratio = 1      # game: WalkSpeedRatio (walks as fast as it runs)
+collision_radius = 20     # game: CollisionRadius
+collision_height = 20     # game: CollisionHeight
+crouch_radius = 20        # game: CrouchRadius
+crouch_height = 20        # game: CrouchHeight
+base_eye_height = 5       # game: BaseEyeHeight
+jump_z = 0                # game: it never jumps (its AI has no jump)
+
+[senses]
+decision_interval = 0.5   # game: CTBot DecisionInterval (AmbientBot keeps it)
+turn_rate = 110           # game: Pawn RotationRate yaw 20000 per second = 110 degrees/s
+
+[combat]
+health = 20               # game: Health / MaxHealth
+accuracy = 0              # game: Ambient Accuracy
+weapon = ""               # game: no RequiredEquipment
+drops = ""
+damage_table = ""         # game: no MyDamageVariance
+uses_cover = false        # game: AmbientBot has no fighting states
+can_crouch = false        # game: bCanCrouch = false
+
+[ambient]
+enabled = true            # game: ControllerClass AmbientBot (RequiredStates StateIdle, StateWander)
+idle_utility = 0.1        # game: StateIdle's EstimateUtility (ctgame.dll)
+wander_utility = 0.2      # game: StateWander's EstimateUtility (ctgame.dll)
+wander_radius = 2048      # game: StateWander picks points within this (ctgame.dll)
+wander_pause_max = 5      # game: StateWander waits a random 0 to 5 s (ctgame.dll)
+can_walk = false          # game: bCanWalk isn't set on Pawn, CTPawn, Ambient or Phidna
+can_run = false           # game: bCanRun isn't set either
+deactivate_time = 1       # game: Ambient DeactivateTime
+
+[sound]
+# game: AudioTable KreetleAudio (System/ctaudio.u): groups in
+# GameData/Sounds/character_voice.uax (Character_Voice.Kreetle). Its
+# DieQuiet and DieLargeArms lines aren't hooked up yet.
+package = "character_voice"
+spotted = []                           # game: the table has no SpottedEnemy line
+hurt = ["KRT_HurtSmallArms"]           # game: PAE_HurtSmallArms
+death = ["KRT_DieSmallArms"]           # game: PAE_DieSmallArms
+death_explosion = ["KRT_DieExplosion"] # game: PAE_DieExplosion
+death_fall = ["KRT_DieFall"]           # game: PAE_DieFall
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
+
+[look]
+package = "GameData/Animations/ambient.ukx"  # game: the mesh is in this package
+mesh = "Phidna"                              # game: Mesh (animation set KreetleSet)
+idle = "ActionBreathe"    # game: Pawn.PlayWaiting plays RelaxBreathe, or ActionBreathe when the set has none (KreetleSet hasn't)
+walk = "WalkForward"      # game: Pawn.AnimateStanding, walking
+run = "RunForward"        # game: Pawn.AnimateStanding, running
+death = "Death"           # game: Pawn.PlayDying plays Death
+walk_back = ""            # game: it can't strafe or back up (bCanStrafe = false)
+step_left = ""
+step_right = ""
+fire = ""
+crouch = ""
+crouch_fire = ""
+death_effect = "Phidna_Death_Explo"   # game: PhidnaDefaults DeathEffect
+rate_by_speed = true      # game: APawn::UpdateMovementAnimation (engine.dll)

@@ -546,7 +546,10 @@ fn clone_troopers_and_droids_fight_each_other_not_the_player() {
     alone.made_by.push(0);
     for _ in 0..60 {
         let ev = alone.step_with(1.0 / 30.0, &world, Some(target_at(800.0, 0.0)), &[]);
-        assert!(fire_directions(&ev).is_empty(), "a trooper fired at the player");
+        assert!(
+            fire_directions(&ev).is_empty(),
+            "a trooper fired at the player"
+        );
     }
     assert!(!alone.in_fight());
 }
@@ -834,6 +837,7 @@ fn tagged_factory(tag: &str, x: f32) -> Factory {
             start_state: StartState::StationaryAttack,
             team: None,
             script: Some(format!("{tag}AI")),
+            patrol: None,
         },
         ..Default::default()
     }
@@ -1434,6 +1438,7 @@ fn placed(name: &str, x: f32) -> Factory {
             start_state: StartState::Idle,
             team: None,
             script: Some(format!("{name}AI")),
+            patrol: None,
         },
         placed: true,
         ..Default::default()
@@ -1510,4 +1515,270 @@ fn saves_from_before_placed_characters_still_load() {
     assert_eq!(back.len(), 1);
     steps(&mut again, 30);
     assert_eq!(again.fighters.len(), 1);
+}
+
+// ---- Wildlife (ambient creatures) ----
+
+fn kreetle() -> Arc<AiParams> {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/enemies/kreetle.toml"
+    ))
+    .unwrap();
+    Arc::new(AiParams::battle_droid().with_overrides(&text).unwrap())
+}
+
+/// Path nodes at (x, y), standing height, linked both ways as listed.
+fn wild_nav(points: &[(&str, f32, f32)], links: &[(usize, usize)]) -> NavGraph {
+    use rc_nav::{reach, Link, NavNode, NodeKind};
+    let nodes: Vec<NavNode> = points
+        .iter()
+        .map(|&(n, x, y)| NavNode {
+            name: n.into(),
+            class: "PathNode".into(),
+            tag: n.into(),
+            location: Vec3::new(x, y, 20.0),
+            export: 0,
+            kind: NodeKind::Path,
+        })
+        .collect();
+    let mut l = vec![Vec::new(); nodes.len()];
+    for &(a, b) in links {
+        let d = (nodes[a].location - nodes[b].location).length();
+        l[a].push(Link {
+            to: b,
+            distance: d,
+            flags: reach::WALK,
+        });
+        l[b].push(Link {
+            to: a,
+            distance: d,
+            flags: reach::WALK,
+        });
+    }
+    NavGraph {
+        nodes,
+        links: l,
+        ..Default::default()
+    }
+}
+
+/// Run a battle with no player for `seconds`; returns each fighter's
+/// positions (every step) and all events.
+fn run_battle(
+    b: &mut Battle,
+    world: &BrushWorld,
+    seconds: f32,
+) -> (Vec<Vec<Vec3>>, Vec<BattleEvent>) {
+    let dt = 1.0 / 30.0;
+    let mut track = vec![Vec::new(); b.fighters.len()];
+    let mut events = Vec::new();
+    let mut t = 0.0;
+    while t < seconds {
+        events.extend(b.step(dt, world, None));
+        for (i, f) in b.fighters.iter().enumerate() {
+            track[i].push(f.pawn.location);
+        }
+        t += dt;
+    }
+    (track, events)
+}
+
+#[test]
+fn wildlife_files_read() {
+    let k = kreetle();
+    assert!(k.kind.neutral());
+    assert!(k.ambient.enabled);
+    assert_eq!(k.combat.health, 20.0);
+    assert_eq!(k.movement.ground_speed, 210.0);
+    assert_eq!(k.look.death_effect, "DeathExplode_SmallCreature");
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/enemies/phidna.toml"
+    ))
+    .unwrap();
+    let p = AiParams::battle_droid().with_overrides(&text).unwrap();
+    assert!(p.kind.neutral() && p.ambient.enabled);
+    assert_eq!(p.look.mesh, "Phidna");
+    assert_eq!(p.look.death_effect, "Phidna_Death_Explo");
+}
+
+#[test]
+fn patrol_next_point_by_mode() {
+    let route = |mode| Patrol {
+        points: vec![PatrolPoint::default(); 4],
+        mode,
+        priority: 1.0,
+    };
+    let mut step = 1;
+    assert_eq!(route(PatrolMode::Loop).next(2, &mut step, 0), 3);
+    assert_eq!(route(PatrolMode::Loop).next(3, &mut step, 0), 0);
+    assert_eq!(route(PatrolMode::Once).next(3, &mut step, 0), 4);
+    // Random never picks the last point (ctgame.dll: rand % (count - 1)).
+    for r in 0..50 {
+        assert!(route(PatrolMode::Random).next(0, &mut step, r) < 3);
+    }
+    let one = Patrol {
+        points: vec![PatrolPoint::default()],
+        mode: PatrolMode::Random,
+        priority: 1.0,
+    };
+    assert_eq!(one.next(0, &mut step, 7), 0);
+    let p = route(PatrolMode::PingPong);
+    let mut step = 1;
+    let mut i = 0;
+    let mut seen = Vec::new();
+    for _ in 0..7 {
+        i = p.next(i, &mut step, 0);
+        seen.push(i);
+    }
+    assert_eq!(seen, [1, 2, 3, 2, 1, 0, 1]);
+}
+
+#[test]
+fn kreetle_wanders_only_where_it_can_walk_to() {
+    let world = flat_floor(vec![]);
+    // A line of points it can reach, one island it can't, one too far.
+    let nav = wild_nav(
+        &[
+            ("A", 0.0, 0.0),
+            ("B", 600.0, 0.0),
+            ("C", 1200.0, 0.0),
+            ("Island", 0.0, 700.0),
+            ("Far", 3500.0, 0.0),
+        ],
+        &[(0, 1), (1, 2), (2, 4)],
+    );
+    let mut b = Battle::new(kreetle(), nav, vec![]);
+    b.fighters.push(Fighter::new(
+        1,
+        kreetle(),
+        Vec3::ZERO,
+        0.0,
+        StartState::Wander,
+    ));
+    b.made_by.push(0);
+    let (track, _) = run_battle(&mut b, &world, 60.0);
+    let f = &b.fighters[0];
+    assert_eq!(f.ambient.state, Some(brain::ambient::AmbientState::Wander));
+    let walked: f32 = track[0].windows(2).map(|w| (w[1] - w[0]).length_2d()).sum();
+    assert!(walked > 1000.0, "it should wander about, walked {walked}");
+    for p in &track[0] {
+        assert!(
+            p.y.abs() < 100.0,
+            "went off the paths toward the island: {p:?}"
+        );
+        assert!(p.x < 2500.0, "went to a point beyond 2048 uu: {p:?}");
+    }
+    // Wandering doesn't switch it to walking (bCanWalk unset): it runs.
+    assert!(!f.walking);
+}
+
+#[test]
+fn phidna_patrol_once_then_wander() {
+    let world = flat_floor(vec![]);
+    let nav = wild_nav(
+        &[("A", 0.0, 0.0), ("B", 800.0, 0.0), ("C", 1600.0, 0.0)],
+        &[(0, 1), (1, 2)],
+    );
+    let mut f = Fighter::new(1, kreetle(), Vec3::ZERO, 0.0, StartState::Idle);
+    f.set_patrol(Some(Patrol {
+        points: vec![PatrolPoint {
+            node: Some("C".into()),
+            event: Some("Done".into()),
+            ..Default::default()
+        }],
+        mode: PatrolMode::Once,
+        priority: 1.0,
+    }));
+    let mut b = Battle::new(kreetle(), nav, vec![]);
+    b.fighters.push(f);
+    b.made_by.push(0);
+    let (track, events) = run_battle(&mut b, &world, 20.0);
+    // It walked to C (a patrol walks: Run(false) sets bIsWalking) ...
+    assert!(track[0].iter().any(|p| (p.x - 1600.0).abs() < 60.0));
+    // ... and, the route done, wanders (patrol utility 0 after Once).
+    let f = &b.fighters[0];
+    assert_eq!(f.ambient.patrol_index, -1);
+    assert_eq!(f.ambient.state, Some(brain::ambient::AmbientState::Wander));
+    // The point's event goes out once it moves on from it.
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, BattleEvent::Event { name, .. } if name == "Done")));
+}
+
+#[test]
+fn nobody_fights_wildlife() {
+    let world = flat_floor(vec![]);
+    let droid = Arc::new(AiParams::battle_droid());
+    let mut b = Battle::new(droid.clone(), NavGraph::default(), vec![]);
+    b.fighters.push(Fighter::new(
+        1,
+        droid,
+        Vec3::ZERO,
+        0.0,
+        StartState::StationaryAttack,
+    ));
+    b.fighters.push(Fighter::new(
+        2,
+        kreetle(),
+        Vec3::new(400.0, 0.0, 0.0),
+        0.0,
+        StartState::Wander,
+    ));
+    b.made_by.extend([0, 0]);
+    let (_, events) = run_battle(&mut b, &world, 5.0);
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        BattleEvent::Ai {
+            event: AiEvent::Fire { .. },
+            ..
+        }
+    )));
+    assert!(!b.in_fight());
+    // A shot nearby doesn't alert it.
+    b.hear(Vec3::new(400.0, 50.0, 40.0));
+    assert_eq!(b.fighters[1].mode, Mode::Idle);
+}
+
+#[test]
+fn unseen_wildlife_stops_until_seen() {
+    let world = flat_floor(vec![]);
+    let nav = wild_nav(&[("A", 0.0, 0.0), ("B", 900.0, 0.0)], &[(0, 1)]);
+    let mut b = Battle::new(kreetle(), nav, vec![]);
+    let mut f = Fighter::new(1, kreetle(), Vec3::ZERO, 0.0, StartState::Wander);
+    f.last_on_screen = 0.0; // never seen
+    b.fighters.push(f);
+    b.made_by.push(0);
+    let (track, _) = run_battle(&mut b, &world, 5.0);
+    assert!(b.fighters[0].stasis);
+    let last = track[0].last().unwrap();
+    assert!(last.length_2d() < 5.0, "it moved while unseen: {last:?}");
+    // Seen again: it carries on.
+    b.fighters[0].last_on_screen = f32::INFINITY;
+    run_battle(&mut b, &world, 0.1);
+    assert!(!b.fighters[0].stasis);
+}
+
+#[test]
+fn covert_view_check() {
+    let world = flat_floor(vec![Brush::cuboid(
+        Vec3::new(900.0, -500.0, 0.0),
+        Vec3::new(1000.0, 500.0, 400.0),
+    )]);
+    let v = Viewer {
+        eye: Vec3::new(0.0, 0.0, 60.0),
+        direction: Vec3::new(1.0, 0.0, 0.0),
+        fov: 90.0,
+    };
+    assert!(v.sees(&world, Vec3::new(500.0, 100.0, 40.0)));
+    assert!(!v.sees(&world, Vec3::new(-500.0, 0.0, 40.0)), "behind");
+    assert!(
+        !v.sees(&world, Vec3::new(100.0, 500.0, 40.0)),
+        "outside the view"
+    );
+    assert!(
+        !v.sees(&world, Vec3::new(1500.0, 0.0, 40.0)),
+        "behind a wall"
+    );
 }

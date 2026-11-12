@@ -24,8 +24,10 @@ pub struct EnemyType {
     /// "droid" or "organic": for damage tables and stuns (EMP, flash).
     pub body: String,
     /// Whose side it fights on: "separatist" (the player's enemies, the
-    /// default) or "republic" (clone troopers: they fight the separatist
-    /// fighters and leave the player and squad alone).
+    /// default), "republic" (clone troopers: they fight the separatist
+    /// fighters and leave the player and squad alone) or "neutral"
+    /// (wildlife on the original's neutral team 0: nobody fights it and it
+    /// fights nobody, though it can be shot).
     pub side: String,
 }
 
@@ -33,6 +35,11 @@ impl EnemyType {
     /// Fights on the player's side (`side = "republic"`).
     pub fn republic(&self) -> bool {
         self.side == "republic"
+    }
+
+    /// On nobody's side (`side = "neutral"`).
+    pub fn neutral(&self) -> bool {
+        self.side == "neutral"
     }
 }
 
@@ -149,6 +156,49 @@ impl GrenadeUse {
     }
 }
 
+/// The original's ambient creatures' AI (`[ambient]`: ctcharacters.u
+/// `AmbientBot` and the compiled states it uses, ctgame.dll `StateIdle`,
+/// `StateWander` and `StatePatrol`, decompiled for reference). When
+/// `enabled`, the character doesn't fight: every `decision_interval` or
+/// so it picks the state that wants it most (idle, wander, or its patrol
+/// if it has one) and does that. See `brain/ambient.rs`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ambient {
+    pub enabled: bool,
+    /// How much it wants to stand about (`StateIdle`'s utility).
+    pub idle_utility: f32,
+    /// How much it wants to wander (`StateWander`'s utility).
+    pub wander_utility: f32,
+    /// Wanders to random navigation points it can reach within this many
+    /// uu (`StateWander`).
+    pub wander_radius: f32,
+    /// Waits up to this many seconds at each one (`StateWander`).
+    pub wander_pause_max: f32,
+    /// The pawn's `bCanWalk` and `bCanRun`: whether it switches between
+    /// walking and running at all (wandering only does with `can_walk`;
+    /// a patrol point's `RunToNode` needs `can_run`).
+    pub can_walk: bool,
+    pub can_run: bool,
+    /// Seconds it may go unseen before it stops moving and thinking
+    /// (`Ambient.DeactivateTime`); -1 never stops.
+    pub deactivate_time: f32,
+}
+
+impl Default for Ambient {
+    fn default() -> Self {
+        Ambient {
+            enabled: false,
+            idle_utility: 0.1,
+            wander_utility: 0.2,
+            wander_radius: 2048.0,
+            wander_pause_max: 5.0,
+            can_walk: false,
+            can_run: false,
+            deactivate_time: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spawning {
     pub activate_unscripted_within: f32,
@@ -199,6 +249,14 @@ pub struct Look {
     pub blend_time_fire: f32,
     /// Blend time into the death animation.
     pub blend_time_death: f32,
+    /// The effect (an emitter class, `DeathExplode_SmallCreature`) shown
+    /// where it dies (the original's `DeathEffect`). Empty for none.
+    pub death_effect: String,
+    /// Plays walking and running animations at the speed the character
+    /// moves: its speed divided by how fast the animation's root bone
+    /// moves (Engine `APawn::UpdateMovementAnimation`, decompiled).
+    /// Off: the animation's own rate.
+    pub rate_by_speed: bool,
 }
 
 /// What the character says or sounds like: sound names in `package`
@@ -259,6 +317,7 @@ pub struct AiParams {
     pub grenades: GrenadeUse,
     pub spawning: Spawning,
     pub look: Look,
+    pub ambient: Ambient,
 }
 
 impl AiParams {
@@ -386,7 +445,10 @@ impl AiParams {
                 blend_time: 0.2,
                 blend_time_fire: 0.05,
                 blend_time_death: 0.1,
+                death_effect: String::new(),
+                rate_by_speed: false,
             },
+            ambient: Ambient::default(),
         }
     }
 
@@ -494,8 +556,8 @@ impl AiParams {
             }
             ("type", "side") => {
                 k.side = text();
-                if !matches!(k.side.as_str(), "separatist" | "republic") {
-                    return Err("side should be \"separatist\" or \"republic\"".into());
+                if !matches!(k.side.as_str(), "separatist" | "republic" | "neutral") {
+                    return Err("side should be \"separatist\", \"republic\" or \"neutral\"".into());
                 }
             }
             ("combat", "uses_cover") => c.uses_cover = boolean()?,
@@ -559,6 +621,16 @@ impl AiParams {
             ("look", "blend_time") => l.blend_time = num()?.max(0.0),
             ("look", "blend_time_fire") => l.blend_time_fire = num()?.max(0.0),
             ("look", "blend_time_death") => l.blend_time_death = num()?.max(0.0),
+            ("look", "death_effect") => l.death_effect = text(),
+            ("look", "rate_by_speed") => l.rate_by_speed = boolean()?,
+            ("ambient", "enabled") => self.ambient.enabled = boolean()?,
+            ("ambient", "idle_utility") => self.ambient.idle_utility = num()?,
+            ("ambient", "wander_utility") => self.ambient.wander_utility = num()?,
+            ("ambient", "wander_radius") => self.ambient.wander_radius = num()?.max(0.0),
+            ("ambient", "wander_pause_max") => self.ambient.wander_pause_max = num()?.max(0.0),
+            ("ambient", "can_walk") => self.ambient.can_walk = boolean()?,
+            ("ambient", "can_run") => self.ambient.can_run = boolean()?,
+            ("ambient", "deactivate_time") => self.ambient.deactivate_time = num()?,
             _ => return Err(format!("unknown setting `{key}` in [{section}]")),
         }
         Ok(())
@@ -578,6 +650,7 @@ impl AiParams {
         out.push(format!("{:?}", self.grenades));
         out.push(format!("{:?}", self.spawning));
         out.push(format!("{:?}", self.look));
+        out.push(format!("{:?}", self.ambient));
         out
     }
 }

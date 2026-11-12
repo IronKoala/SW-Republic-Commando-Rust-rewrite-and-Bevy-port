@@ -16,14 +16,16 @@
 pub mod battle;
 pub mod brain;
 pub mod params;
+pub mod patrol;
 pub mod spawns;
 
 pub use battle::{
     Battle, BattleEvent, BattleSnapshot, Birth, FighterSnapshot, Spawner, SpawnerSnapshot,
-    SwitchedOn,
+    SwitchedOn, Viewer,
 };
 pub use brain::{AiEvent, Fighter, Maneuver, Mode, ScriptGoal, Target, View};
 pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
+pub use patrol::{Patrol, PatrolMode, PatrolPoint};
 pub use spawns::{read_factories, read_placed, Factory, Offspring, Placed, SpawnSpot, StartState};
 
 #[cfg(test)]

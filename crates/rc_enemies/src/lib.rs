@@ -32,12 +32,12 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use look::{DroidLook, Pose};
-use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_ai::{AiEvent, AiParams, Battle, BattleEvent, Mode, SwitchedOn, Target};
 use rc_combat::{
     Blast, Body, CombatSet, Damage, DamageTable, Dead, Died, FireShot, GrenadeParams, Health,
     Hittable, MeleeAttack, Shield, ShotLanded, Stunned, Team, ThrowGrenade,
 };
+use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
@@ -68,6 +68,7 @@ impl Plugin for EnemiesPlugin {
             .add_save_part::<save::EnemiesSave>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
+            .add_message::<rc_effects_plugin::SpawnEffect>()
             .add_message::<FactoryOrder>()
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
@@ -81,6 +82,7 @@ impl Plugin for EnemiesPlugin {
                     hear_level,
                     scripted::set_collision,
                     scripted::follow_orders,
+                    watch_wildlife,
                     think,
                     place_droids,
                 )
@@ -887,8 +889,11 @@ fn hear_level(
 /// music's battle rules.
 fn tell_music(fight: Res<Fight>, mut threats: ResMut<rc_game_core::MusicThreats>) {
     threats.0.clear();
-    // Clone troopers are friends, not threats.
-    let threats_now = fight.battle.alive().filter(|f| !f.params.kind.republic());
+    // Clone troopers are friends, not threats; wildlife is neither.
+    let threats_now = fight
+        .battle
+        .alive()
+        .filter(|f| !f.params.kind.republic() && !f.params.kind.neutral());
     threats.0.extend(threats_now.map(|f| {
         let at = f.pawn.location;
         rc_game_core::MusicThreat {
@@ -934,12 +939,101 @@ fn summary(f: &Fight, log: &GameLog) {
         s.droids_hurt,
         s.first_spotted.map_or("never".into(), |t| format!("{t:.1}s"))
     ));
-    let clones = f.battle.alive().filter(|f| f.params.kind.republic()).count();
+    let clones = f
+        .battle
+        .alive()
+        .filter(|f| f.params.kind.republic())
+        .count();
     if clones > 0 || s.clones_destroyed > 0 {
         log.line(format!(
             "{PART}: t={:.1}s clone troopers: {clones} alive, {} destroyed; {} clone shots, {} hit droids, {} hit other clones by mistake; {} droid bolts hit clones",
             f.battle.time, s.clones_destroyed, s.clone_shots, s.clone_bolts_on_droids, s.clone_bolts_on_clones, s.droid_bolts_on_clones
         ));
+    }
+}
+
+/// What the player's camera sees, for the wildlife and covert spawners:
+/// marks each ambient creature on screen this frame (for
+/// `Ambient.DeactivateTime`), switches shots through ones that stopped
+/// (the original turns their collision off), and tells the battle the
+/// player's view (`Battle::viewer`, for `bCovert` spawners).
+///
+/// **Not exactly the original:** the original knows when it last drew a
+/// creature (`LastRenderTime`), which also leaves out what its zones and
+/// portals hide; ours counts a creature as drawn when it is inside the
+/// camera's view (its frustum), even behind a wall.
+fn watch_wildlife(
+    mut commands: Commands,
+    mut fight: ResMut<Fight>,
+    camera: Query<(&Transform, Option<&Projection>), With<PlayerCamera>>,
+    droids: Query<(Option<&Hittable>, Option<&scripted::NotColliding>), With<Droid>>,
+) {
+    let fight = &mut *fight;
+    let now = fight.battle.time;
+    let Ok((cam, proj)) = camera.single() else {
+        fight.battle.viewer = None;
+        return;
+    };
+    let (vfov, aspect) = match proj {
+        Some(Projection::Perspective(p)) => (p.fov, p.aspect_ratio),
+        _ => (std::f32::consts::FRAC_PI_2, 16.0 / 9.0),
+    };
+    let tan_v = (vfov * 0.5).tan();
+    let tan_h = tan_v * aspect;
+    let eye = to_unreal(cam.translation);
+    let ahead = to_unreal(cam.translation + cam.forward().as_vec3());
+    fight.battle.viewer = Some(rc_ai::Viewer {
+        eye,
+        direction: (ahead - eye).normalize_or_zero(),
+        fov: (2.0 * tan_h.atan()).to_degrees(),
+    });
+    let to_cam = cam.compute_affine().inverse();
+    for f in fight.battle.fighters.iter_mut() {
+        if !f.params.ambient.enabled || f.mode == Mode::Dead {
+            continue;
+        }
+        let centre = to_bevy(f.pawn.location);
+        let r = f
+            .params
+            .movement
+            .collision_radius
+            .max(f.params.movement.collision_height)
+            / 50.0;
+        let p = to_cam.transform_point3(centre);
+        let depth = -p.z;
+        let seen = depth > -r
+            && p.x.abs() <= depth * tan_h + r * (1.0 + tan_h * tan_h).sqrt()
+            && p.y.abs() <= depth * tan_v + r * (1.0 + tan_v * tan_v).sqrt();
+        if seen {
+            f.last_on_screen = now;
+        } else if f.last_on_screen.is_infinite() {
+            // Never drawn yet: the original's LastRenderTime starts at 0.
+            f.last_on_screen = 0.0;
+        }
+        // A stopped creature can't be hit; a moving one again can.
+        let Some(&e) = fight.entities.get(&f.id) else {
+            continue;
+        };
+        let Ok((hit, off)) = droids.get(e) else {
+            continue;
+        };
+        match (f.stasis, hit, off) {
+            (true, Some(h), _) => {
+                commands
+                    .entity(e)
+                    .remove::<Hittable>()
+                    .insert(scripted::NotColliding(*h));
+                fight.battle.not_colliding.insert(f.id);
+            }
+            (false, None, Some(n)) => {
+                commands
+                    .entity(e)
+                    .remove::<scripted::NotColliding>()
+                    .insert(n.0);
+                fight.battle.not_colliding.remove(&f.id);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1097,8 +1191,12 @@ fn think(
                     },
                     // Clone troopers (side = "republic") are on the player's
                     // side: the squad leaves them alone and droids shoot them.
+                    // Wildlife (side = "neutral") is on the original's
+                    // neutral team: nobody aims at it.
                     if p.kind.republic() {
                         Team::Republic
+                    } else if p.kind.neutral() {
+                        Team::Neutral
                     } else {
                         Team::Separatist
                     },
@@ -1272,7 +1370,9 @@ fn think(
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
                         }
-                        log.line(format!("{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"));
+                        log.line(format!(
+                            "{PART}: t={now:.1}s droid {id} spotted an enemy {distance:.0} uu away"
+                        ));
                     }
                     AiEvent::ModeChanged { from, to } => log.line(format!(
                         "{PART}: t={now:.1}s droid {id}: {} -> {}",
@@ -1362,7 +1462,10 @@ fn react_to_combat(
     transforms: Query<&Transform>,
     camera: Query<&Transform, With<PlayerCamera>>,
     mut sounds: ResMut<EnemySounds>,
-    mut raise: MessageWriter<RaiseEvent>,
+    (mut raise, mut effects): (
+        MessageWriter<RaiseEvent>,
+        MessageWriter<rc_effects_plugin::SpawnEffect>,
+    ),
     log: Res<GameLog>,
 ) {
     let fight = &mut *fight;
@@ -1452,6 +1555,23 @@ fn react_to_combat(
         let kind = last_kind.get(d).copied().unwrap_or("other");
         say(&mut commands, fight, droid.id, "death", kind);
         let f = fight.battle.fighters.iter().find(|f| f.id == droid.id);
+        // Its death effect, carried by the body (Engine.u
+        // `Pawn.PlayDying`: the `DeathEffect` emitter, based on the pawn).
+        if let (Some(f), Ok(t)) = (f, transforms.get(*d)) {
+            if !f.params.look.death_effect.is_empty() {
+                effects.write(rc_effects_plugin::SpawnEffect {
+                    effect: f.params.look.death_effect.clone(),
+                    at: t.translation,
+                    by: format!("{PART}: droid {} died", droid.id),
+                    follow: Some(*d),
+                    ..Default::default()
+                });
+                log.line(format!(
+                    "{PART}: t={now:.1}s droid {} death effect {}",
+                    droid.id, f.params.look.death_effect
+                ));
+            }
+        }
         // It leaves its weapon on the ground for the player.
         if let (Some(f), Ok(t)) = (f, transforms.get(*d)) {
             if !f.params.combat.drops.is_empty() {
@@ -1563,7 +1683,15 @@ fn choose_pose(f: &rc_ai::Fighter, just_fired: bool, now: f32) -> Pose {
     if speed > 30.0 {
         let rel = rc_ai::brain::angle_diff(v.y.atan2(v.x), f.facing).to_degrees();
         return if rel.abs() <= 45.0 {
-            if speed > 0.75 * f.params.movement.ground_speed {
+            // Ambient creatures say whether they walk or run (the
+            // original's bIsWalking), whatever their speed.
+            if f.params.ambient.enabled {
+                if f.walking {
+                    Pose::Walk
+                } else {
+                    Pose::Run
+                }
+            } else if speed > 0.75 * f.params.movement.ground_speed {
                 Pose::Run
             } else {
                 Pose::Walk
@@ -1665,10 +1793,19 @@ fn animate(
         let clip = look.clip(d.pose);
         let last = (clip.num_frames - 1.0).max(0.0);
         let before = d.frame;
+        // Walking and running at the speed it moves, where its file asks
+        // (Engine `APawn::UpdateMovementAnimation`): its speed over the
+        // animation's own.
+        let mut rate = clip.rate;
+        if f.params.look.rate_by_speed && matches!(d.pose, Pose::Walk | Pose::Run) {
+            if let Some(&ts) = look.translation_speeds.get(&d.pose) {
+                rate *= f.pawn.velocity.length_2d() / ts;
+            }
+        }
         d.frame = if d.pose.once() {
-            (d.frame + dt * clip.rate).min(last)
+            (d.frame + dt * rate).min(last)
         } else {
-            (d.frame + dt * clip.rate).rem_euclid(clip.num_frames.max(1.0))
+            (d.frame + dt * rate).rem_euclid(clip.num_frames.max(1.0))
         };
         // A body that finished falling doesn't need posing again.
         if d.pose.once() && before == last && d.frame == last && !d.blend.blending() {
