@@ -41,6 +41,7 @@ mod melee;
 pub mod pickup;
 pub mod pickup_sound;
 pub mod save;
+pub mod script_ammo;
 pub mod shot;
 mod throw;
 mod view;
@@ -193,6 +194,16 @@ impl Plugin for WeaponsPlugin {
         app.add_message::<FireShot>()
             .add_message::<ShotLanded>()
             .add_message::<ammo_box::AmmoBoxTaken>()
+            // Level scripts giving or taking ammo (`script_ammo`).
+            .add_message::<rc_game_core::pickups::AddAmmo>()
+            .init_resource::<script_ammo::PendingAddAmmo>()
+            .add_systems(
+                Update,
+                script_ammo::add_ammo
+                    .in_set(CombatSet::Flight)
+                    .run_if(resource_exists::<WeaponLibrary>),
+            )
+            .add_systems(OnExit(rc_game_core::GameState::InGame), script_ammo::forget)
             // The levels' ammo and grenade boxes (`ammo_box`).
             .add_systems(
                 Update,
@@ -233,7 +244,10 @@ impl Plugin for WeaponsPlugin {
                     .run_if(resource_exists::<WeaponLibrary>),
             )
             .add_systems(Update, ammo_box::show_boxes.in_set(GameSet::View))
-            .add_systems(OnExit(rc_game_core::GameState::InGame), ammo_box::forget_boxes)
+            .add_systems(
+                OnExit(rc_game_core::GameState::InGame),
+                ammo_box::forget_boxes,
+            )
             // The weapons lying in the levels (`pickup`).
             .add_message::<pickup::WeaponTaken>()
             .init_resource::<pickup::WeaponsGone>()
