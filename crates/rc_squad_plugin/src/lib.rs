@@ -35,11 +35,11 @@
 //! (`OnEnter(GameState::Loading)`), or given with `SquadMapData::load` by a
 //! program without the loading screen (like `rc_walk`).
 
-pub mod carry;
 mod ammo;
+pub mod carry;
 pub mod look;
-pub mod save;
 pub mod membership;
+pub mod save;
 pub mod voice;
 
 use bevy::prelude::*;
@@ -50,9 +50,9 @@ use rc_combat::{
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
-    playing, Action, ActionState, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
+    playing, Action, ActionState, AiRules, CurrentLevel, GameLog, GamePaths, GameSet, GameState,
     LevelCollision, MarkerJob, MarkerJobStep, MovingFloors, OnTurret, Player, PlayerCamera,
-    SquadMember, SquadReadout, SquadStatus, TurretOrder,
+    SquadMember, SquadReadout, SquadStatus, TeamTable, TurretOrder,
 };
 use rc_movement::{MoveParams, Vec3 as UVec3, World};
 use rc_nav::NavGraph;
@@ -741,10 +741,7 @@ fn spawn_squad(
                 squad.members[i].presence = rc_squad::Presence::Gone;
                 log_line(
                     &log,
-                    format!(
-                        "{} is not in this map",
-                        squad.members[i].settings.name
-                    ),
+                    format!("{} is not in this map", squad.members[i].settings.name),
                 );
             }
         }
@@ -875,6 +872,9 @@ fn sync_bodies(
             // The original's squad damage table: droid bolts x0.15,
             // explosions x0.4, stuns x0.
             DamageTable("DV_OrganicCTSquadDamage".into()),
+            // Whom they fight and how far they see, which level scripts
+            // change: `CloneCommando`'s class default team is 2.
+            AiRules::new(m.settings.class.clone(), 2),
         ));
         log_line(
             &log,
@@ -1022,7 +1022,10 @@ fn take_orders(
         let mut use_key = a.just_pressed(Action::Use);
         // At a switched-on bacta dispenser the shared key uses it.
         if (context || use_key) && use_claimed.is_some_and(|u| u.0) {
-            log_line(&log, "context order left alone: the player is using something");
+            log_line(
+                &log,
+                "context order left alone: the player is using something",
+            );
             context = false;
             use_key = false;
         }
@@ -1062,15 +1065,51 @@ fn take_orders(
     }
 }
 
-/// Every living enemy with a body, for the squad to fight.
+/// Every living enemy with a body, for the squad to fight, and what
+/// level scripts changed on each squad mate (`AiRules`: team, sight
+/// radius, suggested enemy).
+///
+/// With the game's team relations loaded (`TeamTable`), a character with
+/// `AiRules` is a threat to a squad mate when the mate's team treats its
+/// team as an enemy and its `bPerceivedAsThreat` is on, the way the
+/// game's `ULocalSituation::Assess` picks enemies; anything else counts
+/// when it is `Team::Separatist`, as before.
 #[allow(clippy::type_complexity)]
 fn gather_threats(
     mut threats: ResMut<SquadThreats>,
-    enemies: Query<(Entity, &Transform, &Team, &Hittable, Option<&DamageTable>), Without<Dead>>,
-    state: Res<SquadState>,
+    enemies: Query<
+        (
+            Entity,
+            &Transform,
+            &Team,
+            &Hittable,
+            Option<&DamageTable>,
+            Option<&AiRules>,
+        ),
+        (Without<Dead>, Without<SquadMate>),
+    >,
+    mates: Query<(&SquadMate, &AiRules)>,
+    table: Option<Res<TeamTable>>,
+    mut state: ResMut<SquadState>,
     library: Option<Res<WeaponLibrary>>,
 ) {
     threats.0.clear();
+    if let Some(squad) = state.squad.as_mut() {
+        for (mate, rules) in &mates {
+            let Some(m) = squad.members.get_mut(mate.index) else {
+                continue;
+            };
+            m.sight_override = rules.sight_radius;
+            m.suggested = rules.suggested_enemy.map(|e| e.to_bits());
+            m.enemy_teams = table.as_ref().map(|t| {
+                let mut row = [false; rc_game_core::ai_rules::TEAMS];
+                for (b, r) in row.iter_mut().enumerate() {
+                    *r = t.hostile(rules.team, b as u8);
+                }
+                row
+            });
+        }
+    }
     // The damage type of the squad's usual gun, to see who it barely hurts.
     let usual = state.squad.as_ref().and_then(|s| {
         library
@@ -1079,10 +1118,15 @@ fn gather_threats(
             .get(&s.settings.fight.weapon)
             .map(|w| w.damage_type.clone())
     });
-    for (e, t, team, hit, table) in &enemies {
-        if *team != Team::Separatist {
+    for (e, t, team, hit, damage, rules) in &enemies {
+        let counts = match (rules, &table) {
+            (Some(_), Some(_)) => true,
+            _ => *team == Team::Separatist,
+        };
+        if !counts {
             continue;
         }
+        let table = damage;
         let feet = to_unreal(t.translation);
         let centre = feet + UVec3::new(0.0, 0.0, hit.center_up);
         let blaster_share = match (&usual, &library) {
@@ -1097,6 +1141,9 @@ fn gather_threats(
             // above its middle, a commando's 64).
             eye: centre + UVec3::new(0.0, 0.0, hit.half_height * 0.75),
             blaster_share,
+            // Separatists are team 5 (`TeamHostile`) by class default.
+            team: rules.map_or(5, |r| r.team),
+            threat: rules.is_none_or(|r| r.threat),
         });
     }
 }

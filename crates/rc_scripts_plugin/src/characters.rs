@@ -34,7 +34,8 @@ use bevy::prelude::*;
 use rc_combat::{CannotDie, Damage, DamageKind, Invulnerable};
 use rc_game_core::units::to_unreal;
 use rc_game_core::{
-    CharacterAct, CharacterOrder, GameLog, Player, ScriptTags, SquadMembership, SquadStanceOrder,
+    AiRules, CharacterAct, CharacterOrder, GameLog, Player, ScriptTags, SquadMembership,
+    SquadStanceOrder,
 };
 use rc_level::scripts::{Place, ScriptObject};
 use std::collections::{HashMap, HashSet};
@@ -70,6 +71,10 @@ pub const KINDS: &[&str] = &[
     "destroypawn",
     "changesquadstance",
     "changesquadmember",
+    "setthreat",
+    "setteamindex",
+    "suggestenemy",
+    "setsightradius",
 ];
 
 /// Where scripts can send characters, by lower-case tag and by name.
@@ -125,6 +130,7 @@ fn tag_field(kind: &str) -> Option<&'static str> {
         "sethidden" => "HideActorTag",
         "changesquadmember" => "MemberTag",
         "playpropanim" => "AnimPropTag",
+        "setthreat" | "setteamindex" => "PawnTag",
         _ => return None,
     })
 }
@@ -161,6 +167,7 @@ pub(crate) fn cast(
     mut damage: MessageWriter<Damage>,
     mut squad: MessageWriter<SquadStanceOrder>,
     mut membership: MessageWriter<SquadMembership>,
+    mut rules: Query<(Entity, &mut AiRules)>,
     log: Res<GameLog>,
 ) {
     let Some(mut script) = script else { return };
@@ -208,6 +215,17 @@ pub(crate) fn cast(
                     log.line(format!("{at}: squad stance {stance} (not done yet)"));
                 }
             }
+            continue;
+        }
+        if call.kind == "setsightradius" {
+            set_sight_radius(script, &call, &at, &chars, &mut rules, &log);
+            continue;
+        }
+        // gameplay.u's `ACTION_SuggestEnemy` does nothing when `EnemyTag`
+        // is empty. Its `'None'` branch (clear the suggestion) can't be
+        // reached: in UnrealScript the name `'None'` is the empty name.
+        if call.kind == "suggestenemy" && named(a, "EnemyTag").is_none() {
+            log.line(format!("{at}: no EnemyTag; nothing to do"));
             continue;
         }
         // `ChangeSquadMember` with no `MemberTag` does nothing in the
@@ -334,6 +352,77 @@ pub(crate) fn cast(
                     "{at}: {who} ({n}) {}",
                     if on { "can't die" } else { "can die again" }
                 ));
+                continue;
+            }
+            "setthreat" | "setteamindex" | "suggestenemy" => {
+                let enemy = if call.kind == "suggestenemy" {
+                    // The first actor with the tag (`ForEach AllActors`).
+                    let t = named(a, "EnemyTag").unwrap_or_default();
+                    let found = if script.director.settings.is_player(&t) {
+                        player.single().ok().map(|(e, _)| e)
+                    } else {
+                        chars
+                            .iter()
+                            .find(|(_, st, _)| {
+                                st.tag
+                                    .as_deref()
+                                    .is_some_and(|x| x.eq_ignore_ascii_case(&t))
+                            })
+                            .map(|(e, _, _)| e)
+                    };
+                    match found {
+                        Some(e) => Some(e),
+                        None => {
+                            script.stats.not_done += 1;
+                            log.line(format!(
+                                "{at}: {who}: suggested enemy {t} is not a character in the game (the original also takes other actors it can see); not done yet"
+                            ));
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
+                let mut changed = 0;
+                let mut missing = 0;
+                for (e, _, _) in &targets {
+                    let Ok((_, mut r)) = rules.get_mut(*e) else {
+                        missing += 1;
+                        continue;
+                    };
+                    match call.kind.as_str() {
+                        "setthreat" => r.threat = a.flag("IsThreat", true),
+                        "setteamindex" => {
+                            r.team = a.int("NewTeamIndex").unwrap_or(0).clamp(0, 255) as u8
+                        }
+                        _ => r.suggested_enemy = enemy,
+                    }
+                    changed += 1;
+                }
+                let what = match call.kind.as_str() {
+                    "setthreat" => format!("seen as a threat: {}", a.flag("IsThreat", true)),
+                    "setteamindex" => format!("team {}", a.int("NewTeamIndex").unwrap_or(0)),
+                    _ => format!(
+                        "suggested enemy {}",
+                        named(a, "EnemyTag").unwrap_or_default()
+                    ),
+                };
+                log.line(format!("{at}: {who} ({changed}): {what}"));
+                script
+                    .stats
+                    .ai_rules
+                    .push(format!("{} {who} {what}", call.kind));
+                if missing > 0 {
+                    script.stats.not_done += 1;
+                    log.line(format!(
+                        "{at}: {who}: {missing} of them {} (not done yet)",
+                        if is_player {
+                            "is the player, whose team and threat flag the port doesn't keep"
+                        } else {
+                            "aren't characters the port's AI runs"
+                        }
+                    ));
+                }
                 continue;
             }
             "hurtactor" => {
@@ -464,4 +553,77 @@ pub(crate) fn cast(
         }
     }
     script.calls = keep;
+}
+
+/// gameplay.u's `ACTION_SetSightRadius`: every character tagged
+/// `AffectPawnsWithTag` or of class `AffectPawnsOfClass` (or a class under
+/// it), and with `AffectAttachedPawn` the sequence's own character, gets
+/// `NewSightRadius` (0 unless the map set it), or its own back with
+/// `ResetToDefaults`. It never waits for characters to appear.
+fn set_sight_radius(
+    script: &mut LevelScript,
+    call: &Call,
+    at: &str,
+    chars: &Query<(Entity, &ScriptTags, &Transform)>,
+    rules: &mut Query<(Entity, &mut AiRules)>,
+    log: &GameLog,
+) {
+    let a = &call.action;
+    let tag = named(a, "AffectPawnsWithTag");
+    let class = named(a, "AffectPawnsOfClass");
+    let attached = a.flag("AffectAttachedPawn", false);
+    let reset = a.flag("ResetToDefaults", false);
+    let radius = (!reset).then(|| a.float("NewSightRadius").unwrap_or(0.0));
+    let mut hit = Vec::new();
+    for (e, st, _) in chars {
+        let by_tag = tag
+            .as_deref()
+            .is_some_and(|t| st.tag.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(t)));
+        let by_owner = attached
+            && call.owner.as_deref().is_some_and(|o| {
+                st.script
+                    .as_deref()
+                    .is_some_and(|x| x.eq_ignore_ascii_case(o))
+            });
+        if by_tag || by_owner {
+            hit.push(e);
+        }
+    }
+    let mut n = 0;
+    let mut no_parents = 0;
+    for (e, mut r) in rules.iter_mut() {
+        let by_class = class.as_deref().is_some_and(|c| r.is_a(c));
+        if by_class || hit.contains(&e) {
+            if by_class && r.parents.is_none() {
+                no_parents += 1;
+            }
+            r.sight_radius = radius;
+            n += 1;
+        }
+    }
+    let to = match radius {
+        Some(r) => format!("{r}"),
+        None => "their own".into(),
+    };
+    let who = [
+        tag.map(|t| format!("tagged {t}")),
+        class.map(|c| format!("of class {c}")),
+        attached.then(|| "its own character".to_string()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ");
+    log.line(format!(
+        "{at}: sight radius {to} for characters {who}: {n} changed"
+    ));
+    if no_parents > 0 {
+        log.line(format!(
+            "{at}: {no_parents} of them matched by their own class only (the game's classes weren't read)"
+        ));
+    }
+    script
+        .stats
+        .ai_rules
+        .push(format!("setsightradius {who} {to} ({n})"));
 }

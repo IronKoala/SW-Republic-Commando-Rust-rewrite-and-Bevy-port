@@ -43,8 +43,9 @@ use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{
-    playing, CurrentLevel, FactoryOrder, GameLog, GamePaths, GameSet, GameState, LevelCollision,
-    LevelScriptsRun, MusicMood, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
+    ai_rules::PLAYER_TEAM, playing, AiRules, CurrentLevel, FactoryOrder, GameLog, GamePaths,
+    GameSet, GameState, LevelCollision, LevelScriptsRun, MusicMood, Player, PlayerCamera,
+    RaiseEvent, ScriptEvent, ScriptTags,
 };
 use rc_nav::NavGraph;
 use rc_package::Package;
@@ -86,6 +87,13 @@ impl Plugin for EnemiesPlugin {
                     .run_if(resource_exists::<Fight>),
             )
             .add_systems(OnExit(GameState::InGame), end_fight)
+            .add_systems(
+                Update,
+                fill_class_parents
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing)
+                    .run_if(any_with_component::<AiRules>),
+            )
             .add_systems(
                 Update,
                 (
@@ -199,6 +207,9 @@ pub struct Fight {
     /// A save was just loaded: `dispensers::after_load` shows the
     /// dispensers as saved.
     pub dispensers_restored: bool,
+    /// The game's classes, for each character's parent classes
+    /// (`AiRules::parents`); `None` when they couldn't be read.
+    pub classes: Option<Arc<rc_package::class_library::ClassLibrary>>,
 }
 
 /// Counts for the log and for tests.
@@ -252,6 +263,7 @@ impl Fight {
             script_waits: HashMap::new(),
             script_done: Vec::new(),
             dispenser_steps: Vec::new(),
+            classes: None,
             dispensers_restored: false,
         }
     }
@@ -309,6 +321,22 @@ impl PawnClasses {
             self.library = Some(Arc::new(lib));
         }
         self.library.clone()
+    }
+}
+
+/// Fill in the parent classes of every character's `AiRules` (droids,
+/// clone troopers, squad mates), for level scripts that name a class and
+/// mean every class under it too (`ACTION_SetSightRadius`'s
+/// `AffectPawnsOfClass`).
+fn fill_class_parents(classes: Res<PawnClasses>, mut rules: Query<&mut AiRules>) {
+    let Some(lib) = classes.library.as_ref() else {
+        return;
+    };
+    for mut r in &mut rules {
+        if r.parents.is_none() {
+            let parents = lib.chain(&r.class).into_iter().skip(1).collect();
+            r.parents = Some(parents);
+        }
     }
 }
 
@@ -631,9 +659,10 @@ fn load_fight(
                     vec!["no class library: placed characters left out".into()],
                 ),
             };
-            Ok((nav, factories, placed))
+            let overrides = rc_ai::read_team_overrides(&pkg, &data)?;
+            Ok((nav, factories, placed, overrides))
         });
-    let (nav, factories, (placed, placed_notes)) = match read {
+    let (nav, factories, (placed, placed_notes), overrides) = match read {
         Ok(r) => r,
         Err(e) => {
             log.line(format!("{PART}: no droids on this map: {e}"));
@@ -826,7 +855,57 @@ fn load_fight(
     droids.extend(placed);
     let mut battle = Battle::with_types(params, nav, droids);
     battle.scripted = scripted;
-    commands.insert_resource(Fight::new(battle));
+    if let Some(table) = team_table(&paths, &overrides, &log) {
+        battle.teams = Some(rc_ai::Teams {
+            hostile: table.hostile_grid(),
+        });
+        commands.insert_resource(table);
+    }
+    let mut fight = Fight::new(battle);
+    fight.classes = classes.library.clone();
+    commands.insert_resource(fight);
+}
+
+/// The game's teams (`data/ai/teams.toml`) with the map's own
+/// `TeamOverride`s on top. `None` (and a log line) if the file can't be
+/// read: then the fight keeps to two sides.
+fn team_table(
+    paths: &GamePaths,
+    overrides: &[rc_ai::TeamOverride],
+    log: &GameLog,
+) -> Option<rc_game_core::TeamTable> {
+    let Some(file) = paths.data_file("ai/teams.toml") else {
+        log.line(format!("{PART}: no ai/teams.toml: fighting by two sides"));
+        return None;
+    };
+    let mut table = match std::fs::read_to_string(&file)
+        .map_err(|e| e.to_string())
+        .and_then(|t| rc_game_core::TeamTable::from_toml(&t))
+    {
+        Ok(t) => t,
+        Err(e) => {
+            log.line(format!(
+                "{PART}: {}: {e}: fighting by two sides",
+                file.display()
+            ));
+            return None;
+        }
+    };
+    log.line(format!(
+        "{PART}: teams from {} ({} of the map's own team changes)",
+        file.display(),
+        overrides.len()
+    ));
+    for o in overrides {
+        if (0..rc_game_core::ai_rules::TEAMS as i32).contains(&o.index) {
+            table.set_team(o.index as usize, &o.relations);
+            log.line(format!(
+                "{PART}: teams: the map's {} replaces team {}: {:?}",
+                o.name, o.index, table.rel[o.index as usize]
+            ));
+        }
+    }
+    Some(table)
 }
 
 /// The model of weapon class `weapon` (empty: none), read from the game's
@@ -1013,12 +1092,40 @@ fn summary(f: &Fight, log: &GameLog) {
     }
 }
 
+/// The player, with what level scripts changed about them.
+type PlayerQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Transform,
+        Option<&'static Hittable>,
+        Has<Dead>,
+        Option<&'static AiRules>,
+    ),
+    With<Player>,
+>;
+
+/// The player's side besides the player: squad mates.
+type AllyQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Transform,
+        &'static Hittable,
+        &'static Team,
+        Option<&'static AiRules>,
+    ),
+    (Without<Player>, Without<Dead>, Without<Droid>),
+>;
+
 /// Where the player is, for droids to look at (Unreal units).
 fn player_target(
-    player: &Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
+    player: &PlayerQuery,
     camera: &Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
 ) -> Option<Target> {
-    let (t, hit, dead) = player.single().ok()?;
+    let (entity, t, hit, dead, rules) = player.single().ok()?;
     if dead {
         return None;
     }
@@ -1029,7 +1136,13 @@ fn player_target(
         .single()
         .map(|c| to_unreal(c.translation))
         .unwrap_or(centre + rc_movement::Vec3::new(0.0, 0.0, 60.0));
-    Some(Target { centre, eye })
+    Some(Target {
+        key: entity.to_bits(),
+        // `CTGameInfoSP.PickTeam` puts the player on team 1.
+        team: rules.map_or(PLAYER_TEAM, |r| r.team),
+        threat: rules.is_none_or(|r| r.threat),
+        ..Target::new(centre, eye)
+    })
 }
 
 /// Run the fight for one frame: spawn, think, move, shoot.
@@ -1039,10 +1152,11 @@ fn think(
     time: Res<Time>,
     mut fight: ResMut<Fight>,
     collision: Option<Res<LevelCollision>>,
-    player: Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
+    player: PlayerQuery,
     camera: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
-    allies: Query<(&Transform, &Hittable, &Team), (Without<Player>, Without<Dead>, Without<Droid>)>,
+    allies: AllyQuery,
     mut droids: Query<&mut Droid>,
+    rules: Query<(Entity, &AiRules), With<Droid>>,
     // One tuple: Bevy takes at most 16 inputs per system.
     (mut fire, mut throws, mut melee): (
         MessageWriter<FireShot>,
@@ -1064,16 +1178,40 @@ fn think(
     // them too.
     let others: Vec<Target> = allies
         .iter()
-        .filter(|(_, _, team)| **team == Team::Republic)
-        .map(|(t, hit, _)| {
+        .filter(|(_, _, _, team, rules)| rules.is_some() || **team == Team::Republic)
+        .map(|(entity, t, hit, _, rules)| {
             let centre = to_unreal(t.translation) + rc_movement::Vec3::new(0.0, 0.0, hit.center_up);
             Target {
-                centre,
-                eye: centre + rc_movement::Vec3::new(0.0, 0.0, hit.half_height * 0.7),
+                key: entity.to_bits(),
+                // Squad mates and clone troopers: team 2 by class default.
+                team: rules.map_or(2, |r| r.team),
+                threat: rules.is_none_or(|r| r.threat),
+                ..Target::new(
+                    centre,
+                    centre + rc_movement::Vec3::new(0.0, 0.0, hit.half_height * 0.7),
+                )
             }
         })
         .collect();
     let fight = &mut *fight;
+    // What level scripts changed on each droid (`AiRules`) goes to its
+    // brain before it thinks.
+    let droid_of: HashMap<Entity, u32> = fight.entities.iter().map(|(id, e)| (*e, *id)).collect();
+    for (entity, r) in &rules {
+        let Some(id) = droid_of.get(&entity) else {
+            continue;
+        };
+        let suggested = r.suggested_enemy.map(|e| match droid_of.get(&e) {
+            Some(id) => rc_ai::Fighter::key_of(*id),
+            None => e.to_bits(),
+        });
+        if let Some(f) = fight.battle.fighter_mut(*id) {
+            f.team = Some(r.team);
+            f.threat = r.threat;
+            f.sight_override = r.sight_radius;
+            f.suggested = suggested;
+        }
+    }
     let mut events = std::mem::take(&mut fight.restored);
     events.append(&mut fight.queued);
     events.extend(fight.battle.step_with(dt, &*collision.0, target, &others));
@@ -1204,6 +1342,21 @@ fn think(
                 // What the level's scripts call it, and the script it
                 // follows.
                 let o = fight.battle.offspring(id).unwrap_or_default();
+                // Its team and what level scripts may change about whom it
+                // fights (`ACTION_SetTeamIndex`, `SetThreat`, ...).
+                let team = fight
+                    .battle
+                    .alive()
+                    .find(|f| f.id == id)
+                    .map_or(if p.kind.republic() { 2 } else { 5 }, |f| f.team_or_side());
+                let mut rules = AiRules::new(
+                    fight.battle.spawners[spawner].factory.prototype.clone(),
+                    team,
+                );
+                if let Some(lib) = &fight.classes {
+                    rules.parents = Some(lib.chain(&rules.class).into_iter().skip(1).collect());
+                }
+                e.insert(rules);
                 e.insert(ScriptTags {
                     tag: o.tag,
                     script: o.script,

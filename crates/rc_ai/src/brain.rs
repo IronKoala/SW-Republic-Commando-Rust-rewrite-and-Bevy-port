@@ -114,6 +114,29 @@ pub struct Target {
     pub centre: Vec3,
     /// Its eyes (what has to be visible for us to see it, and it us).
     pub eye: Vec3,
+    /// Who it is, so a level script can name it (`ACTION_SuggestEnemy`):
+    /// the caller's own number for it (the game passes Bevy entity bits;
+    /// fighters of the battle use [`Fighter::key`]). 0 for nobody.
+    pub key: u64,
+    /// Its team (the game's `TeamIndex`, 0 to 9), for [`Battle::teams`].
+    pub team: u8,
+    /// `bPerceivedAsThreat`: the game's enemy picking passes over an
+    /// enemy-team character with it off (`ACTION_SetThreat`).
+    pub threat: bool,
+}
+
+impl Target {
+    /// Someone at `centre` with eyes at `eye`, on team 1 (the player's
+    /// team in the game's single-player rules), a threat, named by nobody.
+    pub fn new(centre: Vec3, eye: Vec3) -> Self {
+        Target {
+            centre,
+            eye,
+            key: 0,
+            team: 1,
+            threat: true,
+        }
+    }
 }
 
 /// Everything the AI may look at this frame.
@@ -268,6 +291,19 @@ pub struct Fighter {
     pub script: Option<ScriptGoal>,
     /// A level script made it unable to be hurt (`ACTION_MakeInvulnerable`).
     pub invulnerable: bool,
+    /// Its team (`TeamIndex`), when the game knows it: then
+    /// [`Battle::teams`] decides whom it fights. `None`: by its type's
+    /// side, as before teams were known.
+    pub team: Option<u8>,
+    /// `bPerceivedAsThreat` (see [`Target::threat`]). Level scripts switch
+    /// it (`ACTION_SetThreat`).
+    pub threat: bool,
+    /// A level script's `ACTION_SetSightRadius`: how far it sees instead of
+    /// its type's `sight_radius`, until reset.
+    pub sight_override: Option<f32>,
+    /// A level script's `ACTION_SuggestEnemy`: the [`Target::key`] it
+    /// fights whenever it can see it.
+    pub suggested: Option<u64>,
     /// The scripted walk has been planned (a route asked for).
     script_planned: bool,
     /// Leaping to a scripted point it can't walk to: (from, to, battle
@@ -343,6 +379,10 @@ impl Fighter {
             last_melee: f32::NEG_INFINITY,
             script: None,
             invulnerable: false,
+            team: None,
+            threat: true,
+            sight_override: None,
+            suggested: None,
             script_planned: false,
             leap: None,
             rng: Rng::new(id.wrapping_add(17)),
@@ -358,7 +398,38 @@ impl Fighter {
         Target {
             centre: self.pawn.location,
             eye: self.eye(),
+            key: self.key(),
+            team: self.team_or_side(),
+            threat: self.threat,
         }
+    }
+
+    /// The [`Target::key`] that names this fighter: its id with the top
+    /// bit set, so it can't be mistaken for a caller's own key.
+    pub fn key(&self) -> u64 {
+        Self::key_of(self.id)
+    }
+
+    pub fn key_of(id: u32) -> u64 {
+        (1 << 63) | id as u64
+    }
+
+    /// Its team, or when the game hasn't said, the team of its type's side
+    /// in the game's single-player rules: 2 for clone troopers (the
+    /// `CloneTrooper` class) and 5 for the separatists (`BattleDroid`,
+    /// `GeonosianWarrior`, ...).
+    pub fn team_or_side(&self) -> u8 {
+        self.team
+            .unwrap_or(if self.params.kind.republic() { 2 } else { 5 })
+    }
+
+    /// How far it can see: a level script's `ACTION_SetSightRadius`, else
+    /// its type's `sight_radius`. The game's enemy picking
+    /// (`ULocalSituation::Assess` in ctgame.dll) passes over anyone
+    /// further than the pawn's `SightRadius`.
+    pub fn sight_radius(&self) -> f32 {
+        self.sight_override
+            .unwrap_or(self.params.senses.sight_radius)
     }
 
     pub fn is_moving(&self) -> bool {
@@ -472,20 +543,24 @@ impl Fighter {
         }
     }
 
-    /// Of several enemies, the one to fight: the one it fought last while
+    /// Of several enemies, the one to fight: the one a level script
+    /// suggested (`ACTION_SuggestEnemy`) when it can see it, as the game's
+    /// `ULocalSituation::Assess` does; else the one it fought last while
     /// it can still see it (so it doesn't flick between targets every
     /// frame), else the nearest it can see. `None` if it sees none.
-    /// **Our choice:** the original's target picking is in its compiled
-    /// engine.
+    /// **Our choice:** apart from the suggested enemy and the sight radius,
+    /// the original's target picking is in its compiled code and not
+    /// followed here yet.
     pub fn choose_target(&mut self, world: &dyn World, targets: &[Target]) -> Option<Target> {
         let s = &self.params.senses;
+        let sight = self.sight_radius();
         let eye = self.eye();
         let fighting = matches!(self.mode, Mode::Alerted | Mode::Attack);
         let (fwd, _) = rc_movement::axes(self.facing);
         let visible = |t: &Target| {
             let to = t.eye - eye;
             let dist = to.length();
-            if dist > s.sight_radius {
+            if dist > sight {
                 return false;
             }
             if dist > s.auto_detect_radius
@@ -496,6 +571,16 @@ impl Fighter {
             }
             clear_line(world, eye, t.eye)
         };
+        if let Some(key) = self.suggested {
+            if let Some((i, t)) = targets
+                .iter()
+                .enumerate()
+                .find(|(_, t)| t.key == key && visible(t))
+            {
+                self.target_index = Some(i);
+                return Some(*t);
+            }
+        }
         if let Some(i) = self.target_index {
             if let Some(t) = targets.get(i).filter(|t| visible(t)) {
                 return Some(*t);
@@ -520,7 +605,7 @@ impl Fighter {
         let eye = self.eye();
         let to = t.eye - eye;
         let dist = to.length();
-        if dist > s.sight_radius {
+        if dist > self.sight_radius() {
             return false;
         }
         // The view cone only limits noticing someone new. Once fighting, it

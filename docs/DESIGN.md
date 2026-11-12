@@ -1937,10 +1937,61 @@ character can't stop a level. A save made while a script waits on one keeps
 which action it was, and after a load the action is given again.
 
 Not done yet: squad mates' own scripted moves (`ChangeSquadMember`), moving
-the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
-`GotoState` on characters, characters the game doesn't spawn yet (placed
+the player, `ShootTarget`, `SetScriptPriority` and `GotoState` on
+characters, characters the game doesn't spawn yet (placed
 clone troopers and the like are logged and skipped), one sequence run
 separately per character, and `ScriptPriority`.
+
+### Who fights whom: teams, threats, sight and suggested enemies (`rc_game_core::ai_rules`)
+
+In the original every character has a team (`Pawn.TeamIndex`, 0 to 9)
+and every team says of every team whether it is an enemy, neutral or an
+ally (`CTTeamInfo.RelationTowards`). A computer-run character picks its
+enemy in `ULocalSituation::Assess` (ctgame.dll, read with a disassembler,
+nothing copied): of everyone alive within its pawn's `SightRadius`, it
+counts those its team treats as an enemy **and** whose
+`bPerceivedAsThreat` is on, that it can see; it takes the nearest, except
+that an enemy a script suggested is taken whenever it is seen.
+
+- `data/ai/teams.toml`: the single-player teams (CTGameInfoSP makes them;
+  each team class's `RelationTowards` defaults), one letter per team. A
+  map's own `TeamOverride` actors replace a team at load (only geo_01a has
+  them: teams 5 and 7). The result is the `TeamTable` resource.
+- `AiRules` (component): class (and its parent classes, filled in once the
+  game's classes are read), team, threat flag, sight radius set by a
+  script, suggested enemy. Droids and clone troopers get it when made
+  (team from the spawner's `TeamIndex` or the class default: 5 for
+  separatists, 2 for clone troopers), squad mates when their body appears
+  (team 2). The player is on team 1 (`CTGameInfoSP.PickTeam`).
+- `rc_ai::Battle::teams`: with a team table, every fighter fights the
+  characters its team treats as enemies that are threats (`Target::team`,
+  `Target::threat`), within its own sight radius
+  (`Fighter::sight_radius`), and a seen suggested enemy first
+  (`Fighter::suggested`). The squad does the same per member
+  (`Member::enemy_teams`, `sight_override`, `suggested`; `Threat::team`,
+  `Threat::threat`).
+- Level scripts change them (`characters.rs`):
+
+| Action | What happens |
+|---|---|
+| `SetTeamIndex` | `AiRules::team` of the pawns tagged `PawnTag`, else the sequence's own character; `NewTeamIndex` defaults to 0 (neutral) |
+| `SetThreat` | `AiRules::threat` (`IsThreat`, default on) of the actors tagged `PawnTag`, else the sequence's character |
+| `SetSightRadius` | `AiRules::sight_radius` of characters tagged `AffectPawnsWithTag`, of class `AffectPawnsOfClass` or under it, and with `AffectAttachedPawn` the sequence's character; `NewSightRadius` defaults to 0; `ResetToDefaults` puts their own back |
+| `SuggestEnemy` | the sequence's characters' `AiRules::suggested_enemy`: the first character tagged `EnemyTag` |
+
+**Stand-in (not the original's):** every character starts with
+`bPerceivedAsThreat` on. Where the original switches it on for an ordinary
+character was not found. Its class default is off. Searched: the class defaults of every class in Engine.u, CTGame.u, CTCharacters.u and GamePlay.u (none sets it), every script package and Properties package and all 56 maps (only CTCharacters.u's AutoTurret and a death state, and CTGame.u's ACTION_SetThreat, name it), the .ini files, and every write to the flag's bit in ctgame.dll, engine.dll, gameplay.dll, ctmarkers.dll and xgame.dll (only the perched and shut-down states' wake-up code sets it). Yet the
+original's `Assess` passes over any enemy with it off, so the original
+must find most enemies some other way (its stimulus and state code, not
+read yet). Until that is read, "everyone starts as a threat" stands in,
+and only `ACTION_SetThreat` switches it off.
+
+**Not done yet:** `SetThreat` on things that aren't characters (in the
+original it sets `bValidEnemy` on turrets and props); a suggested enemy
+that isn't a character (the original also takes any actor it can see);
+the player's own team and threat flag (scripts that change them are
+logged).
 
 ### The objective tracker (`rc_scripts_plugin/src/tracker.rs`, `rc_game/src/objective_tracker.rs`)
 

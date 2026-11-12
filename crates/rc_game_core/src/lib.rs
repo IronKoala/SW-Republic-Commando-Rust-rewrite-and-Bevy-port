@@ -40,6 +40,8 @@
 //!   ([`save::SavePart`]), and the save, load and checkpoint messages.
 //! - [`PlaceLight`] and [`LitByPlace`]: the level's light at any point, and
 //!   the tag that draws a character, the gun or the helmet by it.
+//! - [`ai_rules`]: the teams and what level scripts change about whom
+//!   the AI fights ([`AiRules`], [`TeamTable`]).
 //! - [`turrets`]: [`Manning`] while the player works a mounted turret, and
 //!   the level scripts' [`TurretOrder`]s.
 //!
@@ -47,14 +49,15 @@
 //! tests run anywhere.
 
 mod actions;
+pub mod ai_rules;
 pub mod cutscene;
 pub mod events;
 mod hud;
 mod log;
 pub mod music;
 pub mod paths;
-pub mod place_light;
 pub mod pickups;
+pub mod place_light;
 pub mod save;
 pub mod sound;
 mod state;
@@ -63,12 +66,13 @@ pub mod units;
 pub mod use_item;
 
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
+pub use ai_rules::{AiRules, TeamTable};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
-    ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone,
-    FactoryOrder,
-    LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
-    ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
+    ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder,
+    CharacterOrderDone, FactoryOrder, LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim,
+    RaiseEvent, ScriptEvent, ScriptTags, ShowDebriefing, SquadMembership, SquadStanceOrder,
+    UseClaimed,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
