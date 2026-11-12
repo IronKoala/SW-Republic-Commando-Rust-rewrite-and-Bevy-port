@@ -4494,7 +4494,20 @@ a character on the ground: it triggers the map's `Event` for the
 character (`RaiseEvent`, geo_01a's `GunshipTrooper02Death`), stops it,
 and plays its `Death` animation, holding the last frame. From then on it
 ignores the scripts' orders apart from hiding and removal
-(`Controller.PawnDied` destroys an AI's controller, so its script stops).
+(`Controller.PawnDied` destroys an AI's controller). The level's script
+sequence for it carries on, as the map expects: Mikey's own sequence
+kills him and then sends MikeyMegaForce, and the ramp troopers'
+sequences wait for their own death event and then play a line.
+
+geo_01a's two ramp troopers (CloneTrooper7 and 13, since 2026-11-12):
+Trigger42 sends RunLZTroopers, their sequences run them to
+WaitToBeBlownUp and WaitToBeBlownUp02, and Trigger5's bombardment
+(ProjectileFactory11, `GEO_01AProj`, 400 damage within 512 uu) lands
+next to them and kills them; their deaths send GunshipTrooper02Death and
+03Death, which make the sequences play CT3R1001 and CT3R1002. Nothing
+here was written for them: it comes from the map once the cast can die.
+Not done: their `SuggestEnemy Rockey` and `SetScriptPriority` (the AI's
+part).
 The body is taken away `RagdollLifeSpan` seconds later (60 for a clone
 trooper) unless the map or class sets `bSaveMyCorpse`. Not done: the
 original's ragdolls (`TryToRagdoll`: always for explosions, whose
