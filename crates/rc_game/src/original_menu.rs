@@ -164,6 +164,15 @@ pub const DEBRIEFING_PAGE: &str = "debriefing";
 /// What the debriefing's CONTINUE button does (`act:continue`).
 const CONTINUE: &str = "continue";
 
+/// The hint screen's name in `original_menus.toml`.
+pub const HINT_PAGE: &str = "hint";
+
+/// What the hint screen's CONTINUE WITH HINTS does (`act:hint_on`).
+const HINT_ON: &str = "hint_on";
+
+/// What the hint screen's CONTINUE WITHOUT HINTS does (`act:hint_off`).
+const HINT_OFF: &str = "hint_off";
+
 /// What the pause menu's ENABLE HINTS does (`act:enable_hints`).
 const ENABLE_HINTS: &str = "enable_hints";
 
@@ -189,6 +198,7 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::LoadGame => Some(original_saves::LOAD),
         Page::SaveGame => Some(original_saves::SAVE),
         Page::Debriefing => Some(DEBRIEFING_PAGE),
+        Page::Hint => Some(HINT_PAGE),
         Page::Profiles => Some(original_profiles::PROFILES),
         Page::NewProfile => Some(original_profiles::NEW_PROFILE),
         Page::Extras => Some(original_credits::EXTRAS),
@@ -207,6 +217,7 @@ fn page_from_key(key: &str) -> Option<Page> {
         "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
         DEBRIEFING_PAGE => Some(Page::Debriefing),
+        HINT_PAGE => Some(Page::Hint),
         original_credits::EXTRAS => Some(Page::Extras),
         original_credits::CREDITS => Some(Page::Credits),
         original_saves::LOAD => Some(Page::LoadGame),
@@ -476,6 +487,53 @@ impl OriginalMenus {
         DebriefingShown { shown: true, lines }
     }
 
+    /// Fill in the hint page with a level's hint text (`rc_menus::hint`):
+    /// the class's `Init` (with the helmet setting, `visor`) and
+    /// `SetInfoOptions`. Returns whether the original page will show, and
+    /// lines for the log.
+    pub fn show_hint(&mut self, text: &str, visor: bool) -> (bool, Vec<String>) {
+        let mut lines = Vec::new();
+        let (Some(page), Some(assets)) = (self.pages.get_mut(HINT_PAGE), self.assets.as_mut())
+        else {
+            return (false, lines);
+        };
+        // The places the class gives (an earlier hint with the helmet off
+        // moved some up), then `Init` moves them again if it should.
+        if let Ok(c) = assets.library.class(&page.plan.class) {
+            let fresh = rc_menus::build(&c);
+            for name in ["InfoTextBorder", "InfoText", "InfoPicBorder"] {
+                match (
+                    fresh.widget(name).map(|w| &w.kind),
+                    page.screen.layout.widget_mut(name).map(|w| &mut w.kind),
+                ) {
+                    (Some(Kind::Text(a)), Some(Kind::Text(b))) => b.pos = a.pos,
+                    (Some(Kind::Sprite(a)), Some(Kind::Sprite(b))) => b.pos = a.pos,
+                    _ => {}
+                }
+            }
+        }
+        let mut problems = rc_menus::hint::init(&mut page.screen.layout, visor);
+        problems.extend(rc_menus::hint::set_text(&mut page.screen.layout, text));
+        if !visor {
+            lines.push("helmet off: text and frames moved up, as the class's Init does".into());
+        }
+        // CONTINUE WITH HINTS has the focus (the class's Init).
+        if let Some(i) = page
+            .screen
+            .layout
+            .widgets
+            .iter()
+            .position(|w| w.name.eq_ignore_ascii_case("AButton"))
+        {
+            page.screen.focus = Some(i);
+        }
+        for p in problems {
+            lines.push(format!("PROBLEM {p}"));
+        }
+        self.dirty = true;
+        (true, lines)
+    }
+
     fn screen(&self, shown: &Shown) -> Option<&Screen> {
         match shown {
             Shown::Main => self.main.as_ref(),
@@ -590,6 +648,13 @@ fn load(
             // CONTINUE shows on a PC (the original's Init).
             rc_menus::debriefing::show_continue(&mut layout);
         }
+        if rc_menus::hint::is_hint(&class.family) {
+            // CONTINUE WITH HINTS shows on a PC (the original's Init; the
+            // rest of Init is done each time a hint shows).
+            for p in rc_menus::hint::init(&mut layout, true) {
+                log.line(format!("original menus: hint page: PROBLEM {p}"));
+            }
+        }
         if rc_menus::extras::is_extras(&class.family) {
             let locked = rc_menus::extras::init(&mut layout, original_credits::reached);
             log.line(format!(
@@ -616,6 +681,16 @@ fn load(
                         "original menus: page {}: CONTINUE widened to fit its text",
                         plan.page
                     ));
+                }
+                if rc_menus::hint::is_hint(&class.family) {
+                    for b in ["AButton", "BButton"] {
+                        if screens::fit_button_to_text(&mut layout, b, &mut assets) {
+                            log.line(format!(
+                                "original menus: page {}: {b} widened to fit its text",
+                                plan.page
+                            ));
+                        }
+                    }
                 }
                 for e in &plan.extra_buttons {
                     if screens::fit_button_to_text(&mut layout, &e.name, &mut assets) {
@@ -1642,6 +1717,16 @@ fn navigate(
                 n.set(Play::Running);
             }
         }
+        return;
+    }
+    // A hint screen's two buttons: `hints.rs` closes it.
+    if cmd == PageCmd::Act(HINT_ON.into()) || cmd == PageCmd::Act(HINT_OFF.into()) {
+        let with = cmd == PageCmd::Act(HINT_ON.into());
+        log.line(format!(
+            "original menus: hint CONTINUE {} HINTS",
+            if with { "WITH" } else { "WITHOUT" }
+        ));
+        menu.hint_answer = Some(with);
         return;
     }
     // The debriefing's CONTINUE: `debriefing.rs` goes on to the next map.

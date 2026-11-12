@@ -4066,8 +4066,37 @@ texts end up at 85-90% of their size. If
 the original page can't be drawn, a placeholder page marked as one shows
 the title and text with Continue. Not done: the GEO/RAS/YYY classes differ
 only in the music they play (`musGEO_cadence_lp` and so on); that music
-isn't played yet. Hint screens (`bIsForHintText`) aren't shown: the
-original shows them only with a debug switch.
+isn't played yet. The same action without a `NewLevel` is a hint screen
+(see "The hint screens" below).
+
+**The hint screens.** 29 script steps in geo_01a, geo_01b, geo_01c, geo_03a
+and geo_04d run `ACTION_ShowDebriefingScreen` with only a `Text`,
+`MenuClass=XInterfaceCTMenus.CTPauseHintText` and `bIsForHintText=true`
+(the tutorial pop-ups: crouching, the bacta dispenser, the objective
+tracker, the squad, the sniper and anti-armour attachments...). What the
+original does with them is in its own script in the install:
+`ACTION_ShowDebriefingScreen.InitActionFor` (CTGame.u) shows the page only
+if the step isn't for hint text or `bKeepHintMenusAwfulHack` is on (a
+`globalconfig` of `PlayerController`, `true` in the install's `User.ini`:
+despite its name it is simply "hints on"), and the script goes straight on.
+`PlayerController.ShowMenu` (Engine.u) pauses and opens the page with the
+text. The scripts part sends `rc_game_core::ShowHint`; `rc_game/src/hints.rs`
+checks our `hint_screens` setting, pauses and opens the `hint` page
+(`[pages.hint]` in `data/ui/original_menus.toml`). `rc_menus::hint` fills
+the page in as the class's `Init` and `SetInfoOptions` do: the text in
+`InfoText`, the title and picture hidden, the empty picture frame shown,
+CONTINUE WITH HINTS shown and focused, and with the helmet off the frames
+and text moved up to the class's numbers. CONTINUE WITH HINTS
+(`act:hint_on`) goes on playing; CONTINUE WITHOUT HINTS (`act:hint_off`)
+switches `hint_screens` off, saves the settings and goes on; back does
+nothing, as `CTInfoBase.HandleInputBack` is empty. The pause menu's
+ENABLE HINTS switches them back on. If the page can't be drawn, a
+placeholder page (marked) shows the text with the same two choices. Not
+done: the other languages' moves (the port reads only English), gamepad B
+as CONTINUE WITHOUT HINTS (the class's `HandleInputGamePad` does it, but
+whether the PC game sends the pad's B there is in compiled code), and a
+second hint while one shows (none of the 29 can: each waits on a timer
+first).
 
 Following the first exit of each map from `pro` visits all 56 campaign
 maps in order and ends at `epilogue`; no exit names a missing map.

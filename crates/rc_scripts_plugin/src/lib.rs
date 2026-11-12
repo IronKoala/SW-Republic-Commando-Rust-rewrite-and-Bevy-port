@@ -115,6 +115,7 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
+            .add_message::<rc_game_core::ShowHint>()
             .add_save_part::<save::ScriptsSave>()
             .add_save_part::<fx_factories::FxFactoriesSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
@@ -301,6 +302,8 @@ pub struct PlayStats {
     pub sounds_missing: Vec<String>,
     /// Music actions passed on to the music.
     pub music_cues: usize,
+    /// Hint screens passed on to the game (`ShowHint`).
+    pub hints: usize,
     /// The sounds played from a place in the level (not heard everywhere).
     pub sounds_placed: Vec<String>,
     pub not_done: usize,
@@ -648,11 +651,12 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief, mut music): (
+    (mut checkpoints, mut change, mut debrief, mut music, mut hints): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
         MessageWriter<rc_game_core::MusicCue>,
+        MessageWriter<rc_game_core::ShowHint>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -893,6 +897,29 @@ fn run(
                 }
                 if characters::KINDS.contains(&call.kind.as_str()) {
                     script.calls.push(call);
+                    continue;
+                }
+                // A hint screen (`ACTION_ShowDebriefingScreen` without a
+                // `NewLevel`; the one with a `NewLevel` leaves the level
+                // and is sent above). The game pauses and shows it; the
+                // script goes straight on, as the original's
+                // `InitActionFor` returns at once.
+                if call.kind == "showdebriefingscreen" {
+                    let d = rc_scripts::Debriefing::of(&call.action);
+                    let for_hint_text = call.action.flag("bIsForHintText", false);
+                    log.line(format!(
+                        "{PART}: t={now:.2} {} #{} hint screen {} {:?} (bIsForHintText {for_hint_text})",
+                        call.script, call.index, d.menu_class, d.text
+                    ));
+                    script.stats.hints += 1;
+                    hints.write(rc_game_core::ShowHint {
+                        menu_class: d.menu_class,
+                        title: d.title,
+                        text: d.text,
+                        picture: d.picture,
+                        for_hint_text,
+                        by: format!("{} #{}", call.script, call.index),
+                    });
                     continue;
                 }
                 if let Some(cue) = music::cue(&call.action) {
