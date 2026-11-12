@@ -137,6 +137,19 @@ pub struct MovingFloors(pub Arc<dyn CarryBodies>);
 #[derive(Component, Debug, Default)]
 pub struct Player;
 
+/// The player's body as the rules see it, copied from the player part
+/// after it moves each frame: the centre of its collision box (the
+/// original's `Pawn.Location`, which drops when crouching) in Unreal
+/// units, and where it looks (radians, Unreal's yaw and pitch). Parts that
+/// need the player's own numbers (the objective tracker's distance) read
+/// this instead of the feet in the player's `Transform`.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlayerPawn {
+    pub centre: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
 /// The camera that shows the player's view. Weapons in first person and the
 /// on-screen display attach to this. A VR mod replaces this camera, not the
 /// gameplay around it.
