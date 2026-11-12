@@ -712,6 +712,8 @@ mod tests {
             anchors: vec![],
             marker_states: Default::default(),
             state_effects: Vec::new(),
+            mover_keys: Vec::new(),
+            timed_done: Vec::new(),
             started: true,
             scene: crate::cutscene::Scene::default(),
             stats: Default::default(),

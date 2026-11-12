@@ -141,6 +141,17 @@ pub fn run(
     }
 }
 
+/// A mover a script sends to a key (`ACTION_MoverToKeyframe`).
+#[derive(Debug, Clone)]
+pub struct MoverKey {
+    pub tag: String,
+    pub key: usize,
+    /// The script waits until it's there.
+    pub waits: bool,
+    pub script: String,
+    pub index: usize,
+}
+
 /// Carry out what order markers' and anchors' state changes set off
 /// (`rc_scripts::marker_states`): tell the squad, lock or unlock doors,
 /// send map events, hide or show a charge.
@@ -155,6 +166,48 @@ pub fn apply_states(
     };
     let script = &mut *script;
     let now = script.director.time;
+    // Movers sent to a key, and scripts waiting for them.
+    for k in std::mem::take(&mut script.mover_keys) {
+        let moved = movers
+            .as_ref()
+            .map(|m| m.move_to_key_tagged(&k.tag, k.key, k.waits))
+            .unwrap_or_default();
+        for (name, secs) in &moved {
+            log.line(format!(
+                "{PART}: t={now:.2} mover {name} (tag {}) goes to key {} in {secs:.2} s",
+                k.tag, k.key
+            ));
+        }
+        if moved.is_empty() {
+            log.line(format!(
+                "{PART}: t={now:.2} movers {}: none to move to key {}",
+                k.tag, k.key
+            ));
+        }
+        script
+            .stats
+            .mover_keys
+            .push(format!("{} {}", k.tag, k.key));
+        if k.waits {
+            match moved.first() {
+                Some((_, secs)) => script.timed_done.push((now + secs, k.script, k.index)),
+                None => {
+                    script.director.action_done(&k.script, k.index);
+                }
+            }
+        }
+    }
+    let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut script.timed_done)
+        .into_iter()
+        .partition(|(t, ..)| *t <= now);
+    script.timed_done = later;
+    for (_, s, i) in due {
+        if script.director.action_done(&s, i) {
+            log.line(format!(
+                "{PART}: t={now:.2} {s} #{i}: the mover is there; the script carries on"
+            ));
+        }
+    }
     for e in std::mem::take(&mut script.state_effects) {
         match e {
             StateEffect::Marker {
@@ -396,6 +449,8 @@ mod tests {
             anchors: read_anchors(&m),
             marker_states: rc_scripts::marker_states::MarkerStates::read(&m),
             state_effects: Vec::new(),
+            mover_keys: Vec::new(),
+            timed_done: Vec::new(),
             scene: crate::cutscene::Scene::default(),
             breaking: Default::default(),
             props: Default::default(),

@@ -2144,6 +2144,25 @@ a trigger enabling a disabled marker (no Geonosis map sends one), the
 anchor states reached through a job (`Active`, `Hacked`, `Placed`,
 `Armed`, `Explode`, `Damaged`: logged as not done when a script asks).
 
+#### Scripts moving a mover to a key (`ACTION_MoverToKeyframe`)
+
+gameplay.u's `ACTION_MoverToKeyframe` sends every mover tagged `MoverTag`
+that isn't at (or heading for) `KeyFrame` there, one key at a time
+(`InterpolateTo`, then engine.u `Mover.KeyFrameReached` chains on until
+`ScriptTriggeredKeyframe`), with none of the mover state's opening or
+closing events or sounds. With `bWaitUntilFinish` (class default true)
+the script waits the sum of the `MoveTimes` on the way, for the first
+mover moved only (the original returns from its loop there). The port:
+`MoverSet::move_to_key_tagged` and `Mover::script_key` (saved), the
+director waiting as for a character action, and the scripts part
+finishing the wait after those seconds (`LevelScript::timed_done`).
+geo_04c is the only Geonosis map that uses it: `ScriptedTrigger17` lifts
+the hidden blocker `BlastDoor01` (`Mover16`, 5 s) at the start and drops
+it again once `BlastDoorClose01` comes, then sends `BlastDoorClosed01`.
+Not done: the mover's own `Event` on arriving (no Geonosis mover moved
+this way has one), and a second order while one is under way restarts
+from the key it is heading for instead of from where it is.
+
 ### geo_01a, worked through
 
 From the map: `levelstart` starts the gunship intro (`ScriptedTrigger52`),

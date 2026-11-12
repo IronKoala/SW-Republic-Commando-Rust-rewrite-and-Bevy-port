@@ -745,7 +745,8 @@ copy of the game.
   consoles and door locks in their states (since 2026-11-12, tested in the
   cloud only): a switched-off marker can't be ordered, a breach lock locks
   or unlocks its doors, a disabled charge is hidden, and geo_01c's balcony
-  sniper post can't be recalled while its scene runs.
+  sniper post can't be recalled while its scene runs. Scripts can also
+  move a mover to a set key (geo_04c's blast door blocker).
 - **Particle effects (since 2026-11-10, tested in the cloud only, not on
   Windows or by playing).** Explosions now show the game's own fireball,
   smoke, sparks and flying debris, read from its effect classes (all 575

@@ -281,6 +281,12 @@ pub struct LevelScript {
     /// What their state changes set off, carried out by
     /// `markers::apply_states` this frame.
     pub state_effects: Vec<rc_scripts::marker_states::StateEffect>,
+    /// Movers scripts send to a key (`ACTION_MoverToKeyframe`), carried
+    /// out by `markers::apply_states`.
+    pub mover_keys: Vec<markers::MoverKey>,
+    /// Script actions the game finishes after a time: (scripts' clock,
+    /// script, action).
+    pub timed_done: Vec<(f32, String, usize)>,
     started: bool,
     /// What the cutscene asks of the player and the screen.
     pub scene: cutscene::Scene,
@@ -314,6 +320,8 @@ impl LevelScript {
             anchors: Vec::new(),
             marker_states: Default::default(),
             state_effects: Vec::new(),
+            mover_keys: Vec::new(),
+            timed_done: Vec::new(),
         }
     }
 }
@@ -379,6 +387,8 @@ pub struct PlayStats {
     pub prop_states: Vec<String>,
     /// Order markers and anchors scripts sent to a state ("tag state").
     pub marker_states: Vec<String>,
+    /// Movers scripts sent to a key ("tag key").
+    pub mover_keys: Vec<String>,
 }
 
 impl LevelScript {
@@ -675,6 +685,8 @@ fn build(
         anchors,
         marker_states,
         state_effects: Vec::new(),
+        mover_keys: Vec::new(),
+        timed_done: Vec::new(),
         started: false,
         scene: cutscene::Scene::default(),
         stats: PlayStats::default(),
@@ -1199,6 +1211,18 @@ fn carry_out(
                 script.stats.not_done += 1;
                 log.line(format!("{at}: {tag} to state {state} (not done yet)"));
             }
+        }
+        "movertokeyframe" => {
+            let tag = a.text("MoverTag").unwrap_or("").to_string();
+            let key = a.int("KeyFrame").unwrap_or(0).max(0) as usize;
+            log.line(format!("{at}: movers {tag} to key {key}"));
+            script.mover_keys.push(markers::MoverKey {
+                tag,
+                key,
+                waits: call.waits,
+                script: call.script.clone(),
+                index: call.index,
+            });
         }
         "setcancancelmarker" => {
             let tag = a.text("MarkerTag").unwrap_or("");

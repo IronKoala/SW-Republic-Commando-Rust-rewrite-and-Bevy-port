@@ -1779,6 +1779,10 @@ pub fn dispatcher_actions(o: &ScriptObject) -> Vec<ScriptObject> {
 
 /// Character actions that take time: (seconds with no game, time-out when
 /// the game carries them out). `None`: no wait.
+/// The longest a script waits for a mover a script moves (s): our own
+/// safety limit, far beyond any Geonosis mover's time.
+const MOVER_WAIT_LIMIT: f32 = 120.0;
+
 fn character_wait(kind: &str, a: &ScriptObject, s: &Settings) -> Option<(f32, f32)> {
     match kind {
         "movetopoint" | "movetoplayer" => Some((s.move_seconds, s.move_timeout_seconds)),
@@ -1790,6 +1794,12 @@ fn character_wait(kind: &str, a: &ScriptObject, s: &Settings) -> Option<(f32, f3
         // Waits until the player comes near the character: no time-out in
         // the game (the original waits as long as it takes).
         "waitforplayer" => Some((0.0, f32::MAX)),
+        // gameplay.u `ACTION_MoverToKeyframe` waits until the mover is
+        // there (`bWaitUntilFinish`, class default true); the game says
+        // when, from the mover's own times.
+        "movertokeyframe" if a.flag("bWaitUntilFinish", true) && a.text("MoverTag").is_some() => {
+            Some((0.0, MOVER_WAIT_LIMIT))
+        }
         _ => None,
     }
 }

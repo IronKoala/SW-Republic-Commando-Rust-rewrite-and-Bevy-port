@@ -56,6 +56,9 @@ pub struct MoverSave {
     /// this was kept have none and keep the map's.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub behaviour: String,
+    /// The key a level script is moving it to (`ACTION_MoverToKeyframe`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_key: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,6 +94,7 @@ impl From<&MoverSnapshot> for MoverSave {
                 .behaviour
                 .map(|b| b.name().to_string())
                 .unwrap_or_default(),
+            script_key: m.script_key,
         }
     }
 }
@@ -129,6 +133,7 @@ impl MoverSave {
                         .ok_or_else(|| format!("{}: unknown behaviour {b:?}", self.name))?,
                 ),
             },
+            script_key: self.script_key,
         })
     }
 }
@@ -352,6 +357,7 @@ mod tests {
                 touched: false,
                 run_started: 4.5,
                 behaviour: Some(rc_movers::Behaviour::TriggerControl),
+                script_key: Some(1),
             };
             let save = MoversSave {
                 time: 9.0,

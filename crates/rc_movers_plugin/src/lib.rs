@@ -193,6 +193,17 @@ impl LevelMovers {
         found
     }
 
+    /// `ACTION_MoverToKeyframe`: see [`MoverSet::move_to_key_tagged`].
+    /// Returns each mover moved (its name) and the seconds it takes.
+    pub fn move_to_key_tagged(&self, tag: &str, key: usize, first_only: bool) -> Vec<(String, f32)> {
+        let mut set = self.shared.set.write().unwrap_or_else(|e| e.into_inner());
+        let moved = set.move_to_key_tagged(tag, key, first_only);
+        moved
+            .into_iter()
+            .map(|(i, secs)| (set.movers[i].info.place.name.clone(), secs))
+            .collect()
+    }
+
     /// The event is over (the player left the trigger that sent it), as
     /// the original's `UntriggerEvent`: movers that open only while set off
     /// close again.

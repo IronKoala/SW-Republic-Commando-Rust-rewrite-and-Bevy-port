@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: Level scripts move a mover to a key (rc_movers, rc_movers_plugin, rc_scripts, rc_scripts_plugin)
+
+- **Changed:** `ACTION_MoverToKeyframe` is carried out: `MoverSet::move_to_key_tagged`, `Mover::script_key` (saved), the script waits for the mover when `bWaitUntilFinish` is set.
+- **Why:** geo_04c's `ScriptedTrigger17` (Geonosis audit item 7): `BlastDoor01` never moved, so after the console is sliced the script couldn't send `BlastDoorClosed01` the way the original does.
+- **Where it comes from:** gameplay.u `ACTION_MoverToKeyframe` and engine.u `Mover.InterpolateTo`, `KeyFrameReached`, read as text; class default `bWaitUntilFinish = true` with `rc_probe --classes`.
+- **Tested how:** `cargo test -p rc_movers` (new `scripts_send_a_mover_to_a_key`); `rc_game --map geo_04c --frames 150` in the cloud: "mover Mover16 (tag BlastDoor01) goes to key 1 in 5.00 s".
+- **Result:** Passes; the blocker lifts at the start of geo_04c.
+- **Still broken / not tested:** Not tested on Windows or by playing; the drop after the slice not seen in a run (needs the console sliced). Two more items of the audit stay open: `DisplayCriticalMessage` (geo_03c: its text is kept by engine.u `HUD.AddCriticalMessage`, but no script draws `CriticalMessages`, so the drawing is in compiled code not read yet; nothing shown) and `SetViewTarget` (geo_03a's egg tender looking at the eggs: not done).
+
 ## 2026-11-12: Level scripts switch squad markers, charges, consoles and door locks (rc_scripts, rc_scripts_plugin, rc_squad, rc_squad_plugin, rc_movers, rc_movers_plugin, rc_game_core)
 
 - **Changed:** New `rc_scripts::marker_states` (order markers and their anchors with the original's states: start states, `GotoState`), `rc_game_core::MarkerSwitch`, `Squad::switch_marker` / `set_marker_can_cancel` / `switches` (saved), `MarkerSpot::order`, `MoverSet::set_behaviour_named` (the behaviour is saved). Scripts' `SetCanCancelMarker` is carried out; `ShowMarker` is logged as not done. A recall leaves a squad mate on a job that's under way when the level says it can't be cancelled.
