@@ -797,6 +797,7 @@ pub fn show_steps(
                             axes: None,
                             // `CurrentEffect` stays until the next look replaces it.
                             endless: true,
+                            skip_ambient_sound: false,
                         });
                     }
                     stats.effects.push(format!("{name} {e}"));
@@ -1068,6 +1069,7 @@ pub fn animate(
                         vanish_with_carrier: false,
                         axes: Some(axes),
                         endless: false,
+                        skip_ambient_sound: false,
                     });
                 }
             }
