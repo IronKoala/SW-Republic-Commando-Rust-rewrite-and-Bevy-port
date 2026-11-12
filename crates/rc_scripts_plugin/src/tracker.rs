@@ -282,6 +282,8 @@ pub fn asked(action: &ScriptObject) -> Option<String> {
 /// One actor placed in the map that a tracker step names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spot {
+    /// The actor's export index in the map.
+    pub export: usize,
     pub class: String,
     pub name: String,
     /// Unreal units.
@@ -481,6 +483,7 @@ pub fn read_targets(
         out.spots.insert(
             key,
             Spot {
+                export: a,
                 class: class.clone(),
                 name: pkg.name(pkg.exports[a].object_name).to_string(),
                 location,
@@ -519,7 +522,10 @@ pub struct Followed {
     /// hides when it goes, as the original's does when its actor is
     /// destroyed).
     pub character: Option<Entity>,
-    /// Otherwise this fixed place (Unreal units).
+    /// Otherwise the placed actor (export index in the map): a door or
+    /// lift is followed where it is now; anything else stays at `place`.
+    pub export: Option<usize>,
+    /// Its place as the map puts it (Unreal units).
     pub place: [f32; 3],
     pub radius: f32,
 }
@@ -675,7 +681,11 @@ pub fn track(
     characters: Characters,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     pawn: Res<PlayerPawn>,
-    collision: Option<Res<LevelCollision>>,
+    (collision, through, movers): (
+        Option<Res<LevelCollision>>,
+        Option<Res<rc_level_plugin::LineThroughVolumes>>,
+        Option<Res<rc_movers_plugin::LevelMovers>>,
+    ),
     log: Res<GameLog>,
 ) {
     let tracker = &mut *tracker;
@@ -708,6 +718,7 @@ pub fn track(
                     Some(Followed {
                         tag: ask.tag.clone(),
                         character,
+                        export: Some(s.export),
                         place: s.location,
                         radius: s.radius,
                     })
@@ -715,6 +726,7 @@ pub fn track(
                 None => live().map(|e| Followed {
                     tag: ask.tag.clone(),
                     character: Some(e),
+                    export: None,
                     place: [0.0; 3],
                     radius: 0.0,
                 }),
@@ -771,7 +783,16 @@ pub fn track(
                 return;
             }
         },
-        Some(f) => f.place,
+        // A door or lift: where it has moved to (`Location` follows the
+        // mover in the original too).
+        Some(f) => f
+            .export
+            .and_then(|x| {
+                let set = movers.as_ref()?.read();
+                let m = set.movers.iter().find(|m| m.info.place.export == x)?;
+                Some([m.pose.pos.x, m.pose.pos.y, m.pose.pos.z])
+            })
+            .unwrap_or(f.place),
     };
     let Ok(cam) = camera.single() else {
         return;
@@ -783,7 +804,7 @@ pub fn track(
     let mut clear = |a: [f32; 3], b: [f32; 3]| -> bool {
         collision
             .as_ref()
-            .is_none_or(|c| line_clear(c.0.as_ref(), a, b))
+            .is_none_or(|c| line_clear(c.0.as_ref(), through.as_ref().map(|t| t.0.as_ref()), a, b))
     };
     tracker.step(
         time.delta_secs().min(0.25),
@@ -808,23 +829,48 @@ pub fn track(
 }
 
 /// Nothing in the level or its movers between two points (Unreal units).
-fn line_clear(world: &(dyn rc_movement::World + Send + Sync), a: [f32; 3], b: [f32; 3]) -> bool {
-    let (a, b) = (
-        rc_movement::Vec3::new(a[0], a[1], a[2]),
-        rc_movement::Vec3::new(b[0], b[1], b[2]),
-    );
+/// The original's check (`SingleLineCheck` with flags 0x286: movers,
+/// level, level geometry) doesn't stop at blocking volumes; the port's
+/// collision has them in, so a hit on one of `through` (the faces lines
+/// pass, see `rc_level_plugin::LineThroughVolumes`) is passed and the line
+/// goes on beyond it.
+fn line_clear(
+    world: &(dyn rc_movement::World + Send + Sync),
+    through: Option<&rc_movement::TriangleWorld>,
+    a: [f32; 3],
+    b: [f32; 3],
+) -> bool {
+    use rc_movement::{Vec3, World as _};
+    let (a, b) = (Vec3::new(a[0], a[1], a[2]), Vec3::new(b[0], b[1], b[2]));
     let len = (b - a).length();
     if len < 1.0 {
         return true;
     }
+    let dir = (b - a) * (1.0 / len);
     // Long lines in pieces, as `rc_scripts::sight::clear_line` does.
     let pieces = (len / 256.0).ceil().max(1.0) as usize;
     for i in 0..pieces {
-        let t0 = i as f32 / pieces as f32;
-        let t1 = (i + 1) as f32 / pieces as f32;
-        if let Some(h) = world.sweep(rc_movement::Vec3::ZERO, a + (b - a) * t0, a + (b - a) * t1) {
-            if h.time < 0.999 {
+        let mut from = a + (b - a) * (i as f32 / pieces as f32);
+        let to = a + (b - a) * ((i + 1) as f32 / pieces as f32);
+        // At most a few volume faces in one piece.
+        for _ in 0..16 {
+            let Some(h) = world.sweep(Vec3::ZERO, from, to) else {
+                break;
+            };
+            if h.time >= 0.999 {
+                break;
+            }
+            let at = from + (to - from) * h.time;
+            // Is what it hit a volume's face the line passes through?
+            let volume = through
+                .and_then(|t| t.sweep(Vec3::ZERO, from, to))
+                .is_some_and(|v| ((from + (to - from) * v.time) - at).length() < 0.5);
+            if !volume {
                 return false;
+            }
+            from = at + dir * 0.5;
+            if (to - from).dot(dir) <= 0.0 {
+                break;
             }
         }
     }
@@ -934,6 +980,7 @@ mod tests {
         t.show(Followed {
             tag: "x".into(),
             character: None,
+            export: None,
             place: [1000.0, 0.0, 0.0],
             radius: 0.0,
         });
@@ -982,6 +1029,7 @@ mod tests {
         t.show(Followed {
             tag: "x".into(),
             character: None,
+            export: None,
             place: [1000.0, 0.0, 0.0],
             radius: 0.0,
         });
@@ -1003,6 +1051,33 @@ mod tests {
         }
         assert_eq!(n, 4);
         assert!(matches!(t.view, TrackerView::Ring { .. }));
+    }
+
+    /// A wall across the line at x = `x` (two triangles, big, facing
+    /// the line's start).
+    fn wall(x: f32) -> Vec<[rc_movement::Vec3; 3]> {
+        let v = |y: f32, z: f32| rc_movement::Vec3::new(x, y, z);
+        vec![
+            [v(-1000.0, -1000.0), v(1000.0, 1000.0), v(1000.0, -1000.0)],
+            [v(-1000.0, -1000.0), v(-1000.0, 1000.0), v(1000.0, 1000.0)],
+        ]
+    }
+
+    #[test]
+    fn sight_line_passes_blocking_volumes_but_not_walls() {
+        use rc_movement::TriangleWorld;
+        let (a, b) = ([0.0, 10.0, 20.0], [2000.0, 10.0, 20.0]);
+        // A blocking volume's face at 500: in the collision, and in the
+        // faces lines pass.
+        let volume = TriangleWorld::new(wall(500.0));
+        let through = TriangleWorld::new(wall(500.0));
+        assert!(line_clear(&volume, Some(&through), a, b));
+        assert!(!line_clear(&volume, None, a, b));
+        // A real wall behind the volume still stops it.
+        let mut both = wall(500.0);
+        both.extend(wall(1500.0));
+        let both = TriangleWorld::new(both);
+        assert!(!line_clear(&both, Some(&through), a, b));
     }
 
     #[test]

@@ -1993,12 +1993,27 @@ All numbers are in `data/ui/objective_tracker.toml`.
 - **Wide screens.** The original scales its 800x600 units to the screen
   both ways; the port uses the screen height over 600 both ways and keeps
   the middle in the middle (the same as the original on a 4:3 screen).
-- **Ours, not the original's:** the port's sight line also stops at
-  blocking volumes (the original's skips volumes); a mover as the goal stays
-  at its placed spot; the tracker isn't kept in save files, so after a load
-  it shows again at the next tracker step; the port's view yaw is in
-  radians and is rounded to the engine's units; and the sight check runs in
-  the game's update rather than while drawing.
+- **Blocking volumes.** The original's sight line (`SingleLineCheck`
+  flags 0x286: movers, level, level geometry) doesn't stop at blocking
+  volumes. The port's `LevelCollision` holds their faces, so the map's
+  reader keeps the faces of volumes that lines pass
+  (`bBlockZeroExtentTraces` off) apart as well
+  (`MapCollision::line_through_triangles`, resource
+  `rc_level_plugin::LineThroughVolumes`), and the tracker's line goes on
+  past a hit on one of them.
+- **Moving goals.** A door or lift as the goal is followed where it has
+  moved to (the mover's pose), as the original's `Location` is.
+- **While the player is down.** The original keeps drawing it: the helmet
+  is drawn (`FPlayerSceneNode` calls `UHelmet::DrawHelmet`) unless the view
+  isn't the normal render mode, there is no pawn or one player-controller
+  flag is set, and `DrawHelmet` only checks `bDraw` (changed only by the
+  `DrawHUD` console command) and `bShowObjectiveTracker`. The down state
+  (`CTPlayer` state `CtrlIncapacitated`) changes none of these, so the port
+  keeps it too.
+- **Ours, not the original's:** the tracker isn't kept in save files, so
+  after a load it shows again at the next tracker step; the port's view
+  yaw is in radians and is rounded to the engine's units; and the sight
+  check runs in the game's update rather than while drawing.
 
 ### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
 
