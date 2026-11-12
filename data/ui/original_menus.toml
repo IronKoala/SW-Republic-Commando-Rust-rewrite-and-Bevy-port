@@ -394,6 +394,18 @@ back = "unavailable"
 [pages.debriefing.buttons]
 OnAButton = "act:continue"
 
+# The title card before a campaign (checked 2026-11-12 with the install):
+# geo_01briefing's script shows it (ACTION_ShowTitleCardScreen, Args
+# GEO_TitleCard). Its lines, their times and its music are the card file's
+# (GameData/System/geo_titlecard.int), filled in by
+# rc_menus/src/titlecard.rs. Play pauses while it shows and goes on when the
+# last line has faded out (rc_game/src/title_card.rs); there is nothing to
+# choose, and back does nothing, as in the original.
+[pages.title_card]
+class = "XInterfaceCTMenus.CTTitleCardMenu"
+back = "unavailable"
+nothing_to_choose = true
+
 # The profile pages (checked 2026-11-11 with the install). PROFILES on the
 # main menu opens the list (the original's ProfilesSelected); with no
 # profile loaded the main menu opens it by itself and BACK is hidden.

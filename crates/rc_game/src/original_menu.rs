@@ -189,6 +189,7 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::LoadGame => Some(original_saves::LOAD),
         Page::SaveGame => Some(original_saves::SAVE),
         Page::Debriefing => Some(DEBRIEFING_PAGE),
+        Page::TitleCard => Some(crate::title_card::TITLE_CARD),
         Page::Profiles => Some(original_profiles::PROFILES),
         Page::NewProfile => Some(original_profiles::NEW_PROFILE),
         Page::Extras => Some(original_credits::EXTRAS),
@@ -207,6 +208,7 @@ fn page_from_key(key: &str) -> Option<Page> {
         "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
         DEBRIEFING_PAGE => Some(Page::Debriefing),
+        crate::title_card::TITLE_CARD => Some(Page::TitleCard),
         original_credits::EXTRAS => Some(Page::Extras),
         original_credits::CREDITS => Some(Page::Credits),
         original_saves::LOAD => Some(Page::LoadGame),
@@ -701,9 +703,12 @@ fn load(
                 "original menus: no warning box ({e}); profile warnings only go to the log"
             )),
         }
-        for l in [&menus.profiles.warning_layout, &menus.profiles.loading_layout]
-            .into_iter()
-            .flatten()
+        for l in [
+            &menus.profiles.warning_layout,
+            &menus.profiles.loading_layout,
+        ]
+        .into_iter()
+        .flatten()
         {
             paths_needed.extend(assets.textures_of(l));
         }

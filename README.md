@@ -838,8 +838,11 @@ copy of the game.
   when the projector's throw animation reaches its "start the briefing"
   moment, and let the player go at their end, as in the original (since
   2026-11-10; checked in the cloud from the log, not by playing). Not done yet:
-  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene, the title card,
-  the credits, and the logo videos. Holograms shimmer and flicker like
+  riding the gunship in briefings, drawing the baby's and boy's hands, characters brought in during a scene,
+  the credits, and the logo videos. The title card before Geonosis
+  ("WAR HAS COME TO THE GALAXY...") shows on the original page with its
+  own lines, timing and music, pausing play until it ends (since
+  2026-11-12; checked in the cloud, not yet on Windows). Holograms shimmer and flicker like
   the original's (edges fade, a speckle that jumps about, brightness
   flicker, now and then a squash in height), and the briefing holograms
   wear their hologram skins; checked in the cloud, not yet looked at on

@@ -29,6 +29,7 @@ pub mod pause;
 pub mod quads;
 pub mod render;
 pub mod screens;
+pub mod titlecard;
 pub mod value;
 
 pub use assets::Assets;

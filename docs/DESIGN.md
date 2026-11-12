@@ -4337,9 +4337,35 @@ the sky), drawing what the player holds (`BriefingWeapon`: the baby's and
 boy's hands, the briefing helmet; for now nothing is drawn), characters brought in by factories during
 a scene (placed ones are the cast, see `rc_cast` below), hiding and
 showing actors that aren't level parts (the hologram text), view shakes,
-the title card, the credits, and the cutscene state in save files (the
+the credits, and the cutscene state in save files (the
 cutscene maps have no checkpoints, so only a quick save mid-scene would
 lose the hold).
+
+### The title card (`rc_menus::titlecard`, `rc_game/src/title_card.rs`)
+
+geo_01briefing's `ScriptedTrigger14` runs `ACTION_ShowTitleCardScreen`
+(`MenuName` XInterfaceCTMenus.CTTitleCardMenu, `Args` "GEO_TitleCard").
+The scripts part sends it as `rc_game_core::ShowTitleCard`; the shell
+pauses play and opens the menu on the `title_card` page, drawn from the
+original class (`[pages.title_card]` in `data/ui/original_menus.toml`).
+Pausing stops the scripts, so the trigger's next step (`WaitForTimer 2`)
+only runs once the card has closed, as in the original, where the menu
+pauses the level.
+
+What the card shows is the card's own file in the install,
+`GameData/System/geo_titlecard.int`, section `[TitleCard]`: up to 10
+`TextEntries[i]` with their `Text` and four times (`FadeInStartTime`,
+`FullOnStartTime`, `FadeOutStartTime`, `FadeOutEndTime`), and
+`BackgroundMusic`. The first word of `Args` names the file (the class's
+`HandleParameters`; "RESET" is skipped). Reading stops at the first entry
+with no text, as the class's `Init` does. The class's `Tick` rules
+(`rc_menus::titlecard::Card::step`): the clock adds the frame time; each
+line is hidden before its fade-in and after its fade-out end, fades in
+and out linearly, alpha cut to a whole number; the menu closes once the
+clock passes the last line's fade-out end (40 s for Geonosis). Back does
+nothing (the class has no `HandleInputBack`). The music is the card's
+`BackgroundMusic`, played by `music.rs` while the card shows. If the page
+can't be drawn, a marked placeholder page shows the lines as its notice.
 
 ## The cast: characters no other part owns (`rc_cast`)
 

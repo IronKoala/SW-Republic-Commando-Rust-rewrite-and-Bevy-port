@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: The title card before Geonosis (rc_menus, rc_scripts_plugin, rc_game_core, rc_game, data/ui/original_menus.toml)
+
+- **Changed:** The script step `ACTION_ShowTitleCardScreen` is carried out (before: "not done yet"). New `rc_menus::titlecard` (reads the card file, the class's fade and close rules, fills the page), new message `rc_game_core::ShowTitleCard`, new `rc_game/src/title_card.rs` (pauses play, shows the card, carries on when it closes), new page `[pages.title_card]` in `data/ui/original_menus.toml` (new `nothing_to_choose` key for a page with no buttons), the card's music in `rc_game/src/music.rs`.
+- **Why:** Item 21 of the Geonosis gap list: the "WAR HAS COME TO THE GALAXY..." card before geo_01briefing never showed.
+- **Where it comes from:** the map's ScriptedTrigger14 (`MenuName`, `Args`), the class XInterfaceCTMenus.CTTitleCardMenu's script text and defaults (`HandleParameters`, `Init`, `Tick`, `TextEntries`, `bBackgroundMusicDuringLevel`), read as text from the .u file; the lines, times and music from the install's `GameData/System/geo_titlecard.int`. Nothing from the game is in the repo.
+- **Tested how:** `cargo test -p rc_menus` (4 new titlecard tests), `cargo test -p rc_game title_card` (page in the shipped menus), `cargo test -p rc_scripts_plugin`; `rc_game --map geo_01briefing` in the cloud with the game's files, with screen grabs.
+- **Result:** All tests pass. The log reads "title card: GEO_TitleCard ... 4 lines, music GEO_Music.GEO_episodes.musGEO_titleCard_ep, closes after 40.0 s", the music starts, the page is the original one (no placeholder), "WAR HAS COME TO THE GALAXY..." shows in the original font on black, and after 40 s "done after 40.2 s; play goes on" and the briefing carries on.
+- **Still broken / not tested:** Not tested on Windows or by eye against the original. In the cloud the game ran at 2 frames a second, so only the first line was caught in a picture. The gunship ride in the briefing is a separate change.
+
 ## 2026-11-12: The HUD blinks where the level scripts teach it (rc_scripts_plugin, rc_menus, rc_game, data/ui/hud.toml)
 
 - **Changed:** The scripts' `BlinkHUDHealth`, `BlinkHUDSquad`, `BlinkHUDGrenade`, `BlinkHUDShields` and `BlinkHUDSquadCommandPrompt` steps are carried out. New `rc_scripts_plugin::hud_blink` (`LevelScript::hud_blink`) keeps which parts blink and for how long; new `blink` key for HUD elements in `data/ui/hud.toml` (health, squad, grenade, shields) and `rc_menus::hud::blink_alpha`; `rc_game`'s original HUD draws a blinking element with the blink's opacity. Marked in hud.toml: the four health-coloured meter parts (not their white backs), the squad panel, and the grenade panel, picture and count. New `rc_game --script` check "the script blinks the HUD's health meters".

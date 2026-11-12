@@ -195,6 +195,23 @@ pub struct ShowDebriefing {
     pub then: ChangeLevel,
 }
 
+/// Show a title card: lines of text fading in and out over black before a
+/// campaign starts. Sent by the level scripts part for
+/// `ACTION_ShowTitleCardScreen` (geo_01briefing's "WAR HAS COME TO THE
+/// GALAXY..."); the game (`rc_game`) pauses play, as the original's
+/// `ShowTitleCardMenu` does, shows the original's menu class, and unpauses
+/// when the card's last line has faded out. A program with no screen to
+/// show it can ignore it: the scripts carry on as if it had closed at once.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct ShowTitleCard {
+    /// The menu class (`XInterfaceCTMenus.CTTitleCardMenu`).
+    pub menu_class: String,
+    /// The action's `Args`: the card file's name (`GEO_TitleCard`).
+    pub args: String,
+    /// What sent it, for the log.
+    pub by: String,
+}
+
 /// Where the player should arrive on the map being loaded: a `Teleporter`'s
 /// `Tag` (see [`ChangeLevel::portal`]). Put in by the save part before
 /// loading; the level part reads it, uses that teleporter's place as the

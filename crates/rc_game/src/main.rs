@@ -44,6 +44,7 @@ mod settings;
 mod sound_options;
 mod subtitles;
 mod theme;
+mod title_card;
 mod visor;
 
 use bevy::prelude::*;
@@ -528,6 +529,7 @@ fn main() -> AppExit {
     app.add_plugins(visor::GameVisorPlugin);
     app.add_plugins(cutscene::CutscenePlugin);
     app.add_plugins(objective_tracker::ObjectiveTrackerPlugin);
+    app.add_plugins(title_card::TitleCardPlugin);
     app.configure_sets(
         Update,
         player::PlayerMoveSet.before(rc_squad_plugin::SquadSet),
