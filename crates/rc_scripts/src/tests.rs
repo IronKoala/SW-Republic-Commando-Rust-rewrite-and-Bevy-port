@@ -769,7 +769,10 @@ fn exit_opens_and_leaves_once() {
     // Only once, and nothing runs any more.
     d.fire("AllClear", "test");
     let out = d.step(0.05, body_at(1250.0, 0.0, 120.0));
-    assert!(changes(&out).is_empty() && d.stats.events_sent == 1, "{out:?}");
+    assert!(
+        changes(&out).is_empty() && d.stats.events_sent == 1,
+        "{out:?}"
+    );
 }
 
 /// A switched-off exit (geo_04c's `bEnabled=false`) is switched on by an
@@ -803,20 +806,18 @@ fn exit_switched_on_by_its_tag() {
 #[test]
 fn scripts_change_level_and_skip_disabled_actions() {
     let map = MapScripts {
-        actors: vec![
-            script(
-                "Cutscene",
-                vec![
-                    act(
-                        "ChangeLevel",
-                        &[("URL", t("Geo_01a.ctm")), ("bDisabled", Val::Bool(true))],
-                    ),
-                    act("TriggerEvent", &[("Event", t("Shown"))]),
-                    act("ChangeLevel", &[("URL", t("RAS_03B.ctm#FromA"))]),
-                    act("TriggerEvent", &[("Event", t("TooLate"))]),
-                ],
-            ),
-        ],
+        actors: vec![script(
+            "Cutscene",
+            vec![
+                act(
+                    "ChangeLevel",
+                    &[("URL", t("Geo_01a.ctm")), ("bDisabled", Val::Bool(true))],
+                ),
+                act("TriggerEvent", &[("Event", t("Shown"))]),
+                act("ChangeLevel", &[("URL", t("RAS_03B.ctm#FromA"))]),
+                act("TriggerEvent", &[("Event", t("TooLate"))]),
+            ],
+        )],
         failures: vec![],
         sounds: Default::default(),
     };
@@ -902,8 +903,14 @@ fn opened_exit_survives_a_save() {
 #[test]
 fn level_addresses_read_as_map_and_portal() {
     let r = |u: &str| level_url(u);
-    assert_eq!(r("RAS_03B.ctm#FromA"), Some(("ras_03b".into(), Some("FromA".into()))));
-    assert_eq!(r("YYY_05A#PlayerStart"), Some(("yyy_05a".into(), Some("PlayerStart".into()))));
+    assert_eq!(
+        r("RAS_03B.ctm#FromA"),
+        Some(("ras_03b".into(), Some("FromA".into())))
+    );
+    assert_eq!(
+        r("YYY_05A#PlayerStart"),
+        Some(("yyy_05a".into(), Some("PlayerStart".into())))
+    );
     assert_eq!(r("Geo_01Briefing"), Some(("geo_01briefing".into(), None)));
     assert_eq!(r(" EPILOGUE.ctm?Game=X "), Some(("epilogue".into(), None)));
     assert_eq!(r(""), None);
@@ -940,7 +947,11 @@ fn dispatcher_sends_its_list_in_time() {
                         ("Tag", t("Go")),
                         (
                             "Events",
-                            Val::Structs(vec![entry("First", 0.0), entry("Second", 2.0), entry("Third", 1.0)]),
+                            Val::Structs(vec![
+                                entry("First", 0.0),
+                                entry("Second", 2.0),
+                                entry("Third", 1.0),
+                            ]),
                         ),
                     ],
                 ),
@@ -1066,7 +1077,11 @@ fn damaged_step_rules() {
     assert!(sent(&d).contains(&"PanelHit".to_string()));
     assert!(!sent(&d).contains(&"PanelGone".to_string()));
     run(&mut d, 1.5);
-    assert!(sent(&d).contains(&"PanelGone".to_string()), "{:?}", sent(&d));
+    assert!(
+        sent(&d).contains(&"PanelGone".to_string()),
+        "{:?}",
+        sent(&d)
+    );
     assert_eq!(d.prop_health(2), Some(0.0));
 }
 
@@ -1235,4 +1250,51 @@ fn line_of_sight_trigger_follows_a_moving_character() {
         d.sight_candidates_live(eye, [0.0, 1.0, 0.0], &moved),
         vec![(0, [0.0, 1000.0, 0.0])]
     );
+}
+
+/// gameplay.u's `ACTION_PlayPropAnim` is a plain `ScriptedAction`: the
+/// script goes straight on (geo_01a's intro plays three of them before its
+/// `SpawnLandingZone`).
+#[test]
+fn play_prop_anim_does_not_hold_the_script() {
+    let map = MapScripts {
+        actors: vec![
+            actor(
+                obj(
+                    2,
+                    "PlayerStart",
+                    "PlayerStart0",
+                    &[("Event", t("levelstart"))],
+                ),
+                vec![],
+            ),
+            script(
+                "Intro",
+                vec![
+                    act("WaitForEvent", &[("ExternalEvent", t("levelstart"))]),
+                    act(
+                        "PlayPropAnim",
+                        &[
+                            ("AnimPropTag", t("PlayerCommando")),
+                            ("BaseAnim", t("ActionBreathe")),
+                        ],
+                    ),
+                    act(
+                        "PlayPropAnim",
+                        &[
+                            ("AnimPropTag", t("CloneRope62")),
+                            ("BaseAnim", t("ActionBreathe")),
+                        ],
+                    ),
+                    act("TriggerEvent", &[("Event", t("SpawnLandingZone"))]),
+                ],
+            ),
+        ],
+        failures: vec![],
+        sounds: Default::default(),
+    };
+    let mut d = Director::new(&map, &[], Settings::default());
+    d.start();
+    run(&mut d, 0.2);
+    assert_eq!(sent(&d), ["levelstart", "SpawnLandingZone"]);
 }
