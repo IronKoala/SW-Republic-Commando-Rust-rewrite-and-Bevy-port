@@ -20,3 +20,4 @@ pub mod scripts;
 pub mod settle;
 pub mod terrain;
 pub mod volumes;
+pub mod zone_audio;
