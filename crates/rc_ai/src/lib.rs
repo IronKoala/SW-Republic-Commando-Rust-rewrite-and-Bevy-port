@@ -19,12 +19,16 @@ pub mod params;
 pub mod spawns;
 
 pub use battle::{
-    Battle, BattleEvent, BattleSnapshot, Birth, FighterSnapshot, Spawner, SpawnerSnapshot,
-    SwitchedOn,
+    Battle, BattleEvent, BattleSnapshot, Birth, BoneSample, DispState, DispenserMotion,
+    DispenserSnapshot, DispenserStep, Dispensing, FighterSnapshot, Phase, SlotMotion, Spawner,
+    SpawnerSnapshot, SwitchedOn, Unfold,
 };
 pub use brain::{AiEvent, Fighter, Maneuver, Mode, ScriptGoal, Target, View};
 pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
-pub use spawns::{read_factories, Factory, Offspring, SpawnSpot, StartState};
+pub use spawns::{
+    read_factories, Dispenser, Factory, Offspring, SpawnSpot, StartState, Transition,
+    DISPENSER_CLASSES,
+};
 
 #[cfg(test)]
 mod tests;

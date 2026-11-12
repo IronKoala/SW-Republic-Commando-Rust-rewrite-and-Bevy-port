@@ -669,6 +669,56 @@ ctgame.u, ctinventory.u, engine.u, Properties/properties.u).
   SpawnTrenchRim01Troops, SpawnBattleFieldTroopers,
   SpawnFieldChargeTrooper, SpawnGunshipArea).
 
+## Droid dispensers (read 2026-11-12)
+
+Read only from the user's install: the UnrealScript text in ctgame.u
+(`DroidDispenser extends PawnFactory`, `Factory`, `PawnFactory`),
+engine.u (`Pawn` state `Dispense`), class defaults with `rc_probe
+--classes`, the model with `rc_model` (`Dispensers.ukx`, `droid.ukx`) and
+the maps' actors.
+
+- `DroidDispenser`: Physics 12 (`PHYS_RootMotion`), bCollideWorld,
+  MaxHealth 5000, NumDispensers 1, SpawnInterval 3, SpawnMode 0,
+  bCheckExhausted. SpawnMode 2 or 3 is set to 0. `bAlignBottom`.
+  `DroidDispenserDefaults`: bGenerateForever, bStartTimerAfterDeath,
+  damage table `DV_DroidDispenser`, effects `Dispenser_LightDamage`,
+  `Dispenser_Damage`, `Dispenser_Explosion`.
+- `BDDispenser`: 3 slots, NumInitDroids 3, IntroAnim `entranceSky`,
+  collision 170 x 125; defaults WarmUpTime 1, Prototype `BattleDroid`,
+  Capacity 3, skins `DispensersTextures.BDDispenser.BDDispenser_{Warm,On,Off,Dest}`.
+  `SBDDispenser`: 4 slots, no IntroAnim (plays `ActionBreathe`), collision
+  200 x 125 (defaults radius 219), Prototype `SuperBattleDroid`,
+  Capacity 4. `DroidekaDispenser`: WarmUpTime 2, no Prototype.
+- Script: Offline `Trigger` plays IntroAnim; its `AnimEnd` makes the warm
+  up (`WarmUpInfo`, timer `WarmUpTime`) or, with `OnlineTag`, sets Tag to
+  it and waits (`Wait.Trigger`). `Online.BeginState` makes `OnlineInfo`
+  and generates at once, then `SetFactoryTimer`. `GenerateActor`: MaxAlive
+  is NumInitDroids at first; MaxInWorld counts the prototype's living
+  pawns; the droid `LoopAnim('DispBreathe',,,,4)`, `Dispense` attaches it
+  to `AttachBones[i]` (relative location Z = its CollisionHeight,
+  rotation 0, `PHYS_RootMotion`, no collision) and plays
+  `DispenseAnims[i]`, i = NextSpawnPoint clamped. `ReleaseDroid` (the
+  animations' `AnimNotify_ReleaseDroid`) detaches it, sends it to state
+  `Dispense` (`DispUnfold`) and sends SpawnEvent. TakeDamage: 66 % and
+  33 % steps, 0 goes to `Damaged`, which kills the droid on the slot
+  (100000 `CTDamageExplosion`) and in Tick sends ExhaustedEvent once all
+  its droids are dead. `Bump` during `entranceSky`, `EntranceSky704` or
+  `EntranceSky384` crushes pawns (`Crushed`, MaxHealth damage).
+- Animations (30 fps): BDDispenser `Dispense1-3` 70 frames, release at
+  0.286; `entranceSky` 50 frames, root bone `Move` from (0, 0, 3000) to
+  0; `EntranceSky704` 27 frames, 704 to 0; `SlaversPushDispencer` 180
+  frames, Move from (12, 0, 12) to (1105, 0, 0); `Destroyed` 20. Slot
+  bones at the release: (0, -216, 92), (187, 108, 92), (-187, 108, 92).
+  SBDDispenser `Dispense1-4` 132 frames, release 0.644, bones at (0, ±257,
+  28) and (±257, 0, 28); `Destroyed` 46. BattleDroid `DispUnfold` 51
+  frames, its root travels (123, -1, -90); SuperBattleDroid 81 frames,
+  (53, 0, -19).
+- Sounds in the animations: `GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`
+  and `_close`.
+- Maps: `rc_dispenser_check` lists each dispenser's numbers. Placement
+  matches the root motion: every `entranceSky` dispenser whose floor the
+  port's collision has stands within 25 uu of it after the drop.
+
 ## Weapons lying in the levels (read 2026-11-10)
 
 Read from the class defaults with `rc_probe --class` and the scripts'

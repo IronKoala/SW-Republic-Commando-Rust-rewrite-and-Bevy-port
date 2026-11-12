@@ -100,6 +100,10 @@ pub struct Model {
     /// With [`ModelSpec::keep_sets`], every kept animation's too, by the
     /// animation's own name.
     pub triggers: HashMap<String, Vec<(f32, NotifyTrigger)>>,
+    /// Every notify of each animation read, by our name for the animation:
+    /// when (0 to 1 through it) and the notify's class
+    /// (`AnimNotify_ReleaseDroid`, `AnimNotify_Effect`, ...).
+    pub notify_classes: HashMap<String, Vec<(f32, String)>>,
     /// Every animation set read, first set first, when
     /// [`ModelSpec::keep_sets`] asked for them (empty otherwise).
     pub sets: Vec<rc_package::animation::MeshAnimation>,
@@ -493,6 +497,7 @@ impl Model {
         let mut clips = HashMap::new();
         let mut sounds = HashMap::new();
         let mut triggers = HashMap::new();
+        let mut notify_classes = HashMap::new();
         let mut read_sets: Vec<Option<rc_package::animation::MeshAnimation>> =
             (0..sets.len()).map(|_| None).collect();
         for (key, seq_name) in &spec.sequences {
@@ -533,6 +538,22 @@ impl Model {
                     if !sent.is_empty() {
                         triggers.insert(key.clone(), sent);
                     }
+                    let classes: Vec<(f32, String)> = seq
+                        .notifies
+                        .iter()
+                        .filter_map(|n| match ObjectRef::from_index(n.object) {
+                            ObjectRef::Export(k) => pkg
+                                .exports
+                                .get(k)
+                                .map(|e| (n.time, pkg.export_class_name(e).to_string())),
+                            ObjectRef::Import(k) => pkg
+                                .imports
+                                .get(k)
+                                .map(|m| (n.time, pkg.name(m.class_name).to_string())),
+                            ObjectRef::None => None,
+                        })
+                        .collect();
+                    notify_classes.insert(key.clone(), classes);
                     if k > 0 {
                         notes.push(format!(
                             "{name}: {key} = {seq_name} from {}",
@@ -675,6 +696,7 @@ impl Model {
             flipped,
             sounds,
             triggers,
+            notify_classes,
             sets: Vec::new(),
         };
         if spec.keep_sets {
@@ -896,6 +918,44 @@ impl Model {
             .into_iter()
             .map(|p| to_bevy(mesh_point(&self.mesh, p)))
             .collect()
+    }
+
+    /// As [`Model::posed_from_origin`], but with the root bone (the
+    /// skeleton's first, `Move` in the dispensers) held at its rest place:
+    /// for models whose root bone's travel moves the whole actor
+    /// (`PHYS_RootMotion`) rather than the drawing. See
+    /// [`Model::root_offset`].
+    pub fn posed_rooted(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {
+        let mut local = match self.clips.get(key) {
+            Some(clip) => clip.sample(&self.skeleton, frame),
+            None => self.skeleton.local.clone(),
+        };
+        if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
+            l.pos = rest.pos;
+        }
+        let pose = globals(&self.skeleton.parents, &local);
+        skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
+            .into_iter()
+            .map(|p| to_bevy(mesh_point(&self.mesh, p)))
+            .collect()
+    }
+
+    /// How far the root bone (the skeleton's first) is from its rest place
+    /// at `frame` of animation `key`, in Unreal units in the model's own
+    /// axes (as [`Model::bone_from_origin`]). With `PHYS_RootMotion` this
+    /// is what moves the actor.
+    pub fn root_offset(&self, key: &str, frame: f32) -> [f32; 3] {
+        let Some(clip) = self.clips.get(key) else {
+            return [0.0; 3];
+        };
+        let local = clip.sample(&self.skeleton, frame);
+        let pose = globals(&self.skeleton.parents, &local);
+        let rest = globals(&self.skeleton.parents, &self.skeleton.local);
+        let (Some(a), Some(b)) = (pose.first(), rest.first()) else {
+            return [0.0; 3];
+        };
+        let (a, b) = (mesh_point(&self.mesh, a.pos), mesh_point(&self.mesh, b.pos));
+        [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
     }
 
     /// Where bone `bone` is at `frame` of animation `key` (the mesh's own
