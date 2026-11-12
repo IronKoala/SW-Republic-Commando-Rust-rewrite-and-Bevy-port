@@ -56,12 +56,14 @@ pub mod characters;
 pub mod cutscene;
 pub mod fx_factories;
 pub mod markers;
-pub mod projectiles;
 pub mod music;
 pub mod objectives;
+pub mod placed_emitters;
+pub mod projectiles;
 pub mod save;
 pub mod sight;
 pub mod sounds;
+pub mod tracker;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
@@ -115,6 +117,9 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
+            .add_message::<tracker::TrackerAsk>()
+            .init_resource::<tracker::ObjectiveTracker>()
+            .add_systems(Startup, tracker::load_look)
             .add_save_part::<save::ScriptsSave>()
             .add_save_part::<fx_factories::FxFactoriesSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
@@ -143,7 +148,10 @@ impl Plugin for ScriptsPlugin {
                     breakables::explode,
                     sight::look,
                     run,
+                    send_ammo,
+                    tracker::track,
                     fx_factories::run,
+                    placed_emitters::run,
                     projectiles::fly,
                     breakables::show,
                     characters::cast,
@@ -160,7 +168,13 @@ impl Plugin for ScriptsPlugin {
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
-                (forget, sounds::forget, cutscene::forget, projectiles::forget),
+                (
+                    forget,
+                    sounds::forget,
+                    cutscene::forget,
+                    projectiles::forget,
+                    tracker::forget,
+                ),
             );
     }
 }
@@ -242,6 +256,8 @@ pub struct LevelScript {
     pub places: characters::Places,
     /// Sounds the scripts asked for this frame.
     sounds: Vec<sounds::SoundRequest>,
+    /// Ammo the scripts give or take this frame (`ACTION_AddAmmo`).
+    ammo: Vec<rc_game_core::pickups::AddAmmo>,
     /// Squad marker anchors (charges, consoles, door locks) and what they
     /// set off (see `markers.rs`).
     pub anchors: Vec<markers::Anchor>,
@@ -268,6 +284,7 @@ impl LevelScript {
             calls: Vec::new(),
             places: characters::Places::new(Vec::new()),
             sounds: Vec::new(),
+            ammo: Vec::new(),
             started: true,
             scene: cutscene::Scene::default(),
             stats: PlayStats::default(),
@@ -301,11 +318,16 @@ pub struct PlayStats {
     pub sounds_missing: Vec<String>,
     /// Music actions passed on to the music.
     pub music_cues: usize,
+    /// Objective tracker steps passed on to the tracker.
+    pub tracker_asks: usize,
     /// The sounds played from a place in the level (not heard everywhere).
     pub sounds_placed: Vec<String>,
     pub not_done: usize,
     /// Orders sent to characters: `KIND WHO`.
     pub character_orders: Vec<String>,
+    /// `PlayPropAnim`s on the player's own body (not drawn in first
+    /// person, as in the original).
+    pub player_body_anims: Vec<String>,
     /// Characters that finished an order the script waited for:
     /// `SCRIPT #INDEX`.
     pub character_done: Vec<String>,
@@ -322,6 +344,8 @@ pub struct PlayStats {
     /// Orders sent to turrets: `attach TAG`, `detach TAG`, `usable TAG`,
     /// `unusable TAG`.
     pub turret_orders: Vec<String>,
+    /// Ammo given or taken (`ACTION_AddAmmo`): `WeaponClass +N`.
+    pub add_ammo: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
@@ -375,18 +399,19 @@ fn begin(
         .and_then(|(p, d)| {
             rc_level::actors::read_level(&p, &d)
                 .map(|l| {
-                    (
-                        rc_level::scripts::read(&p, &d, &l),
-                        rc_level::scripts::places(&p, &d, &l),
-                    )
+                    let m = rc_level::scripts::read(&p, &d, &l);
+                    // What the map's objective tracker steps point at.
+                    let targets = tracker::read_targets(&p, &d, &l, &m, &paths, &log);
+                    (m, rc_level::scripts::places(&p, &d, &l), targets)
                 })
                 .map_err(|e| e.to_string())
         });
     match read {
-        Ok((m, places)) => {
+        Ok((m, places, targets)) => {
             for f in &m.failures {
                 log.line(format!("{PART}: unreadable: {f}"));
             }
+            commands.insert_resource(targets);
             commands.insert_resource(Loaded(m, settings, places));
         }
         Err(e) => {
@@ -581,6 +606,28 @@ fn build(
         });
     }
     commands.insert_resource(fx_factories::LevelFxFactories::new(fx));
+    // Emitters placed in the map (geo_01a's dust under the landing
+    // gunship): found by their class, their effects read now.
+    let emitters = match rc_effects::read::Library::open(&paths.game_data()) {
+        Ok(lib) => placed_emitters::read(map, &|c: &str| lib.is_emitter(c)),
+        Err(e) => {
+            log.line(format!(
+                "{PART}: effect packages not read ({e}); no placed emitters"
+            ));
+            Vec::new()
+        }
+    };
+    placed_emitters::log_list(&emitters, &log);
+    let mut classes: Vec<&str> = emitters.iter().map(|e| e.class.as_str()).collect();
+    classes.sort_unstable_by_key(|n| n.to_ascii_lowercase());
+    classes.dedup_by_key(|n| n.to_ascii_lowercase());
+    for c in classes {
+        preload.write(rc_effects_plugin::PreloadEffect {
+            effect: Some(c.to_string()),
+            sound: None,
+        });
+    }
+    commands.insert_resource(placed_emitters::LevelEmitters::new(emitters));
     commands.insert_resource(LevelScript {
         director,
         dispensers,
@@ -589,6 +636,7 @@ fn build(
         calls: Vec::new(),
         places,
         sounds: Vec::new(),
+        ammo: Vec::new(),
         anchors,
         started: false,
         scene: cutscene::Scene::default(),
@@ -615,8 +663,10 @@ fn build(
 fn forget(mut commands: Commands) {
     commands.remove_resource::<LevelScript>();
     commands.remove_resource::<fx_factories::LevelFxFactories>();
+    commands.remove_resource::<placed_emitters::LevelEmitters>();
     commands.remove_resource::<Objectives>();
     commands.remove_resource::<Loaded>();
+    commands.remove_resource::<tracker::TrackerTargets>();
 }
 
 fn text_of(v: Option<&Val>) -> String {
@@ -644,15 +694,20 @@ fn run(
         MessageReader<RaiseEvent>,
         MessageReader<rc_game_core::CharacterOrderDone>,
     ),
-    (mut factories, mut turrets): (MessageWriter<FactoryOrder>, MessageWriter<TurretOrder>),
+    (mut factories, mut turrets, mut collisions): (
+        MessageWriter<FactoryOrder>,
+        MessageWriter<TurretOrder>,
+        MessageWriter<rc_game_core::CharacterCollision>,
+    ),
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief, mut music): (
+    (mut checkpoints, mut change, mut debrief, mut music, mut tracker_asks): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
         MessageWriter<rc_game_core::MusicCue>,
+        MessageWriter<tracker::TrackerAsk>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -904,6 +959,14 @@ fn run(
                     music.write(cue);
                     continue;
                 }
+                if let Some(tag) = tracker::asked(&call.action) {
+                    script.stats.tracker_asks += 1;
+                    tracker_asks.write(tracker::TrackerAsk {
+                        tag,
+                        from: format!("t={now:.2} {} #{}", call.script, call.index),
+                    });
+                    continue;
+                }
                 carry_out(
                     script,
                     call,
@@ -915,6 +978,7 @@ fn run(
                     &mut damage,
                     &mut factories,
                     &mut turrets,
+                    &mut collisions,
                     &use_key,
                     &log,
                 );
@@ -945,6 +1009,7 @@ fn carry_out(
     damage: &mut MessageWriter<Damage>,
     factories: &mut MessageWriter<FactoryOrder>,
     turrets: &mut MessageWriter<TurretOrder>,
+    collisions: &mut MessageWriter<rc_game_core::CharacterCollision>,
     use_key: &str,
     log: &GameLog,
 ) {
@@ -956,6 +1021,14 @@ fn carry_out(
             let tag = a.text("CollideActorTag").unwrap_or("");
             let on = a.flag("bCollideActors", true);
             let n = parts.as_ref().map_or(0, |p| p.set_solid(tag, on));
+            // Characters with that tag too (the parts that own them apply
+            // it; nothing happens if there are none).
+            if !script.director.is_teleporter(tag) && !tag.is_empty() {
+                collisions.write(rc_game_core::CharacterCollision {
+                    tag: tag.to_string(),
+                    on,
+                });
+            }
             if script.director.is_teleporter(tag) {
                 log.line(format!(
                     "{at}: level exit {tag} {}",
@@ -972,7 +1045,7 @@ fn carry_out(
             } else {
                 script.stats.not_done += 1;
                 log.line(format!(
-                    "{at}: {tag} collision {on} (not a level part; characters not done yet)"
+                    "{at}: {tag} collision {on} (not a level part; sent to the characters with that tag)"
                 ));
             }
         }
@@ -1155,6 +1228,23 @@ fn carry_out(
                 ));
             }
         }
+        // Handed to the combat part (rc_combat::script_ammo), which keeps
+        // the count between none and the most carried.
+        "addammo" => {
+            let class = a.text("WhichWeapon").unwrap_or("").to_string();
+            let amount = a.int("AmmoAmount").unwrap_or(0);
+            if class.is_empty() {
+                log.line(format!("{at}: no weapon named; nothing happens"));
+            } else {
+                log.line(format!("{at}: {amount:+} for the player's {class}"));
+                script.stats.add_ammo.push(format!("{class} {amount:+}"));
+                script.ammo.push(rc_game_core::pickups::AddAmmo {
+                    weapon_class: class,
+                    amount,
+                    by: format!("{} #{}", call.script, call.index),
+                });
+            }
+        }
         "changelevel" => {
             log.line(format!(
                 "{at}: on to {}",
@@ -1197,6 +1287,17 @@ fn carry_out(
                 .unwrap_or_default();
             log.line(format!("{at} {}{comment} (not done yet)", what.join(" ")));
         }
+    }
+}
+
+/// Hand the ammo the scripts gave or took to the combat part.
+fn send_ammo(
+    script: Option<ResMut<LevelScript>>,
+    mut out: MessageWriter<rc_game_core::pickups::AddAmmo>,
+) {
+    let Some(mut script) = script else { return };
+    if !script.ammo.is_empty() {
+        out.write_batch(std::mem::take(&mut script.ammo));
     }
 }
 

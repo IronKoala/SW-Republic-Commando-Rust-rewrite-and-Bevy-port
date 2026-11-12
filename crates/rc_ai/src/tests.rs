@@ -602,7 +602,7 @@ fn every_enemy_file_reads_and_claims_its_classes() {
             );
             // The clone troopers hold their RequiredEquipment's model.
             let held = match params.kind.id.as_str() {
-                "clone_trooper" => "DC17mBlaster",
+                "clone_trooper" => "DC15BlasterClone",
                 "clone_trooper_tm" => "DC15BlasterCloneTM",
                 _ => "",
             };
@@ -633,6 +633,12 @@ fn every_enemy_file_reads_and_claims_its_classes() {
     for t in &types {
         assert_eq!(t.republic(), t.id.starts_with("clone_trooper"), "{}", t.id);
     }
+    // Geonosian warriors: the unarmed one placed in geo_01a has its own.
+    assert_eq!(who("GeonosianWarrior").as_deref(), Some("geonosian"));
+    assert_eq!(
+        who("GeonosianWarriorNoWeap").as_deref(),
+        Some("geonosian_no_weapon")
+    );
     // Every Trandoshan kind the campaign's maps place has exactly one file.
     for (class, id) in [
         ("TrandoshanMercenary", "trandoshan"),
@@ -1411,4 +1417,97 @@ fn leaps_to_high_script_points() {
     g.follow_script(order);
     let ev = run(&mut g, &world, None, 4.0);
     assert!(!ev.iter().any(|(_, e)| *e == AiEvent::Leapt));
+}
+
+// Characters placed straight in the map (see `spawns::read_placed`).
+
+fn placed(name: &str, x: f32) -> Factory {
+    Factory {
+        name: name.into(),
+        prototype: "BattleDroidTM".into(),
+        location: Vec3::new(x, 0.0, 60.0),
+        capacity: 1,
+        offspring: Offspring {
+            tag: Some(name.into()),
+            event: Some(format!("{name}Dead")),
+            first_damaged_event: None,
+            start_state: StartState::Idle,
+            team: None,
+            script: Some(format!("{name}AI")),
+        },
+        placed: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn placed_characters_are_all_there_from_the_start() {
+    // More than the cap on fighters alive at once, and no events: the
+    // original has every placed character in the level as it starts.
+    let n = AiParams::battle_droid().spawning.max_alive_total as usize + 3;
+    let list: Vec<Factory> = (0..n)
+        .map(|i| placed(&format!("Placed{i}"), i as f32 * 100.0))
+        .collect();
+    let mut b = scripted_battle(list);
+    let ev = steps(&mut b, 1);
+    let made = ev
+        .iter()
+        .filter(|e| matches!(e, BattleEvent::Spawned { .. }))
+        .count();
+    assert_eq!(made, n, "{ev:?}");
+    // At its own place, feet on the floor, with its own tag and script.
+    let f = &b.fighters[2];
+    assert!((f.pawn.feet() - Vec3::new(200.0, 0.0, 0.0)).length_2d() < 1.0);
+    assert!(f.pawn.feet().z < 60.0, "{:?}", f.pawn.feet());
+    assert_eq!(b.tagged("Placed2"), vec![f.id]);
+    assert_eq!(b.following("Placed2AI"), vec![f.id]);
+    // Never made again, even after it dies.
+    let id = f.id;
+    let dead = b.killed(id);
+    assert_eq!(names(&dead), vec!["Placed2Dead".to_string()]);
+    steps(&mut b, 120);
+    assert_eq!(b.fighters.len(), n);
+    assert!(b.spawners.iter().all(|s| !s.active && s.made == 1));
+}
+
+#[test]
+fn events_and_factory_orders_leave_placed_characters_alone() {
+    // A placed spawner's tag is empty and events naming its character's
+    // tag don't touch it.
+    let mut b = scripted_battle(vec![placed("Rocky", 0.0)]);
+    steps(&mut b, 1);
+    assert!(b.trigger("Rocky").is_empty());
+    assert!(b.trigger("").is_empty());
+    assert!(b.stop("", true, true).is_empty());
+    assert_eq!(b.reset(""), 0);
+    assert_eq!(b.alive().count(), 1);
+}
+
+#[test]
+fn saves_from_before_placed_characters_still_load() {
+    let params = Arc::new(AiParams::battle_droid());
+    let old = Battle::new(params.clone(), NavGraph::default(), vec![factory(0.0)]);
+    let snap = old.snapshot();
+    let mut now = Battle::new(
+        params.clone(),
+        NavGraph::default(),
+        vec![factory(0.0), placed("Rocky", 500.0)],
+    );
+    now.scripted = true;
+    now.restore(&snap).unwrap();
+    // The placed character starts as on a fresh level.
+    steps(&mut now, 1);
+    assert_eq!(now.tagged("Rocky").len(), 1);
+    // And a save made now carries on without making it twice.
+    let snap = now.snapshot();
+    let mut again = Battle::new(
+        params,
+        NavGraph::default(),
+        vec![factory(0.0), placed("Rocky", 500.0)],
+    );
+    again.scripted = true;
+    let back = again.restore(&snap).unwrap();
+    assert_eq!(back.len(), 1);
+    steps(&mut again, 30);
+    assert_eq!(again.fighters.len(), 1);
 }
