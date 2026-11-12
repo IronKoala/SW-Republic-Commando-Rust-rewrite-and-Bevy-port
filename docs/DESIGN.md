@@ -1655,6 +1655,7 @@ and carries out the effects:
 | `StopFactorySpawning`, `ResetFactory` | `FactoryOrder::Stop { tag, for_good, remove_offspring }` / `FactoryOrder::Reset { tag }` for the enemy spawners |
 | a `RaiseEvent` from another part (a droid destroyed, a spawner done) | into the director, like a door's event, and so out again as a `ScriptEvent` to everyone |
 | `AddAmmo` | `rc_game_core::pickups::AddAmmo` to `rc_combat::script_ammo`: the player's grenade of that class (the grenade file's `game_class`) gets the amount added, kept between 0 and the most carried, as the original's `Ammunition.AddAmmo`; nothing if not carried. Only grenades: no map names a gun |
+| `BlinkHUDHealth`, `BlinkHUDSquad`, `BlinkHUDGrenade`, `BlinkHUDShields`, `BlinkHUDSquadCommandPrompt` | `LevelScript::hud_blink` (`hud_blink.rs`), read by `rc_game`'s original HUD: elements with that `blink` in `data/ui/hud.toml` are drawn with `rc_menus::hud::blink_alpha` (Engine.dll `UHelmet::DrawHUD`: sin(5 t) * 200 + 55, kept as a byte) until `BlinkTime` has passed. The squad command prompt's blink shows nothing in the original, so nothing here |
 | `PlaySound`, `PlayLocalSound` | the game's own sound plays (see "Script sounds" below); `bDisabled` ones are skipped |
 | actions on characters (below) | `characters::cast`: a `CharacterOrder`, invulnerability, damage or a squad order |
 | anything else | logged with the action's values and the script's own comment, "not done yet" |
@@ -1940,6 +1941,80 @@ the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
 `GotoState` on characters, characters the game doesn't spawn yet (placed
 clone troopers and the like are logged and skipped), one sequence run
 separately per character, and `ScriptPriority`.
+
+### The objective tracker (`rc_scripts_plugin/src/tracker.rs`, `rc_game/src/objective_tracker.rs`)
+
+Level scripts point the player at the next goal with
+`ACTION_ShowActorObjectiveTracker` (178 steps in 36 maps). Everything below
+was read from the original's files on 2026-11-12: the script step's
+UnrealScript text in ctgame.u, the `Helmet` defaults in engine.u, and the
+native helmet drawing (`UHelmet::DrawHelmet`, `FCanvasUtil::DrawRotatedTile`
+and `DrawRotatedIcon`, `UHelmet::ActorDestroyed`) in Engine.dll,
+disassembled and partly run in an emulator locally for reference. Only
+numbers and rules were taken; no code from the game is in the repository.
+All numbers are in `data/ui/objective_tracker.toml`.
+
+- **The step.** Finds the first actor whose `Tag` is `ActorTag`, in the
+  map's actor order (`AllActors`), and hands it to the helmet; when none
+  has it, or the tag is None, it hides the tracker. When the map is read,
+  `tracker::read_targets` finds the first placed actor for every tag the
+  map's tracker steps name (an actor with no `Tag` is tagged with its class
+  name, as in UE2) and writes each to the log. A placed character (its
+  class comes from `Pawn`) is followed while the game's character with that
+  tag lives; a tag no placed actor has is matched against characters the
+  game spawned; with neither, the tracker hides, as the original's does.
+- **The goal.** Its actor's `Location`, followed each frame. Its size is
+  the bounding sphere radius of the actor's static mesh (the map's own
+  setting, else its class default, through `ClassLibrary::object_path`), 0
+  without one.
+- **Ring or arrows.** If the view is within 45 degrees of the line from the
+  eye to the goal, the line is checked through the level and its movers to
+  250 units short of the goal: at once when the goal comes ahead, then
+  every 0.25 s (`VisCheckFrequency`) while it stays clear. Clear: the four
+  corner arrows. Otherwise the ring.
+- **The ring.** `HUDTextures.Icons.ObjectiveRing` (256x256), centred at
+  (400, 463) on the 800x600 screen, turned clockwise by 65535 minus (the
+  view's yaw minus the goal's yaw seen from the pawn), then flattened by
+  cos(12288) (tipped back 67.5 degrees). Colour (200, 240, 255): a shadow 5
+  units lower at opacity 63, then the ring. The engine's sine table (16384
+  steps) is used for every turn.
+- **The distance.** `"%.1f"` of the distance from the pawn's `Location`
+  (the centre of its collision box, `rc_game_core::PlayerPawn`) to the
+  goal, in hundreds of units, in `OrbitFonts.OrbitBold8`, (200, 240, 255),
+  centred on the ring's centre, each letter its size times the screen
+  scale in whole pixels.
+- **The arrows.** Four corners half the goal's radius out to the sides and
+  up and down, square to the line from the eye, put on the screen with the
+  camera; the box is pushed out to at least 78 pixels each way. At each
+  corner the triangle of `HUDTextures.Icons.LargeVisorIcons` (texels 0,360
+  to 39,399) is drawn 39 units across, turned to point inward (24575, 8191,
+  -8193, -24577), in (200, 240, 255) with opacity = the low byte of
+  int(sin(time x 2.5) x 200 + 55), then again at 1.25 and 0.75 times the
+  size at a quarter of that opacity.
+- **Wide screens.** The original scales its 800x600 units to the screen
+  both ways; the port uses the screen height over 600 both ways and keeps
+  the middle in the middle (the same as the original on a 4:3 screen).
+- **Blocking volumes.** The original's sight line (`SingleLineCheck`
+  flags 0x286: movers, level, level geometry) doesn't stop at blocking
+  volumes. The port's `LevelCollision` holds their faces, so the map's
+  reader keeps the faces of volumes that lines pass
+  (`bBlockZeroExtentTraces` off) apart as well
+  (`MapCollision::line_through_triangles`, resource
+  `rc_level_plugin::LineThroughVolumes`), and the tracker's line goes on
+  past a hit on one of them.
+- **Moving goals.** A door or lift as the goal is followed where it has
+  moved to (the mover's pose), as the original's `Location` is.
+- **While the player is down.** The original keeps drawing it: the helmet
+  is drawn (`FPlayerSceneNode` calls `UHelmet::DrawHelmet`) unless the view
+  isn't the normal render mode, there is no pawn or one player-controller
+  flag is set, and `DrawHelmet` only checks `bDraw` (changed only by the
+  `DrawHUD` console command) and `bShowObjectiveTracker`. The down state
+  (`CTPlayer` state `CtrlIncapacitated`) changes none of these, so the port
+  keeps it too.
+- **Ours, not the original's:** the tracker isn't kept in save files, so
+  after a load it shows again at the next tracker step; the port's view
+  yaw is in radians and is rounded to the engine's units; and the sight
+  check runs in the game's update rather than while drawing.
 
 ### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
 
@@ -2842,6 +2917,22 @@ squad:
      checked; `bStartTimerAfterDeath` and `bAlwaysUseFactorySettings` are
      ignored; `SpawnEvent` is sent only when a droid is actually made (the
      original also sends it when the player is out of the factory's range).
+   - *Placed in the map*: characters can also stand in the map with no
+     factory. The original gives every placed pawn its AI as the level
+     starts (Engine.u `Pawn.PostBeginPlay`, read only: through its
+     `AIScriptTag`'s script when it names one, unless `bDontPossess` is
+     set), at full health. Its own `Tag`, `Event` (sent when it dies),
+     `FirstDamagedEvent`, `StartState`, `TeamIndex` and `AIScriptTag` are
+     the same values a factory copies onto what it makes (CTGame.u
+     `PawnFactory.SetupNewActor`), and a placed actor with no stored
+     `Tag` has its class name as its tag. `rc_ai::read_placed` turns each
+     one into a one-character factory (`Factory::placed`) at its own
+     place: `Battle` makes them all on its first step (no "one per step"
+     and no `max_alive_total` limit, since the original has them all from
+     the start) and never again; events, `StopFactorySpawning`,
+     `ResetFactory` and walk-in triggers leave them alone. They go after
+     the real factories, so saves from before they were made still load
+     (they then start as on a fresh level).
    `Battle` runs all of this for a map; the game plugin and `rc_droidsim`
    both use it.
 
@@ -2849,7 +2940,14 @@ squad:
    - On `OnEnter(Loading)` it reads the map's paths and spawners and the
      settings file through `GamePaths::data_file`, so a mod's file wins.
      It logs each spawner it runs (tag, type, capacity, where, its tags
-     and events).
+     and events). It also reads the characters placed straight in the map
+     (`rc_enemies::placed_enemies`): an actor counts when the game's
+     classes (`GameData/System` and `Properties`, read once per run into
+     `PawnClasses`) say it is a `Pawn` and an enemy file claims its class.
+     Placed clone troopers are left to the cast (`rc_cast`), and placed
+     kinds no file claims are logged and left out. Each one made is
+     logged as "placed ... is a ...", and its body as "placed in the map
+     as ...".
    - It hears the level's events (`rc_game_core::ScriptEvent`) and the
      scripts' `FactoryOrder`s, and sends what its spawners and droids
      send (`BattleEvent::Event`) back as `rc_game_core::RaiseEvent`; the
@@ -2903,6 +3001,9 @@ walk at you instead of taking cover (super battle droids);
 `combat.drops` is the weapon it leaves when it falls. `[sound]` lists
 sound names played when it spots you, is hurt and is destroyed.
 
+To see which characters are placed straight in each map and which file
+makes each one, run `rc_placed_enemies` (an example in `rc_enemies`, same
+setup; writes `logs/placed_enemies.log`).
 To see which file claims each map's spawners, and which classes no file
 claims yet, run `rc_enemy_spawners` (an example in `rc_enemies`, needs the
 game folder in `RC_GAME_DIR`; writes `logs/enemy_spawners.log`). A new
@@ -4375,7 +4476,20 @@ a character on the ground: it triggers the map's `Event` for the
 character (`RaiseEvent`, geo_01a's `GunshipTrooper02Death`), stops it,
 and plays its `Death` animation, holding the last frame. From then on it
 ignores the scripts' orders apart from hiding and removal
-(`Controller.PawnDied` destroys an AI's controller, so its script stops).
+(`Controller.PawnDied` destroys an AI's controller). The level's script
+sequence for it carries on, as the map expects: Mikey's own sequence
+kills him and then sends MikeyMegaForce, and the ramp troopers'
+sequences wait for their own death event and then play a line.
+
+geo_01a's two ramp troopers (CloneTrooper7 and 13, since 2026-11-12):
+Trigger42 sends RunLZTroopers, their sequences run them to
+WaitToBeBlownUp and WaitToBeBlownUp02, and Trigger5's bombardment
+(ProjectileFactory11, `GEO_01AProj`, 400 damage within 512 uu) lands
+next to them and kills them; their deaths send GunshipTrooper02Death and
+03Death, which make the sequences play CT3R1001 and CT3R1002. Nothing
+here was written for them: it comes from the map once the cast can die.
+Not done: their `SuggestEnemy Rockey` and `SetScriptPriority` (the AI's
+part).
 The body is taken away `RagdollLifeSpan` seconds later (60 for a clone
 trooper) unless the map or class sets `bSaveMyCorpse`. Not done: the
 original's ragdolls (`TryToRagdoll`: always for explosions, whose

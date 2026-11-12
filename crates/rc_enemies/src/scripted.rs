@@ -12,12 +12,20 @@
 //!   once;
 //! - `WaitForAnimEnd`: done when the script's animation ends;
 //! - `Teleport`, `Hidden`, `Remove` (no death event).
+//!
+//! And [`CharacterCollision`] (`ACTION_SetCollision` on a character's
+//! tag): with collision off, shots pass through it (its `Hittable` is put
+//! away in [`NotColliding`]) and the other side doesn't aim at it, as an
+//! Unreal actor with `bCollideActors` off isn't hit by shots or traces.
 
 use crate::{Droid, Fight, Looks, PART};
 use bevy::prelude::*;
 use rc_ai::ScriptGoal;
 use rc_anim::Clip;
-use rc_game_core::{CharacterAct, CharacterOrder, CharacterOrderDone, GameLog};
+use rc_combat::Hittable;
+use rc_game_core::{
+    CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone, GameLog, ScriptTags,
+};
 use rc_movement::Vec3;
 
 /// An animation a script plays on a droid.
@@ -202,6 +210,50 @@ pub(crate) fn follow_orders(
             } else {
                 fight.script_waits.insert(id, (o.script.clone(), o.index));
             }
+        }
+    }
+}
+
+/// A droid whose collision a level script switched off, with the body it
+/// is hit by when it is switched on again.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct NotColliding(pub Hittable);
+
+/// Switch our droids' collision on or off for the level scripts.
+pub(crate) fn set_collision(
+    mut commands: Commands,
+    mut fight: ResMut<Fight>,
+    mut orders: MessageReader<CharacterCollision>,
+    droids: Query<(Entity, &Droid, &ScriptTags, Option<&Hittable>, Option<&NotColliding>)>,
+    log: Res<GameLog>,
+) {
+    let now = fight.battle.time;
+    for o in orders.read() {
+        for (e, droid, tags, hit, off) in &droids {
+            if !tags.tag.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(&o.tag)) {
+                continue;
+            }
+            let id = droid.id;
+            match (o.on, hit, off) {
+                (false, Some(h), _) => {
+                    commands.entity(e).remove::<Hittable>().insert(NotColliding(*h));
+                    fight.battle.not_colliding.insert(id);
+                }
+                (true, _, Some(n)) => {
+                    commands.entity(e).remove::<NotColliding>().insert(n.0);
+                    fight.battle.not_colliding.remove(&id);
+                }
+                _ => continue,
+            }
+            fight
+                .stats
+                .scripted
+                .push(format!("collision {id} {}", if o.on { "on" } else { "off" }));
+            log.line(format!(
+                "{PART}: t={now:.1}s droid {id} ({}) collision {}",
+                o.tag,
+                if o.on { "on: can be hit again" } else { "off: shots pass through" }
+            ));
         }
     }
 }

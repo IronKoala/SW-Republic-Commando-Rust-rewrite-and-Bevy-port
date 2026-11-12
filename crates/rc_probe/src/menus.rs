@@ -423,6 +423,7 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         objective: String::new(),
         objective_fade: 0.0,
         compass: 0.37,
+        blinking: vec![],
     };
     // The objective shows when nobody speaks and no message is up.
     let objective_only = HudValues {

@@ -674,6 +674,7 @@ mod tests {
             places: Default::default(),
             sounds: vec![],
             ammo: vec![],
+            hud_blink: Default::default(),
             started: true,
             scene: crate::cutscene::Scene::default(),
             stats: PlayStats::default(),

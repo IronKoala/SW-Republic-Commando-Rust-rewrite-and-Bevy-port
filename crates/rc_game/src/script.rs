@@ -970,12 +970,40 @@ fn steps() -> Vec<Step> {
             20.0,
         ),
         Note(|w| spawner_event(w, "BunkerProjectileEFX")),
+        // The two troopers on the ramp (GunshipTrooper02 and 03): when
+        // the player walks into Trigger42 it sends RunLZTroopers, and
+        // their scripts (ScriptedSequence14 and 3) run them to
+        // WaitToBeBlownUp and WaitToBeBlownUp02, where Trigger5's
+        // bombardment lands and kills them. The walk doesn't reach
+        // Trigger42, so the check sends its event itself.
+        Note(|w| {
+            w.write_message(rc_game_core::RaiseEvent {
+                name: "RunLZTroopers".to_string(),
+                by: "the self-test (as Trigger42)".to_string(),
+            });
+        }),
+        Until(
+            "the two ramp troopers run to where the bombardment lands",
+            |w| ramp_troopers(w, false).is_ok(),
+            30.0,
+        ),
+        Check("the two ramp troopers run to where the bombardment lands", |w| {
+            ramp_troopers(w, false)
+        }),
         Note(|w| spawner_event(w, "ArialBombardment01")),
         Until(
             "the bombardment's missiles fly in from high above and blow up",
             bombardment_blows_up,
             20.0,
         ),
+        Until(
+            "the bombardment kills the two ramp troopers",
+            |w| ramp_troopers(w, true).is_ok(),
+            10.0,
+        ),
+        Check("the bombardment kills the two ramp troopers", |w| {
+            ramp_troopers(w, true)
+        }),
         Note(|w| spawner_event(w, "ArialBombardment01")),
         Note(|w| set_pitch(w, 0.0)),
         Wait(0.2),
@@ -1044,6 +1072,14 @@ fn steps() -> Vec<Step> {
             10.0,
         ),
         Check("geo_01a starts with no grenades, as the map's script says", no_grenades_at_start),
+        // ScriptedTrigger3's ACTION_BlinkHUDHealth (15 s) teaches the
+        // health meters: they blink as the original's do.
+        Until(
+            "the script blinks the HUD's health meters",
+            |w| health_meters_blink(w).is_ok(),
+            120.0,
+        ),
+        Check("the script blinks the HUD's health meters", health_meters_blink),
         Until(
             "the scripts start playing the level's lines",
             |w| level_script_lines(w).is_ok(),
@@ -1080,6 +1116,7 @@ fn steps() -> Vec<Step> {
         // stood on the ground.
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
         Check("the clone troopers hold their rifles", troopers_hold_rifles),
+        Check("the Geonosians placed in the map are made", placed_geonosians),
         // Troopers can be hurt and die (their class's `Health`), as
         // engine.u's `Pawn.Died`: the map's `Event` for them goes off and
         // they play their `Death` animation. CloneTrooper1 has no script
@@ -3162,6 +3199,36 @@ fn no_grenades_at_start(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a's `BlinkHUDHealth` step ran and the original HUD draws the
+/// health-coloured meter parts with the blink's opacity (not their own
+/// 255), as Engine.dll `UHelmet::DrawHUD` does.
+fn health_meters_blink(w: &mut World) -> Result<String, String> {
+    let script = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .ok_or("no level script")?;
+    let steps = script.stats.hud_blinks.clone();
+    let now = script.hud_blink.now();
+    let quads = crate::original_hud::layout_drawn(w);
+    let meters: Vec<u8> = quads
+        .iter()
+        .filter(|q| {
+            (q.widget == "vitals" || q.widget == "ammo")
+                && q.color[..3] != [255, 255, 255]
+        })
+        .map(|q| q.color[3])
+        .collect();
+    let got = format!("script steps {steps:?}; blinking {now:?}; meter opacities {meters:?}");
+    if steps.iter().any(|s| s == "Health 15")
+        && now.contains(&"health")
+        && meters.len() == 4
+        && meters.iter().all(|a| *a == meters[0] && *a != 255)
+    {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 /// The level's lines and sounds (`rc_scripts_plugin::sounds`): every sound
 /// geo_01a's scripts name was read from the game's packages with its
 /// length, at least two lines have played and reached the sound card, and
@@ -3425,6 +3492,52 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a places two Geonosians straight in the map (no spawner): the
+/// one at the gunship door (`GeonosianIntroWarrior01`, script
+/// `WarriorIntroAI`) and Rocky (`RockyAI`). Both must be made as the level
+/// starts and the intro warrior's script must have taken it over.
+fn placed_geonosians(w: &mut World) -> Result<String, String> {
+    let fight = w
+        .get_resource::<rc_enemies::Fight>()
+        .ok_or("no fight on this map")?;
+    let b = &fight.battle;
+    let find = |tag: &str| {
+        b.fighters.iter().find(|f| {
+            b.offspring(f.id)
+                .and_then(|o| o.tag)
+                .is_some_and(|t| t.eq_ignore_ascii_case(tag))
+        })
+    };
+    let placed = b.spawners.iter().filter(|s| s.factory.placed).count();
+    let rocky = find("Rocky").map(|f| (f.id, f.params.kind.id.clone(), f.mode));
+    let intro = find("GeonosianIntroWarrior01").map(|f| (f.id, f.params.kind.id.clone()));
+    let intro_scripted: Vec<&String> = intro
+        .as_ref()
+        .map(|(id, _)| {
+            fight
+                .stats
+                .scripted
+                .iter()
+                .filter(|s| s.split_whitespace().any(|x| x == id.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let msg = format!(
+        "{placed} placed; Rocky {rocky:?}; intro warrior {intro:?}, its script steps {intro_scripted:?}"
+    );
+    // Its script may already have removed it (no death event): a removed
+    // fighter stays in the battle's list, so it is found either way.
+    if placed == 2
+        && rocky.as_ref().is_some_and(|r| r.1 == "geonosian")
+        && intro.as_ref().is_some_and(|i| i.1 == "geonosian_no_weapon")
+        && !intro_scripted.is_empty()
+    {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
 /// Stand a few steps back from the landing zone's dispenser, looking at
 /// it, for a picture.
 /// geo_01a's clone troopers hold the game's DC-15 rifle model (their
@@ -3469,14 +3582,18 @@ fn troopers_can_die(w: &mut World) -> Result<String, String> {
             ok += 1;
         }
         if c.name == "CloneTrooper7" {
-            event = c.death_event().map(str::to_string);
+            event = Some(c.death_event().unwrap_or("nothing").to_string());
         }
     }
     let msg = format!(
         "{ok} of {troopers} clone troopers have 100 health and can be hit; CloneTrooper7's death triggers {}",
-        event.as_deref().unwrap_or("nothing")
+        event.as_deref().unwrap_or("- (already gone)")
     );
-    if troopers > 0 && ok == troopers && event.as_deref() == Some("GunshipTrooper02Death") {
+    // CloneTrooper7 has usually died in the bombardment by now (see
+    // `ramp_troopers`) and its body is gone; while it stands, its death
+    // must send the map's event for it.
+    let event_ok = event.as_deref().is_none_or(|e| e == "GunshipTrooper02Death");
+    if troopers > 0 && ok == troopers && event_ok {
         Ok(msg)
     } else {
         Err(msg)
@@ -4455,6 +4572,37 @@ fn projectiles_blew_up(w: &mut World, class: &str, trail: &str, high: Option<f32
 
 fn bunker_missiles_blow_up(w: &mut World) -> bool {
     projectiles_blew_up(w, "GEO_01A_BunkerMissile", "GEO_BunkerMissile_Proj", None)
+}
+
+/// geo_01a's two ramp troopers stand on their places (WaitToBeBlownUp,
+/// WaitToBeBlownUp02, from the map) and, with `dead`, have died there.
+fn ramp_troopers(w: &mut World, dead: bool) -> Result<String, String> {
+    let spots = [
+        ("CloneTrooper7", [-1144.3364, 532.4252]),
+        ("CloneTrooper13", [-1287.9878, 757.9026]),
+    ];
+    let mut q = w.query::<&rc_cast::Cast>();
+    let mut parts = Vec::new();
+    let mut ok = true;
+    for (name, spot) in spots {
+        let Some(c) = q.iter(w).find(|c| c.name == name) else {
+            parts.push(format!("{name} missing"));
+            ok = false;
+            continue;
+        };
+        let d = ((c.location[0] - spot[0]).powi(2) + (c.location[1] - spot[1]).powi(2)).sqrt();
+        parts.push(format!(
+            "{name} {d:.0} uu from its place{}",
+            if c.is_dead() { ", dead" } else { ", alive" }
+        ));
+        ok &= d < 50.0 && (!dead || c.is_dead());
+    }
+    let msg = parts.join("; ");
+    if ok {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
 }
 
 fn bombardment_blows_up(w: &mut World) -> bool {

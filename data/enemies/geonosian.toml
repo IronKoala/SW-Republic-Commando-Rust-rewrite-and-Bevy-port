@@ -13,7 +13,7 @@
 [type]
 id = "geonosian"
 name = "Geonosian warrior"
-classes = ["GeonosianWarrior*"]  # game: the map class
+classes = ["GeonosianWarrior"]  # game: the map class (GeonosianWarriorNoWeap has its own file)
 body = "organic"
 
 [movement]
