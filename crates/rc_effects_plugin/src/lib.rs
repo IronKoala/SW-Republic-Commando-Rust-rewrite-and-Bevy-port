@@ -83,6 +83,11 @@ pub struct SpawnEffect {
     /// axes), for an effect hung on a bone (`AttachToBone` with no turn of
     /// its own takes the bone's). Used instead of `rotation` when given.
     pub axes: Option<[[f32; 3]; 3]>,
+    /// Runs for as long as its carrier (`follow`) is there, however long
+    /// that is: an emitter placed in the map, which in the original
+    /// sends particles for the whole level. Without it, an effect that
+    /// never ends is stopped after a minute.
+    pub endless: bool,
 }
 
 impl Default for SpawnEffect {
@@ -99,6 +104,7 @@ impl Default for SpawnEffect {
             follow: None,
             vanish_with_carrier: false,
             axes: None,
+            endless: false,
         }
     }
 }
@@ -240,6 +246,8 @@ pub struct RunningEffect {
     follow: Option<Entity>,
     /// Taken away at once when the carrier goes (see `SpawnEffect`).
     vanish_with_carrier: bool,
+    /// Not stopped after a minute while its carrier is there.
+    endless: bool,
     /// Its `AmbientSound`, looping while it is there.
     ambient: Option<Entity>,
     pub state: EffectState,
@@ -768,6 +776,7 @@ fn spawn(
                 by: a.by.clone(),
                 follow: a.follow,
                 vanish_with_carrier: a.vanish_with_carrier,
+                endless: a.endless && a.follow.is_some(),
                 ambient,
                 state,
                 parts,
@@ -824,8 +833,10 @@ fn step(
             r.state.step(&def, dt);
             live += r.state.live();
         }
-        // Safety: an effect that loops forever ends after a minute.
-        if vanish || r.state.done(&def) || r.state.age > 60.0 {
+        // Safety: an effect that loops forever ends after a minute, unless
+        // it is a placed emitter whose carrier is still there.
+        let endless = r.endless && r.follow.is_some();
+        if vanish || r.state.done(&def) || (!endless && r.state.age > 60.0) {
             say(
                 &log,
                 format!(

@@ -128,6 +128,37 @@ pub fn globals(parents: &[usize], local: &[Transform]) -> Vec<Transform> {
     out
 }
 
+/// [`globals`] as Republic Commando's engine poses a mesh in the game:
+/// when the mesh's first bone is its "move" bone (named `Move`, see
+/// [`move_bone`]), the bones hanging from it don't follow it. Its motion
+/// only moves the actor itself, and only for an actor whose physics is
+/// root motion. Read from engine.dll (`USkeletalMesh::PostLoad` finds the
+/// bone; `USkeletalMeshInstance::ApplyAnimation` skips it as a parent
+/// outside the editor), decompiled to find this rule, nothing copied.
+pub fn globals_in_game(
+    parents: &[usize],
+    local: &[Transform],
+    move_bone: Option<usize>,
+) -> Vec<Transform> {
+    let mut out: Vec<Transform> = Vec::with_capacity(local.len());
+    for (i, l) in local.iter().enumerate() {
+        let g = if i == 0 || parents[i] >= i || Some(parents[i]) == move_bone {
+            *l
+        } else {
+            out[parents[i]].then(l)
+        };
+        out.push(g);
+    }
+    out
+}
+
+/// The mesh's move bone: its first bone, when that is named `Move`
+/// (engine.dll's `USkeletalMesh::PostLoad`). Nearly every character and
+/// vehicle in the game has one.
+pub fn move_bone(names: &[String]) -> Option<usize> {
+    names.first().filter(|n| n.as_str() == "Move").map(|_| 0)
+}
+
 /// One bone's keys, unpacked.
 #[derive(Debug, Clone)]
 struct Keys {

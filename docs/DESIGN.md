@@ -4272,6 +4272,26 @@ gunship's chin gun) draws nothing and says so in the log. The reading,
 drawing and placing are `rc_effects_plugin::held::HeldModel`, shared with
 the fighters the map's spawners make (`rc_enemies`, see "Two sides").
 
+**The Move bone isn't drawn (from engine.dll).** Many of the game's
+skeletons have a first bone named `Move` that every other bone hangs
+from, and animations use it to carry the whole body (geo_01a's gunship
+clips hold it 757 to 850 Unreal units up). engine.dll's
+`USkeletalMesh::PostLoad` marks bone 0 as the move bone when its name is
+`Move`, and `USkeletalMeshInstance::ApplyAnimation`, outside the editor,
+places a bone whose parent is the move bone without the move bone's own
+travel (found by decompiling engine.dll for reference only; nothing is
+copied into this repository). The travel is used only for actors with
+`Physics` 12 (`PHYS_RootMotion`), whose place follows it
+(`AActor::physRootMotion`). So the cast poses with
+`rc_model::Model::posed_in_game` and `bone_frame_in_game`
+(`rc_anim::globals_in_game`), unless the actor's `Physics` is 12, which
+keeps the old `posed_local` way. Before this the landing gunship
+(`Physics` 4, flying) was drawn 757 units too high. One effect: the
+gunship's `GunshipAmbushSpiderdroid` clip, which flies it off at the end
+of the level, also only turns it in place now, as the engine rule says
+for a flying actor; nothing found in the files switches it to root
+motion.
+
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its
 `AIScriptTag`) with `follows_orders` on, so the level scripts part finds
@@ -4802,6 +4822,31 @@ the effect and sends `rc_combat::Explode`.
 (`bActorDetonate`), zone gravity other than the default, decals and
 per-surface effects (the default material effect is used), and the trails'
 ribbon emitters (not drawn).
+
+### Emitters placed in the map (`rc_scripts_plugin/src/placed_emitters.rs`)
+
+**From the files.** A map places effects as actors whose class leads,
+through its parents, to engine.u's `Emitter` (`rc_effects::read::Library::is_emitter`).
+geo_01a has 11: the dust the gunship blows up (`REP_Gunship_GroundDust0`),
+fires (`Fire_Medium`), smoke (`SpireBigSmoke`, `WhiteSmoke`), blowing
+dust and floor fog. Each one runs its class's effect (from
+`Properties/cteffects.u`) at its map place and turn from the start of the
+level, for as long as the level lasts (`SpawnEffect::endless`, carried by
+an `EmitterCarrier` entity). None of geo_01a's starts switched off.
+
+**Our reading, not from the files.** A level event that names an
+emitter's `Tag` calls engine.u's `Emitter.Trigger`, which calls each
+particle emitter's native `Trigger()` in engine.dll (not decompiled).
+`TriggerDisabled` is true by default, so we follow Unreal Engine 2's
+documented rule: the event switches the emitter off (the particles out
+there live out their time), and the next one switches it back on.
+geo_01a's gunship script sends `REP_Gunship_GroundDust` as the gunship
+leaves for the spider droid at the end of the level. Logged as "our
+reading".
+
+**Not done.** The map's own copies of an emitter's settings (the class's
+are drawn), the actor's `DrawScale` (logged), and keeping which are off
+in save files.
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 
