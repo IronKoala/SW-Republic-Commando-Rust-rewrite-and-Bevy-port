@@ -6,8 +6,11 @@
 pub mod imuse;
 pub mod library;
 
-pub use imuse::{BattleSettings, Command, Criteria, FadeOverride, Imuse, Layer, Threat, Tuning};
-pub use library::{Entry, Fade, FadeShape, Group, MusicLibrary, Piece, Rng, RoomMusic};
+pub use imuse::{
+    engine, BattleSettings, Command, Criteria, FadeOverride, FightEnd, Imuse, Layer, Threat,
+    Tuning, Zones,
+};
+pub use library::{Entry, Fade, FadeShape, Fader, Group, MusicLibrary, Piece, Rng, RoomMusic};
 
 #[cfg(test)]
 mod tests;

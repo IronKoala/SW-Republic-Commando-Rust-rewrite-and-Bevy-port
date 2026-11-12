@@ -4,21 +4,11 @@
 # files at run time, not from here:
 # - the pieces, their fades, loops and loudness: GameData/Sounds/*_music.uax
 # - room music: the map's volumes and GameData/Properties/audioenv.u
-# - battle music and when a fight starts: the map's LevelInfo and scripts
+# - battle music and when a fight starts: the map's LevelInfo, its battle
+#   volumes and its scripts; the timings (a check each second, the 2 second
+#   end delay, the 5 second fade) are the engine's own, read from Engine.dll
 # - menu music: each menu's BackgroundMusic in XInterfaceCTMenus.u
 # See "Music" in docs/DESIGN.md.
-
-# Seconds between checks for a fight starting or ending. The original keeps
-# a "next battle update time" but its spacing isn't stored anywhere.
-battle_check_seconds = 0.5
-
-# A fight's music ends (with its victory flourish) this many seconds after
-# the last enemy left the level's outer battle radius, so it doesn't flicker
-# on and off at the edge.
-battle_end_seconds = 3.0
-
-# Fade, in seconds, for room overlays cut short by a fight or a script.
-overlay_stop_fade = 1.0
 
 # The "player down" loop, for levels whose battle music doesn't name one
 # (every battle group in the game names this same piece).

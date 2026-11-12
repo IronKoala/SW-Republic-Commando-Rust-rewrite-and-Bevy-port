@@ -43,6 +43,8 @@ pub struct Spawner {
     /// Characters made that count against its capacity (a script's
     /// `ResetFactory` sets it back to 0).
     pub made: u32,
+    /// Has been switched on at some time (`Factory.bWasOnceOnline`).
+    pub was_on: bool,
     next_spawn: f32,
     /// The spawn point it uses next (spawn mode 0 and 1).
     next_spot: usize,
@@ -53,6 +55,36 @@ pub struct Spawner {
     /// How what it is based on (`AttachTag`: a mover) has moved it since
     /// the level started; set by the game each frame.
     pub carry: Option<Carry>,
+}
+
+impl Spawner {
+    /// `Factory.IsExhausted` (CTGame.u): never while it makes characters
+    /// forever; yes when switched off after having been on once; otherwise
+    /// when it has no characters left to make (`RemainingItems == 0`).
+    ///
+    /// A droid dispenser (`DroidDispenser.IsExhausted`) is exhausted once
+    /// destroyed (its `Damaged` state), else as any factory. Every
+    /// dispenser in the game makes droids for ever, so only being
+    /// destroyed counts.
+    pub fn exhausted(&self) -> bool {
+        let f = &self.factory;
+        if let Some(d) = &self.disp {
+            if d.phase == Phase::Destroyed {
+                return true;
+            }
+            if f.generate_forever {
+                return false;
+            }
+            return d.remaining == 0;
+        }
+        if f.generate_forever {
+            return false;
+        }
+        if !self.active && self.was_on {
+            return true;
+        }
+        self.made >= f.capacity
+    }
 }
 
 /// What switched a spawner on.
@@ -114,6 +146,7 @@ pub struct SpawnerSnapshot {
     pub active: bool,
     pub disabled: bool,
     pub made: u32,
+    pub was_on: bool,
     /// Battle time of its next try.
     pub next_spawn: f32,
     pub next_spot: usize,
@@ -238,6 +271,7 @@ impl Battle {
                     params,
                     disabled: false,
                     made: 0,
+                    was_on: false,
                     next_spawn: 0.0,
                     next_spot: 0,
                     carry: None,
@@ -653,6 +687,7 @@ impl Battle {
                     active: s.active,
                     disabled: s.disabled,
                     made: s.made,
+                    was_on: s.was_on,
                     next_spawn: s.next_spawn,
                     next_spot: s.next_spot,
                     dispenser: s.disp.as_ref().map(|d| {
@@ -723,6 +758,7 @@ impl Battle {
             sp.active = saved.active;
             sp.disabled = saved.disabled;
             sp.made = saved.made;
+            sp.was_on = saved.was_on;
             sp.next_spawn = saved.next_spawn;
             sp.next_spot = saved.next_spot;
             if let (Some(st), Some(d)) = (sp.disp.as_mut(), &saved.dispenser) {
@@ -807,6 +843,7 @@ impl Battle {
         let n = self.spawners[i].factory.spots.len();
         let sp = &mut self.spawners[i];
         sp.active = true;
+        sp.was_on = true;
         // The original makes one straight away.
         sp.next_spawn = self.time;
         if sp.factory.spawn_mode == 1 && n > 0 {

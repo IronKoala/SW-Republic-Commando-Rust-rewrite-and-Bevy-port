@@ -74,7 +74,7 @@ pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
 };
 pub use log::GameLog;
-pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
+pub use music::{MusicCue, MusicFactories, MusicFactory, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use sound::{SoundAt, Voice};
@@ -105,6 +105,7 @@ impl Plugin for CorePlugin {
             .init_resource::<SquadReadout>()
             .init_resource::<MusicMood>()
             .init_resource::<MusicThreats>()
+            .init_resource::<MusicFactories>()
             .add_message::<MusicCue>()
             .add_message::<HudMessage>()
             .add_message::<pickups::PickedUp>()

@@ -33,6 +33,9 @@ pub struct AudioVolume {
 pub struct MapMusic {
     pub battle: LevelBattle,
     pub volumes: Vec<AudioVolume>,
+    /// The map's `BattleVolume`s (CTGame.u; `EngineBattleVolume` in
+    /// Engine.u is the part the music code sees), in map order.
+    pub battle_volumes: Vec<BlockingVolume>,
     /// Volumes that couldn't be read, and why.
     pub failures: Vec<String>,
 }
@@ -42,6 +45,15 @@ pub fn read(pkg: &Package, data: &[u8], level: &LevelInfo) -> MapMusic {
     let mut out = MapMusic::default();
     for &a in level.actors.iter().flatten() {
         let class = pkg.export_class_name(&pkg.exports[a]);
+        if is_battle_volume(class) {
+            match volumes::read_volume(pkg, data, a) {
+                Ok((shape, _)) => out.battle_volumes.push(shape),
+                Err(e) => out
+                    .failures
+                    .push(format!("{}: {e}", pkg.name(pkg.exports[a].object_name))),
+            }
+            continue;
+        }
         let is_level = class.eq_ignore_ascii_case("LevelInfo");
         if !is_level && !class.to_ascii_lowercase().ends_with("volume") {
             continue;
@@ -83,4 +95,10 @@ pub fn read(pkg: &Package, data: &[u8], level: &LevelInfo) -> MapMusic {
         }
     }
     out
+}
+
+/// `BattleVolume` (CTGame.u) and its engine parent `EngineBattleVolume`
+/// (Engine.u). No other class in the game's packages extends them.
+pub fn is_battle_volume(class: &str) -> bool {
+    class.eq_ignore_ascii_case("BattleVolume") || class.eq_ignore_ascii_case("EngineBattleVolume")
 }

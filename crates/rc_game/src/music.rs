@@ -25,13 +25,14 @@ use bevy::audio::{AudioSinkPlayback, AudioSource, PlaybackMode, PlaybackSettings
 use bevy::prelude::*;
 use rc_game_core::units::to_unreal;
 use rc_game_core::{
-    CurrentLevel, GameLog, GamePaths, GameState, MusicCue, MusicFades, MusicThreats, Play, Player,
-    PlayerVitals,
+    CurrentLevel, GameLog, GamePaths, GameState, MusicCue, MusicFactories, MusicFades,
+    MusicThreats, Play, Player, PlayerPawn, PlayerVitals,
 };
 use rc_level::music::AudioVolume;
+use rc_level::volumes::BlockingVolume;
 use rc_music::{
-    BattleSettings, Command, Criteria, Fade, FadeOverride, FadeShape, Imuse, Layer, MusicLibrary,
-    Piece, RoomMusic, Threat, Tuning,
+    BattleSettings, Command, Criteria, Fade, FadeOverride, FadeShape, Fader, Imuse, Layer,
+    MusicLibrary, Piece, RoomMusic, Threat, Tuning, Zones,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -41,13 +42,6 @@ use std::sync::Arc;
 #[derive(Resource, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields, default)]
 pub struct MusicPlan {
-    /// Seconds between checks for a fight starting or ending.
-    pub battle_check_seconds: f32,
-    /// A fight's music ends this many seconds after the last enemy left
-    /// the outer radius.
-    pub battle_end_seconds: f32,
-    /// Fade (seconds) for room overlays cut short by a fight or a script.
-    pub overlay_stop_fade: f32,
     /// The "player down" loop when the level's battle music names none.
     pub player_down: String,
     /// Replace the main menu's music with another piece from the music
@@ -59,9 +53,6 @@ impl Default for MusicPlan {
     fn default() -> Self {
         let t = Tuning::default();
         MusicPlan {
-            battle_check_seconds: t.battle_check_seconds,
-            battle_end_seconds: t.battle_end_seconds,
-            overlay_stop_fade: t.overlay_stop_fade,
             player_down: t.player_down,
             menu: String::new(),
         }
@@ -75,9 +66,6 @@ impl MusicPlan {
 
     fn tuning(&self) -> Tuning {
         Tuning {
-            battle_check_seconds: self.battle_check_seconds.max(0.05),
-            battle_end_seconds: self.battle_end_seconds.max(0.0),
-            overlay_stop_fade: self.overlay_stop_fade.max(0.0),
             player_down: self.player_down.clone(),
         }
     }
@@ -90,28 +78,22 @@ pub(crate) struct Track {
     name: String,
     /// Loudness from the piece's own settings.
     base: f32,
-    fade: Fade,
-    fading_in: bool,
-    fading_out: bool,
-    /// Seconds into the current fade.
+    /// The engine's fader (0 to 1), which the base multiplies.
+    fader: Fader,
+    /// The current fade's length and how far into it, seconds. When it is
+    /// over the fader goes straight to its target, as the engine's does.
+    fade_seconds: f32,
     t: f32,
+    fading_out: bool,
 }
 
 impl Track {
     fn gain(&self) -> f32 {
-        let f = if self.fade.seconds <= 0.0 {
-            1.0
-        } else {
-            (self.t / self.fade.seconds).clamp(0.0, 1.0)
-        };
-        let g = if self.fading_in {
-            self.fade.shape.gain(f)
-        } else if self.fading_out {
-            self.fade.shape.gain(1.0 - f)
-        } else {
-            1.0
-        };
-        self.base * g
+        self.base * self.fader.value()
+    }
+
+    fn fading(&self) -> bool {
+        self.fader.value() != self.fader.target()
     }
 }
 
@@ -157,6 +139,22 @@ struct LevelMusic {
     director: Imuse,
     rooms: Vec<(AudioVolume, RoomMusic)>,
     inside: Vec<bool>,
+    /// The map's `BattleVolume`s, in map order.
+    battle_volumes: Vec<BlockingVolume>,
+    /// Which battle volume each enemy factory stands in (worked out once,
+    /// as `BattleVolume.FindFactories` does when the level starts; the
+    /// factories never move). Filled when the factory list first arrives.
+    factory_zones: Option<Vec<Vec<usize>>>,
+}
+
+/// Inside a volume, as the music counts it: the point or the point
+/// 50 units above it (the same test as for rooms).
+/// The original's `IsInVolume`: the volume is in the character's
+/// `Touching` list, which Engine.dll's `ULevel::MoveActor` fills with every
+/// volume the character's collision box overlaps (see
+/// [`BlockingVolume::overlaps_box`]).
+fn in_volume(v: &BlockingVolume, centre: [f32; 3], extent: [f32; 3]) -> bool {
+    v.overlaps_box(centre, extent)
 }
 
 pub struct MusicPlugin;
@@ -272,14 +270,17 @@ fn play(
     let Some(handle) = handle else {
         return false;
     };
+    // Engine: the fader is set to 0 at once, then fades to 1.
+    let mut fader = Fader::at(0.0);
+    fader.start(1.0, fade_in.seconds.max(0.0), fade_in.shape);
     let track = Track {
         layer,
         name: piece.name.clone(),
         base: volume,
-        fade: fade_in,
-        fading_in: fade_in.seconds > 0.0,
-        fading_out: false,
+        fader,
+        fade_seconds: fade_in.seconds.max(0.0),
         t: 0.0,
+        fading_out: false,
     };
     let start = track.gain();
     let mode = if piece.looping {
@@ -321,17 +322,11 @@ fn stop(
     };
     match tracks.get_mut(e) {
         Ok(mut t) if fade.seconds > 0.0 => {
-            // Fade out from wherever a fade in had got to.
-            let now = t.gain() / t.base.max(1e-4);
-            t.fading_in = false;
+            // Engine: the fader fades from wherever it is to 0.
+            t.fader.start(0.0, fade.seconds, fade.shape);
+            t.fade_seconds = fade.seconds;
+            t.t = 0.0;
             t.fading_out = true;
-            t.fade = fade;
-            // Start the fade-out curve at the current loudness.
-            let mut k = 0.0;
-            while k < 1.0 && fade.shape.gain(1.0 - k) > now {
-                k += 0.02;
-            }
-            t.t = k * fade.seconds;
         }
         _ => {
             commands.entity(e).try_despawn();
@@ -557,6 +552,12 @@ fn load_level_music(
     for f in &mm.failures {
         log.line(format!("music: {map}: volume not read: {f}"));
     }
+    for (i, v) in mm.battle_volumes.iter().enumerate() {
+        log.line(format!(
+            "music: {map}: battle volume {i}: {} at ({:.0}, {:.0}, {:.0})",
+            v.name, v.location[0], v.location[1], v.location[2]
+        ));
+    }
     let seed = map
         .bytes()
         .fold(7u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
@@ -565,6 +566,8 @@ fn load_level_music(
         director: Imuse::new(lib, battle, plan.tuning(), seed),
         rooms,
         inside: vec![false; n],
+        battle_volumes: mm.battle_volumes,
+        factory_zones: None,
     });
 }
 
@@ -575,9 +578,9 @@ fn level_music(
     time: Res<Time>,
     level: Option<ResMut<LevelMusic>>,
     mut cues: MessageReader<MusicCue>,
-    threats: Res<MusicThreats>,
+    (threats, factories): (Res<MusicThreats>, Res<MusicFactories>),
     vitals: Res<PlayerVitals>,
-    player: Query<&Transform, With<Player>>,
+    (player, pawn): (Query<&Transform, With<Player>>, Res<PlayerPawn>),
     paths: Res<GamePaths>,
     (mut layers, mut sources): (ResMut<Layers>, ResMut<Assets<AudioSource>>),
     mut tracks: Query<&mut Track>,
@@ -588,6 +591,54 @@ fn level_music(
         return;
     };
     let level = &mut *level;
+    let feet = player.single().ok().map(|t| {
+        let p = to_unreal(t.translation);
+        [p.x, p.y, p.z]
+    });
+    // The battle engine measures from the body's centre (`Pawn.Location`),
+    // as it does for the enemies.
+    let at = feet.map(|_| pawn.centre);
+    // Battle volumes: which the player is in, and whether each one's
+    // factories are spent (before script cues, which may force a fight).
+    let vols = &level.battle_volumes;
+    if !vols.is_empty() {
+        if level.factory_zones.is_none() && !factories.0.is_empty() {
+            let fz: Vec<Vec<usize>> = factories
+                .0
+                .iter()
+                .map(|f| {
+                    (0..vols.len())
+                        .filter(|&z| vols[z].contains(f.at))
+                        .collect()
+                })
+                .collect();
+            for (z, v) in vols.iter().enumerate() {
+                let n = fz.iter().filter(|zs| zs.contains(&z)).count();
+                log.line(format!(
+                    "music: battle volume {z} ({}) holds {n} enemy factories",
+                    v.name
+                ));
+            }
+            level.factory_zones = Some(fz);
+        }
+        let mut exhausted = vec![true; vols.len()];
+        if let Some(fz) = &level.factory_zones {
+            for (f, zs) in factories.0.iter().zip(fz) {
+                for &z in zs {
+                    exhausted[z] &= f.exhausted;
+                }
+            }
+        }
+        let player_in = at.map_or(Vec::new(), |p| {
+            (0..vols.len())
+                .filter(|&z| in_volume(&vols[z], p, pawn.extent))
+                .collect()
+        });
+        level.director.set_zones(Zones {
+            player_in,
+            exhausted,
+        });
+    }
     let d = &mut level.director;
     for cue in cues.read() {
         match cue.clone() {
@@ -605,12 +656,8 @@ fn level_music(
             MusicCue::ForceVictory => d.force_victory(),
         }
     }
-    let at = player.single().ok().map(|t| {
-        let p = to_unreal(t.translation);
-        [p.x, p.y, p.z]
-    });
     // Rooms: walking into a volume with music.
-    if let Some(p) = at {
+    if let Some(p) = feet {
         let above = [p[0], p[1], p[2] + 50.0];
         for (i, (v, room)) in level.rooms.iter().enumerate() {
             let inside = v.shape.contains(p) || v.shape.contains(above);
@@ -624,8 +671,12 @@ fn level_music(
         .0
         .iter()
         .map(|t| Threat {
+            id: t.id,
             at: t.at,
             engaged: t.engaged,
+            zones: (0..level.battle_volumes.len())
+                .filter(|&z| in_volume(&level.battle_volumes[z], t.at, t.extent))
+                .collect(),
         })
         .collect();
     d.update(time.delta_secs(), &threats, at, vitals.incapacitated);
@@ -692,14 +743,16 @@ fn fades(
     let user = user_volume(&settings);
     let dt = time.delta_secs();
     for (e, mut t, sink) in &mut tracks {
-        if !paused && (t.fading_in || t.fading_out) {
+        if !paused && (t.fading() || t.fading_out) {
             t.t += dt;
-            if t.t >= t.fade.seconds {
+            t.fader.advance(dt);
+            if t.t >= t.fade_seconds {
                 if t.fading_out {
                     commands.entity(e).try_despawn();
                     continue;
                 }
-                t.fading_in = false;
+                let target = t.fader.target();
+                t.fader = Fader::at(target);
             }
         }
         if let Some(mut s) = sink {
@@ -754,7 +807,7 @@ mod tests {
     #[test]
     fn shipped_plan_reads() {
         let p = MusicPlan::parse(include_str!("../../../data/music/music.toml")).unwrap();
-        assert!(p.battle_end_seconds > 0.0);
+        assert!(!p.player_down.is_empty());
         assert!(
             p.menu.is_empty(),
             "the shipped file keeps the original menu music"
@@ -763,22 +816,22 @@ mod tests {
 
     #[test]
     fn fade_out_starts_where_the_fade_in_was() {
+        let mut fader = Fader::at(0.0);
+        fader.start(1.0, 2.0, FadeShape::Linear);
+        fader.advance(1.0);
         let mut t = Track {
             layer: Layer::Main,
             name: "x".into(),
             base: 1.0,
-            fade: Fade {
-                seconds: 2.0,
-                shape: FadeShape::Linear,
-            },
-            fading_in: true,
-            fading_out: false,
+            fader,
+            fade_seconds: 2.0,
             t: 1.0,
+            fading_out: false,
         };
         assert!((t.gain() - 0.5).abs() < 1e-4);
-        t.fading_in = false;
-        t.fading_out = true;
-        t.t = 0.0;
-        assert!((t.gain() - 1.0).abs() < 1e-4);
+        t.fader.start(0.0, 1.0, FadeShape::Linear);
+        assert!((t.gain() - 0.5).abs() < 1e-4);
+        t.fader.advance(0.5);
+        assert!((t.gain() - 0.25).abs() < 1e-4);
     }
 }

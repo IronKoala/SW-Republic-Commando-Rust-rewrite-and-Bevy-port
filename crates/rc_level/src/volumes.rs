@@ -206,6 +206,64 @@ impl BlockingVolume {
         }
         crossings % 2 == 1
     }
+
+    /// Does a box overlap the volume? `half` is the box's half-size from
+    /// `centre`. This is how the original decides that a character touches
+    /// a volume: Engine.dll's `ULevel::MoveActor` sweeps the character's
+    /// collision box (half-size `CollisionRadius`, `CollisionRadius`,
+    /// `CollisionHeight` from `GetCylinderExtent`) through the level, and
+    /// every volume the box meets goes into its `Touching` list, which
+    /// `IsInVolume` reads. So any part of the body counts, not only its
+    /// centre.
+    pub fn overlaps_box(&self, centre: Vec3, half: Vec3) -> bool {
+        // The box wholly inside the volume.
+        if self.contains(centre) {
+            return true;
+        }
+        // Otherwise a face of the volume must cut the box (this also
+        // covers the volume wholly inside the box).
+        self.triangles()
+            .any(|t| triangle_meets_box(t, centre, half))
+    }
+}
+
+/// Separating-axis test of a triangle against an axis-aligned box: they
+/// meet unless some axis (the box's three, the triangle's normal, or the
+/// nine edge crossings) keeps them apart.
+fn triangle_meets_box(t: [Vec3; 3], centre: Vec3, half: Vec3) -> bool {
+    let sub = |a: Vec3, b: Vec3| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: Vec3, b: Vec3| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: Vec3, b: Vec3| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let v = [sub(t[0], centre), sub(t[1], centre), sub(t[2], centre)];
+    let e = [sub(v[1], v[0]), sub(v[2], v[1]), sub(v[0], v[2])];
+    let apart = |axis: Vec3| {
+        let r = half[0] * axis[0].abs() + half[1] * axis[1].abs() + half[2] * axis[2].abs();
+        let p = [dot(v[0], axis), dot(v[1], axis), dot(v[2], axis)];
+        let lo = p[0].min(p[1]).min(p[2]);
+        let hi = p[0].max(p[1]).max(p[2]);
+        lo > r || hi < -r
+    };
+    let units = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    if units.iter().any(|&u| apart(u)) {
+        return false;
+    }
+    if apart(cross(e[0], e[1])) {
+        return false;
+    }
+    for u in units {
+        for edge in e {
+            if apart(cross(u, edge)) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -275,6 +333,24 @@ mod tests {
         assert!(!v.contains([0.0, 0.0, -2.0]));
         assert!(!v.contains([1.5, 0.0, 0.0]));
         assert_eq!(v.triangles().count(), 12);
+    }
+
+    #[test]
+    fn a_body_touches_a_volume_with_any_part() {
+        let v = cube();
+        let body = [0.5, 0.5, 1.0];
+        // Centre inside.
+        assert!(v.overlaps_box([0.0, 0.0, 0.0], body));
+        // Centre outside, but the box reaches in.
+        assert!(v.overlaps_box([1.4, 0.0, 0.0], body));
+        assert!(v.overlaps_box([0.0, 0.0, 1.9], body));
+        assert!(v.overlaps_box([1.4, 1.4, 0.0], body));
+        // A box bigger than the volume around it.
+        assert!(v.overlaps_box([0.0, 0.0, 0.0], [5.0, 5.0, 5.0]));
+        // Clear of it.
+        assert!(!v.overlaps_box([1.6, 0.0, 0.0], body));
+        assert!(!v.overlaps_box([0.0, 0.0, 2.1], body));
+        assert!(!v.overlaps_box([1.6, 1.6, 0.0], body));
     }
 
     #[test]

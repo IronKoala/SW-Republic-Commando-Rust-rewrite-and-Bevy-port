@@ -146,6 +146,9 @@ pub struct Player;
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
 pub struct PlayerPawn {
     pub centre: [f32; 3],
+    /// Half-size of the body's collision box (radius, radius, height):
+    /// smaller while crouched.
+    pub extent: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
 }
