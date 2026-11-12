@@ -2010,10 +2010,21 @@ All numbers are in `data/ui/objective_tracker.toml`.
   `DrawHUD` console command) and `bShowObjectiveTracker`. The down state
   (`CTPlayer` state `CtrlIncapacitated`) changes none of these, so the port
   keeps it too.
-- **Ours, not the original's:** the tracker isn't kept in save files, so
-  after a load it shows again at the next tracker step; the port's view
-  yaw is in radians and is rounded to the engine's units; and the sight
-  check runs in the game's update rather than while drawing.
+- **Saves.** The original doesn't keep the tracker in save files. The
+  player's helmet is held in `var transient Helmet Helmet` (engine.u
+  `PlayerController`), and a transient value isn't written to a save.
+  After a load `PlayerController.PostLoadBeginPlay` calls
+  `SpawnDefaultHUD`, and ctgame.u's `CTPlayer.SpawnDefaultHUD` makes a
+  `new class'Helmet'` from the class defaults: nothing followed,
+  `bShowObjectiveTracker` off (it has no default, so false), and the sight
+  check's time and result at zero. So the tracker stays off until a
+  script next runs a tracker step. The port does the same: it saves
+  nothing for the tracker, and leaving the level for a load
+  (`tracker::forget`, `ObjectiveTracker::reset`) puts it back to those
+  defaults.
+- **Ours, not the original's:** the port's view yaw is in radians and is
+  rounded to the engine's units; and the sight check runs in the game's
+  update rather than while drawing.
 
 ### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
 

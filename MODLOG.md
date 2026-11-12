@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: The objective tracker after loading a save, as the original (rc_scripts_plugin)
+
+- **Changed:** `tracker::forget` (run when the level is left, which a load does) now calls the new `ObjectiveTracker::reset`, which puts everything back to a fresh helmet's values (the sight check's time and its last result too, which `hide` kept). Nothing is added to save files. docs/DESIGN.md "The objective tracker" says how the original handles saves; the line calling "not kept in saves" ours is gone.
+- **Why:** The ask was to keep the tracker in saves the way the original does. The original's files show it doesn't keep it at all: the helmet that holds the tracker is in `var transient Helmet Helmet` (engine.u `PlayerController`), so it isn't saved, and after a load `PostLoadBeginPlay` calls `SpawnDefaultHUD`, which (ctgame.u `CTPlayer`) makes a `new class'Helmet'` from the class defaults. The Helmet defaults in engine.u set `bDraw`, `bBracketVisibleObjective` and `VisCheckFrequency` but not `bShowObjectiveTracker`, so it starts off. The tracker comes back at the next tracker step a script runs.
+- **Where it comes from:** engine.u and ctgame.u script text and the Helmet class defaults and property flags (none of the tracker's Helmet properties are transient themselves; it is the reference to the helmet that is).
+- **Tested how:** `cargo test -p rc_scripts_plugin` (new test `load_starts_from_a_fresh_helmet`).
+- **Result:** All 40 tests pass.
+- **Still broken / not tested:** Not tested by saving and loading in the game (the cloud build has no way to load a save from the command line); not tested on Windows.
+
 ## 2026-11-12: The objective tracker, the original's ring, arrow and distance (rc_scripts_plugin, rc_game, rc_game_core, rc_package, data/ui/objective_tracker.toml)
 
 - **Changed:** New `rc_scripts_plugin::tracker`: the script step `ACTION_ShowActorObjectiveTracker` (before: "not done yet"), the lookup of each map's tracker targets, and the helmet's rules (sight check, ring or corner arrows, distance). New `rc_game/src/objective_tracker.rs` draws it with the original's pictures and font. New `rc_game_core::PlayerPawn` (the player body's centre and look, published by the player part), `ClassLibrary::object_path`, data file `data/ui/objective_tracker.toml`. `toml` moved to `rc_scripts_plugin`'s normal dependencies.
@@ -11,7 +20,7 @@ rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 - **Tested how:** `cargo test -p rc_scripts_plugin -p rc_game -p rc_package -p rc_game_core` (10 new tracker tests, including the ring corners against the values from running Engine.dll's code); target lookup over all 52 staged maps; `rc_game --map geo_01a` in the cloud with files copied read-only from the user's install, with screenshots.
 - **Result:** All tests pass. In geo_01a at t=48 the log reads "ScriptedTrigger10 #1: objective tracker on BactaDispenserLZ (BactaDispenserGEO BactaDispenserGEO0 at (-988, -354, -2264))" then "objective tracker shows the ring (turn -16536, distance 38.0)"; the screenshot shows the tipped ring at the bottom middle, arrow pointing left (the dispenser is to the left), "38.0" in the middle. The corner arrows were checked by moving the goal in front of the view in a scratch build (not committed): four inward triangles round it, pulsing. 116 of 126 tracker tags across the maps find a placed actor; the other 10 have none in the original's map either.
 - **Follow-up (same PR):** the sight line now passes blocking volumes that lines pass in the original (`bBlockZeroExtentTraces` off; new `MapCollision::line_through_triangles`, `rc_level_plugin::LineThroughVolumes`, test `sight_line_passes_blocking_volumes_but_not_walls`); a door or lift as the goal is followed as it moves. Read from Engine.dll and the scripts: nothing hides the tracker while the player is down (details in docs/DESIGN.md), so the port keeps showing it.
-- **Still broken / not tested:** Not tested on Windows or by playing. Ours, not the original's: not kept in saves (shows again at the next tracker step after a load); view yaw rounding; the check runs in update, not while drawing.
+- **Still broken / not tested:** Not tested on Windows or by playing. Ours, not the original's: view yaw rounding (saves: see the entry above, which found the original does the same); the check runs in update, not while drawing.
 - **Next:** User check on Windows: geo_01a, the bacta dispenser step.
 
 ## 2026-11-12: Enemies placed straight in the maps appear (rc_ai, rc_enemies, rc_cast, rc_game, data/enemies, data/cast)
