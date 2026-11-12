@@ -1,0 +1,338 @@
+//! The original's loading screens, drawn from the player's install
+//! (`rc_menus::loading` has the rules and where each was read from).
+//!
+//! When a level starts loading, the map's row in the install's
+//! `LevelLoadingInfo.int` names the screen: the briefing screen
+//! (`CTLoadingInfo`: picture, mission name, mission text) or the plain one
+//! (`CTLoading`: black, mission name); a map with no row gets the plain
+//! screen with no name, as in the original. The bar fills as this port's
+//! parts finish loading (see below). When a briefing screen's level has
+//! loaded, play is paused and the same screen shows START; START
+//! un-pauses (as the original's `LoadingFinished` and
+//! `CTLoadingInfo.OnAButton` do). The plain screen just goes away.
+//!
+//! The two screens are pages `loading` and `loading_info` in
+//! `data/ui/original_menus.toml`. If a map names a class that neither page
+//! uses, or the page can't be drawn, the placeholder loading screen
+//! (`menu.rs`) shows instead and the log says why.
+//!
+//! The bar: the original fills it from its own loader's progress
+//! (`GameEngine.LoadProgressFraction`, passed to `UpdateLoadingProgress`).
+//! This port loads differently, so the bar shows the share of this port's
+//! loading parts (`LoadingGate`) that have finished. It is drawn exactly
+//! as the original draws a bar; how full it is at a given moment is ours.
+
+use crate::menu::{Menu, Page, PlaceholderLoadingScreen};
+use crate::original_menu::{self, OriginalMenus};
+use bevy::prelude::*;
+use rc_game_core::{CurrentLevel, GameLog, GamePaths, GameState, LoadingGate, Play};
+use rc_menus::loading::{self as rules, EngineClasses, LoadingInfo};
+
+/// The pages' names in `data/ui/original_menus.toml`.
+pub const LOADING_PAGE: &str = "loading";
+pub const LOADING_INFO_PAGE: &str = "loading_info";
+
+/// A briefing screen's level has loaded and play waits for START.
+#[derive(Resource, Default)]
+pub struct LoadingDone {
+    pub waiting: bool,
+}
+
+/// What was read from the install, once.
+#[derive(Resource, Default)]
+struct LoadingRules {
+    read: bool,
+    rows: Vec<LoadingInfo>,
+    classes: Option<EngineClasses>,
+}
+
+/// The screen showing now and how loading is going.
+#[derive(Resource, Default)]
+struct Showing {
+    /// The page, when it pauses when done (`CTLoadingInfo`).
+    pauses: bool,
+    /// The most parts seen waiting at once, for the bar.
+    most_waiting: usize,
+    /// The bar's value last drawn.
+    shown_fill: f32,
+    /// A level was showing when loading started (not the front end).
+    from_level: bool,
+}
+
+pub struct LoadingScreenPlugin;
+
+impl Plugin for LoadingScreenPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<LoadingDone>()
+            .init_resource::<LoadingRules>()
+            .init_resource::<Showing>()
+            .add_systems(OnExit(GameState::InGame), |mut s: ResMut<Showing>| {
+                s.from_level = true;
+            })
+            .add_systems(OnExit(GameState::MainMenu), |mut s: ResMut<Showing>| {
+                s.from_level = false;
+            })
+            .add_systems(
+                OnEnter(GameState::Loading),
+                (original_menu::load, start)
+                    .chain()
+                    .before(PlaceholderLoadingScreen),
+            )
+            .add_systems(
+                Update,
+                progress
+                    .run_if(in_state(GameState::Loading))
+                    .before(crate::menu::MenuSystems),
+            )
+            .add_systems(OnExit(GameState::Loading), loaded)
+            .add_systems(OnEnter(Play::Running), pause_for_start)
+            .add_systems(OnExit(Play::Paused), started)
+            .add_systems(OnEnter(GameState::MainMenu), forget);
+    }
+}
+
+/// Read `LevelLoadingInfo.int` and the two fallback classes from
+/// `System.ini` (the player's own copy in `GameData/Save` first, as the
+/// original reads it, then the shipped one).
+fn read_rules(paths: &GamePaths, log: &GameLog) -> LoadingRules {
+    let mut out = LoadingRules {
+        read: true,
+        ..Default::default()
+    };
+    let info = paths.game_file("GameData/System/LevelLoadingInfo.int");
+    match std::fs::read(&info) {
+        Ok(b) => {
+            out.rows = rules::parse_level_loading_info(&crate::levels::decode_int(&b));
+            log.line(format!(
+                "loading screen: {} maps listed in {}",
+                out.rows.len(),
+                info.display()
+            ));
+        }
+        Err(e) => log.line(format!(
+            "loading screen: can't read {} ({e}); every map gets the plain screen",
+            info.display()
+        )),
+    }
+    let (mut loading, mut loading_info) = (None, None);
+    for rel in ["GameData/Save/System.ini", "GameData/System/System.ini"] {
+        let p = paths.game_file(rel);
+        let Ok(text) = std::fs::read_to_string(&p)
+            .or_else(|_| std::fs::read(&p).map(|b| b.iter().map(|&c| c as char).collect()))
+        else {
+            continue;
+        };
+        let (a, b) = rules::engine_classes(&text);
+        if loading.is_none() {
+            loading = a;
+        }
+        if loading_info.is_none() {
+            loading_info = b;
+        }
+    }
+    match (loading, loading_info) {
+        (Some(loading), Some(loading_info)) => {
+            log.line(format!(
+                "loading screen: System.ini: LoadingMenuClass={loading}, LoadingInfoMenuClass={loading_info}"
+            ));
+            out.classes = Some(EngineClasses {
+                loading,
+                loading_info,
+            });
+        }
+        _ => log.line(
+            "loading screen: System.ini has no LoadingMenuClass or LoadingInfoMenuClass; maps without their own class get the placeholder screen",
+        ),
+    }
+    out
+}
+
+/// Loading starts: choose the screen, as the original's `LoadMap` does,
+/// and set it up as its `LoadingStarted` does.
+#[allow(clippy::too_many_arguments)]
+fn start(
+    mut menus: ResMut<OriginalMenus>,
+    mut rules_read: ResMut<LoadingRules>,
+    mut showing: ResMut<Showing>,
+    mut done: ResMut<LoadingDone>,
+    current: Res<CurrentLevel>,
+    paths: Res<GamePaths>,
+    log: Res<GameLog>,
+) {
+    menus.loading_page = None;
+    done.waiting = false;
+    *showing = Showing {
+        from_level: showing.from_level,
+        ..Default::default()
+    };
+    if !rules_read.read {
+        *rules_read = read_rules(&paths, &log);
+    }
+    let map = current.map.clone().unwrap_or_default();
+    let fallback = EngineClasses {
+        loading: String::new(),
+        loading_info: String::new(),
+    };
+    let info = rules::choose(
+        &map,
+        &rules_read.rows,
+        rules_read.classes.as_ref().unwrap_or(&fallback),
+    );
+    if info.menu_class.is_empty() {
+        log.line(format!(
+            "loading screen: {map}: no class to show (System.ini not read); placeholder screen"
+        ));
+        return;
+    }
+    let menus = &mut *menus;
+    let key = [LOADING_PAGE, LOADING_INFO_PAGE].into_iter().find(|k| {
+        menus
+            .pages
+            .get(*k)
+            .is_some_and(|p| p.plan.class.eq_ignore_ascii_case(&info.menu_class))
+    });
+    let Some(key) = key else {
+        log.line(format!(
+            "loading screen: {map}: its class {} isn't a page that can be drawn here; placeholder screen",
+            info.menu_class
+        ));
+        return;
+    };
+    let Some(assets) = menus.assets.as_mut() else {
+        return;
+    };
+    let family = match assets.library.class(&info.menu_class) {
+        Ok(c) => c.family.clone(),
+        Err(e) => {
+            log.line(format!(
+                "loading screen: {map}: can't read {} ({e}); placeholder screen",
+                info.menu_class
+            ));
+            return;
+        }
+    };
+    let page = menus.pages.get_mut(key).unwrap();
+    // A fresh screen each time, as the original spawns a new menu.
+    page.screen.layout = page.pristine.clone();
+    page.screen.focus = None;
+    let set = rules::setup(
+        &mut page.screen.layout,
+        &family,
+        &mut assets.library,
+        &info,
+        showing.from_level,
+    );
+    if let Some(p) = &set.picture {
+        if assets.texture(p).is_none() {
+            log.line(format!("loading screen: PROBLEM picture {p} can't be read"));
+        }
+    }
+    for p in &set.problems {
+        log.line(format!("loading screen: PROBLEM {p}"));
+    }
+    showing.pauses = rules::pauses_when_done(&family);
+    log.line(format!(
+        "loading screen: {map}: original {} (page {key}), title {:?}, picture {:?}, hints {} (never on a PC), START when loaded: {}",
+        info.menu_class, info.title, set.picture, info.show_hints, showing.pauses
+    ));
+    menus.loading_page = Some(key.to_string());
+    menus.mark_dirty();
+}
+
+/// The bar: the share of loading parts finished so far.
+fn progress(
+    gate: Res<LoadingGate>,
+    mut showing: ResMut<Showing>,
+    mut menus: ResMut<OriginalMenus>,
+) {
+    let Some(key) = menus.loading_page.clone() else {
+        return;
+    };
+    let waiting = gate.waiting().count();
+    showing.most_waiting = showing.most_waiting.max(waiting);
+    let fill = if showing.most_waiting == 0 {
+        0.0
+    } else {
+        1.0 - waiting as f32 / showing.most_waiting as f32
+    };
+    if (fill - showing.shown_fill).abs() < 1e-4 {
+        return;
+    }
+    showing.shown_fill = fill;
+    if let Some(p) = menus.pages.get_mut(&key) {
+        rules::set_progress(&mut p.screen.layout, fill);
+        menus.mark_dirty();
+    }
+}
+
+/// Loading is over: a briefing screen stays, now with START (play
+/// pauses as soon as it starts, `pause_for_start`); the plain one goes.
+fn loaded(
+    mut menus: ResMut<OriginalMenus>,
+    showing: Res<Showing>,
+    mut done: ResMut<LoadingDone>,
+    log: Res<GameLog>,
+) {
+    let Some(key) = menus.loading_page.clone() else {
+        return;
+    };
+    let started = showing.pauses
+        && key == LOADING_INFO_PAGE
+        && menus.pages.get_mut(&key).is_some_and(|p| {
+            let shown = rules::finish(&mut p.screen.layout);
+            // The finished screen opens anew (`MenuOpenExisting`), so
+            // START gets the focus as any opening page's first button.
+            p.screen.focus = p.screen.buttons().first().copied();
+            shown
+        });
+    if !started {
+        menus.loading_page = None;
+        log.line(if showing.pauses {
+            "loading screen: done; no START button, so play goes on"
+        } else {
+            "loading screen: done; the plain screen closes"
+        });
+        return;
+    }
+    // Kept showing until START (`OriginalMenus::shown`).
+    done.waiting = true;
+    menus.mark_dirty();
+    log.line("loading screen: done; paused until START (LOADINGDONE)");
+}
+
+/// The level has started: pause it at once when a briefing screen waits
+/// for START (the original pauses before the level runs).
+fn pause_for_start(
+    state: Res<State<GameState>>,
+    done: ResMut<LoadingDone>,
+    mut next: Option<ResMut<NextState<Play>>>,
+    mut menu: ResMut<Menu>,
+    log: Res<GameLog>,
+) {
+    if !done.waiting {
+        return;
+    }
+    if *state.get() != GameState::InGame {
+        return;
+    }
+    if let Some(n) = next.as_mut() {
+        menu.reset(Page::LoadingDone);
+        n.set(Play::Paused);
+        log.line("loading screen: play paused for START");
+    }
+}
+
+/// START (or anything else that un-pauses) ends the wait.
+fn started(mut done: ResMut<LoadingDone>, mut menus: ResMut<OriginalMenus>, log: Res<GameLog>) {
+    if done.waiting {
+        done.waiting = false;
+        menus.loading_page = None;
+        menus.mark_dirty();
+        log.line("loading screen: START chosen; play goes on");
+    }
+}
+
+fn forget(mut done: ResMut<LoadingDone>, mut menus: ResMut<OriginalMenus>) {
+    done.waiting = false;
+    menus.loading_page = None;
+}

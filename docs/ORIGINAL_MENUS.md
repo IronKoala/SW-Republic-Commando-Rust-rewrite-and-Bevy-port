@@ -197,6 +197,52 @@ XInterfaceCTMenus.CTDebriefingInfo` paints it with sample words of its own;
 `rc_probe --pages` says it uses the original. How it fits into play is in
 `docs/DESIGN.md` ("The debriefing screen").
 
+## The loading screens (2026-11-12)
+
+While a level loads, the game shows the original's own loading screen,
+chosen the way the original's `UGameEngine::LoadMap` chooses it (read from
+`Engine.dll` by disassembly, in a scratch folder; nothing copied):
+
+- The map's row in `System/LevelLoadingInfo.int` (rows read from index 0
+  up to the first missing `MapName`, as `Engine.u`'s
+  `InitLevelLoadingInfo` does) names the class, picture, mission name and
+  text. A row with no class gets `LoadingInfoMenuClass` from `System.ini`
+  (`[Engine.GameEngine]`, `CTLoadingInfo`); a map with no row gets
+  `LoadingMenuClass` (`CTLoading`) with no name. The player's own
+  `GameData/Save/System.ini` is read first, then the shipped one.
+- `CTLoadingInfo` (briefing levels such as geo_01a): its background, the
+  two display-box frames, the mission picture, name and text, the bar and
+  LOADING. When loading ends, play pauses, the bar and LOADING go and START
+  shows (`Console.LoadingFinished` with `PauseOnLoadingFinish`, then
+  `Init("LOADINGDONE")`). START un-pauses (`OnAButton`). Back does nothing
+  (its `HandleInputBack` is empty).
+- `CTLoading` (most maps): black, the mission name, the bar and LOADING.
+  It closes when loading ends.
+- Hints are never shown on a PC (`!IsOnConsole` sets `bNoHints`), so the
+  hint widgets stay hidden.
+- The bar is a `MenuProgressBar`, drawn as `XInterface.dll`'s
+  `DrawMenuProgressBar` draws it: the back stretched over the whole bar,
+  the top `BarWidth / High * Value` wide, both with the canvas's
+  stretched-tile rule (`rc_menus::quads::progress_bar_quads`).
+
+What is ours, not the original's: how full the bar is at a given moment.
+The original fills it from its own loader (`LoadProgressFraction`); here it
+is the share of this port's loading parts (`LoadingGate`) that are done.
+Not checked: which map name the original looks up when it loads a saved
+game (it comes from the package's own name); here a save's map follows the
+same rule as a fresh start. Not traced: how the D3D renderer blends a
+picture flagged `bAlphaTexture` drawn in the normal style; the bar is
+drawn alpha-blended.
+
+`rc_probe --menu XInterfaceCTMenus.CTLoadingInfo` (or `CTLoading`) paints
+a screen; `RC_PROBE_LOADING_MAP` picks the map (default GEO_01A),
+`RC_PROBE_LOADING_FILL` the bar (default 0.6), and
+`RC_PROBE_LOADING_DONE=1` the finished screen with START. The rules are in
+`rc_menus/src/loading.rs`, the game side in
+`rc_game/src/loading_screen.rs`, the pages `loading` and `loading_info` in
+`data/ui/original_menus.toml`. If a page can't be drawn, the placeholder
+loading screen shows and the log says why.
+
 ## The moving background video (2026-11-11)
 
 What the original does, from its own files:

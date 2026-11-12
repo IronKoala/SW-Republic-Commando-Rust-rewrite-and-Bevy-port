@@ -193,6 +193,7 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::NewProfile => Some(original_profiles::NEW_PROFILE),
         Page::Extras => Some(original_credits::EXTRAS),
         Page::Credits => Some(original_credits::CREDITS),
+        Page::LoadingDone => Some(crate::loading_screen::LOADING_INFO_PAGE),
         Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
@@ -349,6 +350,9 @@ pub struct OriginalMenus {
     /// This frame's button press was used here (for example to open the
     /// campaign page), so the placeholder pages must not act on it too.
     pub used_input: bool,
+    /// The original loading screen showing while a level loads, by its
+    /// page name (`loading_screen.rs`); `None` for the placeholder.
+    pub loading_page: Option<String>,
 }
 
 impl OriginalMenus {
@@ -362,6 +366,17 @@ impl OriginalMenus {
     pub fn shown(&self, state: &GameState, play: Option<&Play>, menu: &Menu) -> Option<Shown> {
         if *state == GameState::MainMenu && menu.page == Page::Main && self.active() {
             return Some(Shown::Main);
+        }
+        // A loading screen, and a briefing loading screen waiting for
+        // START once its level is in (`loading_screen.rs`).
+        if *state == GameState::Loading
+            || (*state == GameState::InGame && self.loading_page.is_some())
+        {
+            return self
+                .loading_page
+                .as_ref()
+                .filter(|k| self.pages.contains_key(*k))
+                .map(|k| Shown::Page(k.clone()));
         }
         if *state != GameState::MainMenu && play != Some(&Play::Paused) {
             return None;
@@ -544,7 +559,7 @@ impl Plugin for OriginalMenuPlugin {
     }
 }
 
-fn load(
+pub(crate) fn load(
     mut menus: ResMut<OriginalMenus>,
     paths: Res<GamePaths>,
     found: Res<GamePathsFound>,
@@ -605,6 +620,12 @@ fn load(
                     ));
                 }
             }
+        }
+        if rc_menus::loading::pauses_when_done(&class.family) {
+            // START is hidden while loading; it's shown here so it gets
+            // its command, and each loading hides it again
+            // (`rc_menus::loading::setup`).
+            rc_menus::loading::hide_start(&mut layout, false);
         }
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {

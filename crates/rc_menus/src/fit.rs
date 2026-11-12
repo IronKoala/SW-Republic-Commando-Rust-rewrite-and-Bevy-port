@@ -88,6 +88,7 @@ pub fn widget_box(kind: &Kind, sizes: &mut dyn Sizes) -> Option<[f32; 4]> {
         .into_iter()
         .flatten()
         .collect(),
+        Kind::ProgressBar(p) => vec![crate::quads::progress_bar_box(p)],
     };
     boxes.into_iter().reduce(union)
 }
@@ -443,6 +444,7 @@ pub fn spread(layout: &mut MenuLayout, sizes: &mut dyn Sizes, across: f32) -> Sp
                 Kind::Sprite(s) => s.pos[0],
                 Kind::Text(t) => t.pos[0],
                 Kind::Button(b) => b.blurred.pos[0],
+                Kind::ProgressBar(p) => p.back.pos[0],
             };
             let dx = (x - 0.5) * (k - 1.0);
             shift(&mut layout.widgets[i].kind, dx);
@@ -491,6 +493,10 @@ pub fn shift(kind: &mut Kind, dx: f32) {
     match kind {
         Kind::Sprite(s) => s.pos[0] += dx,
         Kind::Text(t) => t.pos[0] += dx,
+        Kind::ProgressBar(p) => {
+            p.back.pos[0] += dx;
+            p.top.pos[0] += dx;
+        }
         Kind::Button(b) => {
             b.blurred.pos[0] += dx;
             b.focused.pos[0] += dx;
