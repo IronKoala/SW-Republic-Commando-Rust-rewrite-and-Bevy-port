@@ -546,7 +546,10 @@ fn clone_troopers_and_droids_fight_each_other_not_the_player() {
     alone.made_by.push(0);
     for _ in 0..60 {
         let ev = alone.step_with(1.0 / 30.0, &world, Some(target_at(800.0, 0.0)), &[]);
-        assert!(fire_directions(&ev).is_empty(), "a trooper fired at the player");
+        assert!(
+            fire_directions(&ev).is_empty(),
+            "a trooper fired at the player"
+        );
     }
     assert!(!alone.in_fight());
 }
@@ -1419,6 +1422,41 @@ fn leaps_to_high_script_points() {
     assert!(!ev.iter().any(|(_, e)| *e == AiEvent::Leapt));
 }
 
+// Droid dispensers (see `battle::dispense` for the rules).
+
+fn bd_dispenser(tag: &str) -> Factory {
+    let (d, proto, capacity) = Dispenser::class_defaults("BDDispenser").unwrap();
+    let mut d = d;
+    d.damaged.event = Some(format!("{tag}Destroyed"));
+    let spot = |x: f32, y: f32| SpawnSpot {
+        location: Vec3::new(x, y, 60.0),
+        yaw: 0.0,
+        offspring: Offspring {
+            tag: Some(format!("{tag}Droid")),
+            start_state: StartState::StationaryAttack,
+            ..Default::default()
+        },
+    };
+    Factory {
+        name: format!("{tag} dispenser"),
+        tag: tag.into(),
+        prototype: proto.into(),
+        location: Vec3::new(0.0, 0.0, 125.0),
+        spots: vec![spot(0.0, -400.0), spot(400.0, 0.0), spot(-400.0, 0.0)],
+        capacity,
+        max_alive: 1,
+        generate_forever: true,
+        start_timer_after_death: true,
+        spawn_mode: 0,
+        spawn_interval: 3.0,
+        exhausted_event: Some(format!("{tag}Gone")),
+        spawn_event: Some(format!("{tag}Made")),
+        dispenser: Some(d),
+        placed: false,
+        ..Default::default()
+    }
+}
+
 // Characters placed straight in the map (see `spawns::read_placed`).
 
 fn placed(name: &str, x: f32) -> Factory {
@@ -1438,6 +1476,409 @@ fn placed(name: &str, x: f32) -> Factory {
         placed: true,
         ..Default::default()
     }
+}
+
+/// Made-up animation numbers: intro 1.5 s, each slot's animation 2 s with
+/// the droid let go at 0.25 (0.5 s), its bone moving 100 uu out along -Y
+/// from 92 uu up; the unfold takes 1.5 s and moves the droid 120 forward
+/// and 80 down.
+fn test_motion() -> DispenserMotion {
+    let slot = |dir: Vec3| SlotMotion {
+        seconds: 2.0,
+        release: 0.25,
+        path: vec![
+            BoneSample {
+                seconds: 0.0,
+                at: dir * 100.0 + Vec3::new(0.0, 0.0, 92.0),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                z: Vec3::new(0.0, 0.0, 1.0),
+            },
+            BoneSample {
+                seconds: 0.5,
+                at: dir * 200.0 + Vec3::new(0.0, 0.0, 92.0),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                z: Vec3::new(0.0, 0.0, 1.0),
+            },
+        ],
+    };
+    DispenserMotion {
+        intro_seconds: 1.5,
+        slots: vec![
+            slot(Vec3::new(0.0, -1.0, 0.0)),
+            slot(Vec3::new(1.0, 0.0, 0.0)),
+            slot(Vec3::new(-1.0, 0.0, 0.0)),
+        ],
+        unfold: Unfold {
+            seconds: 1.5,
+            travel: vec![(0.0, Vec3::ZERO), (1.5, Vec3::new(120.0, 0.0, -80.0))],
+        },
+        intro_travel: Vec::new(),
+    }
+}
+
+fn dispenser_battle() -> Battle {
+    let mut b = scripted_battle(vec![bd_dispenser("Disp")]);
+    b.set_dispenser_motion(0, test_motion());
+    b
+}
+
+/// Step until `secs` of battle time, returning (time, event) pairs.
+fn steps_until(b: &mut Battle, secs: f32) -> Vec<(f32, BattleEvent)> {
+    let world = flat_floor(vec![]);
+    let mut out = Vec::new();
+    while b.time < secs {
+        let t = b.time;
+        for e in b.step(1.0 / 30.0, &world, Some(target_at(-4500.0, -4500.0))) {
+            out.push((t, e));
+        }
+    }
+    out
+}
+
+fn dispenser_steps(ev: &[(f32, BattleEvent)]) -> Vec<(f32, DispenserStep)> {
+    ev.iter()
+        .filter_map(|(t, e)| match e {
+            BattleEvent::Dispenser { step, .. } => Some((*t, step.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn dispenser_class_defaults_are_the_originals() {
+    let (bd, proto, cap) = Dispenser::class_defaults("BDDispenser").unwrap();
+    assert_eq!((proto, cap), ("BattleDroid", 3));
+    assert_eq!((bd.num_dispensers, bd.num_init_droids), (3, 3));
+    assert_eq!((bd.max_health, bd.warm_up_time), (5000.0, 1.0));
+    assert_eq!(bd.intro_anim.as_deref(), Some("entranceSky"));
+    assert_eq!(
+        bd.online.material.as_deref(),
+        Some("DispensersTextures.BDDispenser.BDDispenser_On")
+    );
+    assert_eq!(bd.damaged.anim.as_deref(), Some("Destroyed"));
+    assert_eq!(bd.damaged.effect_offset, Vec3::new(0.0, 0.0, -50.0));
+    let (sbd, proto, cap) = Dispenser::class_defaults("SBDDispenser").unwrap();
+    assert_eq!((proto, cap), ("SuperBattleDroid", 4));
+    assert_eq!((sbd.num_dispensers, sbd.num_init_droids), (4, 0));
+    assert_eq!((sbd.collision_radius, sbd.collision_height), (219.0, 125.0));
+    assert!(sbd.intro_anim.is_none());
+}
+
+#[test]
+fn a_dispenser_waits_for_its_event_then_drops_in_warms_up_and_dispenses() {
+    let mut b = dispenser_battle();
+    let ev = steps_until(&mut b, 3.0);
+    assert!(b.fighters.is_empty(), "nothing before its event");
+    assert!(dispenser_steps(&ev).is_empty());
+    assert!(b.trigger("Disp").iter().any(|e| matches!(
+        e,
+        BattleEvent::Dispenser { step: DispenserStep::Intro { anim: Some(a) }, .. } if a == "entranceSky"
+    )));
+    let start = b.time;
+    let ev = steps_until(&mut b, start + 3.0);
+    let st = dispenser_steps(&ev);
+    // Intro 1.5 s, then warm-up 1 s (WarmUpTime), then online and a droid
+    // at once.
+    let at = |want: &dyn Fn(&DispenserStep) -> bool| {
+        st.iter().find(|(_, s)| want(s)).map(|(t, _)| t - start)
+    };
+    let warm = at(&|s| matches!(s, DispenserStep::Look { which: "warm_up" })).unwrap();
+    let online = at(&|s| matches!(s, DispenserStep::Look { which: "online" })).unwrap();
+    let first = at(&|s| matches!(s, DispenserStep::Dispense { .. })).unwrap();
+    // (To the step: 1/30 s.)
+    assert!((warm - 1.5).abs() < 0.04, "warm-up at {warm}");
+    assert!((online - 2.5).abs() < 0.04, "online at {online}");
+    assert!((first - online).abs() < 0.04, "first droid at {first}");
+    // It used spawn point 0 (its tag) on slot 1: the slot is the next
+    // spawn point's number.
+    let (id, slot) = st
+        .iter()
+        .find_map(|(_, s)| match s {
+            DispenserStep::Dispense { id, slot } => Some((*id, *slot)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(slot, 1);
+    assert_eq!(b.offspring(id).unwrap().tag.as_deref(), Some("DispDroid"));
+}
+
+#[test]
+fn a_dispensed_droid_rides_its_slot_then_unfolds_then_fights() {
+    let mut b = dispenser_battle();
+    b.trigger("Disp");
+    let ev = steps_until(&mut b, 2.6);
+    let id = b.fighters[0].id;
+    assert!(b.is_dispensing(id));
+    // On slot 1, whose bone goes out along +X from 100 to 200 uu, 92 up;
+    // the dispenser's model stands on its cylinder's bottom (z 0), and the
+    // droid's centre is its own half-height above the bone.
+    let half = b.fighters[0].params.movement.collision_height;
+    let p = b.fighters[0].pawn.location;
+    assert!(p.x > 99.0 && p.x < 130.0, "{p:?}");
+    assert!((p.z - (92.0 + half)).abs() < 0.5, "{p:?}");
+    assert!(!ev
+        .iter()
+        .any(|(_, e)| matches!(e, BattleEvent::Ai { id: i, .. } if *i == id)));
+    // Let go at 0.5 s, at 200 uu, with its SpawnEvent.
+    let ev = steps_until(&mut b, 3.15);
+    assert!(names(&ev.iter().map(|e| e.1.clone()).collect::<Vec<_>>())
+        .contains(&"DispMade".to_string()));
+    let p = b.fighters[0].pawn.location;
+    assert!(p.x > 199.0 && p.x < 210.0, "{p:?}");
+    // Unfolds over 1.5 s: 120 forward (its facing is +X) and 80 down.
+    let ev = steps_until(&mut b, 4.7);
+    assert!(dispenser_steps(&ev)
+        .iter()
+        .any(|(_, s)| *s == DispenserStep::Unfolded { id }));
+    assert!(!b.is_dispensing(id));
+    let p = b.fighters[0].home;
+    assert!((p.x - 320.0).abs() < 2.0, "{p:?}");
+    assert!((p.z - (12.0 + half)).abs() < 2.0, "{p:?}");
+}
+
+#[test]
+fn a_dispenser_makes_its_first_three_then_waits_for_a_death() {
+    // MaxAlive 3, as most maps set it.
+    let mut f = bd_dispenser("Disp");
+    f.max_alive = 3;
+    let mut b = scripted_battle(vec![f]);
+    b.set_dispenser_motion(0, test_motion());
+    b.trigger("Disp");
+    // Online at 2.5 s; NumInitDroids 3 with a 3 s interval: 2.5, 5.5, 8.5.
+    steps_until(&mut b, 20.0);
+    assert_eq!(b.alive().count(), 3);
+    assert!(matches!(
+        b.spawners[0].disp.as_ref().unwrap().phase,
+        Phase::Waiting { .. }
+    ));
+    // Slots in turn after the first: spawn points 0, 1, 2 give slots 1, 2, 0.
+    // One dies: seen within a second, then its 3 s interval, then a new one
+    // at once.
+    let first = b.fighters[0].id;
+    b.killed(first);
+    let t0 = b.time;
+    let ev = steps_until(&mut b, t0 + 6.0);
+    let made: Vec<f32> = dispenser_steps(&ev)
+        .iter()
+        .filter(|(_, s)| matches!(s, DispenserStep::Dispense { .. }))
+        .map(|(t, _)| t - t0)
+        .collect();
+    assert_eq!(made.len(), 1, "{made:?}");
+    assert!(made[0] > 3.0 && made[0] <= 4.1, "{made:?}");
+    // Back to 3: no more until another dies.
+    steps_until(&mut b, t0 + 30.0);
+    assert_eq!(b.alive().count(), 3);
+    assert_eq!(b.spawners[0].made, 4);
+}
+
+#[test]
+fn after_its_first_droids_a_dispenser_keeps_to_max_alive() {
+    // MaxAlive 1 (the class default): NumInitDroids (3) counts only at
+    // the start; afterwards it waits until none of its droids is left.
+    let mut b = dispenser_battle();
+    b.trigger("Disp");
+    steps_until(&mut b, 20.0);
+    assert_eq!(b.alive().count(), 3);
+    let ids: Vec<u32> = b.alive().map(|f| f.id).collect();
+    b.killed(ids[0]);
+    b.killed(ids[1]);
+    steps_until(&mut b, 40.0);
+    assert_eq!(b.alive().count(), 1, "one left: MaxAlive is 1");
+    b.killed(ids[2]);
+    steps_until(&mut b, 50.0);
+    assert_eq!(b.alive().count(), 1, "a new one");
+    assert_eq!(b.spawners[0].made, 4);
+}
+
+#[test]
+fn a_dispenser_is_damaged_in_steps_and_destroyed() {
+    let mut b = dispenser_battle();
+    b.trigger("Disp");
+    steps_until(&mut b, 2.6);
+    let rider = b.fighters[0].id;
+    assert!(b.dispensing(rider).unwrap().released.is_none());
+    let ev = b.dispenser_hurt(0, 3000.0);
+    assert!(matches!(
+        &ev[..],
+        [BattleEvent::Dispenser {
+            step: DispenserStep::Look {
+                which: "slightly_damaged"
+            },
+            ..
+        }]
+    ));
+    assert!(b.dispenser_hurt(0, 2900.0).is_empty(), "each step once");
+    let ev = b.dispenser_hurt(0, 1500.0);
+    assert!(matches!(
+        &ev[..],
+        [BattleEvent::Dispenser {
+            step: DispenserStep::Look {
+                which: "heavily_damaged"
+            },
+            ..
+        }]
+    ));
+    let ev = b.dispenser_hurt(0, -10.0);
+    // Destroyed: its look and event, and the droid still on its slot goes
+    // with it.
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        BattleEvent::Dispenser {
+            step: DispenserStep::Look { which: "damaged" },
+            ..
+        }
+    )));
+    assert!(names(&ev).contains(&"DispDestroyed".to_string()));
+    assert!(ev.contains(&BattleEvent::Dispenser {
+        spawner: 0,
+        step: DispenserStep::KilledOnSlot { id: rider }
+    }));
+    assert_eq!(b.alive().count(), 0);
+    // No more droids; with all of them dead, its ExhaustedEvent once.
+    let ev = steps_until(&mut b, 30.0);
+    assert!(b.fighters.len() == 1);
+    let ev: Vec<BattleEvent> = ev.into_iter().map(|e| e.1).collect();
+    assert_eq!(names(&ev), vec!["DispGone".to_string()]);
+}
+
+#[test]
+fn a_dispenser_with_an_online_tag_waits_for_it_after_its_intro() {
+    let mut f = bd_dispenser("Disp");
+    f.dispenser.as_mut().unwrap().online_tag = Some("StartDispensing".into());
+    let mut b = scripted_battle(vec![f]);
+    b.set_dispenser_motion(0, test_motion());
+    b.trigger("Disp");
+    steps_until(&mut b, 10.0);
+    assert!(b.fighters.is_empty());
+    assert_eq!(
+        b.spawners[0].disp.as_ref().unwrap().phase,
+        Phase::WaitOnline
+    );
+    // Its old tag does nothing now; the online tag starts it.
+    b.trigger("Disp");
+    assert_eq!(
+        b.spawners[0].disp.as_ref().unwrap().phase,
+        Phase::WaitOnline
+    );
+    b.trigger("StartDispensing");
+    steps_until(&mut b, 10.2);
+    assert_eq!(b.fighters.len(), 1);
+}
+
+#[test]
+fn a_dispenser_is_saved_and_carries_on() {
+    let mut b = dispenser_battle();
+    b.trigger("Disp");
+    steps_until(&mut b, 12.0);
+    b.dispenser_hurt(0, 3000.0);
+    let snap = b.snapshot();
+    let mut fresh = dispenser_battle();
+    fresh.restore(&snap).unwrap();
+    assert_eq!(fresh.snapshot().spawners, snap.spawners);
+    assert_eq!(
+        fresh.spawners[0].disp,
+        b.spawners[0].disp.as_ref().map(|d| DispState {
+            riding: None,
+            ..d.clone()
+        })
+    );
+}
+
+#[test]
+fn a_dispenser_is_carried_by_its_intro_and_its_droids_come_out_where_it_landed() {
+    // As entranceSky: the machine starts 3000 uu up and its intro's root
+    // bone brings it down to the floor (PHYS_RootMotion).
+    let mut b = scripted_battle(vec![bd_dispenser("Disp")]);
+    let mut m = test_motion();
+    m.intro_travel = vec![(0.0, Vec3::ZERO), (1.5, Vec3::new(0.0, 0.0, -3000.0))];
+    b.set_dispenser_motion(0, m);
+    let placed = b.spawners[0].factory.location;
+    b.spawners[0].factory.location = placed + Vec3::new(0.0, 0.0, 3000.0);
+    assert_eq!(
+        b.dispenser_location(0),
+        placed + Vec3::new(0.0, 0.0, 3000.0),
+        "up there before its event"
+    );
+    b.trigger("Disp");
+    let start = b.time;
+    steps_until(&mut b, start + 0.75);
+    let mid = b.dispenser_location(0);
+    assert!(
+        (mid.z - (placed.z + 1500.0)).abs() < 70.0,
+        "half way down: {mid:?}"
+    );
+    steps_until(&mut b, start + 2.6);
+    assert_eq!(b.dispenser_location(0), placed, "landed");
+    // Its first droid rides slot 1 from where it landed (bone 92 up).
+    let half = b.fighters[0].params.movement.collision_height;
+    let p = b.fighters[0].pawn.location;
+    assert!(
+        (p.z - (placed.z
+            - b.spawners[0]
+                .factory
+                .dispenser
+                .as_ref()
+                .unwrap()
+                .collision_height
+            + 92.0
+            + half))
+            .abs()
+            < 0.5,
+        "{p:?}"
+    );
+    // And stays down after a save.
+    let snap = b.snapshot();
+    let mut again = scripted_battle(vec![bd_dispenser("Disp")]);
+    let mut m = test_motion();
+    m.intro_travel = vec![(0.0, Vec3::ZERO), (1.5, Vec3::new(0.0, 0.0, -3000.0))];
+    again.set_dispenser_motion(0, m);
+    again.spawners[0].factory.location = placed + Vec3::new(0.0, 0.0, 3000.0);
+    again.restore(&snap).unwrap();
+    assert_eq!(again.dispenser_location(0), placed);
+}
+
+#[test]
+fn a_dispenser_rides_its_base_and_its_droids_ride_with_it() {
+    // `AttachTag`: based on a mover that has gone 1000 uu along X and
+    // turned a quarter round (yaw +90 degrees) about the level's origin.
+    let mut b = scripted_battle(vec![bd_dispenser("Disp")]);
+    b.set_dispenser_motion(0, test_motion());
+    let placed = b.spawners[0].factory.location;
+    let yaw0 = b.dispenser_yaw(0);
+    let carry = Carry {
+        turn: [
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ],
+        shift: Vec3::new(1000.0, 0.0, 0.0),
+        yaw: std::f32::consts::FRAC_PI_2,
+    };
+    b.set_dispenser_carry(0, Some(carry));
+    let want = Vec3::new(1000.0 - placed.y, placed.x, placed.z);
+    assert!((b.dispenser_location(0) - want).length() < 0.01, "carried");
+    assert!(
+        (b.dispenser_yaw(0) - yaw0 - std::f32::consts::FRAC_PI_2).abs() < 1e-5,
+        "turned"
+    );
+    // Its droid on a slot is placed round the carried machine.
+    b.trigger("Disp");
+    let start = b.time;
+    steps_until(&mut b, start + 2.6);
+    let p = b.fighters[0].pawn.location;
+    let flat = |v: Vec3| Vec3::new(v.x, v.y, 0.0);
+    let d = (flat(p) - flat(want)).length();
+    assert!(
+        d > 50.0 && d < 300.0,
+        "droid {p:?} is {d} from the carried machine"
+    );
+    assert!(
+        (flat(p) - flat(placed)).length() > 700.0,
+        "not where the map put it: {p:?}"
+    );
+    // No base: back where the map put it.
+    b.set_dispenser_carry(0, None);
+    assert_eq!(b.dispenser_location(0), placed);
 }
 
 #[test]
