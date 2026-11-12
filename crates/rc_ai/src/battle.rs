@@ -18,7 +18,8 @@
 pub mod dispense;
 
 pub use dispense::{
-    BoneSample, DispState, DispenserMotion, DispenserStep, Dispensing, Phase, SlotMotion, Unfold,
+    BoneSample, Carry, DispState, DispenserMotion, DispenserStep, Dispensing, Phase, SlotMotion,
+    Unfold,
 };
 
 use crate::brain::{AiEvent, Fighter, Mode, Rng, Target, View};
@@ -49,6 +50,9 @@ pub struct Spawner {
     pub disp: Option<DispState>,
     /// A droid dispenser's animation numbers, from the game's files.
     pub motion: Option<DispenserMotion>,
+    /// How what it is based on (`AttachTag`: a mover) has moved it since
+    /// the level started; set by the game each frame.
+    pub carry: Option<Carry>,
 }
 
 /// What switched a spawner on.
@@ -230,6 +234,7 @@ impl Battle {
                     made: 0,
                     next_spawn: 0.0,
                     next_spot: 0,
+                    carry: None,
                     motion: None,
                 })
                 .collect(),

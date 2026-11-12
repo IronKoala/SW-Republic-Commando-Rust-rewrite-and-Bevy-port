@@ -19,6 +19,9 @@ rc_level_viewer = { path = "../rc_level_viewer" }
 # The dispensers' model (rc_model reads skeletal meshes with their animations).
 rc_model = { path = "../rc_model" }
 rc_movement = { path = "../rc_movement" }
+# Dispensers based on movers (`AttachTag`) ride the level's movers.
+rc_movers = { path = "../rc_movers" }
+rc_movers_plugin = { path = "../rc_movers_plugin" }
 rc_nav = { path = "../rc_nav" }
 rc_package = { path = "../rc_package" }
 # The [enemies] section of save files. serde (MIT OR Apache-2.0),

@@ -227,6 +227,32 @@ fn turn(v: Vec3, yaw: f32) -> Vec3 {
     Vec3::new(v.x * c - v.y * s, v.x * s + v.y * c, v.z)
 }
 
+/// How a dispenser's base has moved it: the engine's `SetBase` from the
+/// map's `AttachTag` (`UGameEngine::LoadMap` bases the actor on the first
+/// actor whose tag or name is its `AttachTag`). A based actor is carried
+/// rigidly (`ULevel::MoveActor`: its place relative to the base is kept,
+/// and it turns as the base turns).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Carry {
+    /// The base's turn since the start, as rows (`apply` = rows x point).
+    pub turn: [Vec3; 3],
+    /// Where the base's turn and move take the level's origin.
+    pub shift: Vec3,
+    /// The base's change of yaw, radians.
+    pub yaw: f32,
+}
+
+impl Carry {
+    /// Where a point that rode the base from the start is now.
+    pub fn apply(&self, p: Vec3) -> Vec3 {
+        Vec3::new(
+            self.turn[0].dot(p),
+            self.turn[1].dot(p),
+            self.turn[2].dot(p),
+        ) + self.shift
+    }
+}
+
 fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
     a + (b - a) * t
 }
@@ -299,7 +325,26 @@ impl Battle {
             _ if st.entered => m.intro_travel.last().map_or(Vec3::ZERO, |p| p.1),
             _ => Vec3::ZERO,
         };
-        f.location + turn(along, f.yaw)
+        let at = f.location + turn(along, f.yaw);
+        match &sp.carry {
+            Some(c) => c.apply(at),
+            None => at,
+        }
+    }
+
+    /// Which way dispenser `spawner` faces now (radians): the map's yaw
+    /// plus its base's turn.
+    pub fn dispenser_yaw(&self, spawner: usize) -> f32 {
+        self.spawners.get(spawner).map_or(0.0, |sp| {
+            sp.factory.yaw + sp.carry.as_ref().map_or(0.0, |c| c.yaw)
+        })
+    }
+
+    /// Set how dispenser `spawner`'s base has carried it (see [`Carry`]).
+    pub fn set_dispenser_carry(&mut self, spawner: usize, carry: Option<Carry>) {
+        if let Some(sp) = self.spawners.get_mut(spawner) {
+            sp.carry = carry;
+        }
     }
 
     /// Give dispenser `spawner` its animation numbers.
@@ -726,6 +771,7 @@ impl Battle {
         // `bAlignBottom`: the model's origin is the bottom of its
         // collision cylinder.
         let origin = self.dispenser_location(i) - Vec3::new(0.0, 0.0, d.collision_height);
+        let yaw = self.dispenser_yaw(i);
         let sample = sp
             .motion
             .as_ref()
@@ -733,11 +779,11 @@ impl Battle {
             .and_then(|s| s.at(t));
         match sample {
             Some(b) => {
-                let at = origin + turn(b.at, f.yaw) + turn(b.z, f.yaw) * half;
-                let x = turn(b.x, f.yaw);
+                let at = origin + turn(b.at, yaw) + turn(b.z, yaw) * half;
+                let x = turn(b.x, yaw);
                 (at, x.y.atan2(x.x))
             }
-            None => (origin + Vec3::new(0.0, 0.0, half), f.yaw),
+            None => (origin + Vec3::new(0.0, 0.0, half), yaw),
         }
     }
 

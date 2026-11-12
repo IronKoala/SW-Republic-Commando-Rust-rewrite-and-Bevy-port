@@ -260,6 +260,15 @@ fn place_player(
         Player,
         Transform::from_translation(to_bevy(bottom + forward * 1100.0)),
     ));
+    // A stand-in pawn where the machine lands: an intro that crushes
+    // (`entranceSky`, ...) should kill it (`DroidDispenser.Bump`).
+    commands.spawn((
+        Name::new("crush stand-in"),
+        CrushStandIn,
+        Transform::from_translation(to_bevy(bottom)),
+        Health::new(100.0),
+        rc_combat::Hittable::COMMANDO,
+    ));
     // A plain camera (not the player's, which would carry the first-person
     // arms).
     commands.spawn((
@@ -278,13 +287,18 @@ fn place_player(
     next.set(GameState::InGame);
 }
 
+/// The pawn standing where the machine lands.
+#[derive(Component)]
+struct CrushStandIn;
+
 /// Send its events, hurt it, take pictures, and finish with the checks.
 #[allow(clippy::too_many_arguments)]
 fn run(
     mut commands: Commands,
     mut fight: ResMut<Fight>,
     mut watch: ResMut<Watch>,
-    mut bodies: Query<(&DispenserBody, &mut Health)>,
+    mut bodies: Query<(&DispenserBody, &mut Health), Without<CrushStandIn>>,
+    stand_in: Query<&Health, With<CrushStandIn>>,
     stats: Res<DispenserStats>,
     mut exit: MessageWriter<AppExit>,
     log: Res<GameLog>,
@@ -389,6 +403,37 @@ fn run(
                 body.map(|b| b.skin.clone())
             ),
         );
+        // The intro's crushing and landing effects, when it has them.
+        let intro = played.first().cloned().unwrap_or_default();
+        let crushes = ["entranceSky", "EntranceSky704", "EntranceSky384"]
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(&intro));
+        let left = stand_in.single().map(|h| h.current).unwrap_or(f32::NAN);
+        if crushes {
+            check(
+                left <= 0.0,
+                format!("its intro {intro} crushed the pawn where it landed (health {left})"),
+            );
+        } else {
+            log.line(format!(
+                "its intro {intro:?} doesn't crush; the pawn where it landed has {left} health"
+            ));
+        }
+        let landing: Vec<String> = body
+            .and_then(|b| b.model.effects.get(&intro))
+            .map(|l| l.iter().map(|(_, e)| e.class.clone()).collect())
+            .unwrap_or_default();
+        if !landing.is_empty() {
+            check(
+                landing
+                    .iter()
+                    .all(|c| stats.effects.iter().any(|e| e.ends_with(c.as_str()))),
+                format!(
+                    "its intro started {landing:?} (effects: {:?})",
+                    stats.effects
+                ),
+            );
+        }
         log.line(format!(
             "heard: {:?}",
             body.map(|b| b.heard.clone()).unwrap_or_default()

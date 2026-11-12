@@ -19,7 +19,7 @@ pub mod params;
 pub mod spawns;
 
 pub use battle::{
-    Battle, BattleEvent, BattleSnapshot, Birth, BoneSample, DispState, DispenserMotion,
+    Battle, BattleEvent, BattleSnapshot, Birth, BoneSample, Carry, DispState, DispenserMotion,
     DispenserSnapshot, DispenserStep, Dispensing, FighterSnapshot, Phase, SlotMotion, Spawner,
     SpawnerSnapshot, SwitchedOn, Unfold,
 };

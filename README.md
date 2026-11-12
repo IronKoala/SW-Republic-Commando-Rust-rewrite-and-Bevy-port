@@ -155,8 +155,10 @@ copy of the game.
   droids one slot at a time; each droid rides out folded, is let go when
   the slot's animation says, unfolds and fights. Hits show its damage
   looks and effects, and at zero health it explodes, takes the droid on
-  its slot with it and sends the map's event. Droideka dispensers make
-  nothing yet. Check: `rc_dispenser_check` (every map, no window),
+  its slot with it and sends the map's event. Machines dropping in raise
+  their landing dust and crush whoever they land on, they are solid, and
+  the ones that arrive on transports (ras_04a, ras_04b) ride them in.
+  Droideka dispensers make nothing yet. Check: `rc_dispenser_check` (every map, no window),
   `rc_dispenser_view MAP N` (one dispenser in a window, with pictures).
 
 - **The squad takes cover (tested in the cloud sandbox by numbers, not yet

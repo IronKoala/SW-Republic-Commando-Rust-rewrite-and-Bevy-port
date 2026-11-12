@@ -3062,11 +3062,27 @@ each slot's length, release moment and bone path), plays its
 animations' sounds, and passes its `Health` changes (its damage table
 `DV_DroidDispenser`: blaster bolts do nothing) to the battle. Saves keep
 each dispenser's step, health, damage looks and droids
-(`SpawnerSave::dispenser`). Not done: dispensers riding movers
-(`AttachTag`, ras_04a/b), crushing what is under it as it lands (`Bump`
-during the entrance animations), the intro animations' own effects
-(`AnimNotify_Effect`), `TransitionSound`, and the machine being solid
-for walking. `rc_dispenser_check` (no window) runs every map's dispensers
+(`SpawnerSave::dispenser`). A droid on a slot takes the slot bone's
+rotation (Engine.dll's `UpdateAttachments`), keeps it when let go
+(`DetachFromBone` is only `SetBase(None)`) and while unfolding (its `Move`
+bone doesn't turn). The intro animations' `AnimNotify_Effect`s
+(`Dispenser_Landing_Dirt`, `Dispenser_Landing_Metal`, at the `root` bone)
+start their effects as Engine.dll's `UAnimNotify_Effect::Notify` places
+them (`rc_model::NotifyEffect`). `TransitionSound` and `DispenseSound`
+play when a map gives one (no class default does).
+`rc_enemies/src/dispenser_world.rs` puts the machines in the world: one
+with an `AttachTag` rides the mover tagged or named so (`UGameEngine::LoadMap`
+bases it; `ULevel::MoveActor` carries it rigidly: `rc_ai::Carry`, set each
+frame from `LevelMovers`), which flies ras_04a's and ras_04b's dispensers
+in; its cylinder is solid for bodies (it wraps `LevelCollision`; shots
+still hit it as a target, and a body that starts inside may walk out);
+and while it plays `entranceSky`, `EntranceSky704` or `EntranceSky384`
+whoever it touches takes their full health as `Crushed` damage each frame
+(`DroidDispenser.Bump`; the engine bumps both ways on a blocked move).
+Not done: the falling machine isn't held up by who it lands on, sight
+lines pass through it, and `Crushed` kills the player outright in the
+original (`bKillsNotIncapacitatesPlayer`) where the port treats it like
+any death. `rc_dispenser_check` (no window) runs every map's dispensers
 and checks their steps, timing and where the droids come out;
 `rc_dispenser_view` shows one in a window and takes pictures.
 

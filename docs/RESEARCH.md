@@ -735,6 +735,53 @@ the maps' actors.
 - Maps: `rc_dispenser_check` lists each dispenser's numbers. Placement
   matches the root motion: every `entranceSky` dispenser whose floor the
   port's collision has stands within 25 uu of it after the drop.
+- Intro notifies (`AnimNotify_Effect`): BDDispenser `entranceSky` at 0.68
+  `CTEffects.Dispenser_Landing_Dirt` on bone `root` (and one at 0.01 with
+  no effect class, `Attach` on: it does nothing), `EntranceSky704` at
+  0.473 and `EntranceSkyMetal` at 0.706 `Dispenser_Landing_Metal`;
+  SBDDispenser `entranceSky` at 0.70 `Dispenser_Landing_Dirt` (`root`),
+  `EntranceSky704` at 0.478 `Dispenser_Landing_Metal`; DroidekaDispenser
+  `EntranceSky384` at 0.323 `Dispenser_Landing_Metal`. BDDispenser
+  `Destroyed` also has three `AnimNotify_BreakJoint`s (`droidAttach1-3`,
+  `DestroyChildren`), not used. `AnimNotify_Effect` defaults: DrawScale 1,
+  DrawScale3D (1, 1, 1).
+- `TransitionInfo` class defaults (decoded by hand from the property
+  bytes): every `TransitionSound` is None, and no map sets one or a
+  `DispenseSound`.
+
+## Engine code read for the droid dispensers (Engine.dll, 2026-11-12)
+
+Disassembled locally, read only, for the user's "decompile what the files
+don't say" rule; no code is kept. Field offsets in `AActor`: `Location`
+0x138, `Rotation` 0x144, `Attached` 0x16c, `RelativeLocation` 0x178,
+`AttachmentBone` 0x90, `Tag` 0xb8.
+
+- `AActor::AttachToBone` (0x103c7620): finds the bone (`MatchRefBone`),
+  scales the attached actor by the owner's draw scale, sets its
+  `AttachmentBone` and calls `SetBase(owner)`. `DetachFromBone`
+  (0x103b19e0): `SetBase(None)` and clears `AttachmentBone`; location and
+  rotation are kept.
+- `USkeletalMeshInstance::UpdateAttachments` (0x10504f00): each actor
+  attached to a bone is moved to `FMatrix(RelativeRotation,
+  RelativeLocation) * GetBoneCoords(bone, world)` and turned to
+  `FRotator` of that matrix (its X axis is the bone's X axis).
+- `AActor::physRootMotion` (0x1048f2a0): asks the mesh for the `Move`
+  bone's coordinates (`GetMoveCoords`) and sets the actor's rotation from
+  them, then moves it (`moveSmooth`).
+- `UAnimNotify_Effect::Notify` (0x105053c0): no `EffectClass`, nothing.
+  With `Bone` on a skeletal mesh: location = bone origin + `OffsetLocation`
+  along the bone's axes, rotation = bone + `OffsetRotation`; else the
+  owner's location and rotation. Spawns it, sets `Tag` (if any),
+  `DrawScale`, `DrawScale3D`; with `Attach`, `AttachToBone` (or `SetBase`)
+  and `RelativeLocation`/`RelativeRotation` = the offsets.
+- `UGameEngine::LoadMap` (around 0x1041fd70): every actor with an
+  `AttachTag` is based (`SetBase`, floor (0, 0, 1)) on the first actor in
+  the level whose `Tag` or object name equals it.
+- `ULevel::MoveActor` (0x1043fb30): actors attached to the moved one (not
+  to a bone) get the base's rotation change and are put at the base plus
+  their `RelativeLocation` turned by the base. A move blocked by another
+  actor calls `NotifyBumpEx` on both (0x104421e9, 0x104421f7), which is
+  `Bump` (pawns tell their controller first).
 
 ## Weapons lying in the levels (read 2026-11-10)
 

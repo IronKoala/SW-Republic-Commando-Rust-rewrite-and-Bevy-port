@@ -1701,11 +1701,10 @@ fn a_dispenser_is_damaged_in_steps_and_destroyed() {
         }
     )));
     assert!(names(&ev).contains(&"DispDestroyed".to_string()));
-    assert!(ev.iter().any(|e| *e
-        == BattleEvent::Dispenser {
-            spawner: 0,
-            step: DispenserStep::KilledOnSlot { id: rider }
-        }));
+    assert!(ev.contains(&BattleEvent::Dispenser {
+        spawner: 0,
+        step: DispenserStep::KilledOnSlot { id: rider }
+    }));
     assert_eq!(b.alive().count(), 0);
     // No more droids; with all of them dead, its ExhaustedEvent once.
     let ev = steps_until(&mut b, 30.0);
@@ -1808,4 +1807,48 @@ fn a_dispenser_is_carried_by_its_intro_and_its_droids_come_out_where_it_landed()
     again.spawners[0].factory.location = placed + Vec3::new(0.0, 0.0, 3000.0);
     again.restore(&snap).unwrap();
     assert_eq!(again.dispenser_location(0), placed);
+}
+
+#[test]
+fn a_dispenser_rides_its_base_and_its_droids_ride_with_it() {
+    // `AttachTag`: based on a mover that has gone 1000 uu along X and
+    // turned a quarter round (yaw +90 degrees) about the level's origin.
+    let mut b = scripted_battle(vec![bd_dispenser("Disp")]);
+    b.set_dispenser_motion(0, test_motion());
+    let placed = b.spawners[0].factory.location;
+    let yaw0 = b.dispenser_yaw(0);
+    let carry = Carry {
+        turn: [
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ],
+        shift: Vec3::new(1000.0, 0.0, 0.0),
+        yaw: std::f32::consts::FRAC_PI_2,
+    };
+    b.set_dispenser_carry(0, Some(carry));
+    let want = Vec3::new(1000.0 - placed.y, placed.x, placed.z);
+    assert!((b.dispenser_location(0) - want).length() < 0.01, "carried");
+    assert!(
+        (b.dispenser_yaw(0) - yaw0 - std::f32::consts::FRAC_PI_2).abs() < 1e-5,
+        "turned"
+    );
+    // Its droid on a slot is placed round the carried machine.
+    b.trigger("Disp");
+    let start = b.time;
+    steps_until(&mut b, start + 2.6);
+    let p = b.fighters[0].pawn.location;
+    let flat = |v: Vec3| Vec3::new(v.x, v.y, 0.0);
+    let d = (flat(p) - flat(want)).length();
+    assert!(
+        d > 50.0 && d < 300.0,
+        "droid {p:?} is {d} from the carried machine"
+    );
+    assert!(
+        (flat(p) - flat(placed)).length() > 700.0,
+        "not where the map put it: {p:?}"
+    );
+    // No base: back where the map put it.
+    b.set_dispenser_carry(0, None);
+    assert_eq!(b.dispenser_location(0), placed);
 }

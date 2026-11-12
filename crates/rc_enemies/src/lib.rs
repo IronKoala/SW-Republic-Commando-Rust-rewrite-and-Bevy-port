@@ -22,6 +22,7 @@
 //!
 //! Everything it does is logged to the game log with the prefix `enemies:`.
 
+pub mod dispenser_world;
 pub mod dispensers;
 pub mod look;
 pub mod save;
@@ -74,6 +75,7 @@ impl Plugin for EnemiesPlugin {
             .init_resource::<rc_game_core::MusicThreats>()
             .init_resource::<dispensers::DispenserSounds>()
             .init_resource::<dispensers::DispenserStats>()
+            .init_resource::<dispenser_world::DispenserSolids>()
             .add_systems(OnEnter(GameState::Loading), load_fight)
             .add_systems(
                 OnEnter(GameState::Loading),
@@ -98,6 +100,26 @@ impl Plugin for EnemiesPlugin {
                     .in_set(GameSet::Simulate)
                     .run_if(playing)
                     .run_if(resource_exists::<Fight>),
+            )
+            .add_systems(
+                Update,
+                (dispenser_world::ride_bases, dispenser_world::be_solid)
+                    .chain()
+                    .in_set(GameSet::Simulate)
+                    .before(think)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>)
+                    .run_if(any_with_component::<dispensers::DispenserBody>),
+            )
+            .add_systems(
+                Update,
+                dispenser_world::crush
+                    .after(dispensers::show_steps)
+                    .before(CombatSet::ApplyDamage)
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing)
+                    .run_if(resource_exists::<Fight>)
+                    .run_if(any_with_component::<dispensers::DispenserBody>),
             )
             .add_systems(
                 Update,

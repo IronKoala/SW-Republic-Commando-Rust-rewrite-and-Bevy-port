@@ -343,7 +343,7 @@ fn main() {
             } else {
                 line(format!(
                     "NOTE {who}: the port's collision has no floor right under it after its intro{}",
-                    if rides_mover { " (it rides a mover, not followed yet)" } else { "" }
+                    if rides_mover { " (it rides a mover; this check doesn't move the movers)" } else { "" }
                 ));
             }
             let mut looks_seen = Vec::new();

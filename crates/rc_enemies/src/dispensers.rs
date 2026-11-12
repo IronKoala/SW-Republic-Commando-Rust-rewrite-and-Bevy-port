@@ -379,7 +379,12 @@ pub fn setup(world: &mut World) {
                     for n in notes {
                         log.line(format!("{PART}: dispenser model: {n}"));
                     }
-                    load_sounds(world, &paths, &m, &log);
+                    load_sounds(
+                        world,
+                        &paths,
+                        m.sounds.values().flatten().map(|x| &x.1),
+                        &log,
+                    );
                     Some(Arc::new(m))
                 }
                 Err(e) => {
@@ -396,6 +401,24 @@ pub fn setup(world: &mut World) {
         let Some(model) = models.get(&key).cloned().flatten() else {
             continue;
         };
+        // The sounds its looks (`TransitionSound`) and each droid it makes
+        // (`DispenseSound`) play, when the map gives any (no class default
+        // does).
+        let own: Vec<String> = [
+            &d.warm_up,
+            &d.online,
+            &d.slightly_damaged,
+            &d.heavily_damaged,
+            &d.shutdown,
+            &d.damaged,
+        ]
+        .iter()
+        .filter_map(|t| t.sound.clone())
+        .chain(d.dispense_sound.clone())
+        .collect();
+        if !own.is_empty() {
+            load_sounds(world, &paths, own.iter(), &log);
+        }
         // The battle's numbers.
         let unfold = {
             let looks = world.resource::<Looks>();
@@ -438,7 +461,7 @@ pub fn setup(world: &mut World) {
             d.warm_up_time,
             d.online_tag.as_ref().map(|t| format!(", then waits for {t}")).unwrap_or_default(),
             d.damaged.event.as_ref().map(|e| format!(", sends {e} when destroyed")).unwrap_or_default(),
-            d.attach_tag.as_ref().map(|t| format!(", rides mover {t} (not followed yet)")).unwrap_or_default(),
+            d.attach_tag.as_ref().map(|t| format!(", rides what is tagged or named {t}")).unwrap_or_default(),
         ));
         world
             .resource_mut::<Fight>()
@@ -588,12 +611,17 @@ pub fn setup(world: &mut World) {
     world.insert_resource(stats);
 }
 
-/// Read the sounds `model`'s animations play, once each.
-fn load_sounds(world: &mut World, paths: &GamePaths, model: &Model, log: &GameLog) {
+/// Read these sounds (dotted paths), once each.
+fn load_sounds<'a>(
+    world: &mut World,
+    paths: &GamePaths,
+    wanted: impl Iterator<Item = &'a String>,
+    log: &GameLog,
+) {
     let mut by_package: HashMap<String, Vec<String>> = HashMap::new();
     {
         let have = world.get_resource_or_init::<DispenserSounds>();
-        for (_, path) in model.sounds.values().flatten() {
+        for path in wanted {
             let key = sound_key(path);
             if have.0.contains_key(&key) {
                 continue;
@@ -657,6 +685,8 @@ pub fn show_steps(
     mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
     // (Optional: tests run the fight without the effects part.)
     mut effects: Option<MessageWriter<SpawnEffect>>,
+    sounds: Option<Res<DispenserSounds>>,
+    camera: Query<&GlobalTransform, With<PlayerCamera>>,
     mut stats: ResMut<DispenserStats>,
     log: Res<GameLog>,
 ) {
@@ -708,9 +738,18 @@ pub fn show_steps(
                         .unwrap_or_default(),
                     t.sound
                         .as_ref()
-                        .map(|s| format!(", sound {s} (not played yet)"))
+                        .map(|s| format!(", sound {s}"))
                         .unwrap_or_default(),
                 ));
+                // `MakeTransition`: `PlaySound(TransitionSound)`. (The
+                // original's offline `Tick` also replays the warm-up's
+                // sound every frame while it warms up; no map gives the
+                // warm-up a sound, so that isn't copied.)
+                if let Some(path) = &t.sound {
+                    let at = to_bevy(fight.battle.dispenser_location(spawner));
+                    let heard = play_sound(&sounds, &camera, &mut commands, path, at);
+                    log.line(format!("{PART}: dispenser {name} sound {heard}"));
+                }
                 if which == "damaged" {
                     stats.destroyed += 1;
                 }
@@ -777,6 +816,12 @@ pub fn show_steps(
                     "{PART}: t={now:.1}s dispenser {name} makes droid {id} on slot {} ({anim})",
                     slot + 1
                 ));
+                // `GenerateActor`: `PlaySound(DispenseSound)` when it has one.
+                if let Some(path) = &d.dispense_sound {
+                    let at = to_bevy(fight.battle.dispenser_location(spawner));
+                    let heard = play_sound(&sounds, &camera, &mut commands, path, at);
+                    log.line(format!("{PART}: dispenser {name} sound {heard}"));
+                }
                 if let Some(mut b) = body {
                     b.play(&anim, false);
                 }
@@ -900,14 +945,19 @@ pub fn animate(
     sounds: Option<Res<DispenserSounds>>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     mut commands: Commands,
+    // (Optional: tests run the fight without the effects part.)
+    mut effects: Option<MessageWriter<SpawnEffect>>,
+    mut stats: ResMut<DispenserStats>,
     log: Res<GameLog>,
 ) {
     let dt = time.delta_secs().min(0.25);
     for (mut b, mut t) in &mut bodies {
-        // Where its intro has carried it (`PHYS_RootMotion`), and its
-        // effect with it (`SetBase`).
+        // Where its intro (`PHYS_RootMotion`) and its base (`AttachTag`)
+        // have carried it, and its effect with it (`SetBase`).
         let centre = fight.battle.dispenser_location(b.spawner);
+        let yaw = fight.battle.dispenser_yaw(b.spawner);
         t.translation = to_bevy(centre - UVec3::new(0.0, 0.0, b.half));
+        t.rotation = Quat::from_rotation_y(-yaw);
         if let Some(c) = b.effect {
             if let Ok(mut ct) = carriers.get_mut(c) {
                 ct.translation = to_bevy(centre + b.effect_offset);
@@ -939,6 +989,87 @@ pub fn animate(
                 let heard = play_sound(&sounds, &camera, &mut commands, &path, t.translation);
                 log.line(format!("{PART}: dispenser {} sound {heard}", b.name));
                 b.heard.push(heard);
+            }
+        }
+        // Effects whose moment passed this step (`AnimNotify_Effect`).
+        if let Some(list) = b.model.effects.get(&anim).cloned() {
+            for (at, fx) in list {
+                let first = frame == 0.0 && at <= 0.0;
+                if !(at > from && at <= to) && !(first && b.played.last() == Some(&anim)) {
+                    continue;
+                }
+                let origin = centre - UVec3::new(0.0, 0.0, b.half);
+                let bone = fx
+                    .bone
+                    .as_ref()
+                    .and_then(|bone| b.model.bone_from_origin_in_game(&anim, at * n, bone));
+                let (place, axes) = match bone {
+                    // At the bone plus the offset along its axes, turned
+                    // as the bone.
+                    Some((p, ax)) => {
+                        let v = |a: [f32; 3]| UVec3::new(a[0], a[1], a[2]);
+                        let local = v(p)
+                            + v(ax[0]) * fx.offset[0]
+                            + v(ax[1]) * fx.offset[1]
+                            + v(ax[2]) * fx.offset[2];
+                        (
+                            origin + turn(local, yaw),
+                            [0, 1, 2].map(|k| {
+                                let a = turn(v(ax[k]), yaw);
+                                [a.x, a.y, a.z]
+                            }),
+                        )
+                    }
+                    // At the actor, turned as the actor.
+                    None => (
+                        centre,
+                        [
+                            [yaw.cos(), yaw.sin(), 0.0],
+                            [-yaw.sin(), yaw.cos(), 0.0],
+                            [0.0, 0.0, 1.0],
+                        ],
+                    ),
+                };
+                let mut notes = Vec::new();
+                if fx.offset_rotation != [0; 3] {
+                    notes.push("its OffsetRotation is not applied");
+                }
+                if fx.attach {
+                    notes.push("Attach is not followed (it stays where it started)");
+                }
+                if fx.draw_scale_3d != [1.0; 3] {
+                    notes.push("its DrawScale3D is not applied");
+                }
+                log.line(format!(
+                    "{PART}: dispenser {} {anim} starts effect {} at ({:.0}, {:.0}, {:.0}){}",
+                    b.name,
+                    fx.path,
+                    place.x,
+                    place.y,
+                    place.z,
+                    if notes.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", notes.join("; "))
+                    }
+                ));
+                stats.effects.push(format!("{} {}", b.name, fx.class));
+                if let Some(effects) = effects.as_mut() {
+                    effects.write(SpawnEffect {
+                        effect: fx.class.clone(),
+                        at: to_bevy(place),
+                        floor: Some(to_bevy(origin).y),
+                        sound: None,
+                        by: format!("dispenser {} ({anim})", b.name),
+                        rotation: [0, 0, 0],
+                        draw_scale: fx.draw_scale,
+                        id: None,
+                        follow: None,
+                        vanish_with_carrier: false,
+                        axes: Some(axes),
+                        endless: false,
+                    });
+                }
             }
         }
         let points = b.model.posed_rooted(&anim, next);
@@ -1052,4 +1183,10 @@ pub fn after_load(
             b.last = Some(a);
         }
     }
+}
+
+/// Turn a point about the vertical axis by `yaw` (radians, Unreal axes).
+fn turn(v: UVec3, yaw: f32) -> UVec3 {
+    let (s, c) = yaw.sin_cos();
+    UVec3::new(v.x * c - v.y * s, v.x * s + v.y * c, v.z)
 }
