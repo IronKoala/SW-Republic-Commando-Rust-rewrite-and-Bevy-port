@@ -275,6 +275,43 @@ impl ClassLibrary {
         None
     }
 
+    /// One object a class sets by default (like `StaticMesh`), as its full
+    /// dotted path with its package first (`DemoCharge.DemoChargeMesh`),
+    /// from the nearest class in the chain that sets it. `Some(None)` when
+    /// that class sets it to None; `None` when no class in the chain sets
+    /// it.
+    pub fn object_path(&self, class: &str, name: &str) -> Option<Option<String>> {
+        for c in self.chain(class) {
+            let Some(info) = self.classes.get(&c.to_ascii_lowercase()) else {
+                continue;
+            };
+            let (pkg_name, pkg, data) = &self.packages[info.package];
+            let e = &pkg.exports[info.export];
+            let is_property = |n: &str| self.property_names.contains(&n.to_ascii_lowercase());
+            let Some(found) = class_defaults(pkg, data, e, &is_property) else {
+                continue;
+            };
+            let Some(p) = found
+                .properties
+                .iter()
+                .find(|p| pkg.name(p.name).eq_ignore_ascii_case(name) && p.array_index == 0)
+            else {
+                continue;
+            };
+            let Value::Object(o) = p.value else {
+                return None;
+            };
+            return Some(match ObjectRef::from_index(o) {
+                ObjectRef::None => None,
+                ObjectRef::Import(_) => Some(crate::class::object_path(pkg, o)),
+                ObjectRef::Export(_) => {
+                    Some(format!("{pkg_name}.{}", crate::class::object_path(pkg, o)))
+                }
+            });
+        }
+        None
+    }
+
     /// Every default value for `class`: its own, then whatever its parents
     /// set that it doesn't.
     pub fn defaults(&self, class: &str) -> Defaults {

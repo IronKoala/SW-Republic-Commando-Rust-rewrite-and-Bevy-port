@@ -1,0 +1,67 @@
+# The objective tracker: the tipped ring with an arrow and a distance at
+# the bottom of the screen that points the player at the next goal, and the
+# four pulsing corner arrows round the goal once it is in view.
+#
+# Every value below is the original game's, read from its own files on
+# 2026-11-12: the pictures, font and sight check timing from engine.u
+# (class Helmet defaults), the rest from the native helmet code in
+# Engine.dll (UHelmet::DrawHelmet, decompiled locally for reference only;
+# none of it is in this repository). The pictures and font are read from
+# the player's install at run time; nothing from the game is here.
+#
+# Places and sizes are in the original's 800x600 screen units. On screens
+# wider than 4:3 the port keeps them the same height and centred.
+# Angles are in the engine's units: 65536 to a full turn.
+#
+# Mods can change any of these. A missing value keeps the original's.
+
+# Helmet.TexObjectiveRing: the ring, white, with its arrow at the top.
+ring_texture = "HUDTextures.Icons.ObjectiveRing"
+# DrawRotatedTile(angle, 12288, 0, 400, 463, 656, 719, 0, 0, 256, 256):
+# a 256x256 picture centred at (400, 463), turned so its arrow points at
+# the goal, then tipped back by 12288 (67.5 degrees, so it looks flat).
+ring_centre = [400.0, 463.0]
+ring_size = [256.0, 256.0]
+ring_source = [0.0, 0.0, 256.0, 256.0]
+ring_tilt = 12288
+# Colour (red, green, blue). A shadow is drawn first, 5 units lower at
+# opacity 63, then the ring at full opacity.
+ring_colour = [200, 240, 255]
+ring_shadow_down = 5.0
+ring_shadow_alpha = 63
+
+# Helmet.Orbit8Font. The distance ("%.1f" of the distance in hundreds of
+# units) is drawn centred on the ring's centre.
+distance_font = "OrbitFonts.OrbitBold8"
+distance_colour = [200, 240, 255, 255]
+distance_scale = 0.01
+
+# Helmet.LargeVisorIcons, and the corner arrow's part of it (a triangle
+# pointing down, texels 0,360 to 39,399), drawn 39 units across.
+bracket_texture = "HUDTextures.Icons.LargeVisorIcons"
+bracket_source = [0.0, 360.0, 39.0, 399.0]
+bracket_size = 39.0
+# The box the arrows sit on is never narrower or shorter than this many
+# screen pixels (twice the arrow size).
+bracket_min_pixels = 78.0
+# Each corner's turn: bottom right, top right, top left, bottom left.
+bracket_turns = [24575, 8191, -8193, -24577]
+# Opacity pulse: whole part of sin(time * 2.5) * 200 + 55, kept to its
+# lowest 8 bits as the original's byte is.
+pulse_speed = 2.5
+pulse_amount = 200.0
+pulse_base = 55.0
+# Each arrow is drawn three times: at size 1 with the pulse's opacity, then
+# at 1.25 and 0.75 times the size with a quarter of it.
+glow_sizes = [1.25, 0.75]
+glow_opacity = 0.25
+
+# Helmet.VisCheckFrequency: how often (seconds) the sight line to the goal
+# is checked while the goal is ahead and was in sight.
+sight_check_seconds = 0.25
+# The sight line stops 250 units short of the goal.
+sight_short = 250.0
+# The goal counts as ahead within 45 degrees of the view.
+ahead_degrees = 45.0
+# Helmet.bBracketVisibleObjective: corner arrows when the goal is in sight.
+bracket_visible = true
