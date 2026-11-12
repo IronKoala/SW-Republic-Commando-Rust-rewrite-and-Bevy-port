@@ -404,6 +404,11 @@ fn main() {
                 rc_ai::BattleEvent::SpawnerRefused { .. } | rc_ai::BattleEvent::Removed { .. } => {
                     continue;
                 }
+                rc_ai::BattleEvent::Dispenser { spawner, step } => {
+                    let f = &battle.spawners[spawner].factory;
+                    log.line(format!("[{time:6.2}s] dispenser {}: {step:?}", f.name));
+                    continue;
+                }
                 rc_ai::BattleEvent::Event { name, by } => {
                     log.line(format!(
                         "[{time:6.2}s] event {name} (by {by}; no scripts here)"

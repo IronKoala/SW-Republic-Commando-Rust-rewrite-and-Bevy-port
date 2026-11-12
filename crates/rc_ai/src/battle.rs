@@ -14,6 +14,14 @@
 //! combat part, which tells a droid it was hurt (`Fighter::on_damaged`) or
 //! destroyed (`Fighter::kill`).
 
+#[path = "dispense.rs"]
+pub mod dispense;
+
+pub use dispense::{
+    BoneSample, Carry, DispState, DispenserMotion, DispenserStep, Dispensing, Phase, SlotMotion,
+    Unfold,
+};
+
 use crate::brain::{AiEvent, Fighter, Mode, Rng, Target, View};
 use crate::params::AiParams;
 use crate::spawns::{Factory, Offspring};
@@ -38,6 +46,13 @@ pub struct Spawner {
     next_spawn: f32,
     /// The spawn point it uses next (spawn mode 0 and 1).
     next_spot: usize,
+    /// A droid dispenser's state (see [`dispense`]).
+    pub disp: Option<DispState>,
+    /// A droid dispenser's animation numbers, from the game's files.
+    pub motion: Option<DispenserMotion>,
+    /// How what it is based on (`AttachTag`: a mover) has moved it since
+    /// the level started; set by the game each frame.
+    pub carry: Option<Carry>,
 }
 
 /// What switched a spawner on.
@@ -78,6 +93,8 @@ pub enum BattleEvent {
     Event { name: String, by: String },
     /// Something a droid decided or did.
     Ai { id: u32, event: AiEvent },
+    /// Something a droid dispenser did, for the game to show.
+    Dispenser { spawner: usize, step: DispenserStep },
 }
 
 /// What a battle needs to carry on where it was, for save files.
@@ -100,6 +117,30 @@ pub struct SpawnerSnapshot {
     /// Battle time of its next try.
     pub next_spawn: f32,
     pub next_spot: usize,
+    /// A droid dispenser's state.
+    pub dispenser: Option<DispenserSnapshot>,
+}
+
+/// A droid dispenser, for save files. Droids still coming out of it are
+/// saved as ordinary droids where they are.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DispenserSnapshot {
+    /// [`Phase::name`].
+    pub phase: String,
+    /// When its intro, warm-up or wait ends (battle time).
+    pub until: f32,
+    pub ending: bool,
+    pub health: f32,
+    pub slightly: bool,
+    pub heavily: bool,
+    pub init_done: bool,
+    pub max_alive: u32,
+    pub spawned: Vec<u32>,
+    pub tag: String,
+    pub remaining: u32,
+    pub check_exhausted: bool,
+    /// Its intro has ended (it stands where the intro carried it).
+    pub entered: bool,
 }
 
 /// Where a fighter was made, so the battle knows its tag and events.
@@ -142,6 +183,8 @@ pub struct Battle {
     next_id: u32,
     births: HashMap<u32, Birth>,
     rng: Rng,
+    /// Droids coming out of dispensers.
+    dispensing: HashMap<u32, Dispensing>,
     /// Fighters a level script switched collision off for
     /// (`ACTION_SetCollision`): shots pass through them, so the other
     /// side doesn't aim at them.
@@ -178,6 +221,16 @@ impl Battle {
             spawners: factories
                 .into_iter()
                 .map(|(factory, params)| Spawner {
+                    disp: factory.dispenser.as_ref().map(|d| DispState {
+                        health: d.max_health,
+                        max_alive: factory.max_alive,
+                        tag: factory.tag.clone(),
+                        remaining: factory.capacity,
+                        // `bCheckExhausted` is on in DroidDispenser's
+                        // defaults.
+                        check_exhausted: true,
+                        ..Default::default()
+                    }),
                     // A character placed in the map is made as the level
                     // starts.
                     active: factory.placed,
@@ -187,6 +240,8 @@ impl Battle {
                     made: 0,
                     next_spawn: 0.0,
                     next_spot: 0,
+                    carry: None,
+                    motion: None,
                 })
                 .collect(),
             fighters: Vec::new(),
@@ -196,6 +251,7 @@ impl Battle {
             next_id: 1,
             births: HashMap::new(),
             rng: Rng::new(7),
+            dispensing: HashMap::new(),
             not_colliding: HashSet::new(),
         }
     }
@@ -264,6 +320,12 @@ impl Battle {
         let mut out = Vec::new();
         for i in 0..self.spawners.len() {
             let sp = &mut self.spawners[i];
+            if let Some(st) = &sp.disp {
+                if st.tag.eq_ignore_ascii_case(event) && !sp.disabled {
+                    self.trigger_dispenser(i, event, &mut out);
+                }
+                continue;
+            }
             if sp.factory.placed || !sp.factory.tag.eq_ignore_ascii_case(event) || sp.disabled {
                 continue;
             }
@@ -305,6 +367,11 @@ impl Battle {
             let was = sp.active;
             sp.active = false;
             sp.disabled |= for_good;
+            if let Some(st) = sp.disp.as_mut() {
+                if st.phase != Phase::Destroyed {
+                    st.phase = Phase::Offline;
+                }
+            }
             if was || for_good {
                 out.push(BattleEvent::SpawnerOff {
                     spawner: i,
@@ -369,6 +436,7 @@ impl Battle {
     ) -> Vec<BattleEvent> {
         let mut out = Vec::new();
         self.spawn(player.map(|p| p.centre), &mut out);
+        self.step_dispensing(&mut out);
         let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
         // Two sides: separatist fighters (droids, Geonosians, ...) and
         // republic ones (clone troopers). Each side's friends, so it
@@ -376,6 +444,10 @@ impl Battle {
         let mut friends: [Vec<Vec3>; 2] = [Vec::new(), Vec::new()];
         let mut as_target: [Vec<Target>; 2] = [Vec::new(), Vec::new()];
         for f in self.alive() {
+            // Droids still coming out of a dispenser can't be hit.
+            if self.dispensing.contains_key(&f.id) {
+                continue;
+            }
             let k = f.params.kind.republic() as usize;
             friends[k].push(f.pawn.location);
             if !self.not_colliding.contains(&f.id) {
@@ -390,7 +462,7 @@ impl Battle {
         targets[0].extend_from_slice(&as_target[1]);
         targets[1] = std::mem::take(&mut as_target[0]);
         for f in self.fighters.iter_mut() {
-            if f.mode == Mode::Dead {
+            if f.mode == Mode::Dead || self.dispensing.contains_key(&f.id) {
                 continue;
             }
             // Stunned (a flash or EMP grenade): stands still, does nothing.
@@ -400,9 +472,9 @@ impl Battle {
             }
             let side = f.params.kind.republic() as usize;
             // A separatist with no one in sight still hunts the player.
-            let target = f
-                .choose_target(world, &targets[side])
-                .or(if side == 0 { player } else { None });
+            let target =
+                f.choose_target(world, &targets[side])
+                    .or(if side == 0 { player } else { None });
             let view = View {
                 world,
                 nav: &self.nav,
@@ -583,6 +655,28 @@ impl Battle {
                     made: s.made,
                     next_spawn: s.next_spawn,
                     next_spot: s.next_spot,
+                    dispenser: s.disp.as_ref().map(|d| {
+                        let (until, ending) = match d.phase {
+                            Phase::Intro { until } | Phase::WarmUp { until } => (until, false),
+                            Phase::Waiting { check, ending } => (check, ending),
+                            _ => (0.0, false),
+                        };
+                        DispenserSnapshot {
+                            phase: d.phase.name().to_string(),
+                            until,
+                            ending,
+                            health: d.health,
+                            slightly: d.slightly,
+                            heavily: d.heavily,
+                            init_done: d.init_done,
+                            max_alive: d.max_alive,
+                            spawned: d.spawned.clone(),
+                            tag: d.tag.clone(),
+                            remaining: d.remaining,
+                            check_exhausted: d.check_exhausted,
+                            entered: d.entered,
+                        }
+                    }),
                 })
                 .collect(),
             fighters: self
@@ -631,7 +725,34 @@ impl Battle {
             sp.made = saved.made;
             sp.next_spawn = saved.next_spawn;
             sp.next_spot = saved.next_spot;
+            if let (Some(st), Some(d)) = (sp.disp.as_mut(), &saved.dispenser) {
+                st.phase = match d.phase.as_str() {
+                    "intro" => Phase::Intro { until: d.until },
+                    "warm-up" => Phase::WarmUp { until: d.until },
+                    "waiting for its online event" => Phase::WaitOnline,
+                    "online" => Phase::Online,
+                    "waiting for a death" => Phase::Waiting {
+                        check: d.until,
+                        ending: d.ending,
+                    },
+                    "shut down" => Phase::Shutdown,
+                    "destroyed" => Phase::Destroyed,
+                    _ => Phase::Offline,
+                };
+                st.health = d.health;
+                st.slightly = d.slightly;
+                st.heavily = d.heavily;
+                st.init_done = d.init_done;
+                st.max_alive = d.max_alive;
+                st.spawned = d.spawned.clone();
+                st.tag = d.tag.clone();
+                st.remaining = d.remaining;
+                st.check_exhausted = d.check_exhausted;
+                st.entered = d.entered;
+                st.riding = None;
+            }
         }
+        self.dispensing.clear();
         self.time = s.time;
         self.next_id = s
             .next_id
@@ -710,6 +831,17 @@ impl Battle {
                 .iter()
                 .any(|&(c, r)| (player - c).length_2d() <= r + radius);
             let near = f.triggers.is_empty() && (f.spot(0).location - player).length() <= within;
+            if self.spawners[i].disp.is_some() {
+                let offline = self.spawners[i]
+                    .disp
+                    .as_ref()
+                    .is_some_and(|s| s.phase == Phase::Offline);
+                if offline && (by_trigger || near) {
+                    let tag = self.spawners[i].factory.tag.clone();
+                    self.trigger_dispenser(i, &tag, out);
+                }
+                continue;
+            }
             if by_trigger {
                 self.switch_on(i, SwitchedOn::WalkInTrigger, out);
             } else if near {
@@ -738,6 +870,10 @@ impl Battle {
         }
         let mut made_one = false;
         for i in 0..self.spawners.len() {
+            if self.spawners[i].disp.is_some() {
+                self.step_dispenser(i, out);
+                continue;
+            }
             let sp = &self.spawners[i];
             if !sp.active || self.time < sp.next_spawn || made_one {
                 continue;

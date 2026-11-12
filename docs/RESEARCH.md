@@ -700,6 +700,103 @@ ctgame.u, ctinventory.u, engine.u, Properties/properties.u).
   SpawnTrenchRim01Troops, SpawnBattleFieldTroopers,
   SpawnFieldChargeTrooper, SpawnGunshipArea).
 
+## Droid dispensers (read 2026-11-12)
+
+Read only from the user's install: the UnrealScript text in ctgame.u
+(`DroidDispenser extends PawnFactory`, `Factory`, `PawnFactory`),
+engine.u (`Pawn` state `Dispense`), class defaults with `rc_probe
+--classes`, the model with `rc_model` (`Dispensers.ukx`, `droid.ukx`) and
+the maps' actors.
+
+- `DroidDispenser`: Physics 12 (`PHYS_RootMotion`), bCollideWorld,
+  MaxHealth 5000, NumDispensers 1, SpawnInterval 3, SpawnMode 0,
+  bCheckExhausted. SpawnMode 2 or 3 is set to 0. `bAlignBottom`.
+  `DroidDispenserDefaults`: bGenerateForever, bStartTimerAfterDeath,
+  damage table `DV_DroidDispenser`, effects `Dispenser_LightDamage`,
+  `Dispenser_Damage`, `Dispenser_Explosion`.
+- `BDDispenser`: 3 slots, NumInitDroids 3, IntroAnim `entranceSky`,
+  collision 170 x 125; defaults WarmUpTime 1, Prototype `BattleDroid`,
+  Capacity 3, skins `DispensersTextures.BDDispenser.BDDispenser_{Warm,On,Off,Dest}`.
+  `SBDDispenser`: 4 slots, no IntroAnim (plays `ActionBreathe`), collision
+  200 x 125 (defaults radius 219), Prototype `SuperBattleDroid`,
+  Capacity 4. `DroidekaDispenser`: WarmUpTime 2, no Prototype.
+- Script: Offline `Trigger` plays IntroAnim; its `AnimEnd` makes the warm
+  up (`WarmUpInfo`, timer `WarmUpTime`) or, with `OnlineTag`, sets Tag to
+  it and waits (`Wait.Trigger`). `Online.BeginState` makes `OnlineInfo`
+  and generates at once, then `SetFactoryTimer`. `GenerateActor`: MaxAlive
+  is NumInitDroids at first; MaxInWorld counts the prototype's living
+  pawns; the droid `LoopAnim('DispBreathe',,,,4)`, `Dispense` attaches it
+  to `AttachBones[i]` (relative location Z = its CollisionHeight,
+  rotation 0, `PHYS_RootMotion`, no collision) and plays
+  `DispenseAnims[i]`, i = NextSpawnPoint clamped. `ReleaseDroid` (the
+  animations' `AnimNotify_ReleaseDroid`) detaches it, sends it to state
+  `Dispense` (`DispUnfold`) and sends SpawnEvent. TakeDamage: 66 % and
+  33 % steps, 0 goes to `Damaged`, which kills the droid on the slot
+  (100000 `CTDamageExplosion`) and in Tick sends ExhaustedEvent once all
+  its droids are dead. `Bump` during `entranceSky`, `EntranceSky704` or
+  `EntranceSky384` crushes pawns (`Crushed`, MaxHealth damage).
+- Animations (30 fps): BDDispenser `Dispense1-3` 70 frames, release at
+  0.286; `entranceSky` 50 frames, root bone `Move` from (0, 0, 3000) to
+  0; `EntranceSky704` 27 frames, 704 to 0; `SlaversPushDispencer` 180
+  frames, Move from (12, 0, 12) to (1105, 0, 0); `Destroyed` 20. Slot
+  bones at the release: (0, -216, 92), (187, 108, 92), (-187, 108, 92).
+  SBDDispenser `Dispense1-4` 132 frames, release 0.644, bones at (0, ±257,
+  28) and (±257, 0, 28); `Destroyed` 46. BattleDroid `DispUnfold` 51
+  frames, its root travels (123, -1, -90); SuperBattleDroid 81 frames,
+  (53, 0, -19).
+- Sounds in the animations: `GEN_Sound.Machines.mach_GEN_Bdroid_Dispense_open`
+  and `_close`.
+- Maps: `rc_dispenser_check` lists each dispenser's numbers. Placement
+  matches the root motion: every `entranceSky` dispenser whose floor the
+  port's collision has stands within 25 uu of it after the drop.
+- Intro notifies (`AnimNotify_Effect`): BDDispenser `entranceSky` at 0.68
+  `CTEffects.Dispenser_Landing_Dirt` on bone `root` (and one at 0.01 with
+  no effect class, `Attach` on: it does nothing), `EntranceSky704` at
+  0.473 and `EntranceSkyMetal` at 0.706 `Dispenser_Landing_Metal`;
+  SBDDispenser `entranceSky` at 0.70 `Dispenser_Landing_Dirt` (`root`),
+  `EntranceSky704` at 0.478 `Dispenser_Landing_Metal`; DroidekaDispenser
+  `EntranceSky384` at 0.323 `Dispenser_Landing_Metal`. BDDispenser
+  `Destroyed` also has three `AnimNotify_BreakJoint`s (`droidAttach1-3`,
+  `DestroyChildren`), not used. `AnimNotify_Effect` defaults: DrawScale 1,
+  DrawScale3D (1, 1, 1).
+- `TransitionInfo` class defaults (decoded by hand from the property
+  bytes): every `TransitionSound` is None, and no map sets one or a
+  `DispenseSound`.
+
+## Engine code read for the droid dispensers (Engine.dll, 2026-11-12)
+
+Disassembled locally, read only, for the user's "decompile what the files
+don't say" rule; no code is kept. Field offsets in `AActor`: `Location`
+0x138, `Rotation` 0x144, `Attached` 0x16c, `RelativeLocation` 0x178,
+`AttachmentBone` 0x90, `Tag` 0xb8.
+
+- `AActor::AttachToBone` (0x103c7620): finds the bone (`MatchRefBone`),
+  scales the attached actor by the owner's draw scale, sets its
+  `AttachmentBone` and calls `SetBase(owner)`. `DetachFromBone`
+  (0x103b19e0): `SetBase(None)` and clears `AttachmentBone`; location and
+  rotation are kept.
+- `USkeletalMeshInstance::UpdateAttachments` (0x10504f00): each actor
+  attached to a bone is moved to `FMatrix(RelativeRotation,
+  RelativeLocation) * GetBoneCoords(bone, world)` and turned to
+  `FRotator` of that matrix (its X axis is the bone's X axis).
+- `AActor::physRootMotion` (0x1048f2a0): asks the mesh for the `Move`
+  bone's coordinates (`GetMoveCoords`) and sets the actor's rotation from
+  them, then moves it (`moveSmooth`).
+- `UAnimNotify_Effect::Notify` (0x105053c0): no `EffectClass`, nothing.
+  With `Bone` on a skeletal mesh: location = bone origin + `OffsetLocation`
+  along the bone's axes, rotation = bone + `OffsetRotation`; else the
+  owner's location and rotation. Spawns it, sets `Tag` (if any),
+  `DrawScale`, `DrawScale3D`; with `Attach`, `AttachToBone` (or `SetBase`)
+  and `RelativeLocation`/`RelativeRotation` = the offsets.
+- `UGameEngine::LoadMap` (around 0x1041fd70): every actor with an
+  `AttachTag` is based (`SetBase`, floor (0, 0, 1)) on the first actor in
+  the level whose `Tag` or object name equals it.
+- `ULevel::MoveActor` (0x1043fb30): actors attached to the moved one (not
+  to a bone) get the base's rotation change and are put at the base plus
+  their `RelativeLocation` turned by the base. A move blocked by another
+  actor calls `NotifyBumpEx` on both (0x104421e9, 0x104421f7), which is
+  `Bump` (pawns tell their controller first).
+
 ## Weapons lying in the levels (read 2026-11-10)
 
 Read from the class defaults with `rc_probe --class` and the scripts'
