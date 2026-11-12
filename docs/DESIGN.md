@@ -4740,8 +4740,21 @@ copied into the repository, only the rules written in our own words):
 - *Depth test* (`USpriteEmitter::RenderParticles`): the emitter's `ZTest`
   goes to the graphics driver as the particles' depth test. With it off
   (the bacta hologram's parts) they show over walls and models:
-  `OnTopMaterial`, Bevy's standard material with the depth compare set to
-  always.
+  `SpriteLookMaterial` (Bevy's standard material plus `sprite_look.wesl`)
+  with the depth compare set to always.
+- *Mixing frames* (`BlendBetweenSubdivisions`, `sim::frame_blend`): only
+  without `UseRandomSubdivision` (`RenderParticles`). `FillVertexBuffer`
+  gives each sprite a second set of texture coordinates for the next frame
+  (`frame + 1`, or the same frame when `frame + 1` equals the frame count
+  `n` used for the frame) and writes the next frame's share,
+  `trunc(fraction(n x t) x 255)`, into the vertex colour's alpha. The
+  graphics driver (D3DDrv.dll, `FD3DRenderInterface::SetParticleMaterial`)
+  sets three texture stages: the frame; the next frame mixed in by the
+  vertex alpha (`D3DTOP_BLENDDIFFUSEALPHA`, colour and alpha); then colour
+  times the vertex colour, alpha from the mix alone. So a mixing sprite's
+  own alpha doesn't show; our fades then dim only added-light sprites'
+  colour. The same `SpriteLookMaterial`, with `MIX_FRAMES`, does this
+  (UV_1 holds the next frame).
 
 Our choices (not checked against the original): both the prop's
 `TransitionSound` and the effect's `SpawnSound` play; added-light sprites
@@ -4749,11 +4762,7 @@ ignore the colour list's alpha; debris bounces off a flat floor at the
 prop's base, not the level; how and when particles are sent, sizes and
 colours over life, fades and spin rates are our reading of the property
 names (`UParticleEmitter::UpdateParticles` and `SpawnParticles` are not
-read yet); `MaxAbsVelocity`, `UseSubdivisionScale` and
-`BlendBetweenSubdivisions` are ignored (the engine mixes each frame into
-the next by putting the mix in the vertex colour's alpha; how the graphics
-driver, D3DDrv.dll, then blends the two frames is not read, so we show
-whole frames); beam and trail emitters aren't drawn; sounds aren't placed
+read yet); `MaxAbsVelocity` and `UseSubdivisionScale` are ignored; beam and trail emitters aren't drawn; sounds aren't placed
 in 3D yet, only made quieter with distance (the level scripts' 3D sound in
 `rc_scripts_plugin/src/sounds.rs` could be reused). Found, not fixed: our
 `StartLocationShape` numbers are off by one (Engine.u's list is

@@ -271,8 +271,8 @@ pub struct EmitterDef {
     /// everything, walls included (the bacta dispenser's hologram).
     pub z_test: bool,
     /// `BlendBetweenSubdivisions`: the engine mixes each frame into the
-    /// next. **Not done yet**: we show whole frames (see
-    /// `crate::sim::frame_at`).
+    /// next (see `crate::sim::frame_blend`). Ignored with
+    /// `UseRandomSubdivision`, as in the engine.
     pub blend_frames: bool,
 }
 

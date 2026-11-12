@@ -36,7 +36,7 @@
 
 pub mod held;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{embedded_asset, RenderAssetUsages};
 use bevy::audio::{PlaybackSettings, Volume};
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::MeshVertexBufferLayoutRef;
@@ -48,10 +48,11 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{
     AsBindGroup, CompareFunction, RenderPipelineDescriptor, SpecializedMeshPipelineError,
 };
+use bevy::shader::ShaderRef;
 use rc_combat::GameSound;
 use rc_effects::def::{CoordinateSystem, DrawStyle, EffectDef, EmitterKind};
 use rc_effects::read::Library;
-use rc_effects::sim::{frame_cell, sprite_axes};
+use rc_effects::sim::{frame_blend, frame_cell, sprite_axes};
 use rc_effects::EffectState;
 use rc_game_core::{units, GameLog, GamePaths, GameSet, GameState, PlayerCamera};
 use rc_level_viewer::draw::to_image;
@@ -225,33 +226,68 @@ enum Look {
 }
 
 /// A sprite emitter's material: Bevy's standard one, or, for an emitter
-/// with `ZTest` off, the same with the depth test switched off
-/// ([`OnTopMaterial`]).
+/// with `ZTest` off or frames that mix, [`SpriteLookMaterial`].
 #[derive(Clone)]
 enum SpriteMaterial {
     Normal(Handle<StandardMaterial>),
-    OnTop(Handle<OnTopMaterial>),
+    Special(Handle<SpriteLookMaterial>),
 }
 
-/// The standard material, drawn over everything: for emitters whose
-/// `ZTest` is off. The engine hands `ZTest` to the graphics driver as
-/// the particles' depth test (Engine.dll, `USpriteEmitter::RenderParticles`),
-/// so off means walls and models in front don't hide them.
-pub type OnTopMaterial = ExtendedMaterial<StandardMaterial, NoDepthTest>;
+/// The standard material (unlit) with what the engine's particle drawing
+/// adds to it ([`SpriteLook`]).
+pub type SpriteLookMaterial = ExtendedMaterial<StandardMaterial, SpriteLook>;
 
-/// Our part of [`OnTopMaterial`]: nothing but the pipeline change.
+/// Our part of [`SpriteLookMaterial`]: two switches.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone, Default)]
-pub struct NoDepthTest {}
+#[bind_group_data(SpriteLookKey)]
+pub struct SpriteLook {
+    /// `ZTest`. The engine hands it to the graphics driver as the
+    /// particles' depth test (Engine.dll, `USpriteEmitter::RenderParticles`),
+    /// so off means walls and models in front don't hide them.
+    pub depth_test: bool,
+    /// `BlendBetweenSubdivisions` (see `rc_effects::sim::frame_blend`):
+    /// each sprite shows its frame (`UV_0`) with the next one (`UV_1`)
+    /// mixed in by the vertex alpha, as the graphics driver sets it up
+    /// (D3DDrv.dll, `FD3DRenderInterface::SetParticleMaterial`).
+    pub mix_frames: bool,
+}
 
-impl MaterialExtension for NoDepthTest {
+/// The pipeline switches of a [`SpriteLook`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SpriteLookKey {
+    depth_test: bool,
+    mix_frames: bool,
+}
+
+impl From<&SpriteLook> for SpriteLookKey {
+    fn from(l: &SpriteLook) -> Self {
+        Self {
+            depth_test: l.depth_test,
+            mix_frames: l.mix_frames,
+        }
+    }
+}
+
+impl MaterialExtension for SpriteLook {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://rc_effects_plugin/sprite_look.wesl".into()
+    }
+
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         _layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialExtensionKey<Self>,
+        key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        if let Some(depth) = descriptor.depth_stencil.as_mut() {
-            depth.depth_compare = Some(CompareFunction::Always);
+        if !key.bind_group_data.depth_test {
+            if let Some(depth) = descriptor.depth_stencil.as_mut() {
+                depth.depth_compare = Some(CompareFunction::Always);
+            }
+        }
+        if key.bind_group_data.mix_frames {
+            if let Some(f) = descriptor.fragment.as_mut() {
+                f.shader_defs.push("MIX_FRAMES".into());
+            }
         }
         Ok(())
     }
@@ -307,11 +343,12 @@ pub struct EffectsPlugin;
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         // The material for particles drawn over everything (`ZTest`
-        // off); only where there is a renderer to draw it.
+        // off) or mixing frames; only where there is a renderer to draw it.
         if app.is_plugin_added::<bevy::render::RenderPlugin>()
-            && !app.is_plugin_added::<MaterialPlugin<OnTopMaterial>>()
+            && !app.is_plugin_added::<MaterialPlugin<SpriteLookMaterial>>()
         {
-            app.add_plugins(MaterialPlugin::<OnTopMaterial>::default());
+            embedded_asset!(app, "sprite_look.wesl");
+            app.add_plugins(MaterialPlugin::<SpriteLookMaterial>::default());
         }
         app.add_message::<SpawnEffect>()
             .add_message::<EffectEnded>()
@@ -462,7 +499,7 @@ fn load_effect(
     images: &mut Assets<Image>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    mut on_top: Option<&mut Assets<OnTopMaterial>>,
+    mut on_top: Option<&mut Assets<SpriteLookMaterial>>,
     stats: &mut EffectStats,
     log: &Option<Res<GameLog>>,
     lit_light: f32,
@@ -513,11 +550,15 @@ fn load_effect(
                     fog_enabled: false,
                     ..default()
                 };
-                match (e.z_test, on_top.as_deref_mut()) {
-                    (false, Some(on_top)) => {
-                        Look::Sprites(SpriteMaterial::OnTop(on_top.add(OnTopMaterial {
+                let mix_frames = frame_blend(e, 0.0).is_some();
+                match on_top.as_deref_mut() {
+                    Some(special) if !e.z_test || mix_frames => {
+                        Look::Sprites(SpriteMaterial::Special(special.add(SpriteLookMaterial {
                             base,
-                            extension: NoDepthTest {},
+                            extension: SpriteLook {
+                                depth_test: e.z_test,
+                                mix_frames,
+                            },
                         })))
                     }
                     _ => Look::Sprites(SpriteMaterial::Normal(materials.add(base))),
@@ -643,7 +684,7 @@ fn preload(
     images: Option<ResMut<Assets<Image>>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
-    mut on_top: Option<ResMut<Assets<OnTopMaterial>>>,
+    mut on_top: Option<ResMut<Assets<SpriteLookMaterial>>>,
     audio: Option<ResMut<Assets<AudioSource>>>,
     settings: Option<Res<EffectSettings>>,
     log: Option<Res<GameLog>>,
@@ -693,7 +734,7 @@ fn spawn(
     images: Option<ResMut<Assets<Image>>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
-    mut on_top: Option<ResMut<Assets<OnTopMaterial>>>,
+    mut on_top: Option<ResMut<Assets<SpriteLookMaterial>>>,
     audio: Option<ResMut<Assets<AudioSource>>>,
     camera: Query<&GlobalTransform, With<PlayerCamera>>,
     mut ended: MessageWriter<EffectEnded>,
@@ -812,17 +853,19 @@ fn spawn(
         let parts = loaded
             .looks
             .iter()
-            .map(|l| match l {
+            .zip(&loaded.def.emitters)
+            .map(|(l, def)| match l {
                 Look::Sprites(m) => {
+                    let mixing = frame_blend(def, 0.0).is_some();
                     let mut e = commands.spawn((
-                        Mesh3d(meshes.add(empty_mesh())),
+                        Mesh3d(meshes.add(empty_mesh(mixing))),
                         Transform::IDENTITY,
                         NoFrustumCulling,
                         DespawnOnExit(GameState::InGame),
                     ));
                     match m {
                         SpriteMaterial::Normal(m) => e.insert(MeshMaterial3d(m.clone())),
-                        SpriteMaterial::OnTop(m) => e.insert(MeshMaterial3d(m.clone())),
+                        SpriteMaterial::Special(m) => e.insert(MeshMaterial3d(m.clone())),
                     };
                     Some(e.id())
                 }
@@ -849,15 +892,22 @@ fn spawn(
     }
 }
 
-fn empty_mesh() -> Mesh {
-    Mesh::new(
+/// An empty sprite mesh; `mixing` adds the next frame's texture
+/// coordinates (`UV_1`).
+fn empty_mesh(mixing: bool) -> Mesh {
+    let mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
     )
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new())
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<[f32; 2]>::new())
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, Vec::<[f32; 4]>::new())
-    .with_inserted_indices(Indices::U32(Vec::new()))
+    .with_inserted_indices(Indices::U32(Vec::new()));
+    if mixing {
+        mesh.with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, Vec::<[f32; 2]>::new())
+    } else {
+        mesh
+    }
 }
 
 /// Move the particles on, and remove effects that are over.
@@ -987,6 +1037,9 @@ fn draw(
                     let fv = emitter.frames_v.max(1);
                     let mut pos = Vec::with_capacity(sprites.len() * 4);
                     let mut uv = Vec::with_capacity(sprites.len() * 4);
+                    let mixing = frame_blend(emitter, 0.0).is_some();
+                    let mut uv_next =
+                        Vec::with_capacity(if mixing { sprites.len() * 4 } else { 0 });
                     let mut col = Vec::with_capacity(sprites.len() * 4);
                     let mut idx = Vec::with_capacity(sprites.len() * 6);
                     for s in &sprites {
@@ -1019,6 +1072,8 @@ fn draw(
                         };
                         let (fx, fy) = frame_cell(s.frame, fu, fv);
                         let (fx, fy) = (fx as f32, fy as f32);
+                        let (nx, ny) = frame_cell(s.next_frame, fu, fv);
+                        let (nx, ny) = (nx as f32, ny as f32);
                         let base = pos.len() as u32;
                         for (k, (dx, dy)) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
                             .into_iter()
@@ -1028,25 +1083,38 @@ fn draw(
                             let cu = [0.0, 1.0, 1.0, 0.0][k];
                             let cv = [1.0, 1.0, 0.0, 0.0][k];
                             uv.push([(fx + cu) / fu as f32, (fy + cv) / fv as f32]);
+                            if mixing {
+                                uv_next.push([(nx + cu) / fu as f32, (ny + cv) / fv as f32]);
+                            }
                         }
                         // Colours are stored as the game shows them; the
                         // GPU wants them linear.
                         let lin =
                             Color::srgba(s.colour[0], s.colour[1], s.colour[2], 1.0).to_linear();
-                        let alpha = if additive {
+                        let alpha = if mixing {
+                            // The engine stores the next frame's share
+                            // here instead (`frame_blend`).
+                            s.frame_mix
+                        } else if additive {
                             // Adding light: the fades dim it; the colour
                             // scale's alpha (often 0) is not used.
                             s.fade
                         } else {
                             s.colour[3] * s.fade
                         };
+                        // Mixing frames uses up the alpha, so a fade can
+                        // only dim the colour, and only when adding light.
+                        let dim = if mixing && additive { s.fade } else { 1.0 };
                         for _ in 0..4 {
-                            col.push([lin.red, lin.green, lin.blue, alpha]);
+                            col.push([lin.red * dim, lin.green * dim, lin.blue * dim, alpha]);
                         }
                         idx.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
                     }
                     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
                     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
+                    if mixing {
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uv_next);
+                    }
                     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
                     mesh.insert_indices(Indices::U32(idx));
                 }

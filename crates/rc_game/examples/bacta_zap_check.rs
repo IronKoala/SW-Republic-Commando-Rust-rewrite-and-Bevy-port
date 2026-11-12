@@ -12,7 +12,9 @@
 //! - the hologram parts (`Holo_*`, `ZTest` off in the game's data) show
 //!   over the wall, while the mist and beams (`ZTest` on) are hidden by it;
 //! - the beam, spray and lightning parts (`UseDirectionAs` `PTDU_Up`) are
-//!   drawn long and thin along their movement, not as squares.
+//!   drawn long and thin along their movement, not as squares;
+//! - the power bar (`Holo_Bar`, `BlendBetweenSubdivisions`) mixes each
+//!   frame into the next.
 //!
 //! Run (Linux, no screen needed), with the game folder in `RC_GAME_DIR`:
 //! `xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p rc_game --example bacta_zap_check`
@@ -44,6 +46,8 @@ struct Run {
     /// Per shot: emitter name, sprites drawn, and the longest side over
     /// the shortest of its first sprite's axes.
     parts: Vec<Vec<(String, usize)>>,
+    /// Per shot: the power bar's sprites as (frame, next frame, share).
+    bar: Vec<Vec<(u32, u32, f32)>>,
     ended: bool,
 }
 
@@ -173,6 +177,20 @@ fn drive(
                 println!("  {n}: {c} alive");
             }
             run.parts.push(parts);
+            let bar = effects
+                .iter()
+                .flat_map(|r| {
+                    let def = r.def();
+                    def.emitters
+                        .iter()
+                        .position(|d| d.name.contains("Holo_Bar"))
+                        .map(|i| r.state.sprites(def, i))
+                        .unwrap_or_default()
+                })
+                .map(|s| (s.frame, s.next_frame, s.frame_mix))
+                .collect::<Vec<_>>();
+            println!("  power bar (frame, next, share): {bar:?}");
+            run.bar.push(bar);
             commands.spawn(Screenshot::primary_window());
             run.taken += 1;
         }
@@ -238,6 +256,16 @@ fn drive(
             format!("{part} had particles in a picture"),
         );
     }
+    let mixing = run
+        .bar
+        .iter()
+        .flatten()
+        .filter(|(f, n, share)| n == &(f + 1) && *share > 0.0 && *share < 1.0)
+        .count();
+    check(
+        mixing > 0,
+        format!("the power bar mixes frames ({mixing} sprites part-way to the next frame)"),
+    );
     let shots: Vec<Measured> = run
         .pictures
         .lock()

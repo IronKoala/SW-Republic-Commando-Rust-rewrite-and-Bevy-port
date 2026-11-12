@@ -110,6 +110,11 @@ pub struct Sprite {
     /// Turns.
     pub spin: f32,
     pub frame: u32,
+    /// For emitters that mix frames (`BlendBetweenSubdivisions`): the
+    /// frame being mixed in, and how much of it shows (0-1, in 255 steps
+    /// as the engine stores it). Otherwise `frame` and 0.
+    pub next_frame: u32,
+    pub frame_mix: f32,
     /// Its flight, for sparks.
     pub velocity: [f32; 3],
     /// How far it moved in the last step (`Location - OldLocation`), for
@@ -180,6 +185,43 @@ pub fn frame_at(def: &EmitterDef, t: f32) -> u32 {
         (frames as f32 * t).floor() as i64
     };
     f.clamp(0, frames - 1) as u32
+}
+
+/// For an emitter that mixes frames (`BlendBetweenSubdivisions`, without
+/// `UseRandomSubdivision`): the frame mixed in at relative time `t` and
+/// how much of it shows. From Engine.dll
+/// (`USpriteEmitter::FillVertexBuffer` and `RenderParticles`), with `n`
+/// the frame count used by [`frame_at`] (`max(End - Start, 1)` with
+/// `SubdivisionEnd` set, otherwise all frames):
+/// - the next frame is `frame + 1`, or `frame` itself when `frame + 1`
+///   equals `n`;
+/// - the share is the part of `n x t` after the point, stored as a byte
+///   (`trunc(share x 255)`) in the vertex colour's alpha.
+///
+/// The graphics driver (D3DDrv.dll, `FD3DRenderInterface::SetParticleMaterial`)
+/// then draws the frame with the next one mixed in by that alpha
+/// (`D3DTOP_BLENDDIFFUSEALPHA`), times the vertex colour, and takes the
+/// opacity from the mixed picture alone: the vertex alpha is used up as
+/// the share, so the particle's own alpha does not show.
+pub fn frame_blend(def: &EmitterDef, t: f32) -> Option<(u32, f32)> {
+    if !def.blend_frames || def.random_frame || def.frames() <= 1 {
+        return None;
+    }
+    let t = t.clamp(0.0, 1.0);
+    let n = if def.frame_end != 0 {
+        (def.frame_end as i64 - def.frame_start as i64).max(1)
+    } else {
+        def.frames() as i64
+    };
+    let frame = frame_at(def, t);
+    let next = if frame as i64 + 1 == n {
+        frame
+    } else {
+        frame + 1
+    };
+    let nt = n as f32 * t;
+    let share = ((nt - nt.trunc()) * 255.0).trunc() / 255.0;
+    Some((next, share))
 }
 
 /// Where frame `frame` of a picture split into `frames_u` x `frames_v` sits,
@@ -579,6 +621,11 @@ impl EffectState {
                 } else {
                     frame_at(d, t)
                 };
+                let (next_frame, frame_mix) = if frames <= 1 {
+                    (frame, 0.0)
+                } else {
+                    frame_blend(d, t).unwrap_or((frame, 0.0))
+                };
                 Sprite {
                     position: p.position,
                     half_size: [p.size[0] * scale, p.size[1] * scale],
@@ -586,6 +633,8 @@ impl EffectState {
                     fade: fade.clamp(0.0, 1.0),
                     spin: p.spin,
                     frame,
+                    next_frame,
+                    frame_mix,
                     velocity: p.velocity,
                     movement: [0, 1, 2].map(|k| p.position[k] - p.old_position[k]),
                 }
@@ -738,6 +787,40 @@ mod tests {
     }
 
     #[test]
+    fn frames_mix_as_the_engine_mixes_them() {
+        // 1 x 8, like the bacta power bar.
+        let mut d = EmitterDef {
+            frames_u: 1,
+            frames_v: 8,
+            ..Default::default()
+        };
+        assert_eq!(
+            frame_blend(&d, 0.3),
+            None,
+            "only with BlendBetweenSubdivisions"
+        );
+        d.blend_frames = true;
+        // 8 x 0.3 = 2.4: frame 2 with 0.4 of frame 3 (as a byte: 102/255).
+        let (next, share) = frame_blend(&d, 0.3).unwrap();
+        assert_eq!((frame_at(&d, 0.3), next), (2, 3));
+        assert!((share - 101.0 / 255.0).abs() < 1.5 / 255.0, "{share}");
+        // The last frame mixes with itself.
+        assert_eq!(frame_blend(&d, 0.95).unwrap().0, 7);
+        // Random frames don't mix.
+        d.random_frame = true;
+        assert_eq!(frame_blend(&d, 0.3), None);
+        d.random_frame = false;
+        // With an end, "last" is frame + 1 == End - Start, as the engine
+        // compares it.
+        d.frame_start = 2;
+        d.frame_end = 6;
+        assert_eq!(frame_at(&d, 0.5), 4);
+        assert_eq!(frame_blend(&d, 0.5).unwrap().0, 5);
+        assert_eq!(frame_at(&d, 0.25), 3);
+        assert_eq!(frame_blend(&d, 0.25).unwrap().0, 3);
+    }
+
+    #[test]
     fn sprites_face_the_way_the_engine_turns_them() {
         let s = Sprite {
             position: [100.0, 0.0, 0.0],
@@ -746,6 +829,8 @@ mod tests {
             fade: 1.0,
             spin: 0.0,
             frame: 0,
+            next_frame: 0,
+            frame_mix: 0.0,
             velocity: [0.0; 3],
             movement: [0.0, 0.0, 2.0],
         };
