@@ -38,7 +38,7 @@ fn export_index(i: i32) -> Option<usize> {
     }
 }
 
-pub(crate) fn object_bytes<'a>(data: &'a [u8], e: &Export) -> Result<&'a [u8]> {
+pub fn object_bytes<'a>(data: &'a [u8], e: &Export) -> Result<&'a [u8]> {
     let start = e.serial_offset as usize;
     match data.get(start..start + e.serial_size as usize) {
         Some(b) => Ok(b),

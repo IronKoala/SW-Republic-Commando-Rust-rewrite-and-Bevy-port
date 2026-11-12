@@ -93,6 +93,13 @@ pub struct MapCollision {
     pub weapons: Vec<crate::pickups::PlacedWeapon>,
     /// Pickups of every kind left out of collision.
     pub pickups_not_solid: usize,
+    /// Loose physics props (`crate::karma`). Those that block players are
+    /// parts (`parts`), so their triangles can go when they move.
+    pub karma: Vec<crate::karma::KarmaBody>,
+    /// Actors that look like physics props but aren't simulated, and why.
+    pub karma_skipped: Vec<crate::karma::Skipped>,
+    /// The map's `MegaForce` pushers.
+    pub megaforces: Vec<crate::karma::MegaForce>,
 }
 
 impl MapCollision {
@@ -241,9 +248,6 @@ pub fn load(
     let mut anim_props = Vec::new();
     let mut not_solid = 0;
     let mut pickups_not_solid = 0;
-    // Physics props that fall as the level starts, moved down onto the
-    // ground below (`crate::settle`).
-    let mut karma = std::collections::HashSet::new();
     for &a in level.actors.iter().flatten() {
         let Ok(mut p) = actors::read_placement(&map.0, &map.1, a) else {
             continue;
@@ -315,13 +319,6 @@ pub fn load(
             }
             continue;
         }
-        if crate::settle::starts_awake(&map.0, &map.1, a)
-            && looks
-                .for_actor(&map.0, a, &mut |n| pkgs.get(n))
-                .is_some_and(|l| l.is_a("KarmaProp"))
-        {
-            karma.insert(a);
-        }
         let key = (Rc::as_ptr(&owner) as usize, p.static_mesh);
         let mesh = cache
             .entry(key)
@@ -342,26 +339,10 @@ pub fn load(
             !m.simple_shape.is_empty() && (0..m.triangle_count()).all(|k| !m.triangle_collides(k))
         })
         .count();
-    let (loose, fixed): (Vec<_>, Vec<_>) =
-        pairs.iter().partition(|(p, _)| karma.contains(&p.export));
-    let mut mesh = collision_triangles(&bsp, &fixed);
+    let mut mesh = collision_triangles(&bsp, &pairs);
     let (terrains, terrain_failures) =
         crate::terrain::read_terrains(&map.0, &map.1, level.actors.iter().flatten().copied());
     let terrain_triangles = crate::collision::add_terrains(&mut mesh, &terrains);
-    let settled: Vec<(Placement, &StaticMesh)> = {
-        let ground = crate::settle::Ground::new(&mesh.triangles);
-        loose
-            .iter()
-            .map(|(p, m)| {
-                let mut p = (*p).clone();
-                crate::settle::settle(&mut p, m, &ground);
-                (p, *m)
-            })
-            .collect()
-    };
-    let settled_refs: Vec<(&Placement, &StaticMesh)> =
-        settled.iter().map(|(p, m)| (p, *m)).collect();
-    crate::collision::add_meshes(&mut mesh, &settled_refs);
     let volumes = crate::volumes::blocking_volumes(&map.0, &map.1, &level);
     let blocking_volumes = add_blocking_volumes(&mut mesh, &volumes.volumes, true);
     // Take the movers' triangles out, so they can move.
@@ -380,6 +361,15 @@ pub fn load(
             .entry(b.export)
             .or_insert_with(|| (b.class.clone(), b.tag.clone()));
     }
+    // Physics props move, so they are parts too: the physics part switches
+    // a prop's triangles off once it moves (`crate::karma`).
+    let (karma, karma_skipped) = crate::karma::read(&mut looks, &map, &level, &mut |n| pkgs.get(n));
+    for b in &karma {
+        if let Some(e) = b.export {
+            parts.entry(e).or_insert_with(|| (b.class.clone(), b.tag.clone()));
+        }
+    }
+    let megaforces = crate::karma::megaforces(&map.0, &map.1, &level);
     parts.retain(|a, _| !is_mover.contains(a));
     let mut part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // Ammo boxes, dropped onto what is below them.
@@ -433,10 +423,9 @@ pub fn load(
     // A breakable prop with no collision at all (every section's
     // collision off and no simple shape) could never be hit, so it gets
     // its drawn triangles.
-    let shapes: HashMap<usize, (&Placement, &StaticMesh)> = fixed
+    let shapes: HashMap<usize, (&Placement, &StaticMesh)> = pairs
         .iter()
         .copied()
-        .chain(settled_refs.iter().copied())
         .map(|(p, m)| (p.export, (p, m)))
         .collect();
     for b in &breakables {
@@ -485,6 +474,9 @@ pub fn load(
         ammo_boxes,
         weapons,
         pickups_not_solid,
+        karma,
+        karma_skipped,
+        megaforces,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
         mesh_failures,

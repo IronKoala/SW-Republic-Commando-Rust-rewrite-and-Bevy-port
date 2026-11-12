@@ -17,6 +17,7 @@ pub mod class;
 pub mod class_defaults;
 pub mod class_library;
 pub mod font;
+pub mod karma;
 pub mod light;
 pub mod properties;
 pub mod reader;
