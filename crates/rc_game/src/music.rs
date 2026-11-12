@@ -11,7 +11,9 @@
 //!   and battle actions, passed on by the level scripts as `MusicCue`s;
 //! - menu music: each menu class's `BackgroundMusic` in
 //!   `XInterfaceCTMenus.u` (the main menu plays the sung "Vode An",
-//!   `musUI_mainmenuVOX_lp`; the loading screen and pause menu have none).
+//!   `musUI_mainmenuVOX_lp`; the loading screen and pause menu have none);
+//! - the title card's music: its card file's `BackgroundMusic`
+//!   (`title_card.rs`), played while play is paused for the card.
 //!
 //! `rc_music::Imuse` decides what plays; this file plays it with Bevy's
 //! audio, does the fades, pauses the level's music while a menu is open,
@@ -177,6 +179,7 @@ impl Plugin for MusicPlugin {
                 (
                     shell_music,
                     level_music.run_if(rc_game_core::playing),
+                    title_card_music,
                     fades,
                     watch_ends,
                     watch_started,
@@ -484,6 +487,95 @@ fn shell_music(
                 Layer::Main,
                 Fade::NONE,
             );
+        }
+    }
+}
+
+/// The title card's piece, playing while the card shows.
+#[derive(Component)]
+struct TitleCardTrack {
+    name: String,
+    /// Loudness from the piece's own settings.
+    base: f32,
+}
+
+/// The title card's music: its card file's `BackgroundMusic` starts when
+/// the card opens. The original's menus play it because the class sets
+/// `bBackgroundMusicDuringLevel` (Engine.u's `ManageMenuBackgroundMusic`);
+/// it isn't a level track, so pausing for the card doesn't pause it. It
+/// stops when the card closes (Geonosis's piece, 38.7 s, has ended by then:
+/// the card lasts 40 s). Not a `Track`, so the level's own layers and the
+/// director never see it.
+#[allow(clippy::too_many_arguments)]
+fn title_card_music(
+    mut commands: Commands,
+    cards: Res<crate::title_card::TitleCards>,
+    settings: Res<Settings>,
+    paths: Res<GamePaths>,
+    mut lib: ResMut<Library>,
+    mut started: Local<Option<String>>,
+    mut playing: Query<(Entity, &TitleCardTrack, Option<&mut AudioSink>)>,
+    log: Res<GameLog>,
+) {
+    let want = cards.showing.as_ref().map(|c| c.file.clone());
+    if *started != want {
+        for (e, t, _) in &playing {
+            log.line(format!("music: title card: {} stops", t.name));
+            commands.entity(e).try_despawn();
+        }
+        *started = want;
+        let music = cards.showing.as_ref().and_then(|c| c.music.clone());
+        if let Some(path) = music {
+            // The card names an object path; the music packages know the
+            // piece by its last part.
+            let name = path.rsplit('.').next().unwrap_or(&path).to_string();
+            let lib = library(&mut lib, &paths, &log);
+            match lib.resolve(&name, &mut rc_music::Rng::new(1)) {
+                Some(p) => {
+                    let file = paths.game_file(&format!("GameData/Music/{}.ogg", p.file));
+                    match std::fs::read(&file) {
+                        Ok(bytes) => {
+                            log.line(format!("music: title card: {} ({})", p.name, p.file));
+                            let base = p.volume.1;
+                            let handle = AudioSource {
+                                bytes: bytes.into(),
+                            };
+                            commands.queue(move |w: &mut World| {
+                                let h = w.resource_mut::<Assets<AudioSource>>().add(handle);
+                                w.spawn((
+                                    TitleCardTrack { name: p.name, base },
+                                    AudioPlayer(h),
+                                    PlaybackSettings {
+                                        mode: if p.looping {
+                                            PlaybackMode::Loop
+                                        } else {
+                                            PlaybackMode::Despawn
+                                        },
+                                        volume: Volume::Linear(0.0),
+                                        ..PlaybackSettings::DESPAWN
+                                    },
+                                ));
+                            });
+                        }
+                        Err(e) => log.line(format!(
+                            "music: title card: can't read {} ({e})",
+                            file.display()
+                        )),
+                    }
+                }
+                None => log.line(format!(
+                    "music: title card: {name} is not in the music packages"
+                )),
+            }
+        }
+    }
+    let user = user_volume(&settings);
+    for (_, t, sink) in &mut playing {
+        if let Some(mut s) = sink {
+            let v = t.base * user;
+            if (s.volume().to_linear() - v).abs() > 1e-4 {
+                s.set_volume(Volume::Linear(v));
+            }
         }
     }
 }

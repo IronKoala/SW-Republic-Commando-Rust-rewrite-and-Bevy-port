@@ -97,6 +97,10 @@ pub enum Kind {
     Prop,
 }
 
+/// The class whose `Trigger` plays its `BriefingAnim` and which carries
+/// passengers on its bones (ctcharacters.u).
+pub const BRIEFING_GUNSHIP: &str = "BriefingGunship";
+
 /// One placed character or animated prop.
 #[derive(Debug, Clone)]
 pub struct CastMember {
@@ -152,6 +156,9 @@ pub struct CastMember {
     /// How it can be hurt and die; `None` for props and for characters
     /// this part leaves unhurt (vehicles, classes with no `Health`).
     pub life: Option<Life>,
+    /// A `BriefingGunship` (ctcharacters.u): the animation its `Trigger`
+    /// plays (`BriefingAnim`, no class default). `None` for other classes.
+    pub briefing_anim: Option<String>,
 }
 
 /// A character's health and what its death does, from the map and its
@@ -466,6 +473,12 @@ pub fn find_cast(
                 .unwrap_or_else(|| defaults.bool("bHidden").unwrap_or(false)),
             prop_anim,
             prop_trigger,
+            briefing_anim: chain
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(BRIEFING_GUNSHIP))
+                .then(|| o.text("BriefingAnim").map(str::to_string))
+                .flatten()
+                .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("None")),
             root_motion: o
                 .int("Physics")
                 .or_else(|| defaults.number("Physics").map(|p| p as i32))

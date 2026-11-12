@@ -43,7 +43,8 @@ use rc_combat::{Died, Health, Hittable};
 use rc_game_core::units::{to_bevy, to_unreal, UU_PER_UNIT};
 use rc_game_core::{
     playing, CharacterAct, CharacterOrder, CharacterOrderDone, CurrentLevel, GameLog, GamePaths,
-    GameSet, GameState, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
+    GameSet, GameState, Passenger, Player, PlayerCamera, RaiseEvent, Riding, ScriptEvent,
+    ScriptTags,
 };
 use rc_model::NotifyTrigger;
 use rc_model::{Model, ModelSpec};
@@ -74,14 +75,24 @@ impl Plugin for CastPlugin {
             .add_systems(OnEnter(GameState::Loading), load_cast)
             .add_systems(
                 Update,
-                (spawn_cast, follow_orders, trigger_props, move_cast, die)
+                (
+                    spawn_cast.run_if(playing),
+                    // Orders and level events are taken even while play is
+                    // paused: those sent in the frame a pause begins (the
+                    // briefing's gunship passengers, sent as the title card
+                    // pauses play) would otherwise be lost unread.
+                    follow_orders,
+                    trigger_props,
+                    move_cast.run_if(playing),
+                    die.run_if(playing),
+                )
                     .chain()
                     .in_set(GameSet::Simulate)
-                    .run_if(playing),
+                    .run_if(in_state(GameState::InGame)),
             )
             .add_systems(
                 Update,
-                (place_cast, animate_cast)
+                (place_cast, animate_cast, carry_riders)
                     .chain()
                     .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
@@ -371,6 +382,28 @@ pub struct Cast {
     life: Option<Life>,
     /// When it died (`time`), once dead.
     died_at: Option<f32>,
+    /// A `BriefingGunship`'s `BriefingAnim`, played when a level event
+    /// triggers it.
+    briefing_anim: Option<String>,
+    /// What it carries on its bones (a `BriefingGunship`'s passengers).
+    riders: Vec<Rider>,
+    /// Where each rider's actor is this frame, in the world (Bevy units):
+    /// its `Location` and turn (set by `animate_cast`).
+    carrying: Vec<(Passenger, Vec3, Quat)>,
+    /// Where it is while it rides another's bone: the world place of its
+    /// model's own origin and its turn (worked out by `carry_riders`).
+    ride: Option<Transform>,
+}
+
+/// One passenger on a bone (ctcharacters.u's `BriefingGunship.AttachPassenger`).
+#[derive(Debug, Clone)]
+struct Rider {
+    passenger: Passenger,
+    bone: String,
+    /// `LocationOffset`: Unreal units along the bone's own axes.
+    offset: [f32; 3],
+    /// `RotationOffset`: Unreal pitch, yaw and roll.
+    rotation: [i32; 3],
 }
 
 impl Cast {
@@ -438,6 +471,10 @@ struct Look {
     /// moves to the move bone's place: drawing the move bone's travel
     /// shows the same, as the port doesn't move it.
     in_game: bool,
+    /// Where the model's pieces sit in the member's own space (dropped
+    /// for a model drawn from its origin, and scaled): bone frames are in
+    /// the pieces' space.
+    holder: Transform,
 }
 
 /// Where the held weapon's model goes for bones placed at `local`, in the
@@ -563,6 +600,10 @@ fn spawn_cast(
             trigger: m.prop_trigger.clone(),
             life: m.life.clone(),
             died_at: None,
+            briefing_anim: m.briefing_anim.clone(),
+            riders: Vec::new(),
+            carrying: Vec::new(),
+            ride: None,
         });
     }
     if !plan.members.is_empty() {
@@ -606,17 +647,15 @@ fn spawn_pieces(
         Kind::Pawn if m.align_bottom => 0.0,
         _ => -model.lift / UU_PER_UNIT,
     } * m.scale;
+    let holder_at = Transform {
+        translation: Vec3::new(0.0, drop, 0.0),
+        // The model faces the game's forward (+X, Bevy +X once
+        // converted), as the cast member's yaw expects.
+        rotation: Quat::IDENTITY,
+        scale: Vec3::splat(m.scale),
+    };
     parent.with_children(|p| {
-        let mut holder = p.spawn((
-            Transform {
-                translation: Vec3::new(0.0, drop, 0.0),
-                // The model faces the game's forward (+X, Bevy +X once
-                // converted), as the cast member's yaw expects.
-                rotation: Quat::IDENTITY,
-                scale: Vec3::splat(m.scale),
-            },
-            Visibility::default(),
-        ));
+        let mut holder = p.spawn((holder_at, Visibility::default()));
         holder.with_children(|c| {
             for (i, s) in model.sections.iter().enumerate() {
                 let (pos, nrm) = model.section_attributes(s, &points, &normals);
@@ -719,6 +758,7 @@ fn spawn_pieces(
         frame: 0.0,
         posed_once: false,
         in_game,
+        holder: holder_at,
     }
 }
 
@@ -733,9 +773,12 @@ fn follow_orders(
     mut orders: MessageReader<CharacterOrder>,
     mut done: MessageWriter<CharacterOrderDone>,
     mut cast: Query<(&mut Cast, &mut Visibility)>,
+    player: Query<Entity, With<Player>>,
     mut commands: Commands,
     log: Option<Res<GameLog>>,
 ) {
+    // Passengers taken off a bone, set free after the orders.
+    let mut freed: Vec<Passenger> = Vec::new();
     for o in orders.read() {
         let Ok((mut c, mut vis)) = cast.get_mut(o.target) else {
             continue; // not one of ours
@@ -874,6 +917,54 @@ fn follow_orders(
                 commands.entity(o.target).despawn();
                 finished = true;
             }
+            CharacterAct::AttachPassenger {
+                passenger,
+                bone,
+                offset,
+                rotation,
+                attach,
+            } => {
+                finished = true;
+                // ctcharacters.u's `ACTION_AttachToGunship` acts only when
+                // the script's own pawn is a `BriefingGunship`.
+                if !c.class.eq_ignore_ascii_case(read::BRIEFING_GUNSHIP) {
+                    log_line(
+                        &log,
+                        format!("{at} is a {}, not a BriefingGunship: AttachToGunship does nothing", c.class),
+                    );
+                } else if !*attach {
+                    c.riders.retain(|r| r.passenger != *passenger);
+                    freed.push(passenger.clone());
+                    log_line(&log, format!("{at} lets go of {passenger:?}"));
+                } else if bone.is_empty() {
+                    // `AttachPassenger` needs a bone.
+                    log_line(&log, format!("{at}: no AttachBone; {passenger:?} not attached"));
+                } else if !c
+                    .look
+                    .as_ref()
+                    .is_some_and(|l| l.model.skeleton.find(bone).is_some())
+                {
+                    log_line(
+                        &log,
+                        format!("{at} has no bone {bone} (or no model); {passenger:?} not attached"),
+                    );
+                } else {
+                    log_line(
+                        &log,
+                        format!(
+                            "{at} carries {passenger:?} on bone {bone}, offset ({:.0}, {:.0}, {:.0}), turned (pitch {}, yaw {}, roll {})",
+                            offset[0], offset[1], offset[2], rotation[0], rotation[1], rotation[2]
+                        ),
+                    );
+                    c.riders.retain(|r| r.passenger != *passenger);
+                    c.riders.push(Rider {
+                        passenger: passenger.clone(),
+                        bone: bone.clone(),
+                        offset: *offset,
+                        rotation: *rotation,
+                    });
+                }
+            }
         }
         if o.waits {
             if finished {
@@ -883,6 +974,22 @@ fn follow_orders(
                 });
             } else {
                 c.waiting = Some((o.script.clone(), o.index));
+            }
+        }
+    }
+    // As `DetachPassenger`: the body walks again where it is, and the
+    // player's view is its own again.
+    for p in freed {
+        match p {
+            Passenger::Player => {
+                for e in &player {
+                    commands.entity(e).remove::<Riding>();
+                }
+            }
+            Passenger::Character(e) => {
+                if let Ok((mut c, _)) = cast.get_mut(e) {
+                    c.ride = None;
+                }
             }
         }
     }
@@ -924,7 +1031,9 @@ fn move_cast(
         let goal = c.goal.clone();
         let mut finished = false;
         // Toward a point: (point, walk, stop within, face at the end).
+        // One carried on a bone has no physics of its own (`SetPhysics(PHYS_None)`).
         let target = match &goal {
+            _ if c.ride.is_some() => None,
             Goal::MoveTo { to, walk, face } => Some((*to, *walk, ARRIVED, *face)),
             Goal::MoveToPlayer { tolerance } => {
                 player.map(|p| (p, false, tolerance.max(ARRIVED), None))
@@ -1100,6 +1209,13 @@ fn die(
 /// Put each cast member's body where it is.
 fn place_cast(mut cast: Query<(&Cast, &mut Transform)>) {
     for (c, mut t) in &mut cast {
+        if let Some(r) = c.ride {
+            if t.translation != r.translation || t.rotation != r.rotation {
+                t.translation = r.translation;
+                t.rotation = r.rotation;
+            }
+            continue;
+        }
         let feet =
             rc_movement::Vec3::new(c.location[0], c.location[1], c.location[2] - c.half_height);
         let want =
@@ -1121,7 +1237,37 @@ fn trigger_props(
 ) {
     for e in events.read() {
         for mut c in &mut cast {
-            if c.trigger.is_none() || !c.tag.eq_ignore_ascii_case(&e.name) {
+            if !c.tag.eq_ignore_ascii_case(&e.name) {
+                continue;
+            }
+            // ctcharacters.u's `BriefingGunship.Trigger`: play its
+            // `BriefingAnim` if it has it.
+            if let Some(anim) = c.briefing_anim.clone() {
+                let clip = c.look.as_ref().and_then(|l| l.model.named_clip(&anim));
+                let what = match clip {
+                    Some(clip) => {
+                        let secs = clip.num_frames / clip.rate.max(1.0);
+                        c.scripted = Some(Scripted {
+                            clip,
+                            looping: false,
+                        });
+                        if let Some(l) = c.look.as_mut() {
+                            l.playing = None;
+                        }
+                        format!("plays {anim} ({secs:.2} s)")
+                    }
+                    None => format!("has no animation {anim}; nothing played"),
+                };
+                log_line(
+                    &log,
+                    format!(
+                        "t={:.2} {} triggered by {} ({}): {what}",
+                        c.time, c.name, e.name, e.by
+                    ),
+                );
+                continue;
+            }
+            if c.trigger.is_none() {
                 continue;
             }
             if let Some(what) = c.trigger() {
@@ -1166,8 +1312,11 @@ fn animate_cast(
             scripted,
             moving,
             look,
+            riders,
+            carrying,
             ..
         } = &mut *c;
+        carrying.clear();
         let Some(look) = look.as_mut() else {
             continue;
         };
@@ -1236,14 +1385,32 @@ fn animate_cast(
         }
         // Hidden or far away ones aren't posed; a still pose only once.
         let far = reach > 0.0 && eye.is_some_and(|e| e.distance(at.translation) > reach);
-        if !shown.get() || (far && look.posed_once) || (clip.is_none() && look.posed_once) {
+        let skip =
+            !shown.get() || (far && look.posed_once) || (clip.is_none() && look.posed_once);
+        // One carrying passengers is always worked out: they follow its
+        // bones even when it isn't drawn.
+        if skip && riders.is_empty() {
             continue;
         }
-        look.posed_once = true;
         let local = match clip {
             Some(k) => look.model.local_clip(k, look.frame),
             None => look.model.skeleton.local.clone(),
         };
+        for r in riders.iter() {
+            let frame = if look.in_game {
+                look.model.bone_frame_in_game(&local, &r.bone)
+            } else {
+                look.model.bone_frame(&local, &r.bone)
+            };
+            if let Some(f) = frame {
+                let (p, q) = carried_at(at, &look.holder, f, r.offset, r.rotation);
+                carrying.push((r.passenger.clone(), p, q));
+            }
+        }
+        if skip {
+            continue;
+        }
+        look.posed_once = true;
         if let Some((w, h)) = &look.weapon {
             if let Some(t) = weapon_transform(&look.model, &local, h, look.in_game) {
                 weapons_moved.push((*w, t));
@@ -1282,9 +1449,164 @@ fn animate_cast(
     }
 }
 
+/// Unreal's rotation matrix for a rotator (pitch, yaw, roll; 65536 a
+/// turn): its rows are where the turned X, Y and Z axes point (UE2's
+/// `FRotationMatrix`).
+fn rotator_axes(r: [i32; 3]) -> [[f32; 3]; 3] {
+    let a = |v: i32| v as f32 * std::f32::consts::TAU / 65536.0;
+    let (sp, cp) = a(r[0]).sin_cos();
+    let (sy, cy) = a(r[1]).sin_cos();
+    let (sr, cr) = a(r[2]).sin_cos();
+    [
+        [cp * cy, cp * sy, sp],
+        [sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp],
+        [-(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp],
+    ]
+}
+
+/// Where a passenger hung on a bone is, as the engine places an actor
+/// attached to a bone (Engine.dll `AActor::UpdateAttachments`, read
+/// locally: the passenger's place and turn are `RelativeLocation` and
+/// `RelativeRotation` taken through the bone's coordinates). `member` is
+/// the carrier's place, `holder` where its model's pieces sit, `frame`
+/// the bone's origin and axes in the pieces' space (one Unreal unit
+/// each). The passenger's `Location` in the world (Bevy units) and its
+/// turn (Bevy axes: the turn that takes the game's forward, Bevy +X, to
+/// its forward).
+fn carried_at(
+    member: &Transform,
+    holder: &Transform,
+    frame: [[f32; 3]; 4],
+    offset: [f32; 3],
+    rotation: [i32; 3],
+) -> (Vec3, Quat) {
+    let [o, x, y, z] = frame.map(Vec3::from);
+    let at = member.transform_point(
+        holder.translation + holder.scale * (o + x * offset[0] + y * offset[1] + z * offset[2]),
+    );
+    let r = rotator_axes(rotation);
+    let axis = |row: [f32; 3]| member.rotation * (x * row[0] + y * row[1] + z * row[2]);
+    // Unreal's X (forward) and Z (up) are Bevy's X and Y; its Y is Bevy's Z.
+    let forward = axis(r[0]).normalize_or_zero();
+    let up = axis(r[2]);
+    let up = (up - forward * forward.dot(up)).normalize_or_zero();
+    let q = Quat::from_mat3(&Mat3::from_cols(forward, up, forward.cross(up)));
+    (at, q)
+}
+
+/// Move what the briefing gunships carry: the player (its [`Riding`]) and
+/// cast members on their bones. When nothing carries the player any more
+/// (the gunship is gone), its view is its own again.
+fn carry_riders(
+    mut commands: Commands,
+    mut cast: Query<&mut Cast>,
+    player: Query<(Entity, Option<&Riding>), With<Player>>,
+    log: Option<Res<GameLog>>,
+) {
+    let mut moves = Vec::new();
+    for c in &cast {
+        for (p, at, q) in &c.carrying {
+            moves.push((c.name.clone(), p.clone(), *at, *q));
+        }
+    }
+    let mut player_carried = false;
+    for (base, p, at, q) in moves {
+        let u = to_unreal(at);
+        match p {
+            Passenger::Player => {
+                player_carried = true;
+                let Ok((e, now)) = player.single() else {
+                    continue;
+                };
+                let r = Riding {
+                    base: base.clone(),
+                    centre: [u.x, u.y, u.z],
+                    rotation: q,
+                };
+                if now != Some(&r) {
+                    if now.is_none() {
+                        let f = q * Vec3::X;
+                        log_line(
+                            &log,
+                            format!(
+                                "the player rides {base}: body at ({:.0}, {:.0}, {:.0}), facing {:.0} deg",
+                                u.x,
+                                u.y,
+                                u.z,
+                                f.z.atan2(f.x).to_degrees()
+                            ),
+                        );
+                    }
+                    commands.entity(e).insert(r);
+                }
+            }
+            Passenger::Character(e) => {
+                let Ok(mut c) = cast.get_mut(e) else {
+                    continue;
+                };
+                // Drawn from its model's own origin (`bAlignBottom` off).
+                let up = c.look.as_ref().map_or(Vec3::ZERO, |l| {
+                    l.holder.translation
+                        + l.holder.scale * Vec3::new(0.0, l.model.lift / UU_PER_UNIT, 0.0)
+                });
+                if c.ride.is_none() {
+                    log_line(
+                        &log,
+                        format!(
+                            "{} rides {base} at ({:.0}, {:.0}, {:.0})",
+                            c.name, u.x, u.y, u.z
+                        ),
+                    );
+                }
+                c.ride = Some(Transform::from_translation(at - q * up).with_rotation(q));
+                c.location = [u.x, u.y, u.z];
+                let f = q * Vec3::X;
+                c.yaw = f.z.atan2(f.x);
+            }
+        }
+    }
+    if !player_carried {
+        if let Ok((e, Some(_))) = player.single() {
+            commands.entity(e).remove::<Riding>();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_yaw_offset_turns_the_passenger() {
+        // A bone along the carrier's own axes: Unreal X, Y, Z are Bevy X,
+        // Z, Y. A quarter turn of yaw (16384) turns forward to Unreal +Y.
+        let frame = [
+            [1.0, 2.0, 3.0],
+            [0.02, 0.0, 0.0],
+            [0.0, 0.0, 0.02],
+            [0.0, 0.02, 0.0],
+        ];
+        let (at, q) = carried_at(
+            &Transform::IDENTITY,
+            &Transform::IDENTITY,
+            frame,
+            [50.0, 0.0, 0.0],
+            [0, 16384, 0],
+        );
+        assert!((at - Vec3::new(2.0, 2.0, 3.0)).length() < 1e-5, "{at}");
+        let f = q * Vec3::X;
+        assert!((f - Vec3::Z).length() < 1e-5, "forward {f}");
+        assert!((q * Vec3::Y - Vec3::Y).length() < 1e-5);
+    }
+
+    #[test]
+    fn rotator_axes_are_unreals() {
+        let r = rotator_axes([0, 0, 0]);
+        assert_eq!(r, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        // Pitch up a quarter turn: forward points up.
+        let r = rotator_axes([16384, 0, 0]);
+        assert!((r[0][2] - 1.0).abs() < 1e-6);
+    }
 
     #[test]
     fn turning_takes_the_short_way_round() {

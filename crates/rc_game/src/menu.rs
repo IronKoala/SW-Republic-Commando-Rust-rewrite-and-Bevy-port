@@ -58,6 +58,9 @@ pub enum Page {
     /// The end-of-campaign debriefing (`debriefing.rs`). Back does
     /// nothing; only CONTINUE leaves it.
     Debriefing,
+    /// A campaign's title card (`title_card.rs`): it closes by itself;
+    /// back does nothing.
+    TitleCard,
     /// The original PROFILES page and its NEW PROFILE name page
     /// (`original_profiles.rs`). Only reachable when they can be drawn
     /// from the install; there is no placeholder.
@@ -191,10 +194,14 @@ impl Plugin for MenuPlugin {
             )
             .add_systems(
                 OnEnter(Play::Paused),
-                |mut m: ResMut<Menu>, d: Res<crate::debriefing::Debriefing>| {
-                    // A level's debriefing pauses play too.
+                |mut m: ResMut<Menu>,
+                 d: Res<crate::debriefing::Debriefing>,
+                 t: Res<crate::title_card::TitleCards>| {
+                    // A level's debriefing and title card pause play too.
                     m.reset(if d.showing.is_some() {
                         Page::Debriefing
+                    } else if t.showing.is_some() {
+                        Page::TitleCard
                     } else {
                         Page::Paused
                     })
@@ -342,6 +349,9 @@ pub fn items(
             "DEBRIEFING (PLACEHOLDER)".into(),
             vec![it("Continue", Cmd::Continue)],
         ),
+        // Marked: the original page couldn't be drawn. The lines on screen
+        // now are shown as the notice under the title; it closes by itself.
+        Page::TitleCard => ("TITLE CARD (PLACEHOLDER)".into(), vec![]),
         Page::Paused => (
             "PAUSED".into(),
             vec![
@@ -447,8 +457,9 @@ fn navigate(
         menu.dirty = true;
     }
     let back = actions.just_pressed(Action::MenuBack);
-    let cmd = if back && menu.page == Page::Debriefing {
-        // Only CONTINUE leaves the debriefing, as in the original.
+    let cmd = if back && matches!(menu.page, Page::Debriefing | Page::TitleCard) {
+        // Only CONTINUE leaves the debriefing, and the title card closes
+        // by itself, as in the original.
         None
     } else if back {
         Some(Cmd::Back)

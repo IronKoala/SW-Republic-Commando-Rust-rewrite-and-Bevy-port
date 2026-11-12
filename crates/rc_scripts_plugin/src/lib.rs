@@ -354,6 +354,8 @@ pub struct PlayStats {
     pub add_ammo: Vec<String>,
     /// HUD blinks started (`ACTION_BlinkHUD...`): `Kind seconds`.
     pub hud_blinks: Vec<String>,
+    /// Title cards asked for (`ACTION_ShowTitleCardScreen`), by `Args`.
+    pub title_cards: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
@@ -718,7 +720,10 @@ fn run(
         MessageWriter<rc_game_core::MusicCue>,
         MessageWriter<tracker::TrackerAsk>,
     ),
-    mut hud: MessageWriter<HudMessage>,
+    (mut hud, mut title_cards): (
+        MessageWriter<HudMessage>,
+        MessageWriter<rc_game_core::ShowTitleCard>,
+    ),
     mut damage: MessageWriter<Damage>,
     (restoring, prompts): (Option<Res<RestoringSave>>, Option<Res<InputPrompts>>),
     log: Res<GameLog>,
@@ -966,6 +971,29 @@ fn run(
                     ));
                     script.stats.music_cues += 1;
                     music.write(cue);
+                    continue;
+                }
+                // The title card: the game pauses and shows it
+                // (rc_game/src/title_card.rs); this script's next action
+                // waits while the game is paused, as in the original.
+                if call.kind == "showtitlecardscreen" {
+                    let menu_class = call
+                        .action
+                        .text("MenuClass")
+                        .filter(|c| !c.is_empty())
+                        .unwrap_or(TITLE_CARD_MENU)
+                        .to_string();
+                    let args = call.action.text("Args").unwrap_or("").to_string();
+                    log.line(format!(
+                        "{PART}: t={now:.2} {} #{} title card {args:?} ({menu_class})",
+                        call.script, call.index
+                    ));
+                    script.stats.title_cards.push(args.clone());
+                    title_cards.write(rc_game_core::ShowTitleCard {
+                        menu_class,
+                        args,
+                        by: format!("{} #{}", call.script, call.index),
+                    });
                     continue;
                 }
                 if let Some(tag) = tracker::asked(&call.action) {
@@ -1313,6 +1341,10 @@ fn carry_out(
         }
     }
 }
+
+/// The menu `ACTION_ShowTitleCardScreen` opens when the map names none
+/// (the action's `MenuClass` default in the install's CTGame.u).
+const TITLE_CARD_MENU: &str = "XInterfaceCTMenus.CTTitleCardMenu";
 
 /// The HUD parts the scripts blink run their time out (the original adds
 /// the time between drawings of the HUD).
