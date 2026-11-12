@@ -21,7 +21,9 @@
 //! What the buttons do (in `rc_game`): A unpauses and closes the page
 //! (`OnAButton`: `SetPause(false)`, then `MenuClose`); B switches hint
 //! screens off (`bKeepHintMenusAwfulHack=false`) and then does what A
-//! does. Back does nothing (`CTInfoBase.HandleInputBack` is empty).
+//! does. Back does nothing (`CTInfoBase.HandleInputBack` is empty); a
+//! gamepad's B and A go to `HandleInputGamePad` instead (B = CONTINUE
+//! WITHOUT HINTS, A = CONTINUE WITH HINTS).
 
 use crate::layout::{Kind, MenuLayout};
 

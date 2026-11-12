@@ -1040,11 +1040,14 @@ fn steps() -> Vec<Step> {
             |w| objective_line(w).is_ok(),
             60.0,
         ),
-        Shot("objective"),
+        // Checked in the same frame the wait ends: a subtitle starting
+        // during the screenshot takes the objective's place (as in the
+        // original), which made the check depend on timing.
         Check(
             "the current objective is drawn at the top, as in the original",
             objective_line,
         ),
+        Shot("objective"),
         // The landing gunship hovers over the landing zone, as in the
         // user's screenshot of the original: its class turns
         // `bAlignBottom` off, so it is drawn from its map place, not
@@ -1638,6 +1641,36 @@ fn steps() -> Vec<Step> {
             } else {
                 Err(format!("showing {:?}, play {play:?}", h.showing.is_some()))
             }
+        }),
+        // A gamepad, as the original's console hands its buttons to the
+        // menu: B is CONTINUE WITHOUT HINTS (not back), and A is CONTINUE
+        // WITH HINTS whichever button has the focus.
+        Note(|w| {
+            w.resource_mut::<Settings>().game.hint_screens = true;
+            w.resource_mut::<ActionState>().last_device = rc_game_core::InputDevice::Gamepad;
+            hint_ask(w, true);
+        }),
+        Wait(0.5),
+        Press(Action::MenuBack), // the pad's B
+        Until(
+            "on a gamepad, B is CONTINUE WITHOUT HINTS",
+            |w| hint_closed(w) && !w.resource::<Settings>().game.hint_screens,
+            5.0,
+        ),
+        Note(|w| {
+            w.resource_mut::<Settings>().game.hint_screens = true;
+            hint_ask(w, true);
+        }),
+        Wait(0.5),
+        Press(Action::MenuDown), // focus on CONTINUE WITHOUT HINTS
+        Press(Action::MenuAccept), // the pad's A
+        Until(
+            "on a gamepad, A is CONTINUE WITH HINTS wherever the focus is",
+            |w| hint_closed(w) && w.resource::<Settings>().game.hint_screens,
+            5.0,
+        ),
+        Note(|w| {
+            w.resource_mut::<ActionState>().last_device = rc_game_core::InputDevice::KeyboardMouse
         }),
         // Hints back on, and saved so: CONTINUE WITHOUT HINTS saved the
         // script's settings file with them (and the helmet) off.

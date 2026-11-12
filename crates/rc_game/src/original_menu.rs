@@ -173,6 +173,10 @@ const HINT_ON: &str = "hint_on";
 /// What the hint screen's CONTINUE WITHOUT HINTS does (`act:hint_off`).
 const HINT_OFF: &str = "hint_off";
 
+/// The pad's buttons on the hint screen, for the log.
+const A_BUTTON_NAME: &str = "A (CONTINUE WITH HINTS)";
+const B_BUTTON_NAME: &str = "B (CONTINUE WITHOUT HINTS)";
+
 /// What the pause menu's ENABLE HINTS does (`act:enable_hints`).
 const ENABLE_HINTS: &str = "enable_hints";
 
@@ -1680,15 +1684,38 @@ fn navigate(
                 menus.work.push(OptionWork::Rebind(i));
                 return;
             }
-            let cmd = match chosen {
-                Some(i) => p.buttons.command(i).cloned(),
+            // The hint screen with a gamepad: the original's console
+            // (Engine.u `KeyEvent`) hands the pad's A and B buttons to the
+            // menu's `HandleInputGamePad` first, and on a PC the joystick's
+            // first buttons are those keys (WinDrv.dll sends DirectInput
+            // button n as key 0xC8 + n, `IK_GameA` + n). `CTPauseHintText`
+            // takes B as CONTINUE WITHOUT HINTS and `CTInfoBase` A as
+            // CONTINUE WITH HINTS, whichever button has the focus; both
+            // return true, so the pad's B never reaches back. Escape stays
+            // back (empty on this page).
+            let pad = actions.last_device == rc_game_core::InputDevice::Gamepad;
+            let pad_cmd = if k != HINT_PAGE || !pad {
+                None
+            } else if back {
+                Some((B_BUTTON_NAME, PageCmd::Act(HINT_OFF.into())))
+            } else if by_key && actions.just_pressed(Action::MenuAccept) {
+                Some((A_BUTTON_NAME, PageCmd::Act(HINT_ON.into())))
+            } else {
+                None
+            };
+            let cmd = match (pad_cmd, chosen) {
+                (Some((name, c)), _) => {
+                    log.line(format!("original menus: page {k}: gamepad {name}: {c:?}"));
+                    Some(c)
+                }
+                (None, Some(i)) => p.buttons.command(i).cloned(),
                 // `back = "unavailable"`: back does nothing on this page
                 // (the debriefing).
-                None if back => match p.plan.back.clone() {
+                (None, None) if back => match p.plan.back.clone() {
                     Some(PageCmd::Unavailable) => None,
                     b => Some(b.unwrap_or(PageCmd::Back)),
                 },
-                None => None,
+                (None, None) => None,
             };
             let Some(cmd) = cmd else {
                 return;

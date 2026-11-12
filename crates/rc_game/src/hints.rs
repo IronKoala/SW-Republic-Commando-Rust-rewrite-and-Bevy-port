@@ -16,7 +16,10 @@
 //! - CONTINUE WITHOUT HINTS (`OnBButton`): hints off, then as A. Like
 //!   ENABLE HINTS on the pause menu, the setting is saved (the original
 //!   keeps it in `User.ini`).
-//! - Back does nothing (`CTInfoBase.HandleInputBack` is empty).
+//! - Back (Escape) does nothing (`CTInfoBase.HandleInputBack` is empty).
+//! - On a gamepad, B is CONTINUE WITHOUT HINTS and A is CONTINUE WITH
+//!   HINTS wherever the focus is (`HandleInputGamePad`; see
+//!   `original_menu.rs`).
 //!
 //! If the original page can't be drawn, a placeholder page (marked as one)
 //! shows the text with the same two choices.
@@ -24,9 +27,6 @@
 //! Not done: a second hint asked for while one shows is left out (none of
 //! the 29 can do that: each waits on a timer first); what the original
 //! would do then is decided in its compiled code and wasn't checked.
-//! Gamepad B on the original calls CONTINUE WITHOUT HINTS
-//! (`HandleInputGamePad`); here back does nothing on every device, because
-//! whether the PC version sends the pad's B there is in its compiled code.
 
 use crate::menu::{save_settings, Menu, Page};
 use crate::original_menu::OriginalMenus;

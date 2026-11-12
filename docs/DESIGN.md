@@ -4091,10 +4091,14 @@ and text moved up to the class's numbers. CONTINUE WITH HINTS
 switches `hint_screens` off, saves the settings and goes on; back does
 nothing, as `CTInfoBase.HandleInputBack` is empty. The pause menu's
 ENABLE HINTS switches them back on. If the page can't be drawn, a
-placeholder page (marked) shows the text with the same two choices. Not
-done: the other languages' moves (the port reads only English), gamepad B
-as CONTINUE WITHOUT HINTS (the class's `HandleInputGamePad` does it, but
-whether the PC game sends the pad's B there is in compiled code), and a
+placeholder page (marked) shows the text with the same two choices.
+With a gamepad, B is CONTINUE WITHOUT HINTS and A is CONTINUE WITH HINTS
+wherever the focus is: the original's console (`KeyEvent` in Engine.u)
+hands `IK_GameA`/`IK_GameB` to the menu's `HandleInputGamePad` before
+anything else, the hint classes take them and return true, and on a PC
+WinDrv.dll sends DirectInput joystick button n as key 0xC8 + n (checked
+in its machine code; 0xC8 is `IK_GameA`, so button 1 is `IK_GameB`). Not
+done: the other languages' moves (the port reads only English) and a
 second hint while one shows (none of the 29 can: each waits on a timer
 first).
 
