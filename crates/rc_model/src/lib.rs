@@ -946,24 +946,48 @@ impl Model {
             .collect()
     }
 
-    /// As [`Model::posed_from_origin`], but with the root bone (the
-    /// skeleton's first, `Move` in the dispensers) held at its rest place:
-    /// for models whose root bone's travel moves the whole actor
-    /// (`PHYS_RootMotion`) rather than the drawing. See
-    /// [`Model::root_offset`].
+    /// As [`Model::posed_from_origin`], but placed as the original game
+    /// poses a mesh ([`rc_anim::globals_in_game`]): the bones hanging from
+    /// the move bone don't follow it. For an actor whose physics is root
+    /// motion, that travel moves the actor instead (see
+    /// [`Model::root_offset`]); the droid dispensers' intro drops.
     pub fn posed_rooted(&self, key: &str, frame: f32) -> Vec<[f32; 3]> {
-        let mut local = match self.clips.get(key) {
+        let local = match self.clips.get(key) {
             Some(clip) => clip.sample(&self.skeleton, frame),
             None => self.skeleton.local.clone(),
         };
-        if let (Some(l), Some(rest)) = (local.first_mut(), self.skeleton.local.first()) {
-            l.pos = rest.pos;
-        }
-        let pose = globals(&self.skeleton.parents, &local);
+        let mv = rc_anim::move_bone(&self.skeleton.names);
+        let pose = rc_anim::globals_in_game(&self.skeleton.parents, &local, mv);
         skin(&self.mesh.points, &self.weights, &self.skeleton, &pose)
             .into_iter()
             .map(|p| to_bevy(mesh_point(&self.mesh, p)))
             .collect()
+    }
+
+    /// [`Model::bone_from_origin`] as the original game places bones (see
+    /// [`Model::posed_rooted`]).
+    pub fn bone_from_origin_in_game(
+        &self,
+        key: &str,
+        frame: f32,
+        bone: &str,
+    ) -> Option<([f32; 3], [[f32; 3]; 3])> {
+        let i = self.skeleton.find(bone)?;
+        let local = match self.clips.get(key) {
+            Some(clip) => clip.sample(&self.skeleton, frame),
+            None => self.skeleton.local.clone(),
+        };
+        let mv = rc_anim::move_bone(&self.skeleton.names);
+        let pose = rc_anim::globals_in_game(&self.skeleton.parents, &local, mv);
+        let g = pose.get(i)?;
+        let at = mesh_point(&self.mesh, g.pos);
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|d| {
+            let tip = mesh_point(&self.mesh, g.apply(d));
+            let v = [tip[0] - at[0], tip[1] - at[1], tip[2] - at[2]];
+            let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+            v.map(|c| c / len)
+        });
+        Some((at, axes))
     }
 
     /// How far the root bone (the skeleton's first) is from its rest place

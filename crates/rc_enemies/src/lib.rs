@@ -1196,16 +1196,24 @@ fn think(
 }
 
 /// Put each droid's entity where its body is.
-fn place_droids(fight: Res<Fight>, mut droids: Query<(&Droid, &mut Transform, &mut Hittable)>) {
+fn place_droids(
+    fight: Res<Fight>,
+    // A droid riding out of a dispenser has no `Hittable` until it has
+    // unfolded, but is still placed.
+    mut droids: Query<(&Droid, &mut Transform, Option<&mut Hittable>)>,
+) {
     for f in &fight.battle.fighters {
         let Some(&e) = fight.entities.get(&f.id) else {
             continue;
         };
-        let Ok((_, mut t, mut hit)) = droids.get_mut(e) else {
+        let Ok((_, mut t, hit)) = droids.get_mut(e) else {
             continue;
         };
         t.translation = to_bevy(f.pawn.feet());
         t.rotation = Quat::from_rotation_y(-f.facing);
+        let Some(mut hit) = hit else {
+            continue;
+        };
         let h = if f.pawn.crouched {
             f.params.movement.crouch_height
         } else {

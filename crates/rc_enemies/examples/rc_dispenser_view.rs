@@ -13,7 +13,8 @@
 //! the intro, if it has one). At 16 s it hurts the dispenser three times
 //! (to 60 %, 30 % and 0 of its health), as the player's explosives would.
 //!
-//! Pictures go to `logs/dispenser_view_<seconds>.png` along the way, and
+//! Pictures go to `logs/dispenser_view_<seconds>.png` along the way
+//! (`--shots 1.5,6,7.2` picks other moments), and
 //! the game's log to `logs/rc_dispenser_view.log`. Ends with CHECK lines
 //! about what the dispenser did and exits 1 if any failed.
 
@@ -54,13 +55,34 @@ struct Watch {
     online_sent: bool,
     hurt: u32,
     shots_taken: usize,
+    shots: Vec<f32>,
     done: bool,
 }
 
 fn main() -> AppExit {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let draw_level = args.iter().any(|a| a == "--level");
-    let args: Vec<String> = args.into_iter().filter(|a| a != "--level").collect();
+    let shots: Vec<f32> = match args.iter().position(|a| a == "--shots") {
+        Some(i) => args
+            .get(i + 1)
+            .map(|l| l.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+            .unwrap_or_default(),
+        None => SHOTS.to_vec(),
+    };
+    let args: Vec<String> = {
+        let mut out = Vec::new();
+        let mut skip = false;
+        for a in args {
+            if skip {
+                skip = false;
+            } else if a == "--shots" {
+                skip = true;
+            } else if a != "--level" {
+                out.push(a);
+            }
+        }
+        out
+    };
     let map = args.first().cloned().unwrap_or_else(|| "yyy_35b".into());
     let which = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
     let _ = std::fs::create_dir_all("logs");
@@ -101,6 +123,7 @@ fn main() -> AppExit {
             online_sent: false,
             hurt: 0,
             shots_taken: 0,
+            shots,
             done: false,
         })
         .add_systems(Startup, |mut next: ResMut<NextState<GameState>>| {
@@ -310,8 +333,11 @@ fn run(
         }
         watch.hurt += 1;
     }
-    if watch.shots_taken < SHOTS.len() && t >= SHOTS[watch.shots_taken] {
-        let path = format!("logs/dispenser_view_{:04.1}.png", SHOTS[watch.shots_taken]);
+    if watch.shots_taken < watch.shots.len() && t >= watch.shots[watch.shots_taken] {
+        let path = format!(
+            "logs/dispenser_view_{:04.1}.png",
+            watch.shots[watch.shots_taken]
+        );
         commands
             .spawn(Screenshot::primary_window())
             .observe(save_to_disk(path));

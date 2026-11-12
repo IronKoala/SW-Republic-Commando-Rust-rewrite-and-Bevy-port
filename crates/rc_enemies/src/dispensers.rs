@@ -228,12 +228,12 @@ pub fn motion(
         let mut path = Vec::new();
         let mut f = 0.0;
         while f <= last {
-            if let Some((at, axes)) = model.bone_from_origin(&anim, f, &bone) {
-                // From the machine's origin, which the root bone's travel
-                // moves (none in the slots' animations read so far).
+            // As the game places bones: the move bone's travel moves the
+            // machine, not its other bones.
+            if let Some((at, axes)) = model.bone_from_origin_in_game(&anim, f, &bone) {
                 path.push(BoneSample {
                     seconds: f / rate,
-                    at: v(at) - v(model.root_offset(&anim, f)),
+                    at: v(at),
                     x: v(axes[0]),
                     z: v(axes[2]),
                 });
@@ -756,6 +756,8 @@ pub fn show_steps(
                             follow: Some(carrier),
                             vanish_with_carrier: true,
                             axes: None,
+                            // `CurrentEffect` stays until the next look replaces it.
+                            endless: true,
                         });
                     }
                     stats.effects.push(format!("{name} {e}"));
