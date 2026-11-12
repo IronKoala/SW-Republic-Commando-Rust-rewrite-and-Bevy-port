@@ -19,7 +19,7 @@ struct Night {
     blur: f32,
     grain_tiles: vec2<f32>,
     grain_offset: vec2<f32>,
-    unused: vec2<f32>,
+    plain: vec2<f32>,
 };
 
 @group(0) @binding(0) var screen: texture_2d<f32>;
@@ -64,6 +64,15 @@ fn window_u(x: f32, aspect: f32) -> f32 {
 fn fragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let size = vec2<f32>(textureDimensions(screen));
     let aspect = size.x / size.y;
+    let tiles = night.grain_tiles * vec2(aspect / (4.0 / 3.0), 1.0);
+
+    // Normal and tactical mode with static on the helmet: as the original's
+    // plain vision shaders, the picture plus strength x (grain - 0.5).
+    if night.plain.x > 0.5 {
+        let c = to_screen(textureSample(screen, clamp_sampler, uv).rgb);
+        let g = textureSample(grain_picture, repeat_sampler, uv * tiles + night.grain_offset).rgb;
+        return vec4(from_screen(c + night.grain * (g - vec3(0.5))), 1.0);
+    }
 
     // A slightly blurred copy, as the original read.
     let s = night.blur / size;
@@ -85,7 +94,6 @@ fn fragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
     // Film grain, a new place every frame. Square specks: the repeats
     // across grow with the screen's width.
-    let tiles = night.grain_tiles * vec2(aspect / (4.0 / 3.0), 1.0);
     let g = textureSample(grain_picture, repeat_sampler, uv * tiles + night.grain_offset).r;
     col = col + vec3(night.grain * (g - 0.5));
 

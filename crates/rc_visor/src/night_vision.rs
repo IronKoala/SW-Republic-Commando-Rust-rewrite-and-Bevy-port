@@ -111,6 +111,41 @@ impl Default for LowLightLook {
     }
 }
 
+/// Static on the helmet's view in normal and tactical mode (near a jamming
+/// device's interference generator), as written in `[helmet_static]` of
+/// the data file. The original adds the HUD's static to the film grain of
+/// the vision mode's own shader (engine.dll); in low light mode that is the
+/// night-vision grain, in the other two the plain modes' shaders, which
+/// only add grain to the picture. Their grain repeats are read from the
+/// install.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct StaticLook {
+    /// Off: no static picture (the hiss still plays).
+    pub picture: bool,
+    /// The original's vision mode objects for normal and tactical mode.
+    pub normal_mode: String,
+    pub tactical_mode: String,
+    /// The shader a mode uses when it names none (engine.u's `VisionMode`
+    /// default).
+    pub default_shader: String,
+    /// Used only when the game folder can't be read: grain repeats across
+    /// and down a 4:3 screen.
+    pub fallback_tiles: [f32; 2],
+}
+
+impl Default for StaticLook {
+    fn default() -> Self {
+        StaticLook {
+            picture: true,
+            normal_mode: "FrameFX.VisionModes.VisionNormal".into(),
+            tactical_mode: "FrameFX.VisionModes.VisionEnhance".into(),
+            default_shader: "FrameFX.VisionShaders.VisionShaderNormal".into(),
+            fallback_tiles: [6.3, 6.7],
+        }
+    }
+}
+
 /// Put on a 3D camera to show it through the night-vision visor. The visor
 /// does this itself in low light mode.
 #[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default, Debug, PartialEq)]
@@ -135,7 +170,9 @@ pub struct NightVisionView {
     pub grain_tiles: Vec2,
     /// Where the grain is shifted to this frame, 0 to 1.
     pub grain_offset: Vec2,
-    pub unused: Vec2,
+    /// `x` 1: the plain modes' picture (normal and tactical with static):
+    /// only the grain is added, nothing else changes. `y` unused.
+    pub plain: Vec2,
 }
 
 /// The pictures the pass uses: the visor window and the film grain. Made

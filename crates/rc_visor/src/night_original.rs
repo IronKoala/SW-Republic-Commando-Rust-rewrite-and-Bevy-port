@@ -184,6 +184,60 @@ pub fn read(lib: &mut Library, mode_path: &str) -> NightOriginal {
     out
 }
 
+/// A plain vision mode's film grain (normal and tactical): the mode's
+/// `Noise` (0 to 1) and how many times its shader's grain repeats across
+/// and down the screen (vertex constant 1). A mode that names no shader
+/// uses `default_shader` (engine.u's `VisionMode` default,
+/// `VisionShaderNormal`). The shader adds `strength * (grain - 0.5)` to the
+/// picture (its pixel shader: `mad r0.rgb, c1, t1_bias, t0`), where engine.dll
+/// sets the strength to `Noise` plus the HUD's static.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ModeGrain {
+    pub noise: f32,
+    pub tiles: Option<[f32; 2]>,
+    pub shader: Option<String>,
+    pub problems: Vec<String>,
+}
+
+pub fn read_mode_grain(lib: &mut Library, mode_path: &str, default_shader: &str) -> ModeGrain {
+    let mut out = ModeGrain::default();
+    let mut shader = default_shader.to_string();
+    match lib.find(mode_path) {
+        Ok((loaded, i)) => {
+            let top = mode_path.split('.').next().unwrap_or_default().to_string();
+            match props_of(&loaded.pkg, &loaded.data, i) {
+                Ok(mode) => {
+                    if let Some(Value::Byte(b)) = get(&loaded.pkg, &mode, "Noise", 0) {
+                        out.noise = *b as f32 / 255.0;
+                    }
+                    if let Some(Value::Object(o)) = get(&loaded.pkg, &mode, "VisionShader", 0) {
+                        if *o != 0 {
+                            shader = path_of(&loaded.pkg, &top, *o);
+                        }
+                    }
+                }
+                Err(e) => out.problems.push(format!("{mode_path}: {e}")),
+            }
+        }
+        Err(e) => out.problems.push(e),
+    }
+    match lib.find(&shader) {
+        Ok((loaded, i)) => match props_of(&loaded.pkg, &loaded.data, i) {
+            Ok(p) => {
+                out.tiles = get(&loaded.pkg, &p, "VSConstants", 1)
+                    .and_then(|v| constant_xy(&loaded.pkg, v));
+                if out.tiles.is_none() {
+                    out.problems.push(format!("{shader} has no grain repeats"));
+                }
+            }
+            Err(e) => out.problems.push(format!("{shader}: {e}")),
+        },
+        Err(e) => out.problems.push(e),
+    }
+    out.shader = Some(shader);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,5 +266,26 @@ mod tests {
         let (s, e) = n.fog.unwrap();
         assert!(s > 0.0 && e > s);
         println!("{n:?}");
+        // The plain modes: no grain of their own, the repeats of their
+        // shaders (VisionNormal names none: engine.u's default).
+        let normal = read_mode_grain(
+            &mut lib,
+            "FrameFX.VisionModes.VisionNormal",
+            "FrameFX.VisionShaders.VisionShaderNormal",
+        );
+        assert!(normal.problems.is_empty(), "{:?}", normal.problems);
+        assert_eq!(normal.noise, 0.0);
+        assert_eq!(normal.tiles, Some([6.265625, 6.7421875]));
+        let tactical = read_mode_grain(
+            &mut lib,
+            "FrameFX.VisionModes.VisionEnhance",
+            "FrameFX.VisionShaders.VisionShaderNormal",
+        );
+        assert!(tactical.problems.is_empty(), "{:?}", tactical.problems);
+        assert_eq!(
+            tactical.shader.as_deref(),
+            Some("FrameFX.VisionShaders.VisionShaderEnhance")
+        );
+        assert_eq!(tactical.tiles, Some([9.21875, 6.5390625]));
     }
 }

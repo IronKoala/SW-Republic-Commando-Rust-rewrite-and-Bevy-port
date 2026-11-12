@@ -4848,6 +4848,32 @@ picture after cycling round), and `rc_game --script` (starts in tactical
 with the squad glowing, X goes to low light with the lamp and back, the two
 GAME page rows change the settings).
 
+### Static near a jamming device (`rc_scripts_plugin/src/interference.rs`, `rc_visor`)
+
+geo_03a places 4 `InterferenceGenerator`s (invisible actors, ctgame.u)
+round its jamming device. Near one that is on, the helmet's view gets
+static and a hiss. Everything here is the original's own rules: the
+UnrealScript text (ctgame.u, engine.u), class defaults, the vision shaders
+in `FrameFX.utx`, and the compiled code (Engine.dll, D3DDrv.dll),
+disassembled locally for reference. Nothing decompiled or from the game is
+in the repository.
+
+| Original | Where | Port |
+|---|---|---|
+| `bIsOn` (default true); a level event naming its tag switches it on/off | ctgame.u `InterferenceGenerator.Trigger` | `interference::run` on `ScriptEvent` |
+| geo_03a sends `InterferenceGenerator` after `Target01Destroyed` | the map's `ScriptedTrigger76` | the scripts part already sends it |
+| `StaticAlpha = int((1 - d / ScavDroidMaxRange) ^ ScavStaticGamma * 128)` for the nearest generator that is on within range, else 0; d from the view | ctgame.u `CTHUD.Tick`, `PreRender`; CTHUD defaults 1000 and 1.5; `const MAX_SCAV_STATIC = 128` | `StaticRule::alpha` -> `rc_game_core::HudStatic` |
+| grain strength (pixel constant c1) = min(255, clamp(StaticAlpha, 0, 255) + the mode's `Noise`) / 255 | Engine.dll `UFrameFX::AccumulateWorkingTarget` (HUD + 0x544, VisionMode + 0x83) | `rc_visor::update_night_vision` |
+| normal and tactical shaders: picture + c1 x (grain - 0.5); grain repeats from vertex constant 1 (normal 6.27 x 6.74, tactical 9.22 x 6.54) | `VisionShaderNormal` (engine.u's `VisionMode` default; `VisionNormal` names none), `VisionShaderEnhance` | the night-vision pass with `plain` set |
+| grain shifted by vertex constant 4, an `EVC_Flicker` (X 0, Y 111): each frame three new `rand()/32767` numbers r0..r2, out = (Y r2 + 1 - Y, Y r0 + 1 - Y, ...) | D3DDrv.dll `FD3DRenderInterface::SetShaderConstants`, case 27 | a new random offset every frame (also for low light, which moved 30 times a second before) |
+| hiss: `StaticScavenger` (`GEN_Sound.Interface.int_GEN_squadHeal_lp_01`) loops while StaticAlpha > 0; volume to StaticAlpha / 255 over 0.1 s (straight line); stops with a 0.5 s fade | Engine.dll `UHelmet::DrawHUD` (end) | `interference::run`, `StaticHiss` |
+
+Not done: the Trandoshan scavenger droid's own generator and the full
+static of one on the helmet (`bScavangerHead`), the incapacitated static
+(180, `StaticIncapacitated`), keeping generators' on/off in saves. The
+grain widens with the screen (square specks), as the low light grain
+does; the original stretched it.
+
 ## Particle effects (`rc_effects`, `rc_effects_plugin`)
 
 The game's fireballs, smoke, sparks and flying debris are `Emitter`

@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: Static near the jamming device's interference generators (rc_scripts_plugin, rc_visor, rc_game_core, data/visor/tactical.toml)
+
+- **Changed:** New `rc_scripts_plugin/src/interference.rs` (geo_03a's 4 `InterferenceGenerator`s: on/off by event, the HUD's `StaticAlpha`, the hiss). New `rc_game_core::HudStatic`. `rc_visor`: the full-screen pass also draws the plain modes' grain when there is static (`NightVisionView::plain`), adds static to the low light grain, reads normal/tactical grain repeats from the install (`night_original::read_mode_grain`), moves the grain every frame; new optional `[helmet_static]` in the data file (defaults in code). `visor_check` has two new steps.
+- **Why:** Item 23 of the Geonosis gap list: nothing read the class, so walking up to the jamming device did nothing.
+- **Where it comes from:** ctgame.u `CTHUD.Tick`/`InterferenceGenerator`, CTHUD defaults, FrameFX.utx vision shaders, Engine.dll `UFrameFX::AccumulateWorkingTarget` and `UHelmet::DrawHUD`, D3DDrv.dll `EVC_Flicker` (disassembled locally, nothing committed). Table in docs/DESIGN.md.
+- **Tested how:** `cargo test -p rc_scripts_plugin -p rc_visor -p rc_game_core` with RC_GAME_DIR (files staged read-only from the user's install); `xvfb-run ... visor_check` with RC_GAME_DIR.
+- **Result:** All tests pass. geo_03a: 4 generators, all on, CTHUD range 1000 gamma 1.5, hiss `GEN_Sound.Interface.int_GEN_squadHeal_lp_01`, `ScriptedTrigger76` sends their tag; standing at the jamming device gives StaticAlpha 46. `VISOR CHECK: 20 passed, 0 failed`: static 128 raises the floor's speckle from 0.29 to 15.28 with the brightness about the same (56.7 to 52.3), and it goes back to 0.29 when the static stops.
+- **Still broken / not tested:** Not tested in a running level or on Windows (the hiss is not heard by any test). Scavenger droids, incapacitated static and saving generator state are not done.
+- **Next:** Playtest geo_03a on Windows.
+
 ## 2026-11-12: The objective tracker, the original's ring, arrow and distance (rc_scripts_plugin, rc_game, rc_game_core, rc_package, data/ui/objective_tracker.toml)
 
 - **Changed:** New `rc_scripts_plugin::tracker`: the script step `ACTION_ShowActorObjectiveTracker` (before: "not done yet"), the lookup of each map's tracker targets, and the helmet's rules (sight check, ring or corner arrows, distance). New `rc_game/src/objective_tracker.rs` draws it with the original's pictures and font. New `rc_game_core::PlayerPawn` (the player body's centre and look, published by the player part), `ClassLibrary::object_path`, data file `data/ui/objective_tracker.toml`. `toml` moved to `rc_scripts_plugin`'s normal dependencies.

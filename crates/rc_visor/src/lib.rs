@@ -73,6 +73,11 @@ pub struct VisorReadout {
     pub changes: u32,
     /// The night-vision picture is on the player's view now.
     pub night_vision: bool,
+    /// Film grain strength on the view now (0 to 1): the mode's own plus
+    /// the helmet's static.
+    pub grain: f32,
+    /// The plain static picture (normal or tactical mode) is on now.
+    pub static_picture: bool,
 }
 
 /// Glows in tactical mode, in the colour of the named thing.
@@ -139,6 +144,9 @@ pub struct VisorLook {
     /// The low light mode's numbers from the install (pictures already
     /// handed to [`NightVisionImages`]).
     pub night: night_original::NightOriginal,
+    /// The normal and tactical modes' film grain, for static.
+    pub normal: night_original::ModeGrain,
+    pub tactical: night_original::ModeGrain,
 }
 
 #[derive(Resource, Default)]
@@ -271,10 +279,42 @@ fn load_look(
             use_night_pictures(&mut night, images, have);
         }
     }
+    // The plain modes' grain, for static near an interference generator.
+    let (mut normal, mut tactical) = (
+        night_original::ModeGrain::default(),
+        night_original::ModeGrain::default(),
+    );
+    if file.helmet_static.picture {
+        if let Some(p) = &paths {
+            let st = &file.helmet_static;
+            let mut lib = rc_menus::library::Library::new(&p.game_data());
+            normal = night_original::read_mode_grain(&mut lib, &st.normal_mode, &st.default_shader);
+            tactical =
+                night_original::read_mode_grain(&mut lib, &st.tactical_mode, &st.default_shader);
+        }
+        for (what, g) in [("normal", &normal), ("tactical", &tactical)] {
+            say(
+                &log,
+                format!(
+                    "visor: {what} mode static grain from the game: shader {}, own noise {:.3}, repeats {:?}{}",
+                    g.shader.as_deref().unwrap_or("-"),
+                    g.noise,
+                    g.tiles,
+                    if g.problems.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({}; using the data file's stand-in)", g.problems.join("; "))
+                    }
+                ),
+            );
+        }
+    }
     commands.insert_resource(VisorLook {
         file,
         original: found,
         night,
+        normal,
+        tactical,
     });
 }
 
@@ -582,36 +622,79 @@ fn random(n: u32) -> f32 {
     (x & 0xFF_FFFF) as f32 / 16_777_216.0
 }
 
-/// The night-vision picture: on the player's camera in low light mode
-/// (unless `[low_light] picture = false`), off otherwise. It fades in from
-/// black, and the grain moves 30 times a second. The mode's distance fog
-/// goes on and off with it.
+/// The full-screen pass on the player's camera. In low light mode
+/// (unless `[low_light] picture = false`) it is the night-vision picture:
+/// it fades in from black, and the mode's distance fog goes on and off
+/// with it. In normal and tactical mode it is only there while the helmet
+/// has static ([`HudStatic`]): the plain modes' grain over the picture.
+///
+/// The grain strength is the mode's own `Noise` plus the static, held to
+/// 255, over 255 (engine.dll `UFrameFX::AccumulateWorkingTarget`). The grain
+/// moves to a new random place every frame: the shaders shift it by their
+/// vertex constant 4, an `EVC_Flicker` value D3DDrv.dll fills with new
+/// random numbers each frame (111 x random - 110 across and down).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_night_vision(
     mut commands: Commands,
     state: Res<VisorState>,
     look: Option<Res<VisorLook>>,
+    hud_static: Option<Res<rc_game_core::HudStatic>>,
     time: Res<Time>,
     cameras: Query<(Entity, Option<&NightVisionView>, Has<NightFog>), With<PlayerCamera>>,
     mut readout: ResMut<VisorReadout>,
     mut since: Local<f32>,
+    mut frame: Local<u32>,
     log: Option<Res<GameLog>>,
 ) {
+    *frame = frame.wrapping_add(1);
+    let alpha = hud_static.map_or(0, |s| s.alpha).clamp(0, 255) as f32 / 255.0;
     let wanted = look
         .as_ref()
         .filter(|l| l.file.low_light.picture && state.mode == VisorMode::LowLight);
+    // Static in normal or tactical mode: the plain modes' grain.
+    let plain = look
+        .as_ref()
+        .filter(|l| wanted.is_none() && alpha > 0.0 && l.file.helmet_static.picture);
+    let offset = Vec2::new(random(*frame * 2), random(*frame * 2 + 1));
     let mut on = false;
+    let mut grain_now = 0.0;
     for (e, view, has_fog) in &cameras {
+        if wanted.is_none() && has_fog {
+            commands
+                .entity(e)
+                .remove::<(NightFog, rc_game_core::OwnFog, DistanceFog)>();
+        }
         let Some(look) = wanted else {
-            if view.is_some() {
-                commands.entity(e).remove::<NightVisionView>();
-            }
-            if has_fog {
-                commands
-                    .entity(e)
-                    .remove::<(NightFog, rc_game_core::OwnFog, DistanceFog)>();
-            }
             *since = 0.0;
+            match plain {
+                Some(look) => {
+                    let g = if state.mode == VisorMode::Tactical {
+                        &look.tactical
+                    } else {
+                        &look.normal
+                    };
+                    let grain = (g.noise + alpha).min(1.0);
+                    grain_now = grain;
+                    let next = NightVisionView {
+                        grain,
+                        fade: 1.0,
+                        grain_tiles: Vec2::from(
+                            g.tiles.unwrap_or(look.file.helmet_static.fallback_tiles),
+                        ),
+                        grain_offset: offset,
+                        plain: Vec2::new(1.0, 0.0),
+                        ..default()
+                    };
+                    if view != Some(&next) {
+                        commands.entity(e).insert(next);
+                    }
+                }
+                None => {
+                    if view.is_some() {
+                        commands.entity(e).remove::<NightVisionView>();
+                    }
+                }
+            }
             continue;
         };
         on = true;
@@ -624,11 +707,12 @@ fn update_night_vision(
         };
         let [r, g, b] = l.tint;
         let tint = Color::srgb_u8(r, g, b).to_linear();
-        let step = (time.elapsed_secs_wrapped() * 30.0) as u32;
+        let grain = (n.grain.unwrap_or(l.fallback_grain) * l.grain_scale.max(0.0) + alpha).min(1.0);
+        grain_now = grain;
         let next = NightVisionView {
             tint: Vec4::new(tint.red, tint.green, tint.blue, 1.0),
             boost: l.boost.max(0.0),
-            grain: n.grain.unwrap_or(l.fallback_grain) * l.grain_scale.max(0.0),
+            grain,
             fade: if l.fade_seconds > 0.0 {
                 (*since / l.fade_seconds).clamp(0.0, 1.0)
             } else {
@@ -638,8 +722,8 @@ fn update_night_vision(
             window_middle: l.window_middle,
             blur: 1.5,
             grain_tiles: Vec2::from(n.grain_tiles.unwrap_or(l.fallback_grain_tiles)),
-            grain_offset: Vec2::new(random(step * 2), random(step * 2 + 1)),
-            unused: Vec2::ZERO,
+            grain_offset: offset,
+            plain: Vec2::ZERO,
         };
         if view != Some(&next) {
             commands.entity(e).insert(next);
@@ -659,6 +743,22 @@ fn update_night_vision(
                 },
             ));
         }
+    }
+    readout.grain = grain_now;
+    let plain_on = plain.is_some() && !cameras.is_empty();
+    if plain_on != readout.static_picture {
+        readout.static_picture = plain_on;
+        say(
+            &log,
+            if plain_on {
+                format!(
+                    "visor: static on the {} view (grain {grain_now:.3})",
+                    state.mode.name()
+                )
+            } else {
+                "visor: static off".to_string()
+            },
+        );
     }
     if on != readout.night_vision {
         readout.night_vision = on;

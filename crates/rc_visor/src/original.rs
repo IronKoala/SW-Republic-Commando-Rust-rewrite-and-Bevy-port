@@ -52,6 +52,10 @@ pub struct VisorFile {
     /// The low light mode's night-vision picture. Missing: our defaults.
     #[serde(default)]
     pub low_light: crate::night_vision::LowLightLook,
+    /// Static on the view near an interference generator. Missing: our
+    /// defaults.
+    #[serde(default)]
+    pub helmet_static: crate::night_vision::StaticLook,
 }
 
 impl VisorFile {

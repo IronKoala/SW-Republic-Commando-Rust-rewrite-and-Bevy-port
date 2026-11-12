@@ -37,6 +37,8 @@ enum Change {
     Options(VisorChoice, f32),
     /// Press CYCLE VISOR MODE.
     Key,
+    /// Static on the helmet (the HUD's StaticAlpha), in normal mode.
+    Static(i32),
 }
 
 const STEPS: &[(&str, Change)] = &[
@@ -50,6 +52,9 @@ const STEPS: &[(&str, Change)] = &[
     ("key: normal", Change::Key),
     ("key: tactical", Change::Key),
     ("intensity 0", Change::Options(VisorChoice::Cycle, 0.0)),
+    // Next to an interference generator: the most static it gives (128).
+    ("static 128", Change::Static(128)),
+    ("static gone", Change::Static(0)),
 ];
 
 /// Per picture: red excess at the ball's edge and in its middle, blue
@@ -67,6 +72,8 @@ struct Measured {
     corner: f32,
     /// Whole-picture brightness.
     picture: f32,
+    /// Speckle: how much neighbouring floor pixels differ, on average.
+    speckle: f32,
     mode: Option<VisorMode>,
     shown: usize,
 }
@@ -116,6 +123,22 @@ fn main() {
         found.colours, found.problems
     );
     let has_window = night.mask.is_some();
+    let (mut normal, mut tactical) = Default::default();
+    if let Some(dir) = std::env::var_os("RC_GAME_DIR") {
+        let st = &file.helmet_static;
+        let mut lib = rc_menus::library::Library::new(&PathBuf::from(dir).join("GameData"));
+        normal = rc_visor::night_original::read_mode_grain(
+            &mut lib,
+            &st.normal_mode,
+            &st.default_shader,
+        );
+        tactical = rc_visor::night_original::read_mode_grain(
+            &mut lib,
+            &st.tactical_mode,
+            &st.default_shader,
+        );
+        println!("static grain: normal {normal:?}, tactical {tactical:?}");
+    }
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -131,6 +154,8 @@ fn main() {
             file,
             original: found,
             night,
+            normal,
+            tactical,
         })
         .insert_resource(Run {
             window: has_window,
@@ -225,6 +250,7 @@ fn drive(
     mut settings: ResMut<VisorSettings>,
     mut state: ResMut<VisorState>,
     mut actions: ResMut<ActionState>,
+    mut hud_static: ResMut<rc_game_core::HudStatic>,
     readout: Res<VisorReadout>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -256,6 +282,14 @@ fn drive(
             }
             Change::Key => {
                 actions.update(HashSet::from([Action::Flashlight]), Vec2::ZERO, Vec2::ZERO)
+            }
+            Change::Static(a) => {
+                *settings = VisorSettings {
+                    choice: VisorChoice::Off,
+                    intensity: 0.0,
+                };
+                state.mode = VisorMode::Normal;
+                hud_static.alpha = a;
             }
         }
         println!("step: {name}");
@@ -328,6 +362,14 @@ fn measure(captured: On<ScreenshotCaptured>, run: Res<Run>) {
         }
     }
     floor /= ((h / 10) * (w / 5)) as f32;
+    let mut speckle = 0.0;
+    for y in (h * 85 / 100)..(h * 95 / 100) {
+        for x in (w * 40 / 100)..(w * 60 / 100) {
+            let (a, b) = (px(x as f32, y as f32), px(x as f32 + 1.0, y as f32));
+            speckle += ((a[0] + a[1] + a[2]) - (b[0] + b[1] + b[2])).abs() / 3.0;
+        }
+    }
+    speckle /= ((h / 10) * (w / 5)) as f32;
     // The whole picture, every 4th pixel.
     let (mut colour, mut picture, mut n) = (0.0, 0.0, 0.0);
     for y in (0..h).step_by(4) {
@@ -360,11 +402,12 @@ fn measure(captured: On<ScreenshotCaptured>, run: Res<Run>) {
         colour,
         corner,
         picture,
+        speckle,
         mode: Some(mode),
         shown,
     };
     println!(
-        "  {name}: mode {:?}, shells shown {shown}, night vision {night}, ball edge red {edge:.1}, middle {middle:.1}, box blue {box_blue:.1}, floor {floor:.1}, picture {picture:.1}, colour {colour:.1}, corner {corner:.1}",
+        "  {name}: mode {:?}, shells shown {shown}, night vision {night}, ball edge red {edge:.1}, middle {middle:.1}, box blue {box_blue:.1}, floor {floor:.1}, speckle {speckle:.2}, picture {picture:.1}, colour {colour:.1}, corner {corner:.1}",
         mode
     );
     let _ = std::fs::create_dir_all("logs");
@@ -506,6 +549,33 @@ fn failures(run: &Run, readout: &VisorReadout) -> Vec<String> {
             "back in tactical mode the glow differs ({:.1} against {:.1})",
             back_t.ball_edge_red, t1.ball_edge_red
         ));
+    }
+    // Static: grain over the normal picture (only with the install's grain
+    // picture; the stand-in is flat), the same brightness on average, and
+    // gone again with the static.
+    if let (Some(st), Some(gone)) = (get("static 128"), get("static gone")) {
+        if run.window && st.speckle < normal.speckle + 3.0 {
+            out.push(format!(
+                "static 128: no grain on the floor (speckle {:.2} against {:.2})",
+                st.speckle, normal.speckle
+            ));
+        }
+        if (st.floor - normal.floor).abs() > 6.0 {
+            out.push(format!(
+                "static 128: the floor's brightness moved ({:.1} against {:.1})",
+                st.floor, normal.floor
+            ));
+        }
+        if (gone.speckle - normal.speckle).abs() > 1.0
+            || (gone.picture - normal.picture).abs() > 3.0
+        {
+            out.push(format!(
+                "static gone: the picture differs from normal (speckle {:.2} against {:.2})",
+                gone.speckle, normal.speckle
+            ));
+        }
+    } else {
+        out.push("static pictures missing".into());
     }
     if zero.ball_edge_red > normal.ball_edge_red + 3.0 || zero.shown != 0 {
         out.push(format!(
