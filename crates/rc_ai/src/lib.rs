@@ -24,7 +24,7 @@ pub use battle::{
 };
 pub use brain::{AiEvent, Fighter, Maneuver, Mode, ScriptGoal, Target, View};
 pub use params::{AiParams, EnemyType, GrenadeUse, Sounds};
-pub use spawns::{read_factories, Factory, Offspring, SpawnSpot, StartState};
+pub use spawns::{read_factories, read_placed, Factory, Offspring, Placed, SpawnSpot, StartState};
 
 #[cfg(test)]
 mod tests;
