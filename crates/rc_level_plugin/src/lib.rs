@@ -155,6 +155,14 @@ pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelAmbientSounds(pub Vec<rc_level::ambient::AmbientSound>);
 
+/// The faces of blocking volumes that a line with no thickness passes
+/// through in the original (`bBlockZeroExtentTraces` off). They are part
+/// of `LevelCollision` too; a sight check that must see through them, as
+/// the original's do (the objective tracker), treats a hit on one of these
+/// as no hit. Present while in the game.
+#[derive(Resource, Clone)]
+pub struct LineThroughVolumes(pub Arc<TriangleWorld>);
+
 /// One part of the level a script can switch off (see `LevelParts`).
 pub struct Part {
     pub export: usize,
@@ -357,6 +365,7 @@ fn forget(
     commands.remove_resource::<LevelInfo>();
     commands.remove_resource::<LevelMoverData>();
     commands.remove_resource::<LevelParts>();
+    commands.remove_resource::<LineThroughVolumes>();
     commands.remove_resource::<rc_game_core::PlaceLight>();
     commands.remove_resource::<LevelBreakables>();
     commands.remove_resource::<LevelAmbientSounds>();
@@ -515,6 +524,12 @@ fn load(world: &mut World) {
     ));
     world.insert_resource(LevelAmbientSounds(std::mem::take(&mut lvl.ambient_sounds)));
     world.insert_resource(LevelCollision(parts.world()));
+    world.insert_resource(LineThroughVolumes(Arc::new(TriangleWorld::new(
+        lvl.line_through_triangles
+            .iter()
+            .map(|t| [v(t[0]), v(t[1]), v(t[2])])
+            .collect(),
+    ))));
     world.insert_resource(parts);
     // Ammo and grenade boxes, for the combat part to hand out.
     let boxes: Vec<_> = lvl

@@ -42,6 +42,11 @@ pub struct MapCollision {
     /// The same for shots-only props that are parts (`parts`), by export
     /// index, so they can go when they break. Not in `part_triangles`.
     pub shot_part_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
+    /// The faces of blocking volumes in `triangles` that a line with no
+    /// thickness passes through in the original (`bBlockZeroExtentTraces`
+    /// off): its sight checks, such as the objective tracker's, ignore
+    /// them. Kept apart so a line check can tell them from the rest.
+    pub line_through_triangles: Vec<[Vec3; 3]>,
     /// Placed meshes that collide through their simple collision shape
     /// (collision off on every section; see
     /// `crate::collision::solid_local_triangles`).
@@ -406,8 +411,20 @@ pub fn load(
             crate::pickups::rest_weapon_on_ground(w, |p| ground.below(p));
         }
     }
+    let lines_pass: std::collections::HashSet<usize> = volumes
+        .volumes
+        .iter()
+        .filter(|v| !v.block_traces)
+        .map(|v| v.export)
+        .collect();
+    let mut line_through_triangles = Vec::new();
     let mut triangles = Vec::with_capacity(mesh.triangles.len());
     for (t, src) in mesh.triangles.into_iter().zip(mesh.sources) {
+        if let Source::Volume(a) = src {
+            if lines_pass.contains(&a) && !parts.contains_key(&a) {
+                line_through_triangles.push(t);
+            }
+        }
         match src {
             Source::Actor(a) if is_mover.contains(&a) => {
                 mover_triangles.entry(a).or_default().push(t)
@@ -461,6 +478,7 @@ pub fn load(
         shot_only_props: shot_only.len(),
         shot_triangles,
         shot_part_triangles,
+        line_through_triangles,
         simple_shape_props,
         movers,
         mover_triangles,

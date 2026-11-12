@@ -6,6 +6,8 @@ edition.workspace = true
 
 [dependencies]
 rc_anim = { path = "../rc_anim" }
+# Health, being hit and dying (the troopers standing about in missions).
+rc_combat = { path = "../rc_combat" }
 # Weapon classes (which model a character holds) and reading static meshes.
 rc_effects = { path = "../rc_effects" }
 rc_effects_plugin = { path = "../rc_effects_plugin" }

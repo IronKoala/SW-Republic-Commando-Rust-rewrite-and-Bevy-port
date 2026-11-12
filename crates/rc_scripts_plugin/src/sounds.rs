@@ -725,6 +725,7 @@ mod tests {
                 yaw: 0.0,
             }]),
             sounds: vec![],
+            ammo: vec![],
             anchors: vec![],
             started: true,
             scene: crate::cutscene::Scene::default(),
