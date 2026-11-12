@@ -98,6 +98,39 @@ impl DrawStyle {
     }
 }
 
+/// Which way a sprite particle faces (`SpriteEmitter.UseDirectionAs`,
+/// `EParticleDirectionUsage` in `Engine.u`). How each is drawn was read
+/// from the engine's own code (`USpriteEmitter::FillVertexBuffer` in
+/// `Engine.dll`); see `crate::sim::sprite_axes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Facing {
+    /// `PTDU_None` (the class default): flat to the camera.
+    #[default]
+    Camera,
+    /// `PTDU_Up`: stretched along the way it moves, turned to the camera
+    /// round that line (beams, sprays, lightning).
+    Up,
+    /// `PTDU_Forward`: flat across the way it moves.
+    Forward,
+    /// `PTDU_Normal`: flat across `ProjectionNormal`. Not drawn that way
+    /// yet (drawn flat to the camera); no bacta effect uses it.
+    Normal,
+    /// `PTDU_UpAndNormal`. Not drawn that way yet (as `Normal`).
+    UpAndNormal,
+}
+
+impl Facing {
+    pub fn from_byte(b: u8) -> Self {
+        match b {
+            1 => Facing::Up,
+            2 => Facing::Forward,
+            3 => Facing::Normal,
+            4 => Facing::UpAndNormal,
+            _ => Facing::Camera,
+        }
+    }
+}
+
 /// Where new particles start around the emitter (`EParticleStartLocationShape`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartShape {
@@ -232,6 +265,15 @@ pub struct EmitterDef {
     /// the model is drawn the way its own materials say (solid), not with
     /// the emitter's `draw_style`.
     pub mesh_blend: bool,
+    /// `UseDirectionAs` (sprite emitters).
+    pub facing: Facing,
+    /// `ZTest` (the class default is on): off draws the particles over
+    /// everything, walls included (the bacta dispenser's hologram).
+    pub z_test: bool,
+    /// `BlendBetweenSubdivisions`: the engine mixes each frame into the
+    /// next. **Not done yet**: we show whole frames (see
+    /// `crate::sim::frame_at`).
+    pub blend_frames: bool,
 }
 
 impl Default for EmitterDef {
@@ -280,6 +322,9 @@ impl Default for EmitterDef {
             damping: Range::fixed(1.0),
             coordinate_system: CoordinateSystem::Independent,
             mesh_blend: false,
+            facing: Facing::Camera,
+            z_test: true,
+            blend_frames: false,
         }
     }
 }
