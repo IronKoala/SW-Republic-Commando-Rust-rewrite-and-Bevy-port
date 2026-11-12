@@ -922,6 +922,27 @@ fn steps() -> Vec<Step> {
             }
         }),
         Note(|w| w.resource_mut::<Settings>().game.helmet = true),
+        // The effects the map places (`rc_scripts_plugin::placed_emitters`):
+        // all of geo_01a's 11 run from the map's own copies of their
+        // emitters, and a level event naming the gunship's ground dust
+        // switches it off and back on (engine.dll's rule).
+        Until(
+            "the map's placed effects run from the map's own copies",
+            placed_effects_run,
+            10.0,
+        ),
+        Note(|w| spawner_event(w, "REP_Gunship_GroundDust")),
+        Until(
+            "an event switches the gunship's ground dust off (nothing drawn)",
+            |w| ground_dust_on(w) == Some(false),
+            5.0,
+        ),
+        Note(|w| spawner_event(w, "REP_Gunship_GroundDust")),
+        Until(
+            "a second event switches it back on",
+            |w| ground_dust_on(w) == Some(true),
+            5.0,
+        ),
         // The level's effect spawners (`rc_scripts_plugin::fx_factories`):
         // the opening script sends OverheadVehicles, which switches on
         // geo_01a's five overhead spawners; the game's own gunship and
@@ -4215,6 +4236,56 @@ fn fx_overhead_on(w: &mut World) -> bool {
                 .count()
                 == 5
         })
+}
+
+/// Every placed effect that isn't hidden is running, each started from
+/// its map copy (the effects part keeps it under the actor's name), with
+/// nothing missing to draw it.
+fn placed_effects_run(w: &mut World) -> bool {
+    let Some(em) = w.get_resource::<rc_scripts_plugin::placed_emitters::LevelEmitters>() else {
+        return false;
+    };
+    let wanted: Vec<String> = em
+        .list
+        .iter()
+        .filter(|e| !e.hidden && e.def.is_some())
+        .map(|e| e.name.clone())
+        .collect();
+    let all = em.list.len();
+    let running = em.running();
+    let Some(st) = w.get_resource::<rc_effects_plugin::EffectStats>() else {
+        return false;
+    };
+    let started = wanted
+        .iter()
+        .filter(|n| st.spawned.iter().any(|s| s == *n))
+        .count();
+    let missing: Vec<&String> = st
+        .missing
+        .iter()
+        .filter(|m| wanted.iter().any(|n| m.starts_with(&format!("{n}:"))))
+        .collect();
+    let ok = all > 0 && running == wanted.len() && started == wanted.len();
+    if ok || !missing.is_empty() {
+        w.resource::<GameLog>().line(format!(
+            "script: placed effects: {all} in the map, {running} running, {started} started from the map's copies; missing {missing:?}"
+        ));
+    }
+    ok && missing.is_empty()
+}
+
+/// Whether geo_01a's gunship ground dust is sending and drawn (`None`
+/// while it isn't running).
+fn ground_dust_on(w: &mut World) -> Option<bool> {
+    let mut q = w.query::<&rc_effects_plugin::RunningEffect>();
+    let r = q
+        .iter(w)
+        .find(|r| r.name().eq_ignore_ascii_case("REP_Gunship_GroundDust0"))?;
+    let on = r.state.emitters.iter().any(|e| !e.disabled);
+    let n = r.state.emitters.len();
+    w.resource::<GameLog>()
+        .line(format!("script: ground dust: {n} parts, sending {on}"));
+    Some(on)
 }
 
 /// Send a level event straight to the effect and projectile spawners (not

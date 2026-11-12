@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: Effects placed in the maps run the map's own copies (rc_effects, rc_effects_plugin, rc_scripts_plugin, rc_game)
+
+- **Changed:** `rc_effects::read::Library::placed_effects` reads every effect a map places with the map's own copies of its emitters and the actor's own sounds, life span, unlit, hidden and AutoDestroy values (new `PlacedEffect`; `rc_effects` now uses `rc_level` to read actor values). `EmitterDef` gains `trigger_disabled` and `reset_on_trigger`; `EffectState::trigger` and a per-part `EmitterState::disabled`. `rc_effects_plugin`: `SpawnEffect::def` and `PreloadEffect::def` (an effect's own definition), `TriggerEffect`, pictures shared between effects, placed effects stay while their carrier does. `rc_scripts_plugin/src/placed_emitters.rs` rewritten to use them. `rc_effect_check --maps`. Self-test checks in `rc_game --script`.
+- **Why:** Gap list item 26 (placed effects). The port drew each placed effect from its class, but the map holds its own, often edited, copy; 24 plain `Emitter`s built in the map couldn't be drawn at all; and what a level event does to an effect was a guess.
+- **Where it comes from:** the maps (each actor's `Emitters` list and values); engine.u (`Emitter.Trigger`, `ParticleEmitter` defaults: `TriggerDisabled` on); engine.dll read for reference only, in a scratch folder (`UParticleEmitter::execTrigger`, `UParticleEmitter::Reset`, `AEmitter::Tick`, `AEmitter::Render`, and a search of every emitter function for the actor's `DrawScale`). Nothing decompiled is in the repository.
+- **Tested how:** `cargo test -p rc_effects -p rc_effects_plugin -p rc_scripts_plugin`; `RC_GAME_DIR=... rc_effect_check --maps`; `rc_game --script` in the cloud.
+- **Result:** rc_effect_check: "placed effects: 830 in 53 maps, 65 kinds; 677 edited in the map, 24 built in the map alone, 32 with parts that start off, 8 hidden; failed: 0". Script: see the PR.
+- **Still broken / not tested:** Not tested on Windows or by playing. Not done: `AttachTag` (98 effects ride on something moving; ours stay put), bloom and camera shake values, `AutoReset`, which parts are off in saves.
+- **Next:** User check on Windows: geo_01a's fires and smoke, ras_02a's steam vents.
+
 ## 2026-11-12: geo_01a's gunship rests where the original's does, and the ground dust (rc_anim, rc_model, rc_cast, rc_effects, rc_effects_plugin, rc_scripts_plugin)
 
 - **Changed:** Characters and vehicles the cast draws no longer show the travel of their skeleton's `Move` bone, unless their `Physics` is 12 (root motion): `rc_anim::globals_in_game`, `rc_anim::move_bone`, `rc_model::Model::posed_in_game` and `bone_frame_in_game`, `rc_cast::read::CastMember::root_motion`. New `rc_scripts_plugin/src/placed_emitters.rs`: every effect a map places as an actor (`Emitter` classes) runs from the start of the level at its map place and turn; a level event naming its tag switches it off and on. New `rc_effects::read::Library::is_emitter` and `SpawnEffect::endless`.

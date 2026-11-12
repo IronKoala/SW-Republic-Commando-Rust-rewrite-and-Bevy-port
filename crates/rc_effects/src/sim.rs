@@ -121,6 +121,10 @@ pub struct EmitterState {
     pub delay: f32,
     /// Part of a particle owed from earlier steps.
     pub owed: f32,
+    /// Switched off (`Disabled`): neither moved nor drawn, as engine.dll's
+    /// `AEmitter::Tick` and `AEmitter::Render` skip it. Starts as the
+    /// emitter's `disabled`; a level event can flip it ([`EffectState::trigger`]).
+    pub disabled: bool,
 }
 
 /// An effect running at `origin` (uu).
@@ -181,6 +185,7 @@ impl EffectState {
                 sent: 0,
                 delay: rng.range(e.initial_delay),
                 owed: 0.0,
+                disabled: e.disabled,
             })
             .collect();
         EffectState {
@@ -229,6 +234,30 @@ impl EffectState {
         self
     }
 
+    /// A level event names the effect: what engine.u's `Emitter.Trigger`
+    /// does, which calls each emitter's native `Trigger()` (engine.dll's
+    /// `UParticleEmitter::execTrigger`, read for reference): an emitter
+    /// with `TriggerDisabled` is switched off if on and on if off, and one
+    /// with `ResetOnTrigger` starts over (`UParticleEmitter::Reset`: its
+    /// particles gone, nothing sent yet, a new `InitialDelayRange` wait).
+    /// Says, per emitter, whether it is on afterwards.
+    pub fn trigger(&mut self, def: &EffectDef) -> Vec<bool> {
+        let mut on = Vec::new();
+        for (d, s) in def.emitters.iter().zip(&mut self.emitters) {
+            if d.trigger_disabled {
+                s.disabled = !s.disabled;
+            }
+            if d.reset_on_trigger {
+                s.particles.clear();
+                s.sent = 0;
+                s.owed = 0.0;
+                s.delay = self.rng.range(d.initial_delay);
+            }
+            on.push(!s.disabled);
+        }
+        on
+    }
+
     /// Particles alive now, in all emitters.
     pub fn live(&self) -> usize {
         self.emitters.iter().map(|e| e.particles.len()).sum()
@@ -243,9 +272,18 @@ impl EffectState {
         if self.fading {
             return self.live() == 0;
         }
-        def.emitters.iter().zip(&self.emitters).all(|(d, s)| {
-            d.disabled || (!d.respawn && s.sent >= d.max_particles && s.particles.is_empty())
-        })
+        // As `AEmitter::Tick` (engine.dll): only the parts switched on are
+        // looked at, and an effect with every part switched off is not
+        // over: it waits for a level event to switch a part back on.
+        let mut any_on = false;
+        let all_finished = def.emitters.iter().zip(&self.emitters).all(|(d, s)| {
+            if s.disabled {
+                return true;
+            }
+            any_on = true;
+            !d.respawn && s.sent >= d.max_particles && s.particles.is_empty()
+        });
+        any_on && all_finished
     }
 
     fn spawn(&mut self, def: &EmitterDef, i: usize) {
@@ -340,7 +378,7 @@ impl EffectState {
     pub fn step(&mut self, def: &EffectDef, dt: f32) {
         self.age += dt;
         for (i, d) in def.emitters.iter().enumerate() {
-            if d.disabled
+            if self.emitters[i].disabled
                 || !matches!(
                     d.kind,
                     crate::def::EmitterKind::Sprite
@@ -431,6 +469,9 @@ impl EffectState {
         let (Some(d), Some(s)) = (def.emitters.get(i), self.emitters.get(i)) else {
             return Vec::new();
         };
+        if s.disabled {
+            return Vec::new();
+        }
         let frames = d.frames();
         s.particles
             .iter()
@@ -510,6 +551,64 @@ mod tests {
             life_span: 0.0,
             lit: false,
         }
+    }
+
+    #[test]
+    fn a_level_event_switches_parts_as_the_engine_does() {
+        // Two looping parts: the first starts off and is switched by
+        // events (TriggerDisabled, the default); the second ignores the
+        // switch but starts over on each event (ResetOnTrigger).
+        let mut def = burst();
+        def.emitters[0].respawn = true;
+        def.emitters[0].disabled = true;
+        let mut second = def.emitters[0].clone();
+        second.disabled = false;
+        second.trigger_disabled = false;
+        second.reset_on_trigger = true;
+        def.emitters.push(second);
+        let mut s = EffectState::new(&def, [0.0; 3], 3);
+        for _ in 0..10 {
+            s.step(&def, 0.05);
+        }
+        assert!(s.emitters[0].particles.is_empty(), "starts off");
+        assert!(s.sprites(&def, 0).is_empty());
+        assert!(!s.emitters[1].particles.is_empty());
+        assert_eq!(s.trigger(&def), vec![true, true]);
+        assert!(s.emitters[1].particles.is_empty(), "started over");
+        for _ in 0..10 {
+            s.step(&def, 0.05);
+        }
+        let n = s.emitters[0].particles.len();
+        assert!(n > 0, "switched on");
+        let before: Vec<_> = s.emitters[0].particles.iter().map(|p| p.position).collect();
+        assert_eq!(s.trigger(&def), vec![false, true]);
+        // Off: not drawn, and not moved (engine.dll's AEmitter::Render and
+        // AEmitter::Tick skip it), so it comes back where it was.
+        assert!(s.sprites(&def, 0).is_empty());
+        for _ in 0..10 {
+            s.step(&def, 0.05);
+        }
+        let after: Vec<_> = s.emitters[0].particles.iter().map(|p| p.position).collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn an_effect_with_every_part_off_is_not_over() {
+        // engine.dll's AEmitter::Tick only ends an AutoDestroy effect when
+        // a part is switched on and every part switched on has finished;
+        // all switched off, it stays and waits for the next event.
+        let def = burst();
+        let mut s = EffectState::new(&def, [0.0; 3], 3);
+        assert_eq!(s.trigger(&def), vec![false]);
+        for _ in 0..100 {
+            s.step(&def, 0.05);
+        }
+        assert!(!s.done(&def), "switched off, not over");
+        assert_eq!(s.trigger(&def), vec![true]);
+        for _ in 0..200 {
+            s.step(&def, 0.05);
+        }
+        assert!(s.done(&def), "switched on again, it finishes");
     }
 
     #[test]

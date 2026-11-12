@@ -354,7 +354,12 @@ impl LevelScript {
 /// The map's scripting as read while loading, waiting for the movers'
 /// triggers.
 #[derive(Resource)]
-struct Loaded(MapScripts, Settings, Vec<rc_level::scripts::Place>);
+struct Loaded(
+    MapScripts,
+    Settings,
+    Vec<rc_level::scripts::Place>,
+    Result<Vec<rc_effects::read::PlacedEffect>, String>,
+);
 
 fn begin(
     mut commands: Commands,
@@ -382,19 +387,24 @@ fn begin(
         .and_then(|(p, d)| {
             rc_level::actors::read_level(&p, &d)
                 .map(|l| {
+                    // The effects the map places, with the map's own copies
+                    // of their emitters (see placed_emitters.rs).
+                    let effects = rc_effects::read::Library::open(&paths.game_data())
+                        .map(|lib| lib.placed_effects(&p, map, &d));
                     (
                         rc_level::scripts::read(&p, &d, &l),
                         rc_level::scripts::places(&p, &d, &l),
+                        effects,
                     )
                 })
                 .map_err(|e| e.to_string())
         });
     match read {
-        Ok((m, places)) => {
+        Ok((m, places, effects)) => {
             for f in &m.failures {
                 log.line(format!("{PART}: unreadable: {f}"));
             }
-            commands.insert_resource(Loaded(m, settings, places));
+            commands.insert_resource(Loaded(m, settings, places, effects));
         }
         Err(e) => {
             // No scripts is not fatal: the level plays without them.
@@ -447,12 +457,13 @@ fn build(
     paths: Res<GamePaths>,
     audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
     mut preload: MessageWriter<rc_effects_plugin::PreloadEffect>,
+    current: Res<CurrentLevel>,
     log: Res<GameLog>,
 ) {
     let (Some(loaded), Some(movers)) = (loaded, movers) else {
         return;
     };
-    let Loaded(map, settings, places) = &*loaded;
+    let Loaded(map, settings, places, placed_effects) = &*loaded;
     let mut director = Director::new(map, &movers.movers.triggers, settings.clone());
     // Props weapons can break get the game's full damage rules.
     let breakable = breakable.map(|b| b.0.clone()).unwrap_or_default();
@@ -585,29 +596,32 @@ fn build(
         preload.write(rc_effects_plugin::PreloadEffect {
             effect: Some(w.to_string()),
             sound: None,
+            def: None,
         });
     }
     commands.insert_resource(fx_factories::LevelFxFactories::new(fx));
-    // Emitters placed in the map (geo_01a's dust under the landing
-    // gunship): found by their class, their effects read now.
-    let emitters = match rc_effects::read::Library::open(&paths.game_data()) {
-        Ok(lib) => placed_emitters::read(map, &|c: &str| lib.is_emitter(c)),
+    // Effects placed in the map (geo_01a's dust under the landing
+    // gunship, fires, steam): read with the map in `begin`, each with the
+    // map's own copies of its emitters, made ready now.
+    let map_name = current.map.as_deref().unwrap_or("map");
+    let emitters = match placed_effects {
+        Ok(p) => placed_emitters::read(map, map_name, p),
         Err(e) => {
             log.line(format!(
-                "{PART}: effect packages not read ({e}); no placed emitters"
+                "{PART}: effect packages not read ({e}); no placed effects"
             ));
             Vec::new()
         }
     };
     placed_emitters::log_list(&emitters, &log);
-    let mut classes: Vec<&str> = emitters.iter().map(|e| e.class.as_str()).collect();
-    classes.sort_unstable_by_key(|n| n.to_ascii_lowercase());
-    classes.dedup_by_key(|n| n.to_ascii_lowercase());
-    for c in classes {
-        preload.write(rc_effects_plugin::PreloadEffect {
-            effect: Some(c.to_string()),
-            sound: None,
-        });
+    for e in emitters.iter().filter(|e| !e.hidden) {
+        if let Some(d) = &e.def {
+            preload.write(rc_effects_plugin::PreloadEffect {
+                effect: Some(e.key.clone()),
+                sound: None,
+                def: Some(d.clone()),
+            });
+        }
     }
     commands.insert_resource(placed_emitters::LevelEmitters::new(emitters));
     commands.insert_resource(LevelScript {
