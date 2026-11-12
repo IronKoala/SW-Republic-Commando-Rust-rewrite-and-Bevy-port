@@ -1,0 +1,65 @@
+# Geonosian warrior without a weapon (GeonosianWarriorNoWeap): the same
+# warrior as geonosian.toml, but the game gives it no force pike and more
+# health. geo_01a places one at the gunship door for the opening, where
+# the level's script plays its WarriorIntro animation, moves it and removes
+# it.
+#
+# Numbers marked "game:" are the original's: GeonosianWarriorNoWeap
+# (Properties/properties.u, built from GeonosianWarrior in ctcharacters.u).
+# Everything else is copied from geonosian.toml (enemy files are read on top
+# of the built-in battle droid, not on top of each other).
+# Not sure: how the original's AI behaves with no weapon at all is decided
+# in compiled code; ours just doesn't attack.
+
+[type]
+id = "geonosian_no_weapon"
+name = "Geonosian warrior (no weapon)"
+classes = ["GeonosianWarriorNoWeap"]  # game: the map class
+body = "organic"
+
+[movement]
+ground_speed = 450        # game: GroundSpeed
+collision_radius = 50     # game: CollisionRadius
+collision_height = 115    # game: CollisionHeight
+crouch_height = 70        # game: CrouchHeight
+base_eye_height = 60      # game: BaseEyeHeight
+
+[combat]
+health = 300              # game: MaxHealth (the class sets 300; Pawn.PostBeginPlay sets Health = MaxHealth)
+accuracy = 0.5            # game: Accuracy (Pawn)
+max_aim_yaw = 80          # game: MaxAimYaw (Pawn)
+weapon = ""               # game: RequiredEquipment is empty (no force pike)
+melee_range = 0           # game: no force pike, so no close-up hit
+melee_damage = 0          # game: no force pike
+leap_speed = 900          # guess: stands in for its flying when a level script sends it up a ledge
+burst_count = 1           # game: GeonosianWarriorBotDefaults BurstCount
+ready_distance = 900      # guess
+drops = ""                # game: the force pike isn't a pick-up
+damage_table = "DV_GeonoshansWarriorDamage" # game: MyDamageVariance
+
+[sound]
+# What the warrior says. Names are groups (SoundMultiple) in
+# GameData/Sounds/character_voice.uax; each time one line from the group
+# plays. List a package's sounds with
+# `rc_probe --sounds "<game>\GameData\Sounds\<package>.uax"`.
+#
+# game: GeonosianWarrior AudioTable = WarriorAudio (System/ctaudio.u), a table of one
+# group per event (engine.u EPawnAudioEvent). "hurt_<kind>" and
+# "death_<kind>" are used when that kind of damage did it (blaster,
+# explosion, sonic, electrical, fire, melee, fall, other); otherwise
+# "hurt" and "death". Only the kinds the game's table has are listed.
+# Its other lines (LargeArms, Quiet, HeardSomething, SearchAbort,
+# SeeGrenade, KilledExcited, Retreat, ...) aren't hooked up yet.
+package = "character_voice"
+spotted = ["GWR_SpottedEnemy"]       # game: PAE_SpottedEnemy
+hurt = ["GWR_HurtSmallArms"]         # game: PAE_HurtSmallArms
+death = ["GWR_DieSmallArms"]         # game: PAE_DieSmallArms
+death_explosion = ["GWR_DieExplosion"]
+hurt_fire = ["GWR_HurtFire"]
+death_fire = ["GWR_DieFire"]
+death_fall = ["GWR_DieFall"]
+hurt_interval = 2.0                    # our choice: seconds between hurt lines from one character
+
+[look]
+package = "GameData/Animations/geonosian.ukx"   # game: the mesh is in this package
+mesh = "GeonosianWarrior"                        # game: Mesh

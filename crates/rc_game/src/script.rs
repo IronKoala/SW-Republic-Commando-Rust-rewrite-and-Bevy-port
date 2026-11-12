@@ -1051,6 +1051,14 @@ fn steps() -> Vec<Step> {
             10.0,
         ),
         Check("geo_01a starts with no grenades, as the map's script says", no_grenades_at_start),
+        // ScriptedTrigger3's ACTION_BlinkHUDHealth (15 s) teaches the
+        // health meters: they blink as the original's do.
+        Until(
+            "the script blinks the HUD's health meters",
+            |w| health_meters_blink(w).is_ok(),
+            120.0,
+        ),
+        Check("the script blinks the HUD's health meters", health_meters_blink),
         Until(
             "the scripts start playing the level's lines",
             |w| level_script_lines(w).is_ok(),
@@ -1087,6 +1095,7 @@ fn steps() -> Vec<Step> {
         // stood on the ground.
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
         Check("the clone troopers hold their rifles", troopers_hold_rifles),
+        Check("the Geonosians placed in the map are made", placed_geonosians),
         // Troopers can be hurt and die (their class's `Health`), as
         // engine.u's `Pawn.Died`: the map's `Event` for them goes off and
         // they play their `Death` animation. CloneTrooper1 has no script
@@ -3169,6 +3178,36 @@ fn no_grenades_at_start(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// geo_01a's `BlinkHUDHealth` step ran and the original HUD draws the
+/// health-coloured meter parts with the blink's opacity (not their own
+/// 255), as Engine.dll `UHelmet::DrawHUD` does.
+fn health_meters_blink(w: &mut World) -> Result<String, String> {
+    let script = w
+        .get_resource::<rc_scripts_plugin::LevelScript>()
+        .ok_or("no level script")?;
+    let steps = script.stats.hud_blinks.clone();
+    let now = script.hud_blink.now();
+    let quads = crate::original_hud::layout_drawn(w);
+    let meters: Vec<u8> = quads
+        .iter()
+        .filter(|q| {
+            (q.widget == "vitals" || q.widget == "ammo")
+                && q.color[..3] != [255, 255, 255]
+        })
+        .map(|q| q.color[3])
+        .collect();
+    let got = format!("script steps {steps:?}; blinking {now:?}; meter opacities {meters:?}");
+    if steps.iter().any(|s| s == "Health 15")
+        && now.contains(&"health")
+        && meters.len() == 4
+        && meters.iter().all(|a| *a == meters[0] && *a != 255)
+    {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 /// The level's lines and sounds (`rc_scripts_plugin::sounds`): every sound
 /// geo_01a's scripts name was read from the game's packages with its
 /// length, at least two lines have played and reached the sound card, and
@@ -3426,6 +3465,52 @@ fn level_anim_props(w: &mut World) -> Result<String, String> {
         .count();
     let msg = format!("{drawn} drawn, {failed} not drawn, {dispensers} bacta dispensers");
     if dispensers >= 5 && failed == 0 {
+        Ok(msg)
+    } else {
+        Err(msg)
+    }
+}
+
+/// geo_01a places two Geonosians straight in the map (no spawner): the
+/// one at the gunship door (`GeonosianIntroWarrior01`, script
+/// `WarriorIntroAI`) and Rocky (`RockyAI`). Both must be made as the level
+/// starts and the intro warrior's script must have taken it over.
+fn placed_geonosians(w: &mut World) -> Result<String, String> {
+    let fight = w
+        .get_resource::<rc_enemies::Fight>()
+        .ok_or("no fight on this map")?;
+    let b = &fight.battle;
+    let find = |tag: &str| {
+        b.fighters.iter().find(|f| {
+            b.offspring(f.id)
+                .and_then(|o| o.tag)
+                .is_some_and(|t| t.eq_ignore_ascii_case(tag))
+        })
+    };
+    let placed = b.spawners.iter().filter(|s| s.factory.placed).count();
+    let rocky = find("Rocky").map(|f| (f.id, f.params.kind.id.clone(), f.mode));
+    let intro = find("GeonosianIntroWarrior01").map(|f| (f.id, f.params.kind.id.clone()));
+    let intro_scripted: Vec<&String> = intro
+        .as_ref()
+        .map(|(id, _)| {
+            fight
+                .stats
+                .scripted
+                .iter()
+                .filter(|s| s.split_whitespace().any(|x| x == id.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let msg = format!(
+        "{placed} placed; Rocky {rocky:?}; intro warrior {intro:?}, its script steps {intro_scripted:?}"
+    );
+    // Its script may already have removed it (no death event): a removed
+    // fighter stays in the battle's list, so it is found either way.
+    if placed == 2
+        && rocky.as_ref().is_some_and(|r| r.1 == "geonosian")
+        && intro.as_ref().is_some_and(|i| i.1 == "geonosian_no_weapon")
+        && !intro_scripted.is_empty()
+    {
         Ok(msg)
     } else {
         Err(msg)
