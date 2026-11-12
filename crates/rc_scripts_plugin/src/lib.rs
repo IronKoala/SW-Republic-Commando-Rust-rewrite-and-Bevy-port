@@ -55,6 +55,7 @@ pub mod breakables;
 pub mod characters;
 pub mod cutscene;
 pub mod fx_factories;
+pub mod hud_blink;
 pub mod markers;
 pub mod music;
 pub mod objectives;
@@ -149,6 +150,7 @@ impl Plugin for ScriptsPlugin {
                     sight::look,
                     run,
                     send_ammo,
+                    blink_hud,
                     tracker::track,
                     fx_factories::run,
                     placed_emitters::run,
@@ -258,6 +260,9 @@ pub struct LevelScript {
     sounds: Vec<sounds::SoundRequest>,
     /// Ammo the scripts give or take this frame (`ACTION_AddAmmo`).
     ammo: Vec<rc_game_core::pickups::AddAmmo>,
+    /// The HUD parts the scripts are blinking (`ACTION_BlinkHUDHealth`
+    /// and the rest), read by the HUD.
+    pub hud_blink: hud_blink::HudBlink,
     /// Squad marker anchors (charges, consoles, door locks) and what they
     /// set off (see `markers.rs`).
     pub anchors: Vec<markers::Anchor>,
@@ -285,6 +290,7 @@ impl LevelScript {
             places: characters::Places::new(Vec::new()),
             sounds: Vec::new(),
             ammo: Vec::new(),
+            hud_blink: Default::default(),
             started: true,
             scene: cutscene::Scene::default(),
             stats: PlayStats::default(),
@@ -348,6 +354,8 @@ pub struct PlayStats {
     pub turret_orders: Vec<String>,
     /// Ammo given or taken (`ACTION_AddAmmo`): `WeaponClass +N`.
     pub add_ammo: Vec<String>,
+    /// HUD blinks started (`ACTION_BlinkHUD...`): `Kind seconds`.
+    pub hud_blinks: Vec<String>,
     /// Squad marker job steps carried out: `ANCHOR Step`.
     pub marker_steps: Vec<String>,
     /// Locked doors opened by a breach or a slice (mover names).
@@ -639,6 +647,7 @@ fn build(
         places,
         sounds: Vec::new(),
         ammo: Vec::new(),
+        hud_blink: Default::default(),
         anchors,
         started: false,
         scene: cutscene::Scene::default(),
@@ -1230,6 +1239,21 @@ fn carry_out(
                 ));
             }
         }
+        // Read by the HUD (rc_game's original HUD and data/ui/hud.toml).
+        k if hud_blink::HudBlink::kind_of(k).is_ok() => {
+            let time = a.float("BlinkTime").unwrap_or(0.0);
+            let what = kind.strip_prefix("BlinkHUD").unwrap_or(kind);
+            script.stats.hud_blinks.push(format!("{what} {time}"));
+            match hud_blink::HudBlink::kind_of(k) {
+                Ok(Some(part)) => {
+                    log.line(format!("{at}: the HUD's {part} blinks for {time} s"));
+                    script.hud_blink.start(part, time);
+                }
+                _ => log.line(format!(
+                    "{at}: blink the squad command prompt for {time} s: the original shows nothing for it"
+                )),
+            }
+        }
         // Handed to the combat part (rc_combat::script_ammo), which keeps
         // the count between none and the most carried.
         "addammo" => {
@@ -1289,6 +1313,15 @@ fn carry_out(
                 .unwrap_or_default();
             log.line(format!("{at} {}{comment} (not done yet)", what.join(" ")));
         }
+    }
+}
+
+/// The HUD parts the scripts blink run their time out (the original adds
+/// the time between drawings of the HUD).
+fn blink_hud(script: Option<ResMut<LevelScript>>, time: Res<Time>) {
+    let Some(mut script) = script else { return };
+    if script.hud_blink != hud_blink::HudBlink::default() {
+        script.hud_blink.tick(time.delta_secs());
     }
 }
 

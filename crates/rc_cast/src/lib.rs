@@ -23,8 +23,8 @@
 //! Characters whose class has `Health` (the clone troopers standing about
 //! in the missions) can be hurt and die (`rc_combat`'s `Health` and
 //! `Hittable`): as engine.u's `Pawn.Died`, death triggers the map's
-//! `Event` for the character, stops its script (`Controller.PawnDied`
-//! destroys an AI's controller) and plays its `Death` animation; the
+//! `Event` for the character, stops it moving and plays its `Death`
+//! animation (the level's own script carries on: see `follow_orders`); the
 //! body goes after `RagdollLifeSpan` seconds unless `bSaveMyCorpse`.
 //! The original throws many deaths into a ragdoll instead (all deaths
 //! by explosion); there are no ragdolls here yet. The cast doesn't fight
@@ -741,11 +741,14 @@ fn follow_orders(
             continue; // not one of ours
         };
         let at = format!("t={:.2} {} ({} #{})", c.time, c.name, o.script, o.index);
-        // A dead character's controller is gone (engine.u's
-        // `Controller.PawnDied` destroys an AI's), so nothing runs its
-        // script: only actions on the body itself (hide it, take it away)
-        // still apply. A script waiting on it stays waiting, as the
-        // original's stops.
+        // A dead character doesn't move or act (engine.u's
+        // `Controller.PawnDied` destroys an AI's controller): only actions
+        // on the body itself (hide it, take it away) still apply, and a
+        // script waiting on it stays waiting. The level's sequence itself
+        // carries on past the character's death: geo_01a's Mikey's own
+        // sequence kills him and then sends MikeyMegaForce, and the ramp
+        // troopers' sequences wait for their own death event and then
+        // play a line.
         if c.is_dead() && !matches!(o.act, CharacterAct::Hidden(_) | CharacterAct::Remove) {
             log_line(&log, format!("{at} is dead; ignores {:?}", o.act));
             continue;
