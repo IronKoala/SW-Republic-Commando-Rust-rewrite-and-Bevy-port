@@ -378,6 +378,7 @@ pub(crate) fn preload(list: &[Breakable], out: &mut MessageWriter<PreloadEffect>
                 out.write(PreloadEffect {
                     effect: t.effect.clone(),
                     sound: t.sound_path.clone(),
+                    def: None,
                 });
             }
         }

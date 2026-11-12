@@ -151,14 +151,16 @@ pub struct EmitterDef {
     /// The emitter's object name (`SpriteEmitter12`).
     pub name: String,
     pub kind: EmitterKind,
-    /// `Disabled`: never sends anything (until a trigger switches it on,
-    /// see `trigger_disabled`).
+    /// `Disabled`: at the start, neither moved nor drawn (engine.dll's
+    /// `AEmitter::Tick` and `AEmitter::Render` skip it) until a level event
+    /// switches it on (see `trigger_disabled`).
     pub disabled: bool,
-    /// `TriggerDisabled` (engine.u default true): a trigger flips
-    /// `Disabled` (engine.dll `UParticleEmitter::execTrigger`).
+    /// `TriggerDisabled` (`Engine.u` default: on): a level event naming
+    /// the effect flips `disabled` (engine.dll's
+    /// `UParticleEmitter::execTrigger`).
     pub trigger_disabled: bool,
-    /// `ResetOnTrigger` (default false): a trigger also starts it over
-    /// (`UParticleEmitter::Reset`).
+    /// `ResetOnTrigger` (default off): a level event also starts it over,
+    /// its particles gone (`UParticleEmitter::Reset`).
     pub reset_on_trigger: bool,
     /// `MaxParticles`: how many can be alive at once.
     pub max_particles: u32,

@@ -735,6 +735,14 @@ copy of the game.
   opening briefing, Republic gunships and Geonosian fighters fly over the
   arena, and battle explosions go off near you. 397 such spawners on 55
   maps. Their on/off state is kept in save files.
+- **Effects placed in the maps (since 2026-11-12, tested in the cloud
+  only, not on Windows or by playing).** The fires, smoke, steam, sparks,
+  rain, fog, bugs and glows the maps place (830 in 53 maps) now run where
+  the map puts them, each with the map's own edited copy of the effect (677
+  of them differ from the effect's class) and its own sounds. Level events
+  switch them off and on the way the original engine does. Effects that
+  ride on something moving (98, such as a droid dispenser's thrusters)
+  stay at their map place for now.
 - **Projectile spawners (since 2026-11-11, tested in the cloud only, not
   on Windows or by playing).** The maps' `ProjectileFactory` actors now
   run too: in geo_01a the air bombardment falls on the arena and the

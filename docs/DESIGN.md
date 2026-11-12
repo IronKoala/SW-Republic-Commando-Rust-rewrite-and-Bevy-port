@@ -4871,37 +4871,58 @@ the effect and sends `rc_combat::Explode`.
 per-surface effects (the default material effect is used), and the trails'
 ribbon emitters (not drawn).
 
-### Emitters placed in the map (`rc_scripts_plugin/src/placed_emitters.rs`)
+### Effects placed in the map (`rc_scripts_plugin/src/placed_emitters.rs`)
 
 **From the files.** A map places effects as actors whose class leads,
-through its parents, to engine.u's `Emitter` (`rc_effects::read::Library::is_emitter`).
-geo_01a has 11: the dust the gunship blows up (`REP_Gunship_GroundDust0`),
-fires (`Fire_Medium`), smoke (`SpireBigSmoke`, `WhiteSmoke`), blowing
-dust and floor fog. Each one runs its class's effect (from
-`Properties/cteffects.u`) at its map place and turn from the start of the
-level, for as long as the level lasts (`SpawnEffect::endless`, carried by
-an `EmitterCarrier` entity). None of geo_01a's starts switched off.
+through its parents, to engine.u's `Emitter`
+(`rc_effects::read::Library::is_emitter`), or is `Emitter` itself. The
+campaign's 53 maps with effects place 830 of them, of 65 kinds: fires,
+smoke, steam, sparks, rain, fog, bugs, leaves, shield glows, the dust
+under geo_01a's gunship (`rc_effect_check --maps` counts them).
 
-**What a level event does to it (from engine.dll).** A level event that
-names an emitter's `Tag` calls engine.u's `Emitter.Trigger`, which calls
-each particle emitter's native `Trigger()`. engine.dll (decompiled for
-reference only, nothing copied) shows `UParticleEmitter::execTrigger`
-flipping the emitter's `Disabled` when its `TriggerDisabled` is set
-(engine.u's default, kept by every geo_01a emitter and by the map's own
-copies), and calling `Reset` when `ResetOnTrigger` is set (default off).
-`AEmitter::Tick` and `AEmitter::Render` skip a disabled emitter: its
-particles stop and vanish at once, and come back where they were when a
-second event switches it on. `rc_effects::sim::EffectState::trigger` does
-this, reached through `rc_effects_plugin::TriggerEffect`; the bool order
-that maps the engine's bits to these names is engine.u's own
-`ParticleEmitter` property list. geo_01a's gunship script sends
-`REP_Gunship_GroundDust` as the gunship leaves for the spider droid at
-the end of the level. A placed emitter's effect stays while the level
-lasts, even with every emitter off, as the map's actor does.
+**Each runs the map's own copy.** When a designer places an effect, the
+editor copies the class's emitters into the map (the actor's `Emitters`
+list points at `SpriteEmitter...` objects stored in the map), and they
+are often edited there: 677 of the 830 differ from their class (a vent
+sends 10 particles instead of 20, a `BlankSystem` template is filled in
+per placement), and 24 are plain `Emitter`s built in the map alone. The
+game runs those copies, so `Library::placed_effects` reads them with
+the same reader as the class's (`read::emitter`), and the actor's own
+`SpawnSound`, `AmbientSound`, `LifeSpan`, `bUnlit`, `bHidden` and
+`AutoDestroy` where the map sets them. The level scripts part reads them
+with the map (`begin`), and `build` hands each one to the effects part
+with its definition (`SpawnEffect::def`, kept under the name
+`map.actor`; pictures are shared between copies). Each starts at its map
+place and turn when the level starts, carried by an `EmitterCarrier`
+entity, and stays for the whole level (`SpawnEffect::endless`), even
+with nothing to show, unless it has `AutoDestroy` or a `LifeSpan`.
+Hidden ones (8) aren't shown.
 
-**Not done.** The map's own copies of an emitter's settings (the class's
-are drawn), the actor's `DrawScale` (logged), and keeping which are off
-in save files.
+**Switching on and off (engine.dll, read for reference).** A level event
+naming an effect's `Tag` runs engine.u's `Emitter.Trigger`, which calls
+each part's native `Trigger()`. engine.dll's
+`UParticleEmitter::execTrigger` flips the part's `Disabled` when its
+`TriggerDisabled` is on (engine.u's default), and calls `Reset()` when
+its `ResetOnTrigger` is on (`Reset` sets its live-particle count and
+circular index to 0 and picks a new `InitialDelayRange` wait).
+`AEmitter::Tick` and `AEmitter::Render` both skip a part whose
+`Disabled` is on: it is neither moved nor drawn, so it vanishes at once
+and comes back where it was. `rc_effects::EffectState::trigger` does the
+same; the event reaches the running effect through
+`rc_effects_plugin::TriggerEffect`. 32 placed effects have parts that
+start switched off, waiting for their event.
+
+**The actor's `DrawScale` isn't used while playing (engine.dll).** No
+particle code (every `UParticleEmitter`, `USpriteEmitter`,
+`UMeshEmitter`, `USparkEmitter`, `UBeamEmitter` and `AEmitter` function)
+reads the actor's `DrawScale`; `UParticleEmitter::Scale`, which would,
+is only called by the editor, which wrote the scaled values into the
+map's copies. So it is only logged.
+
+**Not done.** `AttachTag` (98 placed effects ride on something that
+moves, such as a droid dispenser's landing thrusters; ours stay at
+their map place), the `Emitter`'s bloom and camera-shake values,
+`AutoReset`, and keeping which parts are off in save files.
 
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 
