@@ -109,6 +109,13 @@ impl Default for SpawnEffect {
     }
 }
 
+/// A level event names a placed emitter: every effect carried by
+/// `carrier` is triggered ([`rc_effects::sim::EffectState::trigger`]).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct TriggerEffect {
+    pub carrier: Entity,
+}
+
 /// An effect started with an `id` is over (its life ended or its last
 /// particle is gone), or couldn't be shown at all.
 #[derive(Message, Debug, Clone, PartialEq)]
@@ -270,6 +277,7 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SpawnEffect>()
             .add_message::<EffectEnded>()
+            .add_message::<TriggerEffect>()
             .add_message::<PreloadEffect>()
             .init_resource::<Effects>()
             .init_resource::<EffectStats>()
@@ -808,12 +816,19 @@ fn step(
     carriers: Query<&GlobalTransform>,
     mut stats: ResMut<EffectStats>,
     mut ended: MessageWriter<EffectEnded>,
+    mut triggers: MessageReader<TriggerEffect>,
     log: Option<Res<GameLog>>,
 ) {
     let dt = time.delta_secs().min(0.1);
+    let triggered: Vec<Entity> = triggers.read().map(|t| t.carrier).collect();
     let mut live = 0;
     for (e, mut r) in &mut running {
         let def = r.loaded.def.clone();
+        if let Some(c) = r.follow {
+            for _ in triggered.iter().filter(|t| **t == c) {
+                r.state.trigger(&def);
+            }
+        }
         let mut vanish = false;
         if let Some(c) = r.follow {
             match carriers.get(c) {
@@ -833,10 +848,12 @@ fn step(
             r.state.step(&def, dt);
             live += r.state.live();
         }
-        // Safety: an effect that loops forever ends after a minute, unless
-        // it is a placed emitter whose carrier is still there.
+        // Safety: an effect that loops forever ends after a minute. A
+        // placed emitter stays while its carrier is there, as the map's
+        // actor does, even with every emitter switched off (a trigger can
+        // switch them on again).
         let endless = r.endless && r.follow.is_some();
-        if vanish || r.state.done(&def) || (!endless && r.state.age > 60.0) {
+        if vanish || (!endless && (r.state.done(&def) || r.state.age > 60.0)) {
             say(
                 &log,
                 format!(

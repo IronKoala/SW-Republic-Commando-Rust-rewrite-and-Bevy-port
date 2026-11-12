@@ -206,6 +206,8 @@ pub fn emitter(name: &str, kind: &str, v: &Values) -> EmitterDef {
         }
     }
     d.disabled = boolean(v, "Disabled").unwrap_or(false);
+    d.trigger_disabled = boolean(v, "TriggerDisabled").unwrap_or(d.trigger_disabled);
+    d.reset_on_trigger = boolean(v, "ResetOnTrigger").unwrap_or(d.reset_on_trigger);
     if let Some(n) = int(v, "MaxParticles") {
         d.max_particles = n.max(0) as u32;
     }

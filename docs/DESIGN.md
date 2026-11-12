@@ -4834,15 +4834,22 @@ dust and floor fog. Each one runs its class's effect (from
 level, for as long as the level lasts (`SpawnEffect::endless`, carried by
 an `EmitterCarrier` entity). None of geo_01a's starts switched off.
 
-**Our reading, not from the files.** A level event that names an
-emitter's `Tag` calls engine.u's `Emitter.Trigger`, which calls each
-particle emitter's native `Trigger()` in engine.dll (not decompiled).
-`TriggerDisabled` is true by default, so we follow Unreal Engine 2's
-documented rule: the event switches the emitter off (the particles out
-there live out their time), and the next one switches it back on.
-geo_01a's gunship script sends `REP_Gunship_GroundDust` as the gunship
-leaves for the spider droid at the end of the level. Logged as "our
-reading".
+**What a level event does to it (from engine.dll).** A level event that
+names an emitter's `Tag` calls engine.u's `Emitter.Trigger`, which calls
+each particle emitter's native `Trigger()`. engine.dll (decompiled for
+reference only, nothing copied) shows `UParticleEmitter::execTrigger`
+flipping the emitter's `Disabled` when its `TriggerDisabled` is set
+(engine.u's default, kept by every geo_01a emitter and by the map's own
+copies), and calling `Reset` when `ResetOnTrigger` is set (default off).
+`AEmitter::Tick` and `AEmitter::Render` skip a disabled emitter: its
+particles stop and vanish at once, and come back where they were when a
+second event switches it on. `rc_effects::sim::EffectState::trigger` does
+this, reached through `rc_effects_plugin::TriggerEffect`; the bool order
+that maps the engine's bits to these names is engine.u's own
+`ParticleEmitter` property list. geo_01a's gunship script sends
+`REP_Gunship_GroundDust` as the gunship leaves for the spider droid at
+the end of the level. A placed emitter's effect stays while the level
+lasts, even with every emitter off, as the map's actor does.
 
 **Not done.** The map's own copies of an emitter's settings (the class's
 are drawn), the actor's `DrawScale` (logged), and keeping which are off

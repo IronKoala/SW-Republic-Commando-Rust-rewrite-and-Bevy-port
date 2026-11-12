@@ -12,14 +12,16 @@
 //! off (the map's copy of the gunship dust's `SpriteEmitter123` sets
 //! neither `Disabled` nor anything else that would hold it back).
 //!
-//! Not from the files: what a level event naming the emitter's tag does.
-//! engine.u's `Emitter.Trigger` calls each emitter's `Trigger()`, which is
-//! native code (engine.dll), and `TriggerDisabled` is true by default
-//! (engine.u). We take it as Unreal Engine 2's documented rule: the event
-//! switches the emitter off (no new particles, the ones out there live out
-//! their time), and a second one switches it back on. geo_01a's script
-//! sends `REP_Gunship_GroundDust` as the gunship leaves for the spider
-//! droid. Logged as "our reading".
+//! What a level event naming the emitter's tag does, from engine.dll
+//! (decompiled for reference only, nothing copied): engine.u's
+//! `Emitter.Trigger` calls each emitter's native `Trigger()`;
+//! `UParticleEmitter::execTrigger` flips the emitter's `Disabled` when its
+//! `TriggerDisabled` is set (engine.u's default) and starts it over when
+//! `ResetOnTrigger` is set; `AEmitter::Tick` and `AEmitter::Render` skip a
+//! disabled emitter, so its particles stop and vanish at once, and come
+//! back where they were if a second event switches it on. The effects
+//! part does this ([`TriggerEffect`]). geo_01a's script sends
+//! `REP_Gunship_GroundDust` as the gunship leaves for the spider droid.
 //!
 //! Not done: the map's own copies of an emitter's settings (we draw the
 //! class's), the actor's `DrawScale` (logged), and keeping which are off in
@@ -27,7 +29,7 @@
 
 use crate::PART;
 use bevy::prelude::*;
-use rc_effects_plugin::SpawnEffect;
+use rc_effects_plugin::{SpawnEffect, TriggerEffect};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{GameLog, ScriptEvent};
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
@@ -47,15 +49,16 @@ pub struct PlacedEmitter {
     pub draw_scale: Option<f32>,
 }
 
-/// The level's placed emitters while it is played, and which are on.
+/// The level's placed emitters while it is played.
 #[derive(Resource, Default)]
 pub struct LevelEmitters {
     pub list: Vec<PlacedEmitter>,
-    /// The entity carrying each one's effect while it is on.
+    /// The entity carrying each one's effect.
     carriers: Vec<Option<Entity>>,
     started: bool,
-    /// For the self-tests: switched on and off, by name, in order.
-    pub switched: Vec<(String, bool)>,
+    /// For the self-tests: the emitters a level event triggered, by name,
+    /// in order.
+    pub triggered: Vec<String>,
 }
 
 impl LevelEmitters {
@@ -64,17 +67,8 @@ impl LevelEmitters {
             carriers: vec![None; list.len()],
             list,
             started: false,
-            switched: Vec::new(),
+            triggered: Vec::new(),
         }
-    }
-
-    /// Whether the named emitter is sending particles.
-    pub fn is_on(&self, name: &str) -> Option<bool> {
-        let i = self
-            .list
-            .iter()
-            .position(|e| e.name.eq_ignore_ascii_case(name))?;
-        Some(self.carriers[i].is_some())
     }
 }
 
@@ -155,13 +149,14 @@ fn switch_on(
     em.carriers[i] = Some(carrier);
 }
 
-/// Start every placed emitter once the level plays, and switch the ones a
-/// level event names on or off.
+/// Start every placed emitter once the level plays, and trigger the ones a
+/// level event names.
 pub fn run(
     mut commands: Commands,
     em: Option<ResMut<LevelEmitters>>,
     mut events: MessageReader<ScriptEvent>,
     mut spawn: MessageWriter<SpawnEffect>,
+    mut trigger: MessageWriter<TriggerEffect>,
     log: Res<GameLog>,
 ) {
     let Some(mut em) = em else {
@@ -184,22 +179,14 @@ pub fn run(
                 continue;
             }
             let name = em.list[i].name.clone();
-            let on = match em.carriers[i].take() {
-                Some(c) => {
-                    commands.entity(c).try_despawn();
-                    false
-                }
-                None => {
-                    switch_on(i, em, &mut commands, &mut spawn);
-                    true
-                }
-            };
+            if let Some(c) = em.carriers[i] {
+                trigger.write(TriggerEffect { carrier: c });
+            }
             log.line(format!(
-                "{PART}: emitter {name} switched {} by {} (our reading of the native Trigger)",
-                if on { "on" } else { "off" },
+                "{PART}: emitter {name} triggered by {} (each of its emitters with TriggerDisabled switches on or off, engine.dll's rule)",
                 ev.name
             ));
-            em.switched.push((name, on));
+            em.triggered.push(name);
         }
     }
 }
