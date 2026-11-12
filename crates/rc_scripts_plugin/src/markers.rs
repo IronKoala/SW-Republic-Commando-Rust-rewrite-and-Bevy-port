@@ -302,6 +302,8 @@ mod tests {
         w.init_resource::<Messages<MarkerJob>>();
         w.insert_resource(LevelScript {
             director: Director::new(&m, &[], Settings::default()),
+            spawns: vec![],
+            spawned_tags: Default::default(),
             dispensers: vec![],
             hidden: Default::default(),
             held: vec![],

@@ -64,6 +64,7 @@ pub mod projectiles;
 pub mod save;
 pub mod sight;
 pub mod sounds;
+pub mod spawned_actors;
 pub mod tracker;
 
 use bevy::prelude::*;
@@ -154,6 +155,7 @@ impl Plugin for ScriptsPlugin {
                     tracker::track,
                     fx_factories::run,
                     placed_emitters::run,
+                    spawned_actors::run,
                     projectiles::fly,
                     breakables::show,
                     characters::cast,
@@ -176,6 +178,7 @@ impl Plugin for ScriptsPlugin {
                     cutscene::forget,
                     projectiles::forget,
                     tracker::forget,
+                    spawned_actors::forget,
                 ),
             );
     }
@@ -247,6 +250,11 @@ pub struct DispenserView {
 #[derive(Resource)]
 pub struct LevelScript {
     pub director: Director,
+    /// `ACTION_SpawnActor`, `DestroyActor` and `TeleportToPoint` orders
+    /// for the script-spawned effects ([`spawned_actors`]).
+    pub spawns: Vec<spawned_actors::Order>,
+    /// Tags (lower case) of the script-spawned effects that are there.
+    pub spawned_tags: HashSet<String>,
     dispensers: Vec<Dispenser>,
     /// Exports of drawn parts to hide.
     hidden: HashSet<usize>,
@@ -278,11 +286,22 @@ pub struct LevelScript {
 }
 
 impl LevelScript {
+    /// Whether a script-spawned effect has this tag (there now, or
+    /// spawned earlier this frame).
+    pub fn is_spawned_tag(&self, tag: &str) -> bool {
+        self.spawned_tags.contains(&tag.to_ascii_lowercase())
+            || self.spawns.iter().any(|o| {
+                matches!(o, spawned_actors::Order::Spawn { tag: Some(t), .. } if t.eq_ignore_ascii_case(tag))
+            })
+    }
+
     /// Just the director, with nothing else of a level: for tests.
     #[cfg(test)]
     pub(crate) fn bare(director: Director) -> Self {
         LevelScript {
             director,
+            spawns: Vec::new(),
+            spawned_tags: HashSet::new(),
             dispensers: Vec::new(),
             hidden: HashSet::new(),
             held: Vec::new(),
@@ -636,8 +655,36 @@ fn build(
         });
     }
     commands.insert_resource(placed_emitters::LevelEmitters::new(emitters));
+    // Effects the scripts spawn (geo_05's explosions, the grenade-target
+    // holograms, the briefing's gunship dust): which classes are effects,
+    // the tag each class gives itself, read now.
+    let spawn_classes = spawned_actors::classes(map);
+    let spawn_effects: Vec<(String, Option<String>)> =
+        match rc_effects::read::Library::open(&paths.game_data()) {
+            Ok(lib) => spawn_classes
+                .iter()
+                .filter(|c| lib.is_emitter(c))
+                .map(|c| (c.clone(), lib.class_tag(c)))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+    log.line(format!(
+        "{PART}: scripts spawn {} classes, {} of them effects: {:?}",
+        spawn_classes.len(),
+        spawn_effects.len(),
+        spawn_effects
+    ));
+    for (c, _) in &spawn_effects {
+        preload.write(rc_effects_plugin::PreloadEffect {
+            effect: Some(c.clone()),
+            sound: None,
+        });
+    }
+    commands.insert_resource(spawned_actors::SpawnedActors::new(map, spawn_effects));
     commands.insert_resource(LevelScript {
         director,
+        spawns: Vec::new(),
+        spawned_tags: HashSet::new(),
         dispensers,
         hidden: HashSet::new(),
         held: Vec::new(),
@@ -935,6 +982,38 @@ fn run(
                     waits,
                     deadline: now + script.director.settings.character_grace_seconds,
                 };
+                // Effects scripts spawn (gameplay.u's ACTION_SpawnActor),
+                // and the scripts that destroy or move them.
+                if let Some(o) = spawned_actors::spawn_order(
+                    &call.action,
+                    &call.script,
+                    format!("{} #{}", call.script, call.index),
+                ) {
+                    script.spawns.push(o);
+                    continue;
+                }
+                if call.kind == "destroyactor" {
+                    if let Some(tag) = call.action.text("DestroyTag") {
+                        script.spawns.push(spawned_actors::Order::Destroy {
+                            tag: tag.to_string(),
+                        });
+                    }
+                }
+                if call.kind == "teleporttopoint" {
+                    let tag = call.action.text("ActorToTeleportTag").unwrap_or("");
+                    if !tag.is_empty() && script.is_spawned_tag(tag) {
+                        // Only the effect moves (the first actor with the
+                        // tag), and the script doesn't wait for it.
+                        script.spawns.push(spawned_actors::Order::Teleport {
+                            tag: tag.to_string(),
+                            to: call.action.text("DestinationTag").unwrap_or("").to_string(),
+                        });
+                        if call.waits {
+                            script.director.action_done(&call.script, call.index);
+                        }
+                        continue;
+                    }
+                }
                 // Cutscenes: holding the player, fades, the player's
                 // teleports.
                 if cutscene::KINDS.contains(&call.kind.as_str()) || call.kind == "teleporttopoint" {

@@ -695,6 +695,8 @@ mod tests {
         w.insert_resource(sounds);
         w.insert_resource(LevelScript {
             director: Director::new(&MapScripts::default(), &[], Settings::default()),
+            spawns: vec![],
+            spawned_tags: Default::default(),
             dispensers: vec![],
             hidden: Default::default(),
             held: vec![],

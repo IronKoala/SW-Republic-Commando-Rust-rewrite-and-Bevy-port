@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: Effects the level scripts spawn (rc_scripts_plugin, rc_effects, rc_effects_plugin)
+
+- **Changed:** New `rc_scripts_plugin::spawned_actors`: the script step `ACTION_SpawnActor` (before: "not done yet") spawns its class when the class is an effect, at the script's place and turn; `DestroyActor` and `TeleportToPoint` reach spawned effects by tag. New `SpawnEffect::auto_destroy` in `rc_effects_plugin` (with `endless`: ends when finished, never on the one-minute limit). New `rc_effects::read::Library::class_tag`.
+- **Why:** Section 5 of the Geonosis audit: 67 spawn steps did nothing (explosions in geo_05a-c, the grenade-target and projector-glow holograms, the briefing's gunship dust).
+- **Where it comes from:** gameplay.u's script text for `ACTION_SpawnActor`, `ACTION_DestroyActor` and `ACTION_TeleportToPoint` (read with `strings`), engine.u's `Emitter`, the classes' defaults in `Properties/cteffects.u` (all 8 classes are `Emitter`s with `AutoDestroy` and their own `SpawnSound`), the maps' steps. Nothing guessed, nothing copied into the repo.
+- **Tested how:** `cargo test -p rc_scripts_plugin -p rc_effects -p rc_effects_plugin` (new tests: the step's values, spawn place and turn, the move onto a character, destroy, ending on its own, no class, not an effect). Scratch run of each class in the effect simulator. `rc_game --map geo_01briefing --frames 400` in the cloud with the game's files.
+- **Result:** All tests pass. Simulator: Explosion_Med ends after 4.0 s, Explosion_Barrel_Metal 7.9 s, Explosion_Sparks 1.0 s, Explosion_Fiery 4.0 s, Holo_EngageEnemy 1.6 s; Holo_Glow_V1 and REP_Gunship_GroundDust loop. In the briefing the log reads "t=2.42 ScriptedTrigger7 #1 spawned REP_Gunship_GroundDust (tag REP_Gunship_GroundDust) at (-48188, 247467, 210129)", and it is still running when the level ends at 53 s.
+- **Still broken / not tested:** Not tested on Windows or by eye. The geo_05 explosions, the geo_01a-c holograms and the briefing glow were not reached in a cloud run (they need play to get there); they are covered by the unit tests only. The teleport doesn't turn the effect; not kept in saves; `bOffsetFromScriptedPawn` not done (only use is switched off); camera shake and bloom on these effects belong to other threads; falling rocks (not effects) belong to their own thread.
+- **Next:** User playtest on Windows.
+
 ## 2026-11-12: The HUD blinks where the level scripts teach it (rc_scripts_plugin, rc_menus, rc_game, data/ui/hud.toml)
 
 - **Changed:** The scripts' `BlinkHUDHealth`, `BlinkHUDSquad`, `BlinkHUDGrenade`, `BlinkHUDShields` and `BlinkHUDSquadCommandPrompt` steps are carried out. New `rc_scripts_plugin::hud_blink` (`LevelScript::hud_blink`) keeps which parts blink and for how long; new `blink` key for HUD elements in `data/ui/hud.toml` (health, squad, grenade, shields) and `rc_menus::hud::blink_alpha`; `rc_game`'s original HUD draws a blinking element with the blink's opacity. Marked in hud.toml: the four health-coloured meter parts (not their white backs), the squad panel, and the grenade panel, picture and count. New `rc_game --script` check "the script blinks the HUD's health meters".

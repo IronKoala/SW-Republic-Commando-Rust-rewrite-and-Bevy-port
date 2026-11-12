@@ -371,6 +371,26 @@ impl Library {
         false
     }
 
+    /// The `Tag` a class gives its actors: its own, else its nearest
+    /// parent's in the effect packages (`Explosion_Med` sets
+    /// `Explosion_Lrg`). `None` when none of them sets one.
+    pub fn class_tag(&self, class: &str) -> Option<String> {
+        let mut c = class.to_string();
+        for _ in 0..16 {
+            let p = self.packages.iter().find(|p| p.has(&c))?;
+            if let Some(v) = p.class_values(&c) {
+                match crate::tagged::get(&v, "Tag") {
+                    Some(crate::tagged::Tagged::Name(n)) | Some(crate::tagged::Tagged::Text(n)) => {
+                        return Some(n.clone())
+                    }
+                    _ => {}
+                }
+            }
+            c = p.parent(&c)?;
+        }
+        None
+    }
+
     /// Read an effect by class name from whichever package has it.
     pub fn effect(&self, class: &str) -> Result<EffectDef, String> {
         self.packages

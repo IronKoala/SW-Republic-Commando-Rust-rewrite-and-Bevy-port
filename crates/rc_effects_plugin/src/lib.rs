@@ -88,6 +88,12 @@ pub struct SpawnEffect {
     /// sends particles for the whole level. Without it, an effect that
     /// never ends is stopped after a minute.
     pub endless: bool,
+    /// With `endless`: still goes once everything it sends has finished
+    /// (the actor's `AutoDestroy`), but never on the one-minute safety
+    /// limit. For an effect a script spawns (`ACTION_SpawnActor`): a
+    /// burst ends with its last particle, a loop stays until the script
+    /// destroys it or the level ends.
+    pub auto_destroy: bool,
 }
 
 impl Default for SpawnEffect {
@@ -105,6 +111,7 @@ impl Default for SpawnEffect {
             vanish_with_carrier: false,
             axes: None,
             endless: false,
+            auto_destroy: false,
         }
     }
 }
@@ -255,6 +262,7 @@ pub struct RunningEffect {
     vanish_with_carrier: bool,
     /// Not stopped after a minute while its carrier is there.
     endless: bool,
+    auto_destroy: bool,
     /// Its `AmbientSound`, looping while it is there.
     ambient: Option<Entity>,
     pub state: EffectState,
@@ -785,6 +793,7 @@ fn spawn(
                 follow: a.follow,
                 vanish_with_carrier: a.vanish_with_carrier,
                 endless: a.endless && a.follow.is_some(),
+                auto_destroy: a.auto_destroy,
                 ambient,
                 state,
                 parts,
@@ -853,7 +862,12 @@ fn step(
         // actor does, even with every emitter switched off (a trigger can
         // switch them on again).
         let endless = r.endless && r.follow.is_some();
-        if vanish || (!endless && (r.state.done(&def) || r.state.age > 60.0)) {
+        let over = if endless {
+            r.auto_destroy && r.state.done(&def)
+        } else {
+            r.state.done(&def) || r.state.age > 60.0
+        };
+        if vanish || over {
             say(
                 &log,
                 format!(

@@ -750,6 +750,14 @@ copy of the game.
   opening briefing, Republic gunships and Geonosian fighters fly over the
   arena, and battle explosions go off near you. 397 such spawners on 55
   maps. Their on/off state is kept in save files.
+- **Effects the scripts spawn (since 2026-11-12, tested in the cloud
+  only, not on Windows or by playing).** A level script's "spawn actor"
+  step now shows its effect: the explosions in geo_05a, geo_05b and
+  geo_05c (with their sounds), the grenade-target hologram flash in
+  geo_01a, geo_01b and geo_01c, the glow under a thrown hologram
+  projector (briefing, geo_03a, geo_04c, removed when the script removes
+  it), and the dust under the gunship in the Geonosis briefing. Classes
+  that aren't effects (geo_04's falling rocks) are not done here.
 - **Projectile spawners (since 2026-11-11, tested in the cloud only, not
   on Windows or by playing).** The maps' `ProjectileFactory` actors now
   run too: in geo_01a the air bombardment falls on the arena and the

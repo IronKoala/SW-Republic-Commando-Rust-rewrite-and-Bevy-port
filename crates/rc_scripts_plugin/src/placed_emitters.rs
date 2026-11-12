@@ -76,7 +76,7 @@ impl LevelEmitters {
 #[derive(Component)]
 pub struct EmitterCarrier;
 
-fn rotation(o: &ScriptObject) -> [i32; 3] {
+pub(crate) fn rotation(o: &ScriptObject) -> [i32; 3] {
     match o.get("Rotation") {
         Some(Val::Raw(b)) if b.len() >= 12 => {
             let i = |k: usize| i32::from_le_bytes([b[k], b[k + 1], b[k + 2], b[k + 3]]);

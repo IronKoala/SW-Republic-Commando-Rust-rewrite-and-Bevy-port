@@ -5004,6 +5004,34 @@ lasts, even with every emitter off, as the map's actor does.
 are drawn), the actor's `DrawScale` (logged), and keeping which are off
 in save files.
 
+### Effects the scripts spawn (`rc_scripts_plugin/src/spawned_actors.rs`)
+
+A script step `ACTION_SpawnActor` makes an actor of `ActorClass`. Its
+rules come from gameplay.u, whose script text ships inside the package:
+the actor goes at the script actor's own place plus `LocationOffset`,
+turned as the script plus `RotationOffset` (or at the scripted
+character with `bOffsetFromScriptedPawn`, not done: the one map that sets
+it has the step switched off), and gets `ActorTag` as its tag when one is
+set (else its class's own `Tag`). With no class nothing happens.
+
+On Geonosis every class spawned this way, apart from geo_04's falling
+rocks, is an `Emitter` with `AutoDestroy`. So the director hands the step
+to the plugin (`LevelScript::spawns`), which puts a small carrier entity at
+the place and sends `SpawnEffect` with `endless` and the new
+`auto_destroy` flag: the effects part then ends it as the engine does, when
+everything it sends has finished (a burst such as `Explosion_Med` after a
+few seconds), and never on the one-minute safety limit (a loop such as
+`Holo_Glow_V1` or `REP_Gunship_GroundDust` stays). `EffectEnded` removes
+the carrier.
+
+Two other steps can name a spawned effect's tag: `ACTION_DestroyActor`
+removes it at once (geo_01briefing, geo_03a and geo_04c remove the
+projector glow), and `ACTION_TeleportToPoint` moves it to the first actor
+with `DestinationTag` (geo_01c moves `HoloTarget2` onto Sun Fac; a
+character's place is its middle, as Unreal places pawns). The teleport of
+an effect doesn't make the script wait. Not done: the teleport doesn't
+change the effect's turn, and spawned effects aren't kept in saves.
+
 ## Mounted turrets (`rc_turrets`, `rc_turrets_plugin`)
 
 **What the original does.** A `Turret` (the Wookiee heavy turret on

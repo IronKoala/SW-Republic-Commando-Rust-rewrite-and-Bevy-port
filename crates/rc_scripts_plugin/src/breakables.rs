@@ -23,12 +23,12 @@ use bevy::prelude::*;
 use rc_combat::grenade::blast_scale;
 use rc_combat::{Blast, DamageKind, Explode, ShotLanded, WeaponLibrary};
 use rc_effects_plugin::{PreloadEffect, SpawnEffect};
-use rc_game_core::GamePaths;
-use rc_level_viewer::draw::MoverPart;
 use rc_game_core::units;
+use rc_game_core::GamePaths;
 use rc_game_core::{GameLog, LevelCollision};
 use rc_level::breakables::Breakable;
 use rc_level_plugin::LevelParts;
+use rc_level_viewer::draw::MoverPart;
 use rc_scripts::PropHurt;
 use std::collections::HashMap;
 
@@ -406,7 +406,10 @@ pub(crate) fn show(
     for (e, l) in &looks {
         if l.until.is_some_and(|t| now >= t) {
             commands.entity(e).despawn();
-            log.line(format!("props: t={now:.2} broken model of export {} removed", l.export));
+            log.line(format!(
+                "props: t={now:.2} broken model of export {} removed",
+                l.export
+            ));
         }
     }
     if script.breaking.stepped.is_empty() {
@@ -492,7 +495,8 @@ pub(crate) fn show(
                     }
                     let material = StandardMaterial {
                         base_color: Color::linear_rgb(light.x, light.y, light.z),
-                        base_color_texture: pic.map(|p| images.add(rc_level_viewer::draw::to_image(&p))),
+                        base_color_texture: pic
+                            .map(|p| images.add(rc_level_viewer::draw::to_image(&p))),
                         unlit: true,
                         double_sided: true,
                         cull_mode: None,
@@ -666,6 +670,8 @@ mod tests {
         director.add_breakables(&list);
         w.insert_resource(LevelScript {
             director,
+            spawns: vec![],
+            spawned_tags: Default::default(),
             dispensers: vec![],
             hidden: Default::default(),
             held: vec![],

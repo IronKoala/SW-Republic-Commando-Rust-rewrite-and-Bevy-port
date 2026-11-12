@@ -287,6 +287,8 @@ mod tests {
         ));
         w.insert_resource(LevelScript {
             director: Director::new(&map(), &[], Settings::default()),
+            spawns: vec![],
+            spawned_tags: Default::default(),
             dispensers: vec![],
             hidden: HashSet::new(),
             held: vec![],
