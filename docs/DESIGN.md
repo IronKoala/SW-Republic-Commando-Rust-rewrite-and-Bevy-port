@@ -1941,6 +1941,65 @@ the player, `SetTeamIndex`, `SetThreat`, `SetSightRadius`, `ShootTarget` and
 clone troopers and the like are logged and skipped), one sequence run
 separately per character, and `ScriptPriority`.
 
+### The objective tracker (`rc_scripts_plugin/src/tracker.rs`, `rc_game/src/objective_tracker.rs`)
+
+Level scripts point the player at the next goal with
+`ACTION_ShowActorObjectiveTracker` (178 steps in 36 maps). Everything below
+was read from the original's files on 2026-11-12: the script step's
+UnrealScript text in ctgame.u, the `Helmet` defaults in engine.u, and the
+native helmet drawing (`UHelmet::DrawHelmet`, `FCanvasUtil::DrawRotatedTile`
+and `DrawRotatedIcon`, `UHelmet::ActorDestroyed`) in Engine.dll,
+disassembled and partly run in an emulator locally for reference. Only
+numbers and rules were taken; no code from the game is in the repository.
+All numbers are in `data/ui/objective_tracker.toml`.
+
+- **The step.** Finds the first actor whose `Tag` is `ActorTag`, in the
+  map's actor order (`AllActors`), and hands it to the helmet; when none
+  has it, or the tag is None, it hides the tracker. When the map is read,
+  `tracker::read_targets` finds the first placed actor for every tag the
+  map's tracker steps name (an actor with no `Tag` is tagged with its class
+  name, as in UE2) and writes each to the log. A placed character (its
+  class comes from `Pawn`) is followed while the game's character with that
+  tag lives; a tag no placed actor has is matched against characters the
+  game spawned; with neither, the tracker hides, as the original's does.
+- **The goal.** Its actor's `Location`, followed each frame. Its size is
+  the bounding sphere radius of the actor's static mesh (the map's own
+  setting, else its class default, through `ClassLibrary::object_path`), 0
+  without one.
+- **Ring or arrows.** If the view is within 45 degrees of the line from the
+  eye to the goal, the line is checked through the level and its movers to
+  250 units short of the goal: at once when the goal comes ahead, then
+  every 0.25 s (`VisCheckFrequency`) while it stays clear. Clear: the four
+  corner arrows. Otherwise the ring.
+- **The ring.** `HUDTextures.Icons.ObjectiveRing` (256x256), centred at
+  (400, 463) on the 800x600 screen, turned clockwise by 65535 minus (the
+  view's yaw minus the goal's yaw seen from the pawn), then flattened by
+  cos(12288) (tipped back 67.5 degrees). Colour (200, 240, 255): a shadow 5
+  units lower at opacity 63, then the ring. The engine's sine table (16384
+  steps) is used for every turn.
+- **The distance.** `"%.1f"` of the distance from the pawn's `Location`
+  (the centre of its collision box, `rc_game_core::PlayerPawn`) to the
+  goal, in hundreds of units, in `OrbitFonts.OrbitBold8`, (200, 240, 255),
+  centred on the ring's centre, each letter its size times the screen
+  scale in whole pixels.
+- **The arrows.** Four corners half the goal's radius out to the sides and
+  up and down, square to the line from the eye, put on the screen with the
+  camera; the box is pushed out to at least 78 pixels each way. At each
+  corner the triangle of `HUDTextures.Icons.LargeVisorIcons` (texels 0,360
+  to 39,399) is drawn 39 units across, turned to point inward (24575, 8191,
+  -8193, -24577), in (200, 240, 255) with opacity = the low byte of
+  int(sin(time x 2.5) x 200 + 55), then again at 1.25 and 0.75 times the
+  size at a quarter of that opacity.
+- **Wide screens.** The original scales its 800x600 units to the screen
+  both ways; the port uses the screen height over 600 both ways and keeps
+  the middle in the middle (the same as the original on a 4:3 screen).
+- **Ours, not the original's:** the port's sight line also stops at
+  blocking volumes (the original's skips volumes); a mover as the goal stays
+  at its placed spot; the tracker isn't kept in save files, so after a load
+  it shows again at the next tracker step; the port's view yaw is in
+  radians and is rounded to the engine's units; and the sight check runs in
+  the game's update rather than while drawing.
+
 ### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
 
 Every squad marker in a map (`MarkerDemolition`, `MarkerHackTerminal`,

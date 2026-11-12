@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: The objective tracker, the original's ring, arrow and distance (rc_scripts_plugin, rc_game, rc_game_core, rc_package, data/ui/objective_tracker.toml)
+
+- **Changed:** New `rc_scripts_plugin::tracker`: the script step `ACTION_ShowActorObjectiveTracker` (before: "not done yet"), the lookup of each map's tracker targets, and the helmet's rules (sight check, ring or corner arrows, distance). New `rc_game/src/objective_tracker.rs` draws it with the original's pictures and font. New `rc_game_core::PlayerPawn` (the player body's centre and look, published by the player part), `ClassLibrary::object_path`, data file `data/ui/objective_tracker.toml`. `toml` moved to `rc_scripts_plugin`'s normal dependencies.
+- **Why:** Gap 1 of the 2026-11-12 audit: 178 tracker steps in 36 maps did nothing, so the player was never shown where to go.
+- **Where it comes from:** the step's UnrealScript text (ctgame.u), the Helmet defaults (engine.u), and the native drawing (Engine.dll `UHelmet::DrawHelmet`, `FCanvasUtil::DrawRotatedTile`/`DrawRotatedIcon`, `UHelmet::ActorDestroyed`), disassembled and partly emulated locally; checked against the user's screenshots of the original (tipped ring with "37.7", four inward triangles). Details in docs/DESIGN.md "The objective tracker". Nothing decompiled is in the repo.
+- **Tested how:** `cargo test -p rc_scripts_plugin -p rc_game -p rc_package -p rc_game_core` (10 new tracker tests, including the ring corners against the values from running Engine.dll's code); target lookup over all 52 staged maps; `rc_game --map geo_01a` in the cloud with files copied read-only from the user's install, with screenshots.
+- **Result:** All tests pass. In geo_01a at t=48 the log reads "ScriptedTrigger10 #1: objective tracker on BactaDispenserLZ (BactaDispenserGEO BactaDispenserGEO0 at (-988, -354, -2264))" then "objective tracker shows the ring (turn -16536, distance 38.0)"; the screenshot shows the tipped ring at the bottom middle, arrow pointing left (the dispenser is to the left), "38.0" in the middle. The corner arrows were checked by moving the goal in front of the view in a scratch build (not committed): four inward triangles round it, pulsing. 116 of 126 tracker tags across the maps find a placed actor; the other 10 have none in the original's map either.
+- **Still broken / not tested:** Not tested on Windows or by playing. Ours, not the original's: the sight line also stops at blocking volumes; a mover as the goal stays at its placed spot; not kept in saves (shows again at the next tracker step after a load); view yaw rounding; the check runs in update, not while drawing. Not read: whether the original hides the tracker while the player is down.
+- **Next:** User check on Windows: geo_01a, the bacta dispenser step.
+
 ## 2026-11-12: You stand in the gunship until the rope order, then drop to the ground (rc_level)
 
 - **Changed:** `rc_level::volumes::blocking_volumes` also reads any other volume the map makes block players or characters (`bBlockPlayers` or `bBlockActors` set on the map's actor). These volumes don't stop shots.

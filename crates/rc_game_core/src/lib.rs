@@ -79,7 +79,7 @@ pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use sound::{SoundAt, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
-    MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerStart,
+    MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
 };
 pub use turrets::{Manning, OnTurret, TurretOrder};
 pub use use_item::{UseItem, UseLock, UsePanel};
