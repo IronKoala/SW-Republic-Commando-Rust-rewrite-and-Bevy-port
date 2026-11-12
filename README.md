@@ -785,6 +785,15 @@ copy of the game.
   elites come in after you shoot its turret). Not tried in a running
   game yet.
 
+- **Physics props (not tested on Windows).** Loose rocks, crates,
+  barrels and ship debris are simulated with the original's settings from
+  the map files (mass, damping, friction, bounce, shape) and its rules:
+  shots and blasts push them by each damage type's `KDamageImpulse`, the
+  levels' MegaForce pushers fire when their event comes, and geo_04's rock
+  slides fall where the level scripts make them, with their landing sound.
+  `rc_physics`, with [Avian](https://github.com/avianphysics/avian) in place
+  of the original's Karma engine.
+
 ## What doesn't work yet
 
 - Turrets: squad mates on turrets say nothing (no turret voice lines
@@ -796,10 +805,16 @@ copy of the game.
   rockets that hit the ship, which aren't done.
 
 - Breakable props: the damaged step's model isn't swapped in, the
-  burning or electric after-effect some barrels leave isn't done, and
-  loose props aren't pushed by blasts. Effects aren't drawn yet for shots,
+  burning or electric after-effect some barrels leave isn't done. Effects aren't drawn yet for shots,
   grenades or anything else besides breaking props, beam and trail
   effects aren't drawn, and explosion sounds aren't placed in 3D yet.
+- Physics props: joints and hinges (swinging lights, hanging hooks),
+  ragdolls, the player pushing props by walking into them, and a
+  KarmaProp breaking when its `LifeTime` runs out aren't done. Once a prop
+  moves, people walk through it. Karma's own friction model is replaced by
+  the usual one. Two geo_04a rocks that start half inside the ground fall
+  through it, and props that fall off the map keep falling (`KillZ` isn't
+  done). See docs/DESIGN.md, "Physics props".
 - Not tested yet: textures stored inside the 76 maps that weren't sampled, and the
   texture scan on Windows (run in the cloud sandbox on copies of the files).
 - Level scripts run, but only part of what they ask is carried out:
@@ -1281,6 +1296,8 @@ cargo run -p rc_model --example rc_model_list -- "C:\Games\Steam\steamapps\commo
 - [Bevy](https://bevy.org) game engine, MIT or Apache-2.0 license. Its audio
   uses [rodio](https://github.com/RustAudio/rodio) and
   [hound](https://github.com/ruuda/hound) (both MIT or Apache-2.0).
+- [Avian](https://github.com/avianphysics/avian) physics, MIT or Apache-2.0
+  license: the rigid body simulation behind `rc_physics`.
 - [oxideav](https://github.com/OxideAV) `oxideav-msmpeg4` and `oxideav-core`,
   MIT license: the MPEG-4 v2 decoding parts `rc_video` builds on (with
   four fixes of ours, listed in `crates/rc_video/src/msmpeg4v2.rs`).

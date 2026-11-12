@@ -241,3 +241,16 @@ pub struct PropAnim {
     pub actor: String,
     pub anim: String,
 }
+
+/// A level script makes an actor (`ACTION_SpawnActor`): the action's
+/// export index in the map and its `ActorClass` (`Package.Class`). Sent
+/// by the level scripts part; the part that owns that kind of actor makes
+/// it (physics props: `rc_physics`, which has every such action's prop
+/// ready from loading).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct ScriptSpawnActor {
+    pub action: usize,
+    pub class: String,
+    /// The script, for the log.
+    pub by: String,
+}

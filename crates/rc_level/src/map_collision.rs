@@ -100,6 +100,11 @@ pub struct MapCollision {
     pub karma_skipped: Vec<crate::karma::Skipped>,
     /// The map's `MegaForce` pushers.
     pub megaforces: Vec<crate::karma::MegaForce>,
+    /// Physics props the level's scripts make (`ACTION_SpawnActor`).
+    pub karma_spawns: Vec<crate::karma::ScriptSpawn>,
+    /// `KDamageImpulse` and `KDeathUpKick` by lower-case damage type class
+    /// name (`crate::karma::damage_impulses`).
+    pub damage_impulses: HashMap<String, (f32, f32)>,
 }
 
 impl MapCollision {
@@ -370,6 +375,8 @@ pub fn load(
         }
     }
     let megaforces = crate::karma::megaforces(&map.0, &map.1, &level);
+    let karma_spawns = crate::karma::script_spawns(&mut looks, &map, &level, &mut |n| pkgs.get(n));
+    let damage_impulses = crate::karma::damage_impulses(&mut looks, &mut |n| pkgs.get(n));
     parts.retain(|a, _| !is_mover.contains(a));
     let mut part_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // Ammo boxes, dropped onto what is below them.
@@ -477,6 +484,8 @@ pub fn load(
         karma,
         karma_skipped,
         megaforces,
+        karma_spawns,
+        damage_impulses,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
         mesh_failures,

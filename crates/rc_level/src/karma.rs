@@ -143,6 +143,10 @@ impl KParams {
     }
 }
 
+/// Unreal units in one Karma unit (Karma's own sizes, the mesh shapes
+/// and inertia, are stored in Karma units).
+pub const KARMA_UNIT: f32 = 50.0;
+
 /// One physics body's collision shape part, in the body's own frame
 /// (Unreal units, scaled by the actor's draw scale, not yet rotated).
 #[derive(Debug, Clone, PartialEq)]
@@ -181,6 +185,11 @@ pub fn mesh_shape(
         .ok_or_else(|| format!("{} has no Karma shape (KMeshProps)", pkg.name(e.object_name)))?;
     let ke = &pkg.exports[(kp - 1) as usize];
     let km = read_kmesh_props(pkg, data, ke).map_err(|e| e.to_string())?;
+    // `KMeshProps` stores its shapes in Karma units (1 = 50 Unreal
+    // units): the DebriB hull reads 4.2 x 6.4 x 0.6 for a mesh of
+    // 187 x 356 x 47 uu, and the KarmaBarrel cylinder has radius 1.23.
+    let u = KARMA_UNIT;
+    let scale = [scale[0] * u, scale[1] * u, scale[2] * u];
     let s = |v: [f32; 3]| [v[0] * scale[0], v[1] * scale[1], v[2] * scale[2]];
     let avg = (scale[0].abs() + scale[1].abs() + scale[2].abs()) / 3.0;
     let mut shapes = Vec::new();
@@ -289,6 +298,21 @@ pub struct KarmaBody {
     pub blocks_players: bool,
     /// `bBlockKarma`: other bodies bump into it.
     pub blocks_karma: bool,
+    /// Simulated from the start (`Physics` is `PHYS_Karma`). If not, it
+    /// stands still until something triggers it (`Trigger` sets Karma
+    /// physics) when `trigger_makes_karma`.
+    pub karma_now: bool,
+    /// `KarmaProp.Trigger` always switches to Karma physics;
+    /// `KActor.Trigger` switches to its class's default `Physics`.
+    pub trigger_makes_karma: bool,
+    /// `CollisionRadius` (Unreal units): blasts measure from it
+    /// (`HurtRadius`), as do `MegaForce` spheres (`CollidingActors`).
+    pub collision_radius: f32,
+    /// `KActor.Health`: removed when it reaches 0 (0: can't be).
+    pub health: i32,
+    /// `KarmaProp` (true) or `KActor` (false): their shot rules differ
+    /// slightly (see docs/DESIGN.md, "Physics props").
+    pub is_karma_prop: bool,
 }
 
 /// Values for an actor: the map's (`own`, may be empty) over its class's.
@@ -418,8 +442,10 @@ fn build_body(
         return Err("a ragdoll (needs the skeleton physics, not done yet)".into());
     }
     let physics = l.byte("Physics").unwrap_or(0);
-    if physics != PHYS_KARMA {
-        return Err(format!("Physics {physics}, not Karma: it never moves"));
+    let is_karma_prop = look.is_a("KarmaProp");
+    let trigger_makes_karma = is_karma_prop || look.find("Physics", 0).is_some_and(|(_, p)| p.value == Value::Byte(PHYS_KARMA));
+    if physics != PHYS_KARMA && !trigger_makes_karma {
+        return Err(format!("Physics {physics}, not Karma, and a trigger doesn't change that: it never moves"));
     }
     let params = l.kparams()?;
     let (mesh_owner, mesh_ref) = mesh.ok_or("no static mesh")?;
@@ -447,6 +473,11 @@ fn build_body(
         life_time: l.float("LifeTime", 0.0),
         blocks_players: l.flag("bBlockPlayers", false),
         blocks_karma: l.flag("bBlockKarma", false),
+        karma_now: physics == PHYS_KARMA,
+        trigger_makes_karma,
+        collision_radius: l.float("CollisionRadius", 22.0),
+        health: if is_karma_prop { 0 } else { l.int("Health", 0) },
+        is_karma_prop,
     })
 }
 
@@ -643,4 +674,153 @@ pub fn megaforces(pkg: &Package, data: &[u8], level: &LevelInfo) -> Vec<MegaForc
 /// The direction an actor faces (`vector(Rotation)`), Unreal axes.
 pub fn facing(rotation: [i32; 3]) -> Vec3 {
     actors::rotation_axes(rotation)[0]
+}
+
+/// A physics prop a level script makes (`ACTION_SpawnActor` with a Karma
+/// class, such as geo_04's falling rocks `K_GEO4_FallingRock1`-`3`).
+#[derive(Debug, Clone)]
+pub struct ScriptSpawn {
+    /// The action's export index in the map (`ScriptObject::export`).
+    pub action: usize,
+    /// The script (`ScriptedSequence`) it belongs to, for the log.
+    pub script: String,
+    /// The class, `Package.Class`.
+    pub class: String,
+    /// The body, made at the script's place, or why it can't be.
+    pub body: Result<KarmaBody, String>,
+}
+
+fn raw_floats3(p: &Property) -> Option<[f32; 3]> {
+    vec3(p)
+}
+
+fn raw_ints3(p: &Property) -> Option<[i32; 3]> {
+    match &p.value {
+        Value::Raw(b) if b.len() == 12 => {
+            let f = |i: usize| i32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+            Some([f(0), f(1), f(2)])
+        }
+        _ => None,
+    }
+}
+
+/// Every `ACTION_SpawnActor` in the map's scripts whose class is a
+/// physics prop, made ready at load. `ACTION_SpawnActor` (`Gameplay.u`)
+/// spawns at the script's `Location + LocationOffset`, turned by its
+/// `Rotation + RotationOffset`. Actions spawning anything else are left
+/// out (they aren't physics props).
+pub fn script_spawns(
+    looks: &mut ClassLooks,
+    map: &Loaded,
+    level: &LevelInfo,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> Vec<ScriptSpawn> {
+    let (pkg, data) = (&map.0, &map.1);
+    let mut out = Vec::new();
+    for &a in level.actors.iter().flatten() {
+        let Ok(own) = actors::read_actor_properties(pkg, data, a) else {
+            continue;
+        };
+        let Some(list) = own
+            .iter()
+            .find(|p| p.array_index == 0 && pkg.name(p.name).eq_ignore_ascii_case("Actions"))
+        else {
+            continue;
+        };
+        let Value::Raw(b) = &list.value else { continue };
+        let mut r = Reader::new(b);
+        let n = r.compact_index().unwrap_or(0).max(0);
+        let mut actions = Vec::new();
+        for _ in 0..n {
+            match r.compact_index() {
+                Ok(o) if o > 0 => actions.push((o - 1) as usize),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        let Ok(place) = actors::read_placement(pkg, data, a) else {
+            continue;
+        };
+        for act in actions {
+            if !pkg.export_class_name(&pkg.exports[act]).eq_ignore_ascii_case("ACTION_SpawnActor") {
+                continue;
+            }
+            let Ok(props) = actors::read_actor_properties(pkg, data, act) else {
+                continue;
+            };
+            let find = |k: &str| {
+                props
+                    .iter()
+                    .find(|p| p.array_index == 0 && pkg.name(p.name).eq_ignore_ascii_case(k))
+            };
+            let Some(Value::Object(c)) = find("ActorClass").map(|p| p.value.clone()) else {
+                continue;
+            };
+            let path = object_path(pkg, c);
+            if path.len() != 2 {
+                continue;
+            }
+            // Only physics prop classes.
+            match looks.for_class(&path[0], &path[1], open) {
+                Some(l) if l.is_a("KarmaProp") || l.is_a("KActor") => {}
+                _ => continue,
+            }
+            let off = find("LocationOffset").and_then(raw_floats3).unwrap_or([0.0; 3]);
+            let rot = find("RotationOffset").and_then(raw_ints3).unwrap_or([0; 3]);
+            let location = [
+                place.location[0] + off[0],
+                place.location[1] + off[1],
+                place.location[2] + off[2],
+            ];
+            let rotation = [
+                place.rotation[0].wrapping_add(rot[0]),
+                place.rotation[1].wrapping_add(rot[1]),
+                place.rotation[2].wrapping_add(rot[2]),
+            ];
+            out.push(ScriptSpawn {
+                action: act,
+                script: place.name.clone(),
+                class: path.join("."),
+                body: spawned(looks, &path[0], &path[1], location, rotation, open),
+            });
+        }
+    }
+    out
+}
+
+/// How hard each damage type pushes physics props: `KDamageImpulse` and
+/// `KDeathUpKick` (Unreal units x mass per second), by lower-case class
+/// name. Weapon traces push with `Dir * KDamageImpulse`; blasts
+/// (`HurtRadius`) with `KDamageImpulse` away from the blast plus
+/// `KDeathUpKick` up. The damage types' defaults are in
+/// `Properties/Properties.u`.
+pub fn damage_impulses(
+    looks: &mut ClassLooks,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) -> std::collections::HashMap<String, (f32, f32)> {
+    let mut out = std::collections::HashMap::new();
+    let Some(props) = open("Properties") else {
+        return out;
+    };
+    let classes: Vec<String> = props
+        .0
+        .exports
+        .iter()
+        .filter(|e| props.0.export_class_name(e) == "Class")
+        .map(|e| props.0.name(e.object_name).to_string())
+        .collect();
+    for c in classes {
+        let Some(look) = looks.for_class("Properties", &c, open) else {
+            continue;
+        };
+        if !look.is_a("DamageType") {
+            continue;
+        }
+        let f = |k: &str| match look.find(k, 0).map(|(_, p)| &p.value) {
+            Some(Value::Float(f)) => *f,
+            _ => 0.0,
+        };
+        out.insert(c.to_ascii_lowercase(), (f("KDamageImpulse"), f("KDeathUpKick")));
+    }
+    out
 }

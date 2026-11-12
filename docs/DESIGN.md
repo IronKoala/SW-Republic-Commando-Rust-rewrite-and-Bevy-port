@@ -1250,14 +1250,9 @@ terrain yet, so their ground gets the props' average light, flat. The terrain's
 triangles also go into collision (`collision::add_terrains`, used by
 `map_collision` and so by `rc_game` and `rc_walk`).
 
-Falling rocks (`rc_level::settle`): physics props (`KarmaProp`) whose
-`KarmaParams` say `KStartEnabled` (and whose `Physics` the map doesn't
-switch off) drop onto the ground as the game's level starts. The port has
-no physics for them, so `scene.rs` and `map_collision.rs` place them first
-and then move them straight down onto the ground (BSP, other props,
-terrain) until their lowest corner touches it, up to 512 units. They don't
-turn to lie flat. Props whose physics starts asleep stay where the map puts
-them.
+Loose physics props (rocks, crates, debris) are no longer moved onto the
+ground at load: the physics part simulates them (see "Physics props"
+below). `rc_level::settle` stays for tools but the game doesn't use it.
 
 ### Showing a level (`rc_level_viewer`)
 
@@ -5118,6 +5113,126 @@ fire every 0.05 s.
 it (the original asks for the crosshair on it). The Trandoshan turret's
 four barrels fire one after another for a character gunner. The turret
 weapons' first-person offsets and the E-Web's reload time are guesses.
+
+## Physics props (`rc_physics`, `rc_level::karma`, `rc_package::karma`)
+
+The original simulates loose props (rocks, crates, barrels, ship debris,
+geo_04c's breaking wall pieces) with its Karma physics engine. The port
+replaces Karma with Avian (MIT or Apache-2.0) and keeps the game's rules
+around it. Everything below was read from the game's own files: the map,
+the class defaults (`KarmaPropProperties.u`, `Properties.u`, `Engine.u`,
+`CTGame.u`), the scripts' text, and `Engine.dll` (looked at locally with a
+disassembler; nothing of it is in the repo).
+
+What is a physics prop (`rc_level::karma::read`): a `KarmaProp` or `KActor`
+with `KParams` (a `KarmaParams` object) and a static mesh, whose `Physics`
+is `PHYS_Karma` (13), or which a trigger turns into one (`KarmaProp.Trigger`
+always sets `PHYS_Karma`; `KActor.Trigger` sets its class default). Joints
+(`KConstraint`) and ragdolls are left out with a reason in the log.
+
+Its shape (`rc_package::karma`): the static mesh's `KMeshProps` (an object
+inside the mesh): 6 inertia floats, a centre-of-mass nudge, then lists of
+spheres, boxes, cylinders, convex hulls and capsules, each with a 4x4
+placement (`UKMeshProps::Serialize` at 0x10386d10). All 33 in the Geonosis
+and Karma packages read to the last byte. The sizes are in Karma units
+(x 50 for Unreal units): the crash debris `DebriB` mesh is 187 x 356 x 47
+uu and its hull reads 4.2 x 6.4 x 0.64; `KarmaBarrel`'s cylinder has a
+radius of 1.23. Scaled by `DrawScale` x `DrawScale3D`.
+
+Units and forces (`Engine.dll`):
+
+| Rule | Value | Where |
+|---|---|---|
+| Unreal to Karma units | x 0.02 (`K_U2MEScale`), so 1 Karma unit = 50 uu = 1 Bevy unit | 0x1067eacc |
+| Gravity | `PhysicsVolume.Gravity` -1100 uu/s², x `KActorGravScale` | Engine.u defaults |
+| Force each step | mass x (gravity - `KLinearDamping` x velocity); turn slowed by `KAngularDamping` | 0x105986c0 |
+| Mass | clamped to 0.01..100 x the world's default mass | 0x10578ea0 |
+| Speed cap | `MaxKarmaSpeed` 800 Karma units/s (40000 uu/s) | 0x10580c5e |
+| Impulse | `KAddImpulse(momentum, at)`: speed change = momentum / `KMass` (uu/s) | 0x10591ab0 |
+| Friction | below 0.01 none; two props: product; prop and level: the prop's own | contact setup |
+| Landing (`KImpact`) | when the touching points' speed against each other x 50 > `KImpactThreshold` (uu/s) | 0x1058054d |
+
+Rules from the scripts (`Engine.u`, `CTGame.u`):
+
+- `KarmaProp.AffectKarma` (any damage, shot or push): send `Event`;
+  `DamageThreshold -= Damage`; if `bKTakeShot` and the threshold is 0 or
+  less: start the `LifeTime` timer, wake, push with the momentum at the hit.
+- `KActor.TakeDamage`: start `LifeSpan` from `LifeTime`; take `Health`
+  (gone at 0); the same threshold check; wake, send `Event`, push.
+- `Trigger` (an event with the prop's tag, or a `MegaForce` with
+  `bAutoActivateAffected`): `bKTakeShot` on, Karma physics on, wake.
+- Weapon traces push with `Dir x KDamageImpulse` of the damage type, at the
+  hit. Blasts (`HurtRadius`) reach props within the radius that the blast
+  can see; the push is `(KDamageImpulse x direction + KDeathUpKick up) x
+  scale` at the prop's centre, with `scale = 1 - (dist - CollisionRadius) /
+  radius`, and the damage is scaled the same. The damage types' values are
+  read from `Properties.u` at load (`karma::damage_impulses`).
+- `MegaForce.Trigger`: `IT_Line` goes `ForceDistance` (default 1000) along
+  its facing through every prop on the line (`TraceActors`) and pushes
+  `facing x ForceAmount` where the line meets it (or at its centre with
+  `bApplyToCenterOfMass`); `IT_Sphere` takes every prop within
+  `ForceDistance` and pushes `ForceAmount` along its facing
+  (`bUseEmitterDirection`) or away from it, at the prop's centre. Both
+  are `TakeDamage(0, ...)`, so a prop that doesn't take shots isn't pushed
+  unless the MegaForce triggers it first.
+- `ACTION_SpawnActor` makes its class at the script's `Location +
+  LocationOffset`, turned by `Rotation + RotationOffset` (the geo maps use
+  no offsets). geo_04's rock slides are `K_GEO4_FallingRock1`-`3`
+  (`rockSmall/Medium/Big`, one convex hull each, `KStartEnabled`, friction
+  and bounce 0.4, landing sound `ambPS_GEO_rockImpact` at most every 0.5 s,
+  threshold 100 uu/s). Every such action's prop is made ready at load
+  (`karma::script_spawns`); the scripts part sends `ScriptSpawnActor` with
+  the action and `rc_physics` makes the prop and a copy of its model.
+- `KImpact` plays one of `ImpactSounds` at random if `ImpactInterval` has
+  passed since the last.
+
+How the port runs it (`rc_physics`): the level's fixed collision is one
+static triangle mesh; each part a script can switch off is its own, turned
+off with the part. Props whose physics starts asleep (`KStartEnabled`
+off) are held still until they are shot, pushed, triggered or hit by a
+moving prop (Avian bodies made asleep woke up at once and fell, so they
+are held fixed instead and let go when woken); props whose `Physics` isn't Karma stand still until triggered. A
+prop's drawn model (drawn where the map puts it, tagged `MoverPart`)
+follows the body. Props made by scripts are drawn from a hidden copy made
+at load, lit the way props with no stored light are (from the lights
+around the script's place).
+
+Where the port differs (not the original's behaviour, and why):
+
+- Karma's contact friction is a "slip" model (no limit on the friction
+  force, slip = 1/friction - 1); Avian only has the usual friction limit.
+  The friction values are the game's, used as Avian friction.
+- Bounce above 1 (`K_GEO4Rock1` has 2) is held at 1; Avian would add
+  energy. How Karma treats it isn't known.
+- `bKNonSphericalInertia` (off on every prop) switches something inside
+  the MathEngine library (a flag on the body, 0x10596740) that wasn't
+  decoded; the stored inertia is used as is, times mass and draw scale
+  squared.
+- Angular damping: Karma scales it by the average of the inertia's
+  diagonal; Avian slows the turn by the damping alone.
+- Once a prop moves, players walk through it (its triangles leave the
+  level's collision), shots that hit it still go on to the level behind it,
+  and props don't collide with doors and lifts.
+- The landing sound plays at full volume (`ImpactVolume` isn't used yet).
+- A `KarmaProp`'s `LifeTime` breaks it (its `Timer` and `PropDestroyed`
+  state); that's logged, not done. A `KActor` whose `LifeSpan` runs out is
+  removed.
+- Two of geo_04a's falling rocks (`K_GEO4_FallingRock0` and `5`, by the
+  start) are placed with their centres 13 and 7 uu under the sloping
+  ground, so Avian pushes them down through it and they fall out of the
+  world. How Karma treats a prop that starts inside the ground is inside
+  the MathEngine library and wasn't decoded; making the ground one-sided
+  didn't change it. The other 15 land 15 to 160 uu below where they are
+  placed (they are placed in the air and fall into place).
+- `KillZ` (a zone's "fell out of the world" height, -10000 by default)
+  isn't done, so a prop that falls off the map keeps falling. geo_04d's
+  crash debris and some rock-slide rocks roll off ledges.
+- Starting spin (`KStartAngVel`) isn't given (no prop on the copied maps
+  logs one).
+- Not done: joints and hinges (`KConstraint`: geo_01b's 4, geo_04d's 4,
+  geo_05b's 20), ragdolls (`KarmaParamsSkel`, the skeleton physics), the
+  player pushing props by walking into them, and terrain layers' own
+  friction.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 
