@@ -14,12 +14,12 @@
 //!
 //! - `ACTION_SetTeamIndex` sets `TeamIndex` (an action that names no
 //!   team sets 0, the neutral team);
-//! - `ACTION_SetThreat` sets `bPerceivedAsThreat`. **Not found:** the
-//!   flag's class default is off, and the only compiled code found that
-//!   switches it on is a character waking from a shut-down or perched
-//!   state; where ordinary characters get it is not known yet. Here every
-//!   character starts with it on (so everyone fights as before) and only a
-//!   script switches it off;
+//! - `ACTION_SetThreat` sets `bPerceivedAsThreat`. **Stand-in:** where
+//!   the original switches it on for an ordinary character was not found
+//!   (class default off; no class, map, ini or Properties package sets it;
+//!   the only compiled code that sets it is a character waking from a
+//!   shut-down or perched state). Here every character starts with it on
+//!   and only a script switches it off: ours, not the original's;
 //! - `ACTION_SetSightRadius` sets `SightRadius`, or puts back the class
 //!   default (`ResetToDefaults`);
 //! - `ACTION_SuggestEnemy` sets the bot's suggested enemy (`None` clears
@@ -164,7 +164,7 @@ pub struct AiRules {
     pub parents: Option<Vec<String>>,
     /// `TeamIndex`.
     pub team: u8,
-    /// `bPerceivedAsThreat`.
+    /// `bPerceivedAsThreat`. Starts on: a stand-in (see the module notes).
     pub threat: bool,
     /// `SightRadius` when a script set it; `None` is the character's own.
     pub sight_radius: Option<f32>,

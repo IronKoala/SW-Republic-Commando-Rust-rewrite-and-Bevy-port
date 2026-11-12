@@ -167,9 +167,10 @@ copy of the game.
   `SuggestEnemy` steps now work: for example geo_05b sets its battle
   droids' sight radius to 1 and later puts it back, and geo_01a puts its
   spider droid on team 5 and then on team 0.
-  Where the original switches a character's "is a threat" flag on in the
-  first place isn't in the game's files we found, so every character
-  starts as a threat and only a script turns it off.
+  **Stand-in:** every character starts as a "threat" and only a script
+  turns that off. Where the original switches the flag on was not found
+  in any of the game's files or compiled code, so this part is ours, not
+  the original's.
 
 - **Droid dispensers make droids (tested in the cloud sandbox by numbers
   and pictures, not yet on Windows or in a full level).** The battle droid

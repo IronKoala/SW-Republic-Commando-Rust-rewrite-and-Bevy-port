@@ -1979,11 +1979,13 @@ that an enemy a script suggested is taken whenever it is seen.
 | `SetSightRadius` | `AiRules::sight_radius` of characters tagged `AffectPawnsWithTag`, of class `AffectPawnsOfClass` or under it, and with `AffectAttachedPawn` the sequence's character; `NewSightRadius` defaults to 0; `ResetToDefaults` puts their own back |
 | `SuggestEnemy` | the sequence's characters' `AiRules::suggested_enemy`: the first character tagged `EnemyTag` |
 
-**Not found in the game's files:** where an ordinary character's
-`bPerceivedAsThreat` gets switched on. Its class default is off, and the
-only compiled code found that sets it is a character waking from a
-shut-down or perched state. So here every character starts with it on (as
-before this change) and only a script switches it off.
+**Stand-in (not the original's):** every character starts with
+`bPerceivedAsThreat` on. Where the original switches it on for an ordinary
+character was not found. Its class default is off. Searched: the class defaults of every class in Engine.u, CTGame.u, CTCharacters.u and GamePlay.u (none sets it), every script package and Properties package and all 56 maps (only CTCharacters.u's AutoTurret and a death state, and CTGame.u's ACTION_SetThreat, name it), the .ini files, and every write to the flag's bit in ctgame.dll, engine.dll, gameplay.dll, ctmarkers.dll and xgame.dll (only the perched and shut-down states' wake-up code sets it). Yet the
+original's `Assess` passes over any enemy with it off, so the original
+must find most enemies some other way (its stimulus and state code, not
+read yet). Until that is read, "everyone starts as a threat" stands in,
+and only `ACTION_SetThreat` switches it off.
 
 **Not done yet:** `SetThreat` on things that aren't characters (in the
 original it sets `bValidEnemy` on turrets and props); a suggested enemy
