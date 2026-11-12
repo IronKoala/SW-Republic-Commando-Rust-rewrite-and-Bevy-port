@@ -280,10 +280,7 @@ fn main() {
             };
             let ahead = Vec3::new(yaw.cos(), yaw.sin(), 0.0);
             let player_centre = centre + ahead * 1500.0;
-            let player = Target {
-                centre: player_centre,
-                eye: player_centre + Vec3::new(0.0, 0.0, 60.0),
-            };
+            let player = Target::new(player_centre, player_centre + Vec3::new(0.0, 0.0, 60.0));
             let start = battle.time;
             // Where each droid was when it was let go and when it finished
             // unfolding.

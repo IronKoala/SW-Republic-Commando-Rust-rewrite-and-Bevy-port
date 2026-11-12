@@ -158,6 +158,19 @@ copy of the game.
   commandos' DC-17m), as the level's other troopers do. Settings:
   `data/enemies/clone_trooper*.toml`.
 
+- **Level scripts decide who fights whom (tested in the cloud sandbox by
+  numbers, not yet on Windows or by eye).** Every character has the
+  original's team (droids 5, clone troopers and the squad 2, you 1) and
+  fights only the teams its own team treats as enemies
+  (`data/ai/teams.toml`, plus a map's own team changes). The level
+  scripts' `SetTeamIndex`, `SetThreat`, `SetSightRadius` and
+  `SuggestEnemy` steps now work: for example geo_05b sets its battle
+  droids' sight radius to 1 and later puts it back, and geo_01a puts its
+  spider droid on team 5 and then on team 0.
+  Where the original switches a character's "is a threat" flag on in the
+  first place isn't in the game's files we found, so every character
+  starts as a threat and only a script turns it off.
+
 - **Droid dispensers make droids (tested in the cloud sandbox by numbers
   and pictures, not yet on Windows or in a full level).** The battle droid
   and super battle droid dispensers (26 in 14 maps) now work like the

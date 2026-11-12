@@ -341,6 +341,9 @@ pub struct PlayStats {
     pub invulnerable: Vec<String>,
     pub characters_hurt: usize,
     pub squad_orders: Vec<String>,
+    /// `SetThreat`, `SetTeamIndex`, `SuggestEnemy`, `SetSightRadius`:
+    /// `KIND WHO WHAT`.
+    pub ai_rules: Vec<String>,
     /// `ChangeSquadMember`: `WHO joins|leaves`.
     pub squad_members: Vec<String>,
     /// Line-of-sight triggers the player set off by looking, by name.

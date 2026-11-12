@@ -135,6 +135,16 @@ pub struct Member {
     pub(crate) cover_retry_in: f32,
     /// Crouching this frame (in cover, between bursts).
     pub crouch: bool,
+    /// A level script's `ACTION_SetSightRadius` on them: how far they see
+    /// instead of `[fight] sight_radius`, until reset.
+    pub sight_override: Option<f32>,
+    /// A level script's `ACTION_SuggestEnemy`: the [`Threat::id`] they fight
+    /// whenever they can see it (the game's `ULocalSituation::Assess`
+    /// takes a suggested enemy it can see over any other).
+    pub suggested: Option<u64>,
+    /// Which teams (0 to 9) its own team treats as enemies, from the
+    /// game's team relations; `None` fights every threat.
+    pub enemy_teams: Option<[bool; 10]>,
     /// On a turret (a `mount` post): the game holds the body's centre here
     /// and turns them with the turret (radians). They don't move, think or
     /// fire their own gun meanwhile; the game fires the turret.
@@ -396,16 +406,32 @@ pub enum SquadEvent {
     },
     /// Left the squad (a level script's `ChangeSquadMember`): they stop
     /// following and do what the level's scripts tell them.
-    LeftSquad { member: String, at: Vec3 },
+    LeftSquad {
+        member: String,
+        at: Vec3,
+    },
     /// Back in the squad (or in it for the first time).
-    JoinedSquad { member: String, at: Vec3 },
+    JoinedSquad {
+        member: String,
+        at: Vec3,
+    },
     /// Came into the level (placed in the map, or made by a spawner),
     /// `in_squad` or not.
-    CameIn { member: String, at: Vec3, in_squad: bool },
+    CameIn {
+        member: String,
+        at: Vec3,
+        in_squad: bool,
+    },
     /// Taken out of the level (a script's `DestroyPawn`).
-    Removed { member: String },
+    Removed {
+        member: String,
+    },
     /// Got where a level script sent them (away from the squad).
-    ScriptArrived { member: String, index: usize, at: Vec3 },
+    ScriptArrived {
+        member: String,
+        index: usize,
+        at: Vec3,
+    },
     /// A grenade thrown from a grenade post, or on their own (`own`); it
     /// goes off in `fuse` seconds.
     Throw {
@@ -709,6 +735,9 @@ impl Squad {
                     cover_time: 0.0,
                     cover_retry_in: 0.0,
                     crouch: false,
+                    sight_override: None,
+                    suggested: None,
+                    enemy_teams: None,
                     mounted: None,
                     presence: Presence::InSquad,
                     script_move: None,
@@ -927,7 +956,11 @@ impl Squad {
                 }
                 let order_name = format!("{} ({})", spot.name, spot.job);
                 self.pull_for(k, &mut events);
-                if !self.members.iter().any(|m| m.marker.is_none() && m.available()) {
+                if !self
+                    .members
+                    .iter()
+                    .any(|m| m.marker.is_none() && m.available())
+                {
                     events.push(SquadEvent::OrderIgnored {
                         order: order_name,
                         why: if self.auto_pull {

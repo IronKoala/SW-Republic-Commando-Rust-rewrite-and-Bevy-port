@@ -14,10 +14,7 @@ fn flat_floor(extra: Vec<Brush>) -> BrushWorld {
 }
 
 fn target_at(x: f32, y: f32) -> Target {
-    Target {
-        centre: Vec3::new(x, y, 84.0),
-        eye: Vec3::new(x, y, 144.0),
-    }
+    Target::new(Vec3::new(x, y, 84.0), Vec3::new(x, y, 144.0))
 }
 
 /// Run a fighter for `seconds` against a still target; returns all events.
@@ -1951,4 +1948,88 @@ fn saves_from_before_placed_characters_still_load() {
     assert_eq!(back.len(), 1);
     steps(&mut again, 30);
     assert_eq!(again.fighters.len(), 1);
+}
+
+/// The game's single-player teams from `data/ai/teams.toml` (E = enemy).
+fn game_teams() -> Teams {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../data/ai/teams.toml"
+    ))
+    .unwrap();
+    let mut hostile = [[true; 10]; 10];
+    for line in text.lines().filter(|l| l.starts_with('"')) {
+        let mut parts = line
+            .split('"')
+            .filter(|p| !p.trim().is_empty() && p.trim() != "=");
+        let a: usize = parts.next().unwrap().parse().unwrap();
+        let letters = parts.next().unwrap();
+        for (b, c) in letters.chars().enumerate() {
+            hostile[a][b] = c == 'E';
+        }
+    }
+    Teams { hostile }
+}
+
+/// Run a one-droid battle with the game's teams for two seconds; the
+/// directions it fired in.
+fn droid_fires(setup: impl FnOnce(&mut Fighter), player: Target, others: &[Target]) -> Vec<Vec3> {
+    let world = flat_floor(vec![]);
+    let mut b = one_droid_battle();
+    b.teams = Some(game_teams());
+    setup(&mut b.fighters[0]);
+    let mut dirs = Vec::new();
+    for _ in 0..60 {
+        dirs.extend(fire_directions(&b.step_with(
+            1.0 / 30.0,
+            &world,
+            Some(player),
+            others,
+        )));
+    }
+    dirs
+}
+
+#[test]
+fn a_droids_team_decides_whether_it_fights_the_player() {
+    let player = target_at(800.0, 0.0);
+    // Team 5 (TeamHostile, the class default) fights team 1.
+    assert!(!droid_fires(|_| {}, player, &[]).is_empty());
+    // geo_01a's spider droid is put on team 0 (TeamNeutral) by a script:
+    // it treats everyone as neutral.
+    assert!(droid_fires(|f| f.team = Some(0), player, &[]).is_empty());
+}
+
+#[test]
+fn an_enemy_that_is_not_a_threat_is_passed_over() {
+    let player = Target {
+        threat: false,
+        ..target_at(800.0, 0.0)
+    };
+    assert!(droid_fires(|_| {}, player, &[]).is_empty());
+}
+
+#[test]
+fn a_scripts_sight_radius_limits_what_it_sees() {
+    let player = target_at(800.0, 0.0);
+    // geo_05b sets battle droids' sight radius to 1.
+    assert!(droid_fires(|f| f.sight_override = Some(1.0), player, &[]).is_empty());
+    assert!(!droid_fires(|f| f.sight_override = Some(1000.0), player, &[]).is_empty());
+}
+
+#[test]
+fn a_suggested_enemy_it_can_see_comes_first() {
+    // The player is nearer, but a script suggested the squad mate.
+    let player = target_at(700.0, 0.0);
+    let mate = Target {
+        key: 42,
+        team: 2,
+        ..target_at(0.0, 1400.0)
+    };
+    let dirs = droid_fires(|f| f.suggested = Some(42), player, &[mate]);
+    assert!(!dirs.is_empty());
+    assert!(dirs.iter().all(|d| d.y > 0.9), "fired at {dirs:?}");
+    // Without the suggestion it takes the nearest.
+    let dirs = droid_fires(|_| {}, player, &[mate]);
+    assert!(dirs.iter().all(|d| d.x > 0.9), "fired at {dirs:?}");
 }

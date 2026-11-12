@@ -734,3 +734,51 @@ pub fn read_placed(
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
+
+/// A map's `TeamOverride` actor: it replaces the game's team `index` with
+/// its own relations (`GameReplicationInfo.UseTeam`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeamOverride {
+    pub name: String,
+    /// `TeamIndex`.
+    pub index: i32,
+    /// `RelationTowards[0..9]` as the map stores them (0 enemy, 1 neutral,
+    /// 2 ally); `None` where the map keeps the default (enemy).
+    pub relations: [Option<u8>; 10],
+}
+
+/// Every `TeamOverride` actor in a map (geo_01a has two).
+pub fn read_team_overrides(pkg: &Package, data: &[u8]) -> Result<Vec<TeamOverride>, String> {
+    let level = actors::read_level(pkg, data).map_err(|e| format!("level: {e}"))?;
+    let mut out = Vec::new();
+    for &a in level.actors.iter().flatten() {
+        let e = &pkg.exports[a];
+        if !pkg
+            .export_class_name(e)
+            .eq_ignore_ascii_case("TeamOverride")
+        {
+            continue;
+        }
+        let Ok(props) = actors::read_actor_properties(pkg, data, a) else {
+            continue;
+        };
+        let mut o = TeamOverride {
+            name: pkg.name(e.object_name).to_string(),
+            index: 0,
+            relations: [None; 10],
+        };
+        for p in &props {
+            match (pkg.name(p.name), &p.value) {
+                ("TeamIndex", Value::Int(i)) => o.index = *i,
+                ("RelationTowards", Value::Byte(b)) => {
+                    if let Some(r) = o.relations.get_mut(p.array_index as usize) {
+                        *r = Some(*b);
+                    }
+                }
+                _ => {}
+            }
+        }
+        out.push(o);
+    }
+    Ok(out)
+}

@@ -715,6 +715,8 @@ impl Battle {
         fighter.pawn.location = centre;
         fighter.pawn.velocity = Vec3::ZERO;
         fighter.facing = facing;
+        fighter.team = crate::battle::team_of(spot.offspring.team)
+            .or(crate::battle::team_of(self.spawners[i].factory.team));
         self.fighters.push(fighter);
         self.made_by.push(i);
         self.births.insert(

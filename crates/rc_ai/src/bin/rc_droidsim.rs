@@ -336,10 +336,7 @@ fn main() {
         }
 
         // Spawners, droids thinking and acting, droids hearing shots.
-        let target = Some(Target {
-            centre: player.location,
-            eye: player.eye(),
-        });
+        let target = Some(Target::new(player.location, player.eye()));
         let mut events = battle.step(DT, &world, target);
 
         // The player shoots back at the nearest droid it can see.

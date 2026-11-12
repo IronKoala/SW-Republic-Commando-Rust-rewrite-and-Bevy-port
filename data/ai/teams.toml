@@ -1,0 +1,34 @@
+# The original game's single-player teams: who each team treats as an
+# enemy (E), as neutral (N) or as an ally (A).
+#
+# One line per team (0 to 9). The letters are the team's relation towards
+# team 0, 1, 2, ... 9, in that order.
+#
+# Where these come from (the game's own files, read at the time of writing;
+# nothing copied):
+# - CTGame.u, CTGameInfoSP.PostBeginPlay makes the teams: 0 TeamNeutral,
+#   1 and 2 TeamPlayer, 3 TeamWookiee, 4 TeamAttachedScav, 5 TeamHostile,
+#   6 to 8 TeamMP, 9 TeamBerserker. PickTeam puts the player on team 1.
+# - Each team class's RelationTowards defaults (rc_probe --classes
+#   ctgame.u TeamPlayer, ...). The game's default relation is TEAM_Enemy.
+# - CTTeamInfo.SetTeamIndex makes a team its own ally. TeamNeutral's
+#   PreBeginPlay sets every relation to neutral and its SetTeamIndex does
+#   nothing; TeamBerserker's sets teams 1 to 9 to enemy and its
+#   SetTeamIndex only stores the index, so it is its own enemy too.
+# - Class defaults put characters on teams: BattleDroid and
+#   GeonosianWarrior 5, CloneCommando and CloneTrooper 2.
+#
+# A map can replace a team with a TeamOverride actor (geo_01a does, for
+# teams 5 and 7). The game reads those from the map; they are not here.
+
+[relations]
+"0" = "NNNNNNNNNN"   # TeamNeutral
+"1" = "EAAAEEEEEE"   # TeamPlayer (the player)
+"2" = "EAAAEEEEEE"   # TeamPlayer (squad, clone troopers)
+"3" = "EAAANEEEEE"   # TeamWookiee
+"4" = "EEENAAEEEE"   # TeamAttachedScav
+"5" = "EEEEAAEEEE"   # TeamHostile (droids, Geonosians, Trandoshans)
+"6" = "EEEEEEAEAE"   # TeamMP
+"7" = "EEEEEEEAAE"   # TeamMP
+"8" = "EEEEEEEEAE"   # TeamMP
+"9" = "EEEEEEEEEE"   # TeamBerserker

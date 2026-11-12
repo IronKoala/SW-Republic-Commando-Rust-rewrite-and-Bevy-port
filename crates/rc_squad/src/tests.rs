@@ -56,6 +56,8 @@ fn threat(id: u64, feet: Vec3) -> Threat {
         centre: feet + Vec3::new(0.0, 0.0, 80.0),
         eye: feet + Vec3::new(0.0, 0.0, 140.0),
         blaster_share: 1.0,
+        team: 5,
+        threat: true,
     }
 }
 
@@ -1419,6 +1421,8 @@ fn sev_snipes_far_enemies_and_uses_the_blaster_up_close() {
 fn armoured(id: u64, feet: Vec3) -> Threat {
     Threat {
         blaster_share: 0.15,
+        team: 5,
+        threat: true,
         ..threat(id, feet)
     }
 }
@@ -1782,4 +1786,69 @@ fn after_giving_up_on_a_box_they_go_back_before_trying_another() {
         e,
         SquadEvent::FetchAmmo { member, name, .. } if member == "Sev" && name == "DC17mBlasterBox2"
     )));
+}
+
+/// Shots at each target id over `seconds`.
+fn shot_targets(squad: &mut Squad, seconds: f32) -> Vec<u64> {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let events = run(squad, start, seconds, &world);
+    shots(&events).into_iter().map(|s| s.3).collect()
+}
+
+#[test]
+fn members_fight_only_their_teams_enemies_that_are_threats() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    // Team 2's row in data/ai/teams.toml: enemies of 0 and 4 to 9.
+    let row = [
+        true, false, false, false, true, true, true, true, true, true,
+    ];
+    for m in &mut squad.members {
+        m.enemy_teams = Some(row);
+    }
+    // A droid on an allied team (3) and one that isn't a threat
+    // (geo_05b's attachments, `ACTION_SetThreat`): nobody shoots.
+    squad.threats = vec![
+        Threat {
+            team: 3,
+            ..threat(1, Vec3::new(900.0, 0.0, 0.0))
+        },
+        Threat {
+            threat: false,
+            ..threat(2, Vec3::new(900.0, 300.0, 0.0))
+        },
+    ];
+    assert!(shot_targets(&mut squad, 4.0).is_empty());
+    // An ordinary droid (team 5) is fought.
+    squad.threats.push(threat(3, Vec3::new(900.0, -300.0, 0.0)));
+    let hit = shot_targets(&mut squad, 4.0);
+    assert!(!hit.is_empty() && hit.iter().all(|t| *t == 3), "{hit:?}");
+}
+
+#[test]
+fn a_suggested_enemy_and_a_scripts_sight_radius() {
+    let world = test_room();
+    let start = leader_at(0.0, 0.0, 0.0);
+    let mut squad = new_squad(&world, start);
+    run(&mut squad, start, 0.5, &world);
+    // geo_01c: a script tells the squad whom to shoot, over a nearer droid.
+    squad.threats = vec![
+        threat(1, Vec3::new(700.0, 0.0, 0.0)),
+        threat(2, Vec3::new(1400.0, 200.0, 0.0)),
+    ];
+    for m in &mut squad.members {
+        m.suggested = Some(2);
+    }
+    let hit = shot_targets(&mut squad, 3.0);
+    assert!(!hit.is_empty() && hit.iter().all(|t| *t == 2), "{hit:?}");
+    // A sight radius of 1 (`ACTION_SetSightRadius`): they see nobody.
+    for m in &mut squad.members {
+        m.suggested = None;
+        m.sight_override = Some(1.0);
+        m.fight.target = None;
+    }
+    assert!(shot_targets(&mut squad, 3.0).is_empty());
 }

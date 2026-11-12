@@ -189,6 +189,37 @@ pub struct Battle {
     /// (`ACTION_SetCollision`): shots pass through them, so the other
     /// side doesn't aim at them.
     pub not_colliding: HashSet<u32>,
+    /// Who is whose enemy by team (the game's `TeamIndex`), when the game
+    /// has read the teams: then every fighter fights the targets whose team
+    /// is an enemy of its own ([`Fighter::team_or_side`]) and that are a
+    /// threat ([`Target::threat`]). `None`: two sides, separatists against
+    /// the player, the squad and the clone troopers.
+    pub teams: Option<Teams>,
+}
+
+/// A map's `TeamIndex` value as a team, when it sets one (0 to 9).
+pub(crate) fn team_of(t: Option<i32>) -> Option<u8> {
+    t.filter(|t| (0..10).contains(t)).map(|t| t as u8)
+}
+
+/// Which teams are enemies (the game's `TeamIndex` 0 to 9 and each team's
+/// `RelationTowards`, `TEAM_Enemy`): `hostile[a][b]` is whether a
+/// character of team `a` treats one of team `b` as an enemy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Teams {
+    pub hostile: [[bool; 10]; 10],
+}
+
+impl Teams {
+    /// Whether team `a` treats team `b` as an enemy. Teams outside 0..9
+    /// are no one's enemy (the game reads no relation for them).
+    pub fn hostile(&self, a: u8, b: u8) -> bool {
+        self.hostile
+            .get(a as usize)
+            .and_then(|r| r.get(b as usize))
+            .copied()
+            .unwrap_or(false)
+    }
 }
 
 /// What came of a spawner's try at making a character.
@@ -253,6 +284,7 @@ impl Battle {
             rng: Rng::new(7),
             dispensing: HashMap::new(),
             not_colliding: HashSet::new(),
+            teams: None,
         }
     }
 
@@ -437,6 +469,10 @@ impl Battle {
         let mut out = Vec::new();
         self.spawn(player.map(|p| p.centre), &mut out);
         self.step_dispensing(&mut out);
+        if self.teams.is_some() {
+            self.fight_by_teams(dt, world, player, others, &mut out);
+            return out;
+        }
         let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
         // Two sides: separatist fighters (droids, Geonosians, ...) and
         // republic ones (clone troopers). Each side's friends, so it
@@ -496,6 +532,84 @@ impl Battle {
         }
         self.time += dt;
         out
+    }
+
+    /// [`Battle::step_with`] when the teams are known: everyone alive is a
+    /// possible target, and each fighter takes from those whose team its
+    /// own treats as an enemy and that are a threat, as the game's
+    /// `ULocalSituation::Assess` (ctgame.dll) filters them. A separatist
+    /// that sees none still hunts the player, as before (our own).
+    fn fight_by_teams(
+        &mut self,
+        dt: f32,
+        world: &dyn World,
+        player: Option<Target>,
+        others: &[Target],
+        out: &mut Vec<BattleEvent>,
+    ) {
+        let Some(teams) = self.teams.clone() else {
+            return;
+        };
+        let taken: HashSet<usize> = self.alive().filter_map(|f| f.cover_node()).collect();
+        let mut everyone: Vec<Target> = player.into_iter().collect();
+        everyone.extend_from_slice(others);
+        let mut bodies: Vec<(u8, Vec3)> = Vec::new();
+        for f in self.alive() {
+            // Droids still coming out of a dispenser can't be hit.
+            if self.dispensing.contains_key(&f.id) {
+                continue;
+            }
+            bodies.push((f.team_or_side(), f.pawn.location));
+            if !self.not_colliding.contains(&f.id) {
+                everyone.push(f.as_target());
+            }
+        }
+        let mut heard = Vec::new();
+        for f in self.fighters.iter_mut() {
+            if f.mode == Mode::Dead || self.dispensing.contains_key(&f.id) {
+                continue;
+            }
+            if self.time < f.stunned_until {
+                f.pawn.velocity = Vec3::ZERO;
+                continue;
+            }
+            let me = f.team_or_side();
+            let key = f.key();
+            let targets: Vec<Target> = everyone
+                .iter()
+                .filter(|t| t.key != key && t.threat && teams.hostile(me, t.team))
+                .copied()
+                .collect();
+            let friends: Vec<Vec3> = bodies
+                .iter()
+                .filter(|(t, _)| !teams.hostile(me, *t))
+                .map(|(_, p)| *p)
+                .collect();
+            let hunts = (!f.params.kind.republic())
+                .then_some(player)
+                .flatten()
+                .filter(|p| p.threat && teams.hostile(me, p.team));
+            let target = f.choose_target(world, &targets).or(hunts);
+            let view = View {
+                world,
+                nav: &self.nav,
+                time: self.time,
+                target,
+                cover_taken: &taken,
+                allies: &friends,
+            };
+            for e in f.tick(dt, &view) {
+                if let AiEvent::Fire { origin, .. } = e {
+                    heard.push(origin);
+                }
+                out.push(BattleEvent::Ai { id: f.id, event: e });
+            }
+        }
+        self.keep_apart(world);
+        for at in heard {
+            out.extend(self.hear(at));
+        }
+        self.time += dt;
     }
 
     /// A shot (or other loud noise) at `at`: every droid in earshot reacts.
@@ -776,6 +890,7 @@ impl Battle {
             };
             let params = sp.params.clone();
             let mut fighter = Fighter::new(f.id, params, f.feet, f.facing, start);
+            fighter.team = team_of(sp.factory.offspring.team).or(team_of(sp.factory.team));
             if let Some(n) = f.grenades_left {
                 fighter.grenades_left = n.min(fighter.grenades_left);
             }
@@ -918,11 +1033,13 @@ impl Battle {
         let params = sp.params.clone();
         let feet = f.location - Vec3::new(0.0, 0.0, params.movement.collision_height);
         let (yaw, start) = (f.yaw, f.offspring.start_state.clone());
+        let team = team_of(f.offspring.team);
         sp.made += 1;
         let id = self.next_id;
         self.next_id += 1;
-        self.fighters
-            .push(Fighter::new(id, params, feet, yaw, start));
+        let mut fighter = Fighter::new(id, params, feet, yaw, start);
+        fighter.team = team;
+        self.fighters.push(fighter);
         self.made_by.push(i);
         self.births.insert(id, Birth::default());
         out.push(BattleEvent::Spawned {
@@ -1002,6 +1119,7 @@ impl Battle {
             }
         }
         let params = sp.params.clone();
+        let f_team = f.team;
         let spawn_event = f.spawn_event.clone();
         let name = f.name.clone();
         let (mode, spots) = (f.spawn_mode, f.spots.len());
@@ -1022,13 +1140,17 @@ impl Battle {
         let sp = &mut self.spawners[i];
         sp.made += 1;
         sp.next_spot = next_spot;
-        self.fighters.push(Fighter::new(
+        let mut fighter = Fighter::new(
             id,
             params,
             feet,
             spot.yaw,
             spot.offspring.start_state.clone(),
-        ));
+        );
+        // The spawn point's `TeamIndex`, else the factory's
+        // `TeamIndexFromFactory` (each only when 0 or more).
+        fighter.team = team_of(spot.offspring.team).or(team_of(f_team));
+        self.fighters.push(fighter);
         self.made_by.push(i);
         self.births.insert(
             id,

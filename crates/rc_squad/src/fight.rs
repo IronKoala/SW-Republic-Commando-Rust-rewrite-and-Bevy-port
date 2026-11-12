@@ -48,6 +48,13 @@ pub struct Threat {
     /// damage table): 1 for a battle droid, 0.15 for a super battle droid.
     /// At or below `[fight] armoured_below` it counts as armoured.
     pub blaster_share: f32,
+    /// Its team (the game's `TeamIndex`, 0 to 9): a member only fights
+    /// threats whose team its own team treats as an enemy
+    /// ([`crate::Member::enemy_teams`]).
+    pub team: u8,
+    /// `bPerceivedAsThreat`: the game's enemy picking passes over an
+    /// enemy with it off (`ACTION_SetThreat`).
+    pub threat: bool,
 }
 
 /// Someone down and waiting to be revived.
@@ -452,19 +459,36 @@ impl Squad {
                 f.sight_radius = j.sight_radius;
             }
         }
-        let sight = f.sight_radius;
+        // A level script's sight radius is the pawn's own `SightRadius`,
+        // which the game's enemy picking goes by.
+        let sight = self.members[i].sight_override.unwrap_or(f.sight_radius);
+        let suggested = self.members[i].suggested;
         let prefer_armour = special
             .as_ref()
             .is_some_and(|j| j.auto == AutoUse::Armoured);
+        let enemy_teams = self.members[i].enemy_teams;
+        // What the game's `ULocalSituation::Assess` counts: an enemy of
+        // its team, a threat, within its sight radius, and in view.
+        let seen = |t: &&Threat| {
+            t.threat
+                && enemy_teams.is_none_or(|e| e.get(t.team as usize).copied().unwrap_or(false))
+                && dist(t.centre, eye) <= sight
+                && world.sweep(Vec3::ZERO, eye, t.eye).is_none()
+        };
         let best = if busy {
             None
+        } else if let Some(t) =
+            suggested.and_then(|id| self.threats.iter().filter(seen).find(|t| t.id == id))
+        {
+            // A level script's suggested enemy, seen: the game's
+            // `ULocalSituation::Assess` takes it over any other.
+            Some((t.id, dist(t.centre, eye)))
         } else {
             // The nearest they can see; an anti-armour specialist takes
             // the nearest armoured one first.
             self.threats
                 .iter()
-                .filter(|t| dist(t.centre, eye) <= sight)
-                .filter(|t| world.sweep(Vec3::ZERO, eye, t.eye).is_none())
+                .filter(seen)
                 .min_by(|a, b| {
                     let key = |t: &Threat| (prefer_armour && !armoured(t), dist(t.centre, eye));
                     let (ka, kb) = (key(a), key(b));
