@@ -3476,14 +3476,18 @@ fn troopers_can_die(w: &mut World) -> Result<String, String> {
             ok += 1;
         }
         if c.name == "CloneTrooper7" {
-            event = c.death_event().map(str::to_string);
+            event = Some(c.death_event().unwrap_or("nothing").to_string());
         }
     }
     let msg = format!(
         "{ok} of {troopers} clone troopers have 100 health and can be hit; CloneTrooper7's death triggers {}",
-        event.as_deref().unwrap_or("nothing")
+        event.as_deref().unwrap_or("- (already gone)")
     );
-    if troopers > 0 && ok == troopers && event.as_deref() == Some("GunshipTrooper02Death") {
+    // CloneTrooper7 has usually died in the bombardment by now (see
+    // `ramp_troopers`) and its body is gone; while it stands, its death
+    // must send the map's event for it.
+    let event_ok = event.as_deref().is_none_or(|e| e == "GunshipTrooper02Death");
+    if troopers > 0 && ok == troopers && event_ok {
         Ok(msg)
     } else {
         Err(msg)
