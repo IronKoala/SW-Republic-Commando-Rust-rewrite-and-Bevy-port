@@ -7,23 +7,30 @@
 //! They stand in the model's own pose until something sends a
 //! [`PropAnim`] naming them (the bacta dispenser plays `Load` when the
 //! player starts healing and `Holster` when they stop); the animation then
-//! plays once and the prop keeps its last frame. The sounds the animation
+//! plays once and the prop keeps its last frame. Animated props
+//! (`AnimProp`, such as geo_04b's anti-air turret) instead start their
+//! `AnimHealthy` animation as the level starts, looping when it says so,
+//! and an event with their tag starts their `AnimTriggered` one (or stops
+//! it, when it is already playing), as the original's `AnimProp` does. A
+//! model the level links an animation set to (`CustomMeshSets`) is read
+//! with that set. The sounds the animation
 //! names (`AnimNotify_Sound`: the dispenser's clunks and hiss) play from
 //! the prop. They aren't solid yet. [`AnimProp::bone`] says where one of
 //! the model's bones is, for things hung on it (the bacta dispenser's zap
 //! effect, on its `Eye` bone).
 
 use bevy::asset::RenderAssetUsages;
+use bevy::audio::{PlaybackSettings, Volume};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::audio::{PlaybackSettings, Volume};
 use rc_combat::GameSound;
-use rc_game_core::{GameLog, GamePaths, GameState, PlayerCamera, PropAnim, SoundAt};
-use std::sync::Arc;
+use rc_game_core::{GameLog, GamePaths, GameState, PlayerCamera, PropAnim, ScriptEvent, SoundAt};
 use rc_level::actors::Placement;
+use rc_level::class_look::PropAnims;
 use rc_model::{to_bevy, Model, ModelSpec};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Light the model always gets, as for the squad and the droids: the
 /// level's light is baked into its surfaces and the scene has no ambient
@@ -55,8 +62,15 @@ pub struct AnimProp {
     pub meshes: Vec<Handle<Mesh>>,
     /// The animation playing and how far in (frames), if any.
     pub playing: Option<(String, f32)>,
+    /// The animation playing loops (`bLoop`).
+    pub looping: bool,
+    /// What it plays by itself, for animated props (`AnimProp`).
+    pub anims: Option<PropAnims>,
     /// The last animation played (it holds its last frame).
     pub last: Option<String>,
+    /// An animation stopped part way (`AnimTriggered` again): it holds
+    /// that frame.
+    pub stopped: Option<(String, f32)>,
     /// Every animation started, in order (for the log and self-tests).
     pub played: Vec<String>,
     /// Every sound its animations played, by dotted path ("(not
@@ -68,7 +82,7 @@ impl AnimProp {
     /// The animation and frame it is posed at now: the one playing, else
     /// the last frame of the last one played, else the model's own pose.
     pub fn pose_now(&self) -> (String, f32) {
-        if let Some((a, f)) = &self.playing {
+        if let Some((a, f)) = self.playing.as_ref().or(self.stopped.as_ref()) {
             return (a.clone(), *f);
         }
         if let Some(a) = &self.last {
@@ -88,7 +102,9 @@ impl AnimProp {
         let (at, axes) = self.model.bone_from_origin(&anim, frame, bone)?;
         let world = self.place.transform_point(at);
         let axes = axes.map(|a| {
-            let tip = self.place.transform_point([at[0] + a[0], at[1] + a[1], at[2] + a[2]]);
+            let tip = self
+                .place
+                .transform_point([at[0] + a[0], at[1] + a[1], at[2] + a[2]]);
             let v = [tip[0] - world[0], tip[1] - world[1], tip[2] - world[2]];
             let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
             v.map(|c| c / len)
@@ -135,27 +151,66 @@ pub fn placed_points(model: &Model, place: &Placement, anim: &str, frame: f32) -
         .posed_from_origin(anim, frame)
         .into_iter()
         .map(|b| {
-            let u = [b[0] * UNREAL_PER_BEVY, b[2] * UNREAL_PER_BEVY, b[1] * UNREAL_PER_BEVY];
+            let u = [
+                b[0] * UNREAL_PER_BEVY,
+                b[2] * UNREAL_PER_BEVY,
+                b[1] * UNREAL_PER_BEVY,
+            ];
             to_bevy(place.transform_point(u))
         })
         .collect()
 }
 
+/// A model read once per level, with its materials.
+type Loaded = (Arc<Model>, Vec<Handle<StandardMaterial>>);
+
 /// Read each model once and draw every prop. Entities go away when the
 /// game leaves `InGame`.
-pub fn spawn(world: &mut World, paths: &GamePaths, props: &[(Placement, String, String)]) -> Report {
+pub fn spawn(
+    world: &mut World,
+    paths: &GamePaths,
+    props: &[(Placement, String, String)],
+    prop_anims: &HashMap<usize, PropAnims>,
+    custom_sets: &[(String, String)],
+) -> Report {
     let mut report = Report::default();
     // Per model: the model and one material per section (shared by copies).
-    let mut models: HashMap<String, Option<(Arc<Model>, Vec<Handle<StandardMaterial>>)>> =
-        HashMap::new();
+    let mut models: HashMap<String, Option<Loaded>> = HashMap::new();
     let mut counts: Vec<(String, usize)> = Vec::new();
     for (place, package, mesh) in props {
-        let key = format!("{package}.{mesh}");
+        let anims = prop_anims.get(&place.export).cloned();
+        // The level's own animation set for this mesh, if it links one.
+        let set = custom_sets
+            .iter()
+            .find(|(m, _)| m.eq_ignore_ascii_case(mesh))
+            .map(|(_, s)| s.clone());
+        let mut own: Vec<String> = anims
+            .iter()
+            .flat_map(|a| [&a.healthy, &a.triggered])
+            .flatten()
+            .map(|(n, _)| n.clone())
+            .collect();
+        own.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let key = format!(
+            "{package}.{mesh}.{}.{}",
+            set.as_deref().unwrap_or(""),
+            own.join(",")
+        );
         if !models.contains_key(&key) {
+            let mut sequences: Vec<(String, String)> = ANIMATIONS
+                .iter()
+                .map(|a| (a.to_string(), a.to_string()))
+                .collect();
+            for n in &own {
+                if !sequences.iter().any(|(k, _)| k.eq_ignore_ascii_case(n)) {
+                    sequences.push((n.clone(), n.clone()));
+                }
+            }
             let spec = ModelSpec {
                 package: package_path(package),
                 mesh: mesh.clone(),
-                sequences: ANIMATIONS.iter().map(|a| (a.to_string(), a.to_string())).collect(),
+                set: set.clone(),
+                sequences,
                 ..Default::default()
             };
             let loaded = match Model::load(&|rel| paths.game_file(rel), &spec) {
@@ -174,12 +229,27 @@ pub fn spawn(world: &mut World, paths: &GamePaths, props: &[(Placement, String, 
         let Some((model, mats)) = models.get(&key).and_then(|m| m.as_ref()) else {
             continue;
         };
+        // An animated prop starts its own animation at once.
+        let start = anims
+            .as_ref()
+            .and_then(|a| a.healthy.clone())
+            .filter(|(n, _)| model.clip(n).is_some());
+        if let Some((n, _)) = anims.as_ref().and_then(|a| a.healthy.as_ref()) {
+            if start.is_none() {
+                report
+                    .failures
+                    .push(format!("{}: has no animation {n} to play", place.name));
+            }
+        }
         let points = placed_points(model, place, "", 0.0);
         let normals = model.normals(&points);
         let mut pieces = Vec::new();
         for (s, mat) in model.sections.iter().zip(mats) {
             let (pos, nrm) = model.section_attributes(s, &points, &normals);
-            let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            let mut m = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            );
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
             m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
             m.insert_attribute(Mesh::ATTRIBUTE_UV_0, model.section_uvs(s));
@@ -195,9 +265,12 @@ pub fn spawn(world: &mut World, paths: &GamePaths, props: &[(Placement, String, 
                     model: model.clone(),
                     place: place.clone(),
                     meshes: pieces.iter().map(|p| p.0.clone()).collect(),
-                    playing: None,
+                    playing: start.as_ref().map(|(n, _)| (n.clone(), 0.0)),
+                    looping: start.as_ref().is_some_and(|(_, l)| *l),
+                    anims,
                     last: None,
-                    played: Vec::new(),
+                    stopped: None,
+                    played: start.iter().map(|(n, _)| n.clone()).collect(),
                     heard: Vec::new(),
                 },
                 Transform::default(),
@@ -210,12 +283,16 @@ pub fn spawn(world: &mut World, paths: &GamePaths, props: &[(Placement, String, 
                 }
             });
         report.drawn += 1;
-        match counts.iter_mut().find(|(k, _)| *k == key) {
+        let shown = format!("{package}.{mesh}");
+        match counts.iter_mut().find(|(k, _)| *k == shown) {
             Some((_, n)) => *n += 1,
-            None => counts.push((key, 1)),
+            None => counts.push((shown, 1)),
         }
     }
-    report.models = counts.into_iter().map(|(k, n)| format!("{k} x{n}")).collect();
+    report.models = counts
+        .into_iter()
+        .map(|(k, n)| format!("{k} x{n}"))
+        .collect();
     report
 }
 
@@ -244,7 +321,8 @@ fn load_sounds(world: &mut World, paths: &GamePaths, model: &Model, report: &mut
         report.failures.extend(notes);
         let mut have = world.resource_mut::<AnimPropSounds>();
         for (name, sound) in found {
-            have.0.insert(sound_key(&format!("{package}.{name}")), sound);
+            have.0
+                .insert(sound_key(&format!("{package}.{name}")), sound);
         }
         report.sounds += names.len();
     }
@@ -255,6 +333,7 @@ fn load_sounds(world: &mut World, paths: &GamePaths, model: &Model, report: &mut
 pub fn animate(
     time: Res<Time>,
     mut asked: MessageReader<PropAnim>,
+    mut events: MessageReader<ScriptEvent>,
     mut props: Query<&mut AnimProp>,
     mut meshes: ResMut<Assets<Mesh>>,
     sounds: Option<Res<AnimPropSounds>>,
@@ -273,9 +352,12 @@ pub fn animate(
                 Some(_) => {
                     log.line(format!("level: {} plays {}", p.name, a.anim));
                     p.playing = Some((a.anim.clone(), 0.0));
+                    p.looping = false;
+                    p.stopped = None;
                     p.played.push(a.anim.clone());
                     // Sounds at the very start play on the first step.
-                    let heard = play_sounds(&p, &a.anim, -1.0, 0.0, &sounds, &camera, &mut commands);
+                    let heard =
+                        play_sounds(&p, &a.anim, -1.0, 0.0, &sounds, &camera, &mut commands);
                     for h in heard {
                         log.line(format!("level: {} sound {h}", p.name));
                         p.heard.push(h);
@@ -285,7 +367,44 @@ pub fn animate(
             }
         }
         if !found {
-            log.line(format!("level: no animated prop called {} (to play {})", a.actor, a.anim));
+            log.line(format!(
+                "level: no animated prop called {} (to play {})",
+                a.actor, a.anim
+            ));
+        }
+    }
+    // Events with an animated prop's tag (`AnimProp.Trigger`): start its
+    // `AnimTriggered` animation, or stop it when it is already playing.
+    for e in events.read() {
+        for mut p in &mut props {
+            let Some((anim, looping)) = p
+                .anims
+                .as_ref()
+                .filter(|a| a.tag.eq_ignore_ascii_case(&e.name))
+                .and_then(|a| a.triggered.clone())
+            else {
+                continue;
+            };
+            if p.playing
+                .as_ref()
+                .is_some_and(|(n, _)| n.eq_ignore_ascii_case(&anim))
+            {
+                log.line(format!("level: {} stops {anim} ({})", p.name, e.name));
+                let (n, f) = p.playing.take().unwrap_or_default();
+                p.last = None;
+                // It keeps the frame it was at.
+                p.stopped = Some((n, f));
+                continue;
+            }
+            if p.model.clip(&anim).is_none() {
+                log.line(format!("level: {} has no animation {anim}", p.name));
+                continue;
+            }
+            log.line(format!("level: {} plays {anim} ({})", p.name, e.name));
+            p.playing = Some((anim.clone(), 0.0));
+            p.looping = looping;
+            p.stopped = None;
+            p.played.push(anim);
         }
     }
     let dt = time.delta_secs().min(0.25);
@@ -298,9 +417,47 @@ pub fn animate(
             continue;
         };
         let last = (clip.num_frames - 1.0).max(0.0);
-        let next = (frame + clip.rate * dt).min(last);
         let span = clip.num_frames.max(1.0);
-        let heard = play_sounds(&p, &anim, frame / span, next / span, &sounds, &camera, &mut commands);
+        let looping = p.looping;
+        let (next, heard) = if looping {
+            // Round and round: the sounds of the part played, across the
+            // end and back to the start when it wraps.
+            let raw = frame + clip.rate * dt;
+            let next = raw.rem_euclid(span);
+            let mut heard = play_sounds(
+                &p,
+                &anim,
+                frame / span,
+                raw.min(span) / span,
+                &sounds,
+                &camera,
+                &mut commands,
+            );
+            if raw >= span {
+                heard.extend(play_sounds(
+                    &p,
+                    &anim,
+                    -1.0,
+                    next / span,
+                    &sounds,
+                    &camera,
+                    &mut commands,
+                ));
+            }
+            (next, heard)
+        } else {
+            let next = (frame + clip.rate * dt).min(last);
+            let heard = play_sounds(
+                &p,
+                &anim,
+                frame / span,
+                next / span,
+                &sounds,
+                &camera,
+                &mut commands,
+            );
+            (next, heard)
+        };
         for h in heard {
             log.line(format!("level: {} sound {h}", p.name));
             p.heard.push(h);
@@ -314,7 +471,7 @@ pub fn animate(
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
             }
         }
-        if next >= last {
+        if !looping && next >= last {
             p.playing = None;
             p.last = Some(anim);
         } else {
@@ -395,23 +552,25 @@ fn materials_for(world: &mut World, model: &Model) -> Vec<Handle<StandardMateria
                     RenderAssetUsages::RENDER_WORLD,
                 ))
             });
-            world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
-                base_color: if texture.is_some() {
-                    Color::WHITE
-                } else {
-                    Color::srgb(0.6, 0.6, 0.6)
-                },
-                emissive: LinearRgba::rgb(a, a, a) * if texture.is_some() { 1.0 } else { 0.3 },
-                emissive_texture: texture.clone(),
-                base_color_texture: texture,
-                perceptual_roughness: 0.7,
-                alpha_mode: if s.skin.as_ref().is_some_and(|k| k.cutout) {
-                    AlphaMode::Mask(0.5)
-                } else {
-                    AlphaMode::Opaque
-                },
-                ..default()
-            })
+            world
+                .resource_mut::<Assets<StandardMaterial>>()
+                .add(StandardMaterial {
+                    base_color: if texture.is_some() {
+                        Color::WHITE
+                    } else {
+                        Color::srgb(0.6, 0.6, 0.6)
+                    },
+                    emissive: LinearRgba::rgb(a, a, a) * if texture.is_some() { 1.0 } else { 0.3 },
+                    emissive_texture: texture.clone(),
+                    base_color_texture: texture,
+                    perceptual_roughness: 0.7,
+                    alpha_mode: if s.skin.as_ref().is_some_and(|k| k.cutout) {
+                        AlphaMode::Mask(0.5)
+                    } else {
+                        AlphaMode::Opaque
+                    },
+                    ..default()
+                })
         })
         .collect()
 }

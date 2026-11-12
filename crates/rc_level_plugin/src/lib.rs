@@ -30,8 +30,8 @@ pub mod anim_props;
 use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 use rc_game_core::{
-    ArrivalPortal, CurrentLevel, GameLog, GamePaths, GameState, LevelCollision, LoadingGate, PlayerCamera,
-    PlayerStart,
+    ArrivalPortal, CurrentLevel, GameLog, GamePaths, GameState, LevelCollision, LoadingGate,
+    PlayerCamera, PlayerStart,
 };
 use rc_level_viewer::bump::{BumpLitMaterial, BumpMapPlugin};
 use rc_level_viewer::draw::{self, BACKGROUND};
@@ -39,12 +39,12 @@ use rc_level_viewer::lighting::LightingSettings;
 use rc_level_viewer::sky::{self, SkyViewer};
 use rc_level_viewer::{fog, materials, prop_light, scene};
 use rc_movement::{Hit, MoveParams, TriangleWorld, Vec3, World as MoveWorld};
-use std::collections::HashMap;
-use std::sync::RwLock;
 use rc_package::Package;
+use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Instant;
 
 /// For other parts and self-tests: the sky camera's marker, and the marker
@@ -70,37 +70,38 @@ impl Plugin for LevelPlugin {
             prop_light::PropLightPlugin,
             rc_hologram::HologramPlugin,
         ))
-            // Zone fog on the player's camera, except while the visor's low
-            // light mode has its own (`rc_game_core::OwnFog`).
-            .add_systems(
-                PostUpdate,
-                fog::view::follow_zone_fog::<Without<rc_game_core::OwnFog>>
-                    .after(bevy::transform::TransformSystems::Propagate),
+        // Zone fog on the player's camera, except while the visor's low
+        // light mode has its own (`rc_game_core::OwnFog`).
+        .add_systems(
+            PostUpdate,
+            fog::view::follow_zone_fog::<Without<rc_game_core::OwnFog>>
+                .after(bevy::transform::TransformSystems::Propagate),
+        )
+        .add_systems(OnEnter(GameState::Loading), begin)
+        .add_systems(Update, load.run_if(in_state(GameState::Loading)))
+        .add_message::<rc_game_core::PropAnim>()
+        .add_message::<rc_game_core::ScriptEvent>()
+        .add_systems(
+            Update,
+            (let_sky_through, fog_on_player_camera).run_if(in_state(GameState::InGame)),
+        )
+        .add_systems(
+            Update,
+            (
+                place_light::take_materials,
+                place_light::follow_light,
+                place_light::log_player_light,
             )
-            .add_systems(OnEnter(GameState::Loading), begin)
-            .add_systems(Update, load.run_if(in_state(GameState::Loading)))
-            .add_message::<rc_game_core::PropAnim>()
-            .add_systems(
-                Update,
-                (let_sky_through, fog_on_player_camera).run_if(in_state(GameState::InGame)),
-            )
-            .add_systems(
-                Update,
-                (
-                    place_light::take_materials,
-                    place_light::follow_light,
-                    place_light::log_player_light,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::InGame)),
-            )
-            .add_systems(
-                Update,
-                anim_props::animate
-                    .in_set(rc_game_core::GameSet::Simulate)
-                    .run_if(rc_game_core::playing),
-            )
-            .add_systems(OnExit(GameState::InGame), forget);
+                .chain()
+                .run_if(in_state(GameState::InGame)),
+        )
+        .add_systems(
+            Update,
+            anim_props::animate
+                .in_set(rc_game_core::GameSet::Simulate)
+                .run_if(rc_game_core::playing),
+        )
+        .add_systems(OnExit(GameState::InGame), forget);
     }
 }
 
@@ -255,7 +256,15 @@ impl LevelParts {
         let parts = self.0.parts.read().unwrap_or_else(|e| e.into_inner());
         parts
             .iter()
-            .map(|p| (p.export, p.class.clone(), p.tag.clone(), p.solid, p.world.is_some()))
+            .map(|p| {
+                (
+                    p.export,
+                    p.class.clone(),
+                    p.tag.clone(),
+                    p.solid,
+                    p.world.is_some(),
+                )
+            })
             .collect()
     }
 
@@ -330,11 +339,7 @@ impl MoveWorld for WithParts {
 #[derive(Resource)]
 struct Countdown(u32);
 
-fn begin(
-    mut commands: Commands,
-    mut gate: ResMut<LoadingGate>,
-    paths: Option<Res<GamePaths>>,
-) {
+fn begin(mut commands: Commands, mut gate: ResMut<LoadingGate>, paths: Option<Res<GamePaths>>) {
     gate.wait(PART);
     // Where rc_hologram reads the game's own hologram glow and noise
     // pictures from.
@@ -344,10 +349,7 @@ fn begin(
     commands.insert_resource(Countdown(3));
 }
 
-fn forget(
-    mut commands: Commands,
-    views: Query<Entity, With<fog::view::ZoneFogView>>,
-) {
+fn forget(mut commands: Commands, views: Query<Entity, With<fog::view::ZoneFogView>>) {
     // The fog belongs to the level: the menus and the next level start
     // without it.
     commands.remove_resource::<fog::view::LevelFog>();
@@ -382,7 +384,9 @@ fn load(world: &mut World) {
     let log = world.resource::<GameLog>().clone();
     let paths = world.resource::<GamePaths>().clone();
     let Some(map) = world.resource::<CurrentLevel>().map.clone() else {
-        world.resource_mut::<LoadingGate>().fail(PART, "no map chosen");
+        world
+            .resource_mut::<LoadingGate>()
+            .fail(PART, "no map chosen");
         return;
     };
     let path = paths.map_path(&map);
@@ -437,7 +441,12 @@ fn load(world: &mut World) {
         ..default()
     };
     let v = |p: [f32; 3]| Vec3::new(p[0], p[1], p[2]);
-    let tw = TriangleWorld::new(lvl.triangles.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect());
+    let tw = TriangleWorld::new(
+        lvl.triangles
+            .iter()
+            .map(|t| [v(t[0]), v(t[1]), v(t[2])])
+            .collect(),
+    );
     // Coming from another map's exit: arrive at the teleporter it names,
     // if this map has one (`#playerstart` and the like mean the start).
     let portal = world.remove_resource::<ArrivalPortal>();
@@ -459,7 +468,10 @@ fn load(world: &mut World) {
         None => {
             let (lo, hi) = tw.bounds();
             log.line(format!("{PART}: no PlayerStart, starting above the middle"));
-            (Vec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z), 0.0)
+            (
+                Vec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z),
+                0.0,
+            )
         }
     };
     log.line(format!(
@@ -470,7 +482,13 @@ fn load(world: &mut World) {
         yaw.to_degrees()
     ));
     world.insert_resource(PlayerStart { feet, yaw });
-    let anim = anim_props::spawn(world, &paths, &lvl.anim_props);
+    let anim = anim_props::spawn(
+        world,
+        &paths,
+        &lvl.anim_props,
+        &lvl.prop_anims,
+        &lvl.custom_mesh_sets,
+    );
     log.line(format!(
         "{PART}: {} props with an animated model drawn ({}), {} animation sounds{}",
         anim.drawn,
@@ -598,24 +616,28 @@ fn load(world: &mut World) {
                 ps.bsp_samples,
                 probe_t.elapsed().as_secs_f64() * 1000.0
             ));
-            world.insert_resource(rc_game_core::PlaceLight(Arc::new(place_light::Probe(probe))));
+            world.insert_resource(rc_game_core::PlaceLight(Arc::new(place_light::Probe(
+                probe,
+            ))));
             let report = world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
                 world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
                     world.resource_scope(|world, mut mats: Mut<Assets<StandardMaterial>>| {
                         world.resource_scope(|world, mut bumps: Mut<Assets<BumpLitMaterial>>| {
-                          world.resource_scope(|world, mut props: Mut<Assets<prop_light::PropMaterial>>| {
-                            let mut commands = world.commands();
-                            draw::spawn_level(
-                                &mut commands,
-                                &mut meshes,
-                                &mut images,
-                                &mut mats,
-                                Some(&mut bumps),
-                                &mut props,
-                                &sc,
-                                &settings,
+                            world.resource_scope(
+                                |world, mut props: Mut<Assets<prop_light::PropMaterial>>| {
+                                    let mut commands = world.commands();
+                                    draw::spawn_level(
+                                        &mut commands,
+                                        &mut meshes,
+                                        &mut images,
+                                        &mut mats,
+                                        Some(&mut bumps),
+                                        &mut props,
+                                        &sc,
+                                        &settings,
+                                    )
+                                },
                             )
-                          })
                         })
                     })
                 })
@@ -669,7 +691,9 @@ fn load(world: &mut World) {
                 ),
             });
         }
-        Err(e) => log.line(format!("{PART}: map look not built ({e}); it will be invisible")),
+        Err(e) => log.line(format!(
+            "{PART}: map look not built ({e}); it will be invisible"
+        )),
     }
     world.insert_resource(info);
     world.resource_mut::<LoadingGate>().done(PART);
