@@ -1195,6 +1195,15 @@ whether it stops players (`bBlockPlayers`), the AI (`bBlockActors`) and
 shots (`bBlockZeroExtentTraces`). The ones that stop players are added to
 the walking collision. Check: only 11 of 8,942 AI path points are inside a
 volume (107 with `PrePivot` ignored, 115 turned a quarter wrong).
+Other volumes block too when the map turns their `bBlockPlayers` or
+`bBlockActors` on (engine.u's `Actor` leaves both off; `BlockingVolume`
+turns them on). geo_01a's `PhysicsVolume1`, tag `PlayerStand`, is the
+floor you stand on inside the gunship; the intro script's `SetCollision`
+takes it away after the rope order, and you drop about 590 units to the
+ground (gravity -1100, landing at about 1,140 units a second, under
+`MaxFallSpeed` 1200, so no fall damage). The original's `Briefing` state
+only turns the view (`PlayerMove`: `UpdateRotation`), so the body still
+falls. These volumes don't stop shots here.
 
 **The sky.** Unreal 2 draws the sky from a small sky box somewhere in the
 map, marked by a `SkyZoneInfo`. Windows onto it are BSP surfaces flagged
