@@ -33,13 +33,17 @@
 //! at the player (`SoundSourceTag=PlayerCommando`), and a tag nothing in
 //! the level has (logged).
 //!
-//! **Loudness with distance (our reading, not checked against the
-//! original):** full loudness out to the sound's `Radius`, then
-//! `Radius / distance`, like OpenAL's reference distance (the engine the
-//! PC game plays through). We read `Radius` that way because some are tiny
-//! (enemy footsteps 20 uu, 40 cm) and would be silent if they were the
-//! distance a sound stops at. An action `Volume` above 1 (a few maps use
-//! 2 to 10000) makes it carry that many times further instead of louder.
+//! **Loudness with distance (the game's own rule, read from its sound
+//! code):** full loudness out to the sound's `Radius`, then
+//! `Radius / distance`. The PC game plays through OpenAL with the
+//! "inverse distance, clamped" model, a roll-off of 1, no far limit, and
+//! each sound's reference distance set to its `AudioParams.Radius`
+//! (0 counts as 10), with distances and radius both in Unreal units
+//! (checked in the game's `Engine.dll` and `ALAudio.dll`, 2026-11-12;
+//! the decompiled code stays on the PC and is never committed). Two parts
+//! are still **our reading**: an action `Volume` above 1 (a few maps use 2
+//! to 10000) makes it carry that many times further instead of louder, and
+//! the quietest a sound gets is 1/1000 (so it can come back up).
 //! `bDisable3DFalloff` sounds come from their side but don't fade. Which
 //! side a sound is on is the 3D SOUND option's job (`rc_game_core::SoundAt`).
 
@@ -115,6 +119,19 @@ pub struct Placed {
     /// The sound card's volume divided by `gain` (the SOUND options'
     /// volumes included), once it has started.
     base: Option<f32>,
+}
+
+impl Placed {
+    /// A placed sound `gain` loud now (see [`loudness`]).
+    pub fn new(radius: f32, falloff: bool, follow: Option<Entity>, gain: f32) -> Self {
+        Placed {
+            radius,
+            falloff,
+            follow,
+            gain,
+            base: None,
+        }
+    }
 }
 
 /// How loud a placed sound is at `distance` (Unreal units), 0 to 1. See
@@ -562,11 +579,12 @@ pub(crate) fn started(
     }
 }
 
-/// Lines stop while the game is paused, and go on after.
+/// Lines (and the map's looping sounds) stop while the game is paused,
+/// and go on after.
 pub(crate) fn pause(
     play: Option<Res<State<Play>>>,
-    sinks: Query<&AudioSink, With<ScriptSound>>,
-    spatial: Query<&SpatialAudioSink, With<ScriptSound>>,
+    sinks: Query<&AudioSink, Or<(With<ScriptSound>, With<crate::ambient::AmbientLoop>)>>,
+    spatial: Query<&SpatialAudioSink, Or<(With<ScriptSound>, With<crate::ambient::AmbientLoop>)>>,
     mut was_paused: Local<bool>,
 ) {
     let paused = play.is_some_and(|p| *p.get() == Play::Paused);

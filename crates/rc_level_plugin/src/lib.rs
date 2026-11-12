@@ -149,6 +149,12 @@ pub struct LevelMoverData {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
 
+/// Sounds that loop where the map puts them (`rc_level::ambient`): the
+/// battle in the distance, fires, steam. Present from the end of loading
+/// until the game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelAmbientSounds(pub Vec<rc_level::ambient::AmbientSound>);
+
 /// One part of the level a script can switch off (see `LevelParts`).
 pub struct Part {
     pub export: usize,
@@ -353,6 +359,7 @@ fn forget(
     commands.remove_resource::<LevelParts>();
     commands.remove_resource::<rc_game_core::PlaceLight>();
     commands.remove_resource::<LevelBreakables>();
+    commands.remove_resource::<LevelAmbientSounds>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
     commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
 }
@@ -502,6 +509,11 @@ fn load(world: &mut World) {
         lvl.breakables.iter().filter(|b| b.broken_event().is_some()).count()
     ));
     world.insert_resource(LevelBreakables(std::mem::take(&mut lvl.breakables)));
+    log.line(format!(
+        "{PART}: {} looping sounds placed in the map",
+        lvl.ambient_sounds.len()
+    ));
+    world.insert_resource(LevelAmbientSounds(std::mem::take(&mut lvl.ambient_sounds)));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(parts);
     // Ammo and grenade boxes, for the combat part to hand out.

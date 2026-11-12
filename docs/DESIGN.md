@@ -1710,6 +1710,31 @@ distance squared in Bevy units (metres): a droid 10 m away played at 1/100.
 alone and pushes that fading out past a kilometre, so only each part's
 own distance rule applies.
 
+**The map's looping sounds** (`rc_level::ambient`,
+`rc_scripts_plugin/src/ambient.rs`). Any Unreal actor can carry an
+`AmbientSound` (engine.u: `var(Sound) sound AmbientSound;`) that loops
+while the actor is there. Maps use it on `AmbientSound` actors (geo_01a's
+battle in the distance, `GEO_Sound.ambPS_GEO_battle_lp_01`) and through
+class defaults (`Fire_Medium` crackles `ambPS_GEN_fireMd_lp_01`,
+`WhiteSmoke` hisses `ambPS_GEN_steam_lp_05`, both in CTEffects.u). While
+loading, `rc_level::ambient::read` lists every actor with one (the map's
+value first, then its class chain via `ClassLooks`), leaving out movers
+(theirs is `MoveAmbientSound`, while moving) and characters. They reach the
+game as `rc_level_plugin::LevelAmbientSounds`. On the first frame of play
+`ambient::start` reads the sounds and their `AudioParams` and loops each at
+its actor's spot, with the same `Placed` loudness rule as script sounds
+(so `sounds::follow` updates it as you move). That rule is the game's: its
+`Engine.dll` hands OpenAL each sound's `AudioParams.Radius` (0 counts as
+10; the `ForceClamp*Radius` settings can only shrink it) as the reference
+distance, with the inverse-distance-clamped model and a roll-off of 1, so a
+sound plays in full out to `Radius` and at `Radius / distance` beyond. The
+battle loop's `Ambience_PS_01` has `Radius` 10, so the game keeps it very
+quiet until you are near it; they pause with the game and
+stop when the level ends. geo_01a has 6 (`cargo run -p rc_level --example
+ambient_sounds -- <game folder> geo_01a`). The placed emitters' particles
+themselves are still not drawn: only their sound plays. If they are added
+later, their `AmbientSound` must not be played twice.
+
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).
 Starting sends the dispenser's `BactaActive.Event`; full health sends its

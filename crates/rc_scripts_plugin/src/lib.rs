@@ -50,6 +50,7 @@
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
+pub mod ambient;
 pub mod bacta;
 pub mod breakables;
 pub mod characters;
@@ -159,12 +160,18 @@ impl Plugin for ScriptsPlugin {
                     .run_if(playing),
             )
             .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
+            // The map's own looping sounds start with play.
+            .add_systems(
+                Update,
+                ambient::start.in_set(GameSet::Simulate).run_if(playing),
+            )
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
                 (
                     forget,
                     sounds::forget,
+                    ambient::forget,
                     cutscene::forget,
                     projectiles::forget,
                 ),

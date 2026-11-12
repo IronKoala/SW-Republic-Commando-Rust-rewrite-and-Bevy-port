@@ -416,6 +416,12 @@ copy of the game.
   exactly as long as the line lasts. Every one of the 1,629 sounds the
   campaign maps' scripts name is found. `rc_game --script` checks that
   geo_01a's intro plays its lines (57 of 57 checks with level changes).
+  The map's own looping sounds play too (tested in the cloud sandbox on a
+  silent sound card, not yet listened to on Windows): on geo_01a the
+  battle raging in the distance, four fires crackling and a steam vent,
+  each from its place in the level and quieter further away by the game's
+  own rule (read from its sound code). The distant battle is set to carry
+  only 10 units, so it stays very quiet until you are near its speaker.
   Finishing a level now takes you to the next one (tested in the cloud
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the
