@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-12: You stand in the gunship until the rope order, then drop to the ground (rc_level)
+
+- **Changed:** `rc_level::volumes::blocking_volumes` also reads any other volume the map makes block players or characters (`bBlockPlayers` or `bBlockActors` set on the map's actor). These volumes don't stop shots.
+- **Why:** The coordinator asked how the original gets you from the gunship to the ground. In the port you fell to the ground the moment the level started.
+- **Where it comes from:** geo_01a's `PhysicsVolume1` (tag `PlayerStand`, `bBlockPlayers` true, a box under the player start, top at z -2096). The intro script's `SetCollision PlayerStand` ("This takes away the collision for the gunship animation") comes 2 s after `PlayPropAnim EntranceRope600`. engine.u's `Actor` defaults (both blocks off) and `BlockingVolume` (on). engine.u's `state Briefing` only turns the view, so the body still falls; `PhysicsVolume` gravity is -1100 and `Pawn.MaxFallSpeed` is 1200 (`TakeFallingDamage`). Nothing else in the scripts moves the player down.
+- **Tested how:** `cargo test -p rc_level -p rc_level_plugin -p rc_music`. A scratch walk with `rc_movement` and geo_01a's collision (not committed): first with the volume, then after its collision goes, then with no volume from the start.
+- **Result:** With the volume, you stand at z -2096. Once it goes, you leave it at once and land 1.07 s later at z -2688 at 1,141 units a second, with no damage. Without it (the old port), you were on the ground within 2 s of the start. geo_01a has one such volume; pro and geo_01briefing have none.
+- **Still broken / not tested:** Not tested in the game window or on Windows. Only the maps copied to the cloud were checked for volumes like this.
+- **Next:** User check on Windows.
+
 ## 2026-11-12: The script's "play prop animation" no longer holds the opening back (rc_scripts, rc_scripts_plugin)
 
 - **Changed:** `PlayPropAnim` no longer makes the level script wait (it waited our fixed 1.5 s each time). It now plays `BaseAnim` once on every cast member whose tag is `AnimPropTag`. On the player's own body (`PlayerCommando`) it is logged and nothing is drawn. New `ScriptStats::player_body_anims`.
