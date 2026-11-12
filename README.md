@@ -434,8 +434,13 @@ copy of the game.
   so no hands show on screen (tested in the cloud, not on Windows). Once
   the dispenser's canister has swung in, the game's own zap effect appears
   on it with its hum, and both vanish when you stop, as the game's script
-  does (not yet seen or heard on Windows); the effect on your own body
-  isn't done. Settings: `[bacta]` in
+  does (not yet seen or heard on Windows). Its parts are now drawn the way
+  the engine's own code draws them (read from Engine.dll): the little
+  hologram clone turning from red to green, the power bar, the BACTA text
+  and the ring stand where the effect's data puts them and show through
+  walls, and the beams, sprays and lightning stretch along their movement
+  (checked with pictures in the cloud, not yet in a level or on Windows).
+  The effect on your own body isn't done. Settings: `[bacta]` in
   `data/scripts/scripts.toml`, `[use_panel]` in `data/ui/hud.toml`.
   Enemy spawners now follow the scripts too (tested in the cloud sandbox
   with the real files, not yet on Windows or by playing): the level's

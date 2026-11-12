@@ -9,5 +9,5 @@ pub mod read;
 pub mod sim;
 pub mod tagged;
 
-pub use def::{CoordinateSystem, DrawStyle, EffectDef, EmitterDef, EmitterKind};
+pub use def::{CoordinateSystem, DrawStyle, EffectDef, EmitterDef, EmitterKind, Facing};
 pub use sim::{EffectState, Sprite};

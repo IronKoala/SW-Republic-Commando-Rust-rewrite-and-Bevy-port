@@ -12,7 +12,7 @@
 //! effect from `cteffects.u` alone.
 
 use crate::def::{
-    CoordinateSystem, DrawStyle, EffectDef, EmitterDef, EmitterKind, Range, RangeVector,
+    CoordinateSystem, DrawStyle, EffectDef, EmitterDef, EmitterKind, Facing, Range, RangeVector,
     StartShape, VelocityFrom,
 };
 use crate::tagged::{self, boolean, float, get, Tagged, Values};
@@ -285,6 +285,12 @@ pub fn emitter(name: &str, kind: &str, v: &Values) -> EmitterDef {
         d.coordinate_system = CoordinateSystem::from_byte(b);
     }
     d.mesh_blend = boolean(v, "UseMeshBlendMode").unwrap_or(d.mesh_blend);
+    if let Some(b) = byte(v, "UseDirectionAs") {
+        d.facing = Facing::from_byte(b);
+    }
+    // ParticleEmitter's defaults in Engine.u: ZTest on, the blend off.
+    d.z_test = boolean(v, "ZTest").unwrap_or(d.z_test);
+    d.blend_frames = boolean(v, "BlendBetweenSubdivisions").unwrap_or(d.blend_frames);
     d
 }
 

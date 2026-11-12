@@ -4951,14 +4951,73 @@ sound plays with its loudness falling off with distance
 (`sound_half_distance`). Settings are in `data/effects/effects.toml`
 (on/off, size, a particle cap, volume).
 
-Our choices (not checked against the original): a sprite's size is its
-half-width; both the prop's `TransitionSound` and the effect's
-`SpawnSound` play; added-light sprites ignore the colour list's alpha;
-debris bounces off a flat floor at the prop's base, not the level;
-`UseDirectionAs`, `MaxAbsVelocity` and blending between frames are
-ignored; beam and trail emitters aren't drawn; sounds aren't placed in 3D
-yet, only made quieter with distance (the level scripts' 3D sound in
-`rc_scripts_plugin/src/sounds.rs` could be reused).
+**Read from the engine's compiled code** (Engine.dll and Core.dll,
+disassembled in a scratch folder for the bacta dispenser's effect; nothing
+copied into the repository, only the rules written in our own words):
+- *Where a particle starts* (`UParticleEmitter::SpawnParticle`): with a box
+  start, `StartLocationOffset` plus a random point of `StartLocationRange`.
+  For a `PTCS_Independent` emitter (the class default) the random point and
+  the start velocity are turned by the effect's axes, the offset is not; a
+  `PTCS_Relative` emitter keeps everything in its own axes and is turned as
+  it is drawn (we turn it at the start, which comes to the same for an
+  effect that doesn't turn afterwards); `PTCS_Absolute` doesn't turn. Before
+  this, only relative emitters turned, so a hung effect's independent parts
+  (the bacta hologram) stood off in the level's axes.
+- *Which way a sprite faces* (`USpriteEmitter::FillVertexBuffer`,
+  `sim::sprite_axes`): the corners are `Location -/+ right -/+ up`, so the
+  size is a half-width, as we guessed. `PTDU_None` (flat to the camera)
+  uses `Size.X` for both sides: such sprites are always square.
+  `PTDU_Up`: `up` is the particle's last move (`Location - OldLocation`),
+  made length 1, times `Size.Y`; `right` is that move crossed with the line
+  from the camera, made length 1, times `Size.X`. `PTDU_Forward`: `up` is
+  the move crossed with `FVector::GetNonParallel` of it (Core.dll: Y if
+  `|X| > 0.57`, else Z if `|Y| > 0.57`, else X), times `Size.Y`, not made
+  length 1; `right` is the move crossed with `up`, made length 1, times
+  `Size.X`. A particle that hasn't moved has no size. Spin turns both
+  round the view's axis. `PTDU_Normal` and `PTDU_UpAndNormal` are not done
+  (drawn flat to the camera).
+- *Picture frames* (`FillVertexBuffer`, `sim::frame_at`, `sim::frame_cell`):
+  frames run down each column first (column `frame / TextureVSubdivisions`,
+  row `frame % TextureVSubdivisions`). Over a particle's life: with
+  `SubdivisionEnd` set, `SubdivisionStart + floor(max(End - Start, 1) x t)`,
+  otherwise `floor(frames x t)`, kept within the picture.
+- *Depth test* (`USpriteEmitter::RenderParticles`): the emitter's `ZTest`
+  goes to the graphics driver as the particles' depth test. With it off
+  (the bacta hologram's parts) they show over walls and models:
+  `SpriteLookMaterial` (Bevy's standard material plus `sprite_look.wesl`)
+  with the depth compare set to always.
+- *Mixing frames* (`BlendBetweenSubdivisions`, `sim::frame_blend`): only
+  without `UseRandomSubdivision` (`RenderParticles`). `FillVertexBuffer`
+  gives each sprite a second set of texture coordinates for the next frame
+  (`frame + 1`, or the same frame when `frame + 1` equals the frame count
+  `n` used for the frame) and writes the next frame's share,
+  `trunc(fraction(n x t) x 255)`, into the vertex colour's alpha. The
+  graphics driver (D3DDrv.dll, `FD3DRenderInterface::SetParticleMaterial`)
+  sets three texture stages: the frame; the next frame mixed in by the
+  vertex alpha (`D3DTOP_BLENDDIFFUSEALPHA`, colour and alpha); then colour
+  times the vertex colour, alpha from the mix alone. So a mixing sprite's
+  own alpha doesn't show; our fades then dim only added-light sprites'
+  colour. The same `SpriteLookMaterial`, with `MIX_FRAMES`, does this
+  (UV_1 holds the next frame).
+
+Our choices (not checked against the original): both the prop's
+`TransitionSound` and the effect's `SpawnSound` play; added-light sprites
+ignore the colour list's alpha; debris bounces off a flat floor at the
+prop's base, not the level; how and when particles are sent, sizes and
+colours over life, fades and spin rates are our reading of the property
+names (`UParticleEmitter::UpdateParticles` and `SpawnParticles` are not
+read yet); `MaxAbsVelocity` and `UseSubdivisionScale` are ignored; beam and trail emitters aren't drawn; sounds aren't placed
+in 3D yet, only made quieter with distance (the level scripts' 3D sound in
+`rc_scripts_plugin/src/sounds.rs` could be reused). Found, not fixed: our
+`StartLocationShape` numbers are off by one (Engine.u's list is
+`PTLS_Box, PTLS_MovingBox, PTLS_Sphere, PTLS_Polar, PTLS_All`; we read 1 as
+a sphere).
+
+`rc_game`'s example `bacta_zap_check` runs the bacta dispenser's
+`BactaZap_Dispenser` on its own in front of a wall and takes pictures:
+`xvfb-run -a -s "-screen 0 1280x1024x24" cargo run -p rc_game --example bacta_zap_check`
+with `RC_GAME_DIR` set (it needs `Properties/cteffects.u`,
+`System/engine.u` and `Textures/effecttex.utx`).
 
 ### Effect spawners (`FXFactory`, `rc_effects::factory`)
 

@@ -24,7 +24,7 @@
 //!   `CoordinateSystem`) are the game's.
 
 use crate::def::{
-    CoordinateSystem, EffectDef, EmitterDef, Range, RangeVector, StartShape, VelocityFrom,
+    CoordinateSystem, EffectDef, EmitterDef, Facing, Range, RangeVector, StartShape, VelocityFrom,
 };
 
 /// The three axes (forward, right, up; Unreal X, Y, Z) of an Unreal
@@ -77,6 +77,9 @@ impl Rng {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Particle {
     pub position: [f32; 3],
+    /// Where it was before its last move (`Particle.OldLocation`): the
+    /// engine turns `Up` and `Forward` sprites by `position - old_position`.
+    pub old_position: [f32; 3],
     pub velocity: [f32; 3],
     pub age: f32,
     pub lifetime: f32,
@@ -107,8 +110,16 @@ pub struct Sprite {
     /// Turns.
     pub spin: f32,
     pub frame: u32,
+    /// For emitters that mix frames (`BlendBetweenSubdivisions`): the
+    /// frame being mixed in, and how much of it shows (0-1, in 255 steps
+    /// as the engine stores it). Otherwise `frame` and 0.
+    pub next_frame: u32,
+    pub frame_mix: f32,
     /// Its flight, for sparks.
     pub velocity: [f32; 3],
+    /// How far it moved in the last step (`Location - OldLocation`), for
+    /// sprites that face along their movement ([`sprite_axes`]).
+    pub movement: [f32; 3],
 }
 
 /// One emitter running.
@@ -160,6 +171,140 @@ fn lerp_table<T: Copy>(table: &[(f32, T)], t: f32, mix: impl Fn(T, T, f32) -> T)
         }
     }
     table.last().map(|l| l.1)
+}
+
+/// The frame a particle shows at relative time `t` (0-1) of its life, for
+/// an emitter whose picture is split into frames and not picked at random.
+/// From Engine.dll (`USpriteEmitter::FillVertexBuffer`): with
+/// `SubdivisionEnd` set, `SubdivisionStart + floor(max(End - Start, 1) x t)`;
+/// otherwise `floor(frames x t)` (`SubdivisionStart` is then not used);
+/// either way kept within the picture's frames. (`UseSubdivisionScale`, a
+/// table of times, isn't read yet; no bacta effect uses it.)
+pub fn frame_at(def: &EmitterDef, t: f32) -> u32 {
+    let frames = def.frames() as i64;
+    let t = t.clamp(0.0, 1.0);
+    let f = if def.frame_end != 0 {
+        let n = (def.frame_end as i64 - def.frame_start as i64).max(1);
+        def.frame_start as i64 + (n as f32 * t).floor() as i64
+    } else {
+        (frames as f32 * t).floor() as i64
+    };
+    f.clamp(0, frames - 1) as u32
+}
+
+/// For an emitter that mixes frames (`BlendBetweenSubdivisions`, without
+/// `UseRandomSubdivision`): the frame mixed in at relative time `t` and
+/// how much of it shows. From Engine.dll
+/// (`USpriteEmitter::FillVertexBuffer` and `RenderParticles`), with `n`
+/// the frame count used by [`frame_at`] (`max(End - Start, 1)` with
+/// `SubdivisionEnd` set, otherwise all frames):
+/// - the next frame is `frame + 1`, or `frame` itself when `frame + 1`
+///   equals `n`;
+/// - the share is the part of `n x t` after the point, stored as a byte
+///   (`trunc(share x 255)`) in the vertex colour's alpha.
+///
+/// The graphics driver (D3DDrv.dll, `FD3DRenderInterface::SetParticleMaterial`)
+/// then draws the frame with the next one mixed in by that alpha
+/// (`D3DTOP_BLENDDIFFUSEALPHA`), times the vertex colour, and takes the
+/// opacity from the mixed picture alone: the vertex alpha is used up as
+/// the share, so the particle's own alpha does not show.
+pub fn frame_blend(def: &EmitterDef, t: f32) -> Option<(u32, f32)> {
+    if !def.blend_frames || def.random_frame || def.frames() <= 1 {
+        return None;
+    }
+    let t = t.clamp(0.0, 1.0);
+    let n = if def.frame_end != 0 {
+        (def.frame_end as i64 - def.frame_start as i64).max(1)
+    } else {
+        def.frames() as i64
+    };
+    let frame = frame_at(def, t);
+    let next = if frame as i64 + 1 == n {
+        frame
+    } else {
+        frame + 1
+    };
+    let nt = n as f32 * t;
+    let share = ((nt - nt.trunc()) * 255.0).trunc() / 255.0;
+    Some((next, share))
+}
+
+/// Where frame `frame` of a picture split into `frames_u` x `frames_v` sits,
+/// as (column, row), from the top left. The engine counts frames down
+/// each column first (Engine.dll, `USpriteEmitter::FillVertexBuffer`: the
+/// column is `frame / TextureVSubdivisions`, the row
+/// `frame % TextureVSubdivisions`).
+pub fn frame_cell(frame: u32, frames_u: u32, frames_v: u32) -> (u32, u32) {
+    let (u, v) = (frames_u.max(1), frames_v.max(1));
+    ((frame / v) % u, frame % v)
+}
+
+/// `FVector::GetNonParallel` (Core.dll): an axis that isn't close to
+/// lying along `v`.
+fn non_parallel(v: [f32; 3]) -> [f32; 3] {
+    if v[0].abs() > 0.57 {
+        [0.0, 1.0, 0.0]
+    } else if v[1].abs() > 0.57 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    }
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// `FVector::SafeNormal`: the same way, length 1; nothing for nothing.
+fn safe_normal(v: [f32; 3]) -> [f32; 3] {
+    let l2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    if l2 == 0.0 {
+        return v;
+    }
+    let k = 1.0 / l2.sqrt();
+    v.map(|c| c * k)
+}
+
+/// A sprite's two half-axes in Unreal units, `(right, up)`: its corners are
+/// `position -/+ right -/+ up`, the picture's top along `+up`. `None` for a
+/// sprite flat to the camera, which the renderer turns to its camera
+/// itself (using `half_size[0]` for both: the engine draws those square,
+/// from `Size.X` alone).
+///
+/// From Engine.dll (`USpriteEmitter::FillVertexBuffer`), with `d` the
+/// particle's last move made length 1:
+/// - `Up`: `up = d x Size.Y`, `right = (d cross (position - camera))`
+///   made length 1, `x Size.X`;
+/// - `Forward`: `n` = `GetNonParallel(d)`, `up = (d cross n) x Size.Y`
+///   (not made length 1, as in the engine), `right = (d cross up)` made
+///   length 1, `x Size.X`.
+///
+/// A particle that hasn't moved has no `d`, so it is drawn with no size,
+/// as in the engine.
+pub fn sprite_axes(
+    facing: Facing,
+    sprite: &Sprite,
+    camera: [f32; 3],
+) -> Option<([f32; 3], [f32; 3])> {
+    let d = safe_normal(sprite.movement);
+    let [sx, sy] = sprite.half_size;
+    match facing {
+        Facing::Up => {
+            let to_cam = [0, 1, 2].map(|k| sprite.position[k] - camera[k]);
+            let right = safe_normal(cross(d, to_cam)).map(|c| c * sx);
+            Some((right, d.map(|c| c * sy)))
+        }
+        Facing::Forward => {
+            let up = cross(d, non_parallel(d)).map(|c| c * sy);
+            let right = safe_normal(cross(d, up)).map(|c| c * sx);
+            Some((right, up))
+        }
+        Facing::Camera | Facing::Normal | Facing::UpAndNormal => None,
+    }
 }
 
 /// The size scale at relative time `t`.
@@ -276,7 +421,17 @@ impl EffectState {
 
     fn spawn(&mut self, def: &EmitterDef, i: usize) {
         let rng = &mut self.rng;
+        // Engine.dll (UParticleEmitter::SpawnParticle): a box start is
+        // `StartLocationOffset` plus a random point of
+        // `StartLocationRange`; for an emitter in the level's axes
+        // (PTCS_Independent) that random point and the start velocity are
+        // turned by the effect's axes, the offset is not. A PTCS_Relative
+        // emitter keeps both in its own axes and is turned as it is drawn,
+        // which comes to turning everything here.
+        let independent_box = def.coordinate_system == CoordinateSystem::Independent
+            && def.start_shape == StartShape::Box;
         let mut offset = match def.start_shape {
+            StartShape::Box if independent_box => turn(&self.axes, rng.range3(&def.start_range)),
             StartShape::Box => rng.range3(&def.start_range),
             StartShape::Sphere | StartShape::Polar => {
                 // A random direction, at a random distance.
@@ -312,9 +467,13 @@ impl EffectState {
                 }
             }
         }
-        if def.coordinate_system == CoordinateSystem::Relative {
-            offset = turn(&self.axes, offset);
-            velocity = turn(&self.axes, velocity);
+        match def.coordinate_system {
+            CoordinateSystem::Relative => {
+                offset = turn(&self.axes, offset);
+                velocity = turn(&self.axes, velocity);
+            }
+            CoordinateSystem::Independent => velocity = turn(&self.axes, velocity),
+            CoordinateSystem::Absolute => {}
         }
         let sx = rng.unit();
         let size = if def.uniform_size {
@@ -337,8 +496,10 @@ impl EffectState {
         } else {
             0
         };
+        let at = [0, 1, 2].map(|k| self.origin[k] + offset[k]);
         let p = Particle {
-            position: [0, 1, 2].map(|k| self.origin[k] + offset[k]),
+            position: at,
+            old_position: at,
             velocity,
             age: 0.0,
             lifetime: rng.range(def.lifetime).max(0.01),
@@ -385,6 +546,7 @@ impl EffectState {
             let s = &mut self.emitters[i];
             for p in &mut s.particles {
                 p.age += dt;
+                p.old_position = p.position;
                 for k in 0..3 {
                     p.velocity[k] += acceleration[k] * dt;
                     p.velocity[k] *= (1.0 - p.velocity_loss[k] * dt).max(0.0);
@@ -486,15 +648,12 @@ impl EffectState {
                 } else if d.random_frame {
                     p.frame
                 } else {
-                    // Runs through its frames over its life.
-                    let lo = d.frame_start.min(frames - 1);
-                    let hi = if d.frame_end == 0 {
-                        frames
-                    } else {
-                        d.frame_end.min(frames)
-                    };
-                    let span = hi.saturating_sub(lo).max(1);
-                    lo + ((t * span as f32) as u32).min(span - 1)
+                    frame_at(d, t)
+                };
+                let (next_frame, frame_mix) = if frames <= 1 {
+                    (frame, 0.0)
+                } else {
+                    frame_blend(d, t).unwrap_or((frame, 0.0))
                 };
                 Sprite {
                     position: p.position,
@@ -503,7 +662,10 @@ impl EffectState {
                     fade: fade.clamp(0.0, 1.0),
                     spin: p.spin,
                     frame,
+                    next_frame,
+                    frame_mix,
                     velocity: p.velocity,
+                    movement: [0, 1, 2].map(|k| p.position[k] - p.old_position[k]),
                 }
             })
             .collect()
@@ -593,11 +755,135 @@ mod tests {
             s.emitters[0].particles[0].size
         };
         assert!((p.size[0] - plain[0] * 2.0).abs() < 1e-3);
-        // Independent emitters ignore the turn.
+        // Independent emitters' start flight turns too (Engine.dll,
+        // SpawnParticle); Absolute ones' doesn't.
         def.emitters[0].coordinate_system = crate::def::CoordinateSystem::Independent;
         let mut s = EffectState::new(&def, [0.0; 3], 5).placed([0, 16384, 0], 1.0);
         s.step(&def, 0.01);
+        assert!((s.emitters[0].particles[0].velocity[1] - 8000.0).abs() < 1.0);
+        def.emitters[0].coordinate_system = crate::def::CoordinateSystem::Absolute;
+        let mut s = EffectState::new(&def, [0.0; 3], 5).placed([0, 16384, 0], 1.0);
+        s.step(&def, 0.01);
         assert!((s.emitters[0].particles[0].velocity[0] - 8000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn an_independent_start_box_turns_but_its_offset_does_not() {
+        // The bacta hologram's clone: 50 forward and 100 up of the
+        // dispenser's Eye bone, in the bone's axes.
+        let mut def = burst();
+        let e = &mut def.emitters[0];
+        e.coordinate_system = crate::def::CoordinateSystem::Independent;
+        e.start_velocity = RangeVector::fixed(0.0);
+        e.start_range = RangeVector::fixed(0.0);
+        e.start_range.x = Range::fixed(50.0);
+        e.start_range.z = Range::fixed(100.0);
+        e.start_offset = [7.0, 0.0, 0.0];
+        let mut s = EffectState::new(&def, [0.0; 3], 5).placed([0, 16384, 0], 1.0);
+        s.step(&def, 0.01);
+        let p = s.emitters[0].particles[0].position;
+        // Forward is +Y now; the offset stays on +X.
+        assert!(
+            (p[0] - 7.0).abs() < 1e-3 && (p[1] - 50.0).abs() < 1e-3,
+            "{p:?}"
+        );
+        assert!((p[2] - 100.0).abs() < 1e-3, "{p:?}");
+    }
+
+    #[test]
+    fn frames_follow_the_engine() {
+        let mut d = EmitterDef {
+            frames_u: 1,
+            frames_v: 8,
+            ..Default::default()
+        };
+        // The bacta power bar: 8 frames over its life.
+        assert_eq!(frame_at(&d, 0.0), 0);
+        assert_eq!(frame_at(&d, 0.5), 4);
+        assert_eq!(frame_at(&d, 1.0), 7);
+        // SubdivisionStart is only used with an end.
+        d.frame_start = 2;
+        assert_eq!(frame_at(&d, 0.0), 0);
+        d.frame_end = 6;
+        assert_eq!(frame_at(&d, 0.0), 2);
+        assert_eq!(frame_at(&d, 0.99), 5);
+        assert_eq!(frame_at(&d, 1.0), 6);
+        // Down each column first: 2 x 4 (the bacta text).
+        assert_eq!(frame_cell(0, 2, 4), (0, 0));
+        assert_eq!(frame_cell(3, 2, 4), (0, 3));
+        assert_eq!(frame_cell(4, 2, 4), (1, 0));
+        assert_eq!(frame_cell(7, 2, 4), (1, 3));
+    }
+
+    #[test]
+    fn frames_mix_as_the_engine_mixes_them() {
+        // 1 x 8, like the bacta power bar.
+        let mut d = EmitterDef {
+            frames_u: 1,
+            frames_v: 8,
+            ..Default::default()
+        };
+        assert_eq!(
+            frame_blend(&d, 0.3),
+            None,
+            "only with BlendBetweenSubdivisions"
+        );
+        d.blend_frames = true;
+        // 8 x 0.3 = 2.4: frame 2 with 0.4 of frame 3 (as a byte: 102/255).
+        let (next, share) = frame_blend(&d, 0.3).unwrap();
+        assert_eq!((frame_at(&d, 0.3), next), (2, 3));
+        assert!((share - 101.0 / 255.0).abs() < 1.5 / 255.0, "{share}");
+        // The last frame mixes with itself.
+        assert_eq!(frame_blend(&d, 0.95).unwrap().0, 7);
+        // Random frames don't mix.
+        d.random_frame = true;
+        assert_eq!(frame_blend(&d, 0.3), None);
+        d.random_frame = false;
+        // With an end, "last" is frame + 1 == End - Start, as the engine
+        // compares it.
+        d.frame_start = 2;
+        d.frame_end = 6;
+        assert_eq!(frame_at(&d, 0.5), 4);
+        assert_eq!(frame_blend(&d, 0.5).unwrap().0, 5);
+        assert_eq!(frame_at(&d, 0.25), 3);
+        assert_eq!(frame_blend(&d, 0.25).unwrap().0, 3);
+    }
+
+    #[test]
+    fn sprites_face_the_way_the_engine_turns_them() {
+        let s = Sprite {
+            position: [100.0, 0.0, 0.0],
+            half_size: [10.0, 40.0],
+            colour: [1.0; 4],
+            fade: 1.0,
+            spin: 0.0,
+            frame: 0,
+            next_frame: 0,
+            frame_mix: 0.0,
+            velocity: [0.0; 3],
+            movement: [0.0, 0.0, 2.0],
+        };
+        // Up: long side along the move (up), short side across it and the
+        // line to the camera.
+        let (r, u) = sprite_axes(Facing::Up, &s, [0.0; 3]).unwrap();
+        assert_eq!(u, [0.0, 0.0, 40.0]);
+        assert!(
+            (r[0]).abs() < 1e-4 && (r[1].abs() - 10.0).abs() < 1e-4,
+            "{r:?}"
+        );
+        // Forward, moving up: GetNonParallel gives X, so up is along Y
+        // and right along X (made length 1, times Size.X).
+        let (r, u) = sprite_axes(Facing::Forward, &s, [0.0; 3]).unwrap();
+        assert!((u[1].abs() - 40.0).abs() < 1e-4, "{u:?}");
+        assert!((r[0].abs() - 10.0).abs() < 1e-4, "{r:?}");
+        // Not moved: no size.
+        let still = Sprite {
+            movement: [0.0; 3],
+            ..s
+        };
+        let (r, u) = sprite_axes(Facing::Up, &still, [0.0; 3]).unwrap();
+        assert_eq!((r, u), ([0.0; 3], [0.0; 3]));
+        assert!(sprite_axes(Facing::Camera, &s, [0.0; 3]).is_none());
     }
 
     #[test]
