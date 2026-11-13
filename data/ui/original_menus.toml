@@ -397,6 +397,23 @@ back = "unavailable"
 [pages.debriefing.buttons]
 OnAButton = "act:continue"
 
+# The hint screens (checked 2026-11-12 with the install): the tutorial
+# pop-ups that 29 level scripts show (ACTION_ShowDebriefingScreen with
+# MenuClass CTPauseHintText and bIsForHintText). The text is the level's;
+# rc_menus/src/hint.rs fills it in. CONTINUE WITH HINTS goes on, CONTINUE
+# WITHOUT HINTS switches hint screens off and goes on (rc_game/src/hints.rs);
+# back does nothing, as in the original. The paused game shows behind it:
+# the class hides its Background and has no BackgroundMovieName, so
+# MenuBase.Init leaves InLevelBackgroundMovieReplacement hidden too.
+[pages.hint]
+class = "XInterfaceCTMenus.CTPauseHintText"
+over_game = true
+back = "unavailable"
+
+[pages.hint.buttons]
+OnAButton = "act:hint_on"
+OnBButton = "act:hint_off"
+
 # The loading screens (checked 2026-11-12 with the install). Which one a
 # map gets, and its picture, title and text, come from the install's
 # LevelLoadingInfo.int and System.ini, chosen as the original's engine

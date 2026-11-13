@@ -58,6 +58,9 @@ pub enum Page {
     /// The end-of-campaign debriefing (`debriefing.rs`). Back does
     /// nothing; only CONTINUE leaves it.
     Debriefing,
+    /// A level's hint screen (`hints.rs`). Back does nothing; CONTINUE
+    /// WITH HINTS or CONTINUE WITHOUT HINTS leaves it.
+    Hint,
     /// The original PROFILES page and its NEW PROFILE name page
     /// (`original_profiles.rs`). Only reachable when they can be drawn
     /// from the install; there is no placeholder.
@@ -83,6 +86,8 @@ pub enum Cmd {
     Resume,
     /// Leave the debriefing for the next map.
     Continue,
+    /// Leave a hint screen: with hints (true) or without (false).
+    Hint(bool),
     QuitToMenu,
     Quit,
     Setting(Opt),
@@ -124,6 +129,9 @@ pub struct Menu {
     pub notice: Option<String>,
     /// CONTINUE was chosen on the debriefing (`debriefing.rs` goes on).
     pub go_on: bool,
+    /// A hint screen's button was chosen (`hints.rs` reads it): true for
+    /// CONTINUE WITH HINTS, false for CONTINUE WITHOUT HINTS.
+    pub hint_answer: Option<bool>,
     /// True when the menu needs drawing again.
     dirty: bool,
 }
@@ -137,6 +145,7 @@ impl Menu {
             history: vec![],
             notice: None,
             go_on: false,
+            hint_answer: None,
             dirty: true,
         }
     }
@@ -198,11 +207,15 @@ impl Plugin for MenuPlugin {
                 OnEnter(Play::Paused),
                 |mut m: ResMut<Menu>,
                  d: Res<crate::debriefing::Debriefing>,
+                 h: Res<crate::hints::Hints>,
                  l: Res<crate::loading_screen::LoadingDone>| {
-                    // A level's debriefing pauses play too, and so does
-                    // a briefing loading screen once its level is in.
+                    // A level's debriefing and hint screens pause play too,
+                    // and so does a briefing loading screen once its level
+                    // is in.
                     m.reset(if d.showing.is_some() {
                         Page::Debriefing
+                    } else if h.showing.is_some() {
+                        Page::Hint
                     } else if l.waiting {
                         Page::LoadingDone
                     } else {
@@ -360,6 +373,15 @@ pub fn items(
             "DEBRIEFING (PLACEHOLDER)".into(),
             vec![it("Continue", Cmd::Continue)],
         ),
+        // Marked: the original page couldn't be drawn. The hint's text is
+        // shown as the notice under the title.
+        Page::Hint => (
+            "HINT (PLACEHOLDER)".into(),
+            vec![
+                it("Continue with hints", Cmd::Hint(true)),
+                it("Continue without hints", Cmd::Hint(false)),
+            ],
+        ),
         // Not normally reached: play only waits for START when the
         // original screen shows.
         Page::LoadingDone => (
@@ -471,8 +493,9 @@ fn navigate(
         menu.dirty = true;
     }
     let back = actions.just_pressed(Action::MenuBack);
-    let cmd = if back && matches!(menu.page, Page::Debriefing | Page::LoadingDone) {
-        // Only CONTINUE leaves the debriefing, as in the original.
+    let cmd = if back && matches!(menu.page, Page::Debriefing | Page::Hint | Page::LoadingDone) {
+        // Only CONTINUE leaves the debriefing, only its two buttons a hint
+        // screen, and only START a loaded briefing, as in the original.
         None
     } else if back {
         Some(Cmd::Back)
@@ -517,6 +540,7 @@ fn navigate(
             }
         }
         Cmd::Continue => menu.go_on = true,
+        Cmd::Hint(with) => menu.hint_answer = Some(with),
         Cmd::QuitToMenu => next_state.set(GameState::MainMenu),
         Cmd::Quit => {
             log.line("menu: quit");
