@@ -4490,6 +4490,7 @@ dependencies = [
 name = "rc_effects"
 version = "0.1.0"
 dependencies = [
+ "rc_level",
  "rc_package",
 ]
 
@@ -4747,6 +4748,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "rc_audio",
+ "rc_cast",
  "rc_combat",
  "rc_effects",
  "rc_effects_plugin",
@@ -4755,6 +4757,7 @@ dependencies = [
  "rc_level_plugin",
  "rc_level_viewer",
  "rc_movement",
+ "rc_movers",
  "rc_movers_plugin",
  "rc_package",
  "rc_scripts",

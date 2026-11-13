@@ -213,6 +213,12 @@ impl LevelMovers {
     }
 
     /// The movers as they are now (for reading; don't hold on to it).
+    /// Where the mover placed as map export `export` is now, if it is one.
+    pub fn pose_of_export(&self, export: usize) -> Option<rc_movers::Pose> {
+        let i = *self.by_export.get(&export)?;
+        self.read().movers.get(i).map(|m| m.pose)
+    }
+
     pub fn read(&self) -> RwLockReadGuard<'_, MoverSet> {
         self.shared.set.read().unwrap_or_else(|e| e.into_inner())
     }

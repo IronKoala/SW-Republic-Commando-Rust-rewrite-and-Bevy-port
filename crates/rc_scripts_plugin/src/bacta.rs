@@ -233,6 +233,7 @@ pub(crate) fn prepare(
                     preload.write(rc_effects_plugin::PreloadEffect {
                         effect: Some(e.clone()),
                         sound: None,
+                        def: None,
                     });
                 }
             }

@@ -380,3 +380,181 @@ impl Library {
             .effect(class)
     }
 }
+
+/// An effect placed in a map: an actor whose class is an effect class
+/// (`Fire_Medium3`, a `Fire_Medium`), or a plain `Emitter` built in the
+/// map alone.
+#[derive(Debug, Clone)]
+pub struct PlacedEffect {
+    /// Export index (0-based) of the actor in the map.
+    pub export: usize,
+    /// The actor's name (`Fire_Medium3`).
+    pub name: String,
+    pub class: String,
+    /// What it sends: the map's own copies of its emitters (the editor
+    /// copies a class's emitters into the map when the effect is placed,
+    /// and level designers edit them there; the game runs those copies),
+    /// with the actor's own `SpawnSound`, `AmbientSound`, `LifeSpan` and
+    /// `bUnlit` where the map sets them, else the class's. `Err` says why
+    /// it couldn't be read.
+    pub def: Result<EffectDef, String>,
+    /// `bHidden` (the map's, else the class's): the engine draws nothing
+    /// for a hidden actor.
+    pub hidden: bool,
+    /// `AutoDestroy` (the map's, else the class's): the actor goes once
+    /// its emitters have nothing more to show. Without it a placed effect
+    /// stays for the whole level, even with nothing to show (switched off,
+    /// or a burst waiting for a level event to start it over).
+    pub auto_destroy: bool,
+    /// How many of its emitters differ from its class's (for the log;
+    /// `None` for a plain `Emitter` or a class that couldn't be read).
+    pub changed_from_class: Option<usize>,
+}
+
+fn object_value(v: &Values, key: &str) -> Option<Option<Vec<String>>> {
+    match get(v, key)? {
+        Tagged::Object(p) if !p.is_empty() && !p.last().is_some_and(|n| n == "None") => {
+            Some(Some(p.clone()))
+        }
+        Tagged::Object(_) => Some(None),
+        _ => None,
+    }
+}
+
+/// The emitters an actor's `Emitters` list names, read from `pkg` (the
+/// map) itself.
+fn own_emitters(
+    pkg: &Package,
+    pkg_name: &str,
+    data: &[u8],
+    props: &[rc_package::properties::Property],
+) -> Result<Option<Vec<EmitterDef>>, String> {
+    let Some(list) = props
+        .iter()
+        .find(|p| pkg.name(p.name).eq_ignore_ascii_case("Emitters"))
+    else {
+        return Ok(None);
+    };
+    let rc_package::properties::Value::Raw(b) = &list.value else {
+        return Err("its Emitters list isn't a list".into());
+    };
+    let mut r = Reader::new(b);
+    let n = r.compact_index().map_err(|e| e.to_string())?.max(0);
+    let mut out = Vec::new();
+    for _ in 0..n {
+        let o = r.compact_index().map_err(|e| e.to_string())?;
+        let ObjectRef::Export(k) = ObjectRef::from_index(o) else {
+            // `None` in the list: the engine skips it.
+            continue;
+        };
+        let kind = pkg.export_class_name(&pkg.exports[k]).to_string();
+        let name = pkg.name(pkg.exports[k].object_name).to_string();
+        let v = tagged::read_object(pkg, pkg_name, data, k)
+            .ok_or_else(|| format!("its emitter {name} couldn't be read"))?;
+        out.push(emitter(&name, &kind, &v));
+    }
+    Ok(Some(out))
+}
+
+impl Library {
+    /// Every effect `pkg` (a map, named `pkg_name`) places, in export
+    /// order.
+    pub fn placed_effects(&self, pkg: &Package, pkg_name: &str, data: &[u8]) -> Vec<PlacedEffect> {
+        let mut out = Vec::new();
+        for (k, e) in pkg.exports.iter().enumerate() {
+            let class = pkg.export_class_name(e).to_string();
+            if !self.is_emitter(&class) {
+                continue;
+            }
+            let name = pkg.name(e.object_name).to_string();
+            let base = if class.eq_ignore_ascii_case("Emitter") {
+                None
+            } else {
+                self.effect(&class).ok()
+            };
+            let class_values = self
+                .packages
+                .iter()
+                .find(|p| p.has(&class))
+                .and_then(|p| p.class_values(&class));
+            let class_flag = |key: &str| {
+                class_values
+                    .as_ref()
+                    .and_then(|v| boolean(v, key))
+                    .unwrap_or(false)
+            };
+            let class_hidden = class_flag("bHidden");
+            let mut auto_destroy = class_flag("AutoDestroy");
+            let read = rc_level::actors::read_actor_properties(pkg, data, k)
+                .map_err(|e| format!("its values couldn't be read: {e}"));
+            let (def, hidden, changed) = match read {
+                Err(e) => (Err(e), class_hidden, None),
+                Ok(props) => {
+                    let own = tagged::values(pkg, pkg_name, &props);
+                    let hidden = boolean(&own, "bHidden").unwrap_or(class_hidden);
+                    auto_destroy = boolean(&own, "AutoDestroy").unwrap_or(auto_destroy);
+                    let def = own_emitters(pkg, pkg_name, data, &props).and_then(|list| {
+                        let mut d = match (&base, list) {
+                            (Some(b), Some(list)) => EffectDef {
+                                emitters: list,
+                                ..b.clone()
+                            },
+                            (Some(b), None) => b.clone(),
+                            (None, Some(list)) => EffectDef {
+                                name: class.clone(),
+                                emitters: list,
+                                sound: None,
+                                ambient_sound: None,
+                                life_span: 0.0,
+                                lit: false,
+                            },
+                            (None, None) => {
+                                return Err(format!("a {class} with no emitters of its own"))
+                            }
+                        };
+                        if let Some(s) = object_value(&own, "SpawnSound") {
+                            d.sound = s;
+                        }
+                        if let Some(s) = object_value(&own, "AmbientSound") {
+                            d.ambient_sound = s;
+                        }
+                        if let Some(l) = float(&own, "LifeSpan") {
+                            d.life_span = l;
+                        }
+                        if let Some(u) = boolean(&own, "bUnlit") {
+                            d.lit = !u;
+                        }
+                        d.name = name.clone();
+                        Ok(d)
+                    });
+                    let changed = match (&def, &base) {
+                        (Ok(d), Some(b)) => Some(
+                            d.emitters
+                                .iter()
+                                .zip(&b.emitters)
+                                .filter(|(m, c)| {
+                                    let mut m = (*m).clone();
+                                    m.name = c.name.clone();
+                                    m != **c
+                                })
+                                .count()
+                                + d.emitters.len().abs_diff(b.emitters.len()),
+                        ),
+                        _ => None,
+                    };
+                    (def, hidden, changed)
+                }
+            };
+            out.push(PlacedEffect {
+                export: k,
+                name,
+                class,
+                def,
+                hidden,
+                auto_destroy,
+                changed_from_class: changed,
+            });
+        }
+        out
+    }
+}

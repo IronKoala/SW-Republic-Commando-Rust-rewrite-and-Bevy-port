@@ -88,6 +88,11 @@ pub struct SpawnEffect {
     /// sends particles for the whole level. Without it, an effect that
     /// never ends is stopped after a minute.
     pub endless: bool,
+    /// Its definition, when it isn't its class's: an effect placed in a
+    /// map runs the map's own copies of its emitters
+    /// (`rc_effects::read::PlacedEffect`). `effect` is then the name it is
+    /// kept under (the actor's, `Fire_Medium3`).
+    pub def: Option<Arc<EffectDef>>,
 }
 
 impl Default for SpawnEffect {
@@ -105,15 +110,9 @@ impl Default for SpawnEffect {
             vanish_with_carrier: false,
             axes: None,
             endless: false,
+            def: None,
         }
     }
-}
-
-/// A level event names a placed emitter: every effect carried by
-/// `carrier` is triggered ([`rc_effects::sim::EffectState::trigger`]).
-#[derive(Message, Debug, Clone, PartialEq)]
-pub struct TriggerEffect {
-    pub carrier: Entity,
 }
 
 /// An effect started with an `id` is over (its life ended or its last
@@ -130,6 +129,26 @@ pub struct EffectEnded {
 pub struct PreloadEffect {
     pub effect: Option<String>,
     pub sound: Option<Vec<String>>,
+    /// Its definition, when it isn't its class's (see [`SpawnEffect::def`]).
+    pub def: Option<Arc<EffectDef>>,
+}
+
+/// On a carrier entity: the effect's own turn now, as Unreal pitch, yaw
+/// and roll, for an effect riding on something that turns (a placed
+/// emitter with an `AttachTag`). Without it the effect keeps the turn it
+/// was started with.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct CarrierTurn(pub [i32; 3]);
+
+/// "A level event names this effect": the effect carried by `carrier`
+/// does what engine.u's `Emitter.Trigger` does (see
+/// `rc_effects::EffectState::trigger`): parts with `TriggerDisabled` are
+/// switched off or on, parts with `ResetOnTrigger` start over.
+#[derive(Message, Debug, Clone)]
+pub struct TriggerEffect {
+    pub carrier: Entity,
+    /// The event, for the log.
+    pub by: String,
 }
 
 /// Our settings, from `data/effects/effects.toml`.
@@ -240,6 +259,9 @@ pub struct Effects {
     library: Option<Result<Library, String>>,
     effects: HashMap<String, Option<Arc<Loaded>>>,
     sounds: HashMap<String, Option<GameSound>>,
+    /// Pictures by path, shared by every effect that uses them (a map's
+    /// many copies of the same fire use the same picture).
+    pictures: HashMap<String, Option<Handle<Image>>>,
 }
 
 /// An effect running. Its particles are in Unreal units.
@@ -277,15 +299,15 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SpawnEffect>()
             .add_message::<EffectEnded>()
-            .add_message::<TriggerEffect>()
             .add_message::<PreloadEffect>()
+            .add_message::<TriggerEffect>()
             .init_resource::<Effects>()
             .init_resource::<EffectStats>()
             .add_systems(Startup, read_settings)
             .add_systems(Update, preload)
             .add_systems(
                 Update,
-                (spawn, step)
+                (spawn, trigger, step)
                     .chain()
                     .in_set(GameSet::Simulate)
                     .run_if(rc_game_core::playing),
@@ -421,6 +443,7 @@ fn alpha_mode(style: DrawStyle) -> AlphaMode {
 fn load_effect(
     effects: &mut Effects,
     name: &str,
+    given: Option<&Arc<EffectDef>>,
     paths: &GamePaths,
     images: &mut Assets<Image>,
     meshes: &mut Assets<Mesh>,
@@ -434,12 +457,16 @@ fn load_effect(
         return e.clone();
     }
     let t = std::time::Instant::now();
-    let lib = effects
-        .library
-        .get_or_insert_with(|| Library::open(&paths.game_data()));
-    let def = match lib {
-        Ok(l) => l.effect(name),
-        Err(e) => Err(e.clone()),
+    let def = if let Some(d) = given {
+        Ok((**d).clone())
+    } else {
+        let lib = effects
+            .library
+            .get_or_insert_with(|| Library::open(&paths.game_data()));
+        match lib {
+            Ok(l) => l.effect(name),
+            Err(e) => Err(e.clone()),
+        }
     };
     let def = match def {
         Ok(d) => d,
@@ -456,12 +483,23 @@ fn load_effect(
     for e in &def.emitters {
         let look = match &e.kind {
             EmitterKind::Sprite | EmitterKind::Spark => {
-                let tex = e.texture.as_ref().map(|p| picture(&mut mats, p));
-                let tex = match tex {
-                    Some(Ok(p)) => Some(images.add(to_image(&p))),
-                    Some(Err(err)) => {
-                        notes.push(format!("{}: picture {err}", e.name));
-                        None
+                let tex = match &e.texture {
+                    Some(path) => {
+                        let key = path.join(".").to_ascii_lowercase();
+                        match effects.pictures.get(&key) {
+                            Some(h) => h.clone(),
+                            None => {
+                                let h = match picture(&mut mats, path) {
+                                    Ok(p) => Some(images.add(to_image(&p))),
+                                    Err(err) => {
+                                        notes.push(format!("{}: picture {err}", e.name));
+                                        None
+                                    }
+                                };
+                                effects.pictures.insert(key, h.clone());
+                                h
+                            }
+                        }
                     }
                     None => None,
                 };
@@ -613,6 +651,7 @@ fn preload(
             let loaded = load_effect(
                 &mut effects,
                 e,
+                a.def.as_ref(),
                 &paths,
                 &mut images,
                 &mut meshes,
@@ -663,6 +702,7 @@ fn spawn(
             load_effect(
                 &mut effects,
                 &a.effect,
+                a.def.as_ref(),
                 &paths,
                 &mut images,
                 &mut meshes,
@@ -797,6 +837,38 @@ fn spawn(
     }
 }
 
+/// Level events reaching placed effects ([`TriggerEffect`]).
+fn trigger(
+    mut asks: MessageReader<TriggerEffect>,
+    mut running: Query<&mut RunningEffect>,
+    log: Option<Res<GameLog>>,
+) {
+    for a in asks.read() {
+        let mut found = false;
+        for mut r in &mut running {
+            if r.follow != Some(a.carrier) {
+                continue;
+            }
+            found = true;
+            let def = r.loaded.def.clone();
+            let on = r.state.trigger(&def);
+            say(
+                &log,
+                format!(
+                    "effects: {} triggered by {}: parts on {:?} (engine rule: TriggerDisabled flips, ResetOnTrigger starts over)",
+                    def.name, a.by, on
+                ),
+            );
+        }
+        if !found {
+            say(
+                &log,
+                format!("effects: event {} names an effect not running", a.by),
+            );
+        }
+    }
+}
+
 fn empty_mesh() -> Mesh {
     Mesh::new(
         PrimitiveTopology::TriangleList,
@@ -813,26 +885,24 @@ fn step(
     mut commands: Commands,
     time: Res<Time>,
     mut running: Query<(Entity, &mut RunningEffect)>,
-    carriers: Query<&GlobalTransform>,
+    carriers: Query<(&GlobalTransform, Option<&CarrierTurn>)>,
     mut stats: ResMut<EffectStats>,
     mut ended: MessageWriter<EffectEnded>,
-    mut triggers: MessageReader<TriggerEffect>,
     log: Option<Res<GameLog>>,
 ) {
     let dt = time.delta_secs().min(0.1);
-    let triggered: Vec<Entity> = triggers.read().map(|t| t.carrier).collect();
     let mut live = 0;
     for (e, mut r) in &mut running {
         let def = r.loaded.def.clone();
-        if let Some(c) = r.follow {
-            for _ in triggered.iter().filter(|t| **t == c) {
-                r.state.trigger(&def);
-            }
-        }
         let mut vanish = false;
         if let Some(c) = r.follow {
             match carriers.get(c) {
-                Ok(g) => r.state.move_to(&def, to_unreal(g.translation())),
+                Ok((g, turn)) => {
+                    r.state.move_to(&def, to_unreal(g.translation()));
+                    if let Some(t) = turn {
+                        r.state.axes = rc_effects::sim::rotation_axes(t.0);
+                    }
+                }
                 Err(_) if r.vanish_with_carrier => {
                     // `Destroy`: gone at once, with its sound.
                     vanish = true;
@@ -848,12 +918,18 @@ fn step(
             r.state.step(&def, dt);
             live += r.state.live();
         }
-        // Safety: an effect that loops forever ends after a minute. A
-        // placed emitter stays while its carrier is there, as the map's
-        // actor does, even with every emitter switched off (a trigger can
-        // switch them on again).
+        // Safety: an effect that loops forever ends after a minute, unless
+        // it is a placed emitter whose carrier is still there. A placed
+        // emitter stays while its carrier does, even with nothing to send
+        // (switched off, or waiting for a level event to start it over),
+        // as the map's actor does; only its `LifeSpan` ends it.
         let endless = r.endless && r.follow.is_some();
-        if vanish || (!endless && (r.state.done(&def) || r.state.age > 60.0)) {
+        let over = if endless {
+            def.life_span > 0.0 && r.state.age >= def.life_span
+        } else {
+            r.state.done(&def) || r.state.age > 60.0
+        };
+        if vanish || over {
             say(
                 &log,
                 format!(

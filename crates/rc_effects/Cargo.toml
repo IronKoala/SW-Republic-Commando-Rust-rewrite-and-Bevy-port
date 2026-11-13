@@ -6,3 +6,6 @@ description = "Particle effects (explosions, sparks, smoke): reads the game's Em
 
 [dependencies]
 rc_package = { path = "../rc_package" }
+# Reading the effects a map places (each actor's own values and its own
+# copies of its emitters).
+rc_level = { path = "../rc_level" }
