@@ -578,6 +578,120 @@ grow = [-0.8, 0.8]
 blink = "shields"
 glass = true
 
+# The fill's bright band, drawn again over it (Engine.dll 0x10432489 to
+# 0x10432821): the same three pieces of each bar, 2 toward the middle, in the
+# white (or flash red) of the backs, 7 lower and 9 shorter (y + 7, h - 9),
+# from texels 191-204 of the fill (its solid part): fill (165 - 163s, 465,
+# 163s - 4 x 9, texels 165,191-169,204), outer cap (147 - 163s, 18 wide,
+# texels 150,191-164,204), inner cap (161, 13 wide, texels 164,191-179,204);
+# the right bar mirrored (639, 635 + 163s, 653 + 163s). This is what makes
+# the bar one solid bright band.
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-318.4, -108.0]
+size = [130.4, 7.2]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [165, 191, 169, 204]
+fill = "shield"
+fill_toward = "right"
+fill_stretch = true
+fill_inset = 3.2
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+blink = "shields"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-202.4, -108.0]
+size = [14.4, 7.2]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [150, 191, 164, 204]
+slide_with = "shield"
+slide = [-130.4, 0]
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+blink = "shields"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [-191.2, -108.0]
+size = [10.4, 7.2]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 191, 179, 204]
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+blink = "shields"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [188.0, -108.0]
+size = [130.4, 7.2]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [165, 191, 169, 204]
+mirror = true
+fill = "shield"
+fill_toward = "left"
+fill_stretch = true
+fill_inset = 3.2
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+blink = "shields"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [188.0, -108.0]
+size = [14.4, 7.2]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [150, 191, 164, 204]
+mirror = true
+slide_with = "shield"
+slide = [130.4, 0]
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+blink = "shields"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "bottom"
+at = [180.8, -108.0]
+size = [10.4, 7.2]
+when = "shield"
+picture = "HUDTextures.Icons.CloneVisorIcons"
+part = [164, 191, 179, 204]
+mirror = true
+colour = [255, 255, 255, 255]
+grow_with = "shield_hit"
+grow = [-0.8, 0.8]
+redden_with = "shield_hit"
+blink = "shields"
+glass = true
+
 [[element]]
 group = "visor"
 anchor = "top"

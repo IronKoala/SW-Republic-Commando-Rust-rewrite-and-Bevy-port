@@ -3,6 +3,15 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-13: The shield bars' bright band, and the HUD preview laid on the glass as in the game (data/ui/hud.toml, rc_probe, rc_menus)
+
+- **Changed:** Six new elements in `data/ui/hud.toml`: the second layer Engine.dll `UHelmet::DrawHUD` draws over each shield bar's fill (fill, outer cap, inner cap, each side). `rc_probe --hud` now draws the helmet-on HUD as the game does: the glass parts on a flat 1600x1200 page (`hud_*_page.png`), laid on the screen triangle by triangle through the glass (new `GlassMap::triangles`), instead of moving each picture's corners, which bent long bars into broken pieces.
+- **Why:** The user compared with screenshots of the original: its shield bars are one straight, smooth band; ours weren't.
+- **Where it comes from:** Engine.dll disassembled again in a scratch folder (nothing kept): all 23 drawing calls of the shield section were read; calls 13 to 18 (0x104324f4 to 0x10432821) had not been copied.
+- **Tested how:** `cargo test -p rc_menus -p rc_game`; `rc_probe --hud` with the install's HUD files, compared by eye with the user's two screenshots.
+- **Result:** All pass. The preview's bars now show as one smooth curved band with the slanted end, as in the screenshots.
+- **Still broken / not tested:** Not seen on Windows yet. The bar in the user's screenshot is greyer than in our preview over plain grey; not checked in a level.
+
 ## 2026-11-13: The helmet's start-up sequence, the shield charging sounds and the tactical visor's white arcs (rc_game, rc_menus, rc_package, rc_probe, data/ui/hud.toml)
 
 - **Changed:** New `rc_game/src/helmet_start.rs`: the start-up sequence's rules (`StartUpPlan`, `fill`, `text_alpha`, `squad_slot`), the shield charging sounds' steps (`charge_step`) and their playing (`HelmetStartPlugin`, sounds read from the install with their AudioParams volume and pitch), and the tactical visor's clock (`Tactical`). `original_hud::draw_layout` keeps the helmet's `InitTime` on the level's clock (paused while a scene hides the HUD, started again on a new level or a load), fills the health meters and shield bars from empty in their phases, shows the start-up line, brings the squad panels in one by one, and passes the shield sound steps on. New HUD options in `rc_menus::hud`: `flip`, `spin_with` (a quad's `turn`, drawn rotated in Bevy and in `render.rs`), element-level `alpha_with` (now for text too), values `start_up`, `health_meter`, `tactical`, and `SquadLine::hidden`/`start_up_alpha`. `rc_package::sound::AudioParams` now reads MinVolume/MaxVolume/MinPitch/MaxPitch. `data/ui/hud.toml`: the start-up line, `alpha_with = "squad_start_up"` on the squad panels, and the four tactical arcs and the ring. New script check "the helmet starts up as the original's does". `rc_probe --hud` also paints `hud_start_up_*.png`.

@@ -548,6 +548,7 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
             shield_hit_red: 150,
             ..values.clone()
         };
+        let page_size = (1600usize, 1200usize);
         for (name, v) in [
             ("hud", &values),
             ("hud_objective", &objective_only),
@@ -555,7 +556,51 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
             ("hud_start_up", &start_up),
         ] {
             let quads = hud_quads(&layout, v, wf, hf, 16.0 / 9.0, &mut assets, place);
-            let picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);
+            let mut picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);
+            // As the game draws it with the helmet on: the glass parts on
+            // a flat 4:3 page, the page laid on the glass triangle by
+            // triangle (the texture places of the glass), the rest on top.
+            if let Some(g) = glass.as_ref() {
+                let page_quads = rc_menus::hud::hud_quads_of(
+                    &layout,
+                    v,
+                    page_size.0 as f32,
+                    page_size.1 as f32,
+                    4.0 / 3.0,
+                    &mut assets,
+                    None,
+                    &|e| e.glass,
+                );
+                // Over the same plain grey as the screen, so laying it on
+                // the glass is a plain copy.
+                let page = render::render(
+                    &page_quads,
+                    &mut assets,
+                    page_size.0,
+                    page_size.1,
+                    [70, 70, 70, 255],
+                );
+                let screen_quads = rc_menus::hud::hud_quads_of(
+                    &layout,
+                    v,
+                    wf,
+                    hf,
+                    16.0 / 9.0,
+                    &mut assets,
+                    None,
+                    &|e| !e.glass,
+                );
+                let mut base = rc_image::Rgba {
+                    width: w,
+                    height: h,
+                    pixels: [70u8, 70, 70, 255].repeat(w * h),
+                };
+                lay_on_glass(&mut base, &page, g.triangles());
+                picture = render::render_over(&screen_quads, &mut assets, base);
+                let _ = std::fs::create_dir_all(out_dir);
+                let _ = std::fs::File::create(out_dir.join(format!("{name}_page.png")))
+                    .and_then(|f| rc_image::png::write(&page, f));
+            }
             let _ = std::fs::create_dir_all(out_dir);
             let path = out_dir.join(format!("{name}_{w}x{h}.png"));
             match std::fs::File::create(&path).and_then(|f| rc_image::png::write(&picture, f)) {
@@ -572,4 +617,73 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         log.line(format!("  PROBLEM {p}"));
     }
     ok && assets.problems.is_empty()
+}
+
+/// Lay the HUD page on the screen through the helmet glass: each glass
+/// triangle shows the part of the page its texture places cover.
+fn lay_on_glass(
+    out: &mut rc_image::Rgba,
+    page: &rc_image::Rgba,
+    tris: &[[([f32; 2], [f32; 2]); 3]],
+) {
+    let (w, h) = (out.width as f32, out.height as f32);
+    for tri in tris {
+        let s: Vec<[f32; 2]> = tri.iter().map(|c| [c.1[0] * w, c.1[1] * h]).collect();
+        let d =
+            (s[1][1] - s[2][1]) * (s[0][0] - s[2][0]) + (s[2][0] - s[1][0]) * (s[0][1] - s[2][1]);
+        if d.abs() < 1e-9 {
+            continue;
+        }
+        let x0 = s
+            .iter()
+            .map(|p| p[0])
+            .fold(f32::MAX, f32::min)
+            .floor()
+            .max(0.0) as usize;
+        let x1 = s
+            .iter()
+            .map(|p| p[0])
+            .fold(f32::MIN, f32::max)
+            .ceil()
+            .min(w - 1.0) as usize;
+        let y0 = s
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::MAX, f32::min)
+            .floor()
+            .max(0.0) as usize;
+        let y1 = s
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::MIN, f32::max)
+            .ceil()
+            .min(h - 1.0) as usize;
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let l0 = ((s[1][1] - s[2][1]) * (px - s[2][0])
+                    + (s[2][0] - s[1][0]) * (py - s[2][1]))
+                    / d;
+                let l1 = ((s[2][1] - s[0][1]) * (px - s[2][0])
+                    + (s[0][0] - s[2][0]) * (py - s[2][1]))
+                    / d;
+                let l2 = 1.0 - l0 - l1;
+                if l0 < 0.0 || l1 < 0.0 || l2 < 0.0 {
+                    continue;
+                }
+                let u = l0 * tri[0].0[0] + l1 * tri[1].0[0] + l2 * tri[2].0[0];
+                let v = l0 * tri[0].0[1] + l1 * tri[1].0[1] + l2 * tri[2].0[1];
+                if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+                    continue;
+                }
+                let (sx, sy) = (
+                    (u * page.width as f32) as usize,
+                    (v * page.height as f32) as usize,
+                );
+                let si = (sy * page.width + sx) * 4;
+                let oi = (y * out.width + x) * 4;
+                out.pixels[oi..oi + 4].copy_from_slice(&page.pixels[si..si + 4]);
+            }
+        }
+    }
 }

@@ -4114,7 +4114,11 @@ outer cap rides along (`slide_with`). When the shields drop, the bars
 flash for `ShieldFlashDuration` (0.5 s): they swell `int(left * 6)` up
 and down (`grow_with = "shield_hit"`) and the white parts lose `int(left
 / 0.5 * 155)` of their green and blue unless the shields are charging
-(`redden_with`). `original_hud::shield_flash` keeps that clock, as the
+(`redden_with`). Over each fill the original draws its solid band again
+(Engine.dll 0x10432489 to 0x10432821): the same fill, outer cap and inner
+cap, 2 toward the middle, 7 lower and 9 shorter, from texels 191-204 of
+the fill, in the backs' white (red in a hit flash). Together they make
+one smooth bright band. `original_hud::shield_flash` keeps that clock, as the
 original's `LastShield` and `ShieldFlashTime`. A thin strip across the
 top of the glass is drawn in the same colour.
 

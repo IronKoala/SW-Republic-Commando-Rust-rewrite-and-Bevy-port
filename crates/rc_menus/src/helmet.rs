@@ -286,6 +286,12 @@ impl GlassMap {
         GlassMap { tris }
     }
 
+    /// Per glass triangle: each corner's (place in the HUD picture, place
+    /// on the screen), as screen fractions.
+    pub fn triangles(&self) -> &[[([f32; 2], [f32; 2]); 3]] {
+        &self.tris
+    }
+
     /// Whether there is any glass to map through.
     pub fn is_empty(&self) -> bool {
         self.tris.is_empty()
