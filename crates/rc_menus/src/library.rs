@@ -357,6 +357,12 @@ impl Library {
 
     /// A sound's embedded `.wav` file. `SoundMultiple` picks its first sound.
     pub fn sound(&mut self, path: &str) -> Result<Vec<u8>, String> {
+        self.sound_and_params(path).map(|(b, _)| b)
+    }
+
+    /// [`Self::sound`], with the `Params` the sound names (`package.name`,
+    /// lower case; `None` when it names none).
+    pub fn sound_and_params(&mut self, path: &str) -> Result<(Vec<u8>, Option<String>), String> {
         let mut path = path.to_string();
         for _ in 0..4 {
             let (loaded, i) = self.find(&path)?;
@@ -365,7 +371,9 @@ impl Library {
             match pkg.export_class_name(e) {
                 "Sound" => {
                     let s = sound::read_sound(pkg, data, e).map_err(|e| e.to_string())?;
-                    return Ok(s.bytes(data).to_vec());
+                    let this = path.split('.').next().unwrap_or_default();
+                    let params = sound::params_of(pkg, &s.properties, this);
+                    return Ok((s.bytes(data).to_vec(), params));
                 }
                 "SoundMultiple" => {
                     let m = sound::read_multiple(pkg, data, e).map_err(|e| e.to_string())?;

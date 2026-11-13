@@ -459,6 +459,26 @@ copy of the game.
   exactly as long as the line lasts. Every one of the 1,629 sounds the
   campaign maps' scripts name is found. `rc_game --script` checks that
   geo_01a's intro plays its lines (57 of 57 checks with level changes).
+  The map's own looping sounds play too (tested in the cloud sandbox on a
+  silent sound card, not yet listened to on Windows): on geo_01a the
+  battle raging in the distance, four fires crackling and a steam vent,
+  each from its place in the level and quieter further away by the game's
+  own rule (read from its sound code). The distant battle is set to carry
+  only 10 units, so it stays very quiet until you are near its speaker.
+  Rooms sound like rooms (written and tested in the cloud, not yet
+  listened to): each area of a map has the game's own audio settings, so
+  walking from room to room switches the echo, starts that room's
+  background sound with the game's 2-second fade, and plays its
+  occasional sounds (drips, creaks, distant rumbles) around you on the
+  game's timing. geo_03d's script switches two areas to their "broken"
+  sound after the explosion, as the original does. The echo itself is our
+  own sound processor driven by the game's numbers (the original left the
+  echo to the sound card). Rooms with a "repeating echo" setting
+  get it. The visor follows the game's rule for its own echo too, though
+  no vision mode in the game's files sets one. As in the game, music (and
+  any sound with no sound settings) gets no echo, far sounds lose some
+  high notes in rooms that say so, and the room sounds get their own
+  random loudness and pitch from the game's settings.
   Finishing a level now takes you to the next one (tested in the cloud
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the

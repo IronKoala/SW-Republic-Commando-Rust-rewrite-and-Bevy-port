@@ -54,7 +54,8 @@ pub use health::{
     CannotDie, Damage, DamageKind, Dead, Died, Difficulty, Health, Invulnerable, Shield, Team,
 };
 pub use library::{
-    read_audio_params, read_sounds, GameSound, MeleeParams, PlayerSetup, WeaponLibrary,
+    note_sound_params, read_audio_params, read_sounds, sound_params, GameSound, MeleeParams,
+    PlayerSetup, WeaponLibrary,
 };
 pub use melee::{MeleeAttack, MeleeSwing};
 pub use pickup::{spawn_pickup, WeaponPickup, WeaponTaken};

@@ -1191,10 +1191,19 @@ fn play_sound(
     };
     let key = path.to_ascii_lowercase();
     if !menus.sounds.contains_key(&key) {
-        let handle = match menus.assets.as_mut().map(|a| a.library.sound(&path)) {
-            Some(Ok(bytes)) => Some(sources.add(AudioSource {
-                bytes: bytes.into(),
-            })),
+        let handle = match menus
+            .assets
+            .as_mut()
+            .map(|a| a.library.sound_and_params(&path))
+        {
+            Some(Ok((bytes, params))) => {
+                let h = sources.add(AudioSource {
+                    bytes: bytes.into(),
+                });
+                // Its Params decide whether the room's echo hears it.
+                rc_combat::note_sound_params(h.id(), params);
+                Some(h)
+            }
             Some(Err(e)) => {
                 log.line(format!("original menus: sound {path}: {e}"));
                 None
@@ -1205,6 +1214,8 @@ fn play_sound(
     }
     if let Some(Some(h)) = menus.sounds.get(&key) {
         // Turned down by the SOUND FX volume in music.rs, as every sound is.
+        // The room's echo hears it by its Params, as the game does
+        // (`room_sound`): in a level's pause menu the clicks echo.
         commands.spawn((AudioPlayer(h.clone()), PlaybackSettings::DESPAWN));
     }
 }

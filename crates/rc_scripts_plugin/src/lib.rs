@@ -54,6 +54,7 @@
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
+pub mod ambient;
 pub mod bacta;
 pub mod breakables;
 pub mod characters;
@@ -70,6 +71,7 @@ pub mod shake;
 pub mod sight;
 pub mod sounds;
 pub mod tracker;
+pub mod zone_sounds;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
@@ -112,6 +114,9 @@ impl Plugin for ScriptsPlugin {
             .add_message::<rc_game_core::SquadStanceOrder>()
             .add_message::<rc_game_core::SquadMembership>()
             .add_message::<ChangeLevel>()
+            .add_message::<zone_sounds::ZoneAudioChange>()
+            .init_resource::<rc_game_core::RoomEcho>()
+            .init_resource::<rc_game_core::VisionModeNow>()
             .add_message::<rc_effects_plugin::SpawnEffect>()
             .add_message::<rc_effects_plugin::PreloadEffect>()
             .add_message::<rc_effects_plugin::EffectEnded>()
@@ -174,12 +179,33 @@ impl Plugin for ScriptsPlugin {
                     .run_if(playing),
             )
             .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
+            // The map's own looping sounds start with play.
+            .add_systems(
+                Update,
+                ambient::start.in_set(GameSet::Simulate).run_if(playing),
+            )
+            // The room the camera is in: its echo and room sounds.
+            .add_systems(
+                Update,
+                (
+                    zone_sounds::prepare,
+                    zone_sounds::swap,
+                    zone_sounds::update,
+                    zone_sounds::fade,
+                )
+                    .chain()
+                    .after(ScriptSystems)
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing),
+            )
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
                 (
                     forget,
                     sounds::forget,
+                    ambient::forget,
+                    zone_sounds::forget,
                     cutscene::forget,
                     projectiles::forget,
                     tracker::forget,
@@ -708,7 +734,7 @@ fn text_of(v: Option<&Val>) -> String {
 }
 
 /// Step the director and carry out what it asks.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn run(
     time: Res<Time>,
     script: Option<ResMut<LevelScript>>,
@@ -729,13 +755,14 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief, mut music, mut hints, mut tracker_asks): (
+    (mut checkpoints, mut change, mut debrief, mut music, mut hints, mut tracker_asks, mut zone_audio): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
         MessageWriter<rc_game_core::MusicCue>,
         MessageWriter<rc_game_core::ShowHint>,
         MessageWriter<tracker::TrackerAsk>,
+        MessageWriter<zone_sounds::ZoneAudioChange>,
     ),
     mut hud: MessageWriter<HudMessage>,
     mut damage: MessageWriter<Damage>,
@@ -1008,6 +1035,15 @@ fn run(
                     ));
                     script.stats.music_cues += 1;
                     music.write(cue);
+                    continue;
+                }
+                if call.kind == "changezoneaudio" {
+                    let change = zone_sounds::ZoneAudioChange::from_action(&call.action);
+                    log.line(format!(
+                        "{PART}: t={now:.2} {} #{} changezoneaudio: zones tagged {:?} get audio class {:?}",
+                        call.script, call.index, change.tag, change.class
+                    ));
+                    zone_audio.write(change);
                     continue;
                 }
                 if let Some(tag) = tracker::asked(&call.action) {

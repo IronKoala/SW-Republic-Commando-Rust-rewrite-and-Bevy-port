@@ -93,6 +93,12 @@ pub struct MapCollision {
     pub weapons: Vec<crate::pickups::PlacedWeapon>,
     /// Pickups of every kind left out of collision.
     pub pickups_not_solid: usize,
+    /// Sounds that loop where the map puts them (`crate::ambient`): the
+    /// battle in the distance, fires crackling, steam hissing.
+    pub ambient_sounds: Vec<crate::ambient::AmbientSound>,
+    /// How each room sounds: every zone's audio class (its echo, its own
+    /// looping sound and its random one-shots), see `crate::zone_audio`.
+    pub zone_audio: crate::zone_audio::ZoneAudio,
 }
 
 impl MapCollision {
@@ -373,6 +379,11 @@ pub fn load(
     let mut mover_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // And the parts scripts can switch off.
     let mut parts = crate::scripts::tagged_actors(&map.0, &map.1, &level);
+    let ambient_sounds =
+        crate::ambient::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
+    let mut zone_audio =
+        crate::zone_audio::read(&mut looks, &map.0, &map.1, &level, &bsp, &mut |n| pkgs.get(n));
+    crate::zone_audio::read_vision_echoes(&mut zone_audio, &mut looks, &mut |n| pkgs.get(n));
     let breakables =
         crate::breakables::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
     for b in &breakables {
@@ -480,6 +491,8 @@ pub fn load(
         part_triangles,
         parts,
         breakables,
+        ambient_sounds,
+        zone_audio,
         start,
         arrivals,
         ammo_boxes,

@@ -6,6 +6,10 @@
 //! that is all Republic Commando's `.uax` packages were found to use.
 //! Layout follows Microsoft's public RIFF/WAVE documentation ("Multimedia
 //! Programming Interface and Data Specifications 1.0", 1991).
+//!
+//! [`room`] holds the room echo (reverb) used for zone audio.
+
+pub mod room;
 
 /// A decoded sound.
 #[derive(Debug, Clone)]

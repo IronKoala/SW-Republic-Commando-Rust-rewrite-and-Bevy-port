@@ -9,10 +9,11 @@
 //! (Bevy's audio starts sounds after the transform update in `PostUpdate`).
 
 use crate::music::Track;
+use crate::room_sound::EchoReturn;
 use crate::settings::Settings;
 use bevy::audio::{PlaybackSettings, SpatialListener, SpatialScale, Volume};
 use bevy::prelude::*;
-use rc_game_core::{GameLog, PlayerCamera, SoundAt, Voice};
+use rc_game_core::{GameLog, PlayerCamera, SoundAt, SoundCategory, Voice};
 use std::collections::VecDeque;
 
 pub struct SoundOptionsPlugin;
@@ -23,10 +24,15 @@ impl Plugin for SoundOptionsPlugin {
             PostUpdate,
             (adjust_new_sounds, limit_channels)
                 .chain()
+                .in_set(SoundOptionsSystems)
                 .before(bevy::transform::TransformSystems::Propagate),
         );
     }
 }
+
+/// The systems that adjust new sounds (the room's echo wraps them after).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SoundOptionsSystems;
 
 /// The distance between the listener's ears, in Bevy units (a head is
 /// about 0.2 m; a Bevy unit is 50 Unreal units, about a metre).
@@ -54,16 +60,38 @@ pub fn volume_scale(settings: &Settings, voice: bool) -> f32 {
     (a.master_volume * kind).clamp(0.0, 1.0)
 }
 
+/// [`volume_scale`] for a sound tagged with the game's category
+/// (`rc_game_core::SoundCategory`): music on the MUSIC volume, voice on
+/// VOICES, the rest on SOUND FX, as the game's
+/// `GetMasterVolumeMultiplier` picks.
+pub fn category_scale(settings: &Settings, category: u8) -> f32 {
+    let a = &settings.audio;
+    let kind = match category {
+        0 => a.music_volume,
+        1 => a.voices_volume,
+        _ => a.effects_volume,
+    };
+    (a.master_volume * kind).clamp(0.0, 1.0)
+}
+
 #[allow(clippy::type_complexity)]
 fn adjust_new_sounds(
     settings: Res<Settings>,
     mut new: Query<
-        (&mut PlaybackSettings, Has<Voice>, Has<SoundAt>),
-        (Added<PlaybackSettings>, Without<Track>),
+        (
+            &mut PlaybackSettings,
+            Has<Voice>,
+            Has<SoundAt>,
+            Option<&SoundCategory>,
+        ),
+        (Added<PlaybackSettings>, Without<Track>, Without<EchoReturn>),
     >,
 ) {
-    for (mut p, voice, placed) in &mut new {
-        let scale = volume_scale(&settings, voice);
+    for (mut p, voice, placed, category) in &mut new {
+        let scale = match category {
+            Some(c) => category_scale(&settings, c.0),
+            None => volume_scale(&settings, voice),
+        };
         if scale < 1.0 {
             p.volume = Volume::Linear(p.volume.to_linear() * scale);
         }
@@ -81,8 +109,19 @@ fn adjust_new_sounds(
 fn limit_channels(
     mut commands: Commands,
     settings: Res<Settings>,
-    playing: Query<(Entity, Has<Voice>), (With<PlaybackSettings>, Without<Track>)>,
-    new: Query<Entity, (Added<PlaybackSettings>, Without<Voice>, Without<Track>)>,
+    playing: Query<
+        (Entity, Has<Voice>),
+        (With<PlaybackSettings>, Without<Track>, Without<EchoReturn>),
+    >,
+    new: Query<
+        Entity,
+        (
+            Added<PlaybackSettings>,
+            Without<Voice>,
+            Without<Track>,
+            Without<EchoReturn>,
+        ),
+    >,
     mut effects: Local<VecDeque<Entity>>,
     mut stopped: Local<u64>,
     log: Res<GameLog>,

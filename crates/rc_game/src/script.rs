@@ -1089,6 +1089,10 @@ fn steps() -> Vec<Step> {
             "the scripts play the game's own lines, as long as each one lasts, some from their place in the level",
             level_script_lines,
         ),
+        Check(
+            "the map's own looping sounds play from their places (the battle in the distance, fires, steam)",
+            level_ambient_loops,
+        ),
         Check("the start barricade blocks the way", |w| {
             level_script_way(w, true)
         }),
@@ -3477,6 +3481,38 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
         && st.sounds_missing.is_empty()
         && !st.sounds_placed.is_empty()
     {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The map's looping sounds (`rc_scripts_plugin::ambient`): geo_01a's
+/// battle loop and its 4 fires and steam vent, each placed where the map
+/// puts it, all from the game's own sounds.
+fn level_ambient_loops(w: &mut World) -> Result<String, String> {
+    let wanted = w
+        .get_resource::<rc_level_plugin::LevelAmbientSounds>()
+        .map_or(0, |a| a.0.len());
+    let mut q = w.query::<(
+        &rc_scripts_plugin::ambient::AmbientLoop,
+        Has<rc_game_core::SoundAt>,
+    )>();
+    let mut playing: Vec<String> = q
+        .iter(w)
+        .map(|(a, placed)| {
+            format!(
+                "{} {}{}",
+                a.actor,
+                a.sound,
+                if placed { "" } else { " (everywhere)" }
+            )
+        })
+        .collect();
+    playing.sort();
+    let battle = playing.iter().any(|p| p.contains("ambPS_GEO_battle_lp_01"));
+    let got = format!("{} of {wanted} loops playing: {playing:?}", playing.len());
+    if wanted >= 6 && playing.len() == wanted && battle {
         Ok(got)
     } else {
         Err(got)

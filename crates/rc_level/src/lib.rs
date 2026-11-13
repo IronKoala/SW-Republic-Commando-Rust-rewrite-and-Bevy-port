@@ -5,6 +5,7 @@
 //! units and axes (X forward, Y right, Z up); the viewer converts them.
 
 pub mod actors;
+pub mod ambient;
 pub mod breakables;
 pub mod bsp;
 pub mod checkpoints;
@@ -19,3 +20,4 @@ pub mod scripts;
 pub mod settle;
 pub mod terrain;
 pub mod volumes;
+pub mod zone_audio;

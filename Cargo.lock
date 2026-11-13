@@ -4562,6 +4562,7 @@ dependencies = [
  "rc_turrets_plugin",
  "rc_video",
  "rc_visor",
+ "rodio",
  "serde",
  "toml 0.8.23",
 ]
@@ -4571,6 +4572,7 @@ name = "rc_game_core"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rc_audio",
  "rc_movement",
  "serde",
  "toml 0.8.23",

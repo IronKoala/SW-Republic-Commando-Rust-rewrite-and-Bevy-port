@@ -6,6 +6,8 @@ description = "The shared pieces every part of the game plugs into: game states,
 
 [dependencies]
 rc_movement = { path = "../rc_movement" }
+# The room echo's values (`sound::RoomEcho`).
+rc_audio = { path = "../rc_audio" }
 # Save files are TOML. serde (MIT OR Apache-2.0), https://serde.rs; toml
 # (MIT OR Apache-2.0), https://github.com/toml-rs/toml.
 serde = { version = "1", features = ["derive"] }

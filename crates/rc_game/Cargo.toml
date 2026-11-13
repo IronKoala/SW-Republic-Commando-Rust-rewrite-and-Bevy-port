@@ -77,6 +77,15 @@ features = [
     "bevy_gilrs",
 ]
 
+# rodio (MIT OR Apache-2.0), https://github.com/RustAudio/rodio: Bevy's
+# own sound library, the same version Bevy uses. For the room's echo
+# (`room_sound.rs`): converting sounds to the sound card's rate and asking
+# the sound card its rate.
+[dependencies.rodio]
+version = "0.22.2"
+default-features = false
+features = ["playback"]
+
 # Android only (see docs/ANDROID.md): BLAKE3 hashing (CC0 OR Apache-2.0,
 # used inside Bevy) without its C code, and Bevy's native Android start-up.
 [target.'cfg(target_os = "android")'.dependencies]

@@ -88,6 +88,10 @@ pub struct SpawnEffect {
     /// sends particles for the whole level. Without it, an effect that
     /// never ends is stopped after a minute.
     pub endless: bool,
+    /// Leave its `AmbientSound` to someone else: an emitter placed in the
+    /// map, whose loop the scripts part's map sounds play from its place
+    /// with the game's own distance rule (`rc_scripts_plugin::ambient`).
+    pub skip_ambient_sound: bool,
 }
 
 impl Default for SpawnEffect {
@@ -105,6 +109,7 @@ impl Default for SpawnEffect {
             vanish_with_carrier: false,
             axes: None,
             endless: false,
+            skip_ambient_sound: false,
         }
     }
 }
@@ -703,7 +708,8 @@ fn spawn(
         // Its ambient sound loops for as long as it is there (the actor's
         // `AmbientSound`), at the same loudness rule.
         let mut ambient = None;
-        if let (Some(s), Some(au)) = (
+        if let (false, Some(s), Some(au)) = (
+            a.skip_ambient_sound,
             loaded.as_ref().and_then(|l| l.def.ambient_sound.clone()),
             audio.as_deref_mut(),
         ) {

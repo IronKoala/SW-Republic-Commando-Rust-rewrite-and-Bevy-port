@@ -97,6 +97,12 @@ pub struct Bsp {
     pub surfs: Vec<Surf>,
     pub verts: Vec<Vert>,
     pub num_shared_sides: i32,
+    /// Each zone's actor, by zone number: the export (index from 0) of
+    /// its `ZoneInfo` (or `SkyZoneInfo`), `None` for a zone with no actor
+    /// of its own (UE2 then uses the `LevelInfo`). Read from the model's
+    /// zone table (`NumZones`, then per zone: `ZoneActor`, two 64-bit zone
+    /// masks, `LastRenderTime`). Empty if the table couldn't be read.
+    pub zone_actors: Vec<Option<usize>>,
     /// Byte position (inside the object) where the vertex pool ended.
     pub read_end: usize,
     pub object_size: usize,
@@ -236,6 +242,7 @@ pub fn read_model(pkg: &Package, data: &[u8], export: &Export) -> Result<Bsp> {
     }
     let read_end = r.pos();
     let num_shared_sides = r.i32()?;
+    let zone_actors = read_zone_actors(&mut r, pkg).unwrap_or_default();
 
     Ok(Bsp {
         vectors,
@@ -244,9 +251,35 @@ pub fn read_model(pkg: &Package, data: &[u8], export: &Export) -> Result<Bsp> {
         surfs,
         verts,
         num_shared_sides,
+        zone_actors,
         read_end,
         object_size: bytes.len(),
     })
+}
+
+/// The zone table after the vertices: `NumZones` (at most 64, UE2's
+/// `FBspNode::MAX_ZONES`), then per zone the zone's actor (an object
+/// reference), its connectivity and visibility masks (8 bytes each) and a
+/// float (`LastRenderTime`). Checked on geo_01a (5 zones), geo_03d (15)
+/// and ras_02a (9): every actor read is a `ZoneInfo`/`SkyZoneInfo` export
+/// or none. `None` if anything doesn't fit.
+fn read_zone_actors(r: &mut Reader, pkg: &Package) -> Option<Vec<Option<usize>>> {
+    let n = r.i32().ok()?;
+    if !(0..=64).contains(&n) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        let actor = r.compact_index().ok()?;
+        r.bytes(16).ok()?;
+        r.f32().ok()?;
+        out.push(match actor {
+            0 => None,
+            a if a > 0 && (a as usize) <= pkg.exports.len() => Some(a as usize - 1),
+            _ => return None,
+        });
+    }
+    Some(out)
 }
 
 fn get<T>(v: &[T], i: i32) -> Option<&T> {
