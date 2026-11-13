@@ -158,6 +158,20 @@ copy of the game.
   commandos' DC-17m), as the level's other troopers do. Settings:
   `data/enemies/clone_trooper*.toml`.
 
+- **Droid dispensers make droids (tested in the cloud sandbox by numbers
+  and pictures, not yet on Windows or in a full level).** The battle droid
+  and super battle droid dispensers (26 in 14 maps) now work like the
+  original's script: an event drops or pushes the machine in (its intro
+  animation moves it, as in the game), it warms up, goes online and makes
+  droids one slot at a time; each droid rides out folded, is let go when
+  the slot's animation says, unfolds and fights. Hits show its damage
+  looks and effects, and at zero health it explodes, takes the droid on
+  its slot with it and sends the map's event. Machines dropping in raise
+  their landing dust and crush whoever they land on, they are solid, and
+  the ones that arrive on transports (ras_04a, ras_04b) ride them in.
+  Droideka dispensers make nothing yet. Check: `rc_dispenser_check` (every map, no window),
+  `rc_dispenser_view MAP N` (one dispenser in a window, with pictures).
+
 - **The squad takes cover (tested in the cloud sandbox by numbers, not yet
   on Windows or with eyes).** In a fight, squad mates run to the map's
   cover points (the same ones the droids use), crouch behind them between
@@ -462,7 +476,8 @@ copy of the game.
   Windows).** `rc_game` is the one program the whole game is built into. It
   opens on a main menu in the visor's amber, lists the campaigns and missions
   with the names from the game's own files (`Extreme Prejudice`, `Into The
-  Hive`, ...), shows a loading screen with the mission text, and drops you
+  Hive`, ...), shows the original's loading screen (picture, mission name
+  and text; START once a briefing level has loaded), and drops you
   into the level with an on-screen display (shield, health, crosshair, ammo,
   squad, messages). Escape pauses; the pause menu resumes, opens options or
   quits to the main menu. It plays the game's own music by the
@@ -521,8 +536,10 @@ copy of the game.
   newer (`rustup update`).
 
   **The other menus and the on-screen display are still placeholders.**
-  The loading screen and most of the HUD are our own
-  amber stand-ins, and the amber main menu comes back if the install's menu
+  Most of the HUD is our own amber stand-ins. **The loading screens are
+  now the original's** (`CTLoading` and `CTLoadingInfo`, chosen per map from
+  `LevelLoadingInfo.int` as the original does; tested in the cloud sandbox,
+  not yet on Windows; see `docs/ORIGINAL_MENUS.md`). The amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on

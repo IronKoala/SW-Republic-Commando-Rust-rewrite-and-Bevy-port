@@ -71,6 +71,11 @@ pub enum Page {
     /// placeholder.
     Extras,
     Credits,
+    /// The original briefing loading screen once its level has loaded
+    /// (`loading_screen.rs`): play is paused until START. Only shown when
+    /// the original screen can be drawn; back does nothing, as in the
+    /// original.
+    LoadingDone,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -202,12 +207,17 @@ impl Plugin for MenuPlugin {
                 OnEnter(Play::Paused),
                 |mut m: ResMut<Menu>,
                  d: Res<crate::debriefing::Debriefing>,
-                 h: Res<crate::hints::Hints>| {
-                    // A level's debriefing and hint screens pause play too.
+                 h: Res<crate::hints::Hints>,
+                 l: Res<crate::loading_screen::LoadingDone>| {
+                    // A level's debriefing and hint screens pause play too,
+                    // and so does a briefing loading screen once its level
+                    // is in.
                     m.reset(if d.showing.is_some() {
                         Page::Debriefing
                     } else if h.showing.is_some() {
                         Page::Hint
+                    } else if l.waiting {
+                        Page::LoadingDone
                     } else {
                         Page::Paused
                     })
@@ -220,7 +230,10 @@ impl Plugin for MenuPlugin {
                     .in_set(GameSet::Hud)
                     .in_set(MenuSystems),
             )
-            .add_systems(OnEnter(GameState::Loading), spawn_loading_screen)
+            .add_systems(
+                OnEnter(GameState::Loading),
+                spawn_loading_screen.in_set(PlaceholderLoadingScreen),
+            )
             .add_systems(
                 Update,
                 loading
@@ -229,6 +242,11 @@ impl Plugin for MenuPlugin {
             );
     }
 }
+
+/// Spawns the placeholder loading screen (when the original one can't be
+/// drawn, `loading_screen.rs`).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PlaceholderLoadingScreen;
 
 /// Whether the game folder was found at start-up.
 #[derive(Resource)]
@@ -364,6 +382,12 @@ pub fn items(
                 it("Continue without hints", Cmd::Hint(false)),
             ],
         ),
+        // Not normally reached: play only waits for START when the
+        // original screen shows.
+        Page::LoadingDone => (
+            "LOADED (PLACEHOLDER)".into(),
+            vec![it("Start", Cmd::Resume)],
+        ),
         Page::Paused => (
             "PAUSED".into(),
             vec![
@@ -469,9 +493,9 @@ fn navigate(
         menu.dirty = true;
     }
     let back = actions.just_pressed(Action::MenuBack);
-    let cmd = if back && matches!(menu.page, Page::Debriefing | Page::Hint) {
-        // Only CONTINUE leaves the debriefing, and only its two buttons
-        // a hint screen, as in the original.
+    let cmd = if back && matches!(menu.page, Page::Debriefing | Page::Hint | Page::LoadingDone) {
+        // Only CONTINUE leaves the debriefing, only its two buttons a hint
+        // screen, and only START a loaded briefing, as in the original.
         None
     } else if back {
         Some(Cmd::Back)
@@ -771,6 +795,7 @@ fn spawn_loading_screen(
     levels: Res<LevelList>,
     theme: Res<Theme>,
     log: Res<GameLog>,
+    original: Res<OriginalMenus>,
 ) {
     let map = current.map.clone().unwrap_or_default();
     let (title, text) = match levels.find(&map) {
@@ -778,6 +803,11 @@ fn spawn_loading_screen(
         None => (map.to_uppercase(), String::new()),
     };
     log.line(format!("loading: {map} ({title})"));
+    if original.loading_page.is_some() {
+        // The original loading screen shows instead (`loading_screen.rs`).
+        commands.insert_resource(LoadingFrames(0));
+        return;
+    }
     commands.insert_resource(LoadingFrames(0));
     commands
         .spawn((
