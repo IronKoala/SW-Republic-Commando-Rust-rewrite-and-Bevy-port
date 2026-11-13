@@ -49,6 +49,9 @@
 # widgets down (negative: up) by a fraction of the screen, and
 # hidden_rows = [...] hides whole rows (by the row's button).
 #
+# nothing_to_choose = true lets a page with no buttons at all be used
+# (the plain loading screen).
+#
 # keep_together = true keeps a page as one block in the middle of a wide
 # screen (only its full-screen background widens) instead of spreading it
 # out (rc_menus/src/fit.rs).
@@ -393,6 +396,27 @@ back = "unavailable"
 
 [pages.debriefing.buttons]
 OnAButton = "act:continue"
+
+# The loading screens (checked 2026-11-12 with the install). Which one a
+# map gets, and its picture, title and text, come from the install's
+# LevelLoadingInfo.int and System.ini, chosen as the original's engine
+# chooses (rc_game/src/loading_screen.rs, rc_menus/src/loading.rs).
+# "loading" is the plain screen (black, the mission name, the bar); a map
+# whose row names this page's class gets it.
+[pages.loading]
+class = "XInterfaceCTMenus.CTLoading"
+back = "unavailable"
+nothing_to_choose = true
+
+# The briefing screen (picture, mission name and text). When its level
+# has loaded the original pauses and shows START (its OnAButton), which
+# un-pauses and closes it; back does nothing, as in the original.
+[pages.loading_info]
+class = "XInterfaceCTMenus.CTLoadingInfo"
+back = "unavailable"
+
+[pages.loading_info.buttons]
+OnAButton = "resume"
 
 # The profile pages (checked 2026-11-11 with the install). PROFILES on the
 # main menu opens the list (the original's ProfilesSelected); with no

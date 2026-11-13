@@ -184,6 +184,26 @@ pub enum Kind {
     Sprite(Sprite),
     Text(Text),
     Button(Button),
+    ProgressBar(ProgressBar),
+}
+
+/// A bar that fills from left to right (`MenuProgressBar` in the game's
+/// `XInterface.u`), such as the loading screens' `LoadingBar`. How it is
+/// drawn is the original's native code, read from `XInterface.dll`
+/// (`AMenuBase::DrawMenuProgressBar`); see `quads::progress_bar_quads`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProgressBar {
+    /// The empty bar (`BarBack`): its picture, colour and top-left corner.
+    pub back: Sprite,
+    /// The filled part (`BarTop`).
+    pub top: Sprite,
+    /// Size of the whole bar, as fractions of the menu's width and height.
+    pub width: f32,
+    pub height: f32,
+    pub low: f32,
+    pub high: f32,
+    /// How full it is, between `low` and `high` (not clamped here).
+    pub value: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -277,6 +297,7 @@ const DRAWN: &[&str] = &[
     "MenuButtonSprite",
     "MenuButtonEnum",
     "MenuEditBox",
+    "MenuProgressBar",
 ];
 /// Kinds that make up scrolling lists (`lists.rs`).
 const LISTS: &[&str] = &[
@@ -747,6 +768,18 @@ fn to_widget(name: String, v: &V) -> Option<Widget> {
                 b.edit = Some(crate::edit::EditBox::from_value(v));
             }
             Kind::Button(b)
+        }
+        "MenuProgressBar" => {
+            let e = empty();
+            Kind::ProgressBar(ProgressBar {
+                back: sprite(v.get("BarBack").unwrap_or(&e)),
+                top: sprite(v.get("BarTop").unwrap_or(&e)),
+                width: v.float("BarWidth"),
+                height: v.float("BarHeight"),
+                low: v.float("Low"),
+                high: v.float("High"),
+                value: v.float("Value"),
+            })
         }
         // A picture that works as a button: `Blurred` and `Focused` are
         // pictures, drawn as the button's background.

@@ -102,7 +102,7 @@ pub fn disable_row(layout: &mut MenuLayout, name: &str) {
                 t.color[1] = DISABLED_GREY;
                 t.color[2] = DISABLED_GREY;
             }
-            Kind::Sprite(_) => {}
+            Kind::Sprite(_) | Kind::ProgressBar(_) => {}
         }
     }
 }
@@ -230,7 +230,7 @@ pub fn set_widget_text(layout: &mut MenuLayout, name: &str, text: &str) -> bool 
             b.blurred.text = text.to_string();
             b.focused.text = text.to_string();
         }
-        Kind::Sprite(_) => return false,
+        Kind::Sprite(_) | Kind::ProgressBar(_) => return false,
     }
     true
 }
@@ -244,6 +244,10 @@ pub fn move_widget(layout: &mut MenuLayout, name: &str, by: f32) -> bool {
     match &mut w.kind {
         Kind::Text(t) => t.pos[1] += by,
         Kind::Sprite(s) => s.pos[1] += by,
+        Kind::ProgressBar(p) => {
+            p.back.pos[1] += by;
+            p.top.pos[1] += by;
+        }
         Kind::Button(b) => {
             for p in [
                 &mut b.blurred.pos,

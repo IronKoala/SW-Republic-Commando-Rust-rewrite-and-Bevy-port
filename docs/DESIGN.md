@@ -2846,6 +2846,24 @@ Loading blocks the game while it runs (about 2 s for geo_01a in a debug
 build in the cloud). Moving it to a background thread is future work; the
 loading screen stays up meanwhile.
 
+**The loading screens (`rc_game/src/loading_screen.rs`).** On entering
+`Loading`, `LoadingScreenPlugin` picks the original's screen for the map
+(`rc_menus::loading::choose`, the original's `LoadMap` rule over
+`LevelLoadingInfo.int` and `System.ini`), resets that page's layout and fills
+it in (`rc_menus::loading::setup`), and sets
+`OriginalMenus::loading_page`. While that is set, the original page is
+drawn instead of the placeholder loading screen (`menu.rs`, system set
+`PlaceholderLoadingScreen`, which steps aside). The bar's value is kept
+by the original engine's rules and `LoadMap`'s stages
+(`rc_menus::loading::Progress`): the map's own `LoadingGate` part is the
+first stage, the other parts count through the second, and the bar is
+full when all are done. On leaving `Loading`, a `CTLoadingInfo` page
+switches to its finished look (`rc_menus::loading::finish`) and
+`LoadingDone::waiting` is set; when play starts it is paused at once with
+`Page::LoadingDone`, which maps to the same original page, and its START
+calls `resume`. Leaving `Play::Paused` clears the wait. A `CTLoading` page
+just closes.
+
 **Checking without looking.** `rc_game --script` presses the same actions a
 player would and checks each step: menu pages, loading, the player moving
 430 units in a second of walking, nothing moving while paused, the level
