@@ -32,15 +32,20 @@
 //! the curve is in `ALAudio.dll` and was not read), the random numbers
 //! (a fixed sequence, so logs repeat), and the loudness of the room sounds
 //! (the scripts' `[sound] volume`, as the map's other looping sounds).
-//! The visor's own echo (`VisionMode.EAXEffect`, which replaces the
-//! room's) is not done.
+//!
+//! **The visor's echo** (`FListener::Update`): while the view is in a
+//! vision mode (`rc_game_core::VisionModeNow`) whose `EAXEffect` is set,
+//! that echo replaces the room's. That is done here, but none of the 17
+//! vision modes in the game's `FrameFX` package sets one (read at load:
+//! `ZoneAudio::vision_echoes`), so in the game as shipped the visor never
+//! changes the echo. A mod that gives a mode an echo gets it.
 
 use bevy::audio::{AudioSink, AudioSinkPlayback, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 use rc_audio::room::EaxReverb;
 use rc_combat::{AudioParams, GameSound};
 use rc_game_core::units::{to_bevy, to_unreal};
-use rc_game_core::{GameLog, GamePaths, PlayerCamera, RoomEcho, SoundAt};
+use rc_game_core::{GameLog, GamePaths, PlayerCamera, RoomEcho, SoundAt, VisionModeNow};
 use rc_level::scripts::ScriptObject;
 use rc_level::zone_audio::{AudioEnv, Reverb};
 use rc_level_plugin::LevelZoneAudio;
@@ -139,6 +144,8 @@ pub fn eax(r: &Reverb) -> EaxReverb {
         hf_reference: r.hf_reference,
         lf_reference: r.lf_reference,
         room_rolloff_factor: r.room_rolloff_factor,
+        echo_time: r.echo_time,
+        echo_depth: r.echo_depth,
         flags: r.flags,
     }
 }
@@ -289,6 +296,7 @@ pub(crate) fn update(
     state: Option<ResMut<ZoneSounds>>,
     script: Option<Res<LevelScript>>,
     mut echo: ResMut<RoomEcho>,
+    vision: Res<VisionModeNow>,
     ears: Query<&GlobalTransform, With<PlayerCamera>>,
     playing: Query<(), With<ZoneSound>>,
     log: Res<GameLog>,
@@ -314,13 +322,6 @@ pub(crate) fn update(
             "{PART}: t={now:.2} room sound: camera in zone {zone} ({zone_name}): {}",
             new.map_or("no audio class (no echo, no room sounds)".into(), describe)
         ));
-        // The echo.
-        let reverb = new.and_then(|e| e.reverb.as_ref());
-        let values = reverb.filter(|r| r.is_heard()).map(eax);
-        let name = reverb.map_or("none".to_string(), |r| r.name.clone());
-        if echo.values != values || echo.name != name {
-            *echo = RoomEcho { values, name };
-        }
         // The room loop.
         let new_loop = new
             .and_then(|e| e.pre_ambient.as_ref())
@@ -385,6 +386,31 @@ pub(crate) fn update(
         }
         state.current = Some(env);
         state.zone = Some(zone);
+    }
+    // The echo: the vision mode's own when it sets one, else the room's.
+    let mode_echo = vision
+        .0
+        .as_ref()
+        .and_then(|m| {
+            zones
+                .0
+                .vision_echoes
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(m))
+        })
+        .and_then(|(_, r)| r.as_ref());
+    let reverb = mode_echo.or(env.and_then(|e| zones.0.envs[e].reverb.as_ref()));
+    let values = reverb.filter(|r| r.is_heard()).map(eax);
+    let name = reverb.map_or("none".to_string(), |r| r.name.clone());
+    if echo.values != values || echo.name != name {
+        if let Some(r) = mode_echo {
+            log.line(format!(
+                "{PART}: t={now:.2} room sound: vision mode {} sets its own echo {}",
+                vision.0.as_deref().unwrap_or(""),
+                r.name
+            ));
+        }
+        *echo = RoomEcho { values, name };
     }
     // The one-shot.
     let Some(e) = env.map(|e| &zones.0.envs[e]) else {

@@ -381,9 +381,9 @@ pub fn load(
     let mut parts = crate::scripts::tagged_actors(&map.0, &map.1, &level);
     let ambient_sounds =
         crate::ambient::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
-    let zone_audio = crate::zone_audio::read(&mut looks, &map.0, &map.1, &level, &bsp, &mut |n| {
-        pkgs.get(n)
-    });
+    let mut zone_audio =
+        crate::zone_audio::read(&mut looks, &map.0, &map.1, &level, &bsp, &mut |n| pkgs.get(n));
+    crate::zone_audio::read_vision_echoes(&mut zone_audio, &mut looks, &mut |n| pkgs.get(n));
     let breakables =
         crate::breakables::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
     for b in &breakables {

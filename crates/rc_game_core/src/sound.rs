@@ -32,6 +32,13 @@ impl SoundAt {
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct Dry;
 
+/// The vision mode the player's view is in now, as the game's object path
+/// (`FrameFX.VisionModes.VisionNight`), `None` for the plain view. Set by
+/// the visor part. The game uses a mode's own echo (`EAXEffect`) in place
+/// of the room's while the view is in it.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct VisionModeNow(pub Option<String>);
+
 /// The echo of the room the player is in now, as the game would hand it
 /// to EAX (`rc_audio::room`). Set by the level's zone sounds, played by
 /// the game program. `None`: no echo (outside a level, or a room whose

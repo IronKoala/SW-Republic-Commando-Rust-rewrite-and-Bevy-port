@@ -2250,8 +2250,13 @@ disassembly on the PC/cloud scratch, never committed):
   (cos a, sin a, 0) × r, a = random × 2π, r = min + random × (max − min).
 - `SetAudioEnvReverb` (ALAudio): the `I3DL2Listener` values go 1:1 into
   EAX 3.0's listener properties, sent only when they change; no `Effect`
-  means all levels at −10000 mB (silent). `VisionMode.EAXEffect`, when set,
-  replaces the room's echo (not done).
+  means all levels at −10000 mB (silent). `VisionMode.EAXEffect`, when set
+  on the view's current vision mode, replaces the room's echo
+  (`FListener::Update`). None of the 17 vision modes in `FrameFX.utx`
+  sets it, and no map or script package names it, so in the shipped game the
+  visor never changes the echo. The port follows the rule anyway
+  (`ZoneAudio::vision_echoes`, `rc_game_core::VisionModeNow` set by the
+  visor), so a mod that gives a mode an echo hears it.
 - Each sound's EAX `Room` send is 0 mB (full) unless the sound's flags
   have `0x8` or `0x10`; script sounds never do. The echo does not fall
   with distance unless `RoomRolloffFactor` is above 0 (4 effects of 123).
@@ -2270,8 +2275,11 @@ Data: 81 of the 123 effect uses leave `Room` at the engine default of
   processor following the published meaning of each value (pre-delay,
   two diffusers for the reflections, a 4-line feedback delay network for
   the tail with low/high decay shelves, `bDecayHFLimit` from air
-  absorption). The echo effect (`EchoTime/Depth`), reflection/tail panning
-  and `RoomRolloffFactor` are not done.
+  absorption), and the echo effect: one more delay line, `EchoTime` long,
+  fed by the tail and feeding itself with repeats that fade over the
+  decay time, mixed in by `EchoDepth` (EAX only says the echo repeats
+  `EchoTime` apart and grows with `EchoDepth`). Reflection/tail panning
+  (all 0 in the data) and `RoomRolloffFactor` (4 effects) are not done.
 - `rc_game/src/room_sound.rs` wires it into Bevy: each new
   `AudioPlayer<AudioSource>` (not music, not `rc_game_core::Dry` menu
   sounds) becomes an `AudioPlayer<RoomSound>` that converts the sound to

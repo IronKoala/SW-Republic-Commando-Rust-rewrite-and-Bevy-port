@@ -111,6 +111,7 @@ impl Plugin for ScriptsPlugin {
             .add_message::<ChangeLevel>()
             .add_message::<zone_sounds::ZoneAudioChange>()
             .init_resource::<rc_game_core::RoomEcho>()
+            .init_resource::<rc_game_core::VisionModeNow>()
             .add_message::<rc_effects_plugin::SpawnEffect>()
             .add_message::<rc_effects_plugin::PreloadEffect>()
             .add_message::<rc_effects_plugin::EffectEnded>()

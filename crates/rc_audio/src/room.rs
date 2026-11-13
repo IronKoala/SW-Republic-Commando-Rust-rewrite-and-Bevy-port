@@ -16,8 +16,13 @@
 //! one-pole filters, a feedback delay network). It will not sound exactly
 //! like any one sound card.
 //!
-//! Not done: the echo effect (`EchoTime`/`EchoDepth`), the modulation
-//! (every room has `ModulationDepth` 0), panning of the reflections and
+//! The echo effect (`EchoTime`/`EchoDepth`): EAX describes it as a
+//! repeating echo in the tail, `EchoTime` apart, more noticeable the larger
+//! `EchoDepth` is. Ours is one more delay line, `EchoTime` long, fed by the
+//! tail and feeding itself; its repeats die away over the room's decay
+//! time, and `EchoDepth` sets how much of the tail goes through it.
+//!
+//! Not done: the modulation (every room has `ModulationDepth` 0), panning of the reflections and
 //! tail (every room has 0, 0, 0), and the room's air absorption
 //! (`AirAbsorptionHF`, which in EAX dulls far sounds), except as the limit
 //! `bDecayHFLimit` puts on the high-note decay.
@@ -51,6 +56,10 @@ pub struct EaxReverb {
     pub hf_reference: f32,
     pub lf_reference: f32,
     pub room_rolloff_factor: f32,
+    /// Seconds between the echo effect's repeats (EAX: 0.075 to 0.25).
+    pub echo_time: f32,
+    /// How strong the echo effect is, 0 to 1.
+    pub echo_depth: f32,
     pub flags: u32,
 }
 
@@ -181,6 +190,10 @@ const GENERIC_SIZE: f32 = 7.5;
 /// reverb delay.
 const MAX_PRE_DELAY: f32 = 0.4;
 
+/// EAX 3.0's range for `EchoTime`, seconds.
+const MIN_ECHO_TIME: f32 = 0.075;
+const MAX_ECHO_TIME: f32 = 0.25;
+
 /// The echo processor: one input (the send), two outputs.
 #[derive(Debug, Clone)]
 pub struct RoomReverb {
@@ -198,6 +211,10 @@ pub struct RoomReverb {
     lengths: [usize; 4],
     feedback: [f32; 4],
     damping: [Shelves; 4],
+    echo: Delay,
+    echo_length: usize,
+    echo_feedback: f32,
+    echo_depth: f32,
 }
 
 impl RoomReverb {
@@ -223,6 +240,10 @@ impl RoomReverb {
             lengths: [1; 4],
             feedback: [0.0; 4],
             damping: Default::default(),
+            echo: Delay::new((MAX_ECHO_TIME * rate) as usize + 2),
+            echo_length: 1,
+            echo_feedback: 0.0,
+            echo_depth: 0.0,
         }
     }
 
@@ -270,6 +291,12 @@ impl RoomReverb {
             let limit = -3.0 / (per_metre * SPEED_OF_SOUND) / decay;
             hf_ratio = hf_ratio.min(limit);
         }
+        // The echo effect: repeats `EchoTime` apart that lose 60 dB over
+        // the decay time, as the tail does.
+        let echo_time = p.echo_time.clamp(MIN_ECHO_TIME, MAX_ECHO_TIME);
+        self.echo_length = ((echo_time * rate) as usize).clamp(1, self.echo.buf.len() - 1);
+        self.echo_feedback = 10f32.powf(-3.0 * echo_time / decay);
+        self.echo_depth = p.echo_depth.clamp(0.0, 1.0);
         let lf_ratio = p.decay_lf_ratio.max(0.01);
         #[allow(clippy::needless_range_loop)] // four arrays in step
         for i in 0..4 {
@@ -312,9 +339,20 @@ impl RoomReverb {
             let damped = self.damping[i].run(fed);
             self.lines[i].push(damped + late_input);
         }
-        let left = outs[0] - outs[2];
-        let right = outs[1] - outs[3];
-        [reflections + left * 0.5, reflections + right * 0.5]
+        let mut left = (outs[0] - outs[2]) * 0.5;
+        let mut right = (outs[1] - outs[3]) * 0.5;
+        if self.echo_depth > 0.0 {
+            // The tail into the echo line, which feeds itself; its output,
+            // scaled to keep the tail's loudness, takes `EchoDepth` of it.
+            let repeat = self.echo.tap(self.echo_length);
+            let tail = (left + right) * 0.5;
+            self.echo.push(tail + repeat * self.echo_feedback);
+            let wet = repeat * (1.0 - self.echo_feedback * self.echo_feedback).sqrt();
+            let d = self.echo_depth;
+            left = left * (1.0 - d) + wet * d;
+            right = right * (1.0 - d) + wet * d;
+        }
+        [reflections + left, reflections + right]
     }
 }
 
@@ -403,6 +441,8 @@ mod tests {
             hf_reference: 5168.6,
             lf_reference: 139.5,
             room_rolloff_factor: 0.0,
+            echo_time: 0.25,
+            echo_depth: 0.0,
             flags: 127,
         }
     }
@@ -462,6 +502,51 @@ mod tests {
         let at = |t: f32| b[(t * 100.0) as usize];
         let ratio = at(0.2 + p.decay_time) / at(0.2);
         assert!(ratio > 1e-7 && ratio < 1e-5, "ratio {ratio:e}");
+    }
+
+    /// The tail's output, left channel, after one click.
+    fn tail(p: &EaxReverb, n: usize) -> Vec<f32> {
+        let mut r = RoomReverb::new(44100);
+        r.set(Some(p));
+        (0..n)
+            .map(|i| r.run(if i == 0 { 1.0 } else { 0.0 })[0])
+            .collect()
+    }
+
+    /// How alike the tail is with itself `lag` samples later (1 = the same).
+    fn self_likeness(x: &[f32], lag: usize) -> f32 {
+        let (a, b) = (&x[..x.len() - lag], &x[lag..]);
+        let dot: f32 = a.iter().zip(b).map(|(a, b)| a * b).sum();
+        let na: f32 = a.iter().map(|a| a * a).sum::<f32>().sqrt();
+        let nb: f32 = b.iter().map(|b| b * b).sum::<f32>().sqrt();
+        dot / (na * nb)
+    }
+
+    #[test]
+    fn echo_depth_repeats_the_tail_echo_time_apart() {
+        // geo_03a's EFFECT_CITY_MUSEUM0: echo 0.13 s, depth 0.17. Turned
+        // to full depth here so the repeats stand out.
+        let mut p = small_room();
+        p.reflections = -10000;
+        p.echo_time = 0.13;
+        p.echo_depth = 0.0;
+        let plain = tail(&p, 44100);
+        p.echo_depth = 1.0;
+        let echoed = tail(&p, 44100);
+        let lag = (0.13 * 44100.0) as usize;
+        let skip = 4410; // after the first 0.1 s
+        let before = self_likeness(&plain[skip..], lag);
+        let after = self_likeness(&echoed[skip..], lag);
+        let off = self_likeness(&echoed[skip..], lag * 7 / 10);
+        // Measured 0.00 plain, 0.15 echoed, 0.00 at another lag.
+        assert!(
+            after > before + 0.1 && after > off + 0.1,
+            "plain {before:.2}, echoed {after:.2}, other lag {off:.2}"
+        );
+        // Still about as loud: within 6 dB of the plain tail.
+        let energy = |x: &[f32]| x.iter().map(|v| v * v).sum::<f32>();
+        let ratio = energy(&echoed) / energy(&plain);
+        assert!(ratio > 0.25 && ratio < 4.0, "{ratio}");
     }
 
     #[test]

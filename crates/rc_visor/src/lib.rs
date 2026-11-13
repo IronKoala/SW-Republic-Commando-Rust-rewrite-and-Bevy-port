@@ -157,6 +157,7 @@ impl Plugin for VisorPlugin {
             .add_plugins(night_vision::NightVisionPlugin)
             .init_resource::<VisorSettings>()
             .init_resource::<VisorState>()
+            .init_resource::<rc_game_core::VisionModeNow>()
             .init_resource::<VisorReadout>()
             .init_resource::<GlowMaterials>()
             .add_systems(OnEnter(GameState::InGame), (load_look, start_mode).chain())
@@ -596,7 +597,17 @@ fn update_night_vision(
     mut readout: ResMut<VisorReadout>,
     mut since: Local<f32>,
     log: Option<Res<GameLog>>,
+    mut vision: ResMut<rc_game_core::VisionModeNow>,
 ) {
+    // The game's vision mode for low light, for its echo (the sound part
+    // reads it).
+    let mode_now = look
+        .as_ref()
+        .filter(|_| state.mode == VisorMode::LowLight)
+        .map(|l| l.file.low_light.mode.clone());
+    if vision.0 != mode_now {
+        vision.0 = mode_now;
+    }
     let wanted = look
         .as_ref()
         .filter(|l| l.file.low_light.picture && state.mode == VisorMode::LowLight);

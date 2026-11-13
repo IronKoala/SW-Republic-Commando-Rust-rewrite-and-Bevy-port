@@ -77,7 +77,7 @@ pub use log::GameLog;
 pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
-pub use sound::{Dry, RoomEcho, SoundAt, Voice};
+pub use sound::{Dry, RoomEcho, SoundAt, VisionModeNow, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,

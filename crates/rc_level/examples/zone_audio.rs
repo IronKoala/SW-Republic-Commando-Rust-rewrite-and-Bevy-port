@@ -65,6 +65,21 @@ fn main() {
                 }
             }
         }
+        let set: Vec<_> = z
+            .vision_echoes
+            .iter()
+            .filter_map(|(m, r)| r.as_ref().map(|r| format!("{m} = {}", r.name)))
+            .collect();
+        println!(
+            "  vision modes: {}, with their own echo: {}{}",
+            z.vision_echoes.len(),
+            set.len(),
+            if set.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", set.join(", "))
+            }
+        );
         for p in &z.problems {
             println!("  PROBLEM {p}");
         }

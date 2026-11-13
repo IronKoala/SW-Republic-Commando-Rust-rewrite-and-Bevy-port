@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-13: Room echo: the echo effect and the visor's echo (rc_audio, rc_level, rc_visor, rc_scripts_plugin, rc_game_core)
+
+- **Changed:** `rc_audio::room` plays EAX's echo effect (`EchoTime`, `EchoDepth`, now in `EaxReverb`). `rc_level::zone_audio::read_vision_echoes` reads every vision mode in `FrameFX` and the echo it sets (`ZoneAudio::vision_echoes`); the `zone_audio` example prints them. New `rc_game_core::VisionModeNow`, set by the visor (low light = `FrameFX.VisionModes.VisionNight`); the zone sounds use a mode's echo in place of the room's when it has one.
+- **Why:** User: the two "not done yet" parts of the room-sound PR, "so do it".
+- **Where it comes from:** the rule is the engine's (`FListener::Update` in `Engine.dll`, disassembled locally, not committed: if the view's vision mode has `EAXEffect`, it replaces the zone's echo). The data: `FrameFX.utx` has 17 vision modes and none sets `EAXEffect`; no map or `.u` package names it, nor the 13 texture packages checked (the vision modes the game's code names are all in `FrameFX`). Echo values come from each room's effect (for example geo_03a's `EFFECT_CITY_MUSEUM0`: 0.13 s, depth 0.17).
+- **Ours:** how the echo effect sounds (EAX only defines what the two values mean; the sound card made the sound).
+- **Tested how:** `cargo test -p rc_audio -p rc_level -p rc_visor -p rc_scripts_plugin -p rc_game_core --lib`, `cargo test -p rc_game --bin rc_game`; the example on geo_01a and geo_03d.
+- **Result:** All pass. New test: with the echo effect the tail repeats itself 0.13 s apart (likeness 0.15 against 0.00 without it and 0.00 at another spacing) and stays within 6 dB as loud. The example: "vision modes: 17, with their own echo: 0".
+- **Still broken / not tested:** Not listened to. Because no vision mode sets an echo, the visor part changes nothing you can hear in the shipped game.
+
 ## 2026-11-12: Room sound from each zone's audio class: echo, room loops, one-shots, geo_03d's swap (rc_level, rc_audio, rc_level_plugin, rc_scripts_plugin, rc_combat, rc_game_core, rc_game)
 
 - **Changed:** `rc_level::bsp` reads the zone table (each zone's actor); new `rc_level::zone_audio` reads each zone's `ZoneAudioClass` and the classes the map's `ACTION_ChangeZoneAudio` steps name (echo values, `PreAmbient`, `RandomOneShot` and its timing and distances), with a zone lookup; new example `zone_audio`. New `rc_level_plugin::LevelZoneAudio`. New `rc_audio::room` (our echo processor and the shared send). New `rc_scripts_plugin::zone_sounds`: follows the camera from zone to zone, sets the new `rc_game_core::RoomEcho`, plays the room loop with 2-second fades and the one-shots, and carries out `ACTION_ChangeZoneAudio`. New `rc_game/src/room_sound.rs`: every sound except the music and menu clicks (new `rc_game_core::Dry`) is wrapped to feed the echo, and one endless sound plays it; looping sounds loop inside the wrapper. `rc_combat::GameSound::looping` (the `Sound`'s `Looping` flag). `rc_game` now names `rodio` (Bevy's own sound library, same version) directly.

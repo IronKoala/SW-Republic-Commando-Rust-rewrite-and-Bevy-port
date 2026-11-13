@@ -167,6 +167,13 @@ pub struct ZoneAudio {
     pub envs: Vec<AudioEnv>,
     /// Audio classes named but not read, with why.
     pub problems: Vec<String>,
+    /// The echo each vision mode in `FrameFX` sets
+    /// (`VisionMode.EAXEffect`), by its path
+    /// (`FrameFX.VisionModes.VisionNight`); `None` for a mode that sets
+    /// none. The engine uses a mode's echo in place of the room's while
+    /// the view is in that mode (`FListener::Update`). In the game's files
+    /// no mode sets one.
+    pub vision_echoes: std::collections::BTreeMap<String, Option<Reverb>>,
     nodes: Vec<Node>,
 }
 
@@ -280,6 +287,57 @@ pub fn read(
         }
     }
     out
+}
+
+/// Every vision mode in the `FrameFX` package and the echo it sets
+/// (`EAXEffect`: its own value, else its class's default). Problems go to
+/// `out.problems`.
+pub fn read_vision_echoes(
+    out: &mut ZoneAudio,
+    looks: &mut ClassLooks,
+    open: &mut dyn FnMut(&str) -> Option<Loaded>,
+) {
+    let Some(fx) = open("FrameFX") else {
+        out.problems
+            .push("FrameFX: package not found (vision modes' echoes)".into());
+        return;
+    };
+    let (p, d) = (&fx.0, &fx.1);
+    for (i, e) in p.exports.iter().enumerate() {
+        let class_path = object_path(p, e.class_index);
+        let Some(class) = class_path.last() else {
+            continue;
+        };
+        if !class.starts_with("VisionMode") {
+            continue;
+        }
+        let path = object_path(p, i as i32 + 1).join(".");
+        let own = actors::read_actor_properties(p, d, i).unwrap_or_default();
+        let effect = match properties::find(p, &own, "EAXEffect").map(|x| &x.value) {
+            Some(Value::Object(o)) => Some((fx.clone(), *o)),
+            _ => looks
+                .for_class(&class_path[0], class, open)
+                .and_then(|l| {
+                    l.find("EAXEffect", 0)
+                        .map(|(pkg, x)| (pkg.clone(), x.value.clone()))
+                })
+                .and_then(|(pkg, v)| match v {
+                    Value::Object(o) => Some((pkg, o)),
+                    _ => None,
+                }),
+        };
+        let reverb = match effect {
+            Some((pkg, o)) if o != 0 => match read_reverb(looks, &pkg, o, open) {
+                Ok(r) => Some(r),
+                Err(why) => {
+                    out.problems.push(format!("{path}: echo: {why}"));
+                    None
+                }
+            },
+            _ => None,
+        };
+        out.vision_echoes.insert(path, reverb);
+    }
 }
 
 /// Reads audio classes once each.

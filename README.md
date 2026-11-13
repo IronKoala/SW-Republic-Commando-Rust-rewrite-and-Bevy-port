@@ -465,7 +465,9 @@ copy of the game.
   game's timing. geo_03d's script switches two areas to their "broken"
   sound after the explosion, as the original does. The echo itself is our
   own sound processor driven by the game's numbers (the original left the
-  echo to the sound card).
+  echo to the sound card). Rooms with a "repeating echo" setting
+  get it. The visor follows the game's rule for its own echo too, though
+  no vision mode in the game's files sets one.
   Finishing a level now takes you to the next one (tested in the cloud
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the
