@@ -286,6 +286,7 @@ mod tests {
             HashMap::new(),
         ));
         w.insert_resource(LevelScript {
+            shakes: Default::default(),
             director: Director::new(&map(), &[], Settings::default()),
             dispensers: vec![],
             hidden: HashSet::new(),
