@@ -64,6 +64,28 @@ pub struct Light {
     /// `AttachTag`: the tag of the actor it rides on (its base; the
     /// briefing gunship's lights ride the `GunshipAttachMover`).
     pub attach_tag: Option<String>,
+    /// `Tag`: the level event that triggers it.
+    pub tag: Option<String>,
+    /// For a `TriggerLight`: how level events switch it (gameplay.u).
+    pub trigger: Option<TriggerLight>,
+}
+
+/// How gameplay.u's `TriggerLight` switches: its state (`InitialState`,
+/// what a trigger does) and its settings. The class sets none of these
+/// itself (its defaults are 0 and false), so an unset one is 0 or false.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerLight {
+    /// `TriggerTurnsOn`, `TriggerTurnsOff`, `TriggerToggle`,
+    /// `TriggerControl` or `TriggerPound` (empty: no state, triggers do
+    /// nothing).
+    pub state: String,
+    pub initially_on: bool,
+    /// Seconds from off to on (`ChangeTime`); 0 switches at once.
+    pub change_time: f32,
+    /// Stay dark while turning on, then go full on (`bDelayFullOn`).
+    pub delay_full_on: bool,
+    /// `TriggerPound`: how long the flashing lasts (`RemainOnTime`).
+    pub remain_on_time: f32,
 }
 
 /// A zone's flat "ambient" light, added everywhere inside the zone.
@@ -148,6 +170,11 @@ pub fn light_from_properties(pkg: &Package, class: &str, props: &[Property]) -> 
             Some(Value::Bool(true))
         )
     };
+    let name_prop = |name| match properties::find(pkg, props, name).map(|p| &p.value) {
+        Some(Value::Name(n)) => Some(pkg.name(*n as _).to_string())
+            .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("None")),
+        _ => None,
+    };
     Some(Light {
         kind,
         location: location(pkg, props),
@@ -163,11 +190,15 @@ pub fn light_from_properties(pkg: &Package, class: &str, props: &[Property]) -> 
         cone: byte(pkg, props, "LightCone").unwrap_or(DEFAULT_CONE),
         light_type,
         dynamic: bool_prop("bDynamicLight"),
-        attach_tag: match properties::find(pkg, props, "AttachTag").map(|p| &p.value) {
-            Some(Value::Name(n)) => Some(pkg.name(*n as _).to_string())
-                .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("None")),
-            _ => None,
-        },
+        attach_tag: name_prop("AttachTag"),
+        tag: name_prop("Tag"),
+        trigger: lower.eq_ignore_ascii_case("triggerlight").then(|| TriggerLight {
+            state: name_prop("InitialState").unwrap_or_default(),
+            initially_on: bool_prop("bInitiallyOn"),
+            change_time: float(pkg, props, "ChangeTime").unwrap_or(0.0),
+            delay_full_on: bool_prop("bDelayFullOn"),
+            remain_on_time: float(pkg, props, "RemainOnTime").unwrap_or(0.0),
+        }),
     })
 }
 

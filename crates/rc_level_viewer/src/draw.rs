@@ -27,6 +27,22 @@ pub const BACKGROUND: [u8; 3] = [64, 72, 89];
 #[derive(Component, Debug, Clone, Copy)]
 pub struct MoverPart(pub usize);
 
+/// On something that rides another actor by its `AttachTag` (engine.dll's
+/// `UGameEngine::LoadMap` bases it on the first other actor whose `Tag` or
+/// name matches; `ULevel::MoveActor` then moves it rigidly with that
+/// base). Whatever moves the base moves this entity along: the movers part
+/// for a mover base (geo_01briefing's cabin lights, `BlackoutBox` and
+/// effects on the gunship's `GunshipAttachMover`).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct RidesOn {
+    pub tag: String,
+    /// Where the map put it, Unreal units, for something drawn about its
+    /// own origin (a light, an effect). `None` for a part whose triangles
+    /// are drawn where the map placed them (a [`MoverPart`]), which is
+    /// moved by the base's whole move.
+    pub point: Option<[f32; 3]>,
+}
+
 /// What `spawn_level` drew, for the log.
 #[derive(Debug, Default, Clone)]
 pub struct DrawReport {
@@ -264,6 +280,9 @@ pub fn spawn_level(
             ));
             if let Some(m) = b.mover {
                 entity.insert(MoverPart(m));
+                if let Some(tag) = scene.attached.get(&m) {
+                    entity.insert(RidesOn { tag: tag.clone(), point: None });
+                }
             }
             if b.sky {
                 entity.insert(RenderLayers::layer(crate::sky::SKY_LAYER));
@@ -392,6 +411,9 @@ pub fn spawn_level(
         }
         if let Some(m) = b.mover {
             entity.insert(MoverPart(m));
+            if let Some(tag) = scene.attached.get(&m) {
+                entity.insert(RidesOn { tag: tag.clone(), point: None });
+            }
         }
         if b.sky {
             entity.insert(RenderLayers::layer(crate::sky::SKY_LAYER));

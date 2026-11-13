@@ -171,6 +171,19 @@ pub struct Riding {
     pub rotation: Quat,
 }
 
+/// An actor, by its `Tag`, that something the game moves carries this
+/// frame ([`Passenger::Base`]): where it is now. The part that knows the
+/// actor (the movers part, for a mover) puts it there, and with it what
+/// rides on it by `AttachTag`.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct BaseCarried {
+    pub tag: String,
+    /// Unreal units.
+    pub location: [f32; 3],
+    /// Pitch, yaw, roll in Unreal's angle units (65536 a turn).
+    pub rotation: [f32; 3],
+}
+
 /// A character finished a [`CharacterOrder`] (arrived, turned, the
 /// animation ended). The level scripts carry on.
 #[derive(Message, Debug, Clone, PartialEq)]

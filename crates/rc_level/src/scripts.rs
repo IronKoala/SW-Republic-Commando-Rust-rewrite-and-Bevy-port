@@ -398,6 +398,36 @@ pub fn tagged_actors(
     out
 }
 
+/// The static mesh actors that ride another actor (`AttachTag`), by export
+/// index: the tag they name. The engine bases such an actor on the first
+/// other actor whose `Tag` or name matches when the map loads
+/// (`UGameEngine::LoadMap`) and moves it with that base
+/// (`ULevel::MoveActor`); geo_01briefing's `BlackoutBox` rides the
+/// gunship's `GunshipAttachMover`.
+pub fn attached_meshes(pkg: &Package, data: &[u8], level: &LevelInfo) -> HashMap<usize, String> {
+    let mut out = HashMap::new();
+    for &a in level.actors.iter().flatten() {
+        if !pkg
+            .export_class_name(&pkg.exports[a])
+            .eq_ignore_ascii_case("StaticMeshActor")
+        {
+            continue;
+        }
+        let Ok(props) = actors::read_actor_properties(pkg, data, a) else {
+            continue;
+        };
+        if let Some(Value::Name(n)) =
+            rc_package::properties::find(pkg, &props, "AttachTag").map(|p| &p.value)
+        {
+            let tag = pkg.name(*n);
+            if !tag.is_empty() && !tag.eq_ignore_ascii_case("None") {
+                out.insert(a, tag.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// Somewhere a script can send a character (`DestinationTag`): any actor,
 /// path nodes included.
 #[derive(Debug, Clone, PartialEq)]

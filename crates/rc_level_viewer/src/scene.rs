@@ -322,6 +322,11 @@ pub struct Scene {
     pub fog: crate::fog::ZoneFogs,
     /// Why the fog couldn't be read, if it couldn't (then there is none).
     pub fog_error: Option<String>,
+    /// Static meshes that ride another actor (`AttachTag`), by export
+    /// index: the tag they name. Each is drawn as a part of its own (its
+    /// batches carry the export as `mover`), so it can be moved with its
+    /// base (see [`crate::draw::RidesOn`]).
+    pub attached: HashMap<usize, String>,
 }
 
 #[derive(Default)]
@@ -1339,6 +1344,9 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
     // So do props with a tag of their own, which level scripts may remove
     // (barricades, bunker walls). They are tagged `MoverPart` too.
     mover_exports.extend(rc_level::scripts::tagged_actors(pkg, data, &level).into_keys());
+    // And props that ride another actor (`AttachTag`), which move with it.
+    let attached = rc_level::scripts::attached_meshes(pkg, data, &level);
+    mover_exports.extend(attached.keys().copied());
     // And props weapons can break (barrels, consoles, rock cover).
     {
         let mats = &mut *ctx.mats;
@@ -1728,6 +1736,7 @@ pub fn build(map: Loaded, mats: &mut Materials) -> Result<Scene, String> {
         sky,
         fog,
         fog_error,
+        attached,
     })
 }
 

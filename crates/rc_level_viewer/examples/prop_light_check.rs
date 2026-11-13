@@ -163,6 +163,7 @@ fn scene(batches: Vec<Batch>, lights: Vec<Light>) -> Scene {
         sky: None,
         fog: Default::default(),
         fog_error: None,
+        attached: Default::default(),
     }
 }
 
@@ -199,6 +200,8 @@ fn setup(
         light_type: 1,
         dynamic: true,
         attach_tag: None,
+        tag: None,
+        trigger: None,
     };
     let on = LightingSettings::default();
     let off = LightingSettings {

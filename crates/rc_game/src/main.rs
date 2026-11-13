@@ -546,6 +546,12 @@ fn main() -> AppExit {
         Update,
         rc_turrets_plugin::TurretSet.before(player::PlayerMoveSet),
     );
+    // A mover the gunship carries (and what rides on it) goes where the
+    // gunship holds it this frame.
+    app.configure_sets(
+        Update,
+        rc_cast::CastView.before(rc_movers_plugin::MoverSystems),
+    );
     // Use at a turret is the turret's, not a squad order.
     app.configure_sets(
         Update,

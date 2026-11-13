@@ -65,6 +65,7 @@ pub mod save;
 pub mod sight;
 pub mod sounds;
 pub mod tracker;
+pub mod trigger_lights;
 
 use bevy::prelude::*;
 use rc_combat::{Damage, DamageKind};
@@ -154,6 +155,7 @@ impl Plugin for ScriptsPlugin {
                     tracker::track,
                     fx_factories::run,
                     placed_emitters::run,
+                    trigger_lights::switch,
                     projectiles::fly,
                     breakables::show,
                     characters::cast,

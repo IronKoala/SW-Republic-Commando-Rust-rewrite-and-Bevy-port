@@ -65,6 +65,7 @@ pub mod use_item;
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
+    BaseCarried,
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder,
     CharacterOrderDone, FactoryOrder, LevelScriptsRun, MarkerJob, MarkerJobStep, Passenger,
     PropAnim, RaiseEvent, Riding, ScriptEvent, ScriptTags, ShowDebriefing, ShowTitleCard, SquadMembership,
@@ -124,6 +125,7 @@ impl Plugin for CorePlugin {
             .add_message::<TurretOrder>()
             .add_message::<ShowDebriefing>()
             .add_message::<ShowTitleCard>()
+            .add_message::<BaseCarried>()
             .init_resource::<Cutscene>()
             .init_resource::<UseItem>()
             .add_message::<TeleportPlayer>()

@@ -159,6 +159,7 @@ fn setup(
         sky: None,
         fog: Default::default(),
         fog_error: None,
+        attached: Default::default(),
     };
     let r = draw::spawn_level(
         &mut commands,

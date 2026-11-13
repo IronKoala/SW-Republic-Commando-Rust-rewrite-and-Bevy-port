@@ -31,11 +31,11 @@ pub mod save;
 use bevy::prelude::*;
 use rc_game_core::save::SaveAppExt;
 use rc_game_core::{
-    units::to_bevy, CarryBodies, GameLog, GamePaths, GameSet, GameState, LevelCollision,
+    units::to_bevy, BaseCarried, CarryBodies, GameLog, GamePaths, GameSet, GameState, LevelCollision,
     LoadingGate, MovingFloors,
 };
 use rc_level_plugin::LevelMoverData;
-use rc_level_viewer::draw::MoverPart;
+use rc_level_viewer::draw::{MoverPart, RidesOn};
 use rc_movement::{Hit, Pawn, Vec3 as UVec3, World as MoveWorld};
 use rc_movers::{MoverEvent, MoverSet, Settings};
 use std::collections::HashMap;
@@ -60,6 +60,7 @@ pub struct MoverSystems;
 impl Plugin for MoversPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MoverHappened>()
+            .add_message::<BaseCarried>()
             .add_save_part::<save::MoversSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(Update, build.run_if(in_state(GameState::Loading)))
@@ -68,7 +69,7 @@ impl Plugin for MoversPlugin {
             .add_systems(First, forget_moves)
             .add_systems(
                 Update,
-                (report, place_parts)
+                (report, carry_bases, place_parts, place_riders)
                     .chain()
                     .in_set(MoverSystems)
                     .in_set(GameSet::View)
@@ -432,16 +433,80 @@ fn place_parts(movers: Option<Res<LevelMovers>>, mut parts: Query<(&MoverPart, &
         let Some(&i) = movers.by_export.get(&part.0) else {
             continue;
         };
-        let (m, shift) = set.movers[i].motion().matrix();
-        let s = [0usize, 2, 1];
-        let col = |c: usize| Vec3::new(m[s[0]][s[c]], m[s[1]][s[c]], m[s[2]][s[c]]);
-        let rot = Quat::from_mat3(&Mat3::from_cols(col(0), col(1), col(2))).normalize();
-        let pos = to_bevy(shift);
+        let (pos, rot) = part_transform(&set.movers[i].motion());
         if t.rotation != rot || t.translation != pos {
             t.rotation = rot;
             t.translation = pos;
         }
     }
+}
+
+/// Movers something else carries this frame (`BaseCarried`, from the
+/// cast part for a gunship's passengers) go where they are held.
+fn carry_bases(movers: Option<Res<LevelMovers>>, mut carried: MessageReader<BaseCarried>) {
+    let Some(movers) = movers else {
+        carried.clear();
+        return;
+    };
+    let list: Vec<BaseCarried> = carried.read().cloned().collect();
+    if list.is_empty() {
+        return;
+    }
+    let mut set = movers.shared.set.write().unwrap_or_else(|e| e.into_inner());
+    for c in list {
+        for m in set.movers.iter_mut().filter(|m| m.answers_to(&c.tag)) {
+            m.carry_to(rc_movers::Pose {
+                pos: UVec3::new(c.location[0], c.location[1], c.location[2]),
+                rot: c.rotation,
+            });
+        }
+    }
+}
+
+/// What rides a mover by `AttachTag` (`RidesOn`: lights, props, effects)
+/// moves rigidly with it, as engine.dll's `ULevel::MoveActor` moves a
+/// base's attached actors: the mover's move from where it was built
+/// (where the map placed it and its riders) to where it is now.
+fn place_riders(
+    movers: Option<Res<LevelMovers>>,
+    mut riders: Query<(&RidesOn, &mut Transform)>,
+    mut found: Local<HashMap<String, Option<usize>>>,
+) {
+    let Some(movers) = movers else {
+        found.clear();
+        return;
+    };
+    let set = movers.read();
+    for (r, mut t) in &mut riders {
+        let key = r.tag.to_ascii_lowercase();
+        let i = *found
+            .entry(key)
+            .or_insert_with(|| set.movers.iter().position(|m| m.answers_to(&r.tag)));
+        let Some(i) = i else { continue };
+        let motion = set.movers[i].motion();
+        let (pos, rot) = match r.point {
+            Some(p) => {
+                let at = motion.apply(UVec3::new(p[0], p[1], p[2]));
+                (to_bevy(at), t.rotation)
+            }
+            None => part_transform(&motion),
+        };
+        if t.translation != pos || t.rotation != rot {
+            t.translation = pos;
+            t.rotation = rot;
+        }
+    }
+}
+
+/// A mover's move as a Bevy transform for triangles drawn where the map
+/// placed them. Unreal to Bevy swaps Y and Z and scales, so the turn's
+/// rows and columns 1 and 2 swap too (as in `rc_walk`).
+fn part_transform(motion: &rc_movers::Motion) -> (Vec3, Quat) {
+    let (m, shift) = motion.matrix();
+    let s = [0usize, 2, 1];
+    let col = |c: usize| Vec3::new(m[s[0]][s[c]], m[s[1]][s[c]], m[s[2]][s[c]]);
+    let rot = Quat::from_mat3(&Mat3::from_cols(col(0), col(1), col(2))).normalize();
+    (to_bevy(shift), rot)
 }
 
 #[cfg(test)]

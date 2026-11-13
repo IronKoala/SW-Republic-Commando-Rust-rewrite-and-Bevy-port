@@ -42,7 +42,7 @@ use rc_anim::Clip;
 use rc_combat::{Died, Health, Hittable};
 use rc_game_core::units::{to_bevy, to_unreal, UU_PER_UNIT};
 use rc_game_core::{
-    playing, CharacterAct, CharacterOrder, CharacterOrderDone, CurrentLevel, GameLog, GamePaths,
+    playing, BaseCarried, CharacterAct, CharacterOrder, CharacterOrderDone, CurrentLevel, GameLog, GamePaths,
     GameSet, GameState, Passenger, Player, PlayerCamera, RaiseEvent, Riding, ScriptEvent,
     ScriptTags,
 };
@@ -69,6 +69,7 @@ impl Plugin for CastPlugin {
         app.init_resource::<CastCache>()
             .init_resource::<CastPlan>()
             .add_message::<CharacterOrder>()
+            .add_message::<BaseCarried>()
             .add_message::<CharacterOrderDone>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
@@ -1081,14 +1082,21 @@ fn unknown_base(p: &Passenger, bases: &HashMap<String, ([f32; 3], f32)>) -> Opti
     }
 }
 
-/// Where a light riding a carried base goes: the base was placed at
-/// `placed` (Bevy units, its yaw `placed_yaw`, Unreal's) and is now at
-/// `at` turned by `q` (Bevy axes, as [`carried_at`] gives); the light keeps
-/// its place relative to the base, as the engine moves an actor's
-/// attached actors along with it (`AttachTag` sets their `Base`).
-fn rides_base(placed: Vec3, placed_yaw: f32, at: Vec3, q: Quat, light: Vec3) -> Vec3 {
-    let turn = q * Quat::from_rotation_y(placed_yaw);
-    at + turn * (light - placed)
+/// A turn in Bevy's axes as Unreal's pitch, yaw and roll (65536 a turn),
+/// read off the turned axes as engine.u's `Rotator` builds them (forward
+/// `(cp cy, cp sy, sp)`; right's height `-sr cp`, up's `cr cp`). Unreal's
+/// X, Y, Z are Bevy's X, Z, Y.
+fn unreal_rotator(q: Quat) -> [f32; 3] {
+    let ue = |v: Vec3| Vec3::new(v.x, v.z, v.y);
+    let x = ue(q * Vec3::X);
+    let y = ue(q * Vec3::Z);
+    let z = ue(q * Vec3::Y);
+    let k = 65536.0 / std::f32::consts::TAU;
+    [
+        x.z.clamp(-1.0, 1.0).asin() * k,
+        x.y.atan2(x.x) * k,
+        (-y.z).atan2(z.z) * k,
+    ]
 }
 
 fn dist2d(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -1655,7 +1663,7 @@ fn carry_riders(
     mut cast: Query<(&mut Cast, &mut Transform)>,
     player: Query<(Entity, Option<&Riding>), With<Player>>,
     plan: Res<CastPlan>,
-    mut lights: Query<(&rc_level_viewer::lighting::LightRides, &mut Transform), Without<Cast>>,
+    mut carried: MessageWriter<BaseCarried>,
     mut told: Local<std::collections::HashSet<String>>,
     log: Option<Res<GameLog>>,
 ) {
@@ -1726,28 +1734,24 @@ fn carry_riders(
                 c.yaw = f.z.atan2(f.x);
             }
             Passenger::Base(tag) => {
-                let Some((placed, placed_yaw)) = plan.bases.get(&tag.to_ascii_lowercase()) else {
+                if !plan.bases.contains_key(&tag.to_ascii_lowercase()) {
                     continue;
-                };
-                let p = rc_movement::Vec3::new(placed[0], placed[1], placed[2]);
-                let mut n = 0;
-                for (r, mut t) in &mut lights {
-                    if !r.tag.eq_ignore_ascii_case(&tag) {
-                        continue;
-                    }
-                    let l = rc_movement::Vec3::new(r.location[0], r.location[1], r.location[2]);
-                    t.translation = rides_base(to_bevy(p), *placed_yaw, at, q, to_bevy(l));
-                    n += 1;
                 }
+                let rotation = unreal_rotator(q);
                 if told.insert(tag.to_ascii_lowercase()) {
                     log_line(
                         &log,
                         format!(
-                            "{tag} rides {base} at ({:.0}, {:.0}, {:.0}); its {n} real-time lights (AttachTag {tag}) go along",
-                            u.x, u.y, u.z
+                            "{tag} rides {base} at ({:.0}, {:.0}, {:.0}) turned ({:.0}, {:.0}, {:.0}); what rides on it (AttachTag {tag}) goes along",
+                            u.x, u.y, u.z, rotation[0], rotation[1], rotation[2]
                         ),
                     );
                 }
+                carried.write(BaseCarried {
+                    tag,
+                    location: [u.x, u.y, u.z],
+                    rotation,
+                });
             }
         }
     }
@@ -1831,19 +1835,13 @@ mod tests {
     }
 
     #[test]
-    fn a_light_keeps_its_place_on_its_base() {
-        let placed = Vec3::new(10.0, 0.0, 0.0);
-        let yaw = 0.7;
-        let light = Vec3::new(12.0, 3.0, 1.0);
-        // Not moved: the light stays put.
-        let q = Quat::from_rotation_y(-yaw);
-        assert!(rides_base(placed, yaw, placed, q, light).distance(light) < 1e-4);
-        // Moved 100 along X and turned a quarter more: the light's offset
-        // turns with it.
-        let turn = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
-        let at = placed + Vec3::X * 100.0;
-        let got = rides_base(placed, yaw, at, turn * q, light);
-        let want = at + turn * (light - placed);
-        assert!(got.distance(want) < 1e-4, "{got} vs {want}");
+    fn a_turn_reads_back_as_unreals_rotator() {
+        // The cast places a yaw as Bevy's turn about Y by minus the yaw.
+        let r = unreal_rotator(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2));
+        assert!((r[0]).abs() < 0.5 && (r[1] - 16384.0).abs() < 0.5 && r[2].abs() < 0.5, "{r:?}");
+        // Pitch up a quarter turn's half (8192): forward rises.
+        let q = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
+        let r = unreal_rotator(q);
+        assert!((r[0] - 8192.0).abs() < 0.5 && r[1].abs() < 0.5 && r[2].abs() < 0.5, "{r:?}");
     }
 }

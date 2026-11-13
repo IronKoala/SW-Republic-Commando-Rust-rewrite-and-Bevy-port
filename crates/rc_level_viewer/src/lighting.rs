@@ -175,13 +175,128 @@ fn color(l: &Light) -> Color {
     Color::srgb(r, g, b)
 }
 
-/// On a real-time light that rides another actor (`AttachTag`): what it
-/// rides and where the map put it, Unreal units. Whatever moves that
-/// actor moves the light along (the briefing gunship's cabin lights).
-#[derive(Component, Debug, Clone)]
-pub struct LightRides {
+/// A `TriggerLight` while the level runs, switched by level events named
+/// by its `Tag` as gameplay.u's `TriggerLight` does (its script text, read
+/// from the install): `BeginPlay` starts it full on (`bInitiallyOn`) or
+/// dark; each `Tick` moves `Alpha` toward on or off by
+/// `DeltaTime / ChangeTime` and stops at either end; the brightness is
+/// `Alpha` times the map's (or, with `bDelayFullOn`, dark until fully
+/// on). Its state says what a trigger does: `TriggerTurnsOn` heads on,
+/// `TriggerTurnsOff` off, `TriggerToggle` the other way, `TriggerControl`
+/// toward the opposite of how it started, `TriggerPound` on, then flips
+/// every `ChangeTime` on a timer until `RemainOnTime` has passed. A
+/// `ChangeTime` of 0 (the class default) switches at once.
+/// `TriggerControl`'s un-trigger isn't sent by anything in the port.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct SwitchedLight {
+    pub rule: rc_package::light::TriggerLight,
     pub tag: String,
-    pub location: [f32; 3],
+    /// The Bevy intensity at full brightness.
+    pub full: f32,
+    alpha: f32,
+    direction: f32,
+    ticking: bool,
+    /// `TriggerPound`: seconds to the timer, while it runs.
+    timer: Option<f32>,
+    pound_time: f32,
+    /// How bright it is now, 0..1 of `full`.
+    pub factor: f32,
+}
+
+impl SwitchedLight {
+    pub fn new(rule: rc_package::light::TriggerLight, tag: String, full: f32) -> Self {
+        let on = rule.initially_on;
+        let mut s = SwitchedLight {
+            rule,
+            tag,
+            full,
+            alpha: if on { 1.0 } else { 0.0 },
+            direction: if on { 1.0 } else { -1.0 },
+            ticking: true,
+            timer: None,
+            pound_time: 0.0,
+            factor: 1.0,
+        };
+        s.tick(0.0);
+        s
+    }
+
+    /// A level event named by its tag (`Trigger`). False when its state
+    /// does nothing with one.
+    pub fn trigger(&mut self) -> bool {
+        match self.rule.state.to_ascii_lowercase().as_str() {
+            "triggerturnson" => self.direction = 1.0,
+            "triggerturnsoff" => self.direction = -1.0,
+            "triggertoggle" => self.direction = -self.direction,
+            "triggercontrol" => self.direction = if self.rule.initially_on { -1.0 } else { 1.0 },
+            "triggerpound" => {
+                self.direction = 1.0;
+                self.pound_time = self.rule.change_time;
+                self.timer = Some(self.rule.change_time);
+            }
+            _ => return false,
+        }
+        self.ticking = true;
+        true
+    }
+
+    /// One frame of `dt` seconds (`Timer`, then `Tick`).
+    pub fn tick(&mut self, dt: f32) {
+        if let Some(t) = self.timer.as_mut() {
+            *t -= dt;
+            if *t <= 0.0 {
+                // `Timer`: stop after this one once the time is up, flip,
+                // and set the timer again (it no longer fires once
+                // disabled).
+                let more = self.pound_time < self.rule.remain_on_time;
+                self.pound_time += self.rule.change_time;
+                self.direction = -self.direction;
+                self.timer = more.then_some(self.rule.change_time);
+            }
+        }
+        if !self.ticking {
+            return;
+        }
+        let ct = self.rule.change_time;
+        self.alpha += if ct > 0.0 {
+            self.direction * dt / ct
+        } else {
+            self.direction * f32::INFINITY
+        };
+        if self.alpha > 1.0 {
+            self.alpha = 1.0;
+            self.ticking = false;
+        } else if self.alpha < 0.0 {
+            self.alpha = 0.0;
+            self.ticking = false;
+        }
+        self.factor = if !self.rule.delay_full_on {
+            self.alpha
+        } else if (self.direction > 0.0 && self.alpha != 1.0) || self.alpha == 0.0 {
+            0.0
+        } else {
+            1.0
+        };
+    }
+}
+
+/// The extras a spawned light gets: how level events switch it, and what
+/// it rides. Its intensity starts at `full` times the switch's factor.
+fn light_extras(e: &mut EntityCommands, l: &Light, switched: Option<SwitchedLight>) {
+    if let Some(tag) = &l.attach_tag {
+        e.insert(crate::draw::RidesOn {
+            tag: tag.clone(),
+            point: Some(l.location),
+        });
+    }
+    if let Some(s) = switched {
+        e.insert(s);
+    }
+}
+
+fn switched(l: &Light, full: f32) -> Option<SwitchedLight> {
+    let (rule, tag) = (l.trigger.as_ref()?, l.tag.as_ref()?);
+    Some(SwitchedLight::new(rule.clone(), tag.clone(), full))
 }
 
 /// What `spawn_lights` did, for the log.
@@ -216,22 +331,18 @@ pub fn spawn_lights(
         let at = settings.position(l.location);
         match l.kind {
             LightKind::Point => {
+                let sw = switched(l, lumens);
                 let mut e = commands.spawn((
                     PointLight {
                         color: color(l),
-                        intensity: lumens,
+                        intensity: sw.as_ref().map_or(lumens, |s| lumens * s.factor),
                         range,
                         shadow_maps_enabled: settings.shadows,
                         ..default()
                     },
                     Transform::from_translation(at),
                 ));
-                if let Some(tag) = &l.attach_tag {
-                    e.insert(LightRides {
-                        tag: tag.clone(),
-                        location: l.location,
-                    });
-                }
+                light_extras(&mut e, l, sw);
                 report.entities.push(e.id());
                 report.point += 1;
             }
@@ -239,10 +350,11 @@ pub fn spawn_lights(
                 // Guess: LightCone 0-255 spans 0-90 degrees from the centre
                 // line. Not checked against the game.
                 let outer = (l.cone as f32 / 255.0 * std::f32::consts::FRAC_PI_2).clamp(0.02, 1.55);
-                let e = commands.spawn((
+                let sw = switched(l, lumens);
+                let mut e = commands.spawn((
                     SpotLight {
                         color: color(l),
-                        intensity: lumens,
+                        intensity: sw.as_ref().map_or(lumens, |s| lumens * s.factor),
                         range,
                         outer_angle: outer,
                         inner_angle: outer * 0.8,
@@ -251,6 +363,7 @@ pub fn spawn_lights(
                     },
                     Transform::from_translation(at).looking_to(facing(l.rotation), Vec3::Y),
                 ));
+                light_extras(&mut e, l, sw);
                 report.entities.push(e.id());
                 report.spot += 1;
             }

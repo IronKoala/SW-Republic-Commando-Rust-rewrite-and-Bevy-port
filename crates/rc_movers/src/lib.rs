@@ -310,6 +310,21 @@ impl Mover {
         Motion::new(self.built, self.pose)
     }
 
+    /// Put the mover where something carrying it holds it (a mover
+    /// attached to another actor's bone, as geo_01briefing's
+    /// `GunshipAttachMover` on the gunship: engine.dll's
+    /// `AActor::UpdateAttachments` moves it there each frame).
+    pub fn carry_to(&mut self, pose: Pose) {
+        self.pose = pose;
+    }
+
+    /// Whether level actors naming `tag` (an `AttachTag`) mean this mover:
+    /// its `Tag` or its name, as engine.dll's `UGameEngine::LoadMap` bases
+    /// them.
+    pub fn answers_to(&self, tag: &str) -> bool {
+        self.info.tag.eq_ignore_ascii_case(tag) || self.info.place.name.eq_ignore_ascii_case(tag)
+    }
+
     /// A lift: it moves mostly up or down (at least 64 uu, more than it
     /// moves sideways), doesn't turn, and is wide enough to stand on for a
     /// box of half-width `radius`.
