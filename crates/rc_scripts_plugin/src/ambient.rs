@@ -35,7 +35,7 @@
 use bevy::audio::{AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 use rc_game_core::units::{to_bevy, to_unreal};
-use rc_game_core::{GameLog, GamePaths, PlayerCamera, SoundAt, SoundBy, SoundFade};
+use rc_game_core::{ActorAmbient, GameLog, GamePaths, PlayerCamera, SoundAt, SoundBy, SoundFade};
 use rc_level_plugin::{LevelAmbientSounds, LevelHearing};
 use std::collections::BTreeMap;
 
@@ -359,8 +359,129 @@ pub(crate) fn update(
     }
 }
 
+/// A loop of an actor's own (`rc_game_core::ActorAmbient`, such as a
+/// spawned effect's hum): which actor it belongs to.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ActorLoop {
+    pub actor: Entity,
+    pub fade: Fade,
+}
+
+/// Start and stop the loops of actors spawned during play (effects) by the
+/// same rule as the map's: `UpdateAmbientList` treats every actor with an
+/// `AmbientSound` alike. The radius and the rest come from the sound's own
+/// `AudioParams` (`rc_combat::sound_meta`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn update_actor_loops(
+    mut commands: Commands,
+    mut actors: Query<(Entity, &mut ActorAmbient, &GlobalTransform)>,
+    mut loops: Query<(Entity, &mut ActorLoop, Has<AudioPlayer>)>,
+    script: Option<Res<LevelScript>>,
+    hearing: Option<Res<LevelHearing>>,
+    ears: Query<&GlobalTransform, With<PlayerCamera>>,
+    time: Res<Time>,
+    log: Res<GameLog>,
+) {
+    let dt = time.delta_secs();
+    // A loop whose actor is gone stops with it.
+    for (e, l, _) in &loops {
+        if actors.get(l.actor).is_err() {
+            commands.entity(e).try_despawn();
+        }
+    }
+    let Some(ear) = ears.iter().next().map(|g| to_unreal(g.translation())) else {
+        return;
+    };
+    let hearing = hearing.as_ref().map(|h| &*h.0);
+    let volume = script
+        .as_ref()
+        .map_or(1.0, |s| s.director.settings.sound_volume);
+    let default_radius = script
+        .as_ref()
+        .map_or(2000.0, |s| s.director.settings.sound_radius);
+    for (actor, mut a, g) in &mut actors {
+        let meta = rc_combat::sound_meta::meta(a.sound.id());
+        let radius = meta.as_ref().map_or(default_radius, |m| m.radius);
+        let at = to_unreal(g.translation());
+        let e3 = [ear.x, ear.y, ear.z];
+        let a3 = [at.x, at.y, at.z];
+        let share = match hearing {
+            Some(h) if a.walls && !h.line_clear(a3, e3) => {
+                h.radius_multiplier(h.zone_at(a3), h.zone_at(e3))
+            }
+            _ => 1.0,
+        };
+        let reach = radius * MAX_RADIUS_MULTIPLIER * share;
+        let d = at - ear;
+        let d2 = d.dot(d);
+        match a.playing.and_then(|e| loops.get_mut(e).ok()) {
+            None => {
+                a.playing = None;
+                if d2 > reach * reach {
+                    continue;
+                }
+                let non_positional = meta.as_ref().is_some_and(|m| m.non_positional);
+                let falloff = !meta.as_ref().is_some_and(|m| m.no_falloff);
+                let mut spawned = commands.spawn((
+                    ActorLoop {
+                        actor,
+                        fade: Fade::new(0.0, 1.0, FADE_IN),
+                    },
+                    SoundBy {
+                        actor: Some(actor),
+                        ambient: true,
+                        skip_hear_check: true,
+                        ..default()
+                    },
+                    SoundFade(0.0),
+                    AudioPlayer(a.sound.clone()),
+                    PlaybackSettings::LOOP.with_volume(Volume::Linear(volume)),
+                ));
+                if !non_positional {
+                    let mut placed = Placed::new(radius, falloff, Some(actor));
+                    if !a.walls {
+                        placed = placed.through_walls();
+                    }
+                    spawned.insert((SoundAt::place(g.translation()), placed));
+                }
+                a.playing = Some(spawned.id());
+                log.line(format!(
+                    "{PART}: an effect starts looping {} ({:.0} uu away, heard within {reach:.0})",
+                    a.name,
+                    d2.sqrt()
+                ));
+            }
+            Some((e, mut l, has_player)) => {
+                if !has_player {
+                    commands.entity(e).try_despawn();
+                    a.playing = None;
+                    continue;
+                }
+                let far = reach + STOP_MARGIN;
+                if !l.fade.stopping() && d2 > far * far {
+                    l.fade = Fade::new(l.fade.value, 0.0, FADE_OUT);
+                    log.line(format!(
+                        "{PART}: an effect stops looping {} ({:.0} uu away)",
+                        a.name,
+                        d2.sqrt()
+                    ));
+                }
+                let fade = l.fade.step(dt);
+                commands.entity(e).insert(SoundFade(fade));
+                if l.fade.stopping() && fade < 1e-4 {
+                    commands.entity(e).try_despawn();
+                    a.playing = None;
+                }
+            }
+        }
+    }
+}
+
 /// Leaving the level silences its loops.
-pub(crate) fn forget(mut commands: Commands, playing: Query<Entity, With<AmbientLoop>>) {
+pub(crate) fn forget(
+    mut commands: Commands,
+    playing: Query<Entity, Or<(With<AmbientLoop>, With<ActorLoop>)>>,
+) {
     for e in &playing {
         commands.entity(e).try_despawn();
     }

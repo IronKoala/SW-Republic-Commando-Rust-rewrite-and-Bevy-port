@@ -1744,6 +1744,15 @@ a map loop, heard everywhere). In `PostUpdate` the engine:
   category slider (`SoundMix`, from the SOUND options), kept within
   0.0001 to 0.9999, times the distance share of `Placed`;
 - works out the EAX occlusion (`rc_game_core::EaxOcclusion`) when EAX is on.
+Characters' cues go through `rc_game_core::CueClock`, the engine's one
+table of when each cue was last said (`APawn::GetSoundFromCue`, cleared at
+every map load), and play "in battle" (picking a group's battle takes)
+when the speaker is `InCombat`. An actor spawned during play with an
+`AmbientSound` (an effect's hum) carries `rc_game_core::ActorAmbient`, and
+`ambient.rs` starts and stops it by the map loops' rule. Nothing in a
+level runs while its briefing screen waits for START
+(`rc_game_core::StartHeld`, checked by `playing`). The PC original never
+rumbles for a sound (`UClient::SetRumbleFX` is empty there).
 Sound groups (`USoundMultiple`) pick in order, `FirstSound` once, or by
 `Likelihood` skipping members for the wrong battle state or campaign
 (`LevelInfo.Campaign`, read by `rc_game/src/music.rs`).

@@ -471,13 +471,14 @@ impl EnemySounds {
         names: &[String],
         at: rc_movement::Vec3,
         id: u32,
+        battle: bool,
     ) -> Option<String> {
         if names.is_empty() {
             return None;
         }
         self.picks = self.picks.wrapping_add(1);
         let name = &names[self.picks as usize % names.len()];
-        let h = self.by_type.get(kind)?.get(name)?.pick()?;
+        let h = self.by_type.get(kind)?.get(name)?.pick_in(battle)?;
         let mut e = commands.spawn((
             AudioPlayer(h),
             bevy::audio::PlaybackSettings::DESPAWN,
@@ -1034,6 +1035,16 @@ fn summary(f: &Fight, log: &GameLog) {
 }
 
 /// Where the player is, for droids to look at (Unreal units).
+/// Whether a droid's lines play "in battle" (flag 0x200, which picks a
+/// group's battle takes): `AController::InCombat`, a live enemy of its
+/// own. Our AI has one while it has noticed, fights or hunts the enemy.
+fn in_combat(f: &rc_ai::Fighter) -> bool {
+    matches!(
+        f.mode,
+        rc_ai::Mode::Alerted | rc_ai::Mode::Attack | rc_ai::Mode::Investigate
+    )
+}
+
 fn player_target(
     player: &Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
     camera: &Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
@@ -1361,6 +1372,7 @@ fn think(
                                 &f.params.sounds.spotted,
                                 f.pawn.location,
                                 id,
+                                in_combat(f),
                             ) {
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
@@ -1485,6 +1497,7 @@ fn react_to_combat(
             names,
             f.pawn.location,
             id,
+            in_combat(f),
         ) {
             log.line(format!(
                 "{PART}: t={now:.1}s droid {id} {what} ({kind}) sound {n}"

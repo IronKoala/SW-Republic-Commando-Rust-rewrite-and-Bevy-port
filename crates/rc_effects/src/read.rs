@@ -116,6 +116,7 @@ impl EffectPackage {
             emitters,
             sound,
             ambient_sound,
+            sound_occlusion: byte(&own, "SoundOcclusion").unwrap_or(0),
             life_span: float(&own, "LifeSpan").unwrap_or(0.0),
             // `Emitter`'s default bUnlit is on (Engine.u).
             lit: !boolean(&own, "bUnlit").unwrap_or(true),

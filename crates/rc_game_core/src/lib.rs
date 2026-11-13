@@ -84,8 +84,9 @@ pub use sound::{EaxOcclusion, EaxOn, SoundAt, SoundCategory, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
+    StartHeld,
 };
-pub use sound_engine::{Ducking, MusicTrack, SoundBy, SoundFade, SoundMix};
+pub use sound_engine::{ActorAmbient, CueClock, Ducking, MusicTrack, SoundBy, SoundFade, SoundMix};
 pub use turrets::{Manning, OnTurret, TurretOrder};
 pub use use_item::{UseItem, UseLock, UsePanel};
 
@@ -101,6 +102,7 @@ impl Plugin for CorePlugin {
         app.init_state::<GameState>()
             .add_sub_state::<Play>()
             .init_resource::<CurrentLevel>()
+            .init_resource::<StartHeld>()
             .init_resource::<LoadingGate>()
             .init_resource::<ActionState>()
             .init_resource::<InputPrompts>()

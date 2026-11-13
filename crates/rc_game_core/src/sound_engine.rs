@@ -121,3 +121,95 @@ pub struct MusicTrack;
 /// multiplies its volume by it (`FAbstractSource::UpdateVolume`).
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct SoundFade(pub f32);
+
+/// How many cues `UPawnAudioTable::Reset` clears (`EPawnAudioEvent` and
+/// spare room).
+pub const CUE_SLOTS: usize = 193;
+
+/// When each character cue was last said, by cue number, for everyone at
+/// once (one table in Engine.dll, `APawn::GetSoundFromCue`), and the
+/// level's clock it is kept by (`Level.TimeSeconds`: stops while paused).
+/// Cleared when a map loads (`UGameEngine::LoadMap` calls
+/// `UPawnAudioTable::Reset`, which sets every entry to -10000).
+#[derive(Resource, Debug, Clone)]
+pub struct CueClock {
+    pub now: f64,
+    last: Vec<f64>,
+}
+
+impl Default for CueClock {
+    fn default() -> Self {
+        CueClock {
+            now: 0.0,
+            last: vec![-10000.0; CUE_SLOTS],
+        }
+    }
+}
+
+impl CueClock {
+    /// A new map: the clock and the table start again.
+    pub fn reset(&mut self) {
+        *self = CueClock::default();
+    }
+
+    /// `APawn::GetSoundFromCue`'s checks before a character says cue
+    /// `cue`: not within `min_interval` seconds of the last time anyone
+    /// said it, and, from cue 8 on, not while a sound that disables voice
+    /// cues plays. `true`: it may be said.
+    pub fn may_say(&self, cue: usize, min_interval: f32, voice_cues_blocked: bool) -> bool {
+        let last = self.last.get(cue).copied().unwrap_or(-10000.0);
+        if last + min_interval as f64 > self.now {
+            return false;
+        }
+        !(voice_cues_blocked && cue >= 8)
+    }
+
+    /// The cue was said (it had a sound): remember when.
+    pub fn said(&mut self, cue: usize) {
+        if let Some(t) = self.last.get_mut(cue) {
+            *t = self.now;
+        }
+    }
+}
+
+/// An actor's `AmbientSound` (a spawned effect's hum): the map loops'
+/// part (`rc_scripts_plugin::ambient`) starts and stops it as the game's
+/// `UAudioSubsystem::UpdateAmbientList` does, within its `Radius` × 100
+/// of the listener, fading in and out. Put it on an entity standing for
+/// the actor (with a `Transform` at its place, Bevy units); despawning
+/// that entity stops the loop.
+#[derive(Component, Debug, Clone)]
+pub struct ActorAmbient {
+    pub sound: Handle<bevy::audio::AudioSource>,
+    /// The sound's name, for the log.
+    pub name: String,
+    /// The level's walls cut how far it is heard (the actor's
+    /// `SoundOcclusion` isn't `OCCLUSION_None`).
+    pub walls: bool,
+    /// The loop playing now, if any.
+    pub playing: Option<Entity>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One table for everyone: a cue said is too soon for anyone within
+    /// its interval; from cue 8 on, nothing while radio holds cues back.
+    #[test]
+    fn cue_table() {
+        let mut c = CueClock::default();
+        assert!(c.may_say(20, 5.0, false), "never said: -10000 long ago");
+        c.now = 3.0;
+        c.said(20);
+        c.now = 7.0;
+        assert!(!c.may_say(20, 5.0, false));
+        c.now = 8.0;
+        assert!(c.may_say(20, 5.0, false));
+        assert!(!c.may_say(20, 0.0, true));
+        assert!(c.may_say(3, 0.0, true), "death cries still play");
+        c.reset();
+        assert_eq!(c.now, 0.0);
+        assert!(c.may_say(20, 5.0, false));
+    }
+}

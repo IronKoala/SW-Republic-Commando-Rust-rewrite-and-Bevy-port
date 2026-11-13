@@ -603,6 +603,19 @@ fn steps() -> Vec<Step> {
             5.0,
         ),
         Check("the loaded briefing screen shows START, not the bar", loading_waits),
+        // The original runs nothing before START. The port's one frame
+        // in the level before the pause took hold used to run the level's
+        // scripts, and the orders they sent were lost while paused.
+        Check("the level doesn't run before START", |w| {
+            let t = w
+                .get_resource::<rc_scripts_plugin::LevelScript>()
+                .map(|s| s.director.time);
+            match t {
+                Some(t) if t == 0.0 => Ok("script clock 0".into()),
+                Some(t) => Err(format!("script clock {t:.2} s")),
+                None => Ok("no level script yet".into()),
+            }
+        }),
         Shot("loading_done"),
         Press(Action::MenuBack),
         Wait(0.2),
@@ -1527,7 +1540,15 @@ fn steps() -> Vec<Step> {
         Until("quickload: START lets the level run", loading_started, 5.0),
         Wait(0.3),
         Check("quickload puts the player back where they saved", |w| {
-            let (at, yaw) = w.resource::<Noted>().saved.ok_or("no save")?;
+            // The facing to compare with is the one in the save file, not
+            // the one noted a frame before saving: geo_01a's ScriptedTrigger62
+            // shakes the view (turning it) every few seconds, and a shake
+            // running over the save turns the player between the note and
+            // the save.
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let p = quick.part("player").ok_or("no [player] section")?;
+            let yaw = p["yaw"].as_float().ok_or("no yaw")? as f32;
             let (now, now_yaw) = body(w).ok_or("no player")?;
             let d = (now - at).length();
             let turn = (now_yaw - yaw).abs();

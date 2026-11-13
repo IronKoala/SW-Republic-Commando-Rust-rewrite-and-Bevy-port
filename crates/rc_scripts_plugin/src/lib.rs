@@ -181,6 +181,21 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<engine::SoundEngine>()
             .init_resource::<rc_game_core::Ducking>()
             .init_resource::<rc_game_core::SoundMix>()
+            // The characters' cue table (`APawn::GetSoundFromCue`): cleared
+            // when a map loads, its clock runs while the level does.
+            .init_resource::<rc_game_core::CueClock>()
+            .add_systems(
+                OnEnter(GameState::Loading),
+                |mut c: ResMut<rc_game_core::CueClock>| c.reset(),
+            )
+            .add_systems(
+                Update,
+                (|mut c: ResMut<rc_game_core::CueClock>, t: Res<Time>| {
+                    c.now += t.delta_secs_f64()
+                })
+                .before(GameSet::Simulate)
+                .run_if(playing),
+            )
             .add_systems(
                 PostUpdate,
                 (engine::schedule_sounds, engine::set_volumes)
@@ -196,7 +211,7 @@ impl Plugin for ScriptsPlugin {
             // started and stopped as the player moves.
             .add_systems(
                 Update,
-                (ambient::start, ambient::update)
+                (ambient::start, ambient::update, ambient::update_actor_loops)
                     .chain()
                     .in_set(GameSet::Simulate)
                     .run_if(playing),

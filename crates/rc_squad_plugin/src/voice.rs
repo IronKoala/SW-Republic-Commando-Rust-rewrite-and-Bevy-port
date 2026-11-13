@@ -212,6 +212,8 @@ pub fn speak(
     audio: Option<Res<Assets<AudioSource>>>,
     mates: Query<(Entity, &SquadMate, &Transform)>,
     ducking: Option<Res<rc_game_core::Ducking>>,
+    mut cues: Option<ResMut<rc_game_core::CueClock>>,
+    mood: Option<Res<rc_game_core::MusicMood>>,
     player: Query<&Transform, With<Player>>,
     mut stats: ResMut<SquadVoiceStats>,
     mut commands: Commands,
@@ -251,11 +253,22 @@ pub fn speak(
                 Some(i) => squad.members[i].settings.audio_table.clone(),
                 None => chatter.settings.leader_table.clone(),
             };
+            // `APawn::PlayOwnedCue` plays "in battle" (flag 0x200, which
+            // picks a group's battle takes) when the speaker's controller
+            // is `InCombat`: it has a live enemy, or someone has it as
+            // theirs. A squad mate with a target; the player while the
+            // enemies are fighting.
+            let battle = match c {
+                Some(i) => squad.members[i].fight.target.is_some(),
+                None => mood
+                    .as_deref()
+                    .is_some_and(|m| *m == rc_game_core::MusicMood::Battle),
+            };
             let lines = voices.tables.get(&table.to_ascii_lowercase());
             let found = s.events.iter().find_map(|e| {
                 lines
                     .and_then(|t| t.get(&e.to_ascii_lowercase()))
-                    .and_then(|(g, snd)| snd.pick().map(|h| (e.clone(), g.clone(), h)))
+                    .and_then(|(g, snd)| snd.pick_in(battle).map(|h| (e.clone(), g.clone(), h)))
             });
             if let Some(f) = found {
                 chosen = Some((c, f));
@@ -304,14 +317,21 @@ pub fn speak(
             );
             continue;
         };
-        // While a radio line that disables voice cues plays, the game holds
-        // back every cue from 8 on (`APawn::GetSoundFromCue`); 1 to 7, the
-        // death cries, still play.
+        // `APawn::GetSoundFromCue`: while a radio line that disables voice
+        // cues plays, every cue from 8 on is held back (1 to 7, the death
+        // cries, still play); a cue said less than its minimum interval
+        // ago by anyone is too (no interval is given here: the game's
+        // default, 0).
         let cue = voices
             .events
             .iter()
             .position(|e| e.eq_ignore_ascii_case(&event));
-        if ducking.as_ref().is_some_and(|d| d.voice_cues_blocked) && cue.is_none_or(|c| c >= 8) {
+        let blocked = ducking.as_ref().is_some_and(|d| d.voice_cues_blocked);
+        let may = match (&cues, cue) {
+            (Some(c), Some(i)) => c.may_say(i, 0.0, blocked),
+            _ => !blocked,
+        };
+        if !may {
             log_line(
                 &log,
                 format!(
@@ -325,6 +345,9 @@ pub fn speak(
         // engine's (the original's rules and the line's own `AudioParams`):
         // a squad mate's own cue (`PlayOwnedSound`) from where they stand;
         // the player's own lines are heard everywhere.
+        if let (Some(c), Some(i)) = (cues.as_mut(), cue) {
+            c.said(i);
+        }
         let secs = audio.as_deref().map_or(0.0, |a| seconds(a, &sound));
         chatter.speaking(squad.time, secs);
         let mut e = commands.spawn((

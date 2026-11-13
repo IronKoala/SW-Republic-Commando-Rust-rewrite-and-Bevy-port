@@ -724,17 +724,20 @@ fn spawn(
                 load_sound(&mut effects, &s, &paths, au, &mut stats, &log).and_then(|g| g.pick())
             {
                 let name = s.last().cloned().unwrap_or_default();
+                // The actor's `AmbientSound`: started and stopped with the
+                // listener's distance like every actor's loop
+                // (`UpdateAmbientList`, `rc_scripts_plugin::ambient`).
+                let walls = loaded.as_ref().is_none_or(|l| l.def.sound_occlusion != 1);
                 ambient = Some(
                     commands
                         .spawn((
-                            AudioPlayer(h),
-                            PlaybackSettings::LOOP.with_volume(Volume::Linear(vol)),
-                            place,
-                            SoundBy {
-                                ambient: true,
-                                skip_hear_check: true,
-                                ..Default::default()
+                            rc_game_core::ActorAmbient {
+                                sound: h,
+                                name: name.clone(),
+                                walls,
+                                playing: None,
                             },
+                            place.1,
                             DespawnOnExit(GameState::InGame),
                         ))
                         .id(),
