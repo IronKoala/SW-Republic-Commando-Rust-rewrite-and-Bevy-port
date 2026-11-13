@@ -20,6 +20,7 @@ pub mod extras;
 pub mod fit;
 pub mod gpu;
 pub mod helmet;
+pub mod hint;
 pub mod hud;
 pub mod layout;
 pub mod library;

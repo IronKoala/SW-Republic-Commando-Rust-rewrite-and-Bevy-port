@@ -4383,8 +4383,51 @@ texts end up at 85-90% of their size. If
 the original page can't be drawn, a placeholder page marked as one shows
 the title and text with Continue. Not done: the GEO/RAS/YYY classes differ
 only in the music they play (`musGEO_cadence_lp` and so on); that music
-isn't played yet. Hint screens (`bIsForHintText`) aren't shown: the
-original shows them only with a debug switch.
+isn't played yet. The same action without a `NewLevel` is a hint screen
+(see "The hint screens" below).
+
+**The hint screens.** 29 script steps in geo_01a, geo_01b, geo_01c, geo_03a
+and geo_04d run `ACTION_ShowDebriefingScreen` with only a `Text`,
+`MenuClass=XInterfaceCTMenus.CTPauseHintText` and `bIsForHintText=true`
+(the tutorial pop-ups: crouching, the bacta dispenser, the objective
+tracker, the squad, the sniper and anti-armour attachments...). What the
+original does with them is in its own script in the install:
+`ACTION_ShowDebriefingScreen.InitActionFor` (CTGame.u) shows the page only
+if the step isn't for hint text or `bKeepHintMenusAwfulHack` is on (a
+`globalconfig` of `PlayerController`, `true` in the install's `User.ini`:
+despite its name it is simply "hints on"), and the script goes straight on.
+`PlayerController.ShowMenu` (Engine.u) pauses and opens the page with the
+text. The scripts part sends `rc_game_core::ShowHint`; `rc_game/src/hints.rs`
+checks our `hint_screens` setting, pauses and opens the `hint` page
+(`[pages.hint]` in `data/ui/original_menus.toml`). `rc_menus::hint` fills
+the page in as the class's `Init` and `SetInfoOptions` do: the text in
+`InfoText`, the title and picture hidden, the empty picture frame shown,
+CONTINUE WITH HINTS shown and focused, and with the helmet off the frames
+and text moved up to the class's numbers. CONTINUE WITH HINTS
+(`act:hint_on`) goes on playing; CONTINUE WITHOUT HINTS (`act:hint_off`)
+switches `hint_screens` off, saves the settings and goes on; back does
+nothing, as `CTInfoBase.HandleInputBack` is empty. The pause menu's
+ENABLE HINTS switches them back on. If the page can't be drawn, a
+placeholder page (marked) shows the text with the same two choices.
+With a gamepad, B is CONTINUE WITHOUT HINTS and A is CONTINUE WITH HINTS
+wherever the focus is: the original's console (`KeyEvent` in Engine.u)
+hands `IK_GameA`/`IK_GameB` to the menu's `HandleInputGamePad` before
+anything else, the hint classes take them and return true, and on a PC
+WinDrv.dll sends DirectInput joystick button n as key 0xC8 + n (checked
+in its machine code; 0xC8 is `IK_GameA`, so button 1 is `IK_GameB`). A
+hint asked for while a page shows takes that page's place, as in the
+original: `PlayerController.ShowMenu` only skips `SetPause` when play is
+already paused and still opens the page, and the console's `MenuOpen`
+(Engine.u) destroys the page that was showing. Level scripts don't run
+while paused, so this can only happen within one frame (none of the 29
+does it); a debriefing it replaces doesn't go on to its next map. The HUD (prompt text, objective tracker, meters) stays drawn under the
+hint box, as in the original: Engine.dll's `FPlayerSceneNode::Render`
+calls `UHelmet::DrawHUD` whenever the level is drawn, skipping it only
+for split screen or the console's `NOHUD` debug command (checked in its
+machine code; nothing kept). Every widget's place, size, font, wrap width
+(`InfoText.MaxSizeX` 0.38) and shown/hidden state is the class's own
+default, changed only by its `Init` and `SetInfoOptions`. Not
+done: the other languages' moves (the port reads only English).
 
 Following the first exit of each map from `pro` visits all 56 campaign
 maps in order and ends at `epilogue`; no exit names a missing map.

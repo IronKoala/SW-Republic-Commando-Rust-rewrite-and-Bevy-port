@@ -49,3 +49,34 @@ pub struct RoomEcho {
     /// Which effect it is (`EFFECT_CASTLE_LARGEROOM1`), for the log.
     pub name: String,
 }
+
+/// The game's `AudioParams.Category` a sound plays with (0 music, 1
+/// voice, 2 sound effects; `rc_package::sound::AG_*`). The game turns a
+/// sound up and down with the slider for its category
+/// (`UAudioSubsystem::GetMasterVolumeMultiplier`: 0 the music volume, 1
+/// the voice volume, anything else the sound volume); the SOUND options
+/// follow this tag when a sound has it.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoundCategory(pub u8);
+
+/// A sound's EAX occlusion, mB (0 or less): how much the walls between
+/// it and the listener muffle it, by the game's rules (set by the sound
+/// engine; `FAbstractSource` reach against its full reach,
+/// `868.589 * ln(reach / full)`). The room's echo part plays it
+/// (`rc_audio::room::occlusion_gains`).
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EaxOcclusion {
+    pub millibels: i32,
+}
+
+/// The AUDIO menu's EAX row: with it off the game sends no sound to the
+/// room's echo and muffles nothing (`ALAudio.dll` without EAX). On by
+/// default.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EaxOn(pub bool);
+
+impl Default for EaxOn {
+    fn default() -> Self {
+        EaxOn(true)
+    }
+}

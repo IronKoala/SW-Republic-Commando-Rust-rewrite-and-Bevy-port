@@ -1109,11 +1109,14 @@ fn steps() -> Vec<Step> {
             |w| objective_line(w).is_ok(),
             60.0,
         ),
-        Shot("objective"),
+        // Checked in the same frame the wait ends: a subtitle starting
+        // during the screenshot takes the objective's place (as in the
+        // original), which made the check depend on timing.
         Check(
             "the current objective is drawn at the top, as in the original",
             objective_line,
         ),
+        Shot("objective"),
         // The landing gunship hovers over the landing zone, as in the
         // user's screenshot of the original: its class turns
         // `bAlignBottom` off, so it is drawn from its map place, not
@@ -1684,6 +1687,139 @@ fn steps() -> Vec<Step> {
             |w| marker_heard(w, HANGAR_EVENT) && door_closed(w, HANGAR_DOOR) == Some(false),
             5.0,
         ),
+        // A hint screen, asked for the way geo_01a's scripts ask (sent
+        // here directly; the real ones wait for the player to get there).
+        Note(|w| {
+            w.resource_mut::<Settings>().game.hint_screens = true;
+            hint_ask(w, true);
+        }),
+        Wait(0.5),
+        Check(
+            "a hint pauses play and shows the original hint page with the level's text",
+            hint_shown,
+        ),
+        Shot("hint"),
+        Press(Action::MenuBack),
+        Wait(0.3),
+        Check("back does nothing on a hint", |w| match (shown_page(w), page(w)) {
+            (Some(k), _) if k == "hint" => Ok("still showing".into()),
+            (None, Page::Hint) => Ok("placeholder still showing".into()),
+            other => Err(format!("{other:?}")),
+        }),
+        // A second hint while one shows takes its place (ShowMenu opens the
+        // page even when play is paused; MenuOpen destroys the old one).
+        Note(|w| hint_ask_text(w, true, HINT_TEXT_2)),
+        Wait(0.5),
+        Check("a second hint takes the first one's place", |w| {
+            let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+            let by_text = w
+                .resource::<crate::hints::Hints>()
+                .showing
+                .as_ref()
+                .map(|h| h.text.clone());
+            let page_text = match shown_page(w) {
+                Some(k) => match w.resource::<OriginalMenus>().pages[&k]
+                    .screen
+                    .layout
+                    .widget("InfoText")
+                    .map(|w| &w.kind)
+                {
+                    Some(rc_menus::layout::Kind::Text(t)) => Some(t.text.clone()),
+                    _ => None,
+                },
+                None => None,
+            };
+            let got = format!("play {play:?}, hint {by_text:?}, page text {page_text:?}");
+            let placeholder = !w.resource::<OriginalMenus>().active();
+            if play == Some(Play::Paused)
+                && by_text.as_deref() == Some(HINT_TEXT_2)
+                && (placeholder || page_text.as_deref() == Some(HINT_TEXT_2))
+            {
+                Ok(got)
+            } else {
+                Err(got)
+            }
+        }),
+        Press(Action::MenuAccept), // CONTINUE WITH HINTS
+        Until(
+            "CONTINUE WITH HINTS goes on playing, hints still on",
+            |w| hint_closed(w) && w.resource::<Settings>().game.hint_screens,
+            5.0,
+        ),
+        // With the helmet off the class moves the text up; then CONTINUE
+        // WITHOUT HINTS (one down from CONTINUE WITH HINTS).
+        Note(|w| {
+            w.resource_mut::<Settings>().game.helmet = false;
+            hint_ask(w, true);
+        }),
+        Wait(0.5),
+        Check("with the helmet off the hint's text moves up", |w| {
+            let got = hint_text_y(w)?;
+            if (got - 0.3).abs() < 1e-4 {
+                Ok(format!("InfoText at {got}"))
+            } else {
+                Err(format!("InfoText at {got}"))
+            }
+        }),
+        Press(Action::MenuDown),
+        Press(Action::MenuAccept), // CONTINUE WITHOUT HINTS
+        Until(
+            "CONTINUE WITHOUT HINTS goes on playing with hint screens off",
+            |w| hint_closed(w) && !w.resource::<Settings>().game.hint_screens,
+            5.0,
+        ),
+        Note(|w| {
+            w.resource_mut::<Settings>().game.helmet = true;
+            hint_ask(w, true);
+        }),
+        Wait(0.5),
+        Check("with hint screens off a hint doesn't show", |w| {
+            let h = w.resource::<crate::hints::Hints>();
+            let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+            if h.showing.is_none() && h.skipped > 0 && play == Some(Play::Running) {
+                Ok(format!("{} left out", h.skipped))
+            } else {
+                Err(format!("showing {:?}, play {play:?}", h.showing.is_some()))
+            }
+        }),
+        // A gamepad, as the original's console hands its buttons to the
+        // menu: B is CONTINUE WITHOUT HINTS (not back), and A is CONTINUE
+        // WITH HINTS whichever button has the focus.
+        Note(|w| {
+            w.resource_mut::<Settings>().game.hint_screens = true;
+            w.resource_mut::<ActionState>().last_device = rc_game_core::InputDevice::Gamepad;
+            hint_ask(w, true);
+        }),
+        Wait(0.5),
+        Press(Action::MenuBack), // the pad's B
+        Until(
+            "on a gamepad, B is CONTINUE WITHOUT HINTS",
+            |w| hint_closed(w) && !w.resource::<Settings>().game.hint_screens,
+            5.0,
+        ),
+        Note(|w| {
+            w.resource_mut::<Settings>().game.hint_screens = true;
+            hint_ask(w, true);
+        }),
+        Wait(0.5),
+        Press(Action::MenuDown), // focus on CONTINUE WITHOUT HINTS
+        Press(Action::MenuAccept), // the pad's A
+        Until(
+            "on a gamepad, A is CONTINUE WITH HINTS wherever the focus is",
+            |w| hint_closed(w) && w.resource::<Settings>().game.hint_screens,
+            5.0,
+        ),
+        Note(|w| {
+            w.resource_mut::<ActionState>().last_device = rc_game_core::InputDevice::KeyboardMouse
+        }),
+        // Hints back on, and saved so: CONTINUE WITHOUT HINTS saved the
+        // script's settings file with them (and the helmet) off.
+        Note(|w| {
+            w.resource_mut::<Settings>().game.hint_screens = true;
+            let path = w.resource::<crate::settings::SettingsPath>().clone();
+            let log = w.resource::<GameLog>().clone();
+            crate::menu::save_settings(w.resource::<Settings>(), &path, &log);
+        }),
         // The end-of-campaign debriefing, asked for the way geo_05c's
         // last script asks (sent here directly; the real one waits for
         // the end of that level). CONTINUE loads geo_01b again.
@@ -2938,6 +3074,19 @@ fn droid_modes(section: Option<&toml::Value>) -> Vec<String> {
 fn run(world: &mut World) {
     let dt = world.resource::<Time>().delta_secs();
     let log = world.resource::<GameLog>().clone();
+    // A level's own hint screen pauses play, as in the original (the
+    // bacta lesson in geo_01a shows one). The self-test isn't about those,
+    // so it goes on at once with CONTINUE WITH HINTS; the hint checks ask
+    // for their own hints and answer them by pressing the buttons.
+    let real_hint = world
+        .resource::<crate::hints::Hints>()
+        .showing
+        .as_ref()
+        .is_some_and(|h| h.by != "the self-test");
+    if real_hint && world.resource::<Menu>().hint_answer.is_none() {
+        log.line("script: a level's hint screen showed; CONTINUE WITH HINTS");
+        world.resource_mut::<Menu>().hint_answer = Some(true);
+    }
     let mut held = HashSet::new();
     loop {
         let (step, t, frames) = {
@@ -4846,6 +4995,83 @@ fn level_exit_found(w: &mut World) -> Result<String, String> {
 
 /// Note the health and magazine, take a little health off (so carrying it
 /// over shows), and put the player in the exit.
+/// A hint's text, as geo_01a's first hint has it.
+const HINT_TEXT: &str = "Crouch is useful for ducking behind cover and crawling into vents.";
+
+/// A second hint's text (the self-test's own words).
+const HINT_TEXT_2: &str = "A second hint from the self-test.";
+
+fn hint_ask(w: &mut World, for_hint_text: bool) {
+    hint_ask_text(w, for_hint_text, HINT_TEXT);
+}
+
+fn hint_ask_text(w: &mut World, for_hint_text: bool, text: &str) {
+    w.write_message(rc_game_core::ShowHint {
+        menu_class: rc_menus::hint::HINT_MENU.into(),
+        title: String::new(),
+        text: text.into(),
+        picture: String::new(),
+        for_hint_text,
+        by: "the self-test".into(),
+    });
+    w.resource::<GameLog>().line("script: asked for a hint");
+}
+
+fn hint_closed(w: &mut World) -> bool {
+    w.resource::<crate::hints::Hints>().showing.is_none()
+        && w.get_resource::<State<Play>>().map(|p| *p.get()) == Some(Play::Running)
+}
+
+fn hint_text_y(w: &mut World) -> Result<f32, String> {
+    let k = shown_page(w).ok_or("no original page showing")?;
+    let m = w.resource::<OriginalMenus>();
+    match m.pages[&k].screen.layout.widget("InfoText").map(|w| &w.kind) {
+        Some(rc_menus::layout::Kind::Text(t)) => Ok(t.pos[1]),
+        _ => Err("no InfoText".into()),
+    }
+}
+
+fn hint_shown(w: &mut World) -> Result<String, String> {
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    if play != Some(Play::Paused) {
+        return Err(format!("play is {play:?}, not paused"));
+    }
+    if page(w) != Page::Hint {
+        return Err(format!("page {:?}", page(w)));
+    }
+    if !w.resource::<OriginalMenus>().active() {
+        return Ok("no original menus: placeholder page".into());
+    }
+    let k = shown_page(w).ok_or("placeholder page, see the log for why")?;
+    let m = w.resource::<OriginalMenus>();
+    let screen = &m.pages[&k].screen;
+    let l = &screen.layout;
+    let text = match l.widget("InfoText").map(|w| &w.kind) {
+        Some(rc_menus::layout::Kind::Text(t)) => t.text.clone(),
+        _ => String::new(),
+    };
+    let hidden = |n: &str| l.widget(n).is_none_or(|w| w.hidden);
+    let got = format!(
+        "page {k}, text {text:?}, title hidden {}, picture hidden {}, picture frame hidden {}, focus on {:?}, buttons {:?}",
+        hidden("InfoTitle"),
+        hidden("InfoPic"),
+        hidden("InfoPicBorder"),
+        screen.focused_name(),
+        screen.reachable_names()
+    );
+    if text == HINT_TEXT
+        && hidden("InfoTitle")
+        && hidden("InfoPic")
+        && !hidden("InfoPicBorder")
+        && screen.focused_name() == Some("AButton")
+        && screen.reachable_names() == ["AButton", "BButton"]
+    {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
 /// Words for the debriefing check: this script's own, not the game's.
 const DEBRIEF_TITLE: &str = "SCRIPT DEBRIEFING";
 const DEBRIEF_TEXT: &str = "A test of the debriefing screen: this text is the self-test's own, and long enough to wrap onto a second line.";

@@ -195,6 +195,26 @@ pub struct ShowDebriefing {
     pub then: ChangeLevel,
 }
 
+/// Show a hint screen (the tutorial pop-ups such as "Crouch is useful for
+/// ducking behind cover..."). Sent by the level scripts part for
+/// `ACTION_ShowDebriefingScreen` without a `NewLevel`; every one in the
+/// campaign names `XInterfaceCTMenus.CTPauseHintText` and sets
+/// `bIsForHintText`. The game (`rc_game`) pauses play and shows the
+/// original's page, as the original's `CTPlayer.ShowMenu` does, unless
+/// hint screens are switched off and `for_hint_text` is set.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct ShowHint {
+    /// The map's menu class (`XInterfaceCTMenus.CTPauseHintText`).
+    pub menu_class: String,
+    pub title: String,
+    pub text: String,
+    pub picture: String,
+    /// The action's `bIsForHintText`: switched off with the hints.
+    pub for_hint_text: bool,
+    /// What sent it, for the log.
+    pub by: String,
+}
+
 /// Where the player should arrive on the map being loaded: a `Teleporter`'s
 /// `Tag` (see [`ChangeLevel::portal`]). Put in by the save part before
 /// loading; the level part reads it, uses that teleporter's place as the

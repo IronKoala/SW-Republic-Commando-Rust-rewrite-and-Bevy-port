@@ -69,7 +69,7 @@ pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone,
     FactoryOrder,
     LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
-    ShowDebriefing, SquadMembership, SquadStanceOrder, UseClaimed,
+    ShowDebriefing, ShowHint, SquadMembership, SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
@@ -79,7 +79,9 @@ pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use shake::{ShakeView, StopShake, ViewShake};
-pub use sound::{Dry, RoomEcho, SoundAt, VisionModeNow, Voice};
+pub use sound::{
+    Dry, EaxOcclusion, EaxOn, RoomEcho, SoundAt, SoundCategory, VisionModeNow, Voice,
+};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
@@ -128,6 +130,7 @@ impl Plugin for CorePlugin {
             .add_message::<ChangeLevel>()
             .add_message::<TurretOrder>()
             .add_message::<ShowDebriefing>()
+            .add_message::<ShowHint>()
             .init_resource::<Cutscene>()
             .init_resource::<UseItem>()
             .add_message::<TeleportPlayer>()

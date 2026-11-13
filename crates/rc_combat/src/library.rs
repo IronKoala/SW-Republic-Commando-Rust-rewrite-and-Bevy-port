@@ -46,6 +46,30 @@ impl WeaponLibrary {
     }
 }
 
+/// The `Params` (`package.name`, lower case; `None`: it names none) of
+/// each single sound read from the game, by its sound asset. The game
+/// plays a group's pick with the picked sound's own `Params`
+/// (`UAudioSubsystem::PlayUSound` takes the group down to the one sound,
+/// then `USound::GetParams`, which falls back to the `AudioParams` class
+/// defaults, not the group's), so this is kept per sound.
+static SOUND_PARAMS: std::sync::LazyLock<
+    std::sync::RwLock<HashMap<bevy::asset::AssetId<AudioSource>, Option<String>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Note which `Params` a sound asset plays with (see [`sound_params`]).
+pub fn note_sound_params(id: bevy::asset::AssetId<AudioSource>, params: Option<String>) {
+    if let Ok(mut m) = SOUND_PARAMS.write() {
+        m.insert(id, params);
+    }
+}
+
+/// The `Params` a sound asset read from the game plays with: `None` when
+/// it wasn't read by [`read_sounds`] (or noted), `Some(None)` when the
+/// sound names no `Params` (the game then uses the class defaults).
+pub fn sound_params(id: bevy::asset::AssetId<AudioSource>) -> Option<Option<String>> {
+    SOUND_PARAMS.read().ok()?.get(&id).cloned()
+}
+
 /// One sound name from a game package, ready to play. A plain `Sound` has
 /// one variant; a `SoundMultiple` (a group, such as `Uzi_Fire` or a droid's
 /// `BD1_SpottedEnemy`) has several, and each playing picks the next one.
@@ -466,6 +490,7 @@ pub fn read_sounds(
                     Some(rc_package::properties::Value::Bool(true))
                 );
                 let v = (h, params_of(&pkg, &snd.properties, package), looping);
+                note_sound_params(v.0.id(), v.1.clone());
                 cache.insert(i, v.clone());
                 Some(v)
             }

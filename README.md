@@ -573,8 +573,11 @@ copy of the game.
   pause menu script; tested in the cloud, not yet on Windows): LOAD LAST
   SAVE only while you are down, QUICK LOAD only with a quicksave, no saving
   during a briefing or in the prologue, and ENABLE HINTS only when hint
-  screens are off in a level that has them. The hint screens themselves
-  aren't built yet, so ENABLE HINTS only switches the setting back on.
+  screens are off in a level that has them. **The hint screens are the
+  original's** (tested in the cloud sandbox with the install, not yet on
+  Windows): the 29 tutorial pop-ups in geo_01a to geo_04d pause the game
+  and show the level's text on the original page, with CONTINUE WITH HINTS
+  and CONTINUE WITHOUT HINTS (which switches them off until ENABLE HINTS).
   **LOAD GAME and SAVE GAME are the original's pages** (tested in the
   cloud sandbox with the install, and by the user on Windows on 2026-11-09): the saves in a list
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
