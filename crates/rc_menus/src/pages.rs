@@ -134,6 +134,9 @@ pub struct PagePlan {
     /// its full-screen backdrop widens) instead of spreading it out
     /// (`fit::together`).
     pub keep_together: bool,
+    /// The page has nothing to choose (the plain loading screen): no
+    /// button needed.
+    pub nothing_to_choose: bool,
 }
 
 /// A button the port adds to an original page, made as a copy of one of
@@ -324,7 +327,7 @@ pub fn check(layout: &mut MenuLayout, plan: &PagePlan) -> Result<PageButtons, Ve
             )),
         }
     }
-    if commands.is_empty() && why.is_empty() {
+    if commands.is_empty() && why.is_empty() && !plan.nothing_to_choose {
         why.push("no button can be chosen".into());
     }
     if !why.is_empty() {
@@ -404,6 +407,8 @@ struct PageDef {
     hidden_rows: Vec<String>,
     #[serde(default)]
     keep_together: bool,
+    #[serde(default)]
+    nothing_to_choose: bool,
 }
 
 #[derive(Deserialize)]
@@ -453,6 +458,7 @@ pub fn parse_plans(text: &str) -> Result<Vec<PagePlan>, String> {
             moves: d.moves.into_iter().collect(),
             hidden_rows: d.hidden_rows,
             keep_together: d.keep_together,
+            nothing_to_choose: d.nothing_to_choose,
         });
     }
     Ok(out)
