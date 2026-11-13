@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-13: Fix the crash when a level script breaks a prop (rc_level_viewer, rc_scripts_plugin)
+
+- **Changed:** New `rc_level_viewer::draw::PartLight`: when the level is drawn, each mover or tagged prop part keeps the average of its vertex colours. `rc_scripts_plugin::breakables` lights a broken prop's pieces from it, instead of reading the intact prop's mesh.
+- **Why:** User playtest of geo_03a crashed at the moment the script breaks `JammingDevice2` ("Mesh has been extracted to RenderWorld"). Level meshes are sent to the graphics card only (`RenderAssetUsages::RENDER_WORLD`), so the main world can't read their colours afterwards and Bevy panics. The bug was on main too; headless tests never send meshes to a graphics card, so they couldn't catch it.
+- **Where it comes from:** the crash line in the user's `logs/rc_game.log` and `bevy_mesh` 0.20.1 `Mesh::attribute`. Same light values as before (the colours exactly as drawn), now read at draw time.
+- **Tested how:** `cargo test -p rc_level_viewer -p rc_scripts_plugin`, `cargo build --release -p rc_game`.
+- **Result:** tests pass, game builds. Not run in the full game in the cloud.
+- **Still broken / not tested:** Not yet re-tested on Windows.
+- **Next:** User re-runs geo_03a past the jamming devices.
+
 ## 2026-11-12: The events Geonosis levels wait for: squad and player down/revived, weapon pickups, first draw, out of ammo (rc_combat, rc_squad, rc_squad_plugin, rc_level, rc_level_plugin, rc_game_core, data/weapons, data/combat/player.toml, data/pickups/weapon_pickups.toml)
 
 - **Changed:** New `rc_combat::level_events`: a placed weapon's map `Event` when it is taken into the hands, each weapon's `[events] first_draw` the first time the player brings it up (`WeaponsDrawn`, saved in `[combat]` as `drawn`), `[events] out_of_ammo` when the weapon in hand runs dry, and the player's `[events] down` / `revived` from `player.toml`. Squad mates send the map's `Event` / `ReviveEvent` (or a spawner's `PawnEventFromFactory`) on going down and being revived (`rc_squad::PlacedMate`/`SquadFactory`, `MateTags`, `check_down`). The player now starts each level with the DC-17m and the map's `PlayerStart` `StartInventory` (new `MapCollision::start_inventory`, `rc_game_core::pickups::LevelStartInventory`), instead of every attachment from the start.

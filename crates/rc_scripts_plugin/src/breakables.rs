@@ -393,7 +393,7 @@ pub(crate) fn show(
     parts: Option<Res<LevelParts>>,
     paths: Option<Res<GamePaths>>,
     mut effects: MessageWriter<SpawnEffect>,
-    drawn: Query<(&MoverPart, &Mesh3d)>,
+    drawn: Query<(&MoverPart, &rc_level_viewer::draw::PartLight)>,
     looks: Query<(Entity, &BrokenLook)>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
@@ -457,19 +457,14 @@ pub(crate) fn show(
         // one (it has none of its own).
         let mut sum = Vec4::ZERO;
         let mut n = 0.0;
-        for (part, mesh) in &drawn {
+        // Each part's average was recorded when the level was drawn: the
+        // mesh itself is on the graphics card by now and can't be read.
+        for (part, part_light) in &drawn {
             if part.0 != export {
                 continue;
             }
-            if let Some(bevy::mesh::VertexAttributeValues::Float32x4(c)) = meshes
-                .get(&mesh.0)
-                .and_then(|m| m.attribute(Mesh::ATTRIBUTE_COLOR))
-            {
-                for v in c {
-                    sum += Vec4::from_array(*v);
-                    n += 1.0;
-                }
-            }
+            sum += part_light.0;
+            n += 1.0;
         }
         let light = if n > 0.0 { sum / n } else { Vec4::ONE };
         match rc_effects_plugin::static_mesh(m, path) {

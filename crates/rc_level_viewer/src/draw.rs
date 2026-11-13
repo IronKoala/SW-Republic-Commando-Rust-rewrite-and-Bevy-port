@@ -27,6 +27,22 @@ pub const BACKGROUND: [u8; 3] = [64, 72, 89];
 #[derive(Component, Debug, Clone, Copy)]
 pub struct MoverPart(pub usize);
 
+/// A mover part's stored light (its vertex colours as drawn), averaged.
+/// Kept here because the mesh's own copy goes to the graphics card and
+/// can't be read back afterwards; a broken prop's pieces are lit with it.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PartLight(pub Vec4);
+
+/// The average of a mesh's vertex colours, if it has any.
+fn average_colour(mesh: &Mesh) -> Option<Vec4> {
+    let Some(bevy::mesh::VertexAttributeValues::Float32x4(c)) =
+        mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+    else {
+        return None;
+    };
+    (!c.is_empty()).then(|| c.iter().map(|v| Vec4::from_array(*v)).sum::<Vec4>() / c.len() as f32)
+}
+
 /// What `spawn_level` drew, for the log.
 #[derive(Debug, Default, Clone)]
 pub struct DrawReport {
@@ -257,6 +273,7 @@ pub fn spawn_level(
                 diffuse: images.add(to_image(picture)),
                 bump: bump_image,
             };
+            let light = average_colour(&mesh);
             let mut entity = commands.spawn((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(bump_mats.add(material)),
@@ -264,6 +281,9 @@ pub fn spawn_level(
             ));
             if let Some(m) = b.mover {
                 entity.insert(MoverPart(m));
+                if let Some(l) = light {
+                    entity.insert(PartLight(l));
+                }
             }
             if b.sky {
                 entity.insert(RenderLayers::layer(crate::sky::SKY_LAYER));
@@ -360,6 +380,7 @@ pub fn spawn_level(
             },
             ..default()
         };
+        let light = average_colour(&mesh);
         let mut entity = commands.spawn((Mesh3d(meshes.add(mesh)), Transform::default()));
         if prop_shader {
             let gain = if prop_live { settings.live_light_on_props } else { 0.0 };
@@ -392,6 +413,9 @@ pub fn spawn_level(
         }
         if let Some(m) = b.mover {
             entity.insert(MoverPart(m));
+            if let Some(l) = light {
+                entity.insert(PartLight(l));
+            }
         }
         if b.sky {
             entity.insert(RenderLayers::layer(crate::sky::SKY_LAYER));
