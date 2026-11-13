@@ -1745,25 +1745,46 @@ battle in the distance, `GEO_Sound.ambPS_GEO_battle_lp_01`) and through
 class defaults (`Fire_Medium` crackles `ambPS_GEN_fireMd_lp_01`,
 `WhiteSmoke` hisses `ambPS_GEN_steam_lp_05`, both in CTEffects.u). While
 loading, `rc_level::ambient::read` lists every actor with one (the map's
-value first, then its class chain via `ClassLooks`), leaving out movers
-(theirs is `MoveAmbientSound`, while moving) and characters. They reach the
-game as `rc_level_plugin::LevelAmbientSounds`. On the first frame of play
-`ambient::start` reads the sounds and their `AudioParams` and loops each at
-its actor's spot, with the same `Placed` loudness rule as script sounds
-(so `sounds::follow` updates it as you move). That rule is the game's: its
-`Engine.dll` hands OpenAL each sound's `AudioParams.Radius` (0 counts as
-10; the `ForceClamp*Radius` settings can only shrink it) as the reference
-distance, with the inverse-distance-clamped model and a roll-off of 1, so a
-sound plays in full out to `Radius` and at `Radius / distance` beyond. The
-battle loop's `Ambience_PS_01` has `Radius` 10, so the game keeps it very
-quiet until you are near it; they pause with the game and
-stop when the level ends. geo_01a has 6 (`cargo run -p rc_level --example
-ambient_sounds -- <game folder> geo_01a`). The placed emitters' particles are drawn
-by `placed_emitters` through the effects part, which leaves their
-`AmbientSound` to this (`SpawnEffect::skip_ambient_sound`), so it plays
-once, from its place. Switching an emitter off with a level event stops
-its particles only: the sound belongs to the actor, not its particle
-emitters.
+value first, then its class chain via `ClassLooks`), with its
+`SoundOcclusion`, leaving out movers (theirs is `MoveAmbientSound`, while
+moving) and characters. They reach the game as
+`rc_level_plugin::LevelAmbientSounds`. On the first frame of play
+`ambient::start` reads the sounds and their `AudioParams`
+(`AmbientSources`); after that `ambient::update` follows the game's
+`UAudioSubsystem::UpdateAmbientList`/`UpdateAmbients` (Engine.dll, read by
+disassembly, never committed): a loop starts when the listener is within
+`Radius × 100` (`GAudioMaxRadiusMultiplier`), times `0.85 ^ (rooms
+apart²)` when a level wall is between, fading in over 0.4 s; it stops past
+that distance plus 10, fading out over 0.3 s, and starts from its
+beginning next time. While playing it is a `Placed` sound like the script
+sounds. geo_01a's six loops all use `Ambience_PS_01`, `Radius` 10 on PC
+(1000 on Xbox), so they can be heard only within 1000 units. geo_01a has 6
+(`cargo run -p rc_level --example ambient_sounds -- <game folder>
+geo_01a`). The placed emitters' particles are drawn by `placed_emitters`
+through the effects part, which leaves their `AmbientSound` to this
+(`SpawnEffect::skip_ambient_sound`), so it plays once, from its place.
+Switching an emitter off with a level event stops its particles only: the
+sound belongs to the actor, not its particle emitters.
+
+**Walls, rooms and placed sounds** (`rc_level::hearing`,
+`rc_scripts_plugin::sounds::{Placed, Reach}`). Every placed sound (script
+sounds, animation sounds, map loops) gets louder and quieter by the game's
+own rule. OpenAL's inverse-distance-clamped model, roll-off 1, with the
+reference distance ("reach") set each frame by
+`FAbstractSource::UpdateRadii`: the sound's `Radius` when the straight
+line from sound to listener crosses no solid part of the level's BSP
+(`ULevel::IsAudibleAt` → `UModel::FastLineCheck`; placed meshes don't
+count, a mover's sound and `OCCLUSION_None` actors are never blocked),
+otherwise `Radius × 0.85^(steps²) × 0.35`, where `steps` comes from the
+64 × 64 zone table `UGameEngine::LoadMap` builds from each zone's
+`Connectivity`. The zones are the sound's spot and the listener's spot
+(`UModel::PointRegion`, the same walk as `Bsp::point_zone`). The reach
+eases toward its target as the game does: by `(now − when the target last
+changed)` of the way each frame, jumping straight there before the first
+change. OpenAL refuses a negative distance, so a negative overshoot keeps
+the last good one. `now` is the level scripts' clock (the game uses its
+level time, `GEngineTime`). Loudness is `reach / distance` beyond the
+reach, times the loop's fade.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).

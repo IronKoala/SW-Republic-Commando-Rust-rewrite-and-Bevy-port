@@ -25,8 +25,9 @@ use rc_game_core::units::to_unreal;
 use rc_game_core::{AnimSound, AnimSoundsWanted, GameLog, GamePaths, PlayerCamera, SoundAt};
 use std::collections::{BTreeMap, HashMap};
 
-use crate::sounds::{loudness, Placed};
+use crate::sounds::{sound_clock, Placed};
 use crate::{LevelScript, PART};
+use rc_level_plugin::LevelHearing;
 
 /// An animation's sound, playing.
 #[derive(Component, Debug, Clone)]
@@ -131,8 +132,11 @@ pub(crate) fn play(
     script: Option<Res<LevelScript>>,
     bodies: Query<&GlobalTransform>,
     ears: Query<&GlobalTransform, With<PlayerCamera>>,
+    hearing: Option<Res<LevelHearing>>,
+    time: Res<Time>,
     log: Res<GameLog>,
 ) {
+    let now = sound_clock(script.as_deref(), &time);
     let (volume, default_radius) = script.as_ref().map_or((1.0, 600.0), |s| {
         (
             s.director.settings.sound_volume,
@@ -157,22 +161,25 @@ pub(crate) fn play(
         let at = bodies.get(a.from).map(|g| g.translation()).ok();
         match (p.is_some_and(|p| p.non_positional), at) {
             (false, Some(at)) => {
-                // A Radius of 0 counts as 10 (the game's sound code).
-                let radius = match p.and_then(|p| p.radius) {
-                    Some(r) if r > 0.0 => r,
-                    Some(_) => 10.0,
-                    None => default_radius,
-                };
+                let radius = p.and_then(|p| p.radius).unwrap_or(default_radius);
                 let falloff = !p.is_some_and(|p| p.no_falloff);
+                let mut placed = Placed::new(radius, falloff, Some(a.from));
+                let radius = placed.radius;
                 let gain = ear.map_or(1.0, |e| {
-                    loudness(to_unreal(at - e).length(), radius, falloff)
+                    placed.update(
+                        hearing.as_ref().map(|h| &*h.0),
+                        to_unreal(at),
+                        to_unreal(e),
+                        now,
+                    )
                 });
                 commands.spawn((
                     tag,
                     AudioPlayer(h),
-                    PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume * gain)),
+                    PlaybackSettings::DESPAWN
+                        .with_volume(Volume::Linear(placed.start_volume(volume))),
                     SoundAt::place(at),
-                    Placed::new(radius, falloff, Some(a.from), gain),
+                    placed,
                 ));
                 log.line(format!(
                     "{PART}: {} plays {name}, reach {radius:.0} uu, loudness {gain:.2}",

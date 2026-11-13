@@ -3263,9 +3263,6 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
     }
 }
 
-/// The map's looping sounds (`rc_scripts_plugin::ambient`): geo_01a's
-/// battle loop and its 4 fires and steam vent, each placed where the map
-/// puts it, all from the game's own sounds.
 fn anim_sounds_played(w: &mut World) -> Result<String, String> {
     let Some(s) = w.get_resource::<rc_scripts_plugin::anim_sounds::AnimSounds>() else {
         return Err("no animation sounds read".into());
@@ -3287,29 +3284,68 @@ fn anim_sounds_played(w: &mut World) -> Result<String, String> {
     }
 }
 
+/// The map's looping sounds (`rc_scripts_plugin::ambient`): geo_01a's
+/// battle loop, 4 fires and a steam vent are read from the game's own
+/// sounds, and each plays exactly when the game's rule says the player can
+/// hear it: within its `Radius` times 100, times `0.85 ^ (rooms apart
+/// squared)` when a wall of the level is between. At geo_01a's start all
+/// six are thousands of units away, so none plays yet.
 fn level_ambient_loops(w: &mut World) -> Result<String, String> {
+    use rc_scripts_plugin::ambient::{AmbientSources, MAX_RADIUS_MULTIPLIER, STOP_MARGIN};
     let wanted = w
         .get_resource::<rc_level_plugin::LevelAmbientSounds>()
         .map_or(0, |a| a.0.len());
-    let mut q = w.query::<(
-        &rc_scripts_plugin::ambient::AmbientLoop,
-        Has<rc_game_core::SoundAt>,
-    )>();
-    let mut playing: Vec<String> = q
-        .iter(w)
-        .map(|(a, placed)| {
-            format!(
-                "{} {}{}",
-                a.actor,
-                a.sound,
-                if placed { "" } else { " (everywhere)" }
-            )
-        })
-        .collect();
-    playing.sort();
-    let battle = playing.iter().any(|p| p.contains("ambPS_GEO_battle_lp_01"));
-    let got = format!("{} of {wanted} loops playing: {playing:?}", playing.len());
-    if wanted >= 6 && playing.len() == wanted && battle {
+    let hearing = w
+        .get_resource::<rc_level_plugin::LevelHearing>()
+        .map(|h| h.0.clone());
+    let ear = {
+        let mut q = w.query_filtered::<&GlobalTransform, With<rc_game_core::PlayerCamera>>();
+        q.iter(w)
+            .next()
+            .map(|g| rc_game_core::units::to_unreal(g.translation()))
+    };
+    let Some(ear) = ear else {
+        return Err("no listener".into());
+    };
+    let Some(src) = w.get_resource::<AmbientSources>() else {
+        return Err(format!("{wanted} loops in the map, none read"));
+    };
+    let mut rows = Vec::new();
+    let mut wrong = Vec::new();
+    for s in &src.list {
+        let (a, e) = ([s.at.x, s.at.y, s.at.z], [ear.x, ear.y, ear.z]);
+        let (clear, share) = match &hearing {
+            Some(h) if s.walls && !h.line_clear(a, e) => {
+                (false, h.radius_multiplier(h.zone_at(a), h.zone_at(e)))
+            }
+            _ => (true, 1.0),
+        };
+        let reach = s.radius * MAX_RADIUS_MULTIPLIER * share;
+        let d = (s.at - ear).length();
+        let should = d <= reach;
+        let may = d <= reach + STOP_MARGIN;
+        let on = s.playing.is_some();
+        rows.push(format!(
+            "{} {} {d:.0} uu, heard within {reach:.0}{}{}",
+            s.actor,
+            s.sound,
+            if clear { "" } else { " (wall between)" },
+            if on { ", playing" } else { "" }
+        ));
+        if (should && !on) || (on && !may) {
+            wrong.push(s.actor.clone());
+        }
+    }
+    let battle = src
+        .list
+        .iter()
+        .any(|s| s.sound.eq_ignore_ascii_case("ambPS_GEO_battle_lp_01"));
+    let got = format!(
+        "{} of {wanted} loops read, {} started so far: {rows:?}; wrong: {wrong:?}",
+        src.list.len(),
+        src.starts
+    );
+    if wanted >= 6 && src.list.len() == wanted && battle && wrong.is_empty() {
         Ok(got)
     } else {
         Err(got)

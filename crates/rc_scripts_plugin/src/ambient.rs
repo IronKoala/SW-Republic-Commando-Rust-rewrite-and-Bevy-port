@@ -3,31 +3,56 @@
 //! fires and a steam vent. Every one is the game's own sound file, at the
 //! actor's spot in the map.
 //!
-//! They start with the first frame of play, loop until the level ends,
-//! stop while the game is paused, and are placed and fade with distance by
-//! the game's own rule (`crate::sounds`, read from its sound code): full
-//! loudness out to the sound's `Radius` (its `AudioParams`), then
-//! `Radius / distance`, and silent past `Radius` times 100: the game's
-//! `UAudioSubsystem::UpdateAmbientList` (Engine.dll) only starts a loop
-//! within that reach, scaled down when walls are between (not done here),
-//! and plays it from its place, heard everywhere only when it belongs to
-//! the player's own actor. The distant battle's `Radius` is 10 uu, so the
-//! game itself keeps it very quiet until the player is near its speaker.
-//! Their loudness is the scripts' `[sound] volume`.
+//! When each one plays is the game's own rule, read from its
+//! `UAudioSubsystem::UpdateAmbientList` and `UpdateAmbients` (Engine.dll,
+//! 2026-11-13; the decompiled code stays on the PC and is never committed):
+//!
+//! - every frame the game works out how far the loop can be heard: its
+//!   `Radius` (its `AudioParams`) times 100 (`GAudioMaxRadiusMultiplier`,
+//!   Core.dll), times `0.85 ^ (rooms apart squared)` when a wall of the
+//!   level stands between the loop and the listener (`rc_level::hearing`);
+//! - a loop that isn't playing starts when the listener is within that
+//!   distance, fading in over 0.4 s;
+//! - a playing loop stops, fading out over 0.3 s, once the listener is more
+//!   than that distance plus 10 units away. Started again, it plays from
+//!   its beginning.
+//!
+//! While it plays it is a placed sound like any other (`crate::sounds`):
+//! full loudness out to its reach, then `reach / distance`, the reach
+//! shrinking when a wall is between. geo_01a's loops have `Radius` 10
+//! (`Params_SFX.Ambience_PS_01`; the Xbox's is 1000), so they are heard
+//! only within 1000 units, and loud only right next to them. A sound whose
+//! settings say `NonPositional` follows the same start and stop rule but is
+//! not placed. Their loudness is the scripts' `[sound] volume`.
+//!
+//! Left out (not needed on the levels checked): the game's sorting of loops
+//! by priority when it runs out of sound channels, and loops on the
+//! listener's own actor (always heard, never placed).
 
-use bevy::audio::{AudioSource, PlaybackSettings, Volume};
+use bevy::audio::{AudioSink, AudioSinkPlayback, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 use rc_game_core::units::{to_bevy, to_unreal};
 use rc_game_core::{GameLog, GamePaths, PlayerCamera, SoundAt};
-use rc_level_plugin::LevelAmbientSounds;
+use rc_level_plugin::{LevelAmbientSounds, LevelHearing};
 use std::collections::BTreeMap;
 
-use crate::sounds::{loudness, Placed};
+use crate::sounds::{sound_clock, Placed};
 use crate::{LevelScript, PART};
 
 /// Core.dll's `GAudioMaxRadiusMultiplier` (100, never changed in the
 /// game's code): how many times its `Radius` away a map's loop still plays.
 pub const MAX_RADIUS_MULTIPLIER: f32 = 100.0;
+
+/// A loop stops only this many units past where it starts
+/// (`UAudioSubsystem::UpdateAmbients`).
+pub const STOP_MARGIN: f32 = 10.0;
+
+/// Seconds a loop takes to fade in when it starts (`UpdateAmbients` asks
+/// `PlaySound` for 0.4) and out when it stops (`StopSound` with 0.3). Both
+/// fades are straight lines (`USound::GetFadeInType`/`GetFadeOutType`
+/// give 0).
+pub const FADE_IN: f32 = 0.4;
+pub const FADE_OUT: f32 = 0.3;
 
 /// A looping sound from the map, playing.
 #[derive(Component, Debug, Clone)]
@@ -36,36 +61,114 @@ pub struct AmbientLoop {
     pub sound: String,
     /// The actor it comes from (`AmbientSound0`).
     pub actor: String,
+    /// Its place in `AmbientSources::list`.
+    pub index: usize,
+    /// The fade, 0 to 1.
+    pub fade: Fade,
+    /// For a loop heard everywhere: the sound card's volume divided by the
+    /// fade, once it has started.
+    base: Option<f32>,
 }
 
-/// Start every looping sound the map places, once per level.
+/// A straight-line fade, as the game's `FAbstractSource::GetFadeMultiplier`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fade {
+    pub value: f32,
+    /// Where it is going: 1 fading in, 0 fading out.
+    pub target: f32,
+    /// Change per second.
+    pub rate: f32,
+    /// Seconds it lasts, and seconds gone.
+    pub length: f32,
+    pub elapsed: f32,
+    /// Still moving.
+    pub moving: bool,
+}
+
+impl Fade {
+    fn new(from: f32, to: f32, length: f32) -> Fade {
+        Fade {
+            value: from,
+            target: to,
+            rate: (to - from) / length,
+            length,
+            elapsed: 0.0,
+            moving: true,
+        }
+    }
+
+    /// One frame of `dt` seconds.
+    fn step(&mut self, dt: f32) -> f32 {
+        if !self.moving || dt >= 1.0 {
+            return self.value;
+        }
+        self.elapsed += dt;
+        self.value += self.rate * dt;
+        if self.rate > 0.0 {
+            self.value = self.value.min(self.target);
+        } else {
+            self.value = self.value.max(self.target);
+        }
+        if self.elapsed >= self.length {
+            self.value = self.target;
+            self.moving = false;
+        }
+        self.value
+    }
+
+    /// Fading out.
+    pub fn stopping(&self) -> bool {
+        self.target == 0.0
+    }
+}
+
+/// One of the map's looping sounds, ready to play.
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub sound: String,
+    pub actor: String,
+    /// Unreal units.
+    pub at: rc_movement::Vec3,
+    pub handle: Handle<AudioSource>,
+    /// Its settings' `Radius` as stored (for the start and stop distance).
+    pub radius: f32,
+    pub falloff: bool,
+    pub non_positional: bool,
+    /// The level's walls cut how far it is heard (its actor's
+    /// `SoundOcclusion` isn't `OCCLUSION_None`).
+    pub walls: bool,
+    /// Playing now.
+    pub playing: Option<Entity>,
+}
+
+/// The map's looping sounds, read once the level runs.
+#[derive(Resource, Debug, Default)]
+pub struct AmbientSources {
+    pub list: Vec<Source>,
+    /// How many times each has started and stopped, for the log and checks.
+    pub starts: usize,
+    pub stops: usize,
+}
+
+/// Read every looping sound the map places, once per level.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn start(
     mut commands: Commands,
     ambient: Option<Res<LevelAmbientSounds>>,
+    sources: Option<Res<AmbientSources>>,
     script: Option<Res<LevelScript>>,
     paths: Option<Res<GamePaths>>,
     audio: Option<ResMut<Assets<AudioSource>>>,
-    ears: Query<&GlobalTransform, With<PlayerCamera>>,
-    playing: Query<(), With<AmbientLoop>>,
     log: Res<GameLog>,
-    mut done: Local<bool>,
 ) {
-    let Some(ambient) = ambient else {
-        // A new level gets its own.
-        *done = false;
-        return;
-    };
-    if *done || !playing.is_empty() {
+    let Some(ambient) = ambient else { return };
+    if sources.is_some() {
         return;
     }
     let (Some(script), Some(paths), Some(mut audio)) = (script, paths, audio) else {
         return;
     };
-    *done = true;
-    if ambient.0.is_empty() {
-        return;
-    }
+    let mut ready = AmbientSources::default();
     // Read the sounds, one package at a time.
     let mut wanted: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for a in &ambient.0 {
@@ -94,8 +197,6 @@ pub(crate) fn start(
     let (params, mut unplaced) = rc_combat::read_audio_params(&paths, &param_packages);
     notes.append(&mut unplaced);
     let settings = &script.director.settings;
-    let ear = ears.iter().next().map(|g| g.translation());
-    let mut started = 0;
     for a in &ambient.0 {
         let name = a.sound.last().cloned().unwrap_or_default();
         let Some(sound) = sounds.get(&name.to_ascii_lowercase()) else {
@@ -106,73 +207,163 @@ pub(crate) fn start(
             ));
             continue;
         };
-        let Some(h) = sound.pick() else { continue };
+        let Some(handle) = sound.pick() else { continue };
         let p = sound.params.as_ref().and_then(|p| params.get(p));
-        let [x, y, z] = a.location;
-        let at = to_bevy(rc_movement::Vec3::new(x, y, z));
-        if p.is_some_and(|p| p.non_positional) {
-            commands.spawn((
-                AmbientLoop {
-                    sound: name.clone(),
-                    actor: a.name.clone(),
-                },
-                AudioPlayer(h),
-                PlaybackSettings::LOOP.with_volume(Volume::Linear(settings.sound_volume)),
-            ));
-            log.line(format!(
-                "{PART}: {} loops {name} (heard everywhere: the game's settings say so)",
-                a.name
-            ));
-            started += 1;
-            continue;
-        }
-        // A Radius of 0 counts as 10 (the game's sound code).
-        let radius = match p.and_then(|p| p.radius) {
-            Some(r) if r > 0.0 => r,
-            Some(_) => 10.0,
-            None => settings.sound_radius,
-        };
-        let falloff = !p.is_some_and(|p| p.no_falloff);
-        // The game plays a map's loop only while the listener is within
-        // Radius times `GAudioMaxRadiusMultiplier` (100, Core.dll), as
-        // its `UAudioSubsystem::UpdateAmbientList` does; nearer, it plays
-        // from its place like any sound.
-        let cut_off = radius * MAX_RADIUS_MULTIPLIER;
-        let distance = ear.map(|e| to_unreal(at - e).length());
-        let gain = distance.map_or(1.0, |d| {
-            if d > cut_off {
-                0.0
-            } else {
-                loudness(d, radius, falloff)
-            }
-        });
-        commands.spawn((
-            AmbientLoop {
-                sound: name.clone(),
-                actor: a.name.clone(),
-            },
-            AudioPlayer(h),
-            PlaybackSettings::LOOP.with_volume(Volume::Linear(settings.sound_volume * gain)),
-            SoundAt::place(at),
-            Placed::new(radius, falloff, None, gain).cut_off(cut_off),
-        ));
+        let radius = p.and_then(|p| p.radius).unwrap_or(settings.sound_radius);
+        let walls = a.sound_occlusion != 1;
         log.line(format!(
-            "{PART}: {} loops {name} at ({:.0}, {:.0}, {:.0}), reach {radius:.0} uu{}, {} uu away, loudness {gain:.2}",
+            "{PART}: {} loops {name} at ({:.0}, {:.0}, {:.0}), radius {radius:.0} uu{}{}{}: heard within {:.0} uu",
             a.name,
             a.location[0],
             a.location[1],
             a.location[2],
             if a.from_map { "" } else { " (its class's sound)" },
-            distance.map_or("?".into(), |d| format!("{d:.0}")),
+            if p.is_some_and(|p| p.non_positional) { ", not placed" } else { "" },
+            if walls { "" } else { ", walls don't muffle it" },
+            radius * MAX_RADIUS_MULTIPLIER,
         ));
-        started += 1;
+        ready.list.push(Source {
+            sound: name.clone(),
+            actor: a.name.clone(),
+            at: rc_movement::Vec3::new(a.location[0], a.location[1], a.location[2]),
+            handle,
+            radius,
+            falloff: !p.is_some_and(|p| p.no_falloff),
+            non_positional: p.is_some_and(|p| p.non_positional),
+            walls,
+            playing: None,
+        });
     }
     log.line(format!(
-        "{PART}: {started} of {} looping sounds from the map started",
+        "{PART}: {} of {} looping sounds from the map ready",
+        ready.list.len(),
         ambient.0.len()
     ));
     for n in notes {
         log.line(format!("{PART}:   looping sound: {n}"));
+    }
+    commands.insert_resource(ready);
+}
+
+/// Start and stop the map's loops as the listener moves, and run their
+/// fades (see the module notes).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn update(
+    mut commands: Commands,
+    sources: Option<ResMut<AmbientSources>>,
+    script: Option<Res<LevelScript>>,
+    hearing: Option<Res<LevelHearing>>,
+    ears: Query<&GlobalTransform, With<PlayerCamera>>,
+    mut loops: Query<(
+        &mut AmbientLoop,
+        Option<&mut Placed>,
+        Option<&mut AudioSink>,
+    )>,
+    time: Res<Time>,
+    log: Res<GameLog>,
+) {
+    let (Some(mut sources), Some(script)) = (sources, script) else {
+        return;
+    };
+    let Some(ear) = ears.iter().next().map(|g| to_unreal(g.translation())) else {
+        return;
+    };
+    let hearing = hearing.as_ref().map(|h| &*h.0);
+    let volume = script.director.settings.sound_volume;
+    let now = sound_clock(Some(&script), &time);
+    let dt = time.delta_secs();
+    let sources = &mut *sources;
+    for (index, s) in sources.list.iter_mut().enumerate() {
+        let e3 = [ear.x, ear.y, ear.z];
+        let a3 = [s.at.x, s.at.y, s.at.z];
+        let share = match hearing {
+            Some(h) if s.walls && !h.line_clear(a3, e3) => {
+                h.radius_multiplier(h.zone_at(a3), h.zone_at(e3))
+            }
+            _ => 1.0,
+        };
+        let reach = s.radius * MAX_RADIUS_MULTIPLIER * share;
+        let d = s.at - ear;
+        let d2 = d.dot(d);
+        match s.playing {
+            None => {
+                if d2 > reach * reach {
+                    continue;
+                }
+                let mut tag = AmbientLoop {
+                    sound: s.sound.clone(),
+                    actor: s.actor.clone(),
+                    index,
+                    fade: Fade::new(0.0, 1.0, FADE_IN),
+                    base: None,
+                };
+                let at = to_bevy(s.at);
+                let e = if s.non_positional {
+                    commands
+                        .spawn((
+                            AudioPlayer(s.handle.clone()),
+                            PlaybackSettings::LOOP.with_volume(Volume::Linear(volume * 1e-3)),
+                        ))
+                        .id()
+                } else {
+                    let mut placed = Placed::new(s.radius, s.falloff, None).faded_out();
+                    if !s.walls {
+                        placed = placed.through_walls();
+                    }
+                    placed.update(hearing, s.at, ear, now);
+                    let v = placed.start_volume(volume);
+                    commands
+                        .spawn((
+                            AudioPlayer(s.handle.clone()),
+                            PlaybackSettings::LOOP.with_volume(Volume::Linear(v)),
+                            SoundAt::place(at),
+                            placed,
+                        ))
+                        .id()
+                };
+                tag.fade.value = 0.0;
+                commands.entity(e).insert(tag);
+                s.playing = Some(e);
+                sources.starts += 1;
+                log.line(format!(
+                    "{PART}: {} starts looping {} ({:.0} uu away, heard within {reach:.0})",
+                    s.actor,
+                    s.sound,
+                    d2.sqrt()
+                ));
+            }
+            Some(e) => {
+                let Ok((mut l, placed, sink)) = loops.get_mut(e) else {
+                    continue;
+                };
+                let far = reach + STOP_MARGIN;
+                if !l.fade.stopping() && d2 > far * far {
+                    l.fade = Fade::new(l.fade.value, 0.0, FADE_OUT);
+                    log.line(format!(
+                        "{PART}: {} stops looping {} ({:.0} uu away, heard within {reach:.0})",
+                        s.actor,
+                        s.sound,
+                        d2.sqrt()
+                    ));
+                }
+                let fade = l.fade.step(dt);
+                if let Some(mut p) = placed {
+                    p.fade = fade;
+                } else if let Some(mut sink) = sink {
+                    let base = *l
+                        .base
+                        .get_or_insert_with(|| sink.volume().to_linear() / 1e-3);
+                    sink.set_volume(Volume::Linear(base * fade));
+                }
+                // The game stops a sound once its fade is below 0.0001 and
+                // it isn't fading in.
+                if l.fade.stopping() && fade < 1e-4 {
+                    commands.entity(e).try_despawn();
+                    s.playing = None;
+                    sources.stops += 1;
+                }
+            }
+        }
     }
 }
 
@@ -180,5 +371,26 @@ pub(crate) fn start(
 pub(crate) fn forget(mut commands: Commands, playing: Query<Entity, With<AmbientLoop>>) {
     for e in &playing {
         commands.entity(e).try_despawn();
+    }
+    commands.remove_resource::<AmbientSources>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fades_are_straight_lines() {
+        let mut f = Fade::new(0.0, 1.0, FADE_IN);
+        assert!((f.step(0.1) - 0.25).abs() < 1e-6);
+        assert!((f.step(0.1) - 0.5).abs() < 1e-6);
+        f.step(0.25);
+        assert_eq!(f.value, 1.0);
+        assert!(!f.moving);
+        let mut f = Fade::new(1.0, 0.0, FADE_OUT);
+        assert!((f.step(0.15) - 0.5).abs() < 1e-6);
+        f.step(0.2);
+        assert_eq!(f.value, 0.0);
+        assert!(f.stopping());
     }
 }

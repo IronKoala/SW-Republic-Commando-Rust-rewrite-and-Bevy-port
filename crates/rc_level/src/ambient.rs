@@ -38,6 +38,11 @@ pub struct AmbientSound {
     pub sound: Vec<String>,
     /// Whether the value came from the map (`false`: from the class).
     pub from_map: bool,
+    /// The actor's `SoundOcclusion` (engine.u `ESoundOcclusion`): 0
+    /// `OCCLUSION_Default` and 2 `OCCLUSION_BSP` let the level's walls
+    /// muffle it, 1 `OCCLUSION_None` never, 3 `OCCLUSION_StaticMeshes`
+    /// also checks placed meshes. Map value, else the class's, else 0.
+    pub sound_occlusion: u8,
 }
 
 /// Every actor in `level` with an ambient sound of its own or its class's.
@@ -84,6 +89,17 @@ pub fn read(
         let Ok(place) = actors::read_placement(map, data, a) else {
             continue;
         };
+        let sound_occlusion =
+            match properties::find(map, &props, "SoundOcclusion").map(|p| &p.value) {
+                Some(Value::Byte(b)) => *b,
+                _ => match look.as_ref().and_then(|l| l.find("SoundOcclusion", 0)) {
+                    Some((_, p)) => match p.value {
+                        Value::Byte(b) => b,
+                        _ => 0,
+                    },
+                    None => 0,
+                },
+            };
         out.push(AmbientSound {
             export: a,
             class: place.class,
@@ -91,6 +107,7 @@ pub fn read(
             location: place.location,
             sound,
             from_map,
+            sound_occlusion,
         });
     }
     out

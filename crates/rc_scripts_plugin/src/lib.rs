@@ -174,10 +174,14 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<rc_game_core::AnimSoundsWanted>()
             .add_message::<rc_game_core::AnimSound>()
             .add_systems(Update, (anim_sounds::load, anim_sounds::play).chain())
-            // The map's own looping sounds start with play.
+            // The map's own looping sounds: read when play starts, then
+            // started and stopped as the player moves.
             .add_systems(
                 Update,
-                ambient::start.in_set(GameSet::Simulate).run_if(playing),
+                (ambient::start, ambient::update)
+                    .chain()
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing),
             )
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(

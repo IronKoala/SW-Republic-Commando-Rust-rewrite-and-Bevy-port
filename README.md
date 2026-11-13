@@ -455,8 +455,10 @@ copy of the game.
   silent sound card, not yet listened to on Windows): on geo_01a the
   battle raging in the distance, four fires crackling and a steam vent,
   each from its place in the level and quieter further away by the game's
-  own rule (read from its sound code). The distant battle is set to carry
-  only 10 units, so it stays very quiet until you are near its speaker.
+  own rule (read from its sound code). As in the original, a loop starts
+  (fading in) only when you come within 1,000 units of it, less with a
+  wall in between, and fades out when you leave. Walls of the level
+  between you and any sound make it quieter, by the original's own sums.
   Characters' animations play their own sounds at the moments the game's
   animation files give (same testing): the intro Geonosian's wings and
   cry, the troopers' armour as they run, the gunship's engine as it

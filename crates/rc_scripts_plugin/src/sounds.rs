@@ -40,10 +40,13 @@
 //! each sound's reference distance set to its `AudioParams.Radius`
 //! (0 counts as 10), with distances and radius both in Unreal units
 //! (checked in the game's `Engine.dll` and `ALAudio.dll`, 2026-11-12;
-//! the decompiled code stays on the PC and is never committed). Two parts
-//! are still **our reading**: an action `Volume` above 1 (a few maps use 2
-//! to 10000) makes it carry that many times further instead of louder, and
-//! the quietest a sound gets is 1/1000 (so it can come back up).
+//! the decompiled code stays on the PC and is never committed). When a
+//! wall of the level stands between the sound and the listener, the reach
+//! shrinks to `Radius × 0.85^(rooms apart²) × 0.35`, eased frame by frame
+//! (see [`Reach`] and `rc_level::hearing`, read from the same code,
+//! 2026-11-13). One part is still **our reading**: an action `Volume`
+//! above 1 (a few maps use 2 to 10000) makes it carry that many times
+//! further instead of louder.
 //! `bDisable3DFalloff` sounds come from their side but don't fade. Which
 //! side a sound is on is the 3D SOUND option's job (`rc_game_core::SoundAt`).
 
@@ -61,6 +64,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
 use crate::{LevelScript, PART};
+use rc_level::hearing::Hearing;
+use rc_level_plugin::LevelHearing;
+use rc_movement::Vec3 as UVec3;
 
 /// Every sound the level's scripts can play, read while it loaded.
 #[derive(Resource, Debug, Default)]
@@ -105,58 +111,166 @@ pub(crate) struct SoundRequest {
     pub reach: f32,
 }
 
-/// A script sound with a place in the level: how loud it is with distance.
+/// A sound with a place in the level: how loud it is with distance, and
+/// what the level's walls and rooms do to it (see [`Reach`]).
 #[derive(Component, Debug, Clone)]
 pub struct Placed {
-    /// Unreal units: full loudness out to here (radius times reach).
+    /// Unreal units: full loudness out to here (radius times reach). A
+    /// `Radius` of 0 counts as 10, as in the game's `FAbstractSource::Init`.
     pub radius: f32,
     /// Quieter past `radius` (false for `bDisable3DFalloff`).
     pub falloff: bool,
     /// The character it comes from, followed as it moves.
     pub follow: Option<Entity>,
-    /// The distance loudness last given to the sound card.
+    /// The loudness last given to the sound card (distance times `fade`).
     pub gain: f32,
-    /// Silent past this distance (Unreal units): the game plays a map's
-    /// looping sound only within its `Radius` times 100 (see
-    /// `crate::ambient`). `None`: always heard.
-    pub cut_off: Option<f32>,
+    /// Whether the level's walls muffle it: the game's `ULevel::IsAudibleAt`
+    /// says "always heard" only for a mover's sound or an actor with
+    /// `SoundOcclusion=OCCLUSION_None`.
+    pub walls: bool,
+    /// The sound's own fade, 0 to 1 (a map loop fading in or out).
+    pub fade: f32,
+    /// How far it carries now, after walls and rooms.
+    pub reach: Reach,
     /// The sound card's volume divided by `gain` (the SOUND options'
     /// volumes included), once it has started.
     base: Option<f32>,
 }
 
 impl Placed {
-    /// A placed sound `gain` loud now (see [`loudness`]).
-    pub fn new(radius: f32, falloff: bool, follow: Option<Entity>, gain: f32) -> Self {
+    /// A placed sound with reach `radius` (0 counts as 10).
+    pub fn new(radius: f32, falloff: bool, follow: Option<Entity>) -> Self {
+        let radius = if radius == 0.0 { 10.0 } else { radius };
         Placed {
             radius,
             falloff,
             follow,
-            gain,
-            cut_off: None,
+            gain: 1.0,
+            walls: true,
+            fade: 1.0,
+            reach: Reach::new(radius),
             base: None,
         }
     }
 
-    /// The same, silent past `cut_off` Unreal units.
-    pub fn cut_off(mut self, cut_off: f32) -> Self {
-        self.cut_off = Some(cut_off);
+    /// The same, never muffled by walls.
+    pub fn through_walls(mut self) -> Self {
+        self.walls = false;
         self
     }
-}
 
-/// How loud a placed sound is at `distance` (Unreal units), 0 to 1. See
-/// the module notes.
-pub fn loudness(distance: f32, radius: f32, falloff: bool) -> f32 {
-    if !falloff || distance <= radius {
-        1.0
-    } else {
-        (radius / distance).max(MIN_GAIN)
+    /// The same, starting silent (a fade in follows).
+    pub fn faded_out(mut self) -> Self {
+        self.fade = 0.0;
+        self
+    }
+
+    /// Work out how loud it is now: the sound at `at`, the listener at
+    /// `ear` (both Unreal units), `now` the game's clock in seconds. Keeps
+    /// the result in `gain` and returns it.
+    pub fn update(&mut self, hearing: Option<&Hearing>, at: UVec3, ear: UVec3, now: f64) -> f32 {
+        let a = [at.x, at.y, at.z];
+        let e = [ear.x, ear.y, ear.z];
+        let target = match hearing {
+            Some(h) if self.walls && !h.line_clear(a, e) => {
+                self.radius * h.radius_multiplier(h.zone_at(a), h.zone_at(e)) * OCCLUDED
+            }
+            _ => self.radius,
+        };
+        self.reach.step(target, now);
+        let gain = loudness((at - ear).length(), self.reach.applied, self.falloff) * self.fade;
+        self.gain = gain;
+        gain
+    }
+
+    /// The volume to start the sound card at for `volume` (the scripts'
+    /// volume): never quite 0, so the SOUND options' share of the volume
+    /// can be worked out from it once it plays.
+    pub fn start_volume(&mut self, volume: f32) -> f32 {
+        self.gain = self.gain.max(MIN_GAIN);
+        volume * self.gain
     }
 }
 
-/// Quietest a placed sound is made (so its loudness can still be scaled
-/// back up as the listener comes nearer).
+/// A sound's reach shrinks to this share when a wall is between
+/// (`FAbstractSource::UpdateRadii`, Engine.dll).
+pub const OCCLUDED: f32 = 0.35;
+
+/// How far a placed sound carries right now, eased the way the game's
+/// `FAbstractSource::UpdateRadii` (Engine.dll) eases it.
+///
+/// Each frame the game works out a target: the sound's `Radius` when no
+/// wall is between, else `Radius` times `0.85 ^ (rooms apart squared)`
+/// times 0.35. The reach then moves toward the target by
+/// `(now - when the target last changed)` of the way, with the target's
+/// change noted after the move. Until the target first changes, the reach
+/// jumps straight to it. The game hands the reach to OpenAL as the
+/// reference distance; OpenAL refuses a value below 0 and keeps the last
+/// one, so `applied` does the same. These steps are copied as they are,
+/// odd parts included: on a later change the first step can overshoot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Reach {
+    /// The reach the game is moving (`+0x7c`).
+    pub current: f32,
+    /// The last target (`+0x80`).
+    pub target: f32,
+    /// When the target last changed, in seconds (`+0x84`); -1 at first.
+    pub changed_at: f64,
+    /// What OpenAL was last given (never below 0).
+    pub applied: f32,
+}
+
+impl Reach {
+    /// A sound starting with reach `radius`: the game starts its reach at
+    /// `radius`, or 1 when smaller.
+    pub fn new(radius: f32) -> Self {
+        let current = if radius >= 1.0 { radius } else { 1.0 };
+        Reach {
+            current,
+            target: radius,
+            changed_at: -1.0,
+            applied: current,
+        }
+    }
+
+    /// One frame toward `target` at time `now` (seconds).
+    pub fn step(&mut self, target: f32, now: f64) {
+        let since = now - self.changed_at;
+        if self.changed_at > 0.0 || since < 1.0 {
+            self.current = (since * (target - self.current) as f64 + self.current as f64) as f32;
+        } else {
+            self.current = target;
+        }
+        if self.target != target {
+            self.target = target;
+            self.changed_at = now;
+        }
+        if self.current >= 0.0 {
+            self.applied = self.current;
+        }
+    }
+}
+
+/// How loud a placed sound is at `distance` (Unreal units), 0 to 1, with
+/// reference distance `reach`: OpenAL's "inverse distance, clamped" with
+/// a roll-off of 1, as the game sets it up. See the module notes.
+pub fn loudness(distance: f32, reach: f32, falloff: bool) -> f32 {
+    if !falloff || distance <= reach {
+        1.0
+    } else {
+        reach / distance
+    }
+}
+
+/// The clock the sound code eases reach by: the game uses its level time
+/// (`GEngineTime`, seconds since the level started, stopped while paused);
+/// here that is the level scripts' clock, or the game's own clock before
+/// a level runs.
+pub fn sound_clock(script: Option<&LevelScript>, time: &Time) -> f64 {
+    script.map_or(time.elapsed_secs_f64(), |s| s.director.time as f64)
+}
+
+/// Quietest a sound starts on the sound card (see [`Placed::start_volume`]).
 const MIN_GAIN: f32 = 1e-3;
 
 /// A sound a level script is playing.
@@ -446,6 +560,7 @@ pub(crate) fn play(
     playing: Query<(Entity, &ScriptSound)>,
     chars: Query<(Entity, &ScriptTags, &GlobalTransform)>,
     ears: Query<&GlobalTransform, With<PlayerCamera>>,
+    hearing: Option<Res<LevelHearing>>,
     log: Res<GameLog>,
 ) {
     let Some(mut script) = script else { return };
@@ -504,7 +619,17 @@ pub(crate) fn play(
             (Some(p), Some(e)) => Some(to_unreal(p - e).length()),
             _ => None,
         };
-        let gain = distance.map_or(1.0, |d| loudness(d, radius, falloff));
+        let mut placed = place.map(|_| Placed::new(radius, falloff, follow));
+        let radius = placed.as_ref().map_or(radius, |p| p.radius);
+        let gain = match (&mut placed, place, ear) {
+            (Some(p), Some(at), Some(e)) => p.update(
+                hearing.as_ref().map(|h| &*h.0),
+                to_unreal(at),
+                to_unreal(e),
+                now as f64,
+            ),
+            _ => 1.0,
+        };
         let heard = match (&from, distance) {
             (Source::Everywhere(why), _) => format!("heard everywhere: {why}"),
             (Source::Follow(..), d) => format!(
@@ -549,20 +674,14 @@ pub(crate) fn play(
         let mut spawned = commands.spawn((
             tag.clone(),
             AudioPlayer(h),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(r.volume * gain)),
+            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(
+                placed
+                    .as_mut()
+                    .map_or(r.volume, |p| p.start_volume(r.volume)),
+            )),
         ));
-        if let Some(at) = place {
-            spawned.insert((
-                SoundAt::place(at),
-                Placed {
-                    radius,
-                    falloff,
-                    follow,
-                    gain,
-                    cut_off: None,
-                    base: None,
-                },
-            ));
+        if let (Some(at), Some(placed)) = (place, placed) {
+            spawned.insert((SoundAt::place(at), placed));
         }
         // Speech follows the VOICES volume (rc_game_core::Voice).
         if speech {
@@ -632,7 +751,8 @@ pub(crate) fn pause(
 }
 
 /// Placed sounds move with the character saying them, and get louder or
-/// quieter as the player comes nearer or goes away.
+/// quieter as the player comes nearer or goes away, or a wall comes
+/// between (see [`Placed::update`]).
 #[allow(clippy::type_complexity)]
 pub(crate) fn follow(
     mut placed: Query<(
@@ -644,8 +764,13 @@ pub(crate) fn follow(
     )>,
     bodies: Query<&GlobalTransform, Without<Placed>>,
     ears: Query<&GlobalTransform, (With<PlayerCamera>, Without<Placed>)>,
+    hearing: Option<Res<LevelHearing>>,
+    script: Option<Res<LevelScript>>,
+    time: Res<Time>,
 ) {
-    let ear = ears.iter().next().map(|g| g.translation());
+    let ear = ears.iter().next().map(|g| to_unreal(g.translation()));
+    let hearing = hearing.as_ref().map(|h| &*h.0);
+    let now = sound_clock(script.as_deref(), &time);
     for (mut p, mut t, mut at, sink, spatial) in &mut placed {
         if let Some(g) = p.follow.and_then(|e| bodies.get(e).ok()) {
             t.translation = g.translation();
@@ -661,14 +786,9 @@ pub(crate) fn follow(
         let base = *p
             .base
             .get_or_insert_with(|| sink.volume().to_linear() / old);
-        let distance = to_unreal(t.translation - ear).length();
-        let gain = if p.cut_off.is_some_and(|c| distance > c) {
-            0.0
-        } else {
-            loudness(distance, p.radius, p.falloff)
-        };
-        if (gain - p.gain).abs() > 0.005 {
-            p.gain = gain;
+        let before = p.gain;
+        let gain = p.update(hearing, to_unreal(t.translation), ear, now);
+        if gain != before {
             sink.set_volume(Volume::Linear(base * gain));
         }
     }
