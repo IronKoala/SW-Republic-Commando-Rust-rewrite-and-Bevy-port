@@ -21,6 +21,7 @@ mod display;
 mod graphics;
 mod graphics_presets;
 mod helmet;
+mod helmet_start;
 mod hud;
 mod input;
 mod levels;
@@ -476,6 +477,7 @@ fn main() -> AppExit {
         original_pause::OriginalPausePlugin,
         hud::HudPlugin,
         original_hud::OriginalHudPlugin,
+        helmet_start::HelmetStartPlugin,
         music::MusicPlugin,
         player::PlayerPlugin,
         panini::PaniniViewPlugin,

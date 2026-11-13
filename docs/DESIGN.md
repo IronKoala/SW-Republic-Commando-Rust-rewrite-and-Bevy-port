@@ -4126,11 +4126,53 @@ through became 5%) almost vanish, so the HUD keeps the original's alpha
 as it is. Over mid-tone ground that is within a few percent of the
 original; over dark ground it is a little brighter.
 
+**The helmet's start-up sequence** (Engine.dll `UHelmet::DrawHUD`, the
+Helmet defaults in engine.u; `rc_game/src/helmet_start.rs`): the helmet
+keeps `InitTime`, which runs with the level's clock while any phase has
+not ended (and only while the HUD is drawn, since all of this is inside
+`DrawHUD`). From `HealthInitStart` 1.0 to `HealthInitEnd` 3.0 the line
+`HealthInitText` ("SCANNING HEALTH") shows and the health meters fill
+from empty in a straight line (`fill = "health_meter"`); from 3.25 to
+5.25 "CHARGING SHIELDS" and the shield bars fill; from 5.5 to 7.5 "INIT
+SQUAD LINK", only with squad mates, and squad panel *i* stays away until
+`(end - start) / 4 * (i - 1)` is no longer above `(InitTime - start) / i`,
+then blinks (`sin(5 t) * 200 + 55`) until the phase ends. Before its phase
+a bar is empty. The line is drawn centred on (400, 503) of the page in
+OrbitBold15, (164, 200, 208), with opacity `int((sin(10 t) + 1) * 128)`
+kept as a byte. A new level or a loaded game (the level's clock going
+back) starts the sequence again.
+
+**The shield charging sounds** (same code; sounds from Properties.u
+`CTHUDDefaults`): from the bars as drawn this frame (`s`, the start-up
+fill included) and last frame (`LastShield`): when `s` is below 1 and
+rising and the sound isn't on, `ShieldRecharging`
+(`GEN_Sound.Interface.int_GEN_shieldChrgUp_01`) starts; when `s` reaches 1
+or falls while it is on, it stops with a 0.5 s fade and `ShieldCharged`
+(`int_GEN_sqdRevivFull_01`) plays; otherwise, if it is on, it stops at
+once. Dead or down stops it at once. Volume and pitch come from each
+sound's AudioParams (`int_GEN_shieldChrgUp_01` plays at half volume and
+half pitch). Ours: the 0.5 s fade is a straight line (the engine's fade
+curve is in the sound driver, not read).
+
+**The tactical visor's arcs and ring** (Engine.dll
+`UHelmet::DrawTacticalVisionMode`, drawn on the glass page while the visor
+is in tactical mode, the normal combat visor): four arcs of
+`HUDTextures.Icons.TacticalLine` at (47, 118) (mirrored), (721, 118), and
+the same two flipped with their bottoms at 416, white at opacity 92. Each
+time tactical mode starts they grow in over 2 seconds (`fill =
+"tactical"`, new `flip`). `TacticalGraphic` is centred on (100, 140) and
+turns clockwise half a turn a second (`spin_with = "tactical"`; the
+rotation is `DrawRotatedIcon`'s, checked by running it in an emulator).
+These are the bright white arcs on the sides of the original's
+screenshots.
+
 Not done yet: the pulsing (squad mates down, no grenades, low health), the arrow round each squad panel pointing to that
 mate, the timer ring while a mate works on something, which order uses
-which picture (ours), the shields' start-up sequence ("CHARGING
-SHIELDS") and their charging sounds. The shield parts blink with
-`blink = "shields"`.
+which picture (ours), the start-up line giving way to the visor mode's
+name while that shows, the tactical mode's markers for squad mates off
+screen, the red hit-direction arcs (`HUD_Hit2`, in `DrawHelmet`) and the
+health charging sounds. The shield parts blink with `blink =
+"shields"`.
 
 ## Controllers, gyro and the Panini view (`rc_pads`, `rc_panini`)
 

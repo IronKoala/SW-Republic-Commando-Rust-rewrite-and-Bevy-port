@@ -70,11 +70,10 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             filled.picture, filled.problems
         ));
     }
-    if data
-        .family
-        .iter()
-        .any(|c| c.eq_ignore_ascii_case(rc_menus::loading::LOADING_MENU) || c.eq_ignore_ascii_case(rc_menus::loading::LOADING_INFO_MENU))
-    {
+    if data.family.iter().any(|c| {
+        c.eq_ignore_ascii_case(rc_menus::loading::LOADING_MENU)
+            || c.eq_ignore_ascii_case(rc_menus::loading::LOADING_INFO_MENU)
+    }) {
         // As the game shows it for a real map: RC_PROBE_LOADING_MAP (default
         // GEO_01A, whose row names the briefing screen) from the install's
         // LevelLoadingInfo.int, the bar RC_PROBE_LOADING_FILL full (default
@@ -88,7 +87,11 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
         let rows = std::fs::read(&ini)
             .ok()
             .or_else(|| std::fs::read(game_data.join("System").join("levelloadinginfo.int")).ok())
-            .map(|b| rc_menus::loading::parse_level_loading_info(&b.iter().map(|&c| c as char).collect::<String>()))
+            .map(|b| {
+                rc_menus::loading::parse_level_loading_info(
+                    &b.iter().map(|&c| c as char).collect::<String>(),
+                )
+            })
             .unwrap_or_default();
         let classes = rc_menus::loading::EngineClasses {
             loading: rc_menus::loading::LOADING_MENU.into(),
@@ -103,7 +106,8 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             info.title,
             info.show_hints
         ));
-        let set = rc_menus::loading::setup(&mut layout, &data.family, &mut assets.library, &info, false);
+        let set =
+            rc_menus::loading::setup(&mut layout, &data.family, &mut assets.library, &info, false);
         rc_menus::loading::set_progress(&mut layout, fill);
         if std::env::var("RC_PROBE_LOADING_DONE").is_ok_and(|v| v == "1") {
             let ok = rc_menus::loading::finish(&mut layout);
@@ -449,6 +453,7 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         health,
         down,
         order: order.into(),
+        ..Default::default()
     };
     let values = HudValues {
         shield: 0.7,
@@ -480,6 +485,11 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         shield_hit_red: 0,
         frame_pulse: None,
         blinking: vec![],
+        // The tactical visor (the normal combat visor) with its arcs grown
+        // in and the ring a quarter turned.
+        tactical: Some(1.0),
+        tactical_spin: 0.25,
+        ..Default::default()
     };
     // The objective shows when nobody speaks and no message is up.
     let objective_only = HudValues {
@@ -517,6 +527,21 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
             .map(|m| rc_menus::helmet::GlassMap::new(m, &plan, wf / hf));
         let place = |p: [f32; 2]| glass.as_ref().map_or(p, |g| g.place(p));
         let place: Option<&dyn Fn([f32; 2]) -> [f32; 2]> = glass.as_ref().map(|_| &place as _);
+        // The helmet starting up, 4.25 s into the level: shields half
+        // charged, the arcs half grown in, the squad panels not in yet.
+        let mut start_up = HudValues {
+            shield: 0.5,
+            start_up: "CHARGING SHIELDS".into(),
+            start_up_alpha: 200,
+            tactical: Some(0.5),
+            subtitle: String::new(),
+            messages: Vec::new(),
+            pickup: String::new(),
+            ..values.clone()
+        };
+        for m in &mut start_up.squad {
+            m.hidden = true;
+        }
         // The shields just hit: the bars swell and go red for a moment.
         let shield_hit = HudValues {
             shield_hit_steps: 2,
@@ -527,6 +552,7 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
             ("hud", &values),
             ("hud_objective", &objective_only),
             ("hud_shield_hit", &shield_hit),
+            ("hud_start_up", &start_up),
         ] {
             let quads = hud_quads(&layout, v, wf, hf, 16.0 / 9.0, &mut assets, place);
             let picture = render::render(&quads, &mut assets, w, h, [70, 70, 70, 255]);

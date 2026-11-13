@@ -78,6 +78,9 @@ pub struct Quad {
     pub render_style: u8,
     /// Which widget it belongs to (for logs and checks).
     pub widget: String,
+    /// Turned round its middle by this many turns, clockwise (0 for
+    /// almost everything).
+    pub turn: f32,
 }
 
 /// What the quad builder needs to know about textures and fonts.
@@ -151,6 +154,7 @@ fn cursor_quad(
         color: t.color,
         render_style: t.render_style,
         widget: widget.to_string(),
+        turn: 0.0,
     })
 }
 
@@ -214,6 +218,7 @@ fn sprite_quads(s: &Sprite, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Q
         color: s.color,
         render_style: s.render_style,
         widget: widget.to_string(),
+        turn: 0.0,
     };
     if s.scale_mode != MSCM_STRETCH && s.scale_mode != MSCM_FIT_STRETCH {
         out.push(quad(src, dst));
@@ -293,6 +298,7 @@ pub fn progress_bar_quads(p: &ProgressBar, widget: &str, sizes: &mut dyn Sizes, 
                 color: s.color,
                 render_style: STY_ALPHA,
                 widget: widget.to_string(),
+                turn: 0.0,
             });
         }
     };
@@ -479,6 +485,7 @@ fn text_quads(t: &Text, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Quad>
                 color: t.color,
                 render_style: t.render_style,
                 widget: widget.to_string(),
+                turn: 0.0,
             });
             x += advance(&font, c, t.kerning) * t.scale[0] / BASE_WIDTH;
         }

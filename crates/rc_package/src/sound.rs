@@ -133,6 +133,13 @@ pub struct AudioParams {
     /// `bDisable3DFalloff`: from its side, but no quieter with distance
     /// (big explosions).
     pub no_falloff: bool,
+    /// `MinVolume`, `MaxVolume`: how loud (the game picks between them
+    /// each time). 1 when the object gives none (the `AudioParams` class
+    /// defaults in engine.u).
+    pub volume: (f32, f32),
+    /// `MinPitch`, `MaxPitch`: how fast and high it plays, 1 = as
+    /// recorded (picked between them each time). 1 when none is given.
+    pub pitch: (f32, f32),
 }
 
 /// Read an `AudioParams` export (properties only).
@@ -150,6 +157,12 @@ fn audio_params_from(pkg: &Package, props: &[Property]) -> AudioParams {
             Some(Value::Bool(true))
         )
     };
+    // The AudioParams class's own defaults (engine.u) for what an object
+    // doesn't set.
+    let number = |n: &str| match properties::find(pkg, props, n).map(|p| &p.value) {
+        Some(Value::Float(f)) => *f,
+        _ => 1.0,
+    };
     AudioParams {
         radius: match properties::find(pkg, props, "Radius").map(|p| &p.value) {
             Some(Value::Float(f)) => Some(*f),
@@ -157,6 +170,8 @@ fn audio_params_from(pkg: &Package, props: &[Property]) -> AudioParams {
         },
         non_positional: flag("NonPositional"),
         no_falloff: flag("bDisable3DFalloff"),
+        volume: (number("MinVolume"), number("MaxVolume")),
+        pitch: (number("MinPitch"), number("MaxPitch")),
     }
 }
 

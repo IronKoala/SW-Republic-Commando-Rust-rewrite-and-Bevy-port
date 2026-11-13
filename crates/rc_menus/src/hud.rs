@@ -188,6 +188,8 @@ const ELEMENT_KEYS: &[&str] = &[
     "grow",
     "redden_with",
     "alpha_with",
+    "flip",
+    "spin_with",
     "colour_by",
     "colours",
     "scroll",
@@ -290,6 +292,11 @@ pub struct Element {
     /// "alpha" (default for pictures) or "add" (glowing; default for text).
     #[serde(default)]
     pub blend: Option<String>,
+    /// Use this alpha (see `HudValues::alpha`) in place of the colour's
+    /// while it has one: the original's visor frame pulses at low health,
+    /// its start-up line and squad panels blink.
+    #[serde(default)]
+    pub alpha_with: Option<String>,
     /// A 0..1 value (see `HudValues::fraction`) the element fades with:
     /// 1 fully shown, 0 gone. For example `fade = "pickup"` makes the
     /// pickup message fade out as it ends.
@@ -376,13 +383,17 @@ pub struct Picture {
     /// and blue: the original's shield parts flash red when hit.
     #[serde(default)]
     pub redden_with: Option<String>,
-    /// Use this alpha (see `HudValues::alpha`) in place of the colour's
-    /// while it has one: the original's visor frame pulses at low health.
-    #[serde(default)]
-    pub alpha_with: Option<String>,
     /// Flip the picture left to right (to reuse one side's art).
     #[serde(default)]
     pub mirror: bool,
+    /// Turn the picture upside down (the original draws some parts with
+    /// a negative height). A `fill` then cuts the picture's other end.
+    #[serde(default)]
+    pub flip: bool,
+    /// Turn the picture round its middle by this many turns, clockwise
+    /// (see `HudValues::spin`): the original's spinning tactical ring.
+    #[serde(default)]
+    pub spin_with: Option<String>,
     /// Slide the picture sideways by this value (see `HudValues::scroll`),
     /// in picture widths, repeating it: the original's compass strip. The
     /// `part` may then be wider than the picture.
@@ -418,6 +429,12 @@ pub struct SquadLine {
     pub health: f32,
     pub down: bool,
     pub order: String,
+    /// Not drawn at all: the original's start-up sequence hasn't reached
+    /// this squad mate's panel yet.
+    pub hidden: bool,
+    /// The opacity of this squad mate's panel, picture and number while
+    /// the start-up sequence blinks them (`alpha_with = "squad_start_up"`).
+    pub start_up_alpha: Option<u8>,
 }
 
 /// Everything the HUD shows, already worked out by the game.
@@ -468,6 +485,19 @@ pub struct HudValues {
     /// Engine.dll `UHelmet::DrawHUD` gives it `150 + 105 * sin(2.5 *
     /// time)^2`. `None` when it doesn't pulse.
     pub frame_pulse: Option<u8>,
+    /// The original helmet's start-up line ("CHARGING SHIELDS"), empty
+    /// when none shows, and its blinking opacity (Engine.dll
+    /// `UHelmet::DrawHUD`: `int((sin(10 t) + 1) * 128)` kept as a byte).
+    pub start_up: String,
+    pub start_up_alpha: u8,
+    /// How full the health meter is drawn while the start-up sequence
+    /// fills it (0..1); `None` means as full as the health.
+    pub health_meter: Option<f32>,
+    /// In the tactical visor mode: how far the side arcs have grown in
+    /// (0..1, the original's two seconds). `None` in the other modes.
+    pub tactical: Option<f32>,
+    /// The tactical ring's turn, 0..1 (clockwise).
+    pub tactical_spin: f32,
     /// The HUD parts blinking now (see [`BLINK_KINDS`]) and the opacity
     /// they are drawn with this frame.
     pub blinking: Vec<(String, u8)>,
@@ -531,6 +561,8 @@ impl HudValues {
             match name {
                 "shield" => self.shield,
                 "health" => self.health,
+                "health_meter" => self.health_meter.unwrap_or(self.health),
+                "tactical" => self.tactical.unwrap_or(0.0),
                 "clip" => match (self.clip, self.clip_size) {
                     (Some(c), Some(s)) if s > 0 => c as f32 / s as f32,
                     _ => 0.0,
@@ -554,6 +586,14 @@ impl HudValues {
         }
     }
 
+    /// A turn by name, for `spin_with` (turns, clockwise).
+    pub fn spin(&self, name: &str) -> Option<f32> {
+        match name {
+            "tactical" => Some(self.tactical_spin),
+            _ => None,
+        }
+    }
+
     /// A whole count by name (for `grow_with`), `None` if unknown.
     pub fn steps(&self, name: &str) -> Option<u32> {
         match name {
@@ -573,9 +613,11 @@ impl HudValues {
 
     /// An alpha by name (for `alpha_with`): `Some(None)` when known but
     /// not in use now, `None` if unknown.
-    pub fn alpha(&self, name: &str) -> Option<Option<u8>> {
+    pub fn alpha(&self, name: &str, member: Option<&SquadLine>) -> Option<Option<u8>> {
         match name {
             "frame_pulse" => Some(self.frame_pulse),
+            "start_up" => Some(Some(self.start_up_alpha)),
+            "squad_start_up" => Some(member.and_then(|m| m.start_up_alpha)),
             _ => None,
         }
     }
@@ -609,6 +651,8 @@ impl HudValues {
             "prompt" => !self.prompt.is_empty(),
             "subtitle" => !self.subtitle.is_empty(),
             "objective" => !self.objective.is_empty(),
+            "start_up" => !self.start_up.is_empty(),
+            "tactical" => self.tactical.is_some(),
             _ => return None,
         };
         Some(v != not)
@@ -648,6 +692,7 @@ impl HudValues {
             "pickup" => self.pickup.clone(),
             "subtitle" => self.subtitle.clone(),
             "objective" => self.objective.clone(),
+            "start_up" => self.start_up.clone(),
             "prompt1" => self.prompt.first().cloned().unwrap_or_default(),
             "prompt2" => self.prompt.get(1).cloned().unwrap_or_default(),
             "number" => member?.number.clone(),
@@ -714,7 +759,14 @@ impl HudLayout {
         if !(self.pickup_message.seconds > 0.0) || self.pickup_message.fade < 0.0 {
             return Err("[pickup_message]: `seconds` must be above 0 and `fade` 0 or more".into());
         }
-        let known_fill = ["shield", "health", "clip", "squad_health"];
+        let known_fill = [
+            "shield",
+            "health",
+            "health_meter",
+            "tactical",
+            "clip",
+            "squad_health",
+        ];
         for e in &self.elements {
             if e.size[0] <= 0.0 || e.size[1] <= 0.0 {
                 return Err(format!("{}: size must be above 0", e.group));
@@ -749,10 +801,10 @@ impl HudLayout {
                         ));
                     }
                 }
-                if let Some(f) = &p.alpha_with {
-                    if HudValues::default().alpha(f).is_none() {
+                if let Some(f) = &p.spin_with {
+                    if HudValues::default().spin(f).is_none() {
                         return Err(format!(
-                            "{}: alpha_with \"{f}\" is not \"frame_pulse\"",
+                            "{}: spin_with \"{f}\" is not \"tactical\"",
                             e.group
                         ));
                     }
@@ -768,6 +820,14 @@ impl HudLayout {
             }
             let probe = HudValues::default();
             let member = SquadLine::default();
+            if let Some(f) = &e.alpha_with {
+                if probe.alpha(f, Some(&member)).is_none() {
+                    return Err(format!(
+                        "{}: alpha_with \"{f}\" is not one of [\"frame_pulse\", \"start_up\", \"squad_start_up\"]",
+                        e.group
+                    ));
+                }
+            }
             if let Some(b) = &e.blink {
                 if !BLINK_KINDS.contains(&b.as_str()) {
                     return Err(format!(
@@ -943,6 +1003,9 @@ pub fn hud_quads_of(
         };
         for (i, member) in members.into_iter().enumerate() {
             let first_quad = out.len();
+            if member.is_some_and(|m| m.hidden) {
+                continue;
+            }
             if let Some(w) = &e.when {
                 if values.flag(w, member) != Some(true) {
                     continue;
@@ -962,6 +1025,14 @@ pub fn hud_quads_of(
                 (true, Some(c)) => c,
                 _ => chosen.unwrap_or(e.colour),
             };
+            if let Some(a) = e
+                .alpha_with
+                .as_deref()
+                .and_then(|g| values.alpha(g, member))
+                .flatten()
+            {
+                colour[3] = a;
+            }
             if let Some(a) = e.blink.as_deref().and_then(|k| values.blink(k)) {
                 colour[3] = a;
             }
@@ -1001,9 +1072,6 @@ pub fn hud_quads_of(
                         colour[1] = colour[1].saturating_sub(r);
                         colour[2] = colour[2].saturating_sub(r);
                     }
-                    if let Some(a) = p.alpha_with.as_deref().and_then(|g| values.alpha(g)).flatten() {
-                        colour[3] = a;
-                    }
                     if let Some(f) = &p.fill {
                         let v = values.fraction(f, member).unwrap_or(1.0);
                         let v = stepped(v, p.fill_steps, p.fill_least_gap);
@@ -1011,7 +1079,14 @@ pub fn hud_quads_of(
                             continue;
                         }
                         let keep = src;
-                        cut(&mut src, &mut dst, v, p.fill_toward.as_deref(), p.mirror);
+                        cut(
+                            &mut src,
+                            &mut dst,
+                            v,
+                            p.fill_toward.as_deref(),
+                            p.mirror,
+                            p.flip,
+                        );
                         if p.fill_stretch {
                             src = keep;
                         }
@@ -1029,9 +1104,17 @@ pub fn hud_quads_of(
                         Some(v) => tiles(src, dst, v * tw, tw),
                         None => vec![(src, dst)],
                     };
+                    let turn = p
+                        .spin_with
+                        .as_deref()
+                        .and_then(|k| values.spin(k))
+                        .unwrap_or(0.0);
                     for (mut src, dst) in pieces {
                         if p.mirror {
                             src.swap(0, 2);
+                        }
+                        if p.flip {
+                            src.swap(1, 3);
                         }
                         out.push(Quad {
                             texture: p.picture.clone(),
@@ -1040,6 +1123,7 @@ pub fn hud_quads_of(
                             color: colour,
                             render_style: style(e.blend.as_deref(), STY_ALPHA),
                             widget: e.group.clone(),
+                            turn,
                         });
                     }
                 }
@@ -1143,14 +1227,23 @@ fn style(blend: Option<&str>, default: u8) -> u8 {
 }
 
 /// Shorten a bar to `v` of its length, emptying toward `toward` on the
-/// screen. A mirrored picture is flipped after this, so its texels are
-/// cut from the other end.
-fn cut(src: &mut [f32; 4], dst: &mut [f32; 4], v: f32, toward: Option<&str>, mirror: bool) {
+/// screen. A mirrored (or flipped) picture is turned after this, so its
+/// texels are cut from the other end.
+fn cut(
+    src: &mut [f32; 4],
+    dst: &mut [f32; 4],
+    v: f32,
+    toward: Option<&str>,
+    mirror: bool,
+    flip: bool,
+) {
     let toward = toward.unwrap_or("left");
-    let src_toward = match (toward, mirror) {
-        ("left", true) => "right",
-        ("right", true) => "left",
-        (t, _) => t,
+    let src_toward = match (toward, mirror, flip) {
+        ("left", true, _) => "right",
+        ("right", true, _) => "left",
+        ("up", _, true) => "down",
+        ("down", _, true) => "up",
+        (t, _, _) => t,
     };
     shorten(src, v, src_toward);
     shorten(dst, v, toward);
@@ -1241,6 +1334,7 @@ fn text_line(
                 color: colour,
                 render_style,
                 widget: group.to_string(),
+                turn: 0.0,
             });
         }
         x += (g.width + font.kerning) as f32 * k;
@@ -1456,6 +1550,7 @@ mod tests {
             health: 0.5,
             down: true,
             order: "Form up".into(),
+            ..Default::default()
         };
         assert_eq!(v.text("{clip}", None), "30");
         assert_eq!(v.text("{reserve}", None), "--");
@@ -1476,7 +1571,12 @@ mod tests {
     #[test]
     fn a_sliding_strip_repeats_its_picture() {
         // 414 texels of a 128-wide picture over 414 pixels, slid by 0.5.
-        let t = tiles([0.0, 0.0, 414.0, 16.0], [0.0, 0.0, 414.0, 11.0], 64.0, 128.0);
+        let t = tiles(
+            [0.0, 0.0, 414.0, 16.0],
+            [0.0, 0.0, 414.0, 11.0],
+            64.0,
+            128.0,
+        );
         assert_eq!(t[0], ([64.0, 0.0, 128.0, 16.0], [0.0, 0.0, 64.0, 11.0]));
         assert_eq!(t[1], ([0.0, 0.0, 128.0, 16.0], [64.0, 0.0, 192.0, 11.0]));
         let last = t.last().unwrap();
@@ -1501,11 +1601,16 @@ mod tests {
     #[test]
     fn a_bar_shortens_toward_its_end() {
         let (mut s, mut d) = ([0.0, 0.0, 100.0, 10.0], [10.0, 0.0, 210.0, 20.0]);
-        cut(&mut s, &mut d, 0.25, None, false);
+        cut(&mut s, &mut d, 0.25, None, false, false);
         assert_eq!((s, d), ([0.0, 0.0, 25.0, 10.0], [10.0, 0.0, 60.0, 20.0]));
         let (mut s, mut d) = ([0.0, 0.0, 100.0, 10.0], [0.0, 0.0, 100.0, 100.0]);
-        cut(&mut s, &mut d, 0.5, Some("up"), false);
+        cut(&mut s, &mut d, 0.5, Some("up"), false, false);
         assert_eq!(d, [0.0, 0.0, 100.0, 50.0]);
+        // Flipped upside down (the tactical visor's bottom arcs): kept at
+        // the bottom on screen, the texture's top half shown.
+        let (mut s, mut d) = ([0.0, 0.0, 32.0, 128.0], [0.0, 0.0, 10.0, 40.0]);
+        cut(&mut s, &mut d, 0.5, Some("down"), false, true);
+        assert_eq!((s, d), ([0.0, 0.0, 32.0, 64.0], [0.0, 20.0, 10.0, 40.0]));
     }
 
     #[test]

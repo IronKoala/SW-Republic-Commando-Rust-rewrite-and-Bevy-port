@@ -613,7 +613,9 @@ copy of the game.
   cloud sandbox with the install, not yet on Windows): squad numbers over
   order panels at the bottom left, the health meters either side of the
   bottom middle, the blue shield bars along the bottom edges (they flash
-  red when hit), the visor frame down the sides, the grenade and its count
+  red when hit), the visor frame down the sides with the tactical visor's
+  white arcs and turning ring, the helmet's start-up lines ("SCANNING
+  HEALTH", "CHARGING SHIELDS") with the shield charging sound, the grenade and its count
   at the bottom right, all placed as the original's engine code places
   them (`data/ui/hud.toml`), and a test checks nothing overlaps at 18
   screen shapes from 4:3 to 32:9 (phones on their side; upright phones

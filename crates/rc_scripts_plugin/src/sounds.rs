@@ -681,6 +681,8 @@ mod tests {
             radius,
             non_positional,
             no_falloff,
+            volume: (1.0, 1.0),
+            pitch: (1.0, 1.0),
         };
         sounds
             .params

@@ -72,16 +72,41 @@ fn sample(tex: &Rgba, u: f32, v: f32) -> [f32; 4] {
 
 fn draw_quad(out: &mut Rgba, q: &Quad, tex: &Rgba) {
     let (w, h) = (out.width as f32, out.height as f32);
-    let x0 = (q.dst[0] * w).round().max(0.0) as usize;
-    let x1 = ((q.dst[2] * w).round() as usize).min(out.width);
-    let y0 = (q.dst[1] * h).round().max(0.0) as usize;
-    let y1 = ((q.dst[3] * h).round() as usize).min(out.height);
+    // A turned quad: its middle, and how far round (clockwise on the
+    // screen, which runs downward).
+    let (cx, cy) = ((q.dst[0] + q.dst[2]) / 2.0 * w, (q.dst[1] + q.dst[3]) / 2.0 * h);
+    let (sin, cos) = (q.turn * std::f32::consts::TAU).sin_cos();
+    let reach = if q.turn != 0.0 {
+        let (hw, hh) = ((q.dst[2] - q.dst[0]).abs() * w / 2.0, (q.dst[3] - q.dst[1]).abs() * h / 2.0);
+        (hw * hw + hh * hh).sqrt()
+    } else {
+        0.0
+    };
+    let bounds = if q.turn != 0.0 {
+        [cx - reach, cy - reach, cx + reach, cy + reach]
+    } else {
+        [q.dst[0] * w, q.dst[1] * h, q.dst[2] * w, q.dst[3] * h]
+    };
+    let x0 = bounds[0].round().max(0.0) as usize;
+    let x1 = (bounds[2].round().max(0.0) as usize).min(out.width);
+    let y0 = bounds[1].round().max(0.0) as usize;
+    let y1 = (bounds[3].round().max(0.0) as usize).min(out.height);
     let tint = q.color.map(|c| c as f32 / 255.0);
     for py in y0..y1 {
-        let fy = ((py as f32 + 0.5) / h - q.dst[1]) / (q.dst[3] - q.dst[1]);
-        let v = q.src[1] + (q.src[3] - q.src[1]) * fy;
         for px in x0..x1 {
-            let fx = ((px as f32 + 0.5) / w - q.dst[0]) / (q.dst[2] - q.dst[0]);
+            // Back to where this pixel sat before the turn.
+            let (mut sx, mut sy) = (px as f32 + 0.5, py as f32 + 0.5);
+            if q.turn != 0.0 {
+                let (dx, dy) = (sx - cx, sy - cy);
+                sx = cx + dx * cos + dy * sin;
+                sy = cy - dx * sin + dy * cos;
+            }
+            let fx = (sx / w - q.dst[0]) / (q.dst[2] - q.dst[0]);
+            let fy = (sy / h - q.dst[1]) / (q.dst[3] - q.dst[1]);
+            if !(0.0..1.0).contains(&fx) || !(0.0..1.0).contains(&fy) {
+                continue;
+            }
+            let v = q.src[1] + (q.src[3] - q.src[1]) * fy;
             let u = q.src[0] + (q.src[2] - q.src[0]) * fx;
             let s = sample(tex, u, v);
             let src = [

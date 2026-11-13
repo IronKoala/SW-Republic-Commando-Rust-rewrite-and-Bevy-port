@@ -222,7 +222,28 @@ struct OriginalLayout {
     /// the seconds of hit flash left (`ShieldFlashTime`).
     last_shield: Option<f32>,
     shield_flash: f32,
+    /// The start-up sequence's clock (a new level or a loaded game
+    /// starts it again).
+    clock: StartClock,
+    /// The tactical visor's arcs and ring.
+    tactical: crate::helmet_start::Tactical,
 }
+
+/// The helmet's start-up clock (`InitTime`), the level's time last
+/// frame, and the shields as drawn last frame, unrounded, for their
+/// sounds.
+#[derive(Default)]
+struct StartClock {
+    init_time: f32,
+    level_time: Option<f32>,
+    last_charge_shield: Option<f32>,
+    /// The start-up lines shown so far this level (for the script's check).
+    lines: Vec<String>,
+}
+
+/// The system that works out and draws the HUD each frame.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DrawLayout;
 
 /// The visor frame's alpha at low health (Engine.dll `UHelmet::DrawHUD`
 /// 0x10431b9a): at health level 1 or 0 it is `150 + 105 * sin(t)^2` with
@@ -300,7 +321,7 @@ impl Plugin for OriginalHudPlugin {
                     update_crosshair,
                     update_use_panel,
                     collect_messages,
-                    draw_layout,
+                    draw_layout.in_set(DrawLayout),
                     hide_placeholder,
                 )
                     .chain()
@@ -446,11 +467,90 @@ fn values(
                 health: frac(m.health, 1.0),
                 down: m.status == SquadStatus::Incapacitated,
                 order: m.order.clone(),
+                ..Default::default()
             })
             .collect(),
         messages: messages.iter().map(|m| m.0.clone()).collect(),
         ..Default::default()
     }
+}
+
+/// The helmet's start-up sequence (Engine.dll `UHelmet::DrawHUD`): the
+/// "SCANNING HEALTH" / "CHARGING SHIELDS" / "INIT SQUAD LINK" lines, the
+/// health meter and shield bars filling from empty in their phases, the
+/// squad panels coming in one by one, and the shield charging sounds'
+/// steps (worked out from the bars as drawn). True when the level's
+/// clock started again.
+fn start_up(
+    clock: &mut StartClock,
+    now: &mut HudValues,
+    vitals: &PlayerVitals,
+    start: &crate::helmet_start::HelmetStart,
+    charge: &mut crate::helmet_start::ChargeSounds,
+    script: Option<&rc_scripts_plugin::LevelScript>,
+    time: &Time,
+    hud_hidden: bool,
+) -> bool {
+    use crate::helmet_start::{charge_step, fill, squad_slot, text_alpha, Slot};
+    // The level's own clock: it starts again with a new level or a
+    // loaded game, and so does the sequence.
+    let level = script.map(|s| s.director.time);
+    let mut restarted = false;
+    let dt = match (level, clock.level_time) {
+        (Some(t), Some(before)) if t >= before => t - before,
+        (Some(_), _) => {
+            *clock = StartClock::default();
+            restarted = true;
+            0.0
+        }
+        (None, _) => time.delta_secs(),
+    };
+    clock.level_time = level;
+    // All of this is in the original's `UHelmet::DrawHUD`, which isn't
+    // run while the HUD is hidden (a scene with `bDrawHUD` off): the
+    // clock and the sounds wait for the HUD to come back.
+    if hud_hidden {
+        return restarted;
+    }
+    let t = level.unwrap_or(time.elapsed_secs());
+    let raw = if vitals.max_shield > 0.0 {
+        (vitals.shield / vitals.max_shield).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let mut drawn_shield = raw;
+    if let Some(plan) = &start.plan {
+        clock.init_time = plan.advance(clock.init_time, dt);
+        let init = clock.init_time;
+        if let Some(f) = fill(&plan.shields, init) {
+            now.shield = ((now.shield * f) * 200.0).round() / 200.0;
+            drawn_shield = raw * f;
+        }
+        now.health_meter =
+            fill(&plan.health, init).map(|f| ((now.health * f) * 200.0).round() / 200.0);
+        if let Some(text) = plan.text(init, !now.squad.is_empty()) {
+            now.start_up = text.to_string();
+            now.start_up_alpha = text_alpha(t);
+            if !clock.lines.iter().any(|l| l == text) {
+                clock.lines.push(text.to_string());
+            }
+        }
+        for (i, m) in now.squad.iter_mut().enumerate() {
+            match squad_slot(&plan.squad, init, i + 1, t) {
+                Slot::Hidden => m.hidden = true,
+                Slot::Blinking(a) => m.start_up_alpha = Some(a),
+                Slot::Normal => {}
+            }
+        }
+    }
+    let last = clock.last_charge_shield.unwrap_or(drawn_shield);
+    if let Some(step) = charge_step(last, drawn_shield, charge.playing) {
+        charge.steps.push(step);
+        // As the helmet's `PlayingShieldChargeSound`.
+        charge.playing = step == crate::helmet_start::ChargeStep::Start;
+    }
+    clock.last_charge_shield = Some(drawn_shield);
+    restarted
 }
 
 /// What the helmet's text box shows (Engine.dll `UHelmet::DrawTextInfo`):
@@ -495,6 +595,12 @@ fn draw_layout(
         Query<&crate::player::Body, With<rc_game_core::Player>>,
         Option<Res<HudPage>>,
     ),
+    (start, mut charge, visor, cutscene): (
+        Res<crate::helmet_start::HelmetStart>,
+        ResMut<crate::helmet_start::ChargeSounds>,
+        Option<Res<rc_visor::VisorState>>,
+        Option<Res<rc_game_core::Cutscene>>,
+    ),
 ) {
     let original = &mut *original;
     if !original.working {
@@ -521,6 +627,28 @@ fn draw_layout(
         original.objective = (objective, 0.0);
     }
     let mut now = values(&vitals, &weapon, &squad, &original.messages);
+    if start_up(
+        &mut original.clock,
+        &mut now,
+        &vitals,
+        &start,
+        &mut charge,
+        script.as_deref(),
+        &time,
+        cutscene.is_some_and(|c| c.hide_hud),
+    ) {
+        original.last_shield = None;
+        original.shield_flash = 0.0;
+    }
+    if let Some(on) = visor.map(|v| v.mode == rc_visor::VisorMode::Tactical) {
+        let dt = time.delta_secs();
+        if let Some((shown, turn)) = original.tactical.step(on, dt) {
+            // Rounded so a grown-in arc doesn't redraw; the ring turns
+            // every frame anyway.
+            now.tactical = Some((shown * 200.0).round() / 200.0);
+            now.tactical_spin = turn;
+        }
+    }
     let (swell, red) = shield_flash(
         &mut original.last_shield,
         &mut original.shield_flash,
@@ -592,7 +720,9 @@ fn draw_layout(
                 if layout.layout.prompt_faded_in(age) < 1.0
                     && layout.layout.prompt_faded_in(older) >= 1.0
                 {
-                    log.line(format!("original hud: prompt fully faded in after {older:.2} s"));
+                    log.line(format!(
+                        "original hud: prompt fully faded in after {older:.2} s"
+                    ));
                 }
                 Some((lines, older))
             }
@@ -640,16 +770,9 @@ fn draw_layout(
     // glass (`helmet::HudPage`); the rest, or everything without it, on
     // the screen.
     let on_page = glass.is_some() && page.is_some();
-    let quads = rc_menus::hud::hud_quads_of(
-        layout,
-        &key.0,
-        w,
-        h,
-        max_aspect,
-        assets,
-        None,
-        &|e| !(on_page && e.glass),
-    );
+    let quads = rc_menus::hud::hud_quads_of(layout, &key.0, w, h, max_aspect, assets, None, &|e| {
+        !(on_page && e.glass)
+    });
     let page_quads = match (&page, on_page) {
         (Some(p), true) => rc_menus::hud::hud_quads_of(
             layout,
@@ -757,39 +880,45 @@ fn spawn_quads(
         root.insert(UiTargetCamera(cam));
     }
     root.with_children(|root| {
-            for q in quads {
-                let Some(image) = images.get(&picture_key(q)) else {
-                    continue;
-                };
-                // See-through pictures keep their alpha here, not baked in.
-                let alpha = match gpu::variant_over_scene(q.render_style) {
-                    gpu::Variant::OverScene => q.color[3] as f32 / 255.0,
-                    _ => 1.0,
-                };
-                // A mirrored part has its left edge after its right.
-                let (x0, x1) = (q.src[0].min(q.src[2]), q.src[0].max(q.src[2]));
-                root.spawn((
-                    ImageNode {
-                        image: image.clone(),
-                        rect: Some(Rect::new(x0, q.src[1], x1, q.src[3])),
-                        flip_x: q.src[0] > q.src[2],
-                        // The tint is baked into the picture (gpu.rs),
-                        // all but a see-through picture's alpha.
-                        color: Color::srgba(1.0, 1.0, 1.0, alpha),
-                        image_mode: NodeImageMode::Stretch,
-                        ..default()
-                    },
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Percent(q.dst[0] * 100.0),
-                        top: Val::Percent(q.dst[1] * 100.0),
-                        width: Val::Percent((q.dst[2] - q.dst[0]) * 100.0),
-                        height: Val::Percent((q.dst[3] - q.dst[1]) * 100.0),
-                        ..default()
-                    },
-                ));
-            }
-        });
+        for q in quads {
+            let Some(image) = images.get(&picture_key(q)) else {
+                continue;
+            };
+            // See-through pictures keep their alpha here, not baked in.
+            let alpha = match gpu::variant_over_scene(q.render_style) {
+                gpu::Variant::OverScene => q.color[3] as f32 / 255.0,
+                _ => 1.0,
+            };
+            // A mirrored part has its left edge after its right.
+            let (x0, x1) = (q.src[0].min(q.src[2]), q.src[0].max(q.src[2]));
+            // A flipped part has its top edge below its bottom.
+            let (y0, y1) = (q.src[1].min(q.src[3]), q.src[1].max(q.src[3]));
+            root.spawn((
+                ImageNode {
+                    image: image.clone(),
+                    rect: Some(Rect::new(x0, y0, x1, y1)),
+                    flip_x: q.src[0] > q.src[2],
+                    flip_y: q.src[1] > q.src[3],
+                    // The tint is baked into the picture (gpu.rs),
+                    // all but a see-through picture's alpha.
+                    color: Color::srgba(1.0, 1.0, 1.0, alpha),
+                    image_mode: NodeImageMode::Stretch,
+                    ..default()
+                },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(q.dst[0] * 100.0),
+                    top: Val::Percent(q.dst[1] * 100.0),
+                    width: Val::Percent((q.dst[2] - q.dst[0]) * 100.0),
+                    height: Val::Percent((q.dst[3] - q.dst[1]) * 100.0),
+                    ..default()
+                },
+                // Turned round its middle, clockwise as the engine's
+                // `DrawRotatedIcon`.
+                UiTransform::from_rotation(Rot2::radians(q.turn * std::f32::consts::TAU)),
+            ));
+        }
+    });
 }
 
 /// While the original's HUD is drawn, hide the placeholder's drawings.
@@ -807,6 +936,14 @@ fn hide_placeholder(
             *v = want;
         }
     }
+}
+
+/// The helmet's start-up clock (`InitTime`) and the lines it has shown
+/// this level, for the script's check.
+pub fn start_up_seen(w: &World) -> (f32, Vec<String>) {
+    w.get_resource::<OriginalLayout>()
+        .map(|o| (o.clock.init_time, o.clock.lines.clone()))
+        .unwrap_or_default()
 }
 
 /// The original HUD's pictures on screen now (screen fractions), for the

@@ -1080,6 +1080,15 @@ fn steps() -> Vec<Step> {
             120.0,
         ),
         Check("the script blinks the HUD's health meters", health_meters_blink),
+        // The helmet's start-up sequence (Engine.dll `UHelmet::DrawHUD`)
+        // has run: its lines shown, the shield charging sounds played,
+        // and the tactical visor's arcs are drawn.
+        Until(
+            "the helmet's start-up sequence finishes",
+            |w| crate::original_hud::start_up_seen(w).0 >= 7.5,
+            60.0,
+        ),
+        Check("the helmet starts up as the original's does", helmet_started),
         Until(
             "the scripts start playing the level's lines",
             |w| level_script_lines(w).is_ok(),
@@ -3269,10 +3278,7 @@ fn health_meters_blink(w: &mut World) -> Result<String, String> {
     let quads = crate::original_hud::layout_drawn(w);
     let meters: Vec<u8> = quads
         .iter()
-        .filter(|q| {
-            (q.widget == "vitals" || q.widget == "ammo")
-                && q.color[..3] != [255, 255, 255]
-        })
+        .filter(|q| (q.widget == "vitals" || q.widget == "ammo") && q.color[..3] != [255, 255, 255])
         .map(|q| q.color[3])
         .collect();
     let got = format!("script steps {steps:?}; blinking {now:?}; meter opacities {meters:?}");
@@ -3280,6 +3286,36 @@ fn health_meters_blink(w: &mut World) -> Result<String, String> {
         && now.contains(&"health")
         && meters.len() == 4
         && meters.iter().all(|a| *a == meters[0] && *a != 255)
+    {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The helmet's start-up sequence ran as the original's: "SCANNING
+/// HEALTH" and "CHARGING SHIELDS" shown (geo_01a starts without squad
+/// mates, so not "INIT SQUAD LINK"), the shield charging sound started
+/// and the charged sound played, and the tactical arcs and ring drawn.
+fn helmet_started(w: &mut World) -> Result<String, String> {
+    let (init, lines) = crate::original_hud::start_up_seen(w);
+    let sounds = w
+        .get_resource::<crate::helmet_start::ChargeSounds>()
+        .map(|c| (c.started, c.charged))
+        .unwrap_or_default();
+    let tactical = crate::original_hud::layout_drawn(w)
+        .iter()
+        .filter(|q| q.texture.to_ascii_lowercase().contains("tactical"))
+        .count();
+    let got = format!(
+        "InitTime {init:.2}; lines {lines:?}; charging sound started {} times, charged {} times; {tactical} tactical pictures",
+        sounds.0, sounds.1
+    );
+    if lines.iter().any(|l| l == "SCANNING HEALTH")
+        && lines.iter().any(|l| l == "CHARGING SHIELDS")
+        && sounds.0 >= 1
+        && sounds.1 >= 1
+        && tactical == 5
     {
         Ok(got)
     } else {
@@ -3611,7 +3647,10 @@ fn troopers_hold_rifles(w: &mut World) -> Result<String, String> {
         .iter()
         .filter(|c| c.held_weapon() == Some("DC15BlasterClone"))
         .count();
-    let msg = format!("{armed} of {} clone troopers hold a DC15BlasterClone", troopers.len());
+    let msg = format!(
+        "{armed} of {} clone troopers hold a DC15BlasterClone",
+        troopers.len()
+    );
     if !troopers.is_empty() && armed == troopers.len() {
         Ok(msg)
     } else {
@@ -3650,7 +3689,9 @@ fn troopers_can_die(w: &mut World) -> Result<String, String> {
     // CloneTrooper7 has usually died in the bombardment by now (see
     // `ramp_troopers`) and its body is gone; while it stands, its death
     // must send the map's event for it.
-    let event_ok = event.as_deref().is_none_or(|e| e == "GunshipTrooper02Death");
+    let event_ok = event
+        .as_deref()
+        .is_none_or(|e| e == "GunshipTrooper02Death");
     if troopers > 0 && ok == troopers && event_ok {
         Ok(msg)
     } else {

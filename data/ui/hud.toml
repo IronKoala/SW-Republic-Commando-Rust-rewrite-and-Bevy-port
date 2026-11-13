@@ -241,6 +241,7 @@ text = "{number}"
 font = "OrbitFonts.OrbitBold15"
 colour = [164, 200, 208, 220]
 blend = "alpha"
+alpha_with = "squad_start_up"
 glass = true
 
 [[element]]
@@ -252,6 +253,7 @@ repeat_squad = [32, 0]
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [148, 354, 192, 396]
 colour = [255, 255, 255, 240]
+alpha_with = "squad_start_up"
 blink = "squad"
 glass = true
 
@@ -272,6 +274,7 @@ choices = { "FORM UP" = [202, 377, 227, 402], "SEARCH AND DESTROY" = [202, 350, 
 colour_by = "{squad_health_level}"
 colours = { "0" = [255, 73, 43, 200], "1" = [246, 139, 31, 200], "2" = [255, 251, 44, 200], "3" = [81, 213, 67, 200] }
 colour = [81, 213, 67, 200]
+alpha_with = "squad_start_up"
 glass = true
 
 # Health meters either side of the middle, mirrored at 629: a white back
@@ -309,7 +312,7 @@ at = [-183.2, -112]
 size = [47.2, 43.2]
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 181, 240, 236]
-fill = "health"
+fill = "health_meter"
 fill_toward = "down"
 fill_steps = 11
 fill_least_gap = 0.0909
@@ -352,7 +355,7 @@ size = [47.2, 43.2]
 picture = "HUDTextures.Icons.CloneVisorIcons"
 part = [181, 181, 240, 236]
 mirror = true
-fill = "health"
+fill = "health_meter"
 fill_toward = "down"
 fill_steps = 11
 fill_least_gap = 0.0909
@@ -379,8 +382,10 @@ glass = true
 # only moves up), and the white parts lose int(left / 0.5 * 155) of their
 # green and blue (go red) unless the shields are charging. While a level
 # script blinks the shields (bBlinkShields), every part here, fill
-# included, takes the blink's opacity (`blink = "shields"`). (Not done: the
-# "CHARGING SHIELDS" start-up sequence and the charging sounds.)
+# included, takes the blink's opacity (`blink = "shields"`). The start-up
+# sequence fills the bars from empty and plays the charging sounds (see
+# "The helmet's start-up sequence" below; the game side is in
+# crates/rc_game/src/helmet_start.rs).
 # Then a thin strip across the top of the glass in the same colour: (0, 14,
 # 381 x 10, texels 149,26-157,37) and (381, 14, 9 x 10, texels
 # 175,26-183,37), mirrored at 800 and 419.
@@ -809,3 +814,116 @@ align = "centre"
 blend = "alpha"
 colour = [164, 200, 208, 220]
 fade = "prompt"
+
+# --- The helmet's start-up sequence ------------------------------------------
+# Engine.dll `UHelmet::DrawHUD` with the engine.u Helmet defaults: for the
+# first seconds of a level the helmet's InitTime runs, and while it is
+# between HealthInitStart 1.0 and HealthInitEnd 3.0 the line "SCANNING
+# HEALTH" shows and the health meters fill from empty (`health_meter`);
+# from 3.25 to 5.25 "CHARGING SHIELDS" and the shield bars fill (the
+# shield charging sound plays as they rise); from 5.5 to 7.5 "INIT SQUAD
+# LINK" (only with squad mates) and the squad panels come in one by one,
+# blinking (`alpha_with = "squad_start_up"`). The words and times are read
+# from the game (engine.u). The line is drawn centred on (400, 503) of the
+# 800 x 600 page in OrbitBold15, colour (164, 200, 208), its opacity
+# int((sin(10 t) + 1) * 128) kept as a byte (`alpha_with = "start_up"`).
+# The box here is 300 of the page wide, between the health meters.
+[[element]]
+group = "start_up"
+anchor = "bottom"
+at = [-120, -88.4]
+size = [240, 21.6]
+when = "start_up"
+text = "{start_up}"
+align = "centre"
+font = "OrbitFonts.OrbitBold15"
+colour = [164, 200, 208, 255]
+alpha_with = "start_up"
+blend = "alpha"
+glass = true
+
+# --- The tactical visor's arcs and ring --------------------------------------
+# Engine.dll `UHelmet::DrawTacticalVisionMode`, drawn while the visor is in
+# tactical mode (the normal combat visor): the bright white arcs on both
+# sides and the small turning "C" ring at the top left. Four arcs of
+# HUDTextures.Icons.TacticalLine (32 x 128): top left at (47, 118) drawn
+# mirrored, top right at (721, 118), bottom left and right the same flipped
+# upside down with their bottoms at 416. White, opacity 92. Each time
+# tactical mode starts they grow in over 2 seconds, the top arcs from their
+# tops down and the bottom arcs from their bottoms up (`fill = "tactical"`).
+# The ring, HUDTextures.Icons.TacticalGraphic (32 x 32), is centred on
+# (100, 140) and turns clockwise half a turn a second (`spin_with`).
+# They sit inside the visor frame's arcs, so they keep to the same corners
+# (and the frame's group) on wider screens.
+[[element]]
+group = "visor"
+anchor = "top_left"
+at = [37.6, 94.4]
+size = [25.6, 102.4]
+when = "tactical"
+picture = "HUDTextures.Icons.TacticalLine"
+part = [0, 0, 32, 128]
+mirror = true
+fill = "tactical"
+fill_toward = "up"
+colour = [255, 255, 255, 92]
+blend = "alpha"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top_right"
+at = [-63.2, 94.4]
+size = [25.6, 102.4]
+when = "tactical"
+picture = "HUDTextures.Icons.TacticalLine"
+part = [0, 0, 32, 128]
+fill = "tactical"
+fill_toward = "up"
+colour = [255, 255, 255, 92]
+blend = "alpha"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top_left"
+at = [37.6, 230.4]
+size = [25.6, 102.4]
+when = "tactical"
+picture = "HUDTextures.Icons.TacticalLine"
+part = [0, 0, 32, 128]
+mirror = true
+flip = true
+fill = "tactical"
+fill_toward = "down"
+colour = [255, 255, 255, 92]
+blend = "alpha"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top_right"
+at = [-63.2, 230.4]
+size = [25.6, 102.4]
+when = "tactical"
+picture = "HUDTextures.Icons.TacticalLine"
+part = [0, 0, 32, 128]
+flip = true
+fill = "tactical"
+fill_toward = "down"
+colour = [255, 255, 255, 92]
+blend = "alpha"
+glass = true
+
+[[element]]
+group = "visor"
+anchor = "top_left"
+at = [67.2, 99.2]
+size = [25.6, 25.6]
+when = "tactical"
+picture = "HUDTextures.Icons.TacticalGraphic"
+part = [0, 0, 32, 32]
+spin_with = "tactical"
+colour = [255, 255, 255, 92]
+blend = "alpha"
+glass = true
