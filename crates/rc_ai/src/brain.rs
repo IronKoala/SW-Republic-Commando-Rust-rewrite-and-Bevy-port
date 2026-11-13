@@ -22,6 +22,7 @@ use rc_nav::{NavGraph, NodeKind, PathFollower};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+mod notice;
 mod trandoshan;
 
 /// A small, fast random number source (xorshift), so runs repeat exactly
@@ -298,6 +299,8 @@ pub struct Fighter {
     pub action: Option<Action>,
     /// The original's attack state, for fighters that use it.
     orig: trandoshan::Original,
+    /// The original's noticing, for fighters that use it.
+    nt: notice::Notice,
     rng: Rng,
 }
 
@@ -372,6 +375,7 @@ impl Fighter {
             leap: None,
             action: None,
             orig: trandoshan::Original::default(),
+            nt: notice::Notice::default(),
             rng: Rng::new(id.wrapping_add(17)),
         }
     }
@@ -415,6 +419,18 @@ impl Fighter {
     /// Something hurt it. `from` is where the shot came from, if known.
     /// It turns to fight, and if out in the open, looks for cover.
     pub fn on_damaged(&mut self, from: Option<Vec3>, time: f32, events: &mut Vec<AiEvent>) {
+        self.on_damaged_by(from, None, time, events);
+    }
+
+    /// Like `on_damaged`; `by` is the id of whoever did it (the id it has
+    /// in `notice`), if known.
+    pub fn on_damaged_by(
+        &mut self,
+        from: Option<Vec3>,
+        by: Option<u32>,
+        time: f32,
+        events: &mut Vec<AiEvent>,
+    ) {
         if self.mode == Mode::Dead {
             return;
         }
@@ -425,6 +441,15 @@ impl Fighter {
             Some(ScriptGoal::Hold { .. } | ScriptGoal::WaitForTarget { .. })
         ) {
             self.script_done(events);
+        }
+        if self.original_noticing() {
+            // The original's way: whoever hurt it counts as noticed for a
+            // few seconds, so its next decision turns on them. (Its noise
+            // handling, which also reacts to being hurt, is not ported.)
+            if let Some(by) = by {
+                self.notice_hit(by, time);
+            }
+            return;
         }
         if let Some(p) = from {
             if self.last_seen_at.is_none() || time - self.last_seen_time > 1.0 {
@@ -447,6 +472,12 @@ impl Fighter {
     /// it turns that way and gets ready, as if it had glimpsed the enemy
     /// there. Shots farther than its hearing radius are ignored.
     pub fn hear(&mut self, at: Vec3, time: f32, events: &mut Vec<AiEvent>) {
+        // The original reacts to noises by looking into them (its
+        // "investigate" state), which is not ported yet; it never starts a
+        // fight on a noise alone.
+        if self.original_noticing() {
+            return;
+        }
         if !matches!(self.mode, Mode::Idle | Mode::Investigate) {
             return;
         }
@@ -580,6 +611,9 @@ impl Fighter {
         let senses = self.params.senses.clone();
 
         // 1. Look.
+        if self.original_noticing() {
+            return self.tick_original_noticing(dt, view, events);
+        }
         let saw = view.target.filter(|t| self.sees(view, t));
         if let Some(t) = saw {
             if !self.enemy_seen_now {

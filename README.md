@@ -155,7 +155,12 @@ copy of the game.
   They fight the way the game's own trooper AI does (read from its
   compiled code): short bursts, sidesteps out to shoot and back, cover
   points that face the enemy, a rifle-butt hit up close, and now and then
-  a "spotted" gesture (not yet tried on Windows). They hold their DC-15 rifles (the game's own model; the
+  a "spotted" gesture (not yet tried on Windows). They notice droids by
+  the game's own rules too: a decision every half second or so, the
+  nearest droid they can see (view cone and line of sight as the engine
+  checks them) or that just shot them, and they keep after a droid that
+  ducks out of sight for 15 seconds. Noises don't alert them yet (the
+  game's "investigate" part isn't ported). They hold their DC-15 rifles (the game's own model; the
   game's `CloneTrooperDefaults` gives `CloneTrooper` the DC-15, not the
   commandos' DC-17m), as the level's other troopers do. Settings:
   `data/enemies/clone_trooper*.toml`.

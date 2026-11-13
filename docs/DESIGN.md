@@ -3167,17 +3167,54 @@ Ours, or left out, where the files or the code we read don't say:
   port character dodges or takes such cover yet).
 - The game also writes a "next move" time (`CoverBoredomTime` ahead) when
   it looks for cover; what reads it was not found, so it is not used.
-- **Noticing the enemy is not the original's yet.** How a trooper first
-  notices a droid, which one it picks, and when it switches into or out
-  of this attack state still use our droids' stand-in rules: the sight
-  numbers (`SightRadius`, `PeripheralVision`, `AutoDetectRadius`,
-  `EnemyMemoryTime`) are the game's, but the 0.5 s reaction time, the
-  2500 uu hearing range and the nearest-visible-enemy choice are ours.
-  The original does this in compiled code we have found but not read
-  yet: a stimulus system (CTBot's `ReceiveStimulus`/`ProcessStimulus`,
-  `GetBestEnemy`, `LocalSituation.Assess`), each state's
-  `EstimateUtility` (the bot runs the state with the highest), and
-  Engine.dll's `SeeActor`. Reading and porting it is the next piece.
+- **How the troopers notice the enemy** (`brain/notice.rs`, on when a
+  file sets `[senses] noticing = "original"`; both trooper files do). Read
+  from the game's compiled AI code (CTBot's decision loop and its "local
+  situation" check in ctgame.dll, the sight test in Engine.dll):
+  - It decides what to do every `DecisionInterval` (0.5 s) times a random
+    0.8 to 1.2. Each decision it looks over every enemy within
+    `SightRadius` and counts the ones it "can see or hear"; the nearest of
+    those is its best target. Fighting is worth 0.6 when it has a best
+    target; standing about is worth 0.1; looking into a noise is worth the
+    noise's priority (at most 0.55), so a seen enemy always wins. There is
+    no separate reaction time: the wait is the time to the next decision.
+  - "Can see or hear" an enemy means one of: the enemy hurt it in the last
+    6 seconds; the enemy is within `AutoDetectRadius` (200 uu) with nothing
+    solid between their middles; or it can see the enemy.
+  - "Can see" (`SeeActor`): within `SightRadius`, inside its view cone
+    (the cosine of the angle between the way it faces and the enemy's
+    middle is at least `PeripheralVision`, 0.2), and a line of sight. For
+    the enemy it is already fighting, "can see" also stays true for
+    `EnemyMemoryTime` (15 s) after it last really saw it.
+  - Line of sight (`LineOfSightTo`): a clear line from its eyes to the
+    enemy's eyes. If that is blocked, and the enemy is within 100 times its
+    radius, it also tries lines to the corners of a square around the
+    enemy's middle (sides two radii long, at the middle's height). The
+    original only tries the first three of the four corners, and skips the
+    one farthest from and the one nearest to the level's origin among them,
+    so in practice one corner line is tried. We do the same.
+  - While fighting, each time the attack plans (see above) it takes the
+    best target as its enemy again, looking over everyone first if the
+    last look is more than 0.5 s old. So it switches to a nearer enemy it
+    can see or hear, and it knows where its enemy really is.
+  - When a decision finds no best target, it stops fighting and stands.
+  - Not ported yet: the noise system. In the original, shots, hits,
+    explosions, footsteps, deaths and "enemy spotted" calls are stimuli
+    with a range each (a shot is heard to 2048 uu); the bot answers by
+    group (CTBot's defaults: run toward an enemy's shot or a hit, run away
+    from an enemy's bullet hitting near it, dive from its grenade, look at
+    a friend's shot) in its "investigate" state, which is 800-odd lines of
+    compiled code not read yet. Our troopers ignore noises: a noise alone
+    never starts a fight in the original either. Also not ported: its
+    squad leader's commanded enemy, a script's suggested enemy, extra
+    targets (`bUseAdditionalTargets`), the "not a threat" flag
+    (`bPerceivedAsThreat`; our tool can't read its default, and the scripts
+    only clear it on death, so every live enemy counts), and enemies
+    blocking each other's lines of sight (our lines only test the level).
+    The "standing about" state's own behaviour isn't ported: it stands.
+  - The original reads `PeripheralVision` against its full facing
+    (with pitch); ours have no pitch, so the cone is around the flat
+    facing.
 - Placed troopers (the map's own `CloneTrooper` actors, which the cast
   shows) don't use it: only troopers the map's spawners make.
 

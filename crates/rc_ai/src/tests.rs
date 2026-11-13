@@ -1560,11 +1560,16 @@ fn run_frames(
     let mut out = Vec::new();
     let mut t = 0.0;
     while t < seconds {
+        let seen = if f.original_noticing() {
+            f.notice(world, &[target], &[7], t)
+        } else {
+            Some(target)
+        };
         let view = View {
             world,
             nav,
             time: t,
-            target: Some(target),
+            target: seen,
             cover_taken: &taken,
             allies: &[],
         };
@@ -1802,4 +1807,229 @@ fn original_attack_picks_cover_that_faces_the_enemy() {
     );
     // It shot at the enemy on the way.
     assert!(!shot_times(&frames).is_empty());
+}
+
+// --- The original's noticing (clone troopers) ---
+
+/// Run a trooper with the original's noticing among `around` (each with
+/// its id), where `at(t)` may move them. Returns its mode every frame.
+fn notice_run(
+    f: &mut Fighter,
+    world: &BrushWorld,
+    mut around: impl FnMut(f32) -> Vec<(Target, u32)>,
+    start: f32,
+    seconds: f32,
+) -> Vec<(f32, Mode)> {
+    let nav = NavGraph::default();
+    let taken = HashSet::new();
+    let dt = 1.0 / 30.0;
+    let mut out = Vec::new();
+    let mut t = start;
+    while t < start + seconds {
+        let now = around(t);
+        let targets: Vec<Target> = now.iter().map(|a| a.0).collect();
+        let ids: Vec<u32> = now.iter().map(|a| a.1).collect();
+        let seen = f.notice(world, &targets, &ids, t);
+        let view = View {
+            world,
+            nav: &nav,
+            time: t,
+            target: seen,
+            cover_taken: &taken,
+            allies: &[],
+        };
+        f.tick(dt, &view);
+        out.push((t, f.mode));
+        t += dt;
+    }
+    out
+}
+
+fn first_attack(modes: &[(f32, Mode)]) -> Option<f32> {
+    modes.iter().find(|m| m.1 == Mode::Attack).map(|m| m.0)
+}
+
+/// A trooper that only stands and shoots (no sidesteps, no gesture), so the
+/// tests see the noticing alone.
+fn still_trooper() -> Fighter {
+    let p = trooper_file("[attack]\ncan_side_step = false\nemote_probability = 0\n");
+    assert!(p.senses.original_noticing());
+    Fighter::new(1, p, Vec3::ZERO, 0.0, StartState::StationaryAttack)
+}
+
+#[test]
+fn original_noticing_turns_to_fight_at_its_next_decision() {
+    // The droid steps into view at 1.0 s. The trooper decides every
+    // 0.5 s times 0.8 to 1.2, so it fights within 0.6 s of that, and
+    // not before the droid is there.
+    let world = flat_floor(vec![]);
+    let mut f = still_trooper();
+    let modes = notice_run(
+        &mut f,
+        &world,
+        |t| {
+            if t >= 1.0 {
+                vec![(target_at(1500.0, 0.0), 9)]
+            } else {
+                vec![]
+            }
+        },
+        0.0,
+        3.0,
+    );
+    let at = first_attack(&modes).expect("it never fought");
+    assert!((1.0..=1.6 + 1e-3).contains(&at), "fought at {at}");
+}
+
+#[test]
+fn original_noticing_needs_the_view_cone_unless_close() {
+    let world = flat_floor(vec![]);
+    // Behind it, out of its view cone: not noticed.
+    let mut f = still_trooper();
+    let modes = notice_run(
+        &mut f,
+        &world,
+        |_| vec![(target_at(-1500.0, 0.0), 9)],
+        0.0,
+        3.0,
+    );
+    assert_eq!(first_attack(&modes), None);
+    // Behind it but within AutoDetectRadius (200): noticed.
+    let mut f = still_trooper();
+    let modes = notice_run(
+        &mut f,
+        &world,
+        |_| vec![(target_at(-150.0, 0.0), 9)],
+        0.0,
+        3.0,
+    );
+    assert!(first_attack(&modes).is_some());
+}
+
+#[test]
+fn original_noticing_fights_the_nearest_it_can_see() {
+    // A wall hides the nearer droid; it fights the farther one in sight.
+    let wall = Brush::cuboid(Vec3::new(400.0, 200.0, 0.0), Vec3::new(420.0, 700.0, 400.0));
+    let world = flat_floor(vec![wall]);
+    let mut f = still_trooper();
+    let around = |_| {
+        vec![
+            (target_at(1200.0, 0.0), 21),
+            (target_at(800.0, 800.0), 22),
+            (target_at(2000.0, 100.0), 23),
+        ]
+    };
+    notice_run(&mut f, &world, around, 0.0, 1.0);
+    assert_eq!(f.mode, Mode::Attack);
+    let seen = f.notice(
+        &world,
+        &[target_at(1200.0, 0.0), target_at(800.0, 800.0)],
+        &[21, 22],
+        1.0,
+    );
+    assert_eq!(seen.map(|t| t.centre.x), Some(1200.0));
+}
+
+#[test]
+fn original_noticing_turns_on_whoever_hurt_it_for_six_seconds() {
+    // A droid behind it (unseen) shoots it at 0.5 s: it knows where that
+    // droid is for 6 s, then forgets it (it never saw it).
+    let world = flat_floor(vec![]);
+    let mut f = still_trooper();
+    let mut modes = notice_run(
+        &mut f,
+        &world,
+        |_| vec![(target_at(-1500.0, 0.0), 9)],
+        0.0,
+        0.5,
+    );
+    assert_eq!(first_attack(&modes), None);
+    let mut ev = Vec::new();
+    f.on_damaged_by(Some(Vec3::new(-1500.0, 0.0, 84.0)), Some(9), 0.5, &mut ev);
+    let after = notice_run(
+        &mut f,
+        &world,
+        |_| vec![(target_at(-1500.0, 0.0), 9)],
+        0.5,
+        8.0,
+    );
+    let start = first_attack(&after).expect("it never turned on its attacker");
+    assert!(start <= 1.1 + 1e-3, "fought at {start}");
+    modes.extend(after.iter().copied());
+    // It may have turned to face the droid and then seen it; if not, it
+    // has dropped the fight once the 6 s are up and its next look comes.
+    if !f.enemy_seen_now {
+        assert_ne!(after.last().unwrap().1, Mode::Attack);
+    }
+}
+
+#[test]
+fn original_noticing_remembers_an_enemy_out_of_sight_for_its_memory_time() {
+    // Seen, then a wall rises between them at 2 s (the droid steps behind
+    // one): still fought for EnemyMemoryTime (15 s), then dropped.
+    let wall = Brush::cuboid(
+        Vec3::new(700.0, -400.0, 0.0),
+        Vec3::new(720.0, 400.0, 600.0),
+    );
+    let walled = flat_floor(vec![wall]);
+    let open = flat_floor(vec![]);
+    let mut f = still_trooper();
+    let droid = |_| vec![(target_at(1500.0, 0.0), 9)];
+    let modes = notice_run(&mut f, &open, droid, 0.0, 2.0);
+    assert!(first_attack(&modes).is_some());
+    let later = notice_run(&mut f, &walled, droid, 2.0, 18.0);
+    let dropped = later.iter().find(|m| m.1 != Mode::Attack).map(|m| m.0);
+    let dropped = dropped.expect("it never dropped the fight");
+    // Last seen just before 2 s; dropped at the first decision after
+    // 15 s more (decisions come every 0.4 to 0.6 s).
+    assert!((16.9..=17.7).contains(&dropped), "dropped at {dropped}");
+}
+
+#[test]
+fn original_line_of_sight_tries_one_corner_when_the_eyes_are_hidden() {
+    // A wall hides the droid's eyes but leaves a gap below it: the line to
+    // the corner of the droid that the original tries goes under it.
+    let wall = Brush::cuboid(
+        Vec3::new(490.0, -400.0, 125.0),
+        Vec3::new(510.0, 400.0, 600.0),
+    );
+    let world = flat_floor(vec![wall]);
+    let mut f = still_trooper();
+    let modes = notice_run(
+        &mut f,
+        &world,
+        |_| vec![(target_at(1000.0, 0.0), 9)],
+        0.0,
+        1.0,
+    );
+    assert!(
+        first_attack(&modes).is_some(),
+        "the corner line should see it"
+    );
+    // Far away for its size (more than 100 radii): only the eyes count.
+    let wall = Brush::cuboid(
+        Vec3::new(1990.0, -400.0, 125.0),
+        Vec3::new(2010.0, 400.0, 600.0),
+    );
+    let world = flat_floor(vec![wall]);
+    let mut f = still_trooper();
+    let modes = notice_run(
+        &mut f,
+        &world,
+        |_| vec![(target_at(4500.0, 0.0), 9)],
+        0.0,
+        1.0,
+    );
+    assert_eq!(first_attack(&modes), None);
+}
+
+#[test]
+fn original_noticing_ignores_noises() {
+    // Noises don't start a fight (the original looks into them instead,
+    // which isn't ported).
+    let mut f = still_trooper();
+    let mut ev = Vec::new();
+    f.hear(Vec3::new(300.0, 0.0, 84.0), 0.0, &mut ev);
+    assert!(ev.is_empty());
+    assert_eq!(f.mode, Mode::Idle);
 }
