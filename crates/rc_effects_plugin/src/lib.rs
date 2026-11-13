@@ -45,7 +45,9 @@ use rc_combat::GameSound;
 use rc_effects::def::{CoordinateSystem, DrawStyle, EffectDef, EmitterKind};
 use rc_effects::read::Library;
 use rc_effects::EffectState;
-use rc_game_core::{units, GameLog, GamePaths, GameSet, GameState, PlayerCamera};
+use rc_game_core::{
+    units, GameLog, GamePaths, GameSet, GameState, PlayerCamera, SoundAt, SoundBy,
+};
 use rc_level_viewer::draw::to_image;
 use rc_level_viewer::materials::{find_export, Materials, Picture};
 use std::collections::HashMap;
@@ -146,8 +148,6 @@ pub struct EffectSettings {
     /// Most particles drawn at once over all effects; more are skipped.
     pub max_particles: usize,
     pub volume: f32,
-    /// Distance (uu) at which a sound is at half loudness.
-    pub sound_half_distance: f32,
     /// How bright lit effect models (`bUnlit` off) are drawn until the
     /// level's light where they are is known, 0-1 of their own colour.
     pub lit_model_light: f32,
@@ -163,7 +163,6 @@ impl Default for EffectSettings {
             size: 1.0,
             max_particles: 4000,
             volume: 1.0,
-            sound_half_distance: 2000.0,
             lit_model_light: 0.5,
             lit_model_scale: 1.1,
         }
@@ -192,7 +191,6 @@ impl EffectSettings {
                 "size" => s.size = num()? as f32,
                 "max_particles" => s.max_particles = num()? as usize,
                 "volume" => s.volume = num()? as f32,
-                "sound_half_distance" => s.sound_half_distance = num()? as f32,
                 "lit_model_light" => s.lit_model_light = num()? as f32,
                 "lit_model_scale" => s.lit_model_scale = num()? as f32,
                 other => return Err(format!("unknown setting effects.{other}")),
@@ -688,7 +686,11 @@ fn spawn(
             sounds.push(s.clone());
         }
         let dist = listener.map_or(0.0, |l| (l - a.at).length() * units::UU_PER_UNIT);
-        let vol = settings.volume / (1.0 + dist / settings.sound_half_distance.max(1.0));
+        // How loud with distance, and whether it is heard, is the sound
+        // engine's: an emitter's sounds come from its place and are played
+        // straight, without the hearing check (`AEmitter`, flags 0x400).
+        let vol = settings.volume;
+        let place = SoundAt::place(a.at);
         if let Some(au) = audio.as_deref_mut() {
             for s in &sounds {
                 let Some(h) = load_sound(&mut effects, s, &paths, au, &mut stats, &log)
@@ -700,6 +702,11 @@ fn spawn(
                 commands.spawn((
                     AudioPlayer(h),
                     PlaybackSettings::DESPAWN.with_volume(Volume::Linear(vol)),
+                    place,
+                    SoundBy {
+                        skip_hear_check: true,
+                        ..Default::default()
+                    },
                     DespawnOnExit(GameState::InGame),
                 ));
                 stats.sounds.push(name);
@@ -722,6 +729,12 @@ fn spawn(
                         .spawn((
                             AudioPlayer(h),
                             PlaybackSettings::LOOP.with_volume(Volume::Linear(vol)),
+                            place,
+                            SoundBy {
+                                ambient: true,
+                                skip_hear_check: true,
+                                ..Default::default()
+                            },
                             DespawnOnExit(GameState::InGame),
                         ))
                         .id(),

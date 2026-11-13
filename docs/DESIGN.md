@@ -1672,13 +1672,13 @@ also members kept in another package, such as geo_sound's
 (a few music stingers) play their `.ogg` from `GameData/Music`. Across the
 57 campaign maps the scripts name 1,629 sounds; `rc_script_check` finds
 every one in its package. When a script plays one, the sound starts at
-`[sound] volume` (`data/scripts/scripts.toml`) times the action's own
-`Volume`, and is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
+`[sound] volume` (`data/scripts/scripts.toml`); the action's own `Volume`
+is ignored, as the game's `PlayOwnedSound` ignores it. It is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
 ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
-reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
-script) says one line of speech (a `*_voice` package) at a time, so a new
-line stops its last one unless `bDontOverrideOtherSounds`; effects never
-stop each other; a group waits for its longest take. Lines pause with the
+reaches the sound card. Which line stops which is the sound engine's
+(below): a speaker's lines share a number, and `bDontOverrideOtherSounds`
+makes a line one that can't be cut. A group waits for its longest take.
+Lines pause with the
 game and stop when the level ends. Not done: subtitles (the game's
 `System/subtitles_*.int` files hold them, by sound name) and sounds stored
 inside a map.
@@ -1695,7 +1695,8 @@ explosions: from their side, never quieter). The class default `Radius` is
 else its first take's) and `rc_combat::read_audio_params` reads the
 params packages. At play time `sounds.rs` decides:
 - heard everywhere: `ACTION_PlayLocalSound`, `NonPositional` sounds,
-  `SoundSourceTag=PlayerCommando`, and a tag nothing in the level has;
+  `SoundSourceTag=PlayerCommando` (a tag nothing in the level has plays
+  nothing, as `ACTION_PlaySound` logs "non-existant SoundSourceTag");
 - else at the character whose `ScriptTags.tag` is the `SoundSourceTag`
   (followed as it moves), or the map actor with that tag or name (fixed);
 - with no tag: the character running the `ScriptedSequence`, else the
@@ -1707,8 +1708,7 @@ its side) and a `Placed` component; `sounds::follow` moves it with its
 character and sets its loudness every frame: full out to `Radius`, then
 `Radius / distance` (our reading: OpenAL's reference distance; some radii
 are tiny, enemy footsteps 20 uu, so `Radius` can't be where a sound
-stops). An action `Volume` above 1 (2 to 10000 in a few maps) makes the
-sound carry that many times further. Over the 56 campaign maps
+stops). Over the 56 campaign maps
 (`rc_script_check`) the scripts' 1,946 enabled sound actions split as:
 1,404 radio, 58 aimed at the player, 23 local, 391 at the script's spot
 (mostly explosions), 48 at a sequence's character, 9 at a tagged map
@@ -1720,6 +1720,33 @@ distance squared in Bevy units (metres): a droid 10 m away played at 1/100.
 1000 (`SpatialScale`) before Bevy sees them, which leaves left and right
 alone and pushes that fading out past a kilometre, so only each part's
 own distance rule applies.
+
+**The sound engine** (`rc_scripts_plugin/src/engine.rs`, the game's
+`UAudioSubsystem`, read from Engine.dll and ALAudio.dll by disassembly).
+Every part still plays a sound by spawning a Bevy `AudioPlayer`, adding
+`SoundAt` for a place and `rc_game_core::SoundBy` for who plays it (an
+entity or a number, whether it is a character's own cue that may be cut,
+a map loop, heard everywhere). In `PostUpdate` the engine:
+- finds the sound's facts (`rc_combat::sound_meta`, registered when the
+  game's packages are read: its `AudioParams`, category, flags, length);
+- rolls its volume and pitch between `MinVolume`/`MaxVolume` and
+  `MinPitch`/`MaxPitch` (`PlayUSound`; under 0.0001 it isn't played),
+  checks it can be heard (`CheckHearSound`), gives it the game's id and
+  priority (`UpdatePriority`);
+- sorts queued and playing sounds with the C library's `qsort` (equal
+  priorities land in the game's order), stops playing ones under the cut,
+  drops impacts when no channel is free and hands out the AUDIO CHANNELS
+  in channel order (`FindSource`);
+- ducks music to 0.5 and effects and other voices to 0.25 over 0.5 s
+  while a `bDisableVoiceCues` line plays (`UpdateDuckVolume`), published
+  as `rc_game_core::Ducking` for the music part and squad chatter;
+- sets each sink's volume: rolled volume × duck × `SoundFade` × the
+  category slider (`SoundMix`, from the SOUND options), kept within
+  0.0001 to 0.9999, times the distance share of `Placed`;
+- works out the EAX occlusion (`rc_game_core::EaxOcclusion`) when EAX is on.
+Sound groups (`USoundMultiple`) pick in order, `FirstSound` once, or by
+`Likelihood` skipping members for the wrong battle state or campaign
+(`LevelInfo.Campaign`, read by `rc_game/src/music.rs`).
 
 **Animation sounds** (`rc_scripts_plugin/src/anim_sounds.rs`). Animation
 sequences carry `AnimNotify_Sound` notifies: a moment (0 to 1 through the

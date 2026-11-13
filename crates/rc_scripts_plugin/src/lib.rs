@@ -60,6 +60,7 @@ pub mod bacta;
 pub mod breakables;
 pub mod characters;
 pub mod cutscene;
+pub mod engine;
 pub mod fx_factories;
 pub mod hud_blink;
 pub mod markers;
@@ -176,6 +177,16 @@ impl Plugin for ScriptsPlugin {
                     .run_if(playing),
             )
             .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
+            // The sound engine: every new sound, before Bevy starts it.
+            .init_resource::<engine::SoundEngine>()
+            .init_resource::<rc_game_core::Ducking>()
+            .init_resource::<rc_game_core::SoundMix>()
+            .add_systems(
+                PostUpdate,
+                (engine::schedule_sounds, engine::set_volumes)
+                    .chain()
+                    .before(bevy::transform::TransformSystems::Propagate),
+            )
             // The characters' animation sounds.
             .init_resource::<anim_sounds::AnimSounds>()
             .init_resource::<rc_game_core::AnimSoundsWanted>()

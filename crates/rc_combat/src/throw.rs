@@ -8,7 +8,7 @@ use crate::health::{Damage, DamageKind, Dead};
 use crate::library::WeaponLibrary;
 use crate::shot;
 use crate::{Hittable, Team};
-use bevy::audio::{PlaybackSettings, Volume};
+use bevy::audio::PlaybackSettings;
 use bevy::prelude::*;
 use rc_game_core::{
     Action, ActionState, GameLog, GameState, LevelCollision, Player, PlayerCamera, WeaponReadout,
@@ -114,12 +114,15 @@ fn say(log: &Option<Res<GameLog>>, s: String) {
     }
 }
 
-fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &Option<String>, volume: f32) {
+/// Play a grenade sound, from `at` (Bevy units) or, with `None`, heard
+/// everywhere (the player's own throw). How loud with distance is the
+/// sound engine's (`rc_scripts_plugin::engine`, the original's rules).
+fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &Option<String>, at: Option<Vec3>) {
     if let Some(h) = name.as_ref().and_then(|n| lib.sounds.get(n)?.pick()) {
-        commands.spawn((
-            AudioPlayer(h),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
-        ));
+        let mut e = commands.spawn((AudioPlayer(h), PlaybackSettings::DESPAWN));
+        if let Some(at) = at {
+            e.insert(rc_game_core::SoundAt::place(at));
+        }
     }
 }
 
@@ -203,7 +206,7 @@ pub(crate) fn launch_grenades(
         if let Some(looks) = &looks {
             looks.attach(&mut e, &t.grenade);
         }
-        play(&mut commands, &lib, &p.throw_sound, 1.0);
+        play(&mut commands, &lib, &p.throw_sound, None);
     }
 }
 
@@ -248,7 +251,6 @@ pub(crate) fn fly_grenades(
     if grenades.is_empty() || dt <= 0.0 {
         return;
     }
-    let listener = camera.single().ok().map(|c| to_unreal(c.translation()));
     let player_view = camera.single().ok().map(|c| {
         let f = c.forward();
         Vec3::new(f.x, f.z, f.y)
@@ -353,10 +355,12 @@ pub(crate) fn fly_grenades(
             );
         }
         if r.bounced {
-            if let Some(l) = listener {
-                let vol = 1.0 / (1.0 + (l - g.flight.position).length() / 1000.0);
-                play(&mut commands, &lib, &p.bounce_sound, vol);
-            }
+            play(
+                &mut commands,
+                &lib,
+                &p.bounce_sound,
+                Some(to_bevy(g.flight.position)),
+            );
         }
         let mut explode = r.explode;
         let mut direct = if r.explode && r.hit_actor {
@@ -403,8 +407,7 @@ pub(crate) fn fly_grenades(
             why,
         );
         let point = g.flight.position;
-        let vol = listener.map_or(1.0, |l| 1.0 / (1.0 + (l - point).length() / 2000.0));
-        play(&mut commands, &lib, &p.blast_sound, vol);
+        play(&mut commands, &lib, &p.blast_sound, Some(to_bevy(point)));
         blasts.write(Blast {
             grenade: g.grenade.clone(),
             point: to_bevy(point),

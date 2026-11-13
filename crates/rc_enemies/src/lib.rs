@@ -459,16 +459,18 @@ impl EnemySounds {
         self.by_type.insert(t.kind.id.clone(), found);
     }
 
-    /// Play one of `names` (picked in turn) for an enemy of type `kind` at
-    /// `at` (Unreal units), quieter with distance from `listener`. **Our
-    /// choice**, not the game's 3D sound.
+    /// Play one of `names` (picked in turn) for enemy number `id` of type
+    /// `kind` at `at` (Unreal units). How loud it is with distance, and
+    /// whether it is heard at all, is the sound engine's (the original's
+    /// rules, `rc_scripts_plugin::engine`): a character's own cue
+    /// (`PlayOwnedSound`).
     fn play(
         &mut self,
         commands: &mut Commands,
         kind: &str,
         names: &[String],
         at: rc_movement::Vec3,
-        listener: Option<rc_movement::Vec3>,
+        id: u32,
     ) -> Option<String> {
         if names.is_empty() {
             return None;
@@ -476,11 +478,15 @@ impl EnemySounds {
         self.picks = self.picks.wrapping_add(1);
         let name = &names[self.picks as usize % names.len()];
         let h = self.by_type.get(kind)?.get(name)?.pick()?;
-        let volume = listener.map_or(0.5, |l| 1.0 / (1.0 + (l - at).length() / 1000.0));
         let mut e = commands.spawn((
             AudioPlayer(h),
-            bevy::audio::PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume)),
+            bevy::audio::PlaybackSettings::DESPAWN,
             rc_game_core::SoundAt::place(rc_game_core::units::to_bevy(at)),
+            rc_game_core::SoundBy {
+                actor_index: Some(0x4000_0000 | id),
+                owned: true,
+                ..Default::default()
+            },
         ));
         if self.speaking.contains(kind) {
             e.insert(rc_game_core::Voice);
@@ -1071,7 +1077,6 @@ fn think(
     log: Res<GameLog>,
 ) {
     let Some(collision) = collision else { return };
-    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
     let dt = time.delta_secs().min(0.1);
     let target = player_target(&player, &camera);
     // The player's side besides the player (squad mates): droids fight
@@ -1355,7 +1360,7 @@ fn think(
                                 &f.params.kind.id,
                                 &f.params.sounds.spotted,
                                 f.pawn.location,
-                                listener,
+                                id,
                             ) {
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
@@ -1452,14 +1457,12 @@ fn react_to_combat(
     droids: Query<&Droid>,
     players: Query<(), With<Player>>,
     transforms: Query<&Transform>,
-    camera: Query<&Transform, With<PlayerCamera>>,
     mut sounds: ResMut<EnemySounds>,
     mut raise: MessageWriter<RaiseEvent>,
     log: Res<GameLog>,
 ) {
     let fight = &mut *fight;
     let now = fight.battle.time;
-    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
     let died_now: Vec<Entity> = died.read().map(|d| d.entity).collect();
     // The kind of the last damage each droid took this frame, so its death
     // line can match what killed it.
@@ -1481,7 +1484,7 @@ fn react_to_combat(
             &f.params.kind.id,
             names,
             f.pawn.location,
-            listener,
+            id,
         ) {
             log.line(format!(
                 "{PART}: t={now:.1}s droid {id} {what} ({kind}) sound {n}"

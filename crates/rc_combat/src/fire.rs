@@ -10,7 +10,7 @@ use crate::library::WeaponLibrary;
 use crate::shot::{self, Bolt, Rng};
 use crate::weapon::{ShotKind, Trigger, WeaponParams};
 use crate::{Arsenal, FireShot, Hittable, ShotLanded, ViewKick};
-use bevy::audio::{PlaybackSettings, Volume};
+use bevy::audio::PlaybackSettings;
 use bevy::prelude::*;
 use rc_game_core::{
     units::UU_PER_UNIT, Action, ActionState, GameLog, GameState, LevelCollision, Player,
@@ -136,12 +136,23 @@ pub(crate) fn against(
     amount * lib.damage_types.multiplier(table, ty)
 }
 
-fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &str, volume: f32) {
+/// Play a weapon sound: heard everywhere for the player's own weapon (the
+/// game plays the listener's own sounds without a place), else from `at`
+/// (Bevy units) as the shooter's own sound. How loud with distance is the
+/// sound engine's (`rc_scripts_plugin::engine`, the original's rules).
+fn play(commands: &mut Commands, lib: &WeaponLibrary, name: &str, at: Option<(Vec3, Entity)>) {
     if let Some(h) = lib.sounds.get(name).and_then(|s| s.pick()) {
-        commands.spawn((
-            AudioPlayer(h),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
-        ));
+        let mut e = commands.spawn((AudioPlayer(h), PlaybackSettings::DESPAWN));
+        if let Some((at, shooter)) = at {
+            e.insert((
+                rc_game_core::SoundAt::place(at),
+                rc_game_core::SoundBy {
+                    actor: Some(shooter),
+                    owned: true,
+                    ..Default::default()
+                },
+            ));
+        }
     }
 }
 
@@ -267,7 +278,7 @@ pub(crate) fn player_trigger(
     if actions.just_pressed(Action::Reload) && !on_turret && state.start_reload(p) {
         say(format!("weapons: {id} reloading ({} s)", p.reload_time));
         if let Some(s) = &p.reload_sound {
-            play(&mut commands, &lib, s, 1.0);
+            play(&mut commands, &lib, s, None);
         }
     }
     match state.trigger(
@@ -279,7 +290,7 @@ pub(crate) fn player_trigger(
         Trigger::Empty => {
             say(format!("weapons: {id} is empty"));
             if let Some(s) = &p.empty_sound {
-                play(&mut commands, &lib, s, 1.0);
+                play(&mut commands, &lib, s, None);
             }
         }
         Trigger::Reloading => {
@@ -288,7 +299,7 @@ pub(crate) fn player_trigger(
                 p.reload_time
             ));
             if let Some(s) = &p.reload_sound {
-                play(&mut commands, &lib, s, 1.0);
+                play(&mut commands, &lib, s, None);
             }
         }
         Trigger::Fired => {
@@ -332,7 +343,6 @@ pub(crate) fn launch_shots(
     lib: Res<WeaponLibrary>,
     targets_q: Query<(Entity, &GlobalTransform, &Hittable), Without<Dead>>,
     players: Query<(), With<Player>>,
-    camera: Query<&GlobalTransform, With<PlayerCamera>>,
     level: Option<Res<LevelCollision>>,
     mut rng: ResMut<CombatRng>,
     mut damage: MessageWriter<Damage>,
@@ -349,7 +359,6 @@ pub(crate) fn launch_shots(
     };
     let level = level.as_deref();
     let mut targets: Option<Vec<Target>> = None;
-    let listener = camera.single().ok().map(|c| to_unreal(c.translation()));
     for f in fired.read() {
         let Some(p) = lib.weapons.get(&f.weapon) else {
             say(format!(
@@ -383,18 +392,13 @@ pub(crate) fn launch_shots(
         let aim = shot::add_aim_error(start, aim, p.aim_error, &mut rng.0);
         let dir = (aim - start).normalize_or_zero();
 
-        // The fire sound: full volume for the player, quieter with
-        // distance for everyone else. **Our choice**, not the game's
-        // (which uses its 3D sound system).
+        // The fire sound: heard everywhere for the player, from the
+        // shooter for everyone else.
         if !p.fire_sounds.is_empty() {
             let pick = (rng.0.next_f32() * p.fire_sounds.len() as f32) as usize;
             let name = &p.fire_sounds[pick.min(p.fire_sounds.len() - 1)];
-            let volume = if players.contains(f.shooter) {
-                1.0
-            } else {
-                listener.map_or(0.5, |l| 1.0 / (1.0 + (l - start).length() / 1000.0))
-            };
-            play(&mut commands, &lib, name, volume);
+            let at = (!players.contains(f.shooter)).then(|| (to_bevy(start), f.shooter));
+            play(&mut commands, &lib, name, at);
         }
 
         match p.shot {

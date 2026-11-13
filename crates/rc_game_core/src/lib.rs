@@ -58,6 +58,7 @@ pub mod pickups;
 pub mod save;
 pub mod shake;
 pub mod sound;
+pub mod sound_engine;
 mod state;
 pub mod turrets;
 pub mod units;
@@ -84,6 +85,7 @@ pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
 };
+pub use sound_engine::{Ducking, MusicTrack, SoundBy, SoundFade, SoundMix};
 pub use turrets::{Manning, OnTurret, TurretOrder};
 pub use use_item::{UseItem, UseLock, UsePanel};
 

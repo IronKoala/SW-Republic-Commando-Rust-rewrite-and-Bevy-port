@@ -56,7 +56,7 @@ use bevy::audio::{
 use bevy::prelude::*;
 use rc_combat::{AudioParams, GameSound};
 use rc_game_core::units::{to_bevy, to_unreal};
-use rc_game_core::{GameLog, GamePaths, Play, PlayerCamera, ScriptTags, SoundAt};
+use rc_game_core::{GameLog, GamePaths, Play, PlayerCamera, ScriptTags, SoundAt, SoundBy};
 use rc_level::scripts::{MapScripts, ScriptObject};
 use rc_package::sound::read_streamed;
 use rc_package::Package;
@@ -95,7 +95,8 @@ pub(crate) struct SoundRequest {
     /// Who says it: `SoundSourceTag`, or the script's name.
     pub source: String,
     pub volume: f32,
-    /// Stop what the same speaker was saying.
+    /// `PlayOwnedSound` without `bDontOverrideOtherSounds`: the line may
+    /// be cut for a newer one from the same speaker (see `crate::engine`).
     pub cut_off: bool,
     /// For the log: `ScriptedTrigger52 #13`.
     pub by: String,
@@ -106,9 +107,6 @@ pub(crate) struct SoundRequest {
     /// The sequence's tag, for a `ScriptedSequence`'s own sounds: its
     /// character says them.
     pub owner: Option<String>,
-    /// How many times further than its radius it carries: the action's
-    /// `Volume` when above 1.
-    pub reach: f32,
 }
 
 /// A sound with a place in the level: how loud it is with distance, and
@@ -122,19 +120,15 @@ pub struct Placed {
     pub falloff: bool,
     /// The character it comes from, followed as it moves.
     pub follow: Option<Entity>,
-    /// The loudness last given to the sound card (distance times `fade`).
+    /// The share of its loudness left at this distance (0 to 1), which the
+    /// sound engine (`crate::engine`) multiplies in.
     pub gain: f32,
     /// Whether the level's walls muffle it: the game's `ULevel::IsAudibleAt`
     /// says "always heard" only for a mover's sound or an actor with
     /// `SoundOcclusion=OCCLUSION_None`.
     pub walls: bool,
-    /// The sound's own fade, 0 to 1 (a map loop fading in or out).
-    pub fade: f32,
     /// How far it carries now, after walls and rooms.
     pub reach: Reach,
-    /// The sound card's volume divided by `gain` (the SOUND options'
-    /// volumes included), once it has started.
-    base: Option<f32>,
 }
 
 impl Placed {
@@ -147,21 +141,13 @@ impl Placed {
             follow,
             gain: 1.0,
             walls: true,
-            fade: 1.0,
             reach: Reach::new(radius),
-            base: None,
         }
     }
 
     /// The same, never muffled by walls.
     pub fn through_walls(mut self) -> Self {
         self.walls = false;
-        self
-    }
-
-    /// The same, starting silent (a fade in follows).
-    pub fn faded_out(mut self) -> Self {
-        self.fade = 0.0;
         self
     }
 
@@ -178,17 +164,9 @@ impl Placed {
             _ => self.radius,
         };
         self.reach.step(target, now);
-        let gain = loudness((at - ear).length(), self.reach.applied, self.falloff) * self.fade;
+        let gain = loudness((at - ear).length(), self.reach.applied, self.falloff);
         self.gain = gain;
         gain
-    }
-
-    /// The volume to start the sound card at for `volume` (the scripts'
-    /// volume): never quite 0, so the SOUND options' share of the volume
-    /// can be worked out from it once it plays.
-    pub fn start_volume(&mut self, volume: f32) -> f32 {
-        self.gain = self.gain.max(MIN_GAIN);
-        volume * self.gain
     }
 }
 
@@ -270,8 +248,6 @@ pub fn sound_clock(script: Option<&LevelScript>, time: &Time) -> f64 {
     script.map_or(time.elapsed_secs_f64(), |s| s.director.time as f64)
 }
 
-/// Quietest a sound starts on the sound card (see [`Placed::start_volume`]).
-const MIN_GAIN: f32 = 1e-3;
 
 /// A sound a level script is playing.
 #[derive(Component, Debug, Clone)]
@@ -454,11 +430,12 @@ fn read_streamed_sounds(
                 let h = audio.add(AudioSource {
                     bytes: bytes.into(),
                 });
+                register_streamed(paths, &pkg, &data, package, export, name, &h);
                 out.sounds.insert(
                     name.to_ascii_lowercase(),
                     GameSound {
                         variants: vec![h],
-                        params: None,
+                        ..Default::default()
                     },
                 );
                 n += 1;
@@ -469,6 +446,29 @@ fn read_streamed_sounds(
         }
     }
     n
+}
+
+/// Tell the sound engine about a streamed sound: its own `Params` (the
+/// music stingers name `Params_SFX` objects or none), and that it streams.
+fn register_streamed(
+    paths: &GamePaths,
+    pkg: &Package,
+    data: &[u8],
+    package: &str,
+    export: &rc_package::Export,
+    name: &str,
+    h: &Handle<AudioSource>,
+) {
+    use rc_combat::sound_meta;
+    let Some(i) = pkg.exports.iter().position(|e| std::ptr::eq(e, export)) else {
+        return;
+    };
+    let props = sound_meta::export_properties(pkg, data, i).unwrap_or_default();
+    let params = rc_package::sound::params_of(pkg, &props, package);
+    let facts = sound_meta::resolve_params(paths, params.as_deref());
+    let mut meta = sound_meta::meta_of(pkg, &props, name, params, &facts, 0.0);
+    meta.streaming = true;
+    sound_meta::register(h.id(), meta);
 }
 
 /// What a sound action asks for. `owner`: the sequence's tag, for a
@@ -483,17 +483,17 @@ pub(crate) fn request(
     let tag = a
         .text("SoundSourceTag")
         .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("None"));
-    let own = a.float("Volume").unwrap_or(1.0);
+    // The action's own `Volume` is passed to `PlayOwnedSound`, which
+    // doesn't use it (`AActor::execPlayOwnedSound`, Engine.dll).
     SoundRequest {
         name: a.text("Sound").unwrap_or("").to_string(),
         source: tag.unwrap_or(who).to_string(),
-        volume: (volume * own).clamp(0.0, 1.0),
+        volume: volume.clamp(0.0, 1.0),
         cut_off: !a.flag("bDontOverrideOtherSounds", false),
         by: format!("{who} #{index}"),
         local: a.class.to_ascii_lowercase().ends_with("playlocalsound"),
         tagged: tag.is_some(),
         owner: owner.filter(|o| !o.is_empty() && !o.eq_ignore_ascii_case("None")),
-        reach: own.max(1.0),
     }
 }
 
@@ -506,19 +506,35 @@ enum Source {
     Follow(Entity, Vec3),
     /// A fixed spot, Bevy units.
     At(Vec3),
+    /// The `SoundSourceTag` names nothing: `ACTION_PlaySound` logs
+    /// "non-existant SoundSourceTag, not playing" and plays nothing.
+    Nowhere,
 }
 
 /// Work out where a requested sound comes from (see the module notes).
 fn source_of(
     r: &SoundRequest,
-    params: Option<&AudioParams>,
+    non_positional: bool,
     script: &LevelScript,
     chars: &Query<(Entity, &ScriptTags, &GlobalTransform)>,
 ) -> Source {
     if r.local {
         return Source::Everywhere("a local sound".into());
     }
-    if params.is_some_and(|p| p.non_positional) {
+    // `ACTION_PlaySound` looks the tag up first, and plays nothing when
+    // nothing has it, whatever the sound's own `AudioParams` say.
+    let tag_found = !r.tagged
+        || script.director.settings.is_player(&r.source)
+        || script.places.find(&r.source).is_some()
+        || chars.iter().any(|(_, t, _)| {
+            t.tag
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(&r.source))
+        });
+    if !tag_found {
+        return Source::Nowhere;
+    }
+    if non_positional {
         return Source::Everywhere("the game plays it as radio".into());
     }
     if r.tagged && script.director.settings.is_player(&r.source) {
@@ -547,6 +563,7 @@ fn source_of(
             p.location[1],
             p.location[2],
         ))),
+        None if r.tagged => Source::Nowhere,
         None => Source::Everywhere(format!("nothing in the level is called {}", r.source)),
     }
 }
@@ -557,8 +574,8 @@ pub(crate) fn play(
     mut commands: Commands,
     script: Option<ResMut<LevelScript>>,
     sounds: Option<Res<ScriptSounds>>,
-    playing: Query<(Entity, &ScriptSound)>,
     chars: Query<(Entity, &ScriptTags, &GlobalTransform)>,
+    dead: Query<(), With<rc_combat::Dead>>,
     ears: Query<&GlobalTransform, With<PlayerCamera>>,
     hearing: Option<Res<LevelHearing>>,
     log: Res<GameLog>,
@@ -568,8 +585,6 @@ pub(crate) fn play(
         return;
     }
     let now = script.director.time;
-    // What is playing, with what this frame starts.
-    let mut on: Vec<(Entity, ScriptSound)> = playing.iter().map(|(e, s)| (e, s.clone())).collect();
     for r in std::mem::take(&mut script.sounds) {
         let key = r.name.to_ascii_lowercase();
         let Some(h) = sounds
@@ -585,36 +600,52 @@ pub(crate) fn play(
             continue;
         };
         let speech = sounds.as_ref().is_some_and(|s| s.speech.contains(&key));
-        let mut stopped = Vec::new();
-        if r.cut_off && speech {
-            on.retain(|(e, s)| {
-                let same = s.speech && s.source.eq_ignore_ascii_case(&r.source);
-                if same {
-                    stopped.push(s.name.clone());
-                    commands.entity(*e).try_despawn();
-                }
-                !same
-            });
-        }
         let secs = sounds
             .as_ref()
             .and_then(|s| s.lengths.get(&key))
             .map(|l| format!("{l:.1} s"))
             .unwrap_or_else(|| "length unknown".into());
-        // Where it comes from, and how loud it is from here.
+        // Where it comes from: the picked sound's own `AudioParams` (the
+        // group's when it wasn't read through `rc_combat::read_sounds`).
         let params = sounds.as_ref().and_then(|s| s.params.get(&key));
-        let from = source_of(&r, params, &script, &chars);
+        let leaf = rc_combat::sound_meta::meta(h.id());
+        let non_positional = leaf.as_ref().map_or_else(
+            || params.is_some_and(|p| p.non_positional),
+            |m| m.non_positional,
+        );
+        let from = source_of(&r, non_positional, &script, &chars);
         let ear = ears.iter().next().map(|g| g.translation());
-        let radius = params
-            .and_then(|p| p.radius)
-            .unwrap_or(script.director.settings.sound_radius)
-            * r.reach;
-        let falloff = !params.is_some_and(|p| p.no_falloff);
+        let radius = leaf.as_ref().map_or_else(
+            || {
+                params
+                    .and_then(|p| p.radius)
+                    .unwrap_or(rc_combat::sound_meta::SoundMeta::default().radius)
+            },
+            |m| m.radius,
+        );
+        let falloff = !leaf
+            .as_ref()
+            .map_or_else(|| params.is_some_and(|p| p.no_falloff), |m| m.no_falloff);
         let (place, follow) = match &from {
-            Source::Everywhere(_) => (None, None),
+            Source::Everywhere(_) | Source::Nowhere => (None, None),
             Source::Follow(e, at) => (Some(*at), Some(*e)),
             Source::At(at) => (Some(*at), None),
         };
+        if matches!(from, Source::Nowhere) {
+            log.line(format!(
+                "{PART}: t={now:.2} {}: {} {}: non-existant SoundSourceTag, not playing (as the game's ACTION_PlaySound)",
+                r.by, r.source, r.name
+            ));
+            continue;
+        }
+        // `ACTION_PlaySound` plays nothing from a dead character.
+        if follow.is_some_and(|e| dead.contains(e)) {
+            log.line(format!(
+                "{PART}: t={now:.2} {}: {} is dead; {} not played (as the game's ACTION_PlaySound)",
+                r.by, r.source, r.name
+            ));
+            continue;
+        }
         let distance = match (place, ear) {
             (Some(p), Some(e)) => Some(to_unreal(p - e).length()),
             _ => None,
@@ -632,6 +663,7 @@ pub(crate) fn play(
         };
         let heard = match (&from, distance) {
             (Source::Everywhere(why), _) => format!("heard everywhere: {why}"),
+            (Source::Nowhere, _) => String::new(),
             (Source::Follow(..), d) => format!(
                 "from {} (followed), {} uu away, reach {radius:.0} uu, loudness {gain:.2}",
                 r.source,
@@ -650,35 +682,37 @@ pub(crate) fn play(
             }
         };
         log.line(format!(
-            "{PART}: t={now:.2} {}: {} {} {} ({secs}, volume {:.2}; {heard}){}",
+            "{PART}: t={now:.2} {}: {} {} {} ({secs}, volume {:.2}; {heard})",
             r.by,
             r.source,
             if speech { "says" } else { "plays" },
             r.name,
             r.volume,
-            if stopped.is_empty() {
-                String::new()
-            } else {
-                format!("; stops {}", stopped.join(", "))
-            }
         ));
         script.stats.sounds_played.push(r.name.clone());
         if place.is_some() {
             script.stats.sounds_placed.push(r.name.clone());
         }
+        // Who plays it, for the sound engine: `PlayOwnedSound` from the
+        // speaker (an actor's number; a script's own spot has no entity,
+        // so its name stands in for it).
+        let by = SoundBy {
+            actor: follow,
+            actor_index: follow.is_none().then(|| speaker_number(&r.source)),
+            owned: r.cut_off,
+            everywhere: matches!(from, Source::Everywhere(_)),
+            ..default()
+        };
         let tag = ScriptSound {
             name: r.name,
             source: r.source,
             speech,
         };
         let mut spawned = commands.spawn((
-            tag.clone(),
+            tag,
+            by,
             AudioPlayer(h),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(
-                placed
-                    .as_mut()
-                    .map_or(r.volume, |p| p.start_volume(r.volume)),
-            )),
+            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(r.volume)),
         ));
         if let (Some(at), Some(placed)) = (place, placed) {
             spawned.insert((SoundAt::place(at), placed));
@@ -687,9 +721,17 @@ pub(crate) fn play(
         if speech {
             spawned.insert(rc_game_core::Voice);
         }
-        let e = spawned.id();
-        on.push((e, tag));
     }
+}
+
+/// A number standing for a speaker with no entity (a script's spot), the
+/// same for the same name.
+fn speaker_number(name: &str) -> u32 {
+    let mut h: u32 = 2166136261;
+    for b in name.to_ascii_lowercase().bytes() {
+        h = (h ^ b as u32).wrapping_mul(16777619);
+    }
+    h | 0x8000_0000
 }
 
 /// Log when a script sound really starts on the sound card (a placed
@@ -755,13 +797,7 @@ pub(crate) fn pause(
 /// between (see [`Placed::update`]).
 #[allow(clippy::type_complexity)]
 pub(crate) fn follow(
-    mut placed: Query<(
-        &mut Placed,
-        &mut Transform,
-        &mut SoundAt,
-        Option<&mut AudioSink>,
-        Option<&mut SpatialAudioSink>,
-    )>,
+    mut placed: Query<(&mut Placed, &mut Transform, &mut SoundAt)>,
     bodies: Query<&GlobalTransform, Without<Placed>>,
     ears: Query<&GlobalTransform, (With<PlayerCamera>, Without<Placed>)>,
     hearing: Option<Res<LevelHearing>>,
@@ -771,26 +807,13 @@ pub(crate) fn follow(
     let ear = ears.iter().next().map(|g| to_unreal(g.translation()));
     let hearing = hearing.as_ref().map(|h| &*h.0);
     let now = sound_clock(script.as_deref(), &time);
-    for (mut p, mut t, mut at, sink, spatial) in &mut placed {
+    for (mut p, mut t, mut at) in &mut placed {
         if let Some(g) = p.follow.and_then(|e| bodies.get(e).ok()) {
             t.translation = g.translation();
             at.0 = g.translation();
         }
         let Some(ear) = ear else { continue };
-        let sink: &mut dyn AudioSinkPlayback = match (sink, spatial) {
-            (Some(s), _) => s.into_inner(),
-            (_, Some(s)) => s.into_inner(),
-            _ => continue,
-        };
-        let old = p.gain.max(MIN_GAIN);
-        let base = *p
-            .base
-            .get_or_insert_with(|| sink.volume().to_linear() / old);
-        let before = p.gain;
-        let gain = p.update(hearing, to_unreal(t.translation), ear, now);
-        if gain != before {
-            sink.set_volume(Volume::Linear(base * gain));
-        }
+        p.update(hearing, to_unreal(t.translation), ear, now);
     }
 }
 
@@ -840,7 +863,7 @@ mod tests {
                 name.into(),
                 GameSound {
                     variants: vec![h],
-                    params: None,
+                    ..Default::default()
                 },
             );
         }
@@ -903,20 +926,27 @@ mod tests {
         v
     }
 
-    /// A speaker's new line stops its last one; another speaker, a bang,
-    /// or `bDontOverrideOtherSounds` doesn't; an unknown sound is counted.
+    /// Every line is handed to the sound engine, which decides what a
+    /// speaker's new line does to its last one (`FindSource`): a speaker's
+    /// lines share a number, and `bDontOverrideOtherSounds` makes a line
+    /// not "owned". A tag nothing has plays nothing; an unknown sound is
+    /// counted.
     #[test]
-    fn one_line_at_a_time_per_speaker() {
+    fn lines_go_to_the_engine() {
         let mut w = world();
         ask(&mut w, "Script1", &[("Sound", t("line1"))]);
         ask(&mut w, "Script1", &[("Sound", t("bang"))]);
-        assert_eq!(playing(&mut w), ["bang", "line1"]);
         ask(&mut w, "Script1", &[("Sound", t("line2"))]);
-        assert_eq!(playing(&mut w), ["bang", "line2"], "line1 is cut off");
+        assert_eq!(playing(&mut w), ["bang", "line1", "line2"]);
         ask(
             &mut w,
             "Script2",
             &[("Sound", t("line1")), ("SoundSourceTag", t("Sev"))],
+        );
+        assert_eq!(
+            playing(&mut w),
+            ["bang", "line1", "line2"],
+            "no Sev in the level"
         );
         ask(
             &mut w,
@@ -926,15 +956,20 @@ mod tests {
                 ("bDontOverrideOtherSounds", Val::Bool(true)),
             ],
         );
-        assert_eq!(playing(&mut w), ["bang", "line1", "line1", "line2"]);
+        let mut q = w.query::<(&ScriptSound, &SoundBy)>();
+        let by: Vec<SoundBy> = q.iter(&w).map(|(_, b)| *b).collect();
+        assert_eq!(by.len(), 4);
+        let number = Some(speaker_number("Script1"));
+        assert!(by.iter().all(|b| b.actor_index == number));
+        assert_eq!(by.iter().filter(|b| b.owned).count(), 3);
         ask(&mut w, "Script1", &[("Sound", t("nothing"))]);
         let st = &w.resource::<LevelScript>().stats;
-        assert_eq!(st.sounds_played.len(), 5);
+        assert_eq!(st.sounds_played.len(), 4);
         assert_eq!(st.sounds_missing, ["nothing"]);
     }
 
-    /// The action's own `Volume` scales the setting, and the speaker is
-    /// the `SoundSourceTag`, or the script.
+    /// The action's own `Volume` is ignored (`PlayOwnedSound` doesn't use
+    /// it), and the speaker is the `SoundSourceTag`, or the script.
     #[test]
     fn request_reads_the_action() {
         let r = request(
@@ -950,11 +985,10 @@ mod tests {
         );
         assert_eq!(r.name, "CA1G1701");
         assert_eq!(r.source, "ScriptedTrigger52");
-        assert!((r.volume - 0.4).abs() < 1e-6);
+        assert!((r.volume - 0.8).abs() < 1e-6);
         assert!(r.cut_off);
         assert_eq!(r.by, "ScriptedTrigger52 #13");
         assert!(!r.tagged && !r.local);
-        assert_eq!(r.reach, 1.0);
         let r = request(
             "S",
             0,
@@ -962,11 +996,7 @@ mod tests {
             1.0,
             None,
         );
-        assert_eq!(
-            (r.volume, r.reach),
-            (1.0, 8.0),
-            "louder than 1 carries further"
-        );
+        assert_eq!(r.volume, 1.0);
     }
 
     /// Full loudness out to the radius, then radius over distance; no
@@ -990,7 +1020,7 @@ mod tests {
 
     /// Where each sound is heard from: radio everywhere, a placed line at
     /// the script's spot, a tagged one at its character, a local sound
-    /// everywhere, a tag nothing has everywhere.
+    /// everywhere, a tag nothing has not at all.
     #[test]
     fn sounds_come_from_their_place() {
         let mut w = world();
@@ -1045,7 +1075,7 @@ mod tests {
             ],
         );
         let st = &w.resource::<LevelScript>().stats;
-        assert_eq!(st.sounds_played.len(), 6);
+        assert_eq!(st.sounds_played.len(), 5, "Nobody's line isn't played");
         assert_eq!(st.sounds_placed, ["line2", "bang"]);
     }
 }

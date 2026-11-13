@@ -38,6 +38,7 @@ pub const ALL: &[&str] = &[
     "voices_volume",
     "sound_quality",
     "sound_3d",
+    "eax",
     "audio_channels",
     "video_resolution",
     "vsync",
@@ -393,7 +394,8 @@ pub fn fallback_items(name: &str) -> Option<Vec<String>> {
         | "blur"
         | "projectors"
         | "squad_shadows"
-        | "sound_3d" => l(&["ON", "OFF"]),
+        | "sound_3d"
+        | "eax" => l(&["ON", "OFF"]),
         "bloom" => l(&["NONE", "LOW", "HIGH"]),
         "graphics_quality" | "texture_detail" => {
             l(&["LOWEST", "LOW", "MEDIUM", "HIGH", "HIGHEST", "CUSTOM"])
@@ -465,6 +467,7 @@ pub fn read(name: &str, s: &Settings, items: &[String]) -> Option<usize> {
                 (on, None) => on_off_index(items, on),
             }
         }
+        "eax" => on_off_index(items, s.audio.eax),
         "audio_channels" => {
             let want = s.audio.channels;
             (0..n)
@@ -558,6 +561,7 @@ pub fn write(
                 None => first,
             }
         }
+        "eax" => s.audio.eax = text_on(text).unwrap_or(first),
         "audio_channels" => {
             let Some(c) = number_in(text) else {
                 return false;
@@ -647,6 +651,7 @@ pub fn restore(name: &str, s: &mut Settings) {
         "voices_volume" => s.audio.voices_volume = d.audio.voices_volume,
         "sound_quality" => s.audio.low_quality = d.audio.low_quality,
         "sound_3d" => s.audio.sound_3d = d.audio.sound_3d,
+        "eax" => s.audio.eax = d.audio.eax,
         "audio_channels" => s.audio.channels = d.audio.channels,
         // The screen size changes only with the preset (see
         // PRESETS_SET_SCREEN_SIZE).

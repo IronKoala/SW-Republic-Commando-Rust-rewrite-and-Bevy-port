@@ -599,12 +599,16 @@ copy of the game.
   grey; presets don't change the screen size; bump quality and bloom LOW
   against HIGH look the same; no APPLY / "keep these settings?" step.
   SOUND rows (voices volume,
-  sound quality, 3D sound, audio channels) work too (checked by tests;
-  brightness checked by the user on the PC). So do
+  sound quality, 3D sound, EAX, audio channels) work too (checked by tests;
+  brightness checked by the user on the PC). EAX is on by default and done
+  in software (room echo and muffling behind walls); the defaults are the
+  original's (music 7, effects 5, 32 channels). Sounds play through a port
+  of the original's sound engine: random volume and pitch per sound, the
+  most important sounds win when there are more than channels, and music
+  and other sounds dip while a radio or briefing line plays. So do
   SUBTITLES (checked by the user), PROMPT TEXT, the turn keys, the
   screenshot key (F12) and the weapon keys (1 to 4). HELMET shows or hides
-  the helmet frame (see below). Rows the port can't do yet (EAX) are
-  greyed out. Values change with the arrows; the screen size
+  the helmet frame (see below). Values change with the arrows; the screen size
   also has a drop-down list of the sizes that fit your monitor. Our own
   extra settings (field of view, display mode, controller and gyro) are on
   a fifth tab, "PORT +", in the same original look.

@@ -1,30 +1,27 @@
-//! The SOUND options for every sound but the music (which `music.rs` turns
-//! up and down itself): the master, SOUND FX and VOICES volumes, 3D SOUND,
-//! AUDIO CHANNELS and SOUND QUALITY.
+//! The SOUND options for every sound: the volumes, 3D SOUND, EAX, AUDIO
+//! CHANNELS and SOUND QUALITY.
 //!
-//! The parts that play sounds (weapons, enemies, level scripts, menus) play
-//! them at their own loudness and tag them: `rc_game_core::Voice` for
-//! speech, `rc_game_core::SoundAt` for a place in the level. This file
-//! adjusts each sound as it starts, before Bevy hands it to the sound card
-//! (Bevy's audio starts sounds after the transform update in `PostUpdate`).
+//! The sound engine (`rc_scripts_plugin::engine`, the original's
+//! `UAudioSubsystem`) plays every sound; this file hands it the options
+//! each frame (`rc_game_core::SoundMix`, `rc_game_core::EaxOn`) and puts
+//! the listener's ears on the player's eyes. The music part turns its own
+//! tracks up and down (`music.rs`).
 
-use crate::music::Track;
 use crate::settings::Settings;
-use bevy::audio::{PlaybackSettings, SpatialListener, SpatialScale, Volume};
+use bevy::audio::SpatialListener;
 use bevy::prelude::*;
-use rc_game_core::{GameLog, PlayerCamera, SoundAt, Voice};
-use std::collections::VecDeque;
+use rc_game_core::{EaxOn, GameLog, PlayerCamera, SoundMix};
 
 pub struct SoundOptionsPlugin;
 
 impl Plugin for SoundOptionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (apply_quality, ears)).add_systems(
-            PostUpdate,
-            (adjust_new_sounds, limit_channels)
-                .chain()
-                .before(bevy::transform::TransformSystems::Propagate),
-        );
+        app.init_resource::<EaxOn>()
+            .add_systems(Update, (apply_quality, ears))
+            .add_systems(
+                PostUpdate,
+                mix.before(rc_scripts_plugin::engine::schedule_sounds),
+            );
     }
 }
 
@@ -32,80 +29,27 @@ impl Plugin for SoundOptionsPlugin {
 /// about 0.2 m; a Bevy unit is 50 Unreal units, about a metre).
 const EAR_GAP: f32 = 0.2;
 
-/// Bevy's 3D sound (rodio's) also makes a sound quieter with distance, by
-/// one over the distance squared in Bevy units: a droid 10 m away would
-/// play at 1/100 of its loudness. The parts that place sounds already
-/// work out their own loudness with distance (from the game's numbers),
-/// so placed sounds are shrunk by this much before Bevy sees them: its own
-/// fading then only starts beyond 1000 units (50,000 uu, a kilometre).
-/// Which ear a sound is nearer doesn't change with the shrinking, so the
-/// left/right of 3D SOUND stays as it was.
-const SPATIAL_SHRINK: f32 = 1e-3;
-
-/// How loud a new sound plays: its own loudness times the master volume
-/// and the VOICES or SOUND FX volume.
-pub fn volume_scale(settings: &Settings, voice: bool) -> f32 {
+/// The options as the sound engine reads them.
+pub fn sound_mix(settings: &Settings) -> SoundMix {
     let a = &settings.audio;
-    let kind = if voice {
-        a.voices_volume
-    } else {
-        a.effects_volume
-    };
-    (a.master_volume * kind).clamp(0.0, 1.0)
-}
-
-#[allow(clippy::type_complexity)]
-fn adjust_new_sounds(
-    settings: Res<Settings>,
-    mut new: Query<
-        (&mut PlaybackSettings, Has<Voice>, Has<SoundAt>),
-        (Added<PlaybackSettings>, Without<Track>),
-    >,
-) {
-    for (mut p, voice, placed) in &mut new {
-        let scale = volume_scale(&settings, voice);
-        if scale < 1.0 {
-            p.volume = Volume::Linear(p.volume.to_linear() * scale);
-        }
-        if placed && settings.audio.sound_3d {
-            p.spatial = true;
-            p.spatial_scale = Some(SpatialScale::new(SPATIAL_SHRINK));
-        }
+    SoundMix {
+        channels: a.channels,
+        master: a.master_volume.clamp(0.0, 1.0),
+        music: a.music_volume.clamp(0.0, 1.0),
+        voice: a.voices_volume.clamp(0.0, 1.0),
+        sfx: a.effects_volume.clamp(0.0, 1.0),
+        sound_3d: a.sound_3d,
     }
 }
 
-/// AUDIO CHANNELS: when more sounds play than the setting allows, the
-/// oldest effects stop. Speech and music are never stopped (they still
-/// count).
-#[allow(clippy::type_complexity)]
-fn limit_channels(
-    mut commands: Commands,
-    settings: Res<Settings>,
-    playing: Query<(Entity, Has<Voice>), (With<PlaybackSettings>, Without<Track>)>,
-    new: Query<Entity, (Added<PlaybackSettings>, Without<Voice>, Without<Track>)>,
-    mut effects: Local<VecDeque<Entity>>,
-    mut stopped: Local<u64>,
-    log: Res<GameLog>,
-) {
-    effects.retain(|e| playing.contains(*e));
-    effects.extend(new.iter());
-    let limit = settings.audio.channels.max(1) as usize;
-    let mut count = playing.iter().count();
-    while count > limit {
-        let Some(old) = effects.pop_front() else {
-            break;
-        };
-        commands.entity(old).try_despawn();
-        count -= 1;
-        *stopped += 1;
-        // The first time and then now and again, so the log shows the limit
-        // working without a line per gunshot.
-        if *stopped == 1 || stopped.is_multiple_of(100) {
-            log.line(format!(
-                "sound: {} sounds over the {limit}-channel limit stopped so far",
-                *stopped
-            ));
-        }
+/// Hand the options to the sound engine when they change.
+fn mix(settings: Res<Settings>, mut mix: ResMut<SoundMix>, mut eax: ResMut<EaxOn>) {
+    let want = sound_mix(&settings);
+    if *mix != want {
+        *mix = want;
+    }
+    if eax.0 != settings.audio.eax {
+        eax.0 = settings.audio.eax;
     }
 }
 
@@ -159,41 +103,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn voices_follow_their_own_volume() {
+    fn the_options_reach_the_engine() {
         let mut s = Settings::default();
-        s.audio.master_volume = 0.5;
         s.audio.voices_volume = 0.2;
-        s.audio.effects_volume = 1.0;
-        assert!((volume_scale(&s, true) - 0.1).abs() < 1e-6);
-        assert!((volume_scale(&s, false) - 0.5).abs() < 1e-6);
-    }
-
-    fn app(channels: u32) -> App {
-        let mut app = App::new();
-        let mut s = Settings::default();
-        s.audio.channels = channels;
-        app.insert_resource(s)
-            .insert_resource(GameLog::terminal())
-            .add_systems(Update, (adjust_new_sounds, limit_channels).chain());
-        app
-    }
-
-    #[test]
-    fn over_the_limit_the_oldest_effect_stops_never_speech() {
-        let mut app = app(3);
-        let line = app.world_mut().spawn((PlaybackSettings::ONCE, Voice)).id();
-        app.update();
-        let first = app.world_mut().spawn(PlaybackSettings::ONCE).id();
-        app.update();
-        let second = app.world_mut().spawn(PlaybackSettings::ONCE).id();
-        app.update();
-        assert!(app.world().get_entity(first).is_ok());
-        let third = app.world_mut().spawn(PlaybackSettings::ONCE).id();
-        app.update();
-        let w = app.world();
-        assert!(w.get_entity(line).is_ok(), "speech is never stopped");
-        assert!(w.get_entity(first).is_err(), "the oldest effect stops");
-        assert!(w.get_entity(second).is_ok() && w.get_entity(third).is_ok());
+        s.audio.channels = 16;
+        let m = sound_mix(&s);
+        assert_eq!((m.voice, m.channels), (0.2, 16));
+        // The original's defaults.
+        let d = sound_mix(&Settings::default());
+        assert_eq!((d.music, d.sfx, d.voice, d.channels), (0.7, 0.5, 1.0, 32));
+        assert!(Settings::default().audio.eax);
     }
 
     /// The left ear is on the camera's right (+X), to undo rodio's swap.
@@ -202,28 +121,5 @@ mod tests {
         let l = ears_swapped();
         assert!(l.left_ear_offset.x > 0.0 && l.right_ear_offset.x < 0.0);
         assert!((l.left_ear_offset.x - l.right_ear_offset.x - EAR_GAP).abs() < 1e-6);
-    }
-
-    #[test]
-    fn placed_sounds_are_3d_only_with_the_option_on() {
-        let mut app = app(32);
-        let e = app
-            .world_mut()
-            .spawn((PlaybackSettings::ONCE, SoundAt::place(Vec3::X)))
-            .id();
-        app.update();
-        let p = app.world().get::<PlaybackSettings>(e).unwrap();
-        assert!(p.spatial);
-        assert_eq!(
-            p.spatial_scale.map(|s| s.0),
-            Some(Vec3::splat(SPATIAL_SHRINK))
-        );
-        app.world_mut().resource_mut::<Settings>().audio.sound_3d = false;
-        let e = app
-            .world_mut()
-            .spawn((PlaybackSettings::ONCE, SoundAt::place(Vec3::X)))
-            .id();
-        app.update();
-        assert!(!app.world().get::<PlaybackSettings>(e).unwrap().spatial);
     }
 }

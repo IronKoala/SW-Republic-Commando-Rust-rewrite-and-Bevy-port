@@ -233,7 +233,7 @@ OnRight = "option_right"
 "Options[2]" = "music_volume"
 "Options[3]" = "sound_quality"      # LOW: 22050 per second at most (next level load)
 "Options[4]" = "sound_3d"           # enemies heard from their side
-"Options[5]" = "unavailable"        # EAX: Creative's Windows-only sound card effects; no equivalent here
+"Options[5]" = "eax"                # room echo and muffling behind walls (the original's EAX, done in software)
 "Options[6]" = "audio_channels"     # most sounds at once
 
 [pages.options_sound.extra_buttons.PortSettings]

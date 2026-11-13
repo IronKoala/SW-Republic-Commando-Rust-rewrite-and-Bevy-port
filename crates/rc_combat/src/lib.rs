@@ -43,6 +43,7 @@ pub mod pickup_sound;
 pub mod save;
 pub mod script_ammo;
 pub mod shot;
+pub mod sound_meta;
 mod throw;
 mod view;
 pub mod weapon;

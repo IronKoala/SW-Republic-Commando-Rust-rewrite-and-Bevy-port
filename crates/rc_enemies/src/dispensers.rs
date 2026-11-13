@@ -36,7 +36,7 @@
 use crate::scripted::ScriptedAnim;
 use crate::{Droid, Fight, Looks, PART};
 use bevy::asset::RenderAssetUsages;
-use bevy::audio::{PlaybackSettings, Volume};
+use bevy::audio::PlaybackSettings;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -55,10 +55,6 @@ use std::sync::Arc;
 /// dispensers): the level's light is baked into its surfaces and the
 /// scene has no ambient light. A guess (0 to 1), the same as theirs.
 const AMBIENT: f32 = 0.5;
-
-/// Full loudness out to this distance (Unreal units), then fading, as for
-/// the animated props. A guess.
-const SOUND_REACH: f32 = 1000.0;
 
 /// The model's package.
 pub const PACKAGE: &str = "GameData/Animations/Dispensers.ukx";
@@ -1107,18 +1103,12 @@ fn play_sound(
     else {
         return format!("{path} (not loaded)");
     };
-    let distance = camera
-        .single()
-        .map(|c| c.translation().distance(at) * 50.0)
-        .unwrap_or(0.0);
-    let volume = if distance <= SOUND_REACH {
-        1.0
-    } else {
-        SOUND_REACH / distance
-    };
+    // How loud with distance, and whether it is heard, is the sound
+    // engine's (the original's rules, `rc_scripts_plugin::engine`).
+    let _ = camera;
     commands.spawn((
         AudioPlayer(h),
-        PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
+        PlaybackSettings::DESPAWN,
         SoundAt::place(at),
         DespawnOnExit(GameState::InGame),
     ));

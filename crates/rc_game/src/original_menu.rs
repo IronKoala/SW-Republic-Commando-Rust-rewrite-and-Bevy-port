@@ -1204,7 +1204,8 @@ fn play_sound(
         menus.sounds.insert(key.clone(), handle);
     }
     if let Some(Some(h)) = menus.sounds.get(&key) {
-        // Turned down by the SOUND FX volume in music.rs, as every sound is.
+        // Played by the sound engine (rc_scripts_plugin::engine) at the
+        // SOUND FX volume, as every sound is.
         commands.spawn((AudioPlayer(h.clone()), PlaybackSettings::DESPAWN));
     }
 }

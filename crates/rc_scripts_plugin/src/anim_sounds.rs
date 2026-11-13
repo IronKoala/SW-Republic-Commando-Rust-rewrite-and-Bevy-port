@@ -22,12 +22,12 @@ use bevy::audio::{AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 use rc_combat::{AudioParams, GameSound};
 use rc_game_core::units::to_unreal;
-use rc_game_core::{AnimSound, AnimSoundsWanted, GameLog, GamePaths, PlayerCamera, SoundAt};
+use rc_game_core::{
+    AnimSound, AnimSoundsWanted, GameLog, GamePaths, PlayerCamera, SoundAt, SoundBy,
+};
 use std::collections::{BTreeMap, HashMap};
 
-use crate::sounds::{sound_clock, Placed};
 use crate::{LevelScript, PART};
-use rc_level_plugin::LevelHearing;
 
 /// An animation's sound, playing.
 #[derive(Component, Debug, Clone)]
@@ -132,17 +132,11 @@ pub(crate) fn play(
     script: Option<Res<LevelScript>>,
     bodies: Query<&GlobalTransform>,
     ears: Query<&GlobalTransform, With<PlayerCamera>>,
-    hearing: Option<Res<LevelHearing>>,
-    time: Res<Time>,
     log: Res<GameLog>,
 ) {
-    let now = sound_clock(script.as_deref(), &time);
-    let (volume, default_radius) = script.as_ref().map_or((1.0, 600.0), |s| {
-        (
-            s.director.settings.sound_volume,
-            s.director.settings.sound_radius,
-        )
-    });
+    let volume = script
+        .as_ref()
+        .map_or(1.0, |s| s.director.settings.sound_volume);
     let ear = ears.iter().next().map(|g| g.translation());
     for a in heard.read() {
         let Some((package, name)) = split(&a.sound) else {
@@ -153,47 +147,36 @@ pub(crate) fn play(
             continue;
         };
         let Some(h) = sound.pick() else { continue };
-        let p = sound.params.as_ref().and_then(|p| sounds.params.get(p));
         let tag = AnimSoundPlaying {
             sound: name.clone(),
             by: a.by.clone(),
         };
         let at = bodies.get(a.from).map(|g| g.translation()).ok();
-        match (p.is_some_and(|p| p.non_positional), at) {
+        // `UAnimNotify_Sound::Notify`: the owner plays it through
+        // `CheckHearSound` (flags 0); the sound engine does the rest from
+        // the sound's own `AudioParams`.
+        let by = SoundBy {
+            actor: Some(a.from),
+            ..default()
+        };
+        let mut e = commands.spawn((
+            tag,
+            by,
+            AudioPlayer(h.clone()),
+            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
+        ));
+        let meta = rc_combat::sound_meta::meta(h.id());
+        match (meta.as_ref().is_some_and(|m| m.non_positional), at) {
             (false, Some(at)) => {
-                let radius = p.and_then(|p| p.radius).unwrap_or(default_radius);
-                let falloff = !p.is_some_and(|p| p.no_falloff);
-                let mut placed = Placed::new(radius, falloff, Some(a.from));
-                let radius = placed.radius;
-                let gain = ear.map_or(1.0, |e| {
-                    placed.update(
-                        hearing.as_ref().map(|h| &*h.0),
-                        to_unreal(at),
-                        to_unreal(e),
-                        now,
-                    )
-                });
-                commands.spawn((
-                    tag,
-                    AudioPlayer(h),
-                    PlaybackSettings::DESPAWN
-                        .with_volume(Volume::Linear(placed.start_volume(volume))),
-                    SoundAt::place(at),
-                    placed,
-                ));
+                e.insert(SoundAt::place(at));
+                let d = ear.map_or(0.0, |e| to_unreal(at - e).length());
                 log.line(format!(
-                    "{PART}: {} plays {name}, reach {radius:.0} uu, loudness {gain:.2}",
-                    a.by
+                    "{PART}: {} plays {name}, radius {:.0} uu, {d:.0} uu away",
+                    a.by,
+                    meta.as_ref().map_or(0.0, |m| m.radius)
                 ));
             }
-            _ => {
-                commands.spawn((
-                    tag,
-                    AudioPlayer(h),
-                    PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
-                ));
-                log.line(format!("{PART}: {} plays {name} (heard everywhere)", a.by));
-            }
+            _ => log.line(format!("{PART}: {} plays {name} (heard everywhere)", a.by)),
         }
         sounds.played.push(format!("{}: {name}", a.by));
     }
