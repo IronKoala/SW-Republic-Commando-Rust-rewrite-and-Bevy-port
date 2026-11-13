@@ -24,14 +24,24 @@
 //!   from a random direction around the camera (level, not above or
 //!   below) at a random distance between `ROSradiusMin` and
 //!   `ROSradiusMax`, fading with distance like every placed sound
-//!   (`crate::sounds`). It does not loop and starts at full loudness.
+//!   (`crate::sounds`). It does not loop.
+//! - each playing (the room loop and every one-shot) gets the picked
+//!   sound's own `AudioParams` (a group's pick uses the picked sound's,
+//!   and a sound naming none gets the class defaults): a random loudness
+//!   between `MinVolume` and `MaxVolume` (not played below 0.0001), a
+//!   random pitch between `MinPitch` and `MaxPitch` (kept within 0.5 to 2,
+//!   then within 0.7 to 1.2 by `ALAudio.dll`), and the volume slider of
+//!   its `Category` (`rc_game_core::SoundCategory`);
+//! - the fades are straight lines in loudness: the engine's fade
+//!   (`FAbstractSource::GetFadeMultiplier`) bends the line only for a
+//!   `SoundStreamed` whose `FadeInType`/`FadeOutType` says so, and every
+//!   room sound is a plain `Sound` (curve 0, `MFT_Linear`).
 //! - `ACTION_ChangeZoneAudio` sets `ZoneAudioClass` on every `ZoneInfo`
 //!   whose `Tag` is the action's `ZoneInfoTag`.
 //!
-//! **Ours:** the shape of the 2-second fades (straight lines in loudness;
-//! the curve is in `ALAudio.dll` and was not read), the random numbers
-//! (a fixed sequence, so logs repeat), and the loudness of the room sounds
-//! (the scripts' `[sound] volume`, as the map's other looping sounds).
+//! **Ours:** the random numbers (a fixed sequence, so logs repeat), and
+//! the scripts' `[sound] volume` (1 unless a mod changes it), which
+//! multiplies the room sounds as the map's other looping sounds.
 //!
 //! **The visor's echo** (`FListener::Update`): while the view is in a
 //! vision mode (`rc_game_core::VisionModeNow`) whose `EAXEffect` is set,
@@ -45,7 +55,9 @@ use bevy::prelude::*;
 use rc_audio::room::EaxReverb;
 use rc_combat::{AudioParams, GameSound};
 use rc_game_core::units::{to_bevy, to_unreal};
-use rc_game_core::{GameLog, GamePaths, PlayerCamera, RoomEcho, SoundAt, VisionModeNow};
+use rc_game_core::{
+    GameLog, GamePaths, PlayerCamera, RoomEcho, SoundAt, SoundCategory, VisionModeNow,
+};
 use rc_level::scripts::ScriptObject;
 use rc_level::zone_audio::{AudioEnv, Reverb};
 use rc_level_plugin::LevelZoneAudio;
@@ -123,6 +135,34 @@ impl ZoneSounds {
             .wrapping_add(1_013_904_223);
         (self.random >> 8) as f32 / (1u32 << 24) as f32
     }
+
+    /// The `AudioParams` a picked sound plays with: its own `Params`, or
+    /// the class defaults when it names none (`USound::GetParams`).
+    fn params_of(&self, sound: &Handle<AudioSource>) -> AudioParams {
+        rc_combat::sound_params(sound.id())
+            .flatten()
+            .and_then(|n| self.params.get(&n).cloned())
+            .unwrap_or_default()
+    }
+
+    /// The loudness and pitch the game gives one playing, from its
+    /// `AudioParams` (`UAudioSubsystem::PlayUSound`): a random loudness
+    /// between `MinVolume` and `MaxVolume`, not played at all below
+    /// 0.0001 and at most 1, and a random pitch between `MinPitch` and
+    /// `MaxPitch`, kept within 0.5 to 2 and then (`ALAudio`'s
+    /// `PlaySource`) within 0.7 to 1.2.
+    fn loudness_and_pitch(&mut self, p: &AudioParams) -> Option<(f32, f32)> {
+        let r = self.random();
+        let volume = p.min_volume + r * (p.max_volume - p.min_volume);
+        if volume < 0.0001 {
+            return None;
+        }
+        let r = self.random();
+        let pitch = (p.min_pitch + r * (p.max_pitch - p.min_pitch))
+            .clamp(0.5, 2.0)
+            .clamp(0.7, 1.2);
+        Some((volume.min(1.0), pitch))
+    }
 }
 
 /// The EAX values the game sends for an `Effect` (field for field).
@@ -187,9 +227,12 @@ pub(crate) fn prepare(
             sounds.insert(name.to_ascii_lowercase(), s);
         }
     }
+    // Each sound plays with its own Params (a group's pick with the picked
+    // sound's), so read the packages every member names.
     let mut param_packages: Vec<String> = sounds
         .values()
-        .filter_map(|s: &GameSound| s.params.as_ref())
+        .flat_map(|s: &GameSound| s.variants.iter())
+        .filter_map(|h| rc_combat::sound_params(h.id()).flatten())
         .filter_map(|p| p.split_once('.').map(|(pk, _)| pk.to_string()))
         .collect();
     param_packages.sort();
@@ -344,16 +387,23 @@ pub(crate) fn update(
             if let Some(name) = new_loop {
                 match state.sounds.get(&name.to_ascii_lowercase()).cloned() {
                     Some(sound) => {
-                        if let Some(h) = sound.pick() {
+                        let picked = sound.pick().map(|h| {
+                            let params = state.params_of(&h);
+                            let lp = state.loudness_and_pitch(&params);
+                            (h, params, lp)
+                        });
+                        if let Some((h, params, Some((loudness, pitch)))) = picked {
                             let mut settings = if sound.looping {
                                 PlaybackSettings::LOOP
                             } else {
                                 PlaybackSettings::DESPAWN
                             }
-                            .with_volume(Volume::Linear(volume));
+                            .with_volume(Volume::Linear(volume * loudness))
+                            .with_speed(pitch);
                             settings.muted = true;
                             let e = commands
                                 .spawn((
+                                    SoundCategory(params.category),
                                     ZoneSound {
                                         sound: name.clone(),
                                         room_loop: true,
@@ -371,12 +421,17 @@ pub(crate) fn update(
                                 .id();
                             state.room_loop = Some((e, name.clone()));
                             log.line(format!(
-                                "{PART}: room sound: {name} fades in{}",
+                                "{PART}: room sound: {name} fades in (loudness {loudness:.2}, pitch {pitch:.2}, category {}){}",
+                                params.category,
                                 if sound.looping {
                                     ", looping"
                                 } else {
                                     " (the sound isn't marked Looping: plays once)"
                                 }
+                            ));
+                        } else if picked.is_some() {
+                            log.line(format!(
+                                "{PART}: room sound: {name} is too quiet to play (its Params)"
                             ));
                         }
                     }
@@ -429,21 +484,23 @@ pub(crate) fn update(
         return;
     };
     let Some(h) = sound.pick() else { return };
-    let params = sound
-        .params
-        .as_ref()
-        .and_then(|p| state.params.get(p))
-        .cloned();
-    let params = params.as_ref();
-    let tag = ZoneSound {
-        sound: name.clone(),
-        room_loop: false,
-    };
-    let settings = PlaybackSettings::DESPAWN;
+    let own = state.params_of(&h);
+    let params = Some(&own);
+    let tag = (
+        ZoneSound {
+            sound: name.clone(),
+            room_loop: false,
+        },
+        SoundCategory(own.category),
+    );
     let placed = e.ros_radius_max > 0.0 && !params.is_some_and(|p| p.non_positional);
     let id = if placed {
         let a = state.random() * std::f32::consts::TAU;
         let r = e.ros_radius_min + state.random() * (e.ros_radius_max - e.ros_radius_min);
+        let Some((level, pitch)) = state.loudness_and_pitch(&own) else {
+            return;
+        };
+        let settings = PlaybackSettings::DESPAWN.with_speed(pitch);
         let at = to_bevy(rc_movement::Vec3::new(
             p.x + a.cos() * r,
             p.y + a.sin() * r,
@@ -458,28 +515,33 @@ pub(crate) fn update(
         let falloff = !params.is_some_and(|p| p.no_falloff);
         let gain = loudness(r, radius, falloff);
         log.line(format!(
-            "{PART}: t={now:.2} room sound: one-shot {name}, {r:.0} uu away, loudness {gain:.2}; next in {:.1} s",
+            "{PART}: t={now:.2} room sound: one-shot {name}, {r:.0} uu away, loudness {level:.2} x {gain:.2} for distance, pitch {pitch:.2}; next in {:.1} s",
             state.next_one_shot - now
         ));
         commands
             .spawn((
                 tag,
                 AudioPlayer(h),
-                settings.with_volume(Volume::Linear(volume * gain)),
+                settings.with_volume(Volume::Linear(volume * level * gain)),
                 SoundAt::place(at),
                 Placed::new(radius, falloff, None, gain),
             ))
             .id()
     } else {
+        let Some((level, pitch)) = state.loudness_and_pitch(&own) else {
+            return;
+        };
         log.line(format!(
-            "{PART}: t={now:.2} room sound: one-shot {name}, heard everywhere; next in {:.1} s",
+            "{PART}: t={now:.2} room sound: one-shot {name}, heard everywhere, loudness {level:.2}, pitch {pitch:.2}; next in {:.1} s",
             state.next_one_shot - now
         ));
         commands
             .spawn((
                 tag,
                 AudioPlayer(h),
-                settings.with_volume(Volume::Linear(volume)),
+                PlaybackSettings::DESPAWN
+                    .with_speed(pitch)
+                    .with_volume(Volume::Linear(volume * level)),
             ))
             .id()
     };
@@ -527,6 +589,43 @@ pub(crate) fn forget(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loudness_and_pitch_follow_the_params() {
+        let mut z = ZoneSounds {
+            random: 7,
+            ..Default::default()
+        };
+        // params_sfx.Ambient_OneShot_2D: pitch 0.95 to 1.1.
+        let p = AudioParams {
+            min_pitch: 0.95,
+            max_pitch: 1.1,
+            ..Default::default()
+        };
+        for _ in 0..200 {
+            let (v, pitch) = z.loudness_and_pitch(&p).unwrap();
+            assert_eq!(v, 1.0);
+            assert!((0.95..=1.1).contains(&pitch), "{pitch}");
+        }
+        // Silent params: not played at all.
+        let quiet = AudioParams {
+            min_volume: 0.0,
+            max_volume: 0.0,
+            ..Default::default()
+        };
+        assert!(z.loudness_and_pitch(&quiet).is_none());
+        // params_sfx.Interface_Pitched: pitch 0.5, which ALAudio lifts to 0.7.
+        let low = AudioParams {
+            min_pitch: 0.5,
+            max_pitch: 0.5,
+            min_volume: 0.5,
+            max_volume: 0.5,
+            ..Default::default()
+        };
+        assert_eq!(z.loudness_and_pitch(&low), Some((0.5, 0.7)));
+        // A sound naming no Params: the class defaults, music.
+        assert_eq!(AudioParams::default().category, 0);
+    }
 
     #[test]
     fn random_numbers_stay_between_0_and_1() {

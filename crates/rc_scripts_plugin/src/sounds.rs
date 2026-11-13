@@ -315,8 +315,11 @@ fn read_streamed_sounds(
             out.missing.push(format!("{name}: not in {package}"));
             continue;
         };
-        let file = match read_streamed(&pkg, &data, export) {
-            Ok(s) => s.file_name,
+        let (file, params) = match read_streamed(&pkg, &data, export) {
+            Ok(s) => {
+                let params = rc_package::sound::params_of(&pkg, &s.properties, package);
+                (s.file_name, params)
+            }
             Err(e) => {
                 out.missing.push(format!("{name}: didn't read: {e}"));
                 continue;
@@ -329,11 +332,12 @@ fn read_streamed_sounds(
                 let h = audio.add(AudioSource {
                     bytes: bytes.into(),
                 });
+                rc_combat::note_sound_params(h.id(), params.clone());
                 out.sounds.insert(
                     name.to_ascii_lowercase(),
                     GameSound {
                         variants: vec![h],
-                        params: None,
+                        params,
                         looping: false,
                     },
                 );

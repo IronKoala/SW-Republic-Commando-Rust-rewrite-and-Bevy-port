@@ -475,7 +475,10 @@ copy of the game.
   own sound processor driven by the game's numbers (the original left the
   echo to the sound card). Rooms with a "repeating echo" setting
   get it. The visor follows the game's rule for its own echo too, though
-  no vision mode in the game's files sets one.
+  no vision mode in the game's files sets one. As in the game, music (and
+  any sound with no sound settings) gets no echo, far sounds lose some
+  high notes in rooms that say so, and the room sounds get their own
+  random loudness and pitch from the game's settings.
   Finishing a level now takes you to the next one (tested in the cloud
   sandbox with the real files, not yet on Windows or by playing through):
   walking into the exit arrows, or a script's "change level", loads the

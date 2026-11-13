@@ -132,6 +132,85 @@ impl Shelves {
     }
 }
 
+/// High notes turned down: the part above `hf_reference` times a gain,
+/// the rest unchanged. Used per sound for EAX's air absorption (see
+/// [`air_absorption_gain`]). **Ours:** the filter's shape (one pole at
+/// `hf_reference`, as the echo's own `RoomHF`); EAX names only the
+/// frequency and the loss there, and the sound card's filter is not in the
+/// game's files.
+#[derive(Debug, Clone, Default)]
+pub struct HighShelf {
+    low: OnePole,
+}
+
+impl HighShelf {
+    /// The filter's coefficient for `hf_reference` at `rate` (pass it to
+    /// [`Self::run`]; it only changes with the room).
+    pub fn coefficient(hf_reference: f32, rate: f32) -> f32 {
+        OnePole::coefficient(hf_reference, rate)
+    }
+    /// One sample through, with the high part times `hf`.
+    pub fn run(&mut self, x: f32, coefficient: f32, hf: f32) -> f32 {
+        self.low.a = coefficient;
+        let low = self.low.run(x);
+        low + (x - low) * hf
+    }
+}
+
+/// Metres per Unreal unit as the game hands positions to the sound card
+/// (`ALAudio.dll` scales every position and distance by 0.01).
+pub const METRES_PER_UU: f32 = 0.01;
+
+/// EAX air absorption: the gain at `hf_reference` of a sound `metres`
+/// beyond its full-loudness distance, from the room's `AirAbsorptionHF`
+/// (mB per metre). The game never sets a sound's own
+/// `AirAbsorptionFactor`, so EAX's default 1 applies, and it leaves the
+/// sound card's rolloff at 1. Counting only the distance past the
+/// full-loudness one is how OpenAL Soft's EAX does it (`alc/alu.cpp`,
+/// LGPL, read for the rule only).
+pub fn air_absorption_gain(air_absorption_hf: f32, metres: f32) -> f32 {
+    mb_to_gain((air_absorption_hf * metres.max(0.0)).min(0.0))
+}
+
+/// What EAX occlusion (`lOcclusion`, mB, 0 or less) does to one sound,
+/// with the per-sound ratios at EAX's defaults (the game sets none:
+/// `OcclusionLFRatio` 0.25, `OcclusionRoomRatio` 1.5,
+/// `OcclusionDirectRatio` 1.0). Returns, as gains: the sound's own
+/// loudness, its high notes relative to that, the send to the echo, and
+/// the send's high notes relative to that. The rules are OpenAL Soft's EAX
+/// (`al/source.cpp`, `eax_create_direct_filter_param` and
+/// `eax_create_room_filter_param`, LGPL, read for the rules only): a path
+/// with ratio `r` loses `occlusion * max(r * lf, r + lf - 1)` overall and
+/// `occlusion * r` at the high notes.
+pub fn occlusion_gains(occlusion_mb: f32) -> [f32; 4] {
+    const LF: f32 = 0.25;
+    const ROOM: f32 = 1.5;
+    const DIRECT: f32 = 1.0;
+    let o = occlusion_mb.min(0.0);
+    let overall = |r: f32| o * (r * LF).max(r + LF - 1.0);
+    let (direct, direct_hf) = (overall(DIRECT), o * DIRECT);
+    let (room, room_hf) = (overall(ROOM), o * ROOM);
+    [
+        mb_to_gain(direct),
+        mb_to_gain(direct_hf - direct),
+        mb_to_gain(room),
+        mb_to_gain(room_hf - room),
+    ]
+}
+
+/// EAX `RoomRolloffFactor`: how much of a sound's send reaches the echo
+/// at `distance` when the sound card's full-loudness distance for it is
+/// `reference` (DirectSound 3D's rolloff, which EAX applies to the room
+/// path: `reference / (reference + factor * (distance - reference))`,
+/// no change nearer than `reference`). The game sets no rolloff of its
+/// own per sound (EAX default 0), so only the room's counts.
+pub fn room_rolloff_gain(factor: f32, reference: f32, distance: f32) -> f32 {
+    if factor <= 0.0 || reference <= 0.0 || distance <= reference {
+        return 1.0;
+    }
+    reference / (reference + factor * (distance - reference))
+}
+
 /// A delay line with a fixed longest length.
 #[derive(Debug, Clone)]
 struct Delay {
@@ -547,6 +626,51 @@ mod tests {
         let energy = |x: &[f32]| x.iter().map(|v| v * v).sum::<f32>();
         let ratio = energy(&echoed) / energy(&plain);
         assert!(ratio > 0.25 && ratio < 4.0, "{ratio}");
+    }
+
+    #[test]
+    fn rolloff_only_past_the_reference() {
+        assert_eq!(room_rolloff_gain(0.0, 100.0, 5000.0), 1.0);
+        assert_eq!(room_rolloff_gain(1.0, 100.0, 50.0), 1.0);
+        assert!((room_rolloff_gain(1.0, 100.0, 200.0) - 0.5).abs() < 1e-6);
+        assert!((room_rolloff_gain(2.0, 100.0, 200.0) - 1.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn air_absorption_dulls_far_sounds_only_up_high() {
+        // -5 mB per metre over 20 metres: -100 mB, about 0.89.
+        let g = air_absorption_gain(-5.0, 20.0);
+        assert!((g - 10f32.powf(-100.0 / 2000.0)).abs() < 1e-6, "{g}");
+        assert_eq!(air_absorption_gain(-5.0, 0.0), 1.0);
+        let rate = 48000.0;
+        let c = HighShelf::coefficient(5000.0, rate);
+        let level = |freq: f32| {
+            let mut f = HighShelf::default();
+            let mut peak = 0f32;
+            for i in 0..48000 {
+                let x = (2.0 * std::f32::consts::PI * freq * i as f32 / rate).sin();
+                let y = f.run(x, c, 0.25);
+                if i > 24000 {
+                    peak = peak.max(y.abs());
+                }
+            }
+            peak
+        };
+        assert!(level(50.0) > 0.98, "low notes pass");
+        let high = level(15000.0);
+        assert!(high < 0.7, "high notes turned down: {high}");
+    }
+
+    #[test]
+    fn occlusion_muffles_and_quietens() {
+        assert_eq!(occlusion_gains(0.0), [1.0, 1.0, 1.0, 1.0]);
+        let [d, dhf, r, rhf] = occlusion_gains(-2000.0);
+        // Direct: -500 mB overall, -1500 mB more up high.
+        assert!((d - mb_to_gain(-500.0)).abs() < 1e-6);
+        assert!((dhf - mb_to_gain(-1500.0)).abs() < 1e-6);
+        // Echo send: -1500 mB overall, -1500 mB more up high.
+        assert!((r - mb_to_gain(-1500.0)).abs() < 1e-6);
+        assert!((rhf - mb_to_gain(-1500.0)).abs() < 1e-6);
     }
 
     #[test]

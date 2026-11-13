@@ -3,6 +3,16 @@
 Running record of changes to the Star Wars: Republic Commando Rust and Bevy
 rewrite. Newest entries first. Format and rules are in `MODLOG-template.md`.
 
+## 2026-11-13: Room sound: which sounds echo, rolloff, air absorption, occlusion, room sounds' own loudness and pitch (rc_package, rc_combat, rc_menus, rc_audio, rc_scripts_plugin, rc_game_core, rc_game)
+
+- **Changed:** `rc_package::sound::AudioParams` reads `Category`, `Min/MaxVolume`, `Min/MaxPitch` and has the `engine.u` class defaults as `Default`. New `rc_combat::sound_params` / `note_sound_params`: the `Params` of every sound read (also script `SoundStreamed` and menu sounds, via `rc_menus` `sound_and_params`). `rc_game/src/room_sound.rs`: music by the game's rule (`Category` music, which includes sounds naming no `Params`) is left out of the echo, in place of our old `Dry` tag (removed; menu clicks now echo in a level's pause menu like the game's); each sound's send gets the room's `RoomRolloffFactor`, its sound and send get `AirAbsorptionHF` and EAX occlusion (new `rc_game_core::EaxOcclusion`, filled by PR #128) as high-note filters; new `rc_game_core::EaxOn` (AUDIO menu's EAX row) turns all of it off. New `rc_audio::room` helpers `HighShelf`, `room_rolloff_gain`, `air_absorption_gain`, `occlusion_gains`. Room loops and one-shots play with the picked sound's own `Params`: random loudness and pitch, skipped when too quiet, on the slider of their category (new `rc_game_core::SoundCategory`, followed by the SOUND options).
+- **Why:** User asked "have you left anything else out?" (1:1 rewrite).
+- **Where it comes from:** `Engine.dll` (`PlayUSound`, `USound::GetParams`, `USoundMultiple` pick, `FAbstractSource::Init`/`GetFadeMultiplier`/`UpdateVolume`, `GetMasterVolumeMultiplier`, `StopSound`) and `ALAudio.dll` (`PlaySource`), disassembled locally, not committed; `params_*.uax` and `engine.u` data. EAX's own rules for rolloff, air absorption and occlusion ratios: OpenAL Soft's EAX (LGPL; `alc/alu.cpp`, `al/source.cpp`), read for the rules only. The fade curve turned out to be the game's (straight line), so that "ours" is gone.
+- **Ours:** the high-note filter shape; the fixed random sequence.
+- **Tested how:** `cargo test -p rc_audio -p rc_package -p rc_combat -p rc_scripts_plugin -p rc_game -p rc_menus -p rc_game_core`.
+- **Result:** All pass. New tests: rolloff only past the full-loudness distance; air absorption turns down only high notes; occlusion's four gains; room sounds' loudness and pitch follow their `Params` (0.5 pitch lifted to 0.7, silent `Params` not played).
+- **Still broken / not tested:** Not listened to. Occlusion is heard only once PR #128 sets `EaxOcclusion`.
+
 ## 2026-11-13: Room echo: the echo effect and the visor's echo (rc_audio, rc_level, rc_visor, rc_scripts_plugin, rc_game_core)
 
 - **Changed:** `rc_audio::room` plays EAX's echo effect (`EchoTime`, `EchoDepth`, now in `EaxReverb`). `rc_level::zone_audio::read_vision_echoes` reads every vision mode in `FrameFX` and the echo it sets (`ZoneAudio::vision_echoes`); the `zone_audio` example prints them. New `rc_game_core::VisionModeNow`, set by the visor (low light = `FrameFX.VisionModes.VisionNight`); the zone sounds use a mode's echo in place of the room's when it has one.

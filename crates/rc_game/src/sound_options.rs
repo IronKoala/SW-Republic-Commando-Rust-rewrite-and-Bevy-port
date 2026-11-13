@@ -13,7 +13,7 @@ use crate::room_sound::EchoReturn;
 use crate::settings::Settings;
 use bevy::audio::{PlaybackSettings, SpatialListener, SpatialScale, Volume};
 use bevy::prelude::*;
-use rc_game_core::{GameLog, PlayerCamera, SoundAt, Voice};
+use rc_game_core::{GameLog, PlayerCamera, SoundAt, SoundCategory, Voice};
 use std::collections::VecDeque;
 
 pub struct SoundOptionsPlugin;
@@ -60,16 +60,38 @@ pub fn volume_scale(settings: &Settings, voice: bool) -> f32 {
     (a.master_volume * kind).clamp(0.0, 1.0)
 }
 
+/// [`volume_scale`] for a sound tagged with the game's category
+/// (`rc_game_core::SoundCategory`): music on the MUSIC volume, voice on
+/// VOICES, the rest on SOUND FX, as the game's
+/// `GetMasterVolumeMultiplier` picks.
+pub fn category_scale(settings: &Settings, category: u8) -> f32 {
+    let a = &settings.audio;
+    let kind = match category {
+        0 => a.music_volume,
+        1 => a.voices_volume,
+        _ => a.effects_volume,
+    };
+    (a.master_volume * kind).clamp(0.0, 1.0)
+}
+
 #[allow(clippy::type_complexity)]
 fn adjust_new_sounds(
     settings: Res<Settings>,
     mut new: Query<
-        (&mut PlaybackSettings, Has<Voice>, Has<SoundAt>),
+        (
+            &mut PlaybackSettings,
+            Has<Voice>,
+            Has<SoundAt>,
+            Option<&SoundCategory>,
+        ),
         (Added<PlaybackSettings>, Without<Track>, Without<EchoReturn>),
     >,
 ) {
-    for (mut p, voice, placed) in &mut new {
-        let scale = volume_scale(&settings, voice);
+    for (mut p, voice, placed, category) in &mut new {
+        let scale = match category {
+            Some(c) => category_scale(&settings, c.0),
+            None => volume_scale(&settings, voice),
+        };
         if scale < 1.0 {
             p.volume = Volume::Linear(p.volume.to_linear() * scale);
         }

@@ -2268,9 +2268,40 @@ disassembly on the PC/cloud scratch, never committed):
   visor never changes the echo. The port follows the rule anyway
   (`ZoneAudio::vision_echoes`, `rc_game_core::VisionModeNow` set by the
   visor), so a mod that gives a mode an echo hears it.
-- Each sound's EAX `Room` send is 0 mB (full) unless the sound's flags
-  have `0x8` or `0x10`; script sounds never do. The echo does not fall
-  with distance unless `RoomRolloffFactor` is above 0 (4 effects of 123).
+- Which sounds feed the echo (`PlayUSound`, `PlaySource`): each sound's
+  EAX `Room` send is 0 mB (full) unless its flags have `0x10` (its
+  `AudioParams.Category` is `AG_Music`) or `0x8` (only
+  `UConsole::StartMenuBackgroundMusic` passes it); then −10000 mB. A
+  sound naming no `Params` gets the `AudioParams` class defaults
+  (`USound::GetParams`), whose `Category` is 0, music: no echo, and the
+  music slider. A `SoundMultiple` is played as its picked member, with the
+  member's own `Params`. The port notes each read sound's `Params`
+  (`rc_combat::sound_params`) and the wrapper skips music.
+- Every playing gets a random loudness `MinVolume`…`MaxVolume` (not
+  played below 0.0001, at most 1) and pitch `MinPitch`…`MaxPitch` (0.5–2,
+  then 0.7–1.2 in ALAudio), and the slider of its `Category`
+  (`GetMasterVolumeMultiplier`: 0 music, 1 voice, else sound). The room
+  loops and one-shots do this here (`rc_game_core::SoundCategory`); the
+  rest of the game's sounds are the sound-engine work of PR #128.
+- Fades: `FAbstractSource`'s fade is a straight line in loudness for a
+  plain `Sound` (curve 0); only a `SoundStreamed` can ask for another
+  (`FadeInType`/`FadeOutType`, `EMusicFadeType`), and no room sound is one.
+- Distance (EAX, applied by the sound card; positions reach it at 0.01
+  per Unreal unit, rolloff 1, full loudness out to the sound's radius, or
+  its own distance with `bDisable3DFalloff`): the send falls by
+  `RoomRolloffFactor` as `ref / (ref + f·(d − ref))` (4 effects of 123 set
+  it), and the room's `AirAbsorptionHF` (−5 mB per metre in 79 effects)
+  turns high notes down by `AirAbsorptionHF × metres beyond ref` on the
+  sound and its send (no per-sound factor is set, so EAX's 1).
+- Occlusion: the sound engine works out each sound's EAX occlusion
+  (`868.589 · ln(reach / full reach)`; PR #128 puts it on
+  `rc_game_core::EaxOcclusion`). The game leaves the per-sound ratios at
+  EAX's defaults (LF 0.25, room 1.5, direct 1.0). How a ratio turns into
+  loss is taken from OpenAL Soft's EAX (LGPL, read only): overall
+  `occlusion × max(r·LF, r + LF − 1)`, high notes `occlusion × r`, so the
+  sound loses 0.25× overall and 1× up high, its send 0.75× and 1.5×.
+- With the AUDIO menu's EAX row off (`rc_game_core::EaxOn`) ALAudio uses
+  no EAX: no echo send, no air absorption, no occlusion filtering.
 - `ACTION_ChangeZoneAudio` (gameplay.u script): sets `ZoneAudioClass` on
   every `ZoneInfo` whose `Tag` is `ZoneInfoTag`. geo_03d swaps two areas to
   `GEO_03D_Broken1_sfx01` and `Broken2` this way.
@@ -2290,20 +2321,26 @@ Data: 81 of the 123 effect uses leave `Room` at the engine default of
   fed by the tail and feeding itself with repeats that fade over the
   decay time, mixed in by `EchoDepth` (EAX only says the echo repeats
   `EchoTime` apart and grows with `EchoDepth`). Reflection/tail panning
-  (all 0 in the data) and `RoomRolloffFactor` (4 effects) are not done.
+  is all 0 in the data. The high-note filter for air absorption and
+  occlusion is one pole at `HFReference` (EAX names only the frequency
+  and the loss there). OpenAL Soft also weakens far sounds' sends by the
+  decay time; its own source calls that a guess ("very likely not
+  correct"), and EAX does not define it, so it is not done.
 - `rc_game/src/room_sound.rs` wires it into Bevy: each new
-  `AudioPlayer<AudioSource>` (not music, not `rc_game_core::Dry` menu
-  sounds) becomes an `AudioPlayer<RoomSound>` that converts the sound to
+  `AudioPlayer<AudioSource>` (not music, by the rule above) becomes an `AudioPlayer<RoomSound>` that converts the sound to
   the sound card's rate in stereo and adds it to one shared send while it
   plays; one endless sound plays the echo. A looping sound loops inside
   the wrapper (Bevy's own looping replays a recording that would not reach
   the send). Each sound's send is its volume divided by its distance
-  loudness (`Placed::gain`), so the echo keeps its level with distance.
+  loudness (`Placed::gain`), so the echo keeps its level with distance,
+  times the room's rolloff and the occlusion; the wrapper filters the
+  sound and its send for air absorption and occlusion every frame.
 - `rc_scripts_plugin/src/zone_sounds.rs` follows the camera, sets
   `rc_game_core::RoomEcho`, plays the room loops and one-shots, and carries
-  out `ACTION_ChangeZoneAudio`. The fades are straight lines (the curve is
-  in ALAudio.dll, not read), the random numbers a fixed sequence, and the
-  loudness the scripts' `[sound] volume`, as for the map's other loops.
+  out `ACTION_ChangeZoneAudio`, each playing with its own `Params`
+  (above). Ours: the random numbers are a fixed sequence, and the
+  scripts' `[sound] volume` (1) also multiplies them, as for the map's
+  other loops.
 
 
 ## Delta Squad (`rc_squad`, `rc_squad_plugin`)

@@ -24,14 +24,6 @@ impl SoundAt {
     }
 }
 
-/// A sound the room's echo leaves alone: menu clicks. The music is left
-/// alone too (it has its own tag in the game program). **Our choice**: the
-/// game's sound code sends every sound to the echo unless the sound's
-/// flags say otherwise; which flags the menus and music use was not
-/// checked.
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub struct Dry;
-
 /// The vision mode the player's view is in now, as the game's object path
 /// (`FrameFX.VisionModes.VisionNight`), `None` for the plain view. Set by
 /// the visor part. The game uses a mode's own echo (`EAXEffect`) in place
