@@ -24,6 +24,7 @@ pub mod hud;
 pub mod layout;
 pub mod library;
 pub mod lists;
+pub mod loading;
 pub mod pages;
 pub mod pause;
 pub mod quads;

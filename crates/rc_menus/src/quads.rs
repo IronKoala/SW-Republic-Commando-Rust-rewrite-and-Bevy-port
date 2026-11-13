@@ -36,7 +36,8 @@
 //!   the menu's 4:3 area is.
 
 use crate::layout::{
-    pivot_fraction, Kind, MenuLayout, Sprite, Text, MSCM_FIT, MSCM_FIT_STRETCH, MSCM_STRETCH,
+    pivot_fraction, Kind, MenuLayout, ProgressBar, Sprite, Text, MSCM_FIT, MSCM_FIT_STRETCH,
+    MSCM_STRETCH, STY_ALPHA,
 };
 use crate::library::FontData;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -97,6 +98,7 @@ pub fn menu_quads(layout: &MenuLayout, focused: Option<usize>, sizes: &mut dyn S
         match &w.kind {
             Kind::Sprite(s) => sprite_quads(s, &w.name, sizes, &mut out),
             Kind::Text(t) => text_quads(t, &w.name, sizes, &mut out),
+            Kind::ProgressBar(p) => progress_bar_quads(p, &w.name, sizes, &mut out),
             Kind::Button(b) => {
                 let (under, bg, t) = if focused == Some(i) {
                     (&b.under_focused, &b.background_focused, &b.focused)
@@ -241,6 +243,122 @@ fn sprite_quads(s: &Sprite, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Q
             ));
         }
     }
+}
+
+/// The box a progress bar covers (`BarBack`'s corner, `BarWidth` by
+/// `BarHeight`), in fractions of the menu area.
+pub fn progress_bar_box(p: &ProgressBar) -> [f32; 4] {
+    [
+        p.back.pos[0],
+        p.back.pos[1],
+        p.back.pos[0] + p.width,
+        p.back.pos[1] + p.height,
+    ]
+}
+
+/// A progress bar, drawn as the original's native code draws it (read
+/// from `XInterface.dll`, `AMenuBase::DrawMenuProgressBar`, and
+/// `Engine.dll`, `UCanvas::DrawTileStretched`; nothing copied):
+///
+/// - the empty bar (`BarBack`) at `BarBack.PosX`, `BarBack.PosY`, `BarWidth`
+///   by `BarHeight` of the screen, in `BarBack`'s colour, if it has a
+///   picture;
+/// - the full part (`BarTop`) only when `Value > Low`, with `Value` cut to
+///   `High` first, at `BarTop.PosX`, `BarTop.PosY`, `BarWidth / High *
+///   Value` wide (the code does not take `Low` off), in `BarTop`'s colour;
+/// - each with the whole picture (the bar ignores `TextureCoords`), cut
+///   the way `DrawTileStretched` cuts it ([`stretched_tile`]).
+///
+/// The original draws `BarTop` with the canvas style set to `STY_Normal`
+/// and leaves `BarBack` with whatever style was set last. With
+/// `STY_Normal`, `UCanvas::DrawTile` hands the picture to the renderer
+/// as it is; the loading bars' pictures are marked `bAlphaTexture` in the
+/// install. Both parts are drawn here see-through by the picture's alpha,
+/// the way the rest of these menus draw `bAlphaTexture` pictures (this
+/// last step, how the Direct3D renderer blends a `bAlphaTexture` picture,
+/// was not traced in `D3DDrv.dll`).
+pub fn progress_bar_quads(p: &ProgressBar, widget: &str, sizes: &mut dyn Sizes, out: &mut Vec<Quad>) {
+    let mut part = |s: &Sprite, x: f32, y: f32, w: f32, h: f32| {
+        let Some(path) = s.texture.clone() else {
+            return;
+        };
+        let Some((tw, th)) = sizes.texture_size(&path) else {
+            return;
+        };
+        for (src, dst) in stretched_tile(tw, th, [x, y, w, h], pixels_high()) {
+            out.push(Quad {
+                texture: path.clone(),
+                src,
+                dst,
+                color: s.color,
+                render_style: STY_ALPHA,
+                widget: widget.to_string(),
+            });
+        }
+    };
+    part(&p.back, p.back.pos[0], p.back.pos[1], p.width, p.height);
+    if p.value > p.low && p.high != 0.0 {
+        let value = p.value.min(p.high);
+        part(
+            &p.top,
+            p.top.pos[0],
+            p.top.pos[1],
+            p.width / p.high * value,
+            p.height,
+        );
+    }
+}
+
+/// How the original's `UCanvas::DrawTileStretched` (Engine.dll) cuts a
+/// picture `tw` by `th` texels into pieces to cover a box (x, y, width,
+/// height in fractions of a menu area `high` pixels high and 4:3 wide):
+/// one texel is one screen pixel. Each corner is half the picture (rounded
+/// to whole texels); when the box is smaller than the picture, a corner is
+/// half the box and shows that much of the picture's corner (cut, not
+/// squeezed). Between the corners the edges stretch the picture's middle
+/// row or column of one texel, and the middle stretches its middle texel.
+/// Returns (texels x0 y0 x1 y1, box x0 y0 x1 y1) pairs.
+pub fn stretched_tile(tw: f32, th: f32, b: [f32; 4], high: f32) -> Vec<([f32; 4], [f32; 4])> {
+    let wide = high * 4.0 / 3.0;
+    // Work in screen pixels, as the original does.
+    let (x, y, w, h) = (b[0] * wide, b[1] * high, b[2] * wide, b[3] * high);
+    if w <= 0.0 || h <= 0.0 || tw <= 0.0 || th <= 0.0 {
+        return Vec::new();
+    }
+    let cu = (tw * 0.5).round();
+    let cv = (th * 0.5).round();
+    let tile_w = if w > tw { cu } else { w * 0.5 };
+    let tile_h = if h > th { cv } else { h * 0.5 };
+    let mut pieces: Vec<([f32; 4], [f32; 4])> = Vec::new();
+    // (texels u v ul vl, pixels x y xl yl)
+    let mut add = |u: f32, v: f32, ul: f32, vl: f32, px: f32, py: f32, pw: f32, ph: f32| {
+        if pw <= 0.0 || ph <= 0.0 {
+            return;
+        }
+        pieces.push((
+            [u, v, u + ul, v + vl],
+            [px / wide, py / high, (px + pw) / wide, (py + ph) / high],
+        ));
+    };
+    if w > tw {
+        // Top and bottom edges.
+        add(cu, 0.0, 1.0, tile_h, x + cu, y, w - tw, tile_h);
+        add(cu, th - tile_h, 1.0, tile_h, x + cu, y + h - tile_h, w - tw, tile_h);
+    }
+    if h > th {
+        // Left and right edges.
+        add(0.0, cv, tile_w, 1.0, x, y + cv, tile_w, h - th);
+        add(tw - tile_w, cv, tile_w, 1.0, x + w - tile_w, y + cv, tile_w, h - th);
+    }
+    if w > tw && h > th {
+        add(cu, cv, 1.0, 1.0, x + cu, y + cv, w - tw, h - th);
+    }
+    // The four corners.
+    add(0.0, 0.0, tile_w, tile_h, x, y, tile_w, tile_h);
+    add(tw - tile_w, 0.0, tile_w, tile_h, x + w - tile_w, y, tile_w, tile_h);
+    add(0.0, th - tile_h, tile_w, tile_h, x, y + h - tile_h, tile_w, tile_h);
+    add(tw - tile_w, th - tile_h, tile_w, tile_h, x + w - tile_w, y + h - tile_h, tile_w, tile_h);
+    pieces
 }
 
 /// The width of a line of text in base pixels, before scaling.
@@ -404,7 +522,7 @@ pub fn text_overlaps(layout: &MenuLayout, sizes: &mut dyn Sizes) -> Vec<(String,
         let t = match &w.kind {
             Kind::Text(t) => t,
             Kind::Button(b) => &b.blurred,
-            Kind::Sprite(_) => continue,
+            Kind::Sprite(_) | Kind::ProgressBar(_) => continue,
         };
         if t.text.trim().is_empty() || t.color[3] == 0 {
             continue;

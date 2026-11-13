@@ -81,6 +81,10 @@ impl Assets {
                     fonts.push(b.blurred.font.clone());
                     fonts.push(b.focused.font.clone());
                 }
+                Kind::ProgressBar(p) => {
+                    add(&p.back.texture);
+                    add(&p.top.texture);
+                }
             }
         }
         for f in fonts.into_iter().flatten() {

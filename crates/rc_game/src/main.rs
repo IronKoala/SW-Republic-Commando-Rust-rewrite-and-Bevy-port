@@ -16,6 +16,7 @@
 
 mod cutscene;
 mod debriefing;
+mod loading_screen;
 mod display;
 mod graphics;
 mod graphics_presets;
@@ -526,6 +527,7 @@ fn main() -> AppExit {
     // The end-of-campaign debriefing screen (after the scripts part, which
     // asks for it).
     app.add_plugins(debriefing::DebriefingPlugin);
+    app.add_plugins(loading_screen::LoadingScreenPlugin);
     app.add_plugins(visor::GameVisorPlugin);
     app.add_plugins(cutscene::CutscenePlugin);
     app.add_plugins(objective_tracker::ObjectiveTrackerPlugin);
