@@ -56,6 +56,7 @@ pub mod paths;
 pub mod place_light;
 pub mod pickups;
 pub mod save;
+pub mod shake;
 pub mod sound;
 mod state;
 pub mod turrets;
@@ -77,6 +78,7 @@ pub use log::GameLog;
 pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
+pub use shake::{ShakeView, StopShake, ViewShake};
 pub use sound::{Dry, RoomEcho, SoundAt, VisionModeNow, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
@@ -110,6 +112,9 @@ impl Plugin for CorePlugin {
             .add_message::<pickups::PickedUp>()
             .add_message::<pickups::AddAmmo>()
             .add_message::<ViewKick>()
+            .add_message::<ShakeView>()
+            .add_message::<StopShake>()
+            .init_resource::<ViewShake>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
             .add_message::<FactoryOrder>()

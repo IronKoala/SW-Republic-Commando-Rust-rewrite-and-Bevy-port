@@ -2039,10 +2039,21 @@ All numbers are in `data/ui/objective_tracker.toml`.
   `DrawHUD` console command) and `bShowObjectiveTracker`. The down state
   (`CTPlayer` state `CtrlIncapacitated`) changes none of these, so the port
   keeps it too.
-- **Ours, not the original's:** the tracker isn't kept in save files, so
-  after a load it shows again at the next tracker step; the port's view
-  yaw is in radians and is rounded to the engine's units; and the sight
-  check runs in the game's update rather than while drawing.
+- **Saves.** The original doesn't keep the tracker in save files. The
+  player's helmet is held in `var transient Helmet Helmet` (engine.u
+  `PlayerController`), and a transient value isn't written to a save.
+  After a load `PlayerController.PostLoadBeginPlay` calls
+  `SpawnDefaultHUD`, and ctgame.u's `CTPlayer.SpawnDefaultHUD` makes a
+  `new class'Helmet'` from the class defaults: nothing followed,
+  `bShowObjectiveTracker` off (it has no default, so false), and the sight
+  check's time and result at zero. So the tracker stays off until a
+  script next runs a tracker step. The port does the same: it saves
+  nothing for the tracker, and leaving the level for a load
+  (`tracker::forget`, `ObjectiveTracker::reset`) puts it back to those
+  defaults.
+- **Ours, not the original's:** the port's view yaw is in radians and is
+  rounded to the engine's units; and the sight check runs in the game's
+  update rather than while drawing.
 
 ### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
 
@@ -2944,6 +2955,24 @@ carries `PlayerCamera` gets the sky the same way.
 Loading blocks the game while it runs (about 2 s for geo_01a in a debug
 build in the cloud). Moving it to a background thread is future work; the
 loading screen stays up meanwhile.
+
+**The loading screens (`rc_game/src/loading_screen.rs`).** On entering
+`Loading`, `LoadingScreenPlugin` picks the original's screen for the map
+(`rc_menus::loading::choose`, the original's `LoadMap` rule over
+`LevelLoadingInfo.int` and `System.ini`), resets that page's layout and fills
+it in (`rc_menus::loading::setup`), and sets
+`OriginalMenus::loading_page`. While that is set, the original page is
+drawn instead of the placeholder loading screen (`menu.rs`, system set
+`PlaceholderLoadingScreen`, which steps aside). The bar's value is kept
+by the original engine's rules and `LoadMap`'s stages
+(`rc_menus::loading::Progress`): the map's own `LoadingGate` part is the
+first stage, the other parts count through the second, and the bar is
+full when all are done. On leaving `Loading`, a `CTLoadingInfo` page
+switches to its finished look (`rc_menus::loading::finish`) and
+`LoadingDone::waiting` is set; when play starts it is paused at once with
+`Page::LoadingDone`, which maps to the same original page, and its START
+calls `resume`. Leaving `Play::Paused` clears the wait. A `CTLoading` page
+just closes.
 
 **Checking without looking.** `rc_game --script` presses the same actions a
 player would and checks each step: menu pages, loading, the player moving
@@ -5304,6 +5333,43 @@ fire every 0.05 s.
 it (the original asks for the crosshair on it). The Trandoshan turret's
 four barrels fire one after another for a character gunner. The turret
 weapons' first-person offsets and the E-Web's reload time are guesses.
+
+## Screen shake (`rc_game_core::shake`, `rc_game/src/player.rs`, `rc_scripts_plugin/src/shake.rs`)
+
+Every shake in the original ends in one call on the player's controller,
+`ShakeView(InTime, SustainTime, OutTime, X, Y, Z, YawMag, PitchMag,
+Frequency)`. The port has the same single entry: a `ShakeView` message.
+Anything that wants to shake the view (scripts now; explosions and weapons
+later) sends one.
+
+- **The rules** (`rc_game_core::shake::ShakeState`) follow the game's
+  `Engine.u` script text: a new shake is ignored while a stronger one runs;
+  the strength fades in over `InTime`, holds, and falls as
+  `1 - elapsed / end`; each axis has a value that walks toward a new random
+  target in -1..1 by at most `Frequency` a frame; the turn (Unreal rotation
+  units, cut to a whole number) is added to where the player looks every
+  frame and stays; the movement (Unreal units, world axes) is added to the
+  eye position. A rotation's `Yaw` value shakes up and down and its `Pitch`
+  value left and right, as the original swaps them.
+- **When** (`rc_game/src/player.rs`, `shake_view`): once a frame, right
+  after the player's own turning and its limits, also on a turret, as the
+  engine's `UpdateRotation` does (read from Engine.dll). The camera
+  (`place_camera`) adds `ViewShake::offset` to the eyes.
+- **Where the numbers come from** (`rc_scripts_plugin/src/shake.rs`):
+  `ACTION_ShakeView` steps and `ViewShaker` actors in the map; anything a
+  map leaves out is the class default, read from `Gameplay.u` at level load.
+  If those can't be read, those shakes are skipped and logged, not guessed.
+  A `ViewShaker` shakes only if the player is closer than its
+  `ShakeRadius`; the campaign's four set none, so (as in the original) they
+  never do.
+- **For a VR mod**: the shake is one resource, `ViewShake`, with two
+  switches. `turn_view = false` stops it turning the player's view (a
+  must in VR); `move_camera = false` stops the camera movement. Nothing
+  else depends on them.
+- **Log**: `scripts: ... ShakeView: shake the view: ...` when a script
+  asks, `player: t=... shake from ...` when the view takes it (or
+  ignores it), and `player: ... shake from ... over: N frames, camera moved
+  up to X uu, turned up to P pitch / Y yaw a frame` when it ends.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

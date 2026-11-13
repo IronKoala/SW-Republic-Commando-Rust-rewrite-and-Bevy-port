@@ -34,6 +34,10 @@
 //!   [`TurretOrder`]s for the turret part (`rc_turrets_plugin`), whose
 //!   events (a turret taken or let go) arrive as a `RaiseEvent`.
 //!
+//! - screen shakes: `ACTION_ShakeView` and the map's `ViewShaker`s
+//!   become `rc_game_core::ShakeView` messages for the player's view (see
+//!   `shake.rs`).
+//!
 //! - lines of dialogue and sounds (`ACTION_PlaySound`,
 //!   `ACTION_PlayLocalSound`) play from the game's own sound packages, read
 //!   while the level loads; a script waiting for a line waits for its real
@@ -63,6 +67,7 @@ pub mod objectives;
 pub mod placed_emitters;
 pub mod projectiles;
 pub mod save;
+pub mod shake;
 pub mod sight;
 pub mod sounds;
 pub mod tracker;
@@ -154,6 +159,7 @@ impl Plugin for ScriptsPlugin {
                     breakables::explode,
                     sight::look,
                     run,
+                    shake::send,
                     send_ammo,
                     blink_hud,
                     tracker::track,
@@ -301,6 +307,8 @@ pub struct LevelScript {
     pub breaking: breakables::Breakables,
     /// What weapons did to props.
     pub props: breakables::PropStats,
+    /// Screen shakes: the map's `ViewShaker`s and the scripts' requests.
+    pub shakes: shake::LevelShakes,
 }
 
 impl LevelScript {
@@ -323,6 +331,7 @@ impl LevelScript {
             breaking: breakables::Breakables::new(&[]),
             props: breakables::PropStats::default(),
             anchors: Vec::new(),
+            shakes: shake::LevelShakes::default(),
         }
     }
 }
@@ -640,6 +649,11 @@ fn build(
         });
     }
     commands.insert_resource(fx_factories::LevelFxFactories::new(fx));
+    // Screen shakes: the game's defaults for them and the map's shakers.
+    let shakes = shake::LevelShakes::read(map, shake::read_defaults(&paths));
+    for line in shakes.describe() {
+        log.line(line);
+    }
     // Emitters placed in the map (geo_01a's dust under the landing
     // gunship): found by their class, their effects read now.
     let emitters = match rc_effects::read::Library::open(&paths.game_data()) {
@@ -678,6 +692,7 @@ fn build(
         stats: PlayStats::default(),
         breaking: breakables::Breakables::new(&breakable),
         props: breakables::PropStats::default(),
+        shakes,
     });
     let mission = objectives::MissionList::from_map(map);
     if let Some(m) = &mission {
@@ -1273,6 +1288,24 @@ fn carry_out(
                 ));
             }
         }
+        "shakeview" => match script.shakes.action(a, format!("{} #{}", call.script, call.index)) {
+            Ok(m) => log.line(format!(
+                "{at}: shake the view: in {} s, hold {} s, out {} s, move ({}, {}, {}) uu, rotation pitch {} yaw {}, frequency {}",
+                m.in_time,
+                m.sustain_time,
+                m.out_time,
+                m.offset[0],
+                m.offset[1],
+                m.offset[2],
+                m.pitch_mag,
+                m.yaw_mag,
+                m.frequency
+            )),
+            Err(e) => {
+                script.stats.not_done += 1;
+                log.line(format!("{at}: not done: {e}"));
+            }
+        },
         // Read by the HUD (rc_game's original HUD and data/ui/hud.toml).
         k if hud_blink::HudBlink::kind_of(k).is_ok() => {
             let time = a.float("BlinkTime").unwrap_or(0.0);

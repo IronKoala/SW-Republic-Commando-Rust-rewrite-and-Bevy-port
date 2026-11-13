@@ -12,7 +12,8 @@ use rc_game_core::save::{SaveAppExt, SavePart};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{
     playing, Action, ActionState, Cutscene, GameLog, GamePaths, GameSet, GameState, LevelCollision,
-    Manning, Player, PlayerCamera, PlayerStart, TeleportPlayer, ViewKick,
+    Manning, Player, PlayerCamera, PlayerStart, ShakeView, StopShake, TeleportPlayer, ViewKick,
+    ViewShake,
 };
 use rc_movement::{Mode, MoveInput, MoveParams, Pawn, Vec3 as UVec3, World};
 use serde::{Deserialize, Serialize};
@@ -230,8 +231,11 @@ fn spawn_player(
     paths: Res<GamePaths>,
     start: Option<Res<PlayerStart>>,
     collision: Option<Res<LevelCollision>>,
+    mut shake: ResMut<ViewShake>,
     log: Res<GameLog>,
 ) {
+    // A new level has a new player controller: no shake.
+    shake.reset();
     let params = movement_params(&paths, &log);
     let (feet, yaw) = start.map(|s| (s.feet, s.yaw)).unwrap_or((UVec3::ZERO, 0.0));
     if collision.is_none() {
@@ -279,6 +283,7 @@ fn spawn_player(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn move_body(
     time: Res<Time>,
     actions: Res<ActionState>,
@@ -289,6 +294,12 @@ fn move_body(
         Res<Cutscene>,
         MessageReader<TeleportPlayer>,
         Res<rc_game_core::UseItem>,
+    ),
+    (mut shake, mut shakes, mut stops, mut shake_log): (
+        ResMut<ViewShake>,
+        MessageReader<ShakeView>,
+        MessageReader<StopShake>,
+        Local<ShakeLog>,
     ),
     mut body: Query<
         (
@@ -332,6 +343,15 @@ fn move_body(
         body.yaw = m.yaw.rem_euclid(std::f32::consts::TAU);
         body.pitch = m.pitch.clamp(-1.5, 1.5);
         body.time += dt;
+        shake_view(
+            &mut shake,
+            &mut shakes,
+            &mut stops,
+            &mut body,
+            dt,
+            &mut shake_log,
+            &log,
+        );
         t.translation = to_bevy(body.pawn.feet());
         t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
         return;
@@ -349,6 +369,17 @@ fn move_body(
         body.yaw = yaw;
         body.pitch = pitch.clamp(-1.5, 1.5);
     }
+    // The view shake comes right after the player's own turning and its
+    // limits, as in the original (`UpdateRotation` calls `ViewShake`).
+    shake_view(
+        &mut shake,
+        &mut shakes,
+        &mut stops,
+        &mut body,
+        dt,
+        &mut shake_log,
+        &log,
+    );
     // The cutscene stopped the body's physics: it stays exactly where it
     // is (the prologue's newborn clone doesn't fall).
     if cut.frozen {
@@ -421,6 +452,102 @@ fn move_body(
     t.rotation = Quat::from_rotation_y(-(body.yaw + std::f32::consts::FRAC_PI_2));
 }
 
+/// What the log says about the shake running now.
+#[derive(Default)]
+struct ShakeLog {
+    by: String,
+    frames: u32,
+    /// Biggest camera movement, Unreal units, and biggest turn in one
+    /// frame (pitch, yaw), Unreal rotation units.
+    biggest_move: f32,
+    biggest_turn: (i32, i32),
+    /// Total turn added (pitch, yaw), Unreal rotation units.
+    total_turn: (i64, i64),
+}
+
+/// New shakes and stops, then one frame of shake (see
+/// `rc_game_core::shake`): the turn goes into where the body looks (it
+/// stays, as in the original), the movement into `ViewShake::offset` for
+/// the camera.
+fn shake_view(
+    shake: &mut ViewShake,
+    shakes: &mut MessageReader<ShakeView>,
+    stops: &mut MessageReader<StopShake>,
+    body: &mut Body,
+    dt: f32,
+    slog: &mut ShakeLog,
+    log: &GameLog,
+) {
+    for _ in stops.read() {
+        if shake.state.running() {
+            log.line(format!("player: t={:.2} shake stopped", body.time));
+        }
+        shake.state.stop();
+    }
+    for s in shakes.read() {
+        let fade = shake.state.fade();
+        let taken = shake.state.request(s);
+        log.line(format!(
+            "player: t={:.2} shake from {}: in {} s, hold {} s, out {} s, move ({}, {}, {}) uu, rotation yaw {} pitch {}, frequency {}{}",
+            body.time,
+            s.by,
+            s.in_time,
+            s.sustain_time,
+            s.out_time,
+            s.offset[0],
+            s.offset[1],
+            s.offset[2],
+            s.yaw_mag,
+            s.pitch_mag,
+            s.frequency,
+            if taken {
+                String::new()
+            } else {
+                format!(" -- ignored: the running shake ({}) is stronger now (fade {fade:.2})", slog.by)
+            }
+        ));
+        if taken {
+            *slog = ShakeLog {
+                by: s.by.clone(),
+                ..ShakeLog::default()
+            };
+        }
+    }
+    let was_running = shake.state.running() && shake.state.elapsed < shake.state.time_out;
+    let Some(step) = shake.step(dt) else {
+        return;
+    };
+    if was_running {
+        slog.frames += 1;
+        let m = step.offset.iter().map(|x| x * x).sum::<f32>().sqrt();
+        slog.biggest_move = slog.biggest_move.max(m);
+        slog.biggest_turn.0 = slog.biggest_turn.0.max(step.pitch.abs());
+        slog.biggest_turn.1 = slog.biggest_turn.1.max(step.yaw.abs());
+        slog.total_turn.0 += step.pitch as i64;
+        slog.total_turn.1 += step.yaw as i64;
+        if shake.state.elapsed >= shake.state.time_out {
+            log.line(format!(
+                "player: t={:.2} shake from {} over: {} frames, camera moved up to {:.2} uu, turned up to {} pitch / {} yaw a frame, {} / {} in all (65536 = full turn){}",
+                body.time,
+                slog.by,
+                slog.frames,
+                slog.biggest_move,
+                slog.biggest_turn.0,
+                slog.biggest_turn.1,
+                slog.total_turn.0,
+                slog.total_turn.1,
+                if shake.turn_view { "" } else { "; turning switched off" }
+            ));
+        }
+    }
+    if shake.turn_view && (step.pitch != 0 || step.yaw != 0) {
+        let unit = std::f32::consts::TAU / 65536.0;
+        body.pitch = (body.pitch + step.pitch as f32 * unit).clamp(-1.5, 1.5);
+        body.yaw = (body.yaw + step.yaw as f32 * unit).rem_euclid(std::f32::consts::TAU);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn place_camera(
     fov: Res<FieldOfView>,
     weapon: Option<Res<rc_game_core::WeaponReadout>>,
@@ -429,11 +556,16 @@ pub(crate) fn place_camera(
     log: Res<GameLog>,
     mut logged: Local<(f32, f32, f32)>,
     mut view: Query<(&mut Transform, &mut Projection), With<PlayerCamera>>,
+    shake: Res<ViewShake>,
 ) {
     let (Ok(body), Ok((mut t, mut proj))) = (body.single(), view.single_mut()) else {
         return;
     };
     *t = eye_view(body);
+    // The view shake moves the camera off the eyes (world axes), as the
+    // original adds `ShakeOffset` to the eye position.
+    let [x, y, z] = shake.camera_offset();
+    t.translation += to_bevy(UVec3::new(x, y, z));
     // Bevy's field of view is up and down, and it widens the sides to fit
     // the window's shape: that is "Hor+" as long as the up-and-down view
     // doesn't change with the shape. On screens longer than `widest_shape`,
@@ -517,6 +649,90 @@ pub fn horizontal_fov(vertical: f32, aspect: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shake_turns_the_view_and_moves_the_camera_then_ends() {
+        use bevy::ecs::system::RunSystemOnce;
+        use rc_game_core::{units::to_unreal, ShakeView, StopShake, TeleportPlayer, UseItem};
+        let mut world = bevy::ecs::world::World::new();
+        world.insert_resource(GameLog::terminal());
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(ActionState::default());
+        world.insert_resource(Cutscene::default());
+        world.insert_resource(UseItem::default());
+        world.insert_resource(LevelCollision(Arc::new(Nothing)));
+        world.insert_resource(ViewShake::default());
+        world.insert_resource(FieldOfView {
+            across_4_3: 85.0,
+            widest_shape: 2.0,
+        });
+        world.init_resource::<Messages<ViewKick>>();
+        world.init_resource::<Messages<TeleportPlayer>>();
+        world.init_resource::<Messages<ShakeView>>();
+        world.init_resource::<Messages<StopShake>>();
+        world.spawn((
+            Player,
+            Body {
+                pawn: Pawn::new(MoveParams::player_commando(), UVec3::ZERO),
+                yaw: 0.0,
+                pitch: 0.0,
+                time: 0.0,
+            },
+            Transform::default(),
+        ));
+        let cam = world
+            .spawn((
+                PlayerCamera,
+                Transform::default(),
+                Projection::Perspective(PerspectiveProjection::default()),
+            ))
+            .id();
+        // geo_01a's falling-droid shake: ACTION_ShakeView with rotation
+        // Pitch 100, Yaw 100 and the class's other defaults.
+        world.write_message(ShakeView {
+            in_time: 0.3,
+            sustain_time: 1.0,
+            out_time: 0.7,
+            offset: [3.0; 3],
+            yaw_mag: 100.0,
+            pitch_mag: 100.0,
+            frequency: 1.0,
+            by: "test".into(),
+        });
+        let mut moved = 0.0f32;
+        let mut turned = false;
+        // 2.1 s at 60 frames a second: past the 2 s shake.
+        for _ in 0..126 {
+            world
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(1.0 / 60.0));
+            let before = {
+                let mut q = world.query_filtered::<&Body, With<Player>>();
+                let b = q.iter(&world).next().unwrap();
+                (b.yaw, b.pitch)
+            };
+            world.run_system_once(move_body).unwrap();
+            world.run_system_once(place_camera).unwrap();
+            // A one-off system reads every message again: send it once.
+            world.resource_mut::<Messages<ShakeView>>().clear();
+            let mut q = world.query_filtered::<&Body, With<Player>>();
+            let b = q.iter(&world).next().unwrap();
+            turned |= (b.yaw, b.pitch) != before;
+            let eye = eye_view(b).translation;
+            let cam_at = world.get::<Transform>(cam).unwrap().translation;
+            let off = to_unreal(cam_at - eye);
+            let shake = world.resource::<ViewShake>().offset;
+            assert!((off.x - shake[0]).abs() < 1e-2 && (off.z - shake[2]).abs() < 1e-2);
+            assert!(shake.iter().all(|x| x.abs() <= 3.0 + 1e-4), "{shake:?}");
+            moved = moved.max(off.length());
+        }
+        assert!(moved > 0.5, "the camera moved {moved} uu");
+        assert!(turned, "the view never turned");
+        // Over: the camera is back at the eyes and the view stays put.
+        let v = world.resource::<ViewShake>();
+        assert!(v.state.elapsed >= v.state.time_out);
+        assert_eq!(v.offset, [0.0; 3]);
+    }
 
     #[test]
     fn hor_plus_field_of_view() {

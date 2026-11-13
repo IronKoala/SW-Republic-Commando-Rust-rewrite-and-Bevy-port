@@ -728,6 +728,7 @@ mod tests {
         w.insert_resource(audio);
         w.insert_resource(sounds);
         w.insert_resource(LevelScript {
+            shakes: Default::default(),
             director: Director::new(&MapScripts::default(), &[], Settings::default()),
             dispensers: vec![],
             hidden: Default::default(),
