@@ -681,6 +681,7 @@ mod tests {
             radius,
             non_positional,
             no_falloff,
+            ..Default::default()
         };
         sounds
             .params

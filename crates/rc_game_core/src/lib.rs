@@ -79,7 +79,7 @@ pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use shake::{ShakeView, StopShake, ViewShake};
-pub use sound::{SoundAt, Voice};
+pub use sound::{EaxOcclusion, EaxOn, SoundAt, SoundCategory, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
