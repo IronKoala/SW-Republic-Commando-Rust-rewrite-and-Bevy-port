@@ -27,6 +27,11 @@ pub struct Debriefing {
     pub showing: Option<ShowDebriefing>,
 }
 
+/// The debriefing's systems (a hint asked for in the same frame runs after
+/// them and takes the debriefing's place, see `hints.rs`).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DebriefingSet;
+
 pub struct DebriefingPlugin;
 
 impl Plugin for DebriefingPlugin {
@@ -35,7 +40,13 @@ impl Plugin for DebriefingPlugin {
             .add_message::<ShowDebriefing>()
             .add_systems(OnEnter(GameState::Loading), forget)
             .add_systems(OnEnter(GameState::MainMenu), forget)
-            .add_systems(Update, (show, go_on).chain().in_set(GameSet::Hud));
+            .add_systems(
+                Update,
+                (show, go_on)
+                    .chain()
+                    .in_set(GameSet::Hud)
+                    .in_set(DebriefingSet),
+            );
     }
 }
 

@@ -56,6 +56,7 @@ pub mod paths;
 pub mod place_light;
 pub mod pickups;
 pub mod save;
+pub mod shake;
 pub mod sound;
 mod state;
 pub mod turrets;
@@ -67,7 +68,7 @@ pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     AnimSound, AnimSoundsWanted, ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision,
     CharacterOrder, CharacterOrderDone, FactoryOrder, LevelScriptsRun, MarkerJob, MarkerJobStep,
-    PropAnim, RaiseEvent, ScriptEvent, ScriptTags, ShowDebriefing, SquadMembership,
+    PropAnim, RaiseEvent, ScriptEvent, ScriptTags, ShowDebriefing, ShowHint, SquadMembership,
     SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
@@ -77,7 +78,8 @@ pub use log::GameLog;
 pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
-pub use sound::{SoundAt, Voice};
+pub use shake::{ShakeView, StopShake, ViewShake};
+pub use sound::{EaxOcclusion, EaxOn, SoundAt, SoundCategory, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
@@ -110,6 +112,9 @@ impl Plugin for CorePlugin {
             .add_message::<pickups::PickedUp>()
             .add_message::<pickups::AddAmmo>()
             .add_message::<ViewKick>()
+            .add_message::<ShakeView>()
+            .add_message::<StopShake>()
+            .init_resource::<ViewShake>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
             .add_message::<FactoryOrder>()
@@ -125,6 +130,7 @@ impl Plugin for CorePlugin {
             .add_message::<ChangeLevel>()
             .add_message::<TurretOrder>()
             .add_message::<ShowDebriefing>()
+            .add_message::<ShowHint>()
             .init_resource::<Cutscene>()
             .init_resource::<UseItem>()
             .add_message::<TeleportPlayer>()

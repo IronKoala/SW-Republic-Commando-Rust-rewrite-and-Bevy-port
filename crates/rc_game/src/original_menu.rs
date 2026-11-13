@@ -164,6 +164,19 @@ pub const DEBRIEFING_PAGE: &str = "debriefing";
 /// What the debriefing's CONTINUE button does (`act:continue`).
 const CONTINUE: &str = "continue";
 
+/// The hint screen's name in `original_menus.toml`.
+pub const HINT_PAGE: &str = "hint";
+
+/// What the hint screen's CONTINUE WITH HINTS does (`act:hint_on`).
+const HINT_ON: &str = "hint_on";
+
+/// What the hint screen's CONTINUE WITHOUT HINTS does (`act:hint_off`).
+const HINT_OFF: &str = "hint_off";
+
+/// The pad's buttons on the hint screen, for the log.
+const A_BUTTON_NAME: &str = "A (CONTINUE WITH HINTS)";
+const B_BUTTON_NAME: &str = "B (CONTINUE WITHOUT HINTS)";
+
 /// What the pause menu's ENABLE HINTS does (`act:enable_hints`).
 const ENABLE_HINTS: &str = "enable_hints";
 
@@ -189,10 +202,12 @@ pub fn page_key(page: Page) -> Option<&'static str> {
         Page::LoadGame => Some(original_saves::LOAD),
         Page::SaveGame => Some(original_saves::SAVE),
         Page::Debriefing => Some(DEBRIEFING_PAGE),
+        Page::Hint => Some(HINT_PAGE),
         Page::Profiles => Some(original_profiles::PROFILES),
         Page::NewProfile => Some(original_profiles::NEW_PROFILE),
         Page::Extras => Some(original_credits::EXTRAS),
         Page::Credits => Some(original_credits::CREDITS),
+        Page::LoadingDone => Some(crate::loading_screen::LOADING_INFO_PAGE),
         Page::Main | Page::Levels(_) | Page::NoGame => None,
     }
 }
@@ -207,6 +222,7 @@ fn page_from_key(key: &str) -> Option<Page> {
         "more_settings" => Some(Page::MoreSettings),
         "paused" => Some(Page::Paused),
         DEBRIEFING_PAGE => Some(Page::Debriefing),
+        HINT_PAGE => Some(Page::Hint),
         original_credits::EXTRAS => Some(Page::Extras),
         original_credits::CREDITS => Some(Page::Credits),
         original_saves::LOAD => Some(Page::LoadGame),
@@ -349,6 +365,9 @@ pub struct OriginalMenus {
     /// This frame's button press was used here (for example to open the
     /// campaign page), so the placeholder pages must not act on it too.
     pub used_input: bool,
+    /// The original loading screen showing while a level loads, by its
+    /// page name (`loading_screen.rs`); `None` for the placeholder.
+    pub loading_page: Option<String>,
 }
 
 impl OriginalMenus {
@@ -362,6 +381,17 @@ impl OriginalMenus {
     pub fn shown(&self, state: &GameState, play: Option<&Play>, menu: &Menu) -> Option<Shown> {
         if *state == GameState::MainMenu && menu.page == Page::Main && self.active() {
             return Some(Shown::Main);
+        }
+        // A loading screen, and a briefing loading screen waiting for
+        // START once its level is in (`loading_screen.rs`).
+        if *state == GameState::Loading
+            || (*state == GameState::InGame && self.loading_page.is_some())
+        {
+            return self
+                .loading_page
+                .as_ref()
+                .filter(|k| self.pages.contains_key(*k))
+                .map(|k| Shown::Page(k.clone()));
         }
         if *state != GameState::MainMenu && play != Some(&Play::Paused) {
             return None;
@@ -476,6 +506,53 @@ impl OriginalMenus {
         DebriefingShown { shown: true, lines }
     }
 
+    /// Fill in the hint page with a level's hint text (`rc_menus::hint`):
+    /// the class's `Init` (with the helmet setting, `visor`) and
+    /// `SetInfoOptions`. Returns whether the original page will show, and
+    /// lines for the log.
+    pub fn show_hint(&mut self, text: &str, visor: bool) -> (bool, Vec<String>) {
+        let mut lines = Vec::new();
+        let (Some(page), Some(assets)) = (self.pages.get_mut(HINT_PAGE), self.assets.as_mut())
+        else {
+            return (false, lines);
+        };
+        // The places the class gives (an earlier hint with the helmet off
+        // moved some up), then `Init` moves them again if it should.
+        if let Ok(c) = assets.library.class(&page.plan.class) {
+            let fresh = rc_menus::build(&c);
+            for name in ["InfoTextBorder", "InfoText", "InfoPicBorder"] {
+                match (
+                    fresh.widget(name).map(|w| &w.kind),
+                    page.screen.layout.widget_mut(name).map(|w| &mut w.kind),
+                ) {
+                    (Some(Kind::Text(a)), Some(Kind::Text(b))) => b.pos = a.pos,
+                    (Some(Kind::Sprite(a)), Some(Kind::Sprite(b))) => b.pos = a.pos,
+                    _ => {}
+                }
+            }
+        }
+        let mut problems = rc_menus::hint::init(&mut page.screen.layout, visor);
+        problems.extend(rc_menus::hint::set_text(&mut page.screen.layout, text));
+        if !visor {
+            lines.push("helmet off: text and frames moved up, as the class's Init does".into());
+        }
+        // CONTINUE WITH HINTS has the focus (the class's Init).
+        if let Some(i) = page
+            .screen
+            .layout
+            .widgets
+            .iter()
+            .position(|w| w.name.eq_ignore_ascii_case("AButton"))
+        {
+            page.screen.focus = Some(i);
+        }
+        for p in problems {
+            lines.push(format!("PROBLEM {p}"));
+        }
+        self.dirty = true;
+        (true, lines)
+    }
+
     fn screen(&self, shown: &Shown) -> Option<&Screen> {
         match shown {
             Shown::Main => self.main.as_ref(),
@@ -521,6 +598,11 @@ impl Plugin for OriginalMenuPlugin {
         app.init_resource::<OriginalMenus>()
             .init_resource::<crate::menu_video::MenuVideo>()
             .add_systems(OnEnter(GameState::MainMenu), (load, reset).chain())
+            // Also on entering a level: a game started straight into a map
+            // (`--map`) never passes the main menu, and a level's hint or
+            // debriefing fills its page in the same frame it pauses, so the
+            // pages must be there before then.
+            .add_systems(OnEnter(GameState::InGame), load)
             .add_systems(OnEnter(Play::Paused), load)
             .add_systems(
                 Update,
@@ -544,7 +626,7 @@ impl Plugin for OriginalMenuPlugin {
     }
 }
 
-fn load(
+pub(crate) fn load(
     mut menus: ResMut<OriginalMenus>,
     paths: Res<GamePaths>,
     found: Res<GamePathsFound>,
@@ -590,6 +672,13 @@ fn load(
             // CONTINUE shows on a PC (the original's Init).
             rc_menus::debriefing::show_continue(&mut layout);
         }
+        if rc_menus::hint::is_hint(&class.family) {
+            // CONTINUE WITH HINTS shows on a PC (the original's Init; the
+            // rest of Init is done each time a hint shows).
+            for p in rc_menus::hint::init(&mut layout, true) {
+                log.line(format!("original menus: hint page: PROBLEM {p}"));
+            }
+        }
         if rc_menus::extras::is_extras(&class.family) {
             let locked = rc_menus::extras::init(&mut layout, original_credits::reached);
             log.line(format!(
@@ -606,6 +695,12 @@ fn load(
                 }
             }
         }
+        if rc_menus::loading::pauses_when_done(&class.family) {
+            // START is hidden while loading; it's shown here so it gets
+            // its command, and each loading hides it again
+            // (`rc_menus::loading::setup`).
+            rc_menus::loading::hide_start(&mut layout, false);
+        }
         match pages::check(&mut layout, &plan) {
             Ok(mut buttons) => {
                 check_names(&mut layout, &mut buttons, &plan.page, &log);
@@ -616,6 +711,16 @@ fn load(
                         "original menus: page {}: CONTINUE widened to fit its text",
                         plan.page
                     ));
+                }
+                if rc_menus::hint::is_hint(&class.family) {
+                    for b in ["AButton", "BButton"] {
+                        if screens::fit_button_to_text(&mut layout, b, &mut assets) {
+                            log.line(format!(
+                                "original menus: page {}: {b} widened to fit its text",
+                                plan.page
+                            ));
+                        }
+                    }
                 }
                 for e in &plan.extra_buttons {
                     if screens::fit_button_to_text(&mut layout, &e.name, &mut assets) {
@@ -1605,15 +1710,38 @@ fn navigate(
                 menus.work.push(OptionWork::Rebind(i));
                 return;
             }
-            let cmd = match chosen {
-                Some(i) => p.buttons.command(i).cloned(),
+            // The hint screen with a gamepad: the original's console
+            // (Engine.u `KeyEvent`) hands the pad's A and B buttons to the
+            // menu's `HandleInputGamePad` first, and on a PC the joystick's
+            // first buttons are those keys (WinDrv.dll sends DirectInput
+            // button n as key 0xC8 + n, `IK_GameA` + n). `CTPauseHintText`
+            // takes B as CONTINUE WITHOUT HINTS and `CTInfoBase` A as
+            // CONTINUE WITH HINTS, whichever button has the focus; both
+            // return true, so the pad's B never reaches back. Escape stays
+            // back (empty on this page).
+            let pad = actions.last_device == rc_game_core::InputDevice::Gamepad;
+            let pad_cmd = if k != HINT_PAGE || !pad {
+                None
+            } else if back {
+                Some((B_BUTTON_NAME, PageCmd::Act(HINT_OFF.into())))
+            } else if by_key && actions.just_pressed(Action::MenuAccept) {
+                Some((A_BUTTON_NAME, PageCmd::Act(HINT_ON.into())))
+            } else {
+                None
+            };
+            let cmd = match (pad_cmd, chosen) {
+                (Some((name, c)), _) => {
+                    log.line(format!("original menus: page {k}: gamepad {name}: {c:?}"));
+                    Some(c)
+                }
+                (None, Some(i)) => p.buttons.command(i).cloned(),
                 // `back = "unavailable"`: back does nothing on this page
                 // (the debriefing).
-                None if back => match p.plan.back.clone() {
+                (None, None) if back => match p.plan.back.clone() {
                     Some(PageCmd::Unavailable) => None,
                     b => Some(b.unwrap_or(PageCmd::Back)),
                 },
-                None => None,
+                (None, None) => None,
             };
             let Some(cmd) = cmd else {
                 return;
@@ -1642,6 +1770,16 @@ fn navigate(
                 n.set(Play::Running);
             }
         }
+        return;
+    }
+    // A hint screen's two buttons: `hints.rs` closes it.
+    if cmd == PageCmd::Act(HINT_ON.into()) || cmd == PageCmd::Act(HINT_OFF.into()) {
+        let with = cmd == PageCmd::Act(HINT_ON.into());
+        log.line(format!(
+            "original menus: hint CONTINUE {} HINTS",
+            if with { "WITH" } else { "WITHOUT" }
+        ));
+        menu.hint_answer = Some(with);
         return;
     }
     // The debriefing's CONTINUE: `debriefing.rs` goes on to the next map.
@@ -2546,7 +2684,13 @@ mod tests {
             paused.command("restartmissionselected"),
             Some(&PageCmd::Restart)
         );
-        for p in &plans {
+        // The loading screens are shown by loading itself, never opened by
+        // a button (`loading_screen.rs`).
+        let by_loading = [
+            crate::loading_screen::LOADING_PAGE,
+            crate::loading_screen::LOADING_INFO_PAGE,
+        ];
+        for p in plans.iter().filter(|p| !by_loading.contains(&p.page.as_str())) {
             assert!(page_from_key(&p.page).is_some(), "unknown page {}", p.page);
         }
     }

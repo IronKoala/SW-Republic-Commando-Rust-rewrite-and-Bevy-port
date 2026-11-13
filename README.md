@@ -10,6 +10,14 @@ copy of the game.
 
 ## What works
 
+- **Screen shake from the level scripts (unit-tested, not tested in the
+  full game).** The scripts' 129 `ACTION_ShakeView` steps and the map's
+  `ViewShaker`s shake the view with the original's own rules: fade in,
+  hold, fade out, a random wobble that moves the camera and turns the
+  view, and a weaker shake can't cut a stronger one short. Numbers come
+  from the maps and the game's `Gameplay.u`. See docs/DESIGN.md "Screen
+  shake".
+
 - **Reading game packages (tested).** `rc_probe` opens any of the game's package
   files (`.u .ctm .utx .uax .usx .ukx`) read-only and reads the header, the name
   table, the import table and the export table. Tested on Windows against a full
@@ -488,7 +496,8 @@ copy of the game.
   Windows).** `rc_game` is the one program the whole game is built into. It
   opens on a main menu in the visor's amber, lists the campaigns and missions
   with the names from the game's own files (`Extreme Prejudice`, `Into The
-  Hive`, ...), shows a loading screen with the mission text, and drops you
+  Hive`, ...), shows the original's loading screen (picture, mission name
+  and text; START once a briefing level has loaded), and drops you
   into the level with an on-screen display (shield, health, crosshair, ammo,
   squad, messages). Escape pauses; the pause menu resumes, opens options or
   quits to the main menu. It plays the game's own music by the
@@ -547,8 +556,10 @@ copy of the game.
   newer (`rustup update`).
 
   **The other menus and the on-screen display are still placeholders.**
-  The loading screen and most of the HUD are our own
-  amber stand-ins, and the amber main menu comes back if the install's menu
+  Most of the HUD is our own amber stand-ins. **The loading screens are
+  now the original's** (`CTLoading` and `CTLoadingInfo`, chosen per map from
+  `LevelLoadingInfo.int` as the original does; tested in the cloud sandbox,
+  not yet on Windows; see `docs/ORIGINAL_MENUS.md`). The amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on
@@ -557,8 +568,11 @@ copy of the game.
   pause menu script; tested in the cloud, not yet on Windows): LOAD LAST
   SAVE only while you are down, QUICK LOAD only with a quicksave, no saving
   during a briefing or in the prologue, and ENABLE HINTS only when hint
-  screens are off in a level that has them. The hint screens themselves
-  aren't built yet, so ENABLE HINTS only switches the setting back on.
+  screens are off in a level that has them. **The hint screens are the
+  original's** (tested in the cloud sandbox with the install, not yet on
+  Windows): the 29 tutorial pop-ups in geo_01a to geo_04d pause the game
+  and show the level's text on the original page, with CONTINUE WITH HINTS
+  and CONTINUE WITHOUT HINTS (which switches them off until ENABLE HINTS).
   **LOAD GAME and SAVE GAME are the original's pages** (tested in the
   cloud sandbox with the install, and by the user on Windows on 2026-11-09): the saves in a list
   (autosave, quicksave, then your own saves, newest first), SELECT, NEW,
@@ -817,6 +831,11 @@ copy of the game.
 
 ## What doesn't work yet
 
+- Screen shake: only the level scripts' shakes (`ACTION_ShakeView`) and
+  `ViewShaker`s are done (since 2026-11-12, not tested in the full game
+  or on Windows). Explosions, weapons, animations and cutscene camera
+  shakes don't shake the view yet.
+
 - Turrets: squad mates on turrets say nothing (no turret voice lines
   yet), stand still in their usual pose, and are held where the player's
   body goes on that turret (not compared with the original); the Rishi
@@ -837,7 +856,9 @@ copy of the game.
   objectives (kept, not shown), the objective tracker (the original's
   tipped ring with its arrow and the distance at the bottom of the screen,
   and the four pulsing arrows round the goal once it is in view; since
-  2026-11-12, tested in the cloud, not yet on Windows), checkpoints, enemy
+  2026-11-12, tested in the cloud, not yet on Windows; like the original,
+  it is off after loading a save until the level's script turns it on
+  again), checkpoints, enemy
   spawners, level changes, and lines of dialogue and sounds (the game's own, read from its
   sound files; a script waiting for a line waits for its real length).
   Since 2026-11-09 a scripted sound comes from its place in the level

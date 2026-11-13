@@ -563,6 +563,15 @@ impl ObjectiveTracker {
         self.since_check = self.look.sight_check_seconds;
     }
 
+    /// A fresh helmet: everything back to the class defaults (the sight
+    /// check's time and result too), keeping the look.
+    pub fn reset(&mut self) {
+        *self = ObjectiveTracker {
+            look: std::mem::take(&mut self.look),
+            ..Default::default()
+        };
+    }
+
     /// `HideObjectiveTracker` (and `ActorDestroyed`).
     pub fn hide(&mut self) {
         self.followed = None;
@@ -877,10 +886,16 @@ fn line_clear(
     true
 }
 
-/// A level ends: nothing to follow.
+/// A level ends, or a save is loaded: the tracker starts again as a fresh
+/// helmet does. This is also how the original treats saves: the player's
+/// `Helmet` is held in `var transient Helmet Helmet` (engine.u
+/// `PlayerController`), so it isn't written to a save, and after a load
+/// `PostLoadBeginPlay` calls `SpawnDefaultHUD`, which (ctgame.u `CTPlayer`)
+/// makes a `new class'Helmet'` with the class defaults: nothing followed,
+/// `bShowObjectiveTracker` off, no sight check made. The tracker shows
+/// again when a script next runs a tracker step.
 pub fn forget(mut tracker: ResMut<ObjectiveTracker>) {
-    tracker.hide();
-    tracker.checks = 0;
+    tracker.reset();
 }
 
 #[cfg(test)]
@@ -1021,6 +1036,40 @@ mod tests {
             }
             v => panic!("{v:?}"),
         }
+    }
+
+    #[test]
+    fn load_starts_from_a_fresh_helmet() {
+        // The original doesn't save the helmet: after a load the tracker is
+        // off, with the sight check's time and result at the defaults.
+        let mut t = ObjectiveTracker::default();
+        t.look.sight_check_seconds = 0.5;
+        t.show(Followed {
+            tag: "x".into(),
+            character: None,
+            export: None,
+            place: [1000.0, 0.0, 0.0],
+            radius: 0.0,
+        });
+        t.step(
+            0.05,
+            [1000.0, 0.0, 0.0],
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            [0.0; 3],
+            0,
+            &mut |_, _| true,
+        );
+        assert!(t.visible);
+        assert!(matches!(t.view, TrackerView::Brackets { .. }));
+        t.reset();
+        assert!(t.followed.is_none());
+        assert!(!t.visible);
+        assert_eq!(t.since_check, 0.0);
+        assert_eq!(t.checks, 0);
+        assert!(matches!(t.view, TrackerView::Hidden));
+        // A mod's look stays.
+        assert_eq!(t.look.sight_check_seconds, 0.5);
     }
 
     #[test]

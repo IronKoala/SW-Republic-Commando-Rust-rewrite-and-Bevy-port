@@ -2076,10 +2076,21 @@ All numbers are in `data/ui/objective_tracker.toml`.
   `DrawHUD` console command) and `bShowObjectiveTracker`. The down state
   (`CTPlayer` state `CtrlIncapacitated`) changes none of these, so the port
   keeps it too.
-- **Ours, not the original's:** the tracker isn't kept in save files, so
-  after a load it shows again at the next tracker step; the port's view
-  yaw is in radians and is rounded to the engine's units; and the sight
-  check runs in the game's update rather than while drawing.
+- **Saves.** The original doesn't keep the tracker in save files. The
+  player's helmet is held in `var transient Helmet Helmet` (engine.u
+  `PlayerController`), and a transient value isn't written to a save.
+  After a load `PlayerController.PostLoadBeginPlay` calls
+  `SpawnDefaultHUD`, and ctgame.u's `CTPlayer.SpawnDefaultHUD` makes a
+  `new class'Helmet'` from the class defaults: nothing followed,
+  `bShowObjectiveTracker` off (it has no default, so false), and the sight
+  check's time and result at zero. So the tracker stays off until a
+  script next runs a tracker step. The port does the same: it saves
+  nothing for the tracker, and leaving the level for a load
+  (`tracker::forget`, `ObjectiveTracker::reset`) puts it back to those
+  defaults.
+- **Ours, not the original's:** the port's view yaw is in radians and is
+  rounded to the engine's units; and the sight check runs in the game's
+  update rather than while drawing.
 
 ### Squad marker jobs reach the level (`markers.rs`, `rc_scripts::markers`)
 
@@ -2899,6 +2910,24 @@ carries `PlayerCamera` gets the sky the same way.
 Loading blocks the game while it runs (about 2 s for geo_01a in a debug
 build in the cloud). Moving it to a background thread is future work; the
 loading screen stays up meanwhile.
+
+**The loading screens (`rc_game/src/loading_screen.rs`).** On entering
+`Loading`, `LoadingScreenPlugin` picks the original's screen for the map
+(`rc_menus::loading::choose`, the original's `LoadMap` rule over
+`LevelLoadingInfo.int` and `System.ini`), resets that page's layout and fills
+it in (`rc_menus::loading::setup`), and sets
+`OriginalMenus::loading_page`. While that is set, the original page is
+drawn instead of the placeholder loading screen (`menu.rs`, system set
+`PlaceholderLoadingScreen`, which steps aside). The bar's value is kept
+by the original engine's rules and `LoadMap`'s stages
+(`rc_menus::loading::Progress`): the map's own `LoadingGate` part is the
+first stage, the other parts count through the second, and the bar is
+full when all are done. On leaving `Loading`, a `CTLoadingInfo` page
+switches to its finished look (`rc_menus::loading::finish`) and
+`LoadingDone::waiting` is set; when play starts it is paused at once with
+`Page::LoadingDone`, which maps to the same original page, and its START
+calls `resume`. Leaving `Play::Paused` clears the wait. A `CTLoading` page
+just closes.
 
 **Checking without looking.** `rc_game --script` presses the same actions a
 player would and checks each step: menu pages, loading, the player moving
@@ -4309,8 +4338,51 @@ texts end up at 85-90% of their size. If
 the original page can't be drawn, a placeholder page marked as one shows
 the title and text with Continue. Not done: the GEO/RAS/YYY classes differ
 only in the music they play (`musGEO_cadence_lp` and so on); that music
-isn't played yet. Hint screens (`bIsForHintText`) aren't shown: the
-original shows them only with a debug switch.
+isn't played yet. The same action without a `NewLevel` is a hint screen
+(see "The hint screens" below).
+
+**The hint screens.** 29 script steps in geo_01a, geo_01b, geo_01c, geo_03a
+and geo_04d run `ACTION_ShowDebriefingScreen` with only a `Text`,
+`MenuClass=XInterfaceCTMenus.CTPauseHintText` and `bIsForHintText=true`
+(the tutorial pop-ups: crouching, the bacta dispenser, the objective
+tracker, the squad, the sniper and anti-armour attachments...). What the
+original does with them is in its own script in the install:
+`ACTION_ShowDebriefingScreen.InitActionFor` (CTGame.u) shows the page only
+if the step isn't for hint text or `bKeepHintMenusAwfulHack` is on (a
+`globalconfig` of `PlayerController`, `true` in the install's `User.ini`:
+despite its name it is simply "hints on"), and the script goes straight on.
+`PlayerController.ShowMenu` (Engine.u) pauses and opens the page with the
+text. The scripts part sends `rc_game_core::ShowHint`; `rc_game/src/hints.rs`
+checks our `hint_screens` setting, pauses and opens the `hint` page
+(`[pages.hint]` in `data/ui/original_menus.toml`). `rc_menus::hint` fills
+the page in as the class's `Init` and `SetInfoOptions` do: the text in
+`InfoText`, the title and picture hidden, the empty picture frame shown,
+CONTINUE WITH HINTS shown and focused, and with the helmet off the frames
+and text moved up to the class's numbers. CONTINUE WITH HINTS
+(`act:hint_on`) goes on playing; CONTINUE WITHOUT HINTS (`act:hint_off`)
+switches `hint_screens` off, saves the settings and goes on; back does
+nothing, as `CTInfoBase.HandleInputBack` is empty. The pause menu's
+ENABLE HINTS switches them back on. If the page can't be drawn, a
+placeholder page (marked) shows the text with the same two choices.
+With a gamepad, B is CONTINUE WITHOUT HINTS and A is CONTINUE WITH HINTS
+wherever the focus is: the original's console (`KeyEvent` in Engine.u)
+hands `IK_GameA`/`IK_GameB` to the menu's `HandleInputGamePad` before
+anything else, the hint classes take them and return true, and on a PC
+WinDrv.dll sends DirectInput joystick button n as key 0xC8 + n (checked
+in its machine code; 0xC8 is `IK_GameA`, so button 1 is `IK_GameB`). A
+hint asked for while a page shows takes that page's place, as in the
+original: `PlayerController.ShowMenu` only skips `SetPause` when play is
+already paused and still opens the page, and the console's `MenuOpen`
+(Engine.u) destroys the page that was showing. Level scripts don't run
+while paused, so this can only happen within one frame (none of the 29
+does it); a debriefing it replaces doesn't go on to its next map. The HUD (prompt text, objective tracker, meters) stays drawn under the
+hint box, as in the original: Engine.dll's `FPlayerSceneNode::Render`
+calls `UHelmet::DrawHUD` whenever the level is drawn, skipping it only
+for split screen or the console's `NOHUD` debug command (checked in its
+machine code; nothing kept). Every widget's place, size, font, wrap width
+(`InfoText.MaxSizeX` 0.38) and shown/hidden state is the class's own
+default, changed only by its `Init` and `SetInfoOptions`. Not
+done: the other languages' moves (the port reads only English).
 
 Following the first exit of each map from `pro` visits all 56 campaign
 maps in order and ends at `epilogue`; no exit names a missing map.
@@ -5259,6 +5331,43 @@ fire every 0.05 s.
 it (the original asks for the crosshair on it). The Trandoshan turret's
 four barrels fire one after another for a character gunner. The turret
 weapons' first-person offsets and the E-Web's reload time are guesses.
+
+## Screen shake (`rc_game_core::shake`, `rc_game/src/player.rs`, `rc_scripts_plugin/src/shake.rs`)
+
+Every shake in the original ends in one call on the player's controller,
+`ShakeView(InTime, SustainTime, OutTime, X, Y, Z, YawMag, PitchMag,
+Frequency)`. The port has the same single entry: a `ShakeView` message.
+Anything that wants to shake the view (scripts now; explosions and weapons
+later) sends one.
+
+- **The rules** (`rc_game_core::shake::ShakeState`) follow the game's
+  `Engine.u` script text: a new shake is ignored while a stronger one runs;
+  the strength fades in over `InTime`, holds, and falls as
+  `1 - elapsed / end`; each axis has a value that walks toward a new random
+  target in -1..1 by at most `Frequency` a frame; the turn (Unreal rotation
+  units, cut to a whole number) is added to where the player looks every
+  frame and stays; the movement (Unreal units, world axes) is added to the
+  eye position. A rotation's `Yaw` value shakes up and down and its `Pitch`
+  value left and right, as the original swaps them.
+- **When** (`rc_game/src/player.rs`, `shake_view`): once a frame, right
+  after the player's own turning and its limits, also on a turret, as the
+  engine's `UpdateRotation` does (read from Engine.dll). The camera
+  (`place_camera`) adds `ViewShake::offset` to the eyes.
+- **Where the numbers come from** (`rc_scripts_plugin/src/shake.rs`):
+  `ACTION_ShakeView` steps and `ViewShaker` actors in the map; anything a
+  map leaves out is the class default, read from `Gameplay.u` at level load.
+  If those can't be read, those shakes are skipped and logged, not guessed.
+  A `ViewShaker` shakes only if the player is closer than its
+  `ShakeRadius`; the campaign's four set none, so (as in the original) they
+  never do.
+- **For a VR mod**: the shake is one resource, `ViewShake`, with two
+  switches. `turn_view = false` stops it turning the player's view (a
+  must in VR); `move_camera = false` stops the camera movement. Nothing
+  else depends on them.
+- **Log**: `scripts: ... ShakeView: shake the view: ...` when a script
+  asks, `player: t=... shake from ...` when the view takes it (or
+  ignores it), and `player: ... shake from ... over: N frames, camera moved
+  up to X uu, turned up to P pitch / Y yaw a frame` when it ends.
 
 ## Automatic checks on GitHub (`.github/workflows/ci.yml`)
 

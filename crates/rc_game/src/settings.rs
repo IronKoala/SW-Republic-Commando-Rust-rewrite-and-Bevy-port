@@ -50,7 +50,7 @@ pub struct GameSection {
     /// `User.ini`, true there by default). Turning hints off happens on a
     /// hint screen, and the pause menu's ENABLE HINTS turns them back on
     /// (it shows only while they are off, in a level that has hints). The
-    /// hint screens themselves aren't built yet.
+    /// hint screens are `hints.rs`.
     pub hint_screens: bool,
     /// TACTICAL VISOR MODE: which visor modes CYCLE VISOR MODE (X) steps
     /// through (see rc_visor).

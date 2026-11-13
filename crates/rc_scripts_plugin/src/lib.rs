@@ -34,6 +34,10 @@
 //!   [`TurretOrder`]s for the turret part (`rc_turrets_plugin`), whose
 //!   events (a turret taken or let go) arrive as a `RaiseEvent`.
 //!
+//! - screen shakes: `ACTION_ShakeView` and the map's `ViewShaker`s
+//!   become `rc_game_core::ShakeView` messages for the player's view (see
+//!   `shake.rs`).
+//!
 //! - lines of dialogue and sounds (`ACTION_PlaySound`,
 //!   `ACTION_PlayLocalSound`) play from the game's own sound packages, read
 //!   while the level loads; a script waiting for a line waits for its real
@@ -64,6 +68,7 @@ pub mod objectives;
 pub mod placed_emitters;
 pub mod projectiles;
 pub mod save;
+pub mod shake;
 pub mod sight;
 pub mod sounds;
 pub mod tracker;
@@ -120,6 +125,7 @@ impl Plugin for ScriptsPlugin {
             .init_resource::<rc_game_core::UseClaimed>()
             .add_message::<rc_game_core::PropAnim>()
             .add_message::<rc_game_core::ShowDebriefing>()
+            .add_message::<rc_game_core::ShowHint>()
             .add_message::<tracker::TrackerAsk>()
             .init_resource::<tracker::ObjectiveTracker>()
             .add_systems(Startup, tracker::load_look)
@@ -151,6 +157,7 @@ impl Plugin for ScriptsPlugin {
                     breakables::explode,
                     sight::look,
                     run,
+                    shake::send,
                     send_ammo,
                     blink_hud,
                     tracker::track,
@@ -293,6 +300,8 @@ pub struct LevelScript {
     pub breaking: breakables::Breakables,
     /// What weapons did to props.
     pub props: breakables::PropStats,
+    /// Screen shakes: the map's `ViewShaker`s and the scripts' requests.
+    pub shakes: shake::LevelShakes,
 }
 
 impl LevelScript {
@@ -315,6 +324,7 @@ impl LevelScript {
             breaking: breakables::Breakables::new(&[]),
             props: breakables::PropStats::default(),
             anchors: Vec::new(),
+            shakes: shake::LevelShakes::default(),
         }
     }
 }
@@ -342,6 +352,8 @@ pub struct PlayStats {
     pub sounds_missing: Vec<String>,
     /// Music actions passed on to the music.
     pub music_cues: usize,
+    /// Hint screens passed on to the game (`ShowHint`).
+    pub hints: usize,
     /// Objective tracker steps passed on to the tracker.
     pub tracker_asks: usize,
     /// The sounds played from a place in the level (not heard everywhere).
@@ -632,6 +644,11 @@ fn build(
         });
     }
     commands.insert_resource(fx_factories::LevelFxFactories::new(fx));
+    // Screen shakes: the game's defaults for them and the map's shakers.
+    let shakes = shake::LevelShakes::read(map, shake::read_defaults(&paths));
+    for line in shakes.describe() {
+        log.line(line);
+    }
     // Emitters placed in the map (geo_01a's dust under the landing
     // gunship): found by their class, their effects read now.
     let emitters = match rc_effects::read::Library::open(&paths.game_data()) {
@@ -670,6 +687,7 @@ fn build(
         stats: PlayStats::default(),
         breaking: breakables::Breakables::new(&breakable),
         props: breakables::PropStats::default(),
+        shakes,
     });
     let mission = objectives::MissionList::from_map(map);
     if let Some(m) = &mission {
@@ -729,11 +747,12 @@ fn run(
     player: Query<(Entity, &Transform), With<Player>>,
     vitals: Res<PlayerVitals>,
     mut events: MessageWriter<ScriptEvent>,
-    (mut checkpoints, mut change, mut debrief, mut music, mut tracker_asks): (
+    (mut checkpoints, mut change, mut debrief, mut music, mut hints, mut tracker_asks): (
         MessageWriter<CheckpointReached>,
         MessageWriter<ChangeLevel>,
         MessageWriter<rc_game_core::ShowDebriefing>,
         MessageWriter<rc_game_core::MusicCue>,
+        MessageWriter<rc_game_core::ShowHint>,
         MessageWriter<tracker::TrackerAsk>,
     ),
     mut hud: MessageWriter<HudMessage>,
@@ -975,6 +994,29 @@ fn run(
                 }
                 if characters::KINDS.contains(&call.kind.as_str()) {
                     script.calls.push(call);
+                    continue;
+                }
+                // A hint screen (`ACTION_ShowDebriefingScreen` without a
+                // `NewLevel`; the one with a `NewLevel` leaves the level
+                // and is sent above). The game pauses and shows it; the
+                // script goes straight on, as the original's
+                // `InitActionFor` returns at once.
+                if call.kind == "showdebriefingscreen" {
+                    let d = rc_scripts::Debriefing::of(&call.action);
+                    let for_hint_text = call.action.flag("bIsForHintText", false);
+                    log.line(format!(
+                        "{PART}: t={now:.2} {} #{} hint screen {} {:?} (bIsForHintText {for_hint_text})",
+                        call.script, call.index, d.menu_class, d.text
+                    ));
+                    script.stats.hints += 1;
+                    hints.write(rc_game_core::ShowHint {
+                        menu_class: d.menu_class,
+                        title: d.title,
+                        text: d.text,
+                        picture: d.picture,
+                        for_hint_text,
+                        by: format!("{} #{}", call.script, call.index),
+                    });
                     continue;
                 }
                 if let Some(cue) = music::cue(&call.action) {
@@ -1255,6 +1297,24 @@ fn carry_out(
                 ));
             }
         }
+        "shakeview" => match script.shakes.action(a, format!("{} #{}", call.script, call.index)) {
+            Ok(m) => log.line(format!(
+                "{at}: shake the view: in {} s, hold {} s, out {} s, move ({}, {}, {}) uu, rotation pitch {} yaw {}, frequency {}",
+                m.in_time,
+                m.sustain_time,
+                m.out_time,
+                m.offset[0],
+                m.offset[1],
+                m.offset[2],
+                m.pitch_mag,
+                m.yaw_mag,
+                m.frequency
+            )),
+            Err(e) => {
+                script.stats.not_done += 1;
+                log.line(format!("{at}: not done: {e}"));
+            }
+        },
         // Read by the HUD (rc_game's original HUD and data/ui/hud.toml).
         k if hud_blink::HudBlink::kind_of(k).is_ok() => {
             let time = a.float("BlinkTime").unwrap_or(0.0);
