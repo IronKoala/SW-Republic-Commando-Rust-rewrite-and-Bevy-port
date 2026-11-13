@@ -42,8 +42,8 @@ use rc_anim::Clip;
 use rc_combat::{Died, Health, Hittable};
 use rc_game_core::units::{to_bevy, to_unreal, UU_PER_UNIT};
 use rc_game_core::{
-    playing, CharacterAct, CharacterOrder, CharacterOrderDone, CurrentLevel, GameLog, GamePaths,
-    GameSet, GameState, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
+    playing, AnimSound, CharacterAct, CharacterOrder, CharacterOrderDone, CurrentLevel, GameLog,
+    GamePaths, GameSet, GameState, Player, PlayerCamera, RaiseEvent, ScriptEvent, ScriptTags,
 };
 use rc_model::NotifyTrigger;
 use rc_model::{Model, ModelSpec};
@@ -71,6 +71,8 @@ impl Plugin for CastPlugin {
             .add_message::<CharacterOrderDone>()
             .add_message::<ScriptEvent>()
             .add_message::<RaiseEvent>()
+            .add_message::<AnimSound>()
+            .init_resource::<rc_game_core::AnimSoundsWanted>()
             .add_systems(OnEnter(GameState::Loading), load_cast)
             .add_systems(
                 Update,
@@ -177,6 +179,7 @@ fn settings(paths: Option<&GamePaths>, log: &Option<Res<GameLog>>) -> CastFile {
 }
 
 fn load_cast(
+    mut wanted_sounds: ResMut<rc_game_core::AnimSoundsWanted>,
     mut plan: ResMut<CastPlan>,
     mut cache: ResMut<CastCache>,
     level: Option<Res<CurrentLevel>>,
@@ -314,6 +317,17 @@ fn load_cast(
         list.push((m, model));
     }
     log_line(&log, format!("{} in the cast of {map}", list.len()));
+    // Every sound their animations can play, read before play starts.
+    let wanted: std::collections::BTreeSet<String> = list
+        .iter()
+        .filter_map(|(_, model)| model.as_ref())
+        .flat_map(|model| model.sounds.values().flatten().map(|(_, s)| s.clone()))
+        .collect();
+    log_line(
+        &log,
+        format!("{} sounds in the cast's animations", wanted.len()),
+    );
+    wanted_sounds.0.extend(wanted);
     plan.members = list;
     plan.settings = Some(Arc::new(file));
 }
@@ -1148,6 +1162,7 @@ fn animate_cast(
     player: Query<&GlobalTransform, With<PlayerCamera>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     mut raise: MessageWriter<RaiseEvent>,
+    mut heard: MessageWriter<AnimSound>,
     log: Option<Res<GameLog>>,
 ) {
     let Some(mut meshes) = meshes else {
@@ -1213,7 +1228,7 @@ fn animate_cast(
         }
         let mut self_trigger = false;
         if let Some(k) = clip {
-            for (from, to) in passed {
+            for &(from, to) in &passed {
                 for t in look.model.triggers_between(&k.name, from, to) {
                     match t {
                         NotifyTrigger::Event(name) => {
@@ -1228,6 +1243,19 @@ fn animate_cast(
                         }
                         NotifyTrigger::SelfTrigger => self_trigger = true,
                     }
+                }
+            }
+        }
+        // Its animation's own sounds (`AnimNotify_Sound`), from the
+        // moments the game's animation files give.
+        if let Some(k) = clip {
+            for (from, to) in &passed {
+                for sound in look.model.sounds_between(&k.name, *from, *to) {
+                    heard.write(AnimSound {
+                        sound,
+                        from: entity,
+                        by: format!("{name_of} {}", k.name),
+                    });
                 }
             }
         }

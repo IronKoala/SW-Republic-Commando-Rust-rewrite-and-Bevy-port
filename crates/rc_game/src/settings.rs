@@ -227,9 +227,14 @@ pub struct AudioSection {
     /// 3D SOUND: sounds with a place in the level (enemies) are heard from
     /// their side.
     pub sound_3d: bool,
-    /// AUDIO CHANNELS: the most sounds playing at once. When more start, the
-    /// oldest effect stops (speech and music are never cut).
+    /// AUDIO CHANNELS: the most sounds playing at once (the original's
+    /// `Channels`; it uses 32 at most). When more want to play, the sound
+    /// engine keeps the most important ones, as the original does.
     pub channels: u32,
+    /// EAX: the room echo and the muffling of sounds behind walls
+    /// (Creative's EAX in the original; done in software here, so it works
+    /// on any sound card).
+    pub eax: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -323,12 +328,15 @@ impl Default for Settings {
             },
             audio: AudioSection {
                 master_volume: 1.0,
-                music_volume: 0.6,
-                effects_volume: 1.0,
+                // The original's `MusicVolume`, `SoundVolume` and
+                // `VoiceVolume` (ALAudio's defaults).
+                music_volume: 0.7,
+                effects_volume: 0.5,
                 voices_volume: 1.0,
                 low_quality: false,
                 sound_3d: true,
                 channels: 32,
+                eax: true,
             },
             controls: ControlsSection {
                 bindings: "input/bindings.toml".into(),
@@ -455,13 +463,14 @@ squad_shadows = true     # character shadows, and moving lights cast shadows
 fsaa = 1                 # edge smoothing: 1 (none) or the samples the graphics card offers (2, 4, 8)
 
 [audio]
-master_volume = 1.0   # 0 is silent, 1 is full
-music_volume = 0.6
-effects_volume = 1.0
+master_volume = 1.0   # 0 is silent, 1 is full (the port's own; the others are the original's)
+music_volume = 0.7
+effects_volume = 0.5
 voices_volume = 1.0   # speech: squad, enemies, the level's lines
 low_quality = false   # true keeps sounds at 22050 per second or less (next level load)
 sound_3d = true       # enemies are heard from their side
-channels = 32         # most sounds at once; the oldest effect stops for a new one
+channels = 32         # most sounds at once (32 at most); the most important ones play
+eax = true            # room echo and sounds muffled behind walls
 
 [controls]
 bindings = 'input/bindings.toml'   # inside data_folder (or a mod)

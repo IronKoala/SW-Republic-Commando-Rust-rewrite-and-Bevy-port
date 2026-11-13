@@ -345,3 +345,27 @@ mod tests {
         assert_eq!(t.key_times(), vec![0.0, 2.0, 5.0]);
     }
 }
+
+/// The sound an `AnimNotify_Sound` object plays (its `Sound`), as a
+/// dotted path, package first (`GEO_Sound.Vehicles.veh_GEN_gsPeel_06`).
+/// `None` for any other notify, or one with no sound.
+pub fn notify_sound(pkg: &Package, data: &[u8], object: i32) -> Option<String> {
+    let crate::ObjectRef::Export(k) = crate::ObjectRef::from_index(object) else {
+        return None;
+    };
+    let e = pkg.exports.get(k)?;
+    if !pkg
+        .export_class_name(e)
+        .eq_ignore_ascii_case("AnimNotify_Sound")
+    {
+        return None;
+    }
+    let start = e.serial_offset as usize;
+    let end = start + e.serial_size as usize;
+    let mut r = Reader::new(data.get(start..end)?);
+    let props = properties::read_properties(pkg, &mut r).ok()?;
+    match properties::find(pkg, &props, "Sound")?.value {
+        properties::Value::Object(o) if o != 0 => Some(crate::class::object_path(pkg, o)),
+        _ => None,
+    }
+}

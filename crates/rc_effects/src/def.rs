@@ -318,6 +318,9 @@ pub struct EffectDef {
     /// there (the bacta dispenser's zap hums with
     /// `GEO_Sound.GEO_03.ele_GEO_genEnrgy_lp_01`); path as `sound`.
     pub ambient_sound: Option<Vec<String>>,
+    /// `SoundOcclusion` (engine.u `ESoundOcclusion`): 1 (`OCCLUSION_None`)
+    /// lets its sounds through walls; 0 (default) and the rest don't.
+    pub sound_occlusion: u8,
     /// `LifeSpan`: the effect is removed after this long (0: when its
     /// emitters are done).
     pub life_span: f32,

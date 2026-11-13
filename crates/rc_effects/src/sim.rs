@@ -536,6 +536,7 @@ mod tests {
             }],
             sound: None,
             ambient_sound: None,
+            sound_occlusion: 0,
             life_span: 0.0,
             lit: false,
         }

@@ -95,6 +95,10 @@ pub struct DroidLook {
     /// The mesh's whole animation sets, for animations a level script
     /// names (`ACTION_PlayAnim`).
     pub anims: Vec<MeshAnimation>,
+    /// The sounds each animation plays (`AnimNotify_Sound`), by the
+    /// animation's name in lower case: when (0 to 1 through it) and the
+    /// sound's dotted path.
+    pub sounds: HashMap<String, Vec<(f32, String)>>,
     pub skin: Option<(String, Rgba)>,
     /// Triangle corners as wedge numbers, already in Bevy's winding.
     pub indices: Vec<u32>,
@@ -166,6 +170,22 @@ impl DroidLook {
                 )),
             }
         }
+        let mut sounds: HashMap<String, Vec<(f32, String)>> = HashMap::new();
+        for (_, anim) in &anims {
+            for seq in &anim.sequences {
+                let heard: Vec<(f32, String)> = seq
+                    .notifies
+                    .iter()
+                    .filter_map(|n| {
+                        rc_package::animation::notify_sound(&pkg, &data, n.object)
+                            .map(|s| (n.time, s))
+                    })
+                    .collect();
+                if !heard.is_empty() {
+                    sounds.entry(seq.name.to_ascii_lowercase()).or_insert(heard);
+                }
+            }
+        }
         let skeleton = Skeleton::from_mesh(&mesh, Convention::InvertRoot);
         let mut clips = HashMap::new();
         let mut used_sets: Vec<&str> = Vec::new();
@@ -234,6 +254,7 @@ impl DroidLook {
             weights,
             clips,
             anims: anims.iter().map(|(_, a)| a.clone()).collect(),
+            sounds,
             skin,
             indices,
             lift: 0.0,
@@ -267,6 +288,18 @@ impl DroidLook {
 
     pub fn clip(&self, pose: Pose) -> &Clip {
         self.clips.get(&pose).unwrap_or(&self.clips[&Pose::Idle])
+    }
+
+    /// The sounds animation `name` plays whose moment falls after `from`
+    /// and up to `to` (0 to 1 through it).
+    pub fn sounds_between(&self, name: &str, from: f32, to: f32) -> Vec<String> {
+        self.sounds
+            .get(&name.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .filter(|(t, _)| *t > from && *t <= to)
+            .map(|(_, s)| s.clone())
+            .collect()
     }
 
     /// An animation from the set by name (any case), for a level script.

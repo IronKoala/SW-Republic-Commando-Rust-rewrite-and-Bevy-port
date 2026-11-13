@@ -93,6 +93,12 @@ pub struct MapCollision {
     pub weapons: Vec<crate::pickups::PlacedWeapon>,
     /// Pickups of every kind left out of collision.
     pub pickups_not_solid: usize,
+    /// Sounds that loop where the map puts them (`crate::ambient`): the
+    /// battle in the distance, fires crackling, steam hissing.
+    pub ambient_sounds: Vec<crate::ambient::AmbientSound>,
+    /// The level's walls and rooms as the sound code sees them
+    /// (`crate::hearing`); `None` when the model's zones couldn't be read.
+    pub hearing: Option<crate::hearing::Hearing>,
 }
 
 impl MapCollision {
@@ -221,6 +227,12 @@ pub fn load(
     let level = actors::read_level(&pkg, &data).map_err(|e| format!("level: {e}"))?;
     let model = level.model.ok_or("the level has no BSP model")?;
     let bsp = bsp::read_model(&pkg, &data, &pkg.exports[model]).map_err(|e| format!("BSP: {e}"))?;
+    let hearing = {
+        let e = &pkg.exports[model];
+        let start = e.serial_offset as usize;
+        data.get(start..start + e.serial_size as usize)
+            .and_then(|object| crate::hearing::Hearing::read(&bsp, object).ok())
+    };
 
     let mut files = HashMap::new();
     index_packages(game_data, &mut files);
@@ -373,6 +385,8 @@ pub fn load(
     let mut mover_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // And the parts scripts can switch off.
     let mut parts = crate::scripts::tagged_actors(&map.0, &map.1, &level);
+    let ambient_sounds =
+        crate::ambient::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
     let breakables =
         crate::breakables::read(&mut looks, &map.0, &map.1, &level, &mut |n| pkgs.get(n));
     for b in &breakables {
@@ -480,6 +494,8 @@ pub fn load(
         part_triangles,
         parts,
         breakables,
+        ambient_sounds,
+        hearing,
         start,
         arrivals,
         ammo_boxes,

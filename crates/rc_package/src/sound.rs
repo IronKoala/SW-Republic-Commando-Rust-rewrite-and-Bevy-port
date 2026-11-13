@@ -133,7 +133,40 @@ pub struct AudioParams {
     /// `bDisable3DFalloff`: from its side, but no quieter with distance
     /// (big explosions).
     pub no_falloff: bool,
+    /// `Category` (`AG_Music` 0, `AG_Voice` 1, `AG_SFX` 2). Picks the
+    /// volume slider the game plays the sound on, and music gets no room
+    /// echo (`UAudioSubsystem::PlayUSound`). Unset is 0, music.
+    pub category: u8,
+    /// `MinVolume` / `MaxVolume`: each playing gets a random loudness
+    /// between them (class default 1 and 1).
+    pub min_volume: f32,
+    pub max_volume: f32,
+    /// `MinPitch` / `MaxPitch`: the same for pitch (class default 1 and 1).
+    pub min_pitch: f32,
+    pub max_pitch: f32,
 }
+
+impl Default for AudioParams {
+    /// The `AudioParams` class defaults in `Engine.u`, which the game also
+    /// uses for a sound that names no `Params` (`USound::GetParams`).
+    fn default() -> Self {
+        AudioParams {
+            radius: None,
+            non_positional: false,
+            no_falloff: false,
+            category: AG_MUSIC,
+            min_volume: 1.0,
+            max_volume: 1.0,
+            min_pitch: 1.0,
+            max_pitch: 1.0,
+        }
+    }
+}
+
+/// `AudioParams.Category` values (`Engine.u`, enum `EAudioGroup`).
+pub const AG_MUSIC: u8 = 0;
+pub const AG_VOICE: u8 = 1;
+pub const AG_SFX: u8 = 2;
 
 /// Read an `AudioParams` export (properties only).
 pub fn read_audio_params(pkg: &Package, data: &[u8], export: &Export) -> Result<AudioParams> {
@@ -150,6 +183,10 @@ fn audio_params_from(pkg: &Package, props: &[Property]) -> AudioParams {
             Some(Value::Bool(true))
         )
     };
+    let float = |n: &str, default: f32| match properties::find(pkg, props, n).map(|p| &p.value) {
+        Some(Value::Float(f)) => *f,
+        _ => default,
+    };
     AudioParams {
         radius: match properties::find(pkg, props, "Radius").map(|p| &p.value) {
             Some(Value::Float(f)) => Some(*f),
@@ -157,6 +194,14 @@ fn audio_params_from(pkg: &Package, props: &[Property]) -> AudioParams {
         },
         non_positional: flag("NonPositional"),
         no_falloff: flag("bDisable3DFalloff"),
+        category: match properties::find(pkg, props, "Category").map(|p| &p.value) {
+            Some(Value::Byte(b)) => *b,
+            _ => AG_MUSIC,
+        },
+        min_volume: float("MinVolume", 1.0),
+        max_volume: float("MaxVolume", 1.0),
+        min_pitch: float("MinPitch", 1.0),
+        max_pitch: float("MaxPitch", 1.0),
     }
 }
 

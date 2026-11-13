@@ -149,6 +149,19 @@ pub struct LevelMoverData {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct LevelBreakables(pub Vec<rc_level::breakables::Breakable>);
 
+/// Sounds that loop where the map puts them (`rc_level::ambient`): the
+/// battle in the distance, fires, steam. Present from the end of loading
+/// until the game leaves `InGame`.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LevelAmbientSounds(pub Vec<rc_level::ambient::AmbientSound>);
+
+/// The level's walls and rooms as the game's sound code sees them
+/// (`rc_level::hearing`): whether a wall stands between a sound and the
+/// listener, and how many rooms apart they are. Present from the end of
+/// loading until the game leaves `InGame`, when the map's zones read.
+#[derive(Resource, Debug, Clone)]
+pub struct LevelHearing(pub Arc<rc_level::hearing::Hearing>);
+
 /// The faces of blocking volumes that a line with no thickness passes
 /// through in the original (`bBlockZeroExtentTraces` off). They are part
 /// of `LevelCollision` too; a sight check that must see through them, as
@@ -362,6 +375,8 @@ fn forget(
     commands.remove_resource::<LineThroughVolumes>();
     commands.remove_resource::<rc_game_core::PlaceLight>();
     commands.remove_resource::<LevelBreakables>();
+    commands.remove_resource::<LevelAmbientSounds>();
+    commands.remove_resource::<LevelHearing>();
     commands.remove_resource::<rc_game_core::pickups::LevelAmmoBoxes>();
     commands.remove_resource::<rc_game_core::pickups::LevelWeaponPickups>();
 }
@@ -511,6 +526,23 @@ fn load(world: &mut World) {
         lvl.breakables.iter().filter(|b| b.broken_event().is_some()).count()
     ));
     world.insert_resource(LevelBreakables(std::mem::take(&mut lvl.breakables)));
+    log.line(format!(
+        "{PART}: {} looping sounds placed in the map",
+        lvl.ambient_sounds.len()
+    ));
+    world.insert_resource(LevelAmbientSounds(std::mem::take(&mut lvl.ambient_sounds)));
+    match lvl.hearing.take() {
+        Some(h) => {
+            log.line(format!(
+                "{PART}: {} zones for sound (walls and rooms between a sound and the listener)",
+                h.zones()
+            ));
+            world.insert_resource(LevelHearing(Arc::new(h)));
+        }
+        None => log.line(format!(
+            "{PART}: the map's zones couldn't be read; walls won't muffle sounds"
+        )),
+    }
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(LineThroughVolumes(Arc::new(TriangleWorld::new(
         lvl.line_through_triangles

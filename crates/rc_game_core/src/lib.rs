@@ -58,6 +58,7 @@ pub mod pickups;
 pub mod save;
 pub mod shake;
 pub mod sound;
+pub mod sound_engine;
 mod state;
 pub mod turrets;
 pub mod units;
@@ -66,10 +67,10 @@ pub mod use_item;
 pub use actions::{Action, ActionState, InputDevice, InputPrompts};
 pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
-    ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone,
-    FactoryOrder,
-    LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
-    ShowDebriefing, ShowHint, SquadMembership, SquadStanceOrder, UseClaimed,
+    AnimSound, AnimSoundsWanted, ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision,
+    CharacterOrder, CharacterOrderDone, FactoryOrder, LevelScriptsRun, MarkerJob, MarkerJobStep,
+    PropAnim, RaiseEvent, ScriptEvent, ScriptTags, ShowDebriefing, ShowHint, SquadMembership,
+    SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
     HudMessage, PlayerVitals, SquadMember, SquadReadout, SquadStatus, ViewKick, WeaponReadout,
@@ -79,11 +80,13 @@ pub use music::{MusicCue, MusicFades, MusicThreat, MusicThreats};
 pub use paths::GamePaths;
 pub use place_light::{LightTarget, LitByPlace, PlaceLight};
 pub use shake::{ShakeView, StopShake, ViewShake};
-pub use sound::{SoundAt, Voice};
+pub use sound::{EaxOcclusion, EaxOn, SoundAt, SoundCategory, Voice};
 pub use state::{
     playing, CarryBodies, CurrentLevel, GameSet, GameState, LevelCollision, LoadingGate,
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
+    StartHeld,
 };
+pub use sound_engine::{ActorAmbient, CueClock, Ducking, MusicTrack, SoundBy, SoundFade, SoundMix};
 pub use turrets::{Manning, OnTurret, TurretOrder};
 pub use use_item::{UseItem, UseLock, UsePanel};
 
@@ -99,6 +102,7 @@ impl Plugin for CorePlugin {
         app.init_state::<GameState>()
             .add_sub_state::<Play>()
             .init_resource::<CurrentLevel>()
+            .init_resource::<StartHeld>()
             .init_resource::<LoadingGate>()
             .init_resource::<ActionState>()
             .init_resource::<InputPrompts>()
@@ -125,6 +129,8 @@ impl Plugin for CorePlugin {
             .add_message::<SquadMembership>()
             .add_message::<MarkerJob>()
             .add_message::<PropAnim>()
+            .add_message::<AnimSound>()
+            .init_resource::<AnimSoundsWanted>()
             .add_message::<ChangeLevel>()
             .add_message::<TurretOrder>()
             .add_message::<ShowDebriefing>()

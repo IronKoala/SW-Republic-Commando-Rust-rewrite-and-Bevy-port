@@ -54,10 +54,13 @@
 //! every event is sent as a [`ScriptEvent`] message, so other parts
 //! (droid factories, the squad, sounds) can hook in by name.
 
+pub mod ambient;
+pub mod anim_sounds;
 pub mod bacta;
 pub mod breakables;
 pub mod characters;
 pub mod cutscene;
+pub mod engine;
 pub mod fx_factories;
 pub mod hud_blink;
 pub mod markers;
@@ -174,12 +177,53 @@ impl Plugin for ScriptsPlugin {
                     .run_if(playing),
             )
             .add_systems(Update, (sounds::started, sounds::pause, sounds::follow))
+            // The sound engine: every new sound, before Bevy starts it.
+            .init_resource::<engine::SoundEngine>()
+            .init_resource::<rc_game_core::Ducking>()
+            .init_resource::<rc_game_core::SoundMix>()
+            // The characters' cue table (`APawn::GetSoundFromCue`): cleared
+            // when a map loads, its clock runs while the level does.
+            .init_resource::<rc_game_core::CueClock>()
+            .add_systems(
+                OnEnter(GameState::Loading),
+                |mut c: ResMut<rc_game_core::CueClock>| c.reset(),
+            )
+            .add_systems(
+                Update,
+                (|mut c: ResMut<rc_game_core::CueClock>, t: Res<Time>| {
+                    c.now += t.delta_secs_f64()
+                })
+                .before(GameSet::Simulate)
+                .run_if(playing),
+            )
+            .add_systems(
+                PostUpdate,
+                (engine::schedule_sounds, engine::set_volumes)
+                    .chain()
+                    .before(bevy::transform::TransformSystems::Propagate),
+            )
+            // The characters' animation sounds.
+            .init_resource::<anim_sounds::AnimSounds>()
+            .init_resource::<rc_game_core::AnimSoundsWanted>()
+            .add_message::<rc_game_core::AnimSound>()
+            .add_systems(Update, (anim_sounds::load, anim_sounds::play).chain())
+            // The map's own looping sounds: read when play starts, then
+            // started and stopped as the player moves.
+            .add_systems(
+                Update,
+                (ambient::start, ambient::update, ambient::update_actor_loops)
+                    .chain()
+                    .in_set(GameSet::Simulate)
+                    .run_if(playing),
+            )
             .add_systems(OnEnter(GameState::Loading), cutscene::forget)
             .add_systems(
                 OnExit(GameState::InGame),
                 (
                     forget,
                     sounds::forget,
+                    ambient::forget,
+                    anim_sounds::forget,
                     cutscene::forget,
                     projectiles::forget,
                     tracker::forget,

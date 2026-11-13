@@ -233,10 +233,6 @@ fn fades_of(f: Option<MusicFades>) -> Option<FadeOverride> {
     })
 }
 
-fn user_volume(settings: &Settings) -> f32 {
-    (settings.audio.master_volume * settings.audio.music_volume).clamp(0.0, 1.0)
-}
-
 /// Start a piece on a layer; what played there fades out.
 #[allow(clippy::too_many_arguments)]
 fn play(
@@ -290,6 +286,7 @@ fn play(
     let e = commands
         .spawn((
             track,
+            rc_game_core::MusicTrack,
             AudioPlayer(handle),
             PlaybackSettings {
                 mode,
@@ -489,6 +486,35 @@ fn shell_music(
 }
 
 /// Read the map's music settings while it loads.
+/// The map's `LevelInfo.Campaign` (`ELevelCampaign`), 0 when the map
+/// doesn't set it (the class default).
+pub fn level_campaign(
+    pkg: &rc_package::Package,
+    data: &[u8],
+    level: &rc_level::actors::LevelInfo,
+) -> u8 {
+    for &a in level.actors.iter().flatten() {
+        if !pkg
+            .export_class_name(&pkg.exports[a])
+            .eq_ignore_ascii_case("LevelInfo")
+        {
+            continue;
+        }
+        let Ok(props) = rc_level::actors::read_actor_properties(pkg, data, a) else {
+            continue;
+        };
+        return props
+            .iter()
+            .find(|p| pkg.name(p.name).eq_ignore_ascii_case("Campaign"))
+            .and_then(|p| match p.value {
+                rc_package::properties::Value::Byte(b) => Some(b),
+                _ => None,
+            })
+            .unwrap_or(0);
+    }
+    0
+}
+
 fn load_level_music(
     mut commands: Commands,
     level: Res<CurrentLevel>,
@@ -511,7 +537,12 @@ fn load_level_music(
         })
         .and_then(|(p, d)| {
             rc_level::actors::read_level(&p, &d)
-                .map(|l| rc_level::music::read(&p, &d, &l))
+                .map(|l| {
+                    // The sound groups' MinCampaign/MaxCampaign compare
+                    // with it (`rc_combat::sound_meta`).
+                    rc_combat::sound_meta::set_campaign(level_campaign(&p, &d, &l));
+                    rc_level::music::read(&p, &d, &l)
+                })
                 .map_err(|e| e.to_string())
         });
     let mm = match read {
@@ -686,10 +717,15 @@ fn fades(
     time: Res<Time>,
     settings: Res<Settings>,
     play: Option<Res<State<Play>>>,
+    ducking: Option<Res<rc_game_core::Ducking>>,
     mut tracks: Query<(Entity, &mut Track, Option<&mut AudioSink>)>,
 ) {
     let paused = play.is_some_and(|p| *p.get() == Play::Paused);
-    let user = user_volume(&settings);
+    // Lowered while a radio line plays (the sound engine's ducking), then
+    // the original's clamp and the port's master volume.
+    let duck = ducking.map_or(1.0, |d| d.music_now());
+    let music = settings.audio.music_volume.clamp(0.0, 1.0);
+    let master = settings.audio.master_volume.clamp(0.0, 1.0);
     let dt = time.delta_secs();
     for (e, mut t, sink) in &mut tracks {
         if !paused && (t.fading_in || t.fading_out) {
@@ -703,7 +739,7 @@ fn fades(
             }
         }
         if let Some(mut s) = sink {
-            let v = t.gain() * user;
+            let v = (t.gain() * duck * music).clamp(0.0001, 0.9999) * master;
             if (s.volume().to_linear() - v).abs() > 1e-4 {
                 s.set_volume(Volume::Linear(v));
             }

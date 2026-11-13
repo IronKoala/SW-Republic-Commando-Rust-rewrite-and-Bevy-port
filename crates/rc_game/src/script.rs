@@ -603,6 +603,19 @@ fn steps() -> Vec<Step> {
             5.0,
         ),
         Check("the loaded briefing screen shows START, not the bar", loading_waits),
+        // The original runs nothing before START. The port's one frame
+        // in the level before the pause took hold used to run the level's
+        // scripts, and the orders they sent were lost while paused.
+        Check("the level doesn't run before START", |w| {
+            let t = w
+                .get_resource::<rc_scripts_plugin::LevelScript>()
+                .map(|s| s.director.time);
+            match t {
+                Some(t) if t == 0.0 => Ok("script clock 0".into()),
+                Some(t) => Err(format!("script clock {t:.2} s")),
+                None => Ok("no level script yet".into()),
+            }
+        }),
         Shot("loading_done"),
         Press(Action::MenuBack),
         Wait(0.2),
@@ -1089,6 +1102,10 @@ fn steps() -> Vec<Step> {
             "the scripts play the game's own lines, as long as each one lasts, some from their place in the level",
             level_script_lines,
         ),
+        Check(
+            "the map's own looping sounds play from their places (the battle in the distance, fires, steam)",
+            level_ambient_loops,
+        ),
         Check("the start barricade blocks the way", |w| {
             level_script_way(w, true)
         }),
@@ -1120,6 +1137,10 @@ fn steps() -> Vec<Step> {
         Check("the landing gunship hovers where the map puts it", gunship_hovers),
         Check("the clone troopers hold their rifles", troopers_hold_rifles),
         Check("the Geonosians placed in the map are made", placed_geonosians),
+        Check(
+            "the characters' animations play their own sounds (the intro warrior's wings and cry)",
+            anim_sounds_played,
+        ),
         // Troopers can be hurt and die (their class's `Health`), as
         // engine.u's `Pawn.Died`: the map's `Event` for them goes off and
         // they play their `Death` animation. CloneTrooper1 has no script
@@ -1519,7 +1540,15 @@ fn steps() -> Vec<Step> {
         Until("quickload: START lets the level run", loading_started, 5.0),
         Wait(0.3),
         Check("quickload puts the player back where they saved", |w| {
-            let (at, yaw) = w.resource::<Noted>().saved.ok_or("no save")?;
+            // The facing to compare with is the one in the save file, not
+            // the one noted a frame before saving: geo_01a's ScriptedTrigger62
+            // shakes the view (turning it) every few seconds, and a shake
+            // running over the save turns the player between the note and
+            // the save.
+            let (at, _) = w.resource::<Noted>().saved.ok_or("no save")?;
+            let quick = save_file(w, &SaveSlot::Quick)?;
+            let p = quick.part("player").ok_or("no [player] section")?;
+            let yaw = p["yaw"].as_float().ok_or("no yaw")? as f32;
             let (now, now_yaw) = body(w).ok_or("no player")?;
             let d = (now - at).length();
             let turn = (now_yaw - yaw).abs();
@@ -2239,9 +2268,9 @@ fn steps() -> Vec<Step> {
                 Err(format!("{before:.1} -> {now:.1}, shows {shown}"))
             }
         }),
-        Check("the greyed-out EAX row can't be reached, VOICES can", |w| {
+        Check("the EAX row works (effects done in software), VOICES too", |w| {
             let focusable = original_focusable(w);
-            if focusable.iter().any(|n| n == "Options[5]")
+            if !focusable.iter().any(|n| n == "Options[5]")
                 || !focusable.iter().any(|n| n == "Options[0]")
             {
                 Err(format!("{focusable:?}"))
@@ -3477,6 +3506,95 @@ fn level_script_lines(w: &mut World) -> Result<String, String> {
         && st.sounds_missing.is_empty()
         && !st.sounds_placed.is_empty()
     {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+fn anim_sounds_played(w: &mut World) -> Result<String, String> {
+    let Some(s) = w.get_resource::<rc_scripts_plugin::anim_sounds::AnimSounds>() else {
+        return Err("no animation sounds read".into());
+    };
+    let intro: Vec<&String> = s
+        .played
+        .iter()
+        .filter(|p| p.contains("WarriorIntro:"))
+        .collect();
+    let got = format!(
+        "{} read, {} played; the intro warrior's: {intro:?}",
+        s.sounds.len(),
+        s.played.len()
+    );
+    if intro.iter().any(|p| p.contains("GWRX7119")) && intro.len() >= 4 {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// The map's looping sounds (`rc_scripts_plugin::ambient`): geo_01a's
+/// battle loop, 4 fires and a steam vent are read from the game's own
+/// sounds, and each plays exactly when the game's rule says the player can
+/// hear it: within its `Radius` times 100, times `0.85 ^ (rooms apart
+/// squared)` when a wall of the level is between. At geo_01a's start all
+/// six are thousands of units away, so none plays yet.
+fn level_ambient_loops(w: &mut World) -> Result<String, String> {
+    use rc_scripts_plugin::ambient::{AmbientSources, MAX_RADIUS_MULTIPLIER, STOP_MARGIN};
+    let wanted = w
+        .get_resource::<rc_level_plugin::LevelAmbientSounds>()
+        .map_or(0, |a| a.0.len());
+    let hearing = w
+        .get_resource::<rc_level_plugin::LevelHearing>()
+        .map(|h| h.0.clone());
+    let ear = {
+        let mut q = w.query_filtered::<&GlobalTransform, With<rc_game_core::PlayerCamera>>();
+        q.iter(w)
+            .next()
+            .map(|g| rc_game_core::units::to_unreal(g.translation()))
+    };
+    let Some(ear) = ear else {
+        return Err("no listener".into());
+    };
+    let Some(src) = w.get_resource::<AmbientSources>() else {
+        return Err(format!("{wanted} loops in the map, none read"));
+    };
+    let mut rows = Vec::new();
+    let mut wrong = Vec::new();
+    for s in &src.list {
+        let (a, e) = ([s.at.x, s.at.y, s.at.z], [ear.x, ear.y, ear.z]);
+        let (clear, share) = match &hearing {
+            Some(h) if s.walls && !h.line_clear(a, e) => {
+                (false, h.radius_multiplier(h.zone_at(a), h.zone_at(e)))
+            }
+            _ => (true, 1.0),
+        };
+        let reach = s.radius * MAX_RADIUS_MULTIPLIER * share;
+        let d = (s.at - ear).length();
+        let should = d <= reach;
+        let may = d <= reach + STOP_MARGIN;
+        let on = s.playing.is_some();
+        rows.push(format!(
+            "{} {} {d:.0} uu, heard within {reach:.0}{}{}",
+            s.actor,
+            s.sound,
+            if clear { "" } else { " (wall between)" },
+            if on { ", playing" } else { "" }
+        ));
+        if (should && !on) || (on && !may) {
+            wrong.push(s.actor.clone());
+        }
+    }
+    let battle = src
+        .list
+        .iter()
+        .any(|s| s.sound.eq_ignore_ascii_case("ambPS_GEO_battle_lp_01"));
+    let got = format!(
+        "{} of {wanted} loops read, {} started so far: {rows:?}; wrong: {wrong:?}",
+        src.list.len(),
+        src.starts
+    );
+    if wanted >= 6 && src.list.len() == wanted && battle && wrong.is_empty() {
         Ok(got)
     } else {
         Err(got)

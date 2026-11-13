@@ -74,6 +74,8 @@ impl Plugin for EnemiesPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<rc_game_core::CharacterCollision>()
+            .add_message::<rc_game_core::AnimSound>()
+            .init_resource::<rc_game_core::AnimSoundsWanted>()
             .init_resource::<rc_game_core::MusicThreats>()
             .init_resource::<dispensers::DispenserSounds>()
             .init_resource::<dispensers::DispenserStats>()
@@ -457,28 +459,35 @@ impl EnemySounds {
         self.by_type.insert(t.kind.id.clone(), found);
     }
 
-    /// Play one of `names` (picked in turn) for an enemy of type `kind` at
-    /// `at` (Unreal units), quieter with distance from `listener`. **Our
-    /// choice**, not the game's 3D sound.
+    /// Play one of `names` (picked in turn) for enemy number `id` of type
+    /// `kind` at `at` (Unreal units). How loud it is with distance, and
+    /// whether it is heard at all, is the sound engine's (the original's
+    /// rules, `rc_scripts_plugin::engine`): a character's own cue
+    /// (`PlayOwnedSound`).
     fn play(
         &mut self,
         commands: &mut Commands,
         kind: &str,
         names: &[String],
         at: rc_movement::Vec3,
-        listener: Option<rc_movement::Vec3>,
+        id: u32,
+        battle: bool,
     ) -> Option<String> {
         if names.is_empty() {
             return None;
         }
         self.picks = self.picks.wrapping_add(1);
         let name = &names[self.picks as usize % names.len()];
-        let h = self.by_type.get(kind)?.get(name)?.pick()?;
-        let volume = listener.map_or(0.5, |l| 1.0 / (1.0 + (l - at).length() / 1000.0));
+        let h = self.by_type.get(kind)?.get(name)?.pick_in(battle)?;
         let mut e = commands.spawn((
             AudioPlayer(h),
-            bevy::audio::PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume)),
+            bevy::audio::PlaybackSettings::DESPAWN,
             rc_game_core::SoundAt::place(rc_game_core::units::to_bevy(at)),
+            rc_game_core::SoundBy {
+                actor_index: Some(0x4000_0000 | id),
+                owned: true,
+                ..Default::default()
+            },
         ));
         if self.speaking.contains(kind) {
             e.insert(rc_game_core::Voice);
@@ -609,6 +618,7 @@ fn load_fight(
     images: Option<ResMut<Assets<Image>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
     scripts: Option<Res<LevelScriptsRun>>,
+    mut wanted: ResMut<rc_game_core::AnimSoundsWanted>,
 ) {
     commands.remove_resource::<Fight>();
     let Some(map) = level.map.clone() else { return };
@@ -823,6 +833,17 @@ fn load_fight(
             )),
         }
     }
+    // The sounds their animations can play, read before play starts.
+    for t in &types {
+        if let (true, Some(tl)) = (
+            per_type.contains_key(&t.kind.id),
+            looks.by_type.get(&t.kind.id),
+        ) {
+            wanted
+                .0
+                .extend(tl.look.sounds.values().flatten().map(|(_, s)| s.clone()));
+        }
+    }
     droids.extend(placed);
     let mut battle = Battle::with_types(params, nav, droids);
     battle.scripted = scripted;
@@ -1014,6 +1035,16 @@ fn summary(f: &Fight, log: &GameLog) {
 }
 
 /// Where the player is, for droids to look at (Unreal units).
+/// Whether a droid's lines play "in battle" (flag 0x200, which picks a
+/// group's battle takes): `AController::InCombat`, a live enemy of its
+/// own. Our AI has one while it has noticed, fights or hunts the enemy.
+fn in_combat(f: &rc_ai::Fighter) -> bool {
+    matches!(
+        f.mode,
+        rc_ai::Mode::Alerted | rc_ai::Mode::Attack | rc_ai::Mode::Investigate
+    )
+}
+
 fn player_target(
     player: &Query<(&Transform, Option<&Hittable>, Has<Dead>), With<Player>>,
     camera: &Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
@@ -1057,7 +1088,6 @@ fn think(
     log: Res<GameLog>,
 ) {
     let Some(collision) = collision else { return };
-    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
     let dt = time.delta_secs().min(0.1);
     let target = player_target(&player, &camera);
     // The player's side besides the player (squad mates): droids fight
@@ -1341,7 +1371,8 @@ fn think(
                                 &f.params.kind.id,
                                 &f.params.sounds.spotted,
                                 f.pawn.location,
-                                listener,
+                                id,
+                                in_combat(f),
                             ) {
                                 log.line(format!("{PART}: t={now:.1}s droid {id} says {n}"));
                             }
@@ -1438,14 +1469,12 @@ fn react_to_combat(
     droids: Query<&Droid>,
     players: Query<(), With<Player>>,
     transforms: Query<&Transform>,
-    camera: Query<&Transform, With<PlayerCamera>>,
     mut sounds: ResMut<EnemySounds>,
     mut raise: MessageWriter<RaiseEvent>,
     log: Res<GameLog>,
 ) {
     let fight = &mut *fight;
     let now = fight.battle.time;
-    let listener = camera.single().ok().map(|c| to_unreal(c.translation));
     let died_now: Vec<Entity> = died.read().map(|d| d.entity).collect();
     // The kind of the last damage each droid took this frame, so its death
     // line can match what killed it.
@@ -1467,7 +1496,8 @@ fn react_to_combat(
             &f.params.kind.id,
             names,
             f.pawn.location,
-            listener,
+            id,
+            in_combat(f),
         ) {
             log.line(format!(
                 "{PART}: t={now:.1}s droid {id} {what} ({kind}) sound {n}"
@@ -1670,6 +1700,7 @@ fn animate(
     mut droids: Query<(&mut Droid, Option<&HeldWeapon>)>,
     mut held: Query<&mut Transform, Without<Droid>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
+    mut heard: MessageWriter<rc_game_core::AnimSound>,
 ) {
     let dt = time.delta_secs();
     // Held weapons to move onto their bones.
@@ -1727,7 +1758,27 @@ fn animate(
             }
         }
         if let Some(sa) = d.scripted.as_mut() {
+            // The script's animation's own sounds (`AnimNotify_Sound`),
+            // at the moments the game's animation files give.
+            let n = sa.clip.num_frames.max(1.0);
+            let before = if d.showing_script { sa.frame / n } else { -1.0 };
+            let ahead = (sa.frame + dt * sa.clip.rate) / n;
             sa.advance(dt);
+            if let Some(tl) = tl {
+                let mut spans = vec![(before, ahead.min(1.0))];
+                if sa.looping && ahead >= 1.0 {
+                    spans.push((-1.0, sa.frame / n));
+                }
+                for (from, to) in spans {
+                    for sound in tl.look.sounds_between(&sa.name, from, to) {
+                        heard.write(rc_game_core::AnimSound {
+                            sound,
+                            from: e,
+                            by: format!("{} {}", d.kind, sa.name),
+                        });
+                    }
+                }
+            }
             // Blend into the script's animation as into any other.
             if d.showing_script {
                 d.blend.advance(dt);

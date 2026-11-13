@@ -16,8 +16,7 @@
 use crate::{log_line, SquadMate, SquadState};
 use bevy::prelude::*;
 use rc_combat::GameSound;
-use rc_game_core::units::to_unreal;
-use rc_game_core::{GameLog, GamePaths, Player, PlayerCamera};
+use rc_game_core::{GameLog, GamePaths, Player};
 use rc_squad::{Chatter, Heard, SquadEvent, VoiceSettings};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -58,6 +57,9 @@ pub struct SquadVoices {
     /// By table class (lower case): event name (lower case) -> (group,
     /// sounds).
     tables: HashMap<String, HashMap<String, (String, GameSound)>>,
+    /// `EPawnAudioEvent`'s names in order (lower case, no `PAE_`): an
+    /// event's number is its place here.
+    events: Vec<String>,
     tried: bool,
 }
 
@@ -99,6 +101,7 @@ pub fn load_voices(
             return;
         }
     };
+    voices.events = events.iter().map(|e| e.to_ascii_lowercase()).collect();
     let mut classes: Vec<String> = squad
         .members
         .iter()
@@ -207,9 +210,11 @@ pub fn speak(
     mut heard: ResMut<SquadHeard>,
     state: Res<SquadState>,
     audio: Option<Res<Assets<AudioSource>>>,
-    mates: Query<(&SquadMate, &Transform)>,
+    mates: Query<(Entity, &SquadMate, &Transform)>,
+    ducking: Option<Res<rc_game_core::Ducking>>,
+    mut cues: Option<ResMut<rc_game_core::CueClock>>,
+    mood: Option<Res<rc_game_core::MusicMood>>,
     player: Query<&Transform, With<Player>>,
-    camera: Query<&GlobalTransform, With<PlayerCamera>>,
     mut stats: ResMut<SquadVoiceStats>,
     mut commands: Commands,
     log: Option<Res<GameLog>>,
@@ -225,8 +230,6 @@ pub fn speak(
     // Who is talking is kept by `Chatter` from each line's length, so it
     // works the same with no sound device (tests).
     let busy = false;
-    let listener = camera.single().ok().map(|c| to_unreal(c.translation()));
-    let full = chatter.settings.full_volume_within.max(1.0);
     for h in chatter.hear(squad, &events, busy) {
         let s = match h {
             Heard::Quiet { rule, why } => {
@@ -250,11 +253,22 @@ pub fn speak(
                 Some(i) => squad.members[i].settings.audio_table.clone(),
                 None => chatter.settings.leader_table.clone(),
             };
+            // `APawn::PlayOwnedCue` plays "in battle" (flag 0x200, which
+            // picks a group's battle takes) when the speaker's controller
+            // is `InCombat`: it has a live enemy, or someone has it as
+            // theirs. A squad mate with a target; the player while the
+            // enemies are fighting.
+            let battle = match c {
+                Some(i) => squad.members[i].fight.target.is_some(),
+                None => mood
+                    .as_deref()
+                    .is_some_and(|m| *m == rc_game_core::MusicMood::Battle),
+            };
             let lines = voices.tables.get(&table.to_ascii_lowercase());
             let found = s.events.iter().find_map(|e| {
                 lines
                     .and_then(|t| t.get(&e.to_ascii_lowercase()))
-                    .and_then(|(g, snd)| snd.pick().map(|h| (e.clone(), g.clone(), h)))
+                    .and_then(|(g, snd)| snd.pick_in(battle).map(|h| (e.clone(), g.clone(), h)))
             });
             if let Some(f) = found {
                 chosen = Some((c, f));
@@ -262,17 +276,19 @@ pub fn speak(
             }
         }
         let speaker = chosen.as_ref().map_or(s.speaker, |c| c.0);
-        let (who, at) = match speaker {
+        let (who, at, body) = match speaker {
             Some(i) => {
-                let at = mates
-                    .iter()
-                    .find(|(mm, _)| mm.index == i)
-                    .map(|(_, t)| t.translation);
-                (squad.members[i].settings.name.clone(), at)
+                let mate = mates.iter().find(|(_, mm, _)| mm.index == i);
+                (
+                    squad.members[i].settings.name.clone(),
+                    mate.map(|(_, _, t)| t.translation),
+                    mate.map(|(e, _, _)| e),
+                )
             }
             None => (
                 "the player".to_string(),
                 player.single().ok().map(|t| t.translation),
+                None,
             ),
         };
         let found = chosen.map(|c| (c.1 .0, c.1 .1, Some(c.1 .2)));
@@ -301,26 +317,51 @@ pub fn speak(
             );
             continue;
         };
-        // Full volume like a helmet radio (our choice), unless the file
-        // asks for positional voices: then quieter with distance, like the
-        // enemies'. The player's own lines are always full volume.
-        let positional = chatter.settings.positional;
-        let volume = match (speaker, at, listener) {
-            (Some(_), Some(at), Some(l)) if positional => {
-                let d = (to_unreal(at) - l).length();
-                (full / d.max(full)).max(0.25)
-            }
-            _ => 1.0,
+        // `APawn::GetSoundFromCue`: while a radio line that disables voice
+        // cues plays, every cue from 8 on is held back (1 to 7, the death
+        // cries, still play); a cue said less than its minimum interval
+        // ago by anyone is too (no interval is given here: the game's
+        // default, 0).
+        let cue = voices
+            .events
+            .iter()
+            .position(|e| e.eq_ignore_ascii_case(&event));
+        let blocked = ducking.as_ref().is_some_and(|d| d.voice_cues_blocked);
+        let may = match (&cues, cue) {
+            (Some(c), Some(i)) => c.may_say(i, 0.0, blocked),
+            _ => !blocked,
         };
+        if !may {
+            log_line(
+                &log,
+                format!(
+                    "t={:.2} voice: {who} holds back {event} (a radio line is playing) [rule {}]",
+                    squad.time, s.rule
+                ),
+            );
+            continue;
+        }
+        // How loud with distance, and whether it is heard, is the sound
+        // engine's (the original's rules and the line's own `AudioParams`):
+        // a squad mate's own cue (`PlayOwnedSound`) from where they stand;
+        // the player's own lines are heard everywhere.
+        if let (Some(c), Some(i)) = (cues.as_mut(), cue) {
+            c.said(i);
+        }
         let secs = audio.as_deref().map_or(0.0, |a| seconds(a, &sound));
         chatter.speaking(squad.time, secs);
         let mut e = commands.spawn((
             AudioPlayer(sound),
-            bevy::audio::PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume)),
+            bevy::audio::PlaybackSettings::DESPAWN,
             rc_game_core::Voice,
             SquadLine,
+            rc_game_core::SoundBy {
+                actor: body,
+                owned: true,
+                ..Default::default()
+            },
         ));
-        if let (Some(_), Some(at), true) = (speaker, at, positional) {
+        if let (Some(_), Some(at)) = (speaker, at) {
             e.insert(rc_game_core::SoundAt::place(at));
         }
         log_line(

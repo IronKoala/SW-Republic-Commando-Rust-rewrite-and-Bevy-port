@@ -5,11 +5,13 @@
 //! units and axes (X forward, Y right, Z up); the viewer converts them.
 
 pub mod actors;
+pub mod ambient;
 pub mod breakables;
 pub mod bsp;
 pub mod checkpoints;
 pub mod class_look;
 pub mod collision;
+pub mod hearing;
 pub mod lightmap;
 pub mod map_collision;
 pub mod movers;

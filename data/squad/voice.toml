@@ -34,11 +34,10 @@
 #   package             sound package the tables point into
 #   leader_table        the player's own table, for who = "leader" (Boss is 38)
 #   gap                 seconds of quiet after any squad line before the next
-#   positional          "no": squad mates are heard at full volume wherever
-#                       they are, like a helmet radio. "yes": heard from where
-#                       they stand (with 3D SOUND) and quieter further away
-#   full_volume_within  with positional = "yes": further than this (uu) is
-#                       quieter
+#   positional          no longer used: each line plays as the game's own
+#                       sound settings say (radio lines everywhere, others
+#                       from where the squad mate stands)
+#   full_volume_within  no longer used
 #
 # [line.<any name>]  one rule; every rule that fits a happening is tried
 #   on      what happened:

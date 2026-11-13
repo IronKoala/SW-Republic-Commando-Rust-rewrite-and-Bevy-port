@@ -30,11 +30,20 @@ pub enum Play {
     Paused,
 }
 
-/// Run condition for gameplay systems: in a level and not paused.
+/// The level has loaded but waits for START on its briefing screen (the
+/// original doesn't run the level before START). Set by the game's
+/// loading screen. Play is `Running` for the first frame in the level
+/// before the pause takes hold; this keeps that frame from running the
+/// level, so nothing a level script sends in it is lost while paused.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StartHeld(pub bool);
+
+/// Run condition for gameplay systems: in a level, not paused and not
+/// waiting for START.
 ///
 /// `app.add_systems(Update, my_system.in_set(GameSet::Simulate).run_if(playing))`
-pub fn playing(play: Option<Res<State<Play>>>) -> bool {
-    play.is_some_and(|p| *p.get() == Play::Running)
+pub fn playing(play: Option<Res<State<Play>>>, held: Option<Res<StartHeld>>) -> bool {
+    play.is_some_and(|p| *p.get() == Play::Running) && !held.is_some_and(|h| h.0)
 }
 
 /// The order of a frame in `Update`. Put each gameplay system in one of

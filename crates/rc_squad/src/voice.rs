@@ -194,11 +194,11 @@ pub struct VoiceSettings {
     pub leader_table: String,
     /// Seconds of quiet after any squad line before the next.
     pub gap: f32,
-    /// Squad mates are heard from where they stand (and quieter further
-    /// away). Off, they are heard at full volume from everywhere, like a
-    /// helmet radio.
+    /// No longer used: where a squad line is heard from, and how loud, is
+    /// now the sound engine's, from each line's own `AudioParams` (the
+    /// original's rules). Kept so older voice files still read.
     pub positional: bool,
-    /// With `positional`: full volume within this many uu.
+    /// No longer used (see `positional`).
     pub full_volume_within: f32,
     /// The rules, in file order. Every rule that fits an event is tried.
     pub lines: Vec<VoiceLine>,

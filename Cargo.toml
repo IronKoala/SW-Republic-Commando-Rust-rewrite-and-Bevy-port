@@ -22,3 +22,11 @@ opt-level = 3
 
 [profile.dev.package.oxideav-core]
 opt-level = 3
+
+# rodio (Bevy's sound) checks in debug builds that the listener's two ears
+# are never in the same place. Bevy moves the ears one at a time, so for a
+# moment the new left ear can sit exactly where the old right ear was (a
+# turn of exactly half a circle) and the check stops the whole game. Release
+# builds never had the check; debug builds now match them.
+[profile.dev.package.rodio]
+debug-assertions = false

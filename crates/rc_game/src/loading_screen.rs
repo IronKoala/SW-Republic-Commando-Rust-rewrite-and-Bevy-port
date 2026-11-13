@@ -27,7 +27,7 @@
 use crate::menu::{Menu, Page, PlaceholderLoadingScreen};
 use crate::original_menu::{self, OriginalMenus};
 use bevy::prelude::*;
-use rc_game_core::{CurrentLevel, GameLog, GamePaths, GameState, LoadingGate, Play};
+use rc_game_core::{CurrentLevel, GameLog, GamePaths, GameState, LoadingGate, Play, StartHeld};
 use rc_menus::loading::{self as rules, EngineClasses, LoadingInfo};
 
 /// The pages' names in `data/ui/original_menus.toml`.
@@ -319,6 +319,7 @@ fn loaded(
     mut menus: ResMut<OriginalMenus>,
     showing: Res<Showing>,
     mut done: ResMut<LoadingDone>,
+    mut held: ResMut<StartHeld>,
     log: Res<GameLog>,
 ) {
     let Some(key) = menus.loading_page.clone() else {
@@ -342,8 +343,13 @@ fn loaded(
         });
         return;
     }
-    // Kept showing until START (`OriginalMenus::shown`).
+    // Kept showing until START (`OriginalMenus::shown`). Nothing in the
+    // level runs until then, not even the first frame before the pause
+    // takes hold (`StartHeld`): orders a level script sent in that frame
+    // were lost while paused (the intro Geonosian on geo_01a then missed
+    // its whole opening).
     done.waiting = true;
+    held.0 = true;
     menus.mark_dirty();
     log.line("loading screen: done; paused until START (LOADINGDONE)");
 }
@@ -371,7 +377,13 @@ fn pause_for_start(
 }
 
 /// START (or anything else that un-pauses) ends the wait.
-fn started(mut done: ResMut<LoadingDone>, mut menus: ResMut<OriginalMenus>, log: Res<GameLog>) {
+fn started(
+    mut done: ResMut<LoadingDone>,
+    mut held: ResMut<StartHeld>,
+    mut menus: ResMut<OriginalMenus>,
+    log: Res<GameLog>,
+) {
+    held.0 = false;
     if done.waiting {
         done.waiting = false;
         menus.loading_page = None;
@@ -380,7 +392,12 @@ fn started(mut done: ResMut<LoadingDone>, mut menus: ResMut<OriginalMenus>, log:
     }
 }
 
-fn forget(mut done: ResMut<LoadingDone>, mut menus: ResMut<OriginalMenus>) {
+fn forget(
+    mut done: ResMut<LoadingDone>,
+    mut held: ResMut<StartHeld>,
+    mut menus: ResMut<OriginalMenus>,
+) {
     done.waiting = false;
+    held.0 = false;
     menus.loading_page = None;
 }

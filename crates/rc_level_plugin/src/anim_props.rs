@@ -17,7 +17,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::audio::{PlaybackSettings, Volume};
+use bevy::audio::PlaybackSettings;
 use rc_combat::GameSound;
 use rc_game_core::{GameLog, GamePaths, GameState, PlayerCamera, PropAnim, SoundAt};
 use std::sync::Arc;
@@ -37,10 +37,6 @@ const UNREAL_PER_BEVY: f32 = 50.0;
 /// sequence names. The bacta dispensers have these two; a model without
 /// one just doesn't play it.
 pub const ANIMATIONS: [&str; 2] = ["Load", "Holster"];
-
-/// Full loudness out to this distance (Unreal units), then fading as for
-/// the enemies' sounds. A guess.
-const SOUND_REACH: f32 = 1000.0;
 
 /// One drawn animated prop.
 #[derive(Component, Clone)]
@@ -355,18 +351,12 @@ fn play_sounds(
             out.push(format!("{path} (not loaded)"));
             continue;
         };
-        let distance = camera
-            .single()
-            .map(|c| c.translation().distance(at) * UNREAL_PER_BEVY)
-            .unwrap_or(0.0);
-        let volume = if distance <= SOUND_REACH {
-            1.0
-        } else {
-            SOUND_REACH / distance
-        };
+        // How loud with distance, and whether it is heard, is the sound
+        // engine's (the original's rules, `rc_scripts_plugin::engine`).
+        let _ = camera;
         commands.spawn((
             AudioPlayer(h),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
+            PlaybackSettings::DESPAWN,
             SoundAt::place(at),
             DespawnOnExit(GameState::InGame),
         ));

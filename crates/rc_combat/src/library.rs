@@ -13,8 +13,10 @@ use bevy::prelude::*;
 use rc_game_core::{GameLog, GamePaths, Player};
 use rc_package::sound::{params_of, read_multiple, read_sound, AudioParams};
 use rc_package::{ObjectRef, Package};
+use crate::sound_meta::{self, GroupPick, MemberWeight, Picked};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Every weapon the data files describe, by id (file name without
@@ -46,33 +48,86 @@ impl WeaponLibrary {
     }
 }
 
+/// The `Params` (`package.name`, lower case; `None`: it names none) of
+/// each single sound read from the game, by its sound asset. The game
+/// plays a group's pick with the picked sound's own `Params`
+/// (`UAudioSubsystem::PlayUSound` takes the group down to the one sound,
+/// then `USound::GetParams`, which falls back to the `AudioParams` class
+/// defaults, not the group's), so this is kept per sound.
+static SOUND_PARAMS: std::sync::LazyLock<
+    std::sync::RwLock<HashMap<bevy::asset::AssetId<AudioSource>, Option<String>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Note which `Params` a sound asset plays with (see [`sound_params`]).
+pub fn note_sound_params(id: bevy::asset::AssetId<AudioSource>, params: Option<String>) {
+    if let Ok(mut m) = SOUND_PARAMS.write() {
+        m.insert(id, params);
+    }
+}
+
+/// The `Params` a sound asset read from the game plays with: `None` when
+/// it wasn't read by [`read_sounds`] (or noted), `Some(None)` when the
+/// sound names no `Params` (the game then uses the class defaults).
+pub fn sound_params(id: bevy::asset::AssetId<AudioSource>) -> Option<Option<String>> {
+    SOUND_PARAMS.read().ok()?.get(&id).cloned()
+}
+
 /// One sound name from a game package, ready to play. A plain `Sound` has
 /// one variant; a `SoundMultiple` (a group, such as `Uzi_Fire` or a droid's
-/// `BD1_SpottedEnemy`) has several, and each playing picks the next one.
+/// `BD1_SpottedEnemy`) has several, and each playing picks one the game's
+/// way (see [`crate::sound_meta::pick_member`]).
 #[derive(Debug, Clone, Default)]
 pub struct GameSound {
     pub variants: Vec<Handle<AudioSource>>,
     /// The `AudioParams` the game plays it with, as `package.name` in
     /// lower case (`params_vox.voice_ca1_2d`): a group's own, else its
-    /// first member's. Look it up with [`read_audio_params`].
+    /// first member's. Look it up with [`read_audio_params`]. (Each
+    /// variant's own params are in [`crate::sound_meta`].)
     pub params: Option<String>,
+    /// A group's pick settings and state; `None` for a plain sound.
+    pub group: Option<Arc<GroupPick>>,
 }
 
 impl GameSound {
-    /// The variant to play this time. **Our choice:** the game picks from a
-    /// group at random in compiled code we don't read; we step through the
-    /// group in a shuffled order that is the same on every run, so logs and
-    /// tests repeat.
+    /// The variant to play this time, out of battle.
     pub fn pick(&self) -> Option<Handle<AudioSource>> {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static PICKS: AtomicU32 = AtomicU32::new(0);
-        if self.variants.is_empty() {
-            return None;
+        self.pick_in(false)
+    }
+
+    /// The variant to play this time. `battle`: the character playing it
+    /// is in combat (the game's pawn cues pass this; members marked "only
+    /// in battle" or "only out of battle" follow it).
+    pub fn pick_in(&self, battle: bool) -> Option<Handle<AudioSource>> {
+        if self.variants.len() <= 1 && self.group.is_none() {
+            return self.variants.first().cloned();
         }
-        let n = PICKS.fetch_add(1, Ordering::Relaxed);
-        // A fixed odd multiplier walks the group in a scrambled order.
-        let i = (n.wrapping_mul(2_654_435_761) >> 16) as usize % self.variants.len();
-        Some(self.variants[i].clone())
+        let weights: Vec<MemberWeight> = self
+            .variants
+            .iter()
+            .map(|h| {
+                sound_meta::meta(h.id())
+                    .map(|m| MemberWeight::of(&m))
+                    .unwrap_or_default()
+            })
+            .collect();
+        let fallback;
+        let group = match &self.group {
+            Some(g) => g.as_ref(),
+            None => {
+                fallback = GroupPick::new(false, None);
+                &fallback
+            }
+        };
+        match sound_meta::pick_member(
+            group,
+            &weights,
+            battle,
+            sound_meta::campaign(),
+            sound_meta::srand(),
+        )? {
+            Picked::First => group.first.clone(),
+            Picked::Member(i) => self.variants.get(i).cloned(),
+        }
     }
 }
 
@@ -457,6 +512,7 @@ pub fn read_sounds(
                     bytes: rc_audio::for_quality(snd.bytes(&data)).into_owned().into(),
                 });
                 let v = (h, params_of(&pkg, &snd.properties, package));
+                note_sound_params(v.0.id(), v.1.clone());
                 cache.insert(i, v.clone());
                 Some(v)
             }
@@ -491,6 +547,11 @@ pub fn read_sounds(
             match read_multiple(&pkg, &data, &pkg.exports[i]) {
                 Ok(group) => {
                     sound.params = params_of(&pkg, &group.properties, package);
+                    sound.group = Some(Arc::new(group_pick(
+                        &pkg,
+                        &group.properties,
+                        &mut |j| one(j, &mut notes).map(|(h, _)| h),
+                    )));
                     for r in group.sounds {
                         match ObjectRef::from_index(r) {
                             ObjectRef::Export(j)
@@ -537,6 +598,8 @@ pub fn read_sounds(
         }
         found.insert(name.clone(), sound);
     }
+    // What the game says about each sound read here, for the sound engine.
+    register_metas(paths, &pkg, &data, &cache, audio);
     // Read the members kept elsewhere, one package at a time.
     let mut by_package: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (_, list) in &elsewhere {
@@ -575,6 +638,55 @@ pub fn read_sounds(
         }
     }
     (found, notes)
+}
+
+/// A group's `SelectionStyle` and `FirstSound` (read with `read`).
+fn group_pick(
+    pkg: &Package,
+    props: &[rc_package::properties::Property],
+    read: &mut dyn FnMut(usize) -> Option<Handle<AudioSource>>,
+) -> GroupPick {
+    use rc_package::properties::{find, Value};
+    let in_order = matches!(
+        find(pkg, props, "SelectionStyle").map(|p| &p.value),
+        Some(Value::Byte(1))
+    );
+    let first = match find(pkg, props, "FirstSound").map(|p| &p.value) {
+        Some(Value::Object(o)) => match ObjectRef::from_index(*o) {
+            ObjectRef::Export(j)
+                if j < pkg.exports.len() && pkg.export_class_name(&pkg.exports[j]) == "Sound" =>
+            {
+                read(j)
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    GroupPick::new(in_order, first)
+}
+
+/// Register each sound read from `pkg` (by export index) in
+/// [`sound_meta`]: its own properties, its `Params` and its length.
+fn register_metas(
+    paths: &GamePaths,
+    pkg: &Package,
+    data: &[u8],
+    read: &HashMap<usize, (Handle<AudioSource>, Option<String>)>,
+    audio: &Assets<AudioSource>,
+) {
+    for (&i, (h, params)) in read {
+        let props = sound_meta::export_properties(pkg, data, i).unwrap_or_default();
+        let facts = sound_meta::resolve_params(paths, params.as_deref());
+        let seconds = audio
+            .get(h)
+            .and_then(|s| rc_audio::Wav::parse(&s.bytes).ok())
+            .map_or(0.0, |w| w.seconds() as f32);
+        let name = pkg.name(pkg.exports[i].object_name);
+        sound_meta::register(
+            h.id(),
+            sound_meta::meta_of(pkg, &props, name, params.clone(), &facts, seconds),
+        );
+    }
 }
 
 /// Every `AudioParams` in the named sound packages (`params_vox`,

@@ -10,6 +10,5 @@ enabled = true            # false: no particles at all (sounds still play)
 size = 1.0                # our choice: multiplies every particle's size
 max_particles = 4000      # our choice: most drawn at once (a phone guard)
 volume = 1.0              # loudness of effect sounds
-sound_half_distance = 2000 # our choice: uu at which a sound is half as loud (as grenades)
 lit_model_light = 0.5     # our choice: light on lit flying models (gunships) before the level's light at that place
 lit_model_scale = 1.1     # our choice: how strongly the level's light there brightens them (as droids)

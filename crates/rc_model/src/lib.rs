@@ -92,7 +92,9 @@ pub struct Model {
     pub flipped: bool,
     /// Sounds each animation plays (`AnimNotify_Sound`), by our name for
     /// the animation: when (0 to 1 through it) and the sound's dotted
-    /// path (`GEN_Sound.mach_GEN_Bdroid_Dispense_open`).
+    /// path (`GEN_Sound.mach_GEN_Bdroid_Dispense_open`). With
+    /// [`ModelSpec::keep_sets`], every kept animation's too, by the
+    /// animation's own name.
     pub sounds: HashMap<String, Vec<(f32, String)>>,
     /// Events each animation sends (`AnimNotify_Trigger`), by our name for
     /// the animation: when (0 to 1 through it) and what it does. The
@@ -331,21 +333,7 @@ fn notify_trigger(pkg: &Package, data: &[u8], object: i32) -> Option<NotifyTrigg
 
 /// The sound an `AnimNotify_Sound` object plays, as a dotted path.
 fn notify_sound(pkg: &Package, data: &[u8], object: i32) -> Option<String> {
-    let ObjectRef::Export(k) = ObjectRef::from_index(object) else {
-        return None;
-    };
-    let e = pkg.exports.get(k)?;
-    if !pkg
-        .export_class_name(e)
-        .eq_ignore_ascii_case("AnimNotify_Sound")
-    {
-        return None;
-    }
-    let props = export_props(pkg, data, e).ok()?;
-    match properties::find(pkg, &props, "Sound")?.value {
-        Value::Object(o) if o != 0 => Some(rc_package::class::object_path(pkg, o)),
-        _ => None,
-    }
+    rc_package::animation::notify_sound(pkg, data, object)
 }
 
 fn export_props(
@@ -830,6 +818,26 @@ impl Model {
                     }
                 }
             }
+            // And the sounds every kept animation plays, by its own name.
+            for anim in &model.sets {
+                for seq in &anim.sequences {
+                    if model
+                        .sounds
+                        .keys()
+                        .any(|k| k.eq_ignore_ascii_case(&seq.name))
+                    {
+                        continue;
+                    }
+                    let heard: Vec<(f32, String)> = seq
+                        .notifies
+                        .iter()
+                        .filter_map(|n| notify_sound(&pkg, &data, n.object).map(|s| (n.time, s)))
+                        .collect();
+                    if !heard.is_empty() {
+                        model.sounds.insert(seq.name.clone(), heard);
+                    }
+                }
+            }
         }
         // Stand the first animation's first frame on the floor (the mesh
         // itself when no animation was found).
@@ -900,6 +908,19 @@ impl Model {
             .flat_map(|(_, list)| list.iter())
             .filter(|(t, _)| *t > from && *t <= to)
             .map(|(_, n)| n.clone())
+            .collect()
+    }
+
+    /// The sounds animation `name` plays (`AnimNotify_Sound`, dotted
+    /// path) whose moment falls after `from` and up to `to` (0 to 1
+    /// through the animation).
+    pub fn sounds_between(&self, name: &str, from: f32, to: f32) -> Vec<String> {
+        self.sounds
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case(name))
+            .flat_map(|(_, list)| list.iter())
+            .filter(|(t, _)| *t > from && *t <= to)
+            .map(|(_, s)| s.clone())
             .collect()
     }
 

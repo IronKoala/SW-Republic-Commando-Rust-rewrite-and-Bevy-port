@@ -1672,13 +1672,13 @@ also members kept in another package, such as geo_sound's
 (a few music stingers) play their `.ogg` from `GameData/Music`. Across the
 57 campaign maps the scripts name 1,629 sounds; `rc_script_check` finds
 every one in its package. When a script plays one, the sound starts at
-`[sound] volume` (`data/scripts/scripts.toml`) times the action's own
-`Volume`, and is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
+`[sound] volume` (`data/scripts/scripts.toml`); the action's own `Volume`
+is ignored, as the game's `PlayOwnedSound` ignores it. It is logged as `scripts: t=4.94 ScriptedTrigger52 #13:
 ScriptedTrigger52 says CA1G1701 (2.0 s, volume 1.00)` and again when it
-reaches the sound card. Our choices: a speaker (`SoundSourceTag`, else the
-script) says one line of speech (a `*_voice` package) at a time, so a new
-line stops its last one unless `bDontOverrideOtherSounds`; effects never
-stop each other; a group waits for its longest take. Lines pause with the
+reaches the sound card. Which line stops which is the sound engine's
+(below): a speaker's lines share a number, and `bDontOverrideOtherSounds`
+makes a line one that can't be cut. A group waits for its longest take.
+Lines pause with the
 game and stop when the level ends. Not done: subtitles (the game's
 `System/subtitles_*.int` files hold them, by sound name) and sounds stored
 inside a map.
@@ -1695,7 +1695,8 @@ explosions: from their side, never quieter). The class default `Radius` is
 else its first take's) and `rc_combat::read_audio_params` reads the
 params packages. At play time `sounds.rs` decides:
 - heard everywhere: `ACTION_PlayLocalSound`, `NonPositional` sounds,
-  `SoundSourceTag=PlayerCommando`, and a tag nothing in the level has;
+  `SoundSourceTag=PlayerCommando` (a tag nothing in the level has plays
+  nothing, as `ACTION_PlaySound` logs "non-existant SoundSourceTag");
 - else at the character whose `ScriptTags.tag` is the `SoundSourceTag`
   (followed as it moves), or the map actor with that tag or name (fixed);
 - with no tag: the character running the `ScriptedSequence`, else the
@@ -1707,8 +1708,7 @@ its side) and a `Placed` component; `sounds::follow` moves it with its
 character and sets its loudness every frame: full out to `Radius`, then
 `Radius / distance` (our reading: OpenAL's reference distance; some radii
 are tiny, enemy footsteps 20 uu, so `Radius` can't be where a sound
-stops). An action `Volume` above 1 (2 to 10000 in a few maps) makes the
-sound carry that many times further. Over the 56 campaign maps
+stops). Over the 56 campaign maps
 (`rc_script_check`) the scripts' 1,946 enabled sound actions split as:
 1,404 radio, 58 aimed at the player, 23 local, 391 at the script's spot
 (mostly explosions), 48 at a sequence's character, 9 at a tagged map
@@ -1720,6 +1720,107 @@ distance squared in Bevy units (metres): a droid 10 m away played at 1/100.
 1000 (`SpatialScale`) before Bevy sees them, which leaves left and right
 alone and pushes that fading out past a kilometre, so only each part's
 own distance rule applies.
+
+**The sound engine** (`rc_scripts_plugin/src/engine.rs`, the game's
+`UAudioSubsystem`, read from Engine.dll and ALAudio.dll by disassembly).
+Every part still plays a sound by spawning a Bevy `AudioPlayer`, adding
+`SoundAt` for a place and `rc_game_core::SoundBy` for who plays it (an
+entity or a number, whether it is a character's own cue that may be cut,
+a map loop, heard everywhere). In `PostUpdate` the engine:
+- finds the sound's facts (`rc_combat::sound_meta`, registered when the
+  game's packages are read: its `AudioParams`, category, flags, length);
+- rolls its volume and pitch between `MinVolume`/`MaxVolume` and
+  `MinPitch`/`MaxPitch` (`PlayUSound`; under 0.0001 it isn't played),
+  checks it can be heard (`CheckHearSound`), gives it the game's id and
+  priority (`UpdatePriority`);
+- sorts queued and playing sounds with the C library's `qsort` (equal
+  priorities land in the game's order), stops playing ones under the cut,
+  drops impacts when no channel is free and hands out the AUDIO CHANNELS
+  in channel order (`FindSource`);
+- ducks music to 0.5 and effects and other voices to 0.25 over 0.5 s
+  while a `bDisableVoiceCues` line plays (`UpdateDuckVolume`), published
+  as `rc_game_core::Ducking` for the music part and squad chatter;
+- sets each sink's volume: rolled volume × duck × `SoundFade` × the
+  category slider (`SoundMix`, from the SOUND options), kept within
+  0.0001 to 0.9999, times the distance share of `Placed`;
+- works out the EAX occlusion (`rc_game_core::EaxOcclusion`) when EAX is on.
+Characters' cues go through `rc_game_core::CueClock`, the engine's one
+table of when each cue was last said (`APawn::GetSoundFromCue`, cleared at
+every map load), and play "in battle" (picking a group's battle takes)
+when the speaker is `InCombat`. An actor spawned during play with an
+`AmbientSound` (an effect's hum) carries `rc_game_core::ActorAmbient`, and
+`ambient.rs` starts and stops it by the map loops' rule. Nothing in a
+level runs while its briefing screen waits for START
+(`rc_game_core::StartHeld`, checked by `playing`). The PC original never
+rumbles for a sound (`UClient::SetRumbleFX` is empty there).
+Sound groups (`USoundMultiple`) pick in order, `FirstSound` once, or by
+`Likelihood` skipping members for the wrong battle state or campaign
+(`LevelInfo.Campaign`, read by `rc_game/src/music.rs`).
+
+**Animation sounds** (`rc_scripts_plugin/src/anim_sounds.rs`). Animation
+sequences carry `AnimNotify_Sound` notifies: a moment (0 to 1 through the
+sequence) and a `Sound` (`rc_package::animation::notify_sound`). The cast
+(`rc_cast`, from `rc_model::Model::sounds`, every kept set's sequences by
+their own name) and the enemies' level-script animations (`rc_enemies`,
+`DroidLook::sounds`) send `rc_game_core::AnimSound` for each notify the
+frame passes, with the character's entity. While a level loads both add
+every sound their models can play to `rc_game_core::AnimSoundsWanted`;
+`anim_sounds::load` reads the new ones, one read per package, and
+`anim_sounds::play` plays each from the character with the placed-sound
+rule (`Placed`, following the entity). The game does the same: its
+`Engine.dll` `UAnimNotify_Sound::Notify` asks the audio code to play the
+sound from the animating actor (read by disassembly, nothing copied).
+Not yet: the enemies' own (not scripted) animations, `AnimNotify_Footstep`
+and `AnimNotify_Effect`.
+
+**The map's looping sounds** (`rc_level::ambient`,
+`rc_scripts_plugin/src/ambient.rs`). Any Unreal actor can carry an
+`AmbientSound` (engine.u: `var(Sound) sound AmbientSound;`) that loops
+while the actor is there. Maps use it on `AmbientSound` actors (geo_01a's
+battle in the distance, `GEO_Sound.ambPS_GEO_battle_lp_01`) and through
+class defaults (`Fire_Medium` crackles `ambPS_GEN_fireMd_lp_01`,
+`WhiteSmoke` hisses `ambPS_GEN_steam_lp_05`, both in CTEffects.u). While
+loading, `rc_level::ambient::read` lists every actor with one (the map's
+value first, then its class chain via `ClassLooks`), with its
+`SoundOcclusion`, leaving out movers (theirs is `MoveAmbientSound`, while
+moving) and characters. They reach the game as
+`rc_level_plugin::LevelAmbientSounds`. On the first frame of play
+`ambient::start` reads the sounds and their `AudioParams`
+(`AmbientSources`); after that `ambient::update` follows the game's
+`UAudioSubsystem::UpdateAmbientList`/`UpdateAmbients` (Engine.dll, read by
+disassembly, never committed): a loop starts when the listener is within
+`Radius × 100` (`GAudioMaxRadiusMultiplier`), times `0.85 ^ (rooms
+apart²)` when a level wall is between, fading in over 0.4 s; it stops past
+that distance plus 10, fading out over 0.3 s, and starts from its
+beginning next time. While playing it is a `Placed` sound like the script
+sounds. geo_01a's six loops all use `Ambience_PS_01`, `Radius` 10 on PC
+(1000 on Xbox), so they can be heard only within 1000 units. geo_01a has 6
+(`cargo run -p rc_level --example ambient_sounds -- <game folder>
+geo_01a`). The placed emitters' particles are drawn by `placed_emitters`
+through the effects part, which leaves their `AmbientSound` to this
+(`SpawnEffect::skip_ambient_sound`), so it plays once, from its place.
+Switching an emitter off with a level event stops its particles only: the
+sound belongs to the actor, not its particle emitters.
+
+**Walls, rooms and placed sounds** (`rc_level::hearing`,
+`rc_scripts_plugin::sounds::{Placed, Reach}`). Every placed sound (script
+sounds, animation sounds, map loops) gets louder and quieter by the game's
+own rule. OpenAL's inverse-distance-clamped model, roll-off 1, with the
+reference distance ("reach") set each frame by
+`FAbstractSource::UpdateRadii`: the sound's `Radius` when the straight
+line from sound to listener crosses no solid part of the level's BSP
+(`ULevel::IsAudibleAt` → `UModel::FastLineCheck`; placed meshes don't
+count, a mover's sound and `OCCLUSION_None` actors are never blocked),
+otherwise `Radius × 0.85^(steps²) × 0.35`, where `steps` comes from the
+64 × 64 zone table `UGameEngine::LoadMap` builds from each zone's
+`Connectivity`. The zones are the sound's spot and the listener's spot
+(`UModel::PointRegion`, the same walk as `Bsp::point_zone`). The reach
+eases toward its target as the game does: by `(now − when the target last
+changed)` of the way each frame, jumping straight there before the first
+change. OpenAL refuses a negative distance, so a negative overshoot keeps
+the last good one. `now` is the level scripts' clock (the game uses its
+level time, `GEngineTime`). Loudness is `reach / distance` beyond the
+reach, times the loop's fade.
 
 **Bacta dispensers.** Hold Use within 256 units of one that's switched on
 (the game's `PlayerRange`) to heal at 50 health per second (our choice).

@@ -261,3 +261,23 @@ pub struct PropAnim {
     pub actor: String,
     pub anim: String,
 }
+
+/// A character's animation reached one of its sounds (`AnimNotify_Sound`
+/// in the game's animation files): play `sound` (dotted path, package
+/// first: `GEO_Sound.Vehicles.veh_GEN_gsPeel_06`) from `from`, which it
+/// follows as it moves. Sent by the cast (`rc_cast`); played by the level
+/// scripts part (`rc_scripts_plugin::anim_sounds`), which loads the sounds
+/// listed in [`AnimSoundsWanted`] while the level starts.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct AnimSound {
+    pub sound: String,
+    pub from: Entity,
+    /// Who and which animation, for the log.
+    pub by: String,
+}
+
+/// Every sound the level's characters' animations can play (dotted
+/// paths), so they can be read from the game's files before play, not
+/// in the middle of it. Filled by the cast when a level loads.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct AnimSoundsWanted(pub std::collections::BTreeSet<String>);
