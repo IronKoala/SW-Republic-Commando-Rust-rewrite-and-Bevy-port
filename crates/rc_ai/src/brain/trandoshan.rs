@@ -133,10 +133,25 @@ impl Fighter {
         events: &mut Vec<AiEvent>,
     ) {
         let now = view.time;
-        // Where it thinks the enemy is: where it sees it, else where it
-        // last saw it. (The original always knows its enemy's real place;
-        // ours only knows what it has seen.)
-        if let Some(t) = saw {
+        let noticing = self.original_noticing();
+        let mut can_see = saw.is_some();
+        if noticing {
+            // The original's noticing: the enemy is where it really is,
+            // and is picked afresh each time the attack plans.
+            let mut enemy = saw;
+            if self.orig.running.is_none() && self.orig.plan.is_empty() {
+                enemy = self.notice_replan(view.world, now);
+            }
+            can_see = self.nt.can_see_enemy;
+            match enemy {
+                Some(t) => self.orig.enemy = Some(t),
+                None => {
+                    self.original_stop();
+                    self.move_and_turn(dt, view, None);
+                    return;
+                }
+            }
+        } else if let Some(t) = saw {
             self.orig.enemy = Some(t);
         } else if let (Some(mut t), Some(p)) = (self.orig.enemy, self.last_seen_at) {
             let up = t.eye - t.centre;
@@ -159,7 +174,6 @@ impl Fighter {
         if !self.orig.active {
             self.original_activate(now, &enemy, events);
         }
-        let can_see = saw.is_some();
         let to = enemy.centre - self.pawn.location;
         let dir = to.normalize_or_zero();
         let dist = to.length() - enemy.radius;
@@ -170,7 +184,10 @@ impl Fighter {
         }
         let side_move = self.run_plan(dt, view, &enemy, dist, events);
         self.move_and_turn(dt, view, side_move.map(|d| (d, enemy.centre)));
-        self.update_firing(view, &enemy, can_see, events);
+        // The original's firing check doesn't ask whether it sees the
+        // enemy (it traces its shot); ours did, while our fighters only
+        // knew where they had last seen it.
+        self.update_firing(view, &enemy, can_see || noticing, events);
     }
 
     /// Starting to fight: turn to the enemy, then (with chance
@@ -695,7 +712,7 @@ impl Fighter {
     /// Walk (along a route) and turn: to the enemy, or along the route
     /// when walking (troopers can't walk sideways), or not at all while
     /// its aim is locked. `side` moves it sideways (a sidestep).
-    fn move_and_turn(&mut self, dt: f32, view: &View, side: Option<(Vec3, Vec3)>) {
+    pub(super) fn move_and_turn(&mut self, dt: f32, view: &View, side: Option<(Vec3, Vec3)>) {
         let now = view.time;
         let mut input = MoveInput::default();
         let mut want_yaw = self.facing;

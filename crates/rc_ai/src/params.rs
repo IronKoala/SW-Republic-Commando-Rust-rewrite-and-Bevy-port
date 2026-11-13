@@ -61,6 +61,24 @@ pub struct Senses {
     pub turn_rate: f32,
     /// Hears shots this far away, uu.
     pub hearing_radius: f32,
+    /// How it notices enemies: "" (our own rules: `reaction_time`,
+    /// `hearing_radius`, nearest one in sight) or "original" (the game's
+    /// own decision loop, see `brain/notice.rs`).
+    pub noticing: String,
+    /// "original" noticing: the attack looks over everyone again before
+    /// planning if its last look is older than this, s. Game: a fixed 0.5
+    /// in the bot's `GetBestEnemy`.
+    pub situation_interval: f32,
+    /// "original" noticing: whoever hurt it counts as noticed for this
+    /// long, s. Game: a fixed 6 in the bot's `CanSeeOrHear`.
+    pub remember_attacker: f32,
+}
+
+impl Senses {
+    /// Uses the game's own noticing rules.
+    pub fn original_noticing(&self) -> bool {
+        self.noticing == "original"
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -404,6 +422,9 @@ impl AiParams {
                 reaction_time: 0.5,
                 turn_rate: 110.0,
                 hearing_radius: 2500.0,
+                noticing: String::new(),
+                situation_interval: 0.5,
+                remember_attacker: 6.0,
             },
             combat: Combat {
                 health: 100.0,
@@ -637,6 +658,9 @@ impl AiParams {
             ("senses", "reaction_time") => s.reaction_time = num()?,
             ("senses", "turn_rate") => s.turn_rate = num()?,
             ("senses", "hearing_radius") => s.hearing_radius = num()?,
+            ("senses", "noticing") => s.noticing = text(),
+            ("senses", "situation_interval") => s.situation_interval = num()?,
+            ("senses", "remember_attacker") => s.remember_attacker = num()?,
             ("combat", "health") => c.health = num()?,
             ("combat", "shields") => c.shields = num()?.max(0.0),
             ("combat", "shield_recharge_rate") => c.shield_recharge_rate = num()?,

@@ -375,11 +375,13 @@ impl Battle {
         // doesn't shoot through them, and what the other side can fight.
         let mut friends: [Vec<Vec3>; 2] = [Vec::new(), Vec::new()];
         let mut as_target: [Vec<Target>; 2] = [Vec::new(), Vec::new()];
+        let mut target_ids: [Vec<u32>; 2] = [Vec::new(), Vec::new()];
         for f in self.alive() {
             let k = f.params.kind.republic() as usize;
             friends[k].push(f.pawn.location);
             if !self.not_colliding.contains(&f.id) {
                 as_target[k].push(f.as_target());
+                target_ids[k].push(f.id);
             }
         }
         let mut heard = Vec::new();
@@ -389,6 +391,11 @@ impl Battle {
         targets[0].extend_from_slice(others);
         targets[0].extend_from_slice(&as_target[1]);
         targets[1] = std::mem::take(&mut as_target[0]);
+        // Ids for the original's noticing: fighters by their own id; the
+        // player and the others (squad) by ids no fighter has.
+        let mut ids: [Vec<u32>; 2] = [Vec::new(), std::mem::take(&mut target_ids[0])];
+        ids[0].extend((0..targets[0].len() - as_target[1].len()).map(|i| u32::MAX - i as u32));
+        ids[0].extend_from_slice(&target_ids[1]);
         for f in self.fighters.iter_mut() {
             if f.mode == Mode::Dead {
                 continue;
@@ -400,9 +407,12 @@ impl Battle {
             }
             let side = f.params.kind.republic() as usize;
             // A separatist with no one in sight still hunts the player.
-            let target = f
-                .choose_target(world, &targets[side])
-                .or(if side == 0 { player } else { None });
+            let target = if f.original_noticing() {
+                f.notice(world, &targets[side], &ids[side], self.time)
+            } else {
+                f.choose_target(world, &targets[side])
+                    .or(if side == 0 { player } else { None })
+            };
             let view = View {
                 world,
                 nav: &self.nav,
@@ -443,12 +453,17 @@ impl Battle {
     /// The droid was hurt; `from` is where the shot came from, if known.
     /// The first time, its first-hurt event (if it has one) is sent.
     pub fn damaged(&mut self, id: u32, from: Option<Vec3>) -> Vec<BattleEvent> {
+        self.damaged_by(id, from, None)
+    }
+
+    /// Like `damaged`; `by` is the fighter that did it, if it was one.
+    pub fn damaged_by(&mut self, id: u32, from: Option<Vec3>, by: Option<u32>) -> Vec<BattleEvent> {
         let time = self.time;
         let mut ev = Vec::new();
         let mut alive = false;
         if let Some(f) = self.fighter_mut(id) {
             alive = f.mode != Mode::Dead;
-            f.on_damaged(from, time, &mut ev);
+            f.on_damaged_by(from, by, time, &mut ev);
         }
         let mut out: Vec<BattleEvent> = ev
             .into_iter()

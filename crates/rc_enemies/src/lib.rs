@@ -1434,7 +1434,8 @@ fn react_to_combat(
             .instigator
             .and_then(|i| transforms.get(i).ok())
             .map(|t| to_unreal(t.translation) + rc_movement::Vec3::new(0.0, 0.0, 84.0));
-        for e in fight.battle.damaged(droid.id, from) {
+        let by = d.instigator.and_then(|i| droids.get(i).ok()).map(|d| d.id);
+        for e in fight.battle.damaged_by(droid.id, from, by) {
             match e {
                 BattleEvent::Ai { event, .. } => log.line(format!(
                     "{PART}: t={now:.1}s droid {} hurt ({:.0} damage): {event:?}",

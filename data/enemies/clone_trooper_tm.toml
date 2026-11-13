@@ -39,6 +39,9 @@ peripheral_vision = 0.2   # game: Pawn PeripheralVision
 auto_detect_radius = 200  # game: Pawn AutoDetectRadius
 enemy_memory_time = 15    # game: CTBot EnemyMemoryTime
 decision_interval = 0.5   # game: CTBot DecisionInterval
+noticing = "original"     # game: the bot's own decision loop (CTBot), see docs/DESIGN.md
+situation_interval = 0.5  # game: a fixed 0.5 in CTBot GetBestEnemy
+remember_attacker = 6     # game: a fixed 6 in CTBot CanSeeOrHear
 turn_rate = 110           # game: Pawn RotationRate yaw 20000 per second
 
 [combat]

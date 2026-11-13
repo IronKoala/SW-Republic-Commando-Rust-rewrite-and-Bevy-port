@@ -871,3 +871,49 @@ Read from the script text and defaults in `ctcharacters.u`, `engine.u`,
   `Event` `Security00`, `FirstDamagedEvent` `TurretsShot`, which
   `ScriptedTrigger42` waits for before `EliteStart`) and `CoreShipTurret2`
   (`SBDTurret00`); geo_05c three tagged `Lasers01`.
+
+
+### How CTBot notices enemies (read 2026-11-13)
+
+Read from ctgame.dll and Engine.dll for reference (nothing decompiled is
+kept in the repo). In our own words; the rules are in docs/DESIGN.md "How
+the troopers notice the enemy".
+
+- The bot's tick counts `NextDecisionTime` down; at or below 0 (and if the
+  running state agrees to stop, which all the trooper's states do) it runs
+  `MakeDecision` and sets the countdown to `DecisionInterval` x (0.8 +
+  rand() x 0.4 / 32768).
+- `MakeDecision` first picks the strongest queued stimulus
+  (`StimulusPriority`: the stimulus's priority if the bot's response to
+  its group is not "none"), then runs `ULocalSituation::Assess` with the
+  pawn's `SightRadius`, then asks each of its states (`RequiredStates`;
+  CloneTrooperBot: StateTrandoshanAttack, StateIdle, StateInvestigate) for
+  a utility and switches to the highest. StateIdle: always 0.1. The attack
+  states: 0.6 if the situation has a valid best target and the bot may
+  fire. StateInvestigate: the strongest stimulus's priority.
+- `Assess` counts hostile pawns within the radius that `CanSeeOrHear`
+  says yes to; the nearest is `BestTarget`. When the count goes from 0 to
+  more, the enemy posts an "enemy spotted" stimulus. `GetBestEnemy`
+  re-runs `Assess` if the last one is more than 0.5 s old.
+- `CanSeeOrHear`: the pawn's `LastHitBy` within 6 s; within
+  `AutoDetectRadius` with a clear trace; else `CanSeeEnemy`, which is
+  `SeeActor` plus, for the current enemy, `EnemyMemoryTime` since
+  `LastTimeEnemySeen` (`SetEnemy` does not reset that time).
+- `SeeActor`: distance between the pawns' locations within `SightRadius`,
+  the facing vector dotted with the direction at least `PeripheralVision`,
+  then `LineOfSightTo`: eyes (location + `BaseEyeHeight`) to the other's
+  `LOSTestLocation` (a pawn's location + `BaseEyeHeight`); then, unless
+  radius squared over distance squared is below 0.0001, corner points
+  (x - r, y + r), (x + r, y + r), (x - r, y - r), (x + r, y - r) at the
+  other's middle; it finds the corners with the largest and smallest
+  squared length (of the world position itself) and traces from the
+  first three corners, skipping those two.
+- Stimuli: a 40-byte entry per type (group, volume, range, max range, two
+  priorities, flags). `CanHear` hears a stimulus within its range if its
+  volume beats the pawn's `HearingThreshold`, and between range and max
+  range if volume x (distance - range) / (max range - range) does; with
+  the default threshold of 0 that is "within max range". Weapon fire:
+  range 1024, max 2048. CTBot's default responses (hostile): weapon fire
+  run toward, weapon hit run away, grenade bounce dive away, damaged run
+  toward; (friendly): weapon fire, weapon hit, stunned and explosion look
+  at, grenade bounce run away, died run toward.
