@@ -4299,7 +4299,13 @@ original: `PlayerController.ShowMenu` only skips `SetPause` when play is
 already paused and still opens the page, and the console's `MenuOpen`
 (Engine.u) destroys the page that was showing. Level scripts don't run
 while paused, so this can only happen within one frame (none of the 29
-does it); a debriefing it replaces doesn't go on to its next map. Not
+does it); a debriefing it replaces doesn't go on to its next map. The HUD (prompt text, objective tracker, meters) stays drawn under the
+hint box, as in the original: Engine.dll's `FPlayerSceneNode::Render`
+calls `UHelmet::DrawHUD` whenever the level is drawn, skipping it only
+for split screen or the console's `NOHUD` debug command (checked in its
+machine code; nothing kept). Every widget's place, size, font, wrap width
+(`InfoText.MaxSizeX` 0.38) and shown/hidden state is the class's own
+default, changed only by its `Init` and `SetInfoOptions`. Not
 done: the other languages' moves (the port reads only English).
 
 Following the first exit of each map from `pro` visits all 56 campaign
