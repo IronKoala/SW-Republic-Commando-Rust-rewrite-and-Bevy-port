@@ -149,6 +149,10 @@ pub enum CharacterAct {
 pub enum Passenger {
     Player,
     Character(Entity),
+    /// Another actor, by its `Tag`, that the game doesn't draw as a
+    /// character (the briefing's `GunshipAttachMover`): what rides on it
+    /// (`AttachTag`) is carried along.
+    Base(String),
 }
 
 /// On the player while a briefing gunship carries it (set by the part

@@ -69,6 +69,11 @@ pub struct Sequence {
     /// Numbers Republic Commando adds whose meaning we don't know. Kept so
     /// the log can show them.
     pub unknown: Vec<f32>,
+    /// The sequence moves its actor along its move bone (bit 0 of the
+    /// second of the three numbers `FSkelAnimSeq::Serialize` reads after
+    /// the shared ones; engine.dll's `USkeletalMeshInstance::GetMoveCoords`
+    /// tests it). See `rc_anim::Clip::root_motion`.
+    pub root_motion: bool,
     /// One track per bone in `MeshAnimation::bones`.
     pub tracks: Vec<Track>,
 }
@@ -146,7 +151,8 @@ pub fn read_mesh_animation(pkg: &Package, data: &[u8], export: &Export) -> Resul
             unknown.push(r.i32()? as f32);
         }
         unknown.push(r.i32()? as f32);
-        unknown.push(r.i32()? as f32);
+        let motion_flags = r.i32()?;
+        unknown.push(motion_flags as f32);
         if version >= 143 {
             unknown.push(r.i32()? as f32);
         }
@@ -166,6 +172,7 @@ pub fn read_mesh_animation(pkg: &Package, data: &[u8], export: &Export) -> Resul
             rate,
             notifies,
             unknown,
+            root_motion: motion_flags & 1 != 0,
             tracks,
         })
     })?;

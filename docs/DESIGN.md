@@ -4450,16 +4450,36 @@ In the port the scripts part sends `CharacterAct::AttachPassenger` to the
 gunship; `rc_cast` keeps the riders and works out each one's place from
 the bone every frame (`carry_riders`): cast members are drawn there from
 their model's origin, and the player gets `rc_game_core::Riding`, which
-`player.rs` uses for the body and the view. The gunship is posed as the
-game draws it (the move bone's travel isn't shown, see
-`Model::posed_in_game`), so it stays where the map puts it and its
-passengers move only with the small sway of its bones. The cast takes
+`player.rs` uses for the body and the view (the view is put where the
+gunship holds the body this frame, `place_camera` runs after
+`rc_cast::CastView`, so the cabin doesn't run ahead of the camera).
+
+**Leaving the Venator.** `GEO01fly` is marked for root motion (see the
+Move bone rule below), and the gunship is a pawn, so the original's
+`physRootMotion` moves the gunship itself along the move bone: down the
+launch shaft (about 130,000 units down by 20 s) and out over the battle.
+`animate_cast` does the same for cast pawns (`RootStart`, `root_moved`),
+and the riders follow the bone wherever that takes it. The escort
+`GunshipHigh0` plays vehicles.ukx's `GEO01fly` the same way; its notifies
+send `GunshipDoorOpen` (24 s), `HitColumn` and the fireball, so in the
+port as in the original those come while the two ships are out over the
+battle, not in the hangar. The briefing gunship's own door flap bones
+don't move in `GEO01fly`.
+
+Other actors on the passenger list are carried as a base when they
+aren't characters (`Passenger::Base`): `GunshipAttachMover` (Mover0) is
+the base of the cabin's six real-time `TriggerLight`s by `AttachTag`
+(`rc_level_viewer::lighting::LightRides`), and `carry_riders` moves those
+lights with it (`rides_base`), as `ULevel::FarMoveActor` and `MoveActor`
+move an actor's attached actors. Without them the cabin went dark once
+the ship left the hangar lights. `CoreshipHologram`, `CanyonHologram`,
+`HoloLight`, `CloneLight` and `CloneLight2` are tags no actor in the map
+has, so those steps carry nothing (the log says so). The cast takes
 orders even while play is paused: the attach steps come in the frame the
-title card pauses play. Not done: the actors on the list that aren't
-characters (`GunshipAttachMover`, the mover the interior lights and
-effects follow by `AttachTag`; `CoreshipHologram`, `CanyonHologram`,
-`HoloLight`, `CloneLight`, `CloneLight2`, which no actor in the map has as
-a tag), riding in save files, and the original's `DrawScale` handling in
+title card pauses play. Not done: the mover's other attached actors
+(the `BlackoutBox` static mesh, `Steam_Jet3`, `Holo_Glow_V9`,
+`Holo_Flash2`), the lights' on and off switching by trigger, root motion
+for actors that aren't cast pawns, riding in save files, and the original's `DrawScale` handling in
 `AttachToBone` (the gunship's `DrawScale` is 1, so it changes nothing
 here). `StartGlow`, `StopGlow` and `StartGunshipInteriorLight` are events
 no game file sends.
@@ -4548,16 +4568,22 @@ clips hold it 757 to 850 Unreal units up). engine.dll's
 places a bone whose parent is the move bone without the move bone's own
 travel (found by decompiling engine.dll for reference only; nothing is
 copied into this repository). The travel is used only for actors with
-`Physics` 12 (`PHYS_RootMotion`), whose place follows it
-(`AActor::physRootMotion`). So the cast poses with
+`Physics` 12 (`PHYS_RootMotion`), and for a pawn playing a sequence
+marked for it: `APawn::startNewPhysics` calls `physRootMotion` first in
+every physics but falling, and `USkeletalMeshInstance::GetMoveCoords`
+answers only for a channel that isn't looping, is playing, has a rate,
+is on the move bone and plays a sequence whose `FSkelAnimSeq` flags have
+bit 0 set (`rc_package` reads it as `Sequence::root_motion`). The actor
+then goes to the move bone now, taken back through the move bone at the
+start onto the actor's place at the start (`PostInitAnim`). So the cast poses with
 `rc_model::Model::posed_in_game` and `bone_frame_in_game`
 (`rc_anim::globals_in_game`), unless the actor's `Physics` is 12, which
 keeps the old `posed_local` way. Before this the landing gunship
 (`Physics` 4, flying) was drawn 757 units too high. One effect: the
 gunship's `GunshipAmbushSpiderdroid` clip, which flies it off at the end
-of the level, also only turns it in place now, as the engine rule says
-for a flying actor; nothing found in the files switches it to root
-motion.
+of the level, is marked for root motion, so it now carries the gunship
+away as the engine does. Its landing clip `WarriorIntroGunship` is
+marked too and ends where it started, so the landing place is unchanged.
 
 **What they do.** Each cast member gets `ScriptTags` (its `Tag`, which
 is the class name when the map gives none, as in Unreal, and its

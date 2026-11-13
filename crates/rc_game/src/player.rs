@@ -86,6 +86,7 @@ impl Plugin for PlayerPlugin {
                 Update,
                 place_camera
                     .in_set(GameSet::View)
+                    .after(rc_cast::CastView)
                     .run_if(in_state(GameState::InGame)),
             );
     }
@@ -214,9 +215,17 @@ fn eye_view(body: &Body) -> Transform {
 /// relative look times the pawn's rotation). The eyes stay straight above
 /// the body's middle, as the original's `Pawn.EyePosition` (EyeHeight
 /// along the world's up).
+///
+/// The eyes are put above where the gunship holds the body this frame
+/// (`Riding::centre`), not where the body was last moved: the gunship's
+/// flight moves hundreds of units a frame, and a frame late the view
+/// would lag behind the cabin.
 fn riding_view(body: &Body, riding: Option<&rc_game_core::Riding>) -> Transform {
     let mut t = eye_view(body);
     if let Some(r) = riding {
+        let [x, y, z] = r.centre;
+        let eye = body.pawn.eye() - body.pawn.location;
+        t.translation = to_bevy(UVec3::new(x, y, z) + eye);
         t.rotation = r.rotation * t.rotation;
     }
     t

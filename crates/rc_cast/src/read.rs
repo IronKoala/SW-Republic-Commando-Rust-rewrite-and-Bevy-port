@@ -145,8 +145,10 @@ pub struct CastMember {
     /// Its physics is root motion (`Physics` 12, `PHYS_RootMotion` in
     /// engine.u), from the map or the class: the original moves such an
     /// actor along with its animation's move bone (geo_01a's troopers in
-    /// the gunship door). Every other one stays where it is and its move
-    /// bone's travel isn't drawn.
+    /// the gunship door). A pawn also follows the move bone while it plays
+    /// a sequence marked for root motion (`rc_anim::Clip::root_motion`);
+    /// otherwise it stays where it is and its move bone's travel isn't
+    /// drawn.
     pub root_motion: bool,
     /// Running speed, Unreal units a second (`GroundSpeed`).
     pub ground_speed: f32,
@@ -306,6 +308,27 @@ pub fn map_skins(
 
 /// Yaw from an actor's stored `Rotation` (pitch, yaw, roll as Unreal
 /// angle units), radians.
+/// The actors others ride on (`AttachTag`, by lower-case tag): where the
+/// map puts each (Unreal units) and its yaw. The first with the tag, as the
+/// engine's `ForEach AllActors` finds it.
+pub fn bases(actors: &[ScriptActor]) -> std::collections::HashMap<String, ([f32; 3], f32)> {
+    let wanted: std::collections::HashSet<String> = actors
+        .iter()
+        .filter_map(|a| a.obj.text("AttachTag"))
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let mut out = std::collections::HashMap::new();
+    for a in actors {
+        let Some(tag) = a.obj.text("Tag").map(str::to_ascii_lowercase) else {
+            continue;
+        };
+        if wanted.contains(&tag) && !out.contains_key(&tag) {
+            out.insert(tag, (a.location, yaw_of(a)));
+        }
+    }
+    out
+}
+
 fn yaw_of(a: &ScriptActor) -> f32 {
     match a.obj.get("Rotation") {
         Some(Val::Raw(b)) if b.len() >= 8 => {

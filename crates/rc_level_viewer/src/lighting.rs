@@ -175,6 +175,15 @@ fn color(l: &Light) -> Color {
     Color::srgb(r, g, b)
 }
 
+/// On a real-time light that rides another actor (`AttachTag`): what it
+/// rides and where the map put it, Unreal units. Whatever moves that
+/// actor moves the light along (the briefing gunship's cabin lights).
+#[derive(Component, Debug, Clone)]
+pub struct LightRides {
+    pub tag: String,
+    pub location: [f32; 3],
+}
+
 /// What `spawn_lights` did, for the log.
 #[derive(Debug, Default, Clone)]
 pub struct SpawnReport {
@@ -207,7 +216,7 @@ pub fn spawn_lights(
         let at = settings.position(l.location);
         match l.kind {
             LightKind::Point => {
-                let e = commands.spawn((
+                let mut e = commands.spawn((
                     PointLight {
                         color: color(l),
                         intensity: lumens,
@@ -217,6 +226,12 @@ pub fn spawn_lights(
                     },
                     Transform::from_translation(at),
                 ));
+                if let Some(tag) = &l.attach_tag {
+                    e.insert(LightRides {
+                        tag: tag.clone(),
+                        location: l.location,
+                    });
+                }
                 report.entities.push(e.id());
                 report.point += 1;
             }
@@ -311,7 +326,11 @@ mod tests {
         assert_eq!(s.live_light_on_props, 1.0);
         assert_eq!(s.sun_lux_at_255, 5.0);
         assert_eq!(notes.len(), 1);
-        std::fs::write(&path, "baked_light = false\nlightmap_gain = 1.5\nlive_light_on_props = 0.5\n").unwrap();
+        std::fs::write(
+            &path,
+            "baked_light = false\nlightmap_gain = 1.5\nlive_light_on_props = 0.5\n",
+        )
+        .unwrap();
         let (s, notes) = LightingSettings::load(&path);
         assert!(!s.baked_light);
         assert_eq!(s.live_light_on_props, 0.5);

@@ -61,6 +61,9 @@ pub struct Light {
     /// Whether it lights moving things at run time (`bDynamicLight`). When
     /// false, its light was baked into the map when the level was built.
     pub dynamic: bool,
+    /// `AttachTag`: the tag of the actor it rides on (its base; the
+    /// briefing gunship's lights ride the `GunshipAttachMover`).
+    pub attach_tag: Option<String>,
 }
 
 /// A zone's flat "ambient" light, added everywhere inside the zone.
@@ -160,6 +163,11 @@ pub fn light_from_properties(pkg: &Package, class: &str, props: &[Property]) -> 
         cone: byte(pkg, props, "LightCone").unwrap_or(DEFAULT_CONE),
         light_type,
         dynamic: bool_prop("bDynamicLight"),
+        attach_tag: match properties::find(pkg, props, "AttachTag").map(|p| &p.value) {
+            Some(Value::Name(n)) => Some(pkg.name(*n as _).to_string())
+                .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("None")),
+            _ => None,
+        },
     })
 }
 

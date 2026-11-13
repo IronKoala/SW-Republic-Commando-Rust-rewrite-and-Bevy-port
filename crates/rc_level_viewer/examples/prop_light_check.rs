@@ -198,6 +198,7 @@ fn setup(
         cone: 128,
         light_type: 1,
         dynamic: true,
+        attach_tag: None,
     };
     let on = LightingSettings::default();
     let off = LightingSettings {

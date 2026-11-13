@@ -95,6 +95,7 @@ impl Plugin for CastPlugin {
                 (place_cast, animate_cast, carry_riders)
                     .chain()
                     .in_set(GameSet::View)
+                    .in_set(CastView)
                     .run_if(in_state(GameState::InGame)),
             );
     }
@@ -129,9 +130,17 @@ pub struct CastPlan {
     pub weapons: HashMap<String, Arc<HeldModel>>,
     pub settings: Option<Arc<CastFile>>,
     pub spawned: bool,
+    /// Actors others ride on (see [`read::bases`]).
+    pub bases: HashMap<String, ([f32; 3], f32)>,
 }
 
 pub use rc_effects_plugin::held::{HeldModel, WEAPON_BONE};
+
+/// Where cast members are drawn and what they carry is worked out (in
+/// [`GameSet::View`]). The player's camera comes after it, so a player
+/// riding a moving gunship sees from where the gunship is this frame.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CastView;
 
 /// Read the model for weapon class `weapon`, once per game.
 fn held_model(
@@ -243,6 +252,7 @@ fn load_cast(
         return;
     };
     let (members, notes) = read::find_cast(&scripts.actors, &lib, &meshes, &file, &map_skins);
+    plan.bases = read::bases(&scripts.actors);
     for n in notes {
         log_line(&log, n);
     }
@@ -393,6 +403,55 @@ pub struct Cast {
     /// Where it is while it rides another's bone: the world place of its
     /// model's own origin and its turn (worked out by `carry_riders`).
     ride: Option<Transform>,
+    /// A character (a `Pawn`): its animations can move it (see
+    /// [`RootStart`]).
+    pawn: bool,
+    /// While a root-motion animation moves it: where that started.
+    root: Option<RootStart>,
+}
+
+/// Where a root-motion animation started moving a character, as
+/// engine.dll keeps it (read locally, nothing copied): every `Pawn`'s
+/// physics (`APawn::startNewPhysics`, and `APawn::performPhysics` with no
+/// physics at all) first tries `physRootMotion`, which moves the actor
+/// whenever its whole-body channel plays a sequence, not looping, at a
+/// rate other than 0, that is marked as root motion, on a mesh whose
+/// first bone is `Move` (`USkeletalMeshInstance::GetMoveCoords`). The
+/// actor's place and turn are then the move bone's now, taken back through
+/// the move bone's at the start and on through the actor's place and turn
+/// at the start (`PostInitAnim` keeps `MoveStart⁻¹ × LocalToWorld`; the
+/// actor goes to `MoveNow × that`). The briefing gunship's `GEO01fly` is
+/// marked: it carries the ship and its passengers down the launch shaft
+/// and out over the battle.
+#[derive(Debug, Clone)]
+struct RootStart {
+    clip: String,
+    /// The actor's `Location` (Unreal units) and yaw when it started.
+    location: [f32; 3],
+    yaw: f32,
+    /// The move bone's place in the mesh at the start frame.
+    start: rc_anim::math::Transform,
+}
+
+/// Where a [`RootStart`] has the actor now that the move bone is at
+/// `now`: its `Location` and yaw. The move bone's turn is followed about
+/// the up axis only, as cast members only turn that way (`GEO01fly`'s move
+/// bone never turns). `scale` is the actor's `DrawScale`
+/// (`LocalToWorld` scales the travel; the mesh's own scale doesn't).
+fn root_moved(r: &RootStart, now: &rc_anim::math::Transform, scale: f32) -> ([f32; 3], f32) {
+    let rel = r.start.inverse().then(now);
+    let fwd = rel.rot.rotate([1.0, 0.0, 0.0]);
+    let turn = fwd[1].atan2(fwd[0]);
+    let (sy, cy) = r.yaw.sin_cos();
+    let d = rel.pos.map(|v| v * scale);
+    (
+        [
+            r.location[0] + d[0] * cy - d[1] * sy,
+            r.location[1] + d[0] * sy + d[1] * cy,
+            r.location[2] + d[2],
+        ],
+        r.yaw + turn,
+    )
 }
 
 /// One passenger on a bone (ctcharacters.u's `BriefingGunship.AttachPassenger`).
@@ -604,6 +663,8 @@ fn spawn_cast(
             riders: Vec::new(),
             carrying: Vec::new(),
             ride: None,
+            pawn: m.kind == Kind::Pawn,
+            root: None,
         });
     }
     if !plan.members.is_empty() {
@@ -774,6 +835,7 @@ fn follow_orders(
     mut done: MessageWriter<CharacterOrderDone>,
     mut cast: Query<(&mut Cast, &mut Visibility)>,
     player: Query<Entity, With<Player>>,
+    plan: Res<CastPlan>,
     mut commands: Commands,
     log: Option<Res<GameLog>>,
 ) {
@@ -930,7 +992,10 @@ fn follow_orders(
                 if !c.class.eq_ignore_ascii_case(read::BRIEFING_GUNSHIP) {
                     log_line(
                         &log,
-                        format!("{at} is a {}, not a BriefingGunship: AttachToGunship does nothing", c.class),
+                        format!(
+                            "{at} is a {}, not a BriefingGunship: AttachToGunship does nothing",
+                            c.class
+                        ),
                     );
                 } else if !*attach {
                     c.riders.retain(|r| r.passenger != *passenger);
@@ -938,7 +1003,15 @@ fn follow_orders(
                     log_line(&log, format!("{at} lets go of {passenger:?}"));
                 } else if bone.is_empty() {
                     // `AttachPassenger` needs a bone.
-                    log_line(&log, format!("{at}: no AttachBone; {passenger:?} not attached"));
+                    log_line(
+                        &log,
+                        format!("{at}: no AttachBone; {passenger:?} not attached"),
+                    );
+                } else if let Some(t) = unknown_base(passenger, &plan.bases) {
+                    log_line(
+                        &log,
+                        format!("{at}: nothing tagged {t} in this map carries anything; nothing carried"),
+                    );
                 } else if !c
                     .look
                     .as_ref()
@@ -946,7 +1019,9 @@ fn follow_orders(
                 {
                     log_line(
                         &log,
-                        format!("{at} has no bone {bone} (or no model); {passenger:?} not attached"),
+                        format!(
+                            "{at} has no bone {bone} (or no model); {passenger:?} not attached"
+                        ),
                     );
                 } else {
                     log_line(
@@ -991,8 +1066,29 @@ fn follow_orders(
                     c.ride = None;
                 }
             }
+            // What rides on it stays where it was let go.
+            Passenger::Base(_) => {}
         }
     }
+}
+
+/// The tag of a [`Passenger::Base`] that nothing rides on (or that isn't
+/// in the map), for the log; `None` for every other passenger.
+fn unknown_base(p: &Passenger, bases: &HashMap<String, ([f32; 3], f32)>) -> Option<String> {
+    match p {
+        Passenger::Base(t) if !bases.contains_key(&t.to_ascii_lowercase()) => Some(t.clone()),
+        _ => None,
+    }
+}
+
+/// Where a light riding a carried base goes: the base was placed at
+/// `placed` (Bevy units, its yaw `placed_yaw`, Unreal's) and is now at
+/// `at` turned by `q` (Bevy axes, as [`carried_at`] gives); the light keeps
+/// its place relative to the base, as the engine moves an actor's
+/// attached actors along with it (`AttachTag` sets their `Base`).
+fn rides_base(placed: Vec3, placed_yaw: f32, at: Vec3, q: Quat, light: Vec3) -> Vec3 {
+    let turn = q * Quat::from_rotation_y(placed_yaw);
+    at + turn * (light - placed)
 }
 
 fn dist2d(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -1289,7 +1385,7 @@ fn trigger_props(
 fn animate_cast(
     time: Res<Time>,
     plan: Res<CastPlan>,
-    mut cast: Query<(Entity, &mut Cast, &InheritedVisibility, &Transform)>,
+    mut cast: Query<(Entity, &mut Cast, &InheritedVisibility, &mut Transform)>,
     mut held: Query<&mut Transform, Without<Cast>>,
     player: Query<&GlobalTransform, With<PlayerCamera>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
@@ -1306,7 +1402,7 @@ fn animate_cast(
     let mut again = Vec::new();
     // Held weapons to put on their bones.
     let mut weapons_moved = Vec::new();
-    for (entity, mut c, shown, at) in &mut cast {
+    for (entity, mut c, shown, mut at) in &mut cast {
         let name_of = c.name.clone();
         let Cast {
             scripted,
@@ -1314,6 +1410,13 @@ fn animate_cast(
             look,
             riders,
             carrying,
+            location,
+            yaw,
+            half_height,
+            pawn,
+            root,
+            ride,
+            time: now,
             ..
         } = &mut *c;
         carrying.clear();
@@ -1383,10 +1486,60 @@ fn animate_cast(
         if self_trigger {
             again.push(entity);
         }
+        // A character's root-motion animation moves it (see [`RootStart`]).
+        // Only one drawn as the game draws it: one whose physics is
+        // already root motion shows the travel in its pose instead.
+        let mv = rc_anim::move_bone(&look.model.skeleton.names);
+        let rooted = match clip {
+            Some(k) if *pawn && look.in_game && ride.is_none() && mv.is_some() => {
+                k.root_motion && !looping && k.rate != 0.0
+            }
+            _ => false,
+        };
+        match clip.filter(|_| rooted) {
+            Some(k) => {
+                let move_at = |f: f32| k.sample(&look.model.skeleton, f)[0];
+                if root.as_ref().is_none_or(|r| r.clip != k.name || !same) {
+                    *root = Some(RootStart {
+                        clip: k.name.clone(),
+                        location: *location,
+                        yaw: *yaw,
+                        start: move_at(look.frame),
+                    });
+                    log_line(
+                        &log,
+                        format!(
+                            "t={now:.2} {name_of}'s animation {} moves it along its move bone (root motion) from ({:.0}, {:.0}, {:.0})",
+                            k.name, location[0], location[1], location[2]
+                        ),
+                    );
+                }
+                if let Some(r) = root.as_ref() {
+                    let (l, y) = root_moved(r, &move_at(look.frame), look.holder.scale.x);
+                    *location = l;
+                    *yaw = y;
+                    // Placed now, as `place_cast` would next frame, so its
+                    // passengers ride where it is drawn.
+                    let feet = rc_movement::Vec3::new(l[0], l[1], l[2] - *half_height);
+                    at.translation = to_bevy(feet);
+                    at.rotation = Quat::from_rotation_y(-y);
+                }
+            }
+            None => {
+                if let Some(r) = root.take() {
+                    log_line(
+                        &log,
+                        format!(
+                            "t={now:.2} {name_of}'s animation {} stops moving it, at ({:.0}, {:.0}, {:.0})",
+                            r.clip, location[0], location[1], location[2]
+                        ),
+                    );
+                }
+            }
+        }
         // Hidden or far away ones aren't posed; a still pose only once.
         let far = reach > 0.0 && eye.is_some_and(|e| e.distance(at.translation) > reach);
-        let skip =
-            !shown.get() || (far && look.posed_once) || (clip.is_none() && look.posed_once);
+        let skip = !shown.get() || (far && look.posed_once) || (clip.is_none() && look.posed_once);
         // One carrying passengers is always worked out: they follow its
         // bones even when it isn't drawn.
         if skip && riders.is_empty() {
@@ -1403,7 +1556,7 @@ fn animate_cast(
                 look.model.bone_frame(&local, &r.bone)
             };
             if let Some(f) = frame {
-                let (p, q) = carried_at(at, &look.holder, f, r.offset, r.rotation);
+                let (p, q) = carried_at(&at, &look.holder, f, r.offset, r.rotation);
                 carrying.push((r.passenger.clone(), p, q));
             }
         }
@@ -1499,12 +1652,15 @@ fn carried_at(
 /// (the gunship is gone), its view is its own again.
 fn carry_riders(
     mut commands: Commands,
-    mut cast: Query<&mut Cast>,
+    mut cast: Query<(&mut Cast, &mut Transform)>,
     player: Query<(Entity, Option<&Riding>), With<Player>>,
+    plan: Res<CastPlan>,
+    mut lights: Query<(&rc_level_viewer::lighting::LightRides, &mut Transform), Without<Cast>>,
+    mut told: Local<std::collections::HashSet<String>>,
     log: Option<Res<GameLog>>,
 ) {
     let mut moves = Vec::new();
-    for c in &cast {
+    for (c, _) in &cast {
         for (p, at, q) in &c.carrying {
             moves.push((c.name.clone(), p.clone(), *at, *q));
         }
@@ -1541,7 +1697,7 @@ fn carry_riders(
                 }
             }
             Passenger::Character(e) => {
-                let Ok(mut c) = cast.get_mut(e) else {
+                let Ok((mut c, mut placed)) = cast.get_mut(e) else {
                     continue;
                 };
                 // Drawn from its model's own origin (`bAlignBottom` off).
@@ -1558,10 +1714,40 @@ fn carry_riders(
                         ),
                     );
                 }
-                c.ride = Some(Transform::from_translation(at - q * up).with_rotation(q));
+                let ride = Transform::from_translation(at - q * up).with_rotation(q);
+                // Placed now too (not only by `place_cast` next frame): a
+                // flying gunship moves hundreds of units a frame, and a
+                // frame late its passengers would trail outside it.
+                placed.translation = ride.translation;
+                placed.rotation = ride.rotation;
+                c.ride = Some(ride);
                 c.location = [u.x, u.y, u.z];
                 let f = q * Vec3::X;
                 c.yaw = f.z.atan2(f.x);
+            }
+            Passenger::Base(tag) => {
+                let Some((placed, placed_yaw)) = plan.bases.get(&tag.to_ascii_lowercase()) else {
+                    continue;
+                };
+                let p = rc_movement::Vec3::new(placed[0], placed[1], placed[2]);
+                let mut n = 0;
+                for (r, mut t) in &mut lights {
+                    if !r.tag.eq_ignore_ascii_case(&tag) {
+                        continue;
+                    }
+                    let l = rc_movement::Vec3::new(r.location[0], r.location[1], r.location[2]);
+                    t.translation = rides_base(to_bevy(p), *placed_yaw, at, q, to_bevy(l));
+                    n += 1;
+                }
+                if told.insert(tag.to_ascii_lowercase()) {
+                    log_line(
+                        &log,
+                        format!(
+                            "{tag} rides {base} at ({:.0}, {:.0}, {:.0}); its {n} real-time lights (AttachTag {tag}) go along",
+                            u.x, u.y, u.z
+                        ),
+                    );
+                }
             }
         }
     }
@@ -1613,5 +1799,51 @@ mod tests {
         let y = turn_toward(3.0, -3.0, 0.1);
         assert!(y > 3.0, "turned the long way: {y}");
         assert!((turn_toward(0.0, 0.05, 0.1) - 0.05).abs() < 1e-4);
+    }
+
+    #[test]
+    fn root_motion_moves_from_where_the_actor_started() {
+        use rc_anim::math::{Quat as AQuat, Transform as AT};
+        // The move bone starts 100 up and travels 10 forward (mesh X) and
+        // 5 down; the actor faces a quarter turn (Unreal +Y) and is drawn
+        // at scale 2.
+        let r = RootStart {
+            clip: "GEO01fly".into(),
+            location: [1000.0, 2000.0, 300.0],
+            yaw: std::f32::consts::FRAC_PI_2,
+            start: AT {
+                rot: AQuat::IDENTITY,
+                pos: [0.0, 0.0, 100.0],
+            },
+        };
+        let (at, yaw) = root_moved(&r, &r.start, 2.0);
+        assert_eq!(at, r.location, "no jump on the first frame");
+        assert!((yaw - r.yaw).abs() < 1e-5);
+        let now = AT {
+            rot: AQuat::IDENTITY,
+            pos: [10.0, 0.0, 95.0],
+        };
+        let (at, _) = root_moved(&r, &now, 2.0);
+        let want = [1000.0, 2020.0, 290.0];
+        for k in 0..3 {
+            assert!((at[k] - want[k]).abs() < 1e-3, "{at:?}");
+        }
+    }
+
+    #[test]
+    fn a_light_keeps_its_place_on_its_base() {
+        let placed = Vec3::new(10.0, 0.0, 0.0);
+        let yaw = 0.7;
+        let light = Vec3::new(12.0, 3.0, 1.0);
+        // Not moved: the light stays put.
+        let q = Quat::from_rotation_y(-yaw);
+        assert!(rides_base(placed, yaw, placed, q, light).distance(light) < 1e-4);
+        // Moved 100 along X and turned a quarter more: the light's offset
+        // turns with it.
+        let turn = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let at = placed + Vec3::X * 100.0;
+        let got = rides_base(placed, yaw, at, turn * q, light);
+        let want = at + turn * (light - placed);
+        assert!(got.distance(want) < 1e-4, "{got} vs {want}");
     }
 }

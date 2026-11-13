@@ -131,8 +131,9 @@ pub fn globals(parents: &[usize], local: &[Transform]) -> Vec<Transform> {
 /// [`globals`] as Republic Commando's engine poses a mesh in the game:
 /// when the mesh's first bone is its "move" bone (named `Move`, see
 /// [`move_bone`]), the bones hanging from it don't follow it. Its motion
-/// only moves the actor itself, and only for an actor whose physics is
-/// root motion. Read from engine.dll (`USkeletalMesh::PostLoad` finds the
+/// only moves the actor itself: a pawn playing a sequence marked for it
+/// ([`Clip::root_motion`], not looping), or an actor whose physics is
+/// root motion (`AActor::physRootMotion`). Read from engine.dll (`USkeletalMesh::PostLoad` finds the
 /// bone; `USkeletalMeshInstance::ApplyAnimation` skips it as a parent
 /// outside the editor), decompiled to find this rule, nothing copied.
 pub fn globals_in_game(
@@ -179,6 +180,9 @@ pub struct Clip {
     tracks: Vec<Option<Keys>>,
     /// How many mesh bones found a track by name.
     pub matched_bones: usize,
+    /// The sequence is marked to move its actor along the move bone
+    /// (root motion; see [`globals_in_game`]).
+    pub root_motion: bool,
 }
 
 impl Clip {
@@ -206,6 +210,7 @@ impl Clip {
             rate: seq.rate,
             tracks,
             matched_bones: matched,
+            root_motion: seq.root_motion,
         }
     }
 

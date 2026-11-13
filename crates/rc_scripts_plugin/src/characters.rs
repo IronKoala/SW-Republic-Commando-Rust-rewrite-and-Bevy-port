@@ -34,7 +34,8 @@ use bevy::prelude::*;
 use rc_combat::{CannotDie, Damage, DamageKind, Invulnerable};
 use rc_game_core::units::to_unreal;
 use rc_game_core::{
-    CharacterAct, CharacterOrder, GameLog, Passenger, Player, ScriptTags, SquadMembership, SquadStanceOrder,
+    CharacterAct, CharacterOrder, GameLog, Passenger, Player, ScriptTags, SquadMembership,
+    SquadStanceOrder,
 };
 use rc_level::scripts::{Place, ScriptObject, Val};
 use std::collections::{HashMap, HashSet};
@@ -421,11 +422,20 @@ pub(crate) fn cast(
                 let t = named(a, "AttachActorTag").unwrap_or_default();
                 let passenger = if script.director.settings.is_player(&t) {
                     Some(Passenger::Player)
+                } else if t.is_empty() {
+                    None
                 } else {
                     chars
                         .iter()
-                        .find(|(_, st, _)| st.tag.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(&t)))
+                        .find(|(_, st, _)| {
+                            st.tag
+                                .as_deref()
+                                .is_some_and(|x| x.eq_ignore_ascii_case(&t))
+                        })
                         .map(|(e, _, _)| Passenger::Character(e))
+                        // Any other actor: the gunship's part carries what
+                        // rides on it (and says if it knows no such actor).
+                        .or_else(|| Some(Passenger::Base(t.clone())))
                 };
                 match passenger {
                     Some(passenger) => Some(CharacterAct::AttachPassenger {
