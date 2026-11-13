@@ -870,9 +870,11 @@ copy of the game.
   gunship with Delta 62 and the clone advisor's hologram, your view turning
   with it, and its flight sends the door slam and camera shake events
   (since 2026-11-12); since 2026-11-13 it drops out of the Venator's
-  hangar and flies over the battle with its cabin lights, as the
-  original moves it along its animation (checked in the cloud, not yet
-  on Windows). The title card before Geonosis
+  hangar and flies over the battle, as the original moves it along its
+  animation, with its whole cabin (lights, blackout box, steam, the
+  advisor's glow) and the cabin lights switching on and off on the
+  script's cue; anything riding a door or lift by `AttachTag` now moves
+  with it in every map (checked in the cloud, not yet on Windows). The title card before Geonosis
   ("WAR HAS COME TO THE GALAXY...") shows on the original page with its
   own lines, timing and music, pausing play until it ends (since
   2026-11-12; checked in the cloud, not yet on Windows). Holograms shimmer and flicker like

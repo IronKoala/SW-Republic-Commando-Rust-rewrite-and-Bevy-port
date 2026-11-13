@@ -452,3 +452,56 @@ mod tests {
         assert!((LightingSettings::linear_gain(2.0) - 4.595).abs() < 0.01);
     }
 }
+
+#[cfg(test)]
+mod switched_tests {
+    use super::SwitchedLight;
+    use rc_package::light::TriggerLight;
+
+    fn rule(state: &str, on: bool, change_time: f32, delay: bool) -> TriggerLight {
+        TriggerLight {
+            state: state.into(),
+            initially_on: on,
+            change_time,
+            delay_full_on: delay,
+            remain_on_time: 0.0,
+        }
+    }
+
+    #[test]
+    fn the_briefing_cabin_lights_switch_as_gameplay_u_says() {
+        // blueLight: on, TriggerTurnsOff, no change time: out at once.
+        let mut s = SwitchedLight::new(rule("TriggerTurnsOff", true, 0.0, false), "blueLight".into(), 10.0);
+        assert_eq!(s.factor, 1.0);
+        assert!(s.trigger());
+        s.tick(0.016);
+        assert_eq!(s.factor, 0.0);
+        // GunshipHotlight: off, TriggerTurnsOn, 1 s, bDelayFullOn: dark
+        // until the second is up, then full.
+        let mut s = SwitchedLight::new(rule("TriggerTurnsOn", false, 1.0, true), "GunshipHotlight".into(), 10.0);
+        assert_eq!(s.factor, 0.0);
+        s.trigger();
+        s.tick(0.5);
+        assert_eq!(s.factor, 0.0);
+        s.tick(0.6);
+        assert_eq!(s.factor, 1.0);
+        // AdvisorLight: off, TriggerToggle: on, then off.
+        let mut s = SwitchedLight::new(rule("TriggerToggle", false, 0.0, false), "AdvisorLight".into(), 10.0);
+        s.trigger();
+        s.tick(0.016);
+        assert_eq!(s.factor, 1.0);
+        s.trigger();
+        s.tick(0.016);
+        assert_eq!(s.factor, 0.0);
+    }
+
+    #[test]
+    fn a_change_time_fades_and_no_state_ignores_triggers() {
+        let mut s = SwitchedLight::new(rule("TriggerTurnsOn", false, 2.0, false), "t".into(), 10.0);
+        s.trigger();
+        s.tick(1.0);
+        assert!((s.factor - 0.5).abs() < 1e-5);
+        let mut s = SwitchedLight::new(rule("", true, 0.0, false), "t".into(), 10.0);
+        assert!(!s.trigger());
+    }
+}

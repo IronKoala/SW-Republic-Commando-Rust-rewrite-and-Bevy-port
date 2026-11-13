@@ -154,7 +154,7 @@ impl Plugin for ScriptsPlugin {
                     blink_hud,
                     tracker::track,
                     fx_factories::run,
-                    (placed_emitters::run, placed_emitters::ride).chain(),
+                    (placed_emitters::run, placed_emitters::ride, placed_emitters::hide).chain(),
                     trigger_lights::switch,
                     projectiles::fly,
                     breakables::show,

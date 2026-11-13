@@ -51,7 +51,7 @@ use crate::PART;
 use bevy::prelude::*;
 use rc_effects::def::EffectDef;
 use rc_effects::read::PlacedEffect;
-use rc_effects_plugin::{CarrierTurn, SpawnEffect, TriggerEffect};
+use rc_effects_plugin::{CarrierHidden, CarrierTurn, SpawnEffect, TriggerEffect};
 use rc_game_core::units::to_bevy;
 use rc_game_core::{GameLog, ScriptEvent};
 use rc_level::scripts::{MapScripts, ScriptObject, Val};
@@ -304,18 +304,19 @@ pub fn run(
         for i in 0..em.list.len() {
             let e = &em.list[i];
             let Some(def) = e.def.clone() else { continue };
-            if e.hidden {
-                continue;
-            }
             let at = to_bevy(UVec3::new(e.location[0], e.location[1], e.location[2]));
-            let carrier = commands
-                .spawn((
-                    EmitterCarrier,
-                    Transform::from_translation(at),
-                    GlobalTransform::from_translation(at),
-                    DespawnOnExit(rc_game_core::GameState::InGame),
-                ))
-                .id();
+            let mut c = commands.spawn((
+                EmitterCarrier,
+                Transform::from_translation(at),
+                GlobalTransform::from_translation(at),
+                DespawnOnExit(rc_game_core::GameState::InGame),
+            ));
+            // A hidden one runs but isn't drawn (`CarrierHidden`) until a
+            // script shows it.
+            if e.hidden {
+                c.insert(CarrierHidden);
+            }
+            let carrier = c.id();
             spawn.write(SpawnEffect {
                 effect: e.key.clone(),
                 def: Some(def),
@@ -433,6 +434,66 @@ pub fn ride(
             ));
         }
     }
+}
+
+/// `ACTION_SetHidden` naming a placed effect's tag shows or hides it
+/// (sets its `bHidden`), as for any actor with that tag. geo_01briefing
+/// shows the advisor's hologram glow (`Holo_Glow_V1`) when he appears and
+/// hides it when he goes. Taken off the list the characters part works
+/// through, as no character answers to an effect's tag.
+pub fn hide(
+    mut commands: Commands,
+    script: Option<ResMut<crate::LevelScript>>,
+    em: Option<ResMut<LevelEmitters>>,
+    log: Res<GameLog>,
+) {
+    let (Some(mut script), Some(mut em)) = (script, em) else {
+        return;
+    };
+    if !script.calls.iter().any(|c| c.kind == "sethidden") {
+        return;
+    }
+    let calls = std::mem::take(&mut script.calls);
+    let mut keep = Vec::with_capacity(calls.len());
+    for call in calls {
+        let tag = call
+            .action
+            .text("HideActorTag")
+            .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("None"));
+        let matches: Vec<usize> = match (call.kind.as_str(), tag) {
+            ("sethidden", Some(t)) => (0..em.list.len())
+                .filter(|&i| em.list[i].tag.eq_ignore_ascii_case(t))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if matches.is_empty() {
+            keep.push(call);
+            continue;
+        }
+        let hide = call.action.flag("bHidden", false);
+        for i in matches {
+            em.list[i].hidden = hide;
+            if let Some(c) = em.carriers[i] {
+                if hide {
+                    commands.entity(c).insert(CarrierHidden);
+                } else {
+                    commands.entity(c).remove::<CarrierHidden>();
+                }
+            }
+            log.line(format!(
+                "{PART}: t={:.2} {} #{}: effect {} {}",
+                script.director.time,
+                call.script,
+                call.index,
+                em.list[i].name,
+                if hide { "hidden" } else { "shown" }
+            ));
+        }
+        if call.waits {
+            script.director.action_done(&call.script, call.index);
+        }
+    }
+    script.calls = keep;
 }
 
 #[cfg(test)]

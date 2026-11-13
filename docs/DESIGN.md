@@ -4467,19 +4467,48 @@ battle, not in the hangar. The briefing gunship's own door flap bones
 don't move in `GEO01fly`.
 
 Other actors on the passenger list are carried as a base when they
-aren't characters (`Passenger::Base`): `GunshipAttachMover` (Mover0) is
-the base of the cabin's six real-time `TriggerLight`s by `AttachTag`
-(`rc_level_viewer::lighting::LightRides`), and `carry_riders` moves those
-lights with it (`rides_base`), as `ULevel::FarMoveActor` and `MoveActor`
-move an actor's attached actors. Without them the cabin went dark once
-the ship left the hangar lights. `CoreshipHologram`, `CanyonHologram`,
+aren't characters (`Passenger::Base`): `carry_riders` sends
+`rc_game_core::BaseCarried` with where the bone holds it (place and
+Unreal rotator), and the movers part puts the mover with that tag or
+name there (`Mover::carry_to`), as `AActor::UpdateAttachments` does for
+an actor on a bone. `GunshipAttachMover` (Mover0) is the base, by
+`AttachTag`, of the cabin's six `TriggerLight`s, the `BlackoutBox`
+static mesh and three effects (`Steam_Jet3`, `Holo_Glow_V9`,
+`Holo_Flash2`). Anything riding a mover moves rigidly with it, as
+`ULevel::MoveActor` moves a base's attached actors: lights and static
+meshes carry `rc_level_viewer::draw::RidesOn` and the movers part's
+`place_riders` moves them by the mover's move from where it was built
+(a static mesh with an `AttachTag` is drawn as a part of its own,
+`rc_level::scripts::attached_meshes`); placed effects ride by the
+placed-effects part's own rule (`placed_emitters::ride`, which reads
+the mover's pose). This works for every mover in every map, not only
+the gunship's.
+
+**The cabin's lighting script.** The cabin lights are gameplay.u
+`TriggerLight`s, switched by level events by their `Tag`
+(`rc_level_viewer::lighting::SwitchedLight`, run by
+`rc_scripts_plugin::trigger_lights`, from the class's script text:
+`BeginPlay`, `Tick`, and the states `TriggerTurnsOn`, `TriggerTurnsOff`,
+`TriggerToggle`, `TriggerControl`, `TriggerPound`; the class sets none of
+`ChangeTime`, `bInitiallyOn`, `bDelayFullOn` itself, so unset means 0 or
+false). In geo_01briefing `ScriptedTrigger5` closes the `BlackoutBox`
+around the cabin and sends `blueLight` (the three blue lights,
+`TriggerTurnsOff`, go out), so the drop down the shaft is dark; at 19 s
+it opens the box and sends `GunshipSlitLight` (on); `GunshipDoorOpen`
+sends `GunshipHotlight` (`TriggerTurnsOn`, `ChangeTime` 1 with
+`bDelayFullOn`: dark for a second, then full); `AdvisorGlow` and
+`HideAdvisor` toggle `AdvisorLight`. `ACTION_SetHidden` on an effect's
+tag shows or hides it (`placed_emitters::hide`; the advisor's glow
+`Holo_Glow_V1` is hidden in the map and shown when he appears). A hidden
+effect still runs and only isn't drawn
+(`rc_effects_plugin::CarrierHidden`): engine.dll's `AEmitter::Tick` only
+stops for an actor being deleted. `CoreshipHologram`, `CanyonHologram`,
 `HoloLight`, `CloneLight` and `CloneLight2` are tags no actor in the map
 has, so those steps carry nothing (the log says so). The cast takes
 orders even while play is paused: the attach steps come in the frame the
-title card pauses play. Not done: the mover's other attached actors
-(the `BlackoutBox` static mesh, `Steam_Jet3`, `Holo_Glow_V9`,
-`Holo_Flash2`), the lights' on and off switching by trigger, root motion
-for actors that aren't cast pawns, riding in save files, and the original's `DrawScale` handling in
+title card pauses play. Not done: root motion for actors that aren't
+cast pawns (none in this map), riding and the lights' switch states in
+save files, and the original's `DrawScale` handling in
 `AttachToBone` (the gunship's `DrawScale` is 1, so it changes nothing
 here). `StartGlow`, `StopGlow` and `StartGunshipInteriorLight` are events
 no game file sends.

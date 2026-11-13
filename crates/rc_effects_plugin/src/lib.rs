@@ -140,6 +140,14 @@ pub struct PreloadEffect {
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct CarrierTurn(pub [i32; 3]);
 
+/// On a carrier entity: the actor is hidden (`bHidden`), so nothing it
+/// carries is drawn. Its particles still run: engine.dll's `AEmitter::Tick`
+/// steps a hidden emitter like any other (it only stops for one being
+/// deleted), and hidden actors are left out when the scene is drawn. Taking
+/// it away shows the effect as it is by then.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CarrierHidden;
+
 /// "A level event names this effect": the effect carried by `carrier`
 /// does what engine.u's `Emitter.Trigger` does (see
 /// `rc_effects::EffectState::trigger`): parts with `TriggerDisabled` are
@@ -314,7 +322,9 @@ impl Plugin for EffectsPlugin {
             )
             .add_systems(
                 Update,
-                draw.in_set(GameSet::View)
+                (draw, hide_with_carrier)
+                    .chain()
+                    .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
             )
             .add_systems(OnExit(GameState::InGame), forget);
@@ -967,6 +977,28 @@ fn step(
 
 /// Squares facing the camera, and debris models, where the particles are.
 #[allow(clippy::too_many_arguments)]
+/// Effects on a hidden carrier ([`CarrierHidden`]) aren't drawn.
+fn hide_with_carrier(
+    running: Query<&RunningEffect>,
+    hidden: Query<(), With<CarrierHidden>>,
+    mut shown: Query<&mut Visibility, Without<RunningEffect>>,
+) {
+    for r in &running {
+        let want = if r.follow.is_some_and(|c| hidden.contains(c)) {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        for e in r.parts.iter().flatten().chain(r.debris.iter().flatten()) {
+            if let Ok(mut v) = shown.get_mut(*e) {
+                if *v != want {
+                    *v = want;
+                }
+            }
+        }
+    }
+}
+
 fn draw(
     mut commands: Commands,
     mut running: Query<&mut RunningEffect>,
