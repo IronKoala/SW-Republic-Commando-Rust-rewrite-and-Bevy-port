@@ -828,7 +828,9 @@ copy of the game.
   objectives (kept, not shown), the objective tracker (the original's
   tipped ring with its arrow and the distance at the bottom of the screen,
   and the four pulsing arrows round the goal once it is in view; since
-  2026-11-12, tested in the cloud, not yet on Windows), checkpoints, enemy
+  2026-11-12, tested in the cloud, not yet on Windows; like the original,
+  it is off after loading a save until the level's script turns it on
+  again), checkpoints, enemy
   spawners, level changes, and lines of dialogue and sounds (the game's own, read from its
   sound files; a script waiting for a line waits for its real length).
   Since 2026-11-09 a scripted sound comes from its place in the level
