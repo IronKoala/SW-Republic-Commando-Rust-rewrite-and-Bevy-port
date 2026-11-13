@@ -241,7 +241,10 @@ struct UsePanelPictures {
     ring: Option<(rc_image::Rgba, Handle<Image>)>,
     /// How many of its twelve steps the ring image shows lit now.
     ring_fill: Option<u32>,
-    icon: Option<(Handle<Image>, Vec2)>,
+    /// The icon sheet, and the squares cut from it so far (by `HUDIconX`,
+    /// `HUDIconY`; `None` for a square outside the sheet).
+    sheet: Option<rc_image::Rgba>,
+    icons: std::collections::HashMap<[u32; 2], Option<(Handle<Image>, Vec2)>>,
 }
 
 pub struct OriginalHudPlugin;
@@ -511,6 +514,15 @@ fn draw_layout(
             .and_then(|p| p.use_panel.as_ref())
             .map_or(usize::MAX, |u| u.prompt_wrap);
         now.prompt = wrap_prompt(p, wrap);
+    }
+    // A console's, door lock's or charge's clock (see
+    // `rc_game_core::timer_text`).
+    if let Some(t) = use_item
+        .as_ref()
+        .and_then(|u| u.timer)
+        .and_then(rc_game_core::timer_text)
+    {
+        now.use_timer = t;
     }
     text_box(
         &mut now,
@@ -916,52 +928,37 @@ fn update_use_panel(
             )),
         }
         match library.texture(&panel.icon_sheet) {
-            Ok(sheet) => {
-                let c = panel.icon_cell as usize;
-                let (ix, iy) = (panel.icon[0] as usize, panel.icon[1] as usize);
-                let (cols, rows) = (panel.icon_grid[0] as usize, panel.icon_grid[1] as usize);
-                if ix < cols
-                    && iy < rows
-                    && cols * c <= sheet.width
-                    && rows * c <= sheet.height
-                    && c > 0
-                {
-                    let x0 = (cols - 1 - ix) * c;
-                    let y0 = (rows - 1 - iy) * c;
-                    let mut px = Vec::with_capacity(c * c * 4);
-                    for y in y0..y0 + c {
-                        let i = (y * sheet.width + x0) * 4;
-                        px.extend_from_slice(&sheet.pixels[i..i + c * 4]);
-                    }
-                    let image = Image::new(
-                        Extent3d {
-                            width: c as u32,
-                            height: c as u32,
-                            depth_or_array_layers: 1,
-                        },
-                        TextureDimension::D2,
-                        px,
-                        TextureFormat::Rgba8UnormSrgb,
-                        RenderAssetUsages::RENDER_WORLD,
-                    );
-                    log.line(format!(
-                        "original hud: use icon {} square {:?} ({c} px, from the bottom right of {cols}x{rows})",
-                        panel.icon_sheet, panel.icon
-                    ));
-                    pics.icon = Some((images.add(image), Vec2::splat(c as f32)));
-                } else {
-                    log.line(format!(
-                        "original hud: use icon square {:?} is outside {}",
-                        panel.icon, panel.icon_sheet
-                    ));
-                }
-            }
+            Ok(sheet) => pics.sheet = Some(sheet),
             Err(e) => log.line(format!(
                 "original hud: use icon {}: {e}; not drawn",
                 panel.icon_sheet
             )),
         }
     }
+    // Which square: a bacta dispenser's from hud.toml, a console's, door
+    // lock's or charge's from its squad marker, none without a marker.
+    let square = match use_item.icon {
+        rc_game_core::UseIcon::Default => Some(panel.icon),
+        rc_game_core::UseIcon::Square(sq) => Some(sq),
+        rc_game_core::UseIcon::Nothing => None,
+    };
+    if let (Some(sq), Some(sheet)) = (square, pics.sheet.as_ref()) {
+        if !pics.icons.contains_key(&sq) {
+            let cut = cut_icon(sheet, &panel, sq, &mut images);
+            match &cut {
+                Some(_) => log.line(format!(
+                    "original hud: use icon {} square {sq:?} ({} px, from the bottom right of {}x{})",
+                    panel.icon_sheet, panel.icon_cell, panel.icon_grid[0], panel.icon_grid[1]
+                )),
+                None => log.line(format!(
+                    "original hud: use icon square {sq:?} is outside {}",
+                    panel.icon_sheet
+                )),
+            }
+            pics.icons.insert(sq, cut);
+        }
+    }
+    let icon = square.and_then(|sq| pics.icons.get(&sq).cloned().flatten());
     let fill = match state {
         UsePanel::Ready(f) | UsePanel::Working(f) => Some(f),
         _ => None,
@@ -999,7 +996,7 @@ fn update_use_panel(
                 })
             }),
             UsePart::Icon => (state != UsePanel::Hidden)
-                .then(|| pics.icon.clone())
+                .then(|| icon.clone())
                 .flatten()
                 .map(|(h, px)| {
                     let colour =
@@ -1034,6 +1031,41 @@ fn update_use_panel(
             node.top = Val::Vh(-size.y / 2.0);
         }
     }
+}
+
+/// Square `sq` of the icon sheet (counted from its bottom right, as the
+/// game's `HUDIconX`/`Y`), as an image; `None` when it is outside.
+fn cut_icon(
+    sheet: &rc_image::Rgba,
+    panel: &UsePanelPlan,
+    sq: [u32; 2],
+    images: &mut Assets<Image>,
+) -> Option<(Handle<Image>, Vec2)> {
+    let c = panel.icon_cell as usize;
+    let (ix, iy) = (sq[0] as usize, sq[1] as usize);
+    let (cols, rows) = (panel.icon_grid[0] as usize, panel.icon_grid[1] as usize);
+    if !(ix < cols && iy < rows && cols * c <= sheet.width && rows * c <= sheet.height && c > 0) {
+        return None;
+    }
+    let x0 = (cols - 1 - ix) * c;
+    let y0 = (rows - 1 - iy) * c;
+    let mut px = Vec::with_capacity(c * c * 4);
+    for y in y0..y0 + c {
+        let i = (y * sheet.width + x0) * 4;
+        px.extend_from_slice(&sheet.pixels[i..i + c * 4]);
+    }
+    let image = Image::new(
+        Extent3d {
+            width: c as u32,
+            height: c as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        px,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    Some((images.add(image), Vec2::splat(c as f32)))
 }
 
 /// Which use panel pictures are on screen now (for the script's check).

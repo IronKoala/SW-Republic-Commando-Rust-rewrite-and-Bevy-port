@@ -405,6 +405,9 @@ pub struct HudValues {
     pub prompt: Vec<String>,
     /// How far the prompt has faded in, 0..1.
     pub prompt_fade: f32,
+    /// The clock of a console, door lock or charge the player aims at
+    /// ("00:10"), empty when none is shown.
+    pub use_timer: String,
     /// What the person speaking says (the advisor's words), empty when
     /// nobody speaks.
     pub subtitle: String,
@@ -530,6 +533,7 @@ impl HudValues {
             "squad_down" => member?.down,
             "pickup" => !self.pickup.is_empty(),
             "prompt" => !self.prompt.is_empty(),
+            "use_timer" => !self.use_timer.is_empty(),
             "subtitle" => !self.subtitle.is_empty(),
             "objective" => !self.objective.is_empty(),
             _ => return None,
@@ -573,6 +577,7 @@ impl HudValues {
             "objective" => self.objective.clone(),
             "prompt1" => self.prompt.first().cloned().unwrap_or_default(),
             "prompt2" => self.prompt.get(1).cloned().unwrap_or_default(),
+            "use_timer" => self.use_timer.clone(),
             "number" => member?.number.clone(),
             "name" => member?.name.to_uppercase(),
             "order" => {

@@ -287,6 +287,7 @@ mod tests {
         ));
         w.insert_resource(LevelScript {
             shakes: Default::default(),
+            panel_states: Vec::new(),
             director: Director::new(&map(), &[], Settings::default()),
             dispensers: vec![],
             hidden: HashSet::new(),
@@ -390,5 +391,119 @@ mod tests {
         let text = toml::to_string(&save).unwrap();
         let back: ScriptsSave = toml::from_str(&text).unwrap();
         assert_eq!(back, save, "{text}");
+    }
+}
+
+/// The `[panels]` section: each console's, door lock's and demolition
+/// charge's state (`panels.rs`). A job under way when the game was saved
+/// isn't carried on (its time is kept where the item keeps it).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PanelsSave {
+    #[serde(default)]
+    pub item: Vec<PanelSave>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PanelSave {
+    pub name: String,
+    /// Its state's name in the original (`Locked`, `Armed`, ...).
+    pub state: String,
+    pub usable: bool,
+    #[serde(default)]
+    pub activated: bool,
+    #[serde(default)]
+    pub used: bool,
+    #[serde(default)]
+    pub elapsed: f32,
+    #[serde(default)]
+    pub remaining: f32,
+    #[serde(default)]
+    pub fraction: f32,
+    /// Seconds left on its `Timer()` and its `Sleep`.
+    #[serde(default)]
+    pub timer: Option<f32>,
+    #[serde(default)]
+    pub sleep: Option<f32>,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub gone: bool,
+}
+
+impl SavePart for PanelsSave {
+    const KEY: &'static str = "panels";
+
+    fn save(world: &mut World) -> Option<Self> {
+        let lp = world.get_resource::<crate::panels::LevelPanels>()?;
+        if !lp.panels.begun() {
+            return None;
+        }
+        Some(PanelsSave {
+            item: lp
+                .panels
+                .list
+                .iter()
+                .map(|p| PanelSave {
+                    name: p.name.clone(),
+                    state: p.state.name().to_string(),
+                    usable: p.usable,
+                    activated: p.activated,
+                    used: p.used,
+                    elapsed: p.elapsed,
+                    remaining: p.remaining,
+                    fraction: p.fraction,
+                    timer: p.timer,
+                    sleep: p.sleep,
+                    hidden: p.hidden,
+                    gone: p.gone,
+                })
+                .collect(),
+        })
+    }
+
+    fn load(world: &mut World, d: Self) -> Result<(), String> {
+        let Some(mut lp) = world.get_resource_mut::<crate::panels::LevelPanels>() else {
+            return Ok(());
+        };
+        let mut unknown = Vec::new();
+        for s in &d.item {
+            let Some(i) = lp.panels.find(&s.name) else {
+                unknown.push(s.name.clone());
+                continue;
+            };
+            let p = &mut lp.panels.list[i];
+            match rc_scripts::panels::State::named(p.kind, &s.state) {
+                Some(st) => p.state = st,
+                None => unknown.push(format!("{} state {}", s.name, s.state)),
+            }
+            p.usable = s.usable;
+            p.activated = s.activated;
+            p.used = s.used;
+            p.elapsed = s.elapsed;
+            p.remaining = s.remaining;
+            p.fraction = s.fraction;
+            p.timer = s.timer;
+            p.sleep = s.sleep;
+            p.hidden = s.hidden;
+            p.gone = s.gone;
+            p.activating = false;
+            p.player_activated = false;
+            p.user = None;
+        }
+        lp.panels.mark_begun();
+        lp.using = None;
+        lp.plunger = None;
+        if let Some(log) = world.get_resource::<GameLog>() {
+            log.line(format!(
+                "{PART}: save: {} consoles, door locks and charges put back{}",
+                d.item.len(),
+                if unknown.is_empty() {
+                    String::new()
+                } else {
+                    format!("; not in this map: {}", unknown.join(", "))
+                }
+            ));
+        }
+        Ok(())
     }
 }

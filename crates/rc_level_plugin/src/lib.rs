@@ -296,6 +296,48 @@ impl LevelParts {
     }
 }
 
+/// The shape of each console, door lock and demolition charge, by export
+/// index (`rc_level::map_collision::MapCollision::item_triangles`), for
+/// the player's look at one. Present while in the game.
+#[derive(Resource, Clone)]
+pub struct ItemShapes(Arc<HashMap<usize, TriangleWorld>>);
+
+impl ItemShapes {
+    /// From triangles (Unreal units) by export index.
+    pub fn new(triangles: HashMap<usize, Vec<[[f32; 3]; 3]>>) -> Self {
+        let v = |p: [f32; 3]| Vec3::new(p[0], p[1], p[2]);
+        ItemShapes(Arc::new(
+            triangles
+                .into_iter()
+                .map(|(e, ts)| {
+                    (
+                        e,
+                        TriangleWorld::new(ts.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect()),
+                    )
+                })
+                .collect(),
+        ))
+    }
+
+    /// Where along the line from `start` to `end` (0 to 1) it first meets
+    /// item `export`'s shape, if it does.
+    pub fn line_hit(&self, export: usize, start: Vec3, end: Vec3) -> Option<f32> {
+        self.0
+            .get(&export)?
+            .sweep(Vec3::ZERO, start, end)
+            .map(|h| h.time)
+    }
+
+    /// How many items have a shape.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 struct WithParts(Arc<PartsShared>);
 
 impl MoveWorld for WithParts {
@@ -510,6 +552,17 @@ fn load(world: &mut World) {
         lvl.breakables.iter().filter(|b| b.explosion.is_some()).count(),
         lvl.breakables.iter().filter(|b| b.broken_event().is_some()).count()
     ));
+    world.insert_resource(ItemShapes(Arc::new(
+        std::mem::take(&mut lvl.item_triangles)
+            .into_iter()
+            .map(|(e, ts)| {
+                (
+                    e,
+                    TriangleWorld::new(ts.iter().map(|t| [v(t[0]), v(t[1]), v(t[2])]).collect()),
+                )
+            })
+            .collect(),
+    )));
     world.insert_resource(LevelBreakables(std::mem::take(&mut lvl.breakables)));
     world.insert_resource(LevelCollision(parts.world()));
     world.insert_resource(LineThroughVolumes(Arc::new(TriangleWorld::new(

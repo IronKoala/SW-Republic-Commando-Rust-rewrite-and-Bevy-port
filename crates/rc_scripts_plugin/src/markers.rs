@@ -26,9 +26,9 @@
 //! doors and removes the prop. Each step is sent once per anchor.
 //!
 //! Not done yet: the anchor's own look changing (a lit charge, a sliced
-//! console's screen, the blown lock's mesh) and its sounds; the player
-//! doing these jobs himself (Use at the marker); doors swinging shut
-//! again after a slice (they stay open).
+//! console's screen, the blown lock's mesh) and its sounds; doors swinging
+//! shut again after a slice (they stay open). The player doing these jobs
+//! himself is `panels.rs`.
 
 use crate::{LevelScript, PART};
 use bevy::prelude::*;
@@ -302,6 +302,7 @@ mod tests {
         w.init_resource::<Messages<MarkerJob>>();
         w.insert_resource(LevelScript {
             shakes: Default::default(),
+            panel_states: Vec::new(),
             director: Director::new(&m, &[], Settings::default()),
             dispensers: vec![],
             hidden: Default::default(),

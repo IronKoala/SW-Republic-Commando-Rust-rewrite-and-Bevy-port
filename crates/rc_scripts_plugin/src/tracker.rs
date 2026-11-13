@@ -334,7 +334,7 @@ const CLASS_PACKAGES: [&str; 8] = [
     "GameData/Properties/MarkerProperties.u",
 ];
 
-fn class_library(paths: &GamePaths) -> (rc_package::class_library::ClassLibrary, Vec<String>) {
+pub(crate) fn class_library(paths: &GamePaths) -> (rc_package::class_library::ClassLibrary, Vec<String>) {
     let mut lib = rc_package::class_library::ClassLibrary::new();
     let mut missing = Vec::new();
     let mut rels: Vec<String> = CLASS_PACKAGES.iter().map(|s| s.to_string()).collect();
@@ -419,6 +419,7 @@ pub fn read_targets(
     data: &[u8],
     level: &rc_level::actors::LevelInfo,
     map: &MapScripts,
+    lib: &rc_package::class_library::ClassLibrary,
     paths: &GamePaths,
     log: &GameLog,
 ) -> TrackerTargets {
@@ -426,10 +427,6 @@ pub fn read_targets(
     let mut out = TrackerTargets::default();
     if tags.is_empty() {
         return out;
-    }
-    let (lib, missing) = class_library(paths);
-    for m in &missing {
-        log.line(format!("{PART}: tracker: class package {m}"));
     }
     let mut meshes = HashMap::new();
     for &a in level.actors.iter().flatten() {

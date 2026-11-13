@@ -18,3 +18,45 @@ light_scale = 0.85
 load = "BactaLoad"        # LoadAnim: the hands come up and plug in
 fire = "BactaLoop"        # FireAnim: repeated while Use is held
 holster = "BactaHolster"  # HolsterAnim: unplug and go down
+
+# The others, from HandSignal.MarkerHandSetup and its Setup functions
+# (ctinventory.u). `fire = ""` is the game's FireAnim = '': nothing
+# repeats while the hands are up.
+# game: SetupHackTerminal (a console, AIT_HackTerminal)
+[slice]
+load = "KeypadLoad"
+fire = "KeypadLoop"
+holster = "KeypadHolster"
+
+# game: SetupBreachDoor (a breach lock, AIT_BreachDoor); the job starts
+# when the hands put the charge on (the HolsterAttachment moment)
+[breach]
+load = "SetDoorCharge"
+fire = "StartDoorCharge"
+holster = "Holster"
+
+# game: SetupDemolition on a charge not yet placed (state Unplaced)
+[demolition_place]
+load = "SetDemolition"
+fire = "KeypadLoop"
+holster = "Holster"
+
+# game: SetupDemolition on a charge already placed
+[demolition]
+load = "Load"
+fire = "KeypadLoop"
+holster = "Holster"
+
+# game: SetupPlunger (an armed charge, AIT_Plunger); the charge goes off
+# at the animation's FireWeapon moment
+[plunger]
+load = "Detonate"
+fire = ""
+holster = "Holster"
+
+# game: SetupDefaults (a slice lock: HackDoor is AIT_HackDoor, which
+# MarkerHandSetup has no case for)
+[defaults]
+load = "Load"
+fire = "KeypadLoop"
+holster = "Holster"

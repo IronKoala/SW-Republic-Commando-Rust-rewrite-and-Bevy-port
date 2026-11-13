@@ -223,11 +223,13 @@ pub(crate) fn load_arms(
     }
     if let Some(h) = &lib.hands {
         for (using, m) in &h.uses {
-            let sequences = vec![
+            let mut sequences = vec![
                 (ArmsAnim::Load.sequence().to_string(), m.load.clone()),
                 (ArmsAnim::Fire.sequence().to_string(), m.fire.clone()),
                 (ArmsAnim::Holster.sequence().to_string(), m.holster.clone()),
             ];
+            // No `FireAnim` (the plunger's): nothing repeats.
+            sequences.retain(|(_, game)| !game.is_empty());
             wanted.push((crate::hands::arms_id(using), &h.arms, sequences));
         }
     }
@@ -322,7 +324,10 @@ pub(crate) fn animate_arms(
         Option<Res<rc_game_core::Cutscene>>,
         Option<Res<rc_game_core::UseItem>>,
     ),
-    mut sounds: Option<ResMut<ArmsSounds>>,
+    (mut sounds, mut hand_notifies): (
+        Option<ResMut<ArmsSounds>>,
+        Option<ResMut<bevy::ecs::message::Messages<rc_game_core::HandNotify>>>,
+    ),
 ) {
     let (Some(models), Ok((me, arsenal, body, down)), Ok((camera, mut projection))) =
         (models, players.single(), cameras.single_mut())
@@ -395,13 +400,40 @@ pub(crate) fn animate_arms(
 
     // The sounds the animations passed this frame (see `arms_sound`).
     let now_at = moment(&arms);
-    if let Some(sounds) = sounds.as_deref_mut() {
-        if !down && !other_hands {
-            let due = spans(watch.heard.as_ref(), &now_at, dt, &|w, a| {
-                clips.length(w, a)
-            });
-            let model = |w: &str| models.0.get(w).and_then(|m| m.as_ref().ok()).cloned();
+    if !down && !other_hands {
+        let due = spans(watch.heard.as_ref(), &now_at, dt, &|w, a| {
+            clips.length(w, a)
+        });
+        let model = |w: &str| models.0.get(w).and_then(|m| m.as_ref().ok()).cloned();
+        if let Some(sounds) = sounds.as_deref_mut() {
             play_sounds(&due, &model, sounds, &mut commands, &log);
+        }
+        // The hands' animation events (`HolsterAttachment`, `FireWeapon`):
+        // the thing being used acts on them (see `HandNotify`).
+        if let Some(out) = hand_notifies.as_deref_mut() {
+            for s in &due {
+                let Some(using) = s.weapon.strip_prefix("hands:") else {
+                    continue;
+                };
+                let Some(m) = model(&s.weapon) else { continue };
+                for (t, class) in m.notify_classes.get(s.anim.sequence()).into_iter().flatten() {
+                    if *t > s.from && *t <= s.to {
+                        let line = format!(
+                            "arms: {} {} at {t:.3}: {class}",
+                            s.weapon,
+                            game_sequence(&lib, Some(&s.weapon), s.anim)
+                        );
+                        match &log {
+                            Some(l) => l.line(line),
+                            None => println!("{line}"),
+                        }
+                        out.write(rc_game_core::HandNotify {
+                            using: using.to_string(),
+                            notify: class.clone(),
+                        });
+                    }
+                }
+            }
         }
     }
     watch.heard = Some(now_at);
