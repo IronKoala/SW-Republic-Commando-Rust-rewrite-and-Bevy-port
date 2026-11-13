@@ -583,6 +583,11 @@ impl Plugin for OriginalMenuPlugin {
         app.init_resource::<OriginalMenus>()
             .init_resource::<crate::menu_video::MenuVideo>()
             .add_systems(OnEnter(GameState::MainMenu), (load, reset).chain())
+            // Also on entering a level: a game started straight into a map
+            // (`--map`) never passes the main menu, and a level's hint or
+            // debriefing fills its page in the same frame it pauses, so the
+            // pages must be there before then.
+            .add_systems(OnEnter(GameState::InGame), load)
             .add_systems(OnEnter(Play::Paused), load)
             .add_systems(
                 Update,
