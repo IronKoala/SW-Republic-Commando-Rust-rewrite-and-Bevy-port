@@ -664,23 +664,16 @@ impl Model {
         }
         let weights = weights_per_point(&mesh);
 
-        // Which way round the triangles go once in Bevy's axes (see
-        // rc_character/src/load.rs): flip them if the stored order gives a
-        // negative volume.
-        let pts: Vec<[f32; 3]> = mesh
-            .points
-            .iter()
-            .map(|&p| to_bevy(mesh_point(&mesh, p)))
-            .collect();
-        let mut volume = 0f64;
-        for tri in &mesh.triangles {
-            let [a, b, c] = tri
-                .wedges
-                .map(|w| pts[mesh.wedges[w as usize].point as usize]);
-            let cr = rc_anim::math::cross(b, c);
-            volume += (a[0] * cr[0] + a[1] * cr[1] + a[2] * cr[2]) as f64 / 6.0;
-        }
-        let flipped = volume < 0.0;
+        // Which way round the triangles go once in Bevy's axes. The game
+        // draws the stored order, one-sided: a mesh's front faces are the
+        // stored ones unless its scale mirrors it (an odd number of
+        // negative `MeshScale` parts turns the faces round). Guessing from
+        // the shape (the old rule: flip when the stored order gives a
+        // negative volume) turned open and inside-out meshes, such as the
+        // briefing gunship's cabin, the wrong way: 16 of the game's 126
+        // skeletal meshes, all with no mirroring, while all 110 closed
+        // ones agreed with the stored order.
+        let flipped = mesh.mesh_scale.iter().filter(|v| **v < 0.0).count() % 2 == 1;
 
         // One section per material slot, in slot order. A triangle's
         // `material` indexes the mesh's material list, whose entries name
