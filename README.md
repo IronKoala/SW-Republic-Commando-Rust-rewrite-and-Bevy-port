@@ -476,7 +476,8 @@ copy of the game.
   Windows).** `rc_game` is the one program the whole game is built into. It
   opens on a main menu in the visor's amber, lists the campaigns and missions
   with the names from the game's own files (`Extreme Prejudice`, `Into The
-  Hive`, ...), shows a loading screen with the mission text, and drops you
+  Hive`, ...), shows the original's loading screen (picture, mission name
+  and text; START once a briefing level has loaded), and drops you
   into the level with an on-screen display (shield, health, crosshair, ammo,
   squad, messages). Escape pauses; the pause menu resumes, opens options or
   quits to the main menu. It plays the game's own music by the
@@ -535,8 +536,10 @@ copy of the game.
   newer (`rustup update`).
 
   **The other menus and the on-screen display are still placeholders.**
-  The loading screen and most of the HUD are our own
-  amber stand-ins, and the amber main menu comes back if the install's menu
+  Most of the HUD is our own amber stand-ins. **The loading screens are
+  now the original's** (`CTLoading` and `CTLoadingInfo`, chosen per map from
+  `LevelLoadingInfo.int` as the original does; tested in the cloud sandbox,
+  not yet on Windows; see `docs/ORIGINAL_MENUS.md`). The amber main menu comes back if the install's menu
   files can't be read. The plan is to replace them with the original's in
   turn; see `docs/ORIGINAL_MENUS.md`. **The pause menu is now the
   original's** (tested in the cloud sandbox with the install, not yet on
@@ -826,7 +829,9 @@ copy of the game.
   objectives (kept, not shown), the objective tracker (the original's
   tipped ring with its arrow and the distance at the bottom of the screen,
   and the four pulsing arrows round the goal once it is in view; since
-  2026-11-12, tested in the cloud, not yet on Windows), checkpoints, enemy
+  2026-11-12, tested in the cloud, not yet on Windows; like the original,
+  it is off after loading a save until the level's script turns it on
+  again), checkpoints, enemy
   spawners, level changes, and lines of dialogue and sounds (the game's own, read from its
   sound files; a script waiting for a line waits for its real length).
   Since 2026-11-09 a scripted sound comes from its place in the level

@@ -70,6 +70,50 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
             filled.picture, filled.problems
         ));
     }
+    if data
+        .family
+        .iter()
+        .any(|c| c.eq_ignore_ascii_case(rc_menus::loading::LOADING_MENU) || c.eq_ignore_ascii_case(rc_menus::loading::LOADING_INFO_MENU))
+    {
+        // As the game shows it for a real map: RC_PROBE_LOADING_MAP (default
+        // GEO_01A, whose row names the briefing screen) from the install's
+        // LevelLoadingInfo.int, the bar RC_PROBE_LOADING_FILL full (default
+        // 0.6), or finished (START showing) with RC_PROBE_LOADING_DONE=1.
+        let map = std::env::var("RC_PROBE_LOADING_MAP").unwrap_or_else(|_| "GEO_01A".into());
+        let fill: f32 = std::env::var("RC_PROBE_LOADING_FILL")
+            .ok()
+            .and_then(|f| f.parse().ok())
+            .unwrap_or(0.6);
+        let ini = game_data.join("System").join("LevelLoadingInfo.int");
+        let rows = std::fs::read(&ini)
+            .ok()
+            .or_else(|| std::fs::read(game_data.join("System").join("levelloadinginfo.int")).ok())
+            .map(|b| rc_menus::loading::parse_level_loading_info(&b.iter().map(|&c| c as char).collect::<String>()))
+            .unwrap_or_default();
+        let classes = rc_menus::loading::EngineClasses {
+            loading: rc_menus::loading::LOADING_MENU.into(),
+            loading_info: rc_menus::loading::LOADING_INFO_MENU.into(),
+        };
+        let info = rc_menus::loading::choose(&map, &rows, &classes);
+        log.line(format!(
+            "loading screen for {map}: {} rows read; class {}, picture {:?}, title {:?}, hints {}",
+            rows.len(),
+            info.menu_class,
+            info.pic,
+            info.title,
+            info.show_hints
+        ));
+        let set = rc_menus::loading::setup(&mut layout, &data.family, &mut assets.library, &info, false);
+        rc_menus::loading::set_progress(&mut layout, fill);
+        if std::env::var("RC_PROBE_LOADING_DONE").is_ok_and(|v| v == "1") {
+            let ok = rc_menus::loading::finish(&mut layout);
+            log.line(format!("loading finished: START shown {ok}"));
+        }
+        log.line(format!(
+            "loading screen set up: picture {:?}, problems {:?}",
+            set.picture, set.problems
+        ));
+    }
     if class.eq_ignore_ascii_case(campaign::CAMPAIGN_MENU) {
         // As the game shows it: Geonosis chosen, its third mission picked.
         if let Some(mut c) = campaign::read(&data) {
@@ -200,6 +244,15 @@ pub(crate) fn probe(log: &mut Log, game_data: &Path, class: &str, out_dir: &Path
                 t.font,
                 quads::text_box(t, &mut assets).map(round),
                 t.color
+            ),
+            Kind::ProgressBar(p) => format!(
+                "progress bar {:?} / {:?} box {:?} value {} ({}..{})",
+                p.back.texture,
+                p.top.texture,
+                round(quads::progress_bar_box(p)),
+                p.value,
+                p.low,
+                p.high
             ),
             Kind::Button(b) => format!(
                 "button {:?} -> {} {}{}box {:?} text colour {:?} focused {:?}{}",
