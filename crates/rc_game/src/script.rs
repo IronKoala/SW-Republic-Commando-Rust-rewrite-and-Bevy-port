@@ -6,7 +6,8 @@
 //!
 //! The route: the original main menu (colours checked against the
 //! original's pictures), CAMPAIGN MAP (the original campaign page: its
-//! missions, the planets left and right, EVERY MAP +), geo_01a, loading,
+//! missions, the planets left and right, EVERY MAP +), geo_01a, loading
+//! (the original's briefing loading screen, then START),
 //! the level's walls and sky (looking up), walk forward, pause (nothing
 //! moves), resume, saving (the level-start checkpoint, a checkpoint, a
 //! quicksave), walking away, quickload (the player is back where they
@@ -567,6 +568,14 @@ fn steps() -> Vec<Step> {
         }),
         Press(Action::MenuAccept),
         Until("loading starts", |w| !in_state(w, GameState::MainMenu), 5.0),
+        Check("the original's briefing loading screen shows", |w| {
+            let page = shown_page(w);
+            let start = button_hidden(w, "loading_info", "AButton");
+            match (page.as_deref(), start) {
+                (Some("loading_info"), Some(true)) => Ok("loading_info, START hidden".into()),
+                other => Err(format!("{other:?}")),
+            }
+        }),
         Check("a map was chosen", |w| {
             w.resource::<CurrentLevel>()
                 .map
@@ -588,6 +597,18 @@ fn steps() -> Vec<Step> {
                 ))
             }
         }),
+        Until(
+            "the briefing loading screen waits for START",
+            |w| loading_waits(w).is_ok(),
+            5.0,
+        ),
+        Check("the loaded briefing screen shows START, not the bar", loading_waits),
+        Shot("loading_done"),
+        Press(Action::MenuBack),
+        Wait(0.2),
+        Check("back does nothing on the loaded briefing screen", loading_waits),
+        Press(Action::MenuAccept), // START
+        Until("START lets the level run", loading_started, 5.0),
         Wait(1.0),
         Check("player, camera and collision exist", |w| {
             let (p, c, l) = (
@@ -1482,6 +1503,17 @@ fn steps() -> Vec<Step> {
             |w| in_state(w, GameState::InGame) && !w.contains_resource::<RestoringSave>(),
             LOAD_TIMEOUT,
         ),
+        Until(
+            "quickload: the briefing screen waits for START",
+            |w| loading_waits(w).is_ok(),
+            5.0,
+        ),
+        Check("quickload: START, not the bar", loading_waits),
+                Press(Action::MenuBack),
+        Wait(0.2),
+        Check("quickload: back does nothing", loading_waits),
+        Press(Action::MenuAccept), // START
+        Until("quickload: START lets the level run", loading_started, 5.0),
         Wait(0.3),
         Check("quickload puts the player back where they saved", |w| {
             let (at, yaw) = w.resource::<Noted>().saved.ok_or("no save")?;
@@ -1866,6 +1898,13 @@ fn steps() -> Vec<Step> {
             |w| in_state(w, GameState::InGame) && !w.contains_resource::<RestoringSave>(),
             LOAD_TIMEOUT,
         ),
+        Until(
+            "loading a save: the briefing screen waits for START",
+            |w| loading_waits(w).is_ok(),
+            5.0,
+        ),
+        Press(Action::MenuAccept), // START
+        Until("loading a save: START lets the level run", loading_started, 5.0),
         Wait(0.5),
         Check("the quicksave's map is loaded", |w| {
             match w.resource::<CurrentLevel>().map.clone() {
@@ -2370,6 +2409,41 @@ fn steps() -> Vec<Step> {
             Err("still running 5 s later".into())
         }),
     ]
+}
+
+/// A briefing loading screen (`CTLoadingInfo`) has finished and waits
+/// for START: play paused, START showing, the bar and LOADING hidden.
+fn loading_waits(w: &mut World) -> Result<String, String> {
+    let play = w.get_resource::<State<Play>>().map(|p| *p.get());
+    let page = shown_page(w);
+    let k = "loading_info";
+    let (start, bar, text) = (
+        button_hidden(w, k, "AButton"),
+        button_hidden(w, k, "LoadingBar"),
+        button_hidden(w, k, "LoadingText"),
+    );
+    let waiting = w.resource::<crate::loading_screen::LoadingDone>().waiting;
+    let got = format!(
+        "page {page:?}, play {play:?}, START hidden {start:?}, bar hidden {bar:?}, LOADING hidden {text:?}, waiting {waiting}"
+    );
+    if page.as_deref() == Some(k)
+        && play == Some(Play::Paused)
+        && start == Some(false)
+        && bar == Some(true)
+        && text == Some(true)
+        && waiting
+    {
+        Ok(got)
+    } else {
+        Err(got)
+    }
+}
+
+/// START was chosen: the level runs and the loading screen is gone.
+fn loading_started(w: &mut World) -> bool {
+    in_state(w, GameState::InGame)
+        && w.get_resource::<State<Play>>().map(|p| *p.get()) == Some(Play::Running)
+        && shown_page(w).as_deref() != Some("loading_info")
 }
 
 fn original_page_shown(w: &mut World) -> Option<String> {
@@ -3017,7 +3091,12 @@ fn run(world: &mut World) {
                 done = at >= chars.len();
             }
             Step::FocusAfter(a, want) => {
+                // One frame with nothing held first: a `FocusOn` just
+                // before may have ended on a frame that held the same
+                // action, and a held action is not a new press.
                 if frames == 0 {
+                    done = false;
+                } else if frames == 1 {
                     held.insert(a);
                     done = false;
                 } else {
