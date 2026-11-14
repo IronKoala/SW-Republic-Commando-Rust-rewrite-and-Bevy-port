@@ -426,6 +426,8 @@ impl Plugin for SquadPlugin {
             .add_message::<rc_game_core::CharacterOrder>()
             .add_message::<rc_game_core::CharacterOrderDone>()
             .add_message::<MarkerJob>()
+            .add_message::<rc_game_core::MarkerObsolete>()
+            .init_resource::<rc_game_core::MarkerBusy>()
             .init_resource::<SquadJobQueue>()
             .init_resource::<SquadState>()
             .init_resource::<SquadOptions>()
@@ -470,6 +472,7 @@ impl Plugin for SquadPlugin {
                     sync_bodies,
                     check_down,
                     ride_movers,
+                    marker_links,
                     take_orders,
                     gather_threats,
                     ammo::gather_boxes,
@@ -500,6 +503,68 @@ impl Plugin for SquadPlugin {
                     .in_set(GameSet::View)
                     .run_if(in_state(GameState::InGame)),
             );
+    }
+}
+
+/// The level's consoles, door locks and charges and the squad's marked
+/// jobs on them (the original's `SquadMarker` for an `ActivateItem`):
+///
+/// - the player finished one himself (or a script switched it off): its
+///   markers are done with (`SquadMarker.MakeObsolete`), or back when a
+///   script puts the item back (`GotoState('Enabled')`);
+/// - the anchors a squad mate is on now are published as
+///   [`rc_game_core::MarkerBusy`] (`MarkersActive()`): the player can't use
+///   those himself meanwhile.
+fn marker_links(
+    mut state: ResMut<SquadState>,
+    mut obsolete: MessageReader<rc_game_core::MarkerObsolete>,
+    mut busy: ResMut<rc_game_core::MarkerBusy>,
+    log: Option<Res<GameLog>>,
+) {
+    let Some(squad) = state.squad.as_mut() else {
+        obsolete.clear();
+        if !busy.0.is_empty() {
+            busy.0.clear();
+        }
+        return;
+    };
+    for o in obsolete.read() {
+        for (spot, st) in squad.markers.iter_mut() {
+            if !spot.anchor.eq_ignore_ascii_case(&o.anchor) {
+                continue;
+            }
+            let was = *st;
+            match (o.obsolete, *st) {
+                (true, rc_squad::squad::MarkerState::Open) => *st = rc_squad::squad::MarkerState::Done,
+                (false, rc_squad::squad::MarkerState::Done) => *st = rc_squad::squad::MarkerState::Open,
+                _ => {}
+            }
+            if *st != was {
+                log_line(
+                    &log,
+                    format!(
+                        "marker {} ({} at {}) {}",
+                        spot.name,
+                        spot.job,
+                        spot.anchor,
+                        if o.obsolete {
+                            "is done with: the player did it"
+                        } else {
+                            "is back"
+                        }
+                    ),
+                );
+            }
+        }
+    }
+    let now: std::collections::HashSet<String> = squad
+        .markers
+        .iter()
+        .filter(|(_, st)| matches!(st, rc_squad::squad::MarkerState::Assigned(_)))
+        .map(|(spot, _)| spot.anchor.to_ascii_lowercase())
+        .collect();
+    if busy.0 != now {
+        busy.0 = now;
     }
 }
 

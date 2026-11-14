@@ -682,7 +682,7 @@ pub(crate) fn heal(
     (healing_sound, prompts): (Query<Entity, With<HealingSound>>, Option<Res<InputPrompts>>),
     props: Query<&rc_level_plugin::anim_props::AnimProp>,
     mut commands: Commands,
-    mut aimed: Local<bool>,
+    (mut aimed, mut last_hands): (Local<bool>, Local<Option<String>>),
 ) {
     claimed.0 = false;
     let Some(mut script) = script else {
@@ -862,8 +862,10 @@ pub(crate) fn heal(
     use_item.panel = panel;
     // The hands plug into the dispenser while it heals (the game's
     // HandSignal: `SetupBactaHealer`), whether or not the body is held.
+    // (Compared with its own last answer: the consoles and charges,
+    // `panels.rs`, write over it after this.)
     let hands = healing.then(|| "bacta".to_string());
-    if hands != use_item.hands {
+    if hands != *last_hands {
         log.line(format!(
             "{PART}: t={now:.2} bacta: hands {}",
             if hands.is_some() {
@@ -872,8 +874,9 @@ pub(crate) fn heal(
                 "come away"
             }
         ));
-        use_item.hands = hands;
+        *last_hands = hands.clone();
     }
+    use_item.hands = hands;
     // The prompt, while standing at one that can be used.
     let prompt = matches!(panel, UsePanel::Ready(_))
         .then(|| assets.as_ref().and_then(|a| a.prompt.as_deref()))

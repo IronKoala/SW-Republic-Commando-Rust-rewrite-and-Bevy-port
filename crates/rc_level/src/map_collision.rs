@@ -93,6 +93,22 @@ pub struct MapCollision {
     pub weapons: Vec<crate::pickups::PlacedWeapon>,
     /// Pickups of every kind left out of collision.
     pub pickups_not_solid: usize,
+    /// The shape of each console, door lock and demolition charge (the
+    /// original's `ActivateItem`s, see [`is_activate_item`]), by export
+    /// index, placed where the map puts it: what the player's look must
+    /// hit to use one (`CTPlayer`'s trace for `TGT_Panel`). Its collision
+    /// triangles, or its drawn ones when it has none.
+    pub item_triangles: HashMap<usize, Vec<[Vec3; 3]>>,
+}
+
+/// Whether a map class is a console, door lock or demolition charge the
+/// player can use (`HackTerminal*`, `HackDoor*`, `BreachDoor*`,
+/// `DemolitionCharge*`, as the squad marker anchors are found).
+pub fn is_activate_item(class: &str) -> bool {
+    let c = class.to_ascii_lowercase();
+    ["hackterminal", "hackdoor", "breachdoor", "demolitioncharge"]
+        .iter()
+        .any(|p| c.starts_with(p))
 }
 
 impl MapCollision {
@@ -241,6 +257,7 @@ pub fn load(
     let mut anim_props = Vec::new();
     let mut not_solid = 0;
     let mut pickups_not_solid = 0;
+    let mut item_triangles: HashMap<usize, Vec<[Vec3; 3]>> = HashMap::new();
     // Physics props that fall as the level starts, moved down onto the
     // ground below (`crate::settle`).
     let mut karma = std::collections::HashSet::new();
@@ -288,6 +305,21 @@ pub fn load(
                     }
                     continue;
                 }
+            }
+        }
+        // A console, door lock or charge: its shape, for the player's
+        // look, whether or not it blocks or shows now.
+        if is_activate_item(&p.class) && p.static_mesh != 0 {
+            let key = (Rc::as_ptr(&owner) as usize, p.static_mesh);
+            let mesh = cache
+                .entry(key)
+                .or_insert_with(|| load_mesh(&mut pkgs, &owner, p.static_mesh));
+            if let Some(m) = mesh {
+                let mut t = crate::collision::solid_triangles(&p, m);
+                if t.is_empty() {
+                    t = crate::collision::drawn_triangles(&p, m);
+                }
+                item_triangles.insert(a, t);
             }
         }
         // Hidden props are left out, as in the level viewer.
@@ -485,6 +517,7 @@ pub fn load(
         ammo_boxes,
         weapons,
         pickups_not_solid,
+        item_triangles,
         bsp_nodes: bsp.nodes.len(),
         mesh_actors: pairs.len(),
         mesh_failures,

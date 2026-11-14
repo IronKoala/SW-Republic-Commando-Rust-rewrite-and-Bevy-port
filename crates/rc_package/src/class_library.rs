@@ -312,6 +312,37 @@ impl ClassLibrary {
         None
     }
 
+    /// The fields of a struct a class sets by default (an `ActivationInfo`
+    /// such as `HackTerminal.ActiveState`), from the nearest class in the
+    /// chain that sets it. Objects are full dotted paths with their package
+    /// first (`GEN_Sound.Interface.int_GEN_HackedConsole_01`), `"None"` for
+    /// none. `None` when no class in the chain sets it.
+    pub fn struct_default(&self, class: &str, name: &str) -> Option<Vec<(String, DefaultValue)>> {
+        for c in self.chain(class) {
+            let Some(info) = self.classes.get(&c.to_ascii_lowercase()) else {
+                continue;
+            };
+            let (pkg_name, pkg, data) = &self.packages[info.package];
+            let e = &pkg.exports[info.export];
+            let is_property = |n: &str| self.property_names.contains(&n.to_ascii_lowercase());
+            let Some(found) = class_defaults(pkg, data, e, &is_property) else {
+                continue;
+            };
+            let Some(p) = found
+                .properties
+                .iter()
+                .find(|p| pkg.name(p.name).eq_ignore_ascii_case(name) && p.array_index == 0)
+            else {
+                continue;
+            };
+            let Value::Raw(b) = &p.value else {
+                return None;
+            };
+            return struct_fields(pkg, Some(pkg_name), b);
+        }
+        None
+    }
+
     /// Every default value for `class`: its own, then whatever its parents
     /// set that it doesn't.
     pub fn defaults(&self, class: &str) -> Defaults {
@@ -329,6 +360,39 @@ impl ClassLibrary {
         }
         Defaults { chain, entries }
     }
+}
+
+/// The fields of a struct value stored as a tagged property list (`b`, from
+/// `pkg`), with objects as full dotted paths. `own` is `pkg`'s own name,
+/// for objects it exports (a map's `myLevel`, a script package's own);
+/// without it those paths start at their outermost group.
+pub fn struct_fields(
+    pkg: &Package,
+    own: Option<&str>,
+    b: &[u8],
+) -> Option<Vec<(String, DefaultValue)>> {
+    let mut r = crate::Reader::new(b);
+    let props = crate::properties::read_properties(pkg, &mut r).ok()?;
+    Some(
+        props
+            .iter()
+            .filter(|p| p.array_index == 0)
+            .map(|p| {
+                let v = match p.value {
+                    Value::Object(o) => DefaultValue::Object(match ObjectRef::from_index(o) {
+                        ObjectRef::None => "None".to_string(),
+                        ObjectRef::Import(_) => crate::class::object_path(pkg, o),
+                        ObjectRef::Export(_) => match own {
+                            Some(n) => format!("{n}.{}", crate::class::object_path(pkg, o)),
+                            None => crate::class::object_path(pkg, o),
+                        },
+                    }),
+                    ref v => convert(pkg, v),
+                };
+                (pkg.name(p.name).to_string(), v)
+            })
+            .collect(),
+    )
 }
 
 fn convert(pkg: &Package, v: &Value) -> DefaultValue {

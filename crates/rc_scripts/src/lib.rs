@@ -25,6 +25,7 @@
 //! ([`Settings`]).
 
 pub mod markers;
+pub mod panels;
 pub mod save;
 pub mod settings;
 pub mod sight;

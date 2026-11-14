@@ -103,11 +103,11 @@ prompt_wrap = 21
 #
 # Texts: {weapon} {clip} {reserve} {grenade} {grenades} {message1}
 # (newest) {message2} {message3} {pickup} {prompt1} {prompt2} (the use
-# prompt's two lines) {subtitle} {objective}; for squad rows {number} {name}
-# {order}.
+# prompt's two lines) {use_timer} (a console's or charge's clock)
+# {subtitle} {objective}; for squad rows {number} {name} {order}.
 # Conditions (`when`, `alert_when`, "!" in front means "not"): weapon,
 # clip, reserve, grenade, shield_low, health_low, health_full, squad_down, pickup,
-# prompt, subtitle, objective.
+# prompt, use_timer, subtitle, objective.
 # Bars (`fill`): shield, health, clip, squad_health.
 # Fading (`fade`, 1 shown to 0 gone): pickup, prompt, subtitle, objective.
 # Sliding (`scroll`, in picture widths, the picture repeating): compass.
@@ -539,3 +539,25 @@ align = "centre"
 blend = "alpha"
 colour = [164, 200, 208, 220]
 fade = "prompt"
+
+# --- The clock of a console, door lock or charge ----------------------------
+# While you aim at a console, door lock or demolition charge whose job has
+# time left, the original shows that time ("00:10") above the crosshair.
+# Read from Engine.dll (UHelmet::DrawHelmet, 0x10438c13): DrawString at
+# (400, 240) of the 800x600 screen with its "centred" flag, which
+# (FCanvasUtil::DrawString, 0x104cad47) moves the text back by half its
+# width and half its height, so (400, 240) is its middle. Font: the
+# helmet's Orbit15Font (OrbitFonts.OrbitBold15, 27 lines high) at 0.8 of
+# its size, colour (200, 240, 255), fully opaque. On our 480 lines the
+# middle is 48 above the screen's, the text 27 x 0.8 x 0.8 = 17.28 high.
+[[element]]
+group = "use_timer"
+anchor = "centre"
+at = [-80, -56.64]
+size = [160, 17.28]
+when = "use_timer"
+text = "{use_timer}"
+align = "centre"
+font = "OrbitFonts.OrbitBold15"
+blend = "alpha"
+colour = [200, 240, 255, 255]

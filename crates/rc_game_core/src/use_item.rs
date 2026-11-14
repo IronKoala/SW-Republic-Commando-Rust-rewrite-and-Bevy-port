@@ -30,6 +30,124 @@ pub struct UseItem {
     /// `data/combat/hand_signal.toml` (`"bacta"`: plugging into a bacta
     /// dispenser). A VR mod can read the same flag to pose its own hands.
     pub hands: Option<String>,
+    /// While set, the player is held as the original's `CTPlayer` state
+    /// `UsingItem` holds them at a console, door lock or charge: see
+    /// [`UseHold`]. (A bacta dispenser uses [`UseItem::lock`] instead.)
+    pub hold: Option<UseHold>,
+    /// Which picture the use panel shows in its middle.
+    pub icon: UseIcon,
+    /// Seconds left on the job (the item's `DurationRemaining`), shown by
+    /// the HUD as a "00:10" clock in the middle of the screen while above
+    /// zero, as the original's helmet does for a panel target.
+    pub timer: Option<f32>,
+}
+
+/// How the player is held while using a console, door lock or charge:
+/// the original's `CTPlayer.UsingItem.PlayerMove` (ctgame.u). Each frame:
+///
+/// - Where they should stand (`stand`): `Target.Location + PlayerOffset *
+///   Vector(Target.Rotation)` across the floor when the item has
+///   `bLockPlayerLocation`; otherwise where they are (`None`), so they
+///   stay put.
+/// - Further away than `450 * dt`: the body is pushed with acceleration
+///   `15 * (stand - feet) - velocity` (no height), and walks there under
+///   its own movement. Closer: put on the spot (if more than 1 unit off)
+///   and stopped.
+/// - The view turns towards `look_at` (the item's place, raised by its
+///   `HUDMarkerIconZOffset`) from the eye, each of yaw and pitch at most
+///   45000 rotation units a second. The player's own looking does nothing.
+///
+/// Nothing here assumes a flat screen: a VR mod can move the body the
+/// same way and point the head itself.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UseHold {
+    /// Unreal units (x, y).
+    pub stand: Option<[f32; 2]>,
+    /// Unreal units.
+    pub look_at: [f32; 3],
+}
+
+impl UseHold {
+    /// The original's numbers (`UsingItem.PlayerMove`).
+    pub const SPEED: f32 = 450.0;
+    pub const PULL: f32 = 15.0;
+    /// Rotation units (65536 a turn) a second, for yaw and for pitch.
+    pub const TURN: f32 = 45000.0;
+
+    /// One frame: from feet `at` (x, y) moving at `velocity` (x, y), what
+    /// to do. `dt` seconds.
+    pub fn step(&self, at: [f32; 2], velocity: [f32; 2], dt: f32) -> HoldStep {
+        let Some(stand) = self.stand else {
+            return HoldStep::Stop(None);
+        };
+        let to = [stand[0] - at[0], stand[1] - at[1]];
+        let dist = (to[0] * to[0] + to[1] * to[1]).sqrt();
+        if dist > Self::SPEED * dt {
+            HoldStep::Push([
+                Self::PULL * to[0] - velocity[0],
+                Self::PULL * to[1] - velocity[1],
+            ])
+        } else if dist > 1.0 {
+            HoldStep::Stop(Some(stand))
+        } else {
+            HoldStep::Stop(None)
+        }
+    }
+
+    /// Turn `from` (radians) towards `want` (radians) by at most the
+    /// original's 45000 units a second, the short way round, on the
+    /// original's rotation units (whole numbers, 65536 a turn).
+    pub fn turn(from: f32, want: f32, dt: f32) -> f32 {
+        use std::f32::consts::TAU;
+        let unit = |r: f32| (r / TAU * 65536.0).round() as i32;
+        let mut d = (unit(want) - unit(from)) & 65535;
+        if d > 32768 {
+            d -= 65536;
+        }
+        let most = Self::TURN * dt;
+        let d = (d as f32).clamp(-most, most);
+        from + d / 65536.0 * TAU
+    }
+}
+
+/// The clock the original's helmet shows for a console, door lock or
+/// charge (`UHelmet::DrawHelmet`, Engine.dll 0x10438c13): only while
+/// `remaining` is above 0; minutes are the whole seconds over 60, seconds
+/// are `remaining + 0.5` rounded down, modulo 60, and a 0 there shows as
+/// 1; printed `"%02i:%02i"`.
+pub fn timer_text(remaining: f32) -> Option<String> {
+    if remaining <= 0.0 {
+        return None;
+    }
+    let minutes = remaining as i32 / 60;
+    let mut seconds = (remaining + 0.5) as i32 % 60;
+    if seconds == 0 {
+        seconds = 1;
+    }
+    Some(format!("{minutes:02}:{seconds:02}"))
+}
+
+/// What [`UseHold::step`] says to do with the body this frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HoldStep {
+    /// Walk with this acceleration (x, y), Unreal units a second squared.
+    Push([f32; 2]),
+    /// Stand still: velocity and acceleration nothing; put the feet here
+    /// first when given (x, y).
+    Stop(Option<[f32; 2]>),
+}
+
+/// The picture in the middle of the use panel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UseIcon {
+    /// `data/ui/hud.toml`'s `[use_panel] icon` (a bacta dispenser's).
+    #[default]
+    Default,
+    /// This square of the icon sheet (the squad marker's `HUDIconX`,
+    /// `HUDIconY`).
+    Square([u32; 2]),
+    /// None: the item has no squad marker (the original draws no icon).
+    Nothing,
 }
 
 /// Where a used thing holds the player.
@@ -108,6 +226,17 @@ mod tests {
         assert_eq!(pos, [100.0, 0.0]);
         assert_eq!(yaw, 0.0);
         assert!(done);
+    }
+
+    #[test]
+    fn the_clock_reads_as_the_original_prints_it() {
+        assert_eq!(timer_text(0.0), None);
+        assert_eq!(timer_text(10.0).as_deref(), Some("00:10"));
+        assert_eq!(timer_text(9.4).as_deref(), Some("00:09"));
+        assert_eq!(timer_text(9.6).as_deref(), Some("00:10"));
+        // A whole minute: the seconds' 0 shows as 1.
+        assert_eq!(timer_text(60.0).as_deref(), Some("01:01"));
+        assert_eq!(timer_text(0.2).as_deref(), Some("00:01"));
     }
 
     #[test]

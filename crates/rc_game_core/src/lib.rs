@@ -68,7 +68,7 @@ pub use cutscene::{Cutscene, HeldView, TeleportPlayer};
 pub use events::{
     ArrivalPortal, ChangeLevel, CharacterAct, CharacterCollision, CharacterOrder, CharacterOrderDone,
     FactoryOrder,
-    LevelScriptsRun, MarkerJob, MarkerJobStep, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
+    HandNotify, LevelScriptsRun, MarkerBusy, MarkerJob, MarkerJobStep, MarkerObsolete, PropAnim, RaiseEvent, ScriptEvent, ScriptTags,
     ShowDebriefing, ShowHint, SquadMembership, SquadStanceOrder, UseClaimed,
 };
 pub use hud::{
@@ -85,7 +85,7 @@ pub use state::{
     MovingFloors, MusicMood, OwnFog, Play, Player, PlayerCamera, PlayerPawn, PlayerStart,
 };
 pub use turrets::{Manning, OnTurret, TurretOrder};
-pub use use_item::{UseItem, UseLock, UsePanel};
+pub use use_item::{timer_text, HoldStep, UseHold, UseIcon, UseItem, UseLock, UsePanel};
 
 use bevy::prelude::*;
 
@@ -124,6 +124,9 @@ impl Plugin for CorePlugin {
             .add_message::<SquadStanceOrder>()
             .add_message::<SquadMembership>()
             .add_message::<MarkerJob>()
+            .add_message::<HandNotify>()
+            .add_message::<MarkerObsolete>()
+            .init_resource::<MarkerBusy>()
             .add_message::<PropAnim>()
             .add_message::<ChangeLevel>()
             .add_message::<TurretOrder>()

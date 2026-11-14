@@ -2067,9 +2067,91 @@ open is a door the movers part moves. On the 13 Geonosis maps: 57 anchors,
 61 of their events are ones scripts wait for, and 38 of 38 doors found.
 
 Not done: the anchor's own look changing (a lit charge, a console's
-screen, the blown lock's mesh), its sounds, the player doing a job with
-Use, and saving which steps were sent (after a load a step can be sent
-again if the squad repeats it).
+screen, the blown lock's mesh), its sounds when a squad mate does the
+job, and saving which steps were sent (after a load a step can be sent
+again if the squad repeats it). The player doing the job himself is the
+next section.
+
+### The player uses consoles, door locks and charges (`panels.rs`, `rc_scripts::panels`)
+
+The original's `ActivateItem` classes (Engine.u `ActivateItem`, CTGame.u
+`HackTerminal`, `ActivateDoor`, `HackDoor`, `BreachDoor`, CTMarkers.u
+`ExplosiveCharge`, `DemolitionCharge`) are state machines in
+`rc_scripts::panels`, written from their script source (read locally, not
+copied). The map's values sit over the class defaults (`ClassLibrary`,
+with `Properties/MarkerProperties.u`); an `ActivationInfo` struct the map
+changes is stored whole, so it replaces the class's whole.
+
+| Item | States (start in bold) | The job | Done |
+|---|---|---|---|
+| console (`HackTerminal*`) | Disabled, **Standby**, Active, Hacked | `ActiveState.Duration` | `HackedState` |
+| slice lock (`HackDoor*`) | Disabled, **Locked**, Unlocked, Damaged | `DoorLockedState.Duration` | unlocks its partner (`MatchingComponent`) |
+| breach lock (`BreachDoor*`) | Disabled, **Locked**, ChargeLocked, Unlocked, Damaged | `DoorLockedState.Duration`, then a fuse of `DoorChargeLockedState.Duration` | `Damaged`: blast, doors open after `DamagedDelay` |
+| demolition charge | **Unplaced**, Placed, Armed, Explode, Disabled | `ChargePlaced.Duration` | `Armed`: the plunger blows it (`ChargeExplode`) |
+
+Times are the state's `Duration` times the item's `Difficulty`
+multiplier, read from Engine.dll's `AActivateItem::DurationMultiplier`
+(Easy 1, Medium 2, Hard 3, Hardest 6). Consoles, slice locks and charges
+keep their progress when the player lets go (`bSavesProgress`); a breach
+lock starts again.
+
+**Aiming** follows ctgame.dll's `CTPlayer::SelectTargetType` (`TGT_Panel`):
+the look (10000 units from the eye) meets the item's own shape first
+(`rc_level::map_collision::MapCollision::item_triangles`, served by
+`rc_level_plugin::ItemShapes`), no squad mate is on its job (the squad
+part publishes `rc_game_core::MarkerBusy`), the player isn't on a turret,
+it is usable and usable by the player (`bIsUsableByPlayer`; geo_01b's
+entrance console and breach lock are squad-only), it is nearer than its
+`PlayerRange`, and the player is in front of it (`Vector(Rotation)`
+dotted with the view below `ActivateDotProdMax`). An armed charge is
+`TGT_DemolitionReady` instead, at any distance. No item in any of the
+game's maps needs an `AmmunitionRequired`.
+
+**The HUD** for a `TGT_Panel` (Engine.dll `UHelmet::DrawHelmet`, from
+0x10438b34): the ring filled to `FractionComplete`; the squad marker's
+icon square (`HUDIconX`, `HUDIconY`, `UHelmet::GetMarkerIconUVs`), none
+for an item without a marker; the icon coloured by the same value; the
+item's `ActivatePromptText`; and its `DurationRemaining` as `%02i:%02i`
+at (400, 240) of 800x600, centred, Orbit15Font at 0.8, RGB(200, 240,
+255), while above 0 (`rc_game_core::timer_text`, `[[element]]` with
+`{use_timer}` in `data/ui/hud.toml`). The helmet's red detonate icon over
+an armed charge (0x10438eac) isn't drawn yet.
+
+**Using one** (`CTPlayer.Use` case `TGT_Panel`, state `UsingItem`):
+Use sends the item's `EventUnderway`; if it is usable the hands come up
+(`HandSignal.MarkerHandSetup`: `[slice]`, `[breach]`,
+`[demolition_place]`, `[demolition]`, `[plunger]`, `[defaults]` in
+`data/combat/hand_signal.toml`) and the player is held
+(`rc_game_core::UseHold`: walked to `PlayerOffset` in front when
+`bLockPlayerLocation`, at most 450 units a second with acceleration
+`15 * (spot - feet) - velocity`, else kept in place; the view turned to
+the item at most 45000 rotation units a second; looking, moving, firing
+and orders do nothing). The job starts when the hands are up, or for a
+breach or demolition charge at the hands' `HolsterAttachment` moment
+(`rc_game_core::HandNotify` from the arms). Each frame Use is held the
+time grows; letting go is `AbortSetup`. The plunger fires at the
+`Detonate` move's `FireWeapon` moment.
+
+**What the items ask** (`rc_scripts::panels::Out`), carried out by
+`panels.rs`: each new state's `MakeTransition` sends its event, plays its
+`TransitionSound` and `TransitionEffect`, and hurts what is near with its
+damage (characters through `Explode`, breakable props too); doors open
+(`LevelMovers::open_named`); a charge's `PropToDestroy` is blown away;
+an exploded charge is gone; the item's squad markers are done with
+(`MarkerObsolete`, so the squad won't be sent to it) and the squad
+marker steps (`markers.rs`) aren't sent again. A job a squad mate
+finished leaves the item unusable to the player. `ACTION_GotoState` on an
+item's tag moves it to that state. Items are kept in save files
+(`[panels]`).
+
+Not done yet, said in the log when they would happen: the item's look
+changing (a state's `Mesh` and `Material`, the charge shown on a breach
+lock), the AI hearing a breach (`PostStimulusToWorld`), the doors'
+`TriggerControl` after a slice (they open at once and stay open), the
+squad's own timing using the item's durations, and the player's
+`PAE_DemolitionExplode` line before the plunger. If the hands' model
+can't be shown, the job starts after 3 s anyway (ours, so it never
+hangs).
 
 ### geo_01a, worked through
 

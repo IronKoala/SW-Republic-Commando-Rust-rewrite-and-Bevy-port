@@ -471,6 +471,7 @@ pub(crate) fn hud(log: &mut Log, game_data: &Path, file: &Path, out_dir: &Path) 
         pickup_fade: 1.0,
         prompt: Vec::new(),
         prompt_fade: 0.0,
+        use_timer: String::new(),
         subtitle: "Clone Advisor 1: Proceed to the next bacta station and plug in. You'll see a tall device with a cross on it.".into(),
         subtitle_fade: 1.0,
         objective: String::new(),

@@ -30,7 +30,8 @@ pub fn arms_id(using: &str) -> String {
 pub struct HandMoves {
     /// Coming up into view (`LoadAnim`).
     pub load: String,
-    /// Repeated while Use is held (`FireAnim`).
+    /// Repeated while Use is held (`FireAnim`). Empty for none (the
+    /// plunger's `FireAnim = ''`): the hands stay still once up.
     pub fire: String,
     /// Going down out of view (`HolsterAnim`).
     pub holster: String,
@@ -102,6 +103,27 @@ mod tests {
             ("BactaLoad", "BactaLoop", "BactaHolster")
         );
         assert!(h.for_arms("dc17m_blaster").is_none());
+    }
+
+    #[test]
+    fn the_original_hand_setups() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/combat/hand_signal.toml"
+        ))
+        .unwrap();
+        let h = HandSignal::from_text(&text).unwrap();
+        let moves = |u: &str| {
+            let (_, m) = h.for_arms(&arms_id(u)).unwrap();
+            (m.load.clone(), m.fire.clone(), m.holster.clone())
+        };
+        let t = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+        assert_eq!(moves("slice"), t("KeypadLoad", "KeypadLoop", "KeypadHolster"));
+        assert_eq!(moves("breach"), t("SetDoorCharge", "StartDoorCharge", "Holster"));
+        assert_eq!(moves("demolition_place"), t("SetDemolition", "KeypadLoop", "Holster"));
+        assert_eq!(moves("demolition"), t("Load", "KeypadLoop", "Holster"));
+        assert_eq!(moves("plunger"), t("Detonate", "", "Holster"));
+        assert_eq!(moves("defaults"), t("Load", "KeypadLoop", "Holster"));
     }
 
     #[test]

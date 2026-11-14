@@ -251,6 +251,38 @@ pub struct MarkerJob {
     pub by: String,
 }
 
+/// The first-person hands passed an animation event (an `AnimNotify` in
+/// `Animations/hudarms.ukx`) this frame. `notify` is its class
+/// (`AnimNotify_HolsterAttachment`, `AnimNotify_FireWeapon`); `using` the
+/// hands' use (`[breach]` in `data/combat/hand_signal.toml`). The original
+/// starts placing a breach or demolition charge at `HolsterAttachment`
+/// (`HandSignal.HolsterAttachment`) and fires the plunger at `FireWeapon`
+/// (`HandSignal.FireWeapon`). Sent by the arms (`rc_combat`).
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct HandNotify {
+    pub using: String,
+    pub notify: String,
+}
+
+/// The squad marker jobs a squad mate is on now, by the marker's anchor
+/// (the map actor the job is for), lower case: the original's
+/// `SquadMarker.MarkersActive()`. While one is, the player can't use that
+/// anchor himself, and it doesn't make its marker obsolete. Written by
+/// the squad part each frame.
+#[derive(Resource, Debug, Default, Clone, PartialEq)]
+pub struct MarkerBusy(pub std::collections::HashSet<String>);
+
+/// The squad markers whose anchor is `anchor` are done with: the
+/// original's `SquadMarker.MakeObsolete()` (the player finished the job
+/// himself, or a script switched it off). `false` in `obsolete` puts them
+/// back (`SquadMarker.GotoState('Enabled')`). Sent by the level scripts
+/// part; the squad part carries it out.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct MarkerObsolete {
+    pub anchor: String,
+    pub obsolete: bool,
+}
+
 /// Play animation `anim` (the model's own sequence name, such as `Load`)
 /// on the map actor called `actor` (`BactaDispenserGEO0`), for props drawn
 /// with an animated model (`rc_level_plugin::anim_props`). The animation's

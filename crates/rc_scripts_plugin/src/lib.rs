@@ -63,6 +63,7 @@ pub mod hud_blink;
 pub mod markers;
 pub mod music;
 pub mod objectives;
+pub mod panels;
 pub mod placed_emitters;
 pub mod projectiles;
 pub mod save;
@@ -129,6 +130,7 @@ impl Plugin for ScriptsPlugin {
             .add_systems(Startup, tracker::load_look)
             .add_save_part::<save::ScriptsSave>()
             .add_save_part::<fx_factories::FxFactoriesSave>()
+            .add_save_part::<save::PanelsSave>()
             .add_systems(OnEnter(GameState::Loading), begin)
             .add_systems(
                 Update,
@@ -147,8 +149,7 @@ impl Plugin for ScriptsPlugin {
             .add_systems(
                 Update,
                 (
-                    bacta::heal,
-                    bacta::zap,
+                    (bacta::heal, panels::run, bacta::zap).chain(),
                     markers::run,
                     breakables::shots,
                     breakables::blasts,
@@ -284,6 +285,9 @@ pub struct LevelScript {
     pub props: breakables::PropStats,
     /// Screen shakes: the map's `ViewShaker`s and the scripts' requests.
     pub shakes: shake::LevelShakes,
+    /// `ACTION_GotoState` for consoles, door locks and charges (by tag,
+    /// to the state named), for `panels.rs` to carry out.
+    pub panel_states: Vec<(String, String, String)>,
 }
 
 impl LevelScript {
@@ -307,6 +311,7 @@ impl LevelScript {
             props: breakables::PropStats::default(),
             anchors: Vec::new(),
             shakes: shake::LevelShakes::default(),
+            panel_states: Vec::new(),
         }
     }
 }
@@ -403,6 +408,7 @@ fn begin(
     gate.wait(PART);
     commands.remove_resource::<bacta::BactaAssets>();
     commands.remove_resource::<bacta::BactaStats>();
+    commands.remove_resource::<panels::LevelPanels>();
     let settings = load_settings(&paths, &log);
     let Some(map) = &current.map else {
         gate.fail(PART, "no map chosen");
@@ -420,18 +426,46 @@ fn begin(
             rc_level::actors::read_level(&p, &d)
                 .map(|l| {
                     let m = rc_level::scripts::read(&p, &d, &l);
+                    // The game's classes, for what the map leaves to them.
+                    let (lib, missing) = tracker::class_library(&paths);
+                    for m in &missing {
+                        log.line(format!("{PART}: class package {m}"));
+                    }
                     // What the map's objective tracker steps point at.
-                    let targets = tracker::read_targets(&p, &d, &l, &m, &paths, &log);
-                    (m, rc_level::scripts::places(&p, &d, &l), targets)
+                    let targets = tracker::read_targets(&p, &d, &l, &m, &lib, &paths, &log);
+                    // Consoles, door locks and demolition charges.
+                    let (list, problems) = rc_scripts::panels::read(&p, &d, &l, &lib);
+                    for e in &problems {
+                        log.line(format!("{PART}: console/lock/charge: {e}"));
+                    }
+                    for x in &list {
+                        log.line(format!(
+                            "{PART}:   {} {} ({}) starts {}, {} by the player, {:.0} s{}{}",
+                            x.kind.what(),
+                            x.name,
+                            x.class,
+                            x.initial.name(),
+                            if x.usable_by_player { "usable" } else { "not usable" },
+                            x.default_remaining(),
+                            x.marker
+                                .as_deref()
+                                .map(|m| format!(", squad marker {m}"))
+                                .unwrap_or_default(),
+                            if x.lock_player { ", holds the player" } else { "" }
+                        ));
+                    }
+                    let panels = rc_scripts::panels::Panels::new(list);
+                    (m, rc_level::scripts::places(&p, &d, &l), targets, panels)
                 })
                 .map_err(|e| e.to_string())
         });
     match read {
-        Ok((m, places, targets)) => {
+        Ok((m, places, targets, panels)) => {
             for f in &m.failures {
                 log.line(format!("{PART}: unreadable: {f}"));
             }
             commands.insert_resource(targets);
+            commands.insert_resource(panels::LevelPanels::new(panels));
             commands.insert_resource(Loaded(m, settings, places));
         }
         Err(e) => {
@@ -486,10 +520,15 @@ fn build(
     audio: Option<ResMut<Assets<bevy::audio::AudioSource>>>,
     mut preload: MessageWriter<rc_effects_plugin::PreloadEffect>,
     log: Res<GameLog>,
+    level_panels: Option<Res<panels::LevelPanels>>,
 ) {
     let (Some(loaded), Some(movers)) = (loaded, movers) else {
         return;
     };
+    // The consoles', door locks' and charges' effects and sounds.
+    if let Some(lp) = &level_panels {
+        panels::preload(&lp.panels, &mut preload);
+    }
     let Loaded(map, settings, places) = &*loaded;
     let mut director = Director::new(map, &movers.movers.triggers, settings.clone());
     // Props weapons can break get the game's full damage rules.
@@ -670,6 +709,7 @@ fn build(
         breaking: breakables::Breakables::new(&breakable),
         props: breakables::PropStats::default(),
         shakes,
+        panel_states: Vec::new(),
     });
     let mission = objectives::MissionList::from_map(map);
     if let Some(m) = &mission {
@@ -1184,8 +1224,11 @@ fn carry_out(
                     if on { "switched on" } else { "switched off" }
                 ));
             } else {
-                script.stats.not_done += 1;
-                log.line(format!("{at}: {tag} to state {state} (not done yet)"));
+                // Consoles, door locks and charges, by their tag: carried
+                // out by `panels.rs`, which says if none has the tag.
+                script
+                    .panel_states
+                    .push((tag.to_string(), state.to_string(), at.clone()));
             }
         }
         "showprompt" => {

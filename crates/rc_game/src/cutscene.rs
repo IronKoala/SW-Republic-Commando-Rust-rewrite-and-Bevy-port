@@ -51,8 +51,9 @@ fn hold_player(
 ) {
     if let Some(h) = &cut.held {
         actions.hold_still(h.weapon_change);
-    } else if use_item.lock.is_some() {
-        // At a bacta dispenser: held, but letting go of Use still stops.
+    } else if use_item.lock.is_some() || use_item.hold.is_some() {
+        // At a bacta dispenser, console, door lock or charge: held, but
+        // letting go of Use still stops.
         actions.hold_for_use();
     }
 }

@@ -361,8 +361,26 @@ fn move_body(
     let kick = kicks
         .read()
         .fold(Vec2::ZERO, |k, v| k + Vec2::new(v.yaw, v.pitch));
-    body.yaw = (body.yaw + actions.look.x + kick.x).rem_euclid(std::f32::consts::TAU);
-    body.pitch = (body.pitch + actions.look.y + kick.y).clamp(-1.5, 1.5);
+    if let Some(hold) = &use_item.hold {
+        // Using a console, door lock or charge (`CTPlayer.UsingItem`):
+        // the view turns towards the item by itself, at most 45000
+        // rotation units a second each way; the player's own looking does
+        // nothing.
+        let eye = body.pawn.eye();
+        let (dx, dy, dz) = (
+            hold.look_at[0] - eye.x,
+            hold.look_at[1] - eye.y,
+            hold.look_at[2] - eye.z,
+        );
+        let want_yaw = dy.atan2(dx);
+        let want_pitch = dz.atan2((dx * dx + dy * dy).sqrt());
+        body.yaw = rc_game_core::UseHold::turn(body.yaw, want_yaw, dt)
+            .rem_euclid(std::f32::consts::TAU);
+        body.pitch = rc_game_core::UseHold::turn(body.pitch, want_pitch, dt).clamp(-1.5, 1.5);
+    } else {
+        body.yaw = (body.yaw + actions.look.x + kick.x).rem_euclid(std::f32::consts::TAU);
+        body.pitch = (body.pitch + actions.look.y + kick.y).clamp(-1.5, 1.5);
+    }
     // Held by a cutscene: looking stays inside its limits.
     if let Some(held) = &cut.held {
         let (yaw, pitch) = held.limit(body.yaw, body.pitch);
@@ -423,7 +441,28 @@ fn move_body(
     }
     // Down (health at 0, waiting for a squad mate to revive): can look
     // around but not move.
-    let input = if down || use_item.lock.is_some() {
+    // Held at a console, door lock or charge: walked to its spot, then
+    // stopped there (`UsingItem.PlayerMove`, see `UseHold`).
+    let mut push = None;
+    if let Some(hold) = &use_item.hold {
+        let p = &body.pawn;
+        match hold.step(
+            [p.location.x, p.location.y],
+            [p.velocity.x, p.velocity.y],
+            dt,
+        ) {
+            rc_game_core::HoldStep::Push(a) => push = Some(UVec3::new(a[0], a[1], 0.0)),
+            rc_game_core::HoldStep::Stop(at) => {
+                if let Some([x, y]) = at {
+                    body.pawn.location.x = x;
+                    body.pawn.location.y = y;
+                }
+                body.pawn.velocity.x = 0.0;
+                body.pawn.velocity.y = 0.0;
+            }
+        }
+    }
+    let input = if down || use_item.lock.is_some() || use_item.hold.is_some() {
         MoveInput {
             yaw: body.yaw,
             ..Default::default()
@@ -443,7 +482,9 @@ fn move_body(
     if let Some(m) = &movers {
         m.step(dt, &mut body.pawn);
     }
-    let events = body.pawn.step(dt, &input, collision.0.as_ref());
+    let events = body
+        .pawn
+        .step_pushed(dt, &input, push, collision.0.as_ref());
     body.time += dt;
     for e in &events {
         log.line(format!("player: t={:.2} {e:?}", body.time));

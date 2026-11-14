@@ -148,7 +148,7 @@ fn hurt(script: &mut LevelScript, export: usize, amount: f32, by: &str, log: &Ga
 /// Hurt every standing breakable prop a blast at `point` (Unreal units)
 /// can see within `radius`, as `HurtRadius` does for characters.
 #[allow(clippy::too_many_arguments)]
-fn hurt_around(
+pub(crate) fn hurt_around(
     script: &mut LevelScript,
     parts: &LevelParts,
     level: Option<&LevelCollision>,
@@ -526,7 +526,7 @@ pub(crate) fn show(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
     use bevy::ecs::system::RunSystemOnce;
@@ -581,7 +581,7 @@ mod tests {
 
     /// A box of triangles from `lo` to `hi` (Unreal units), as a part's
     /// collision.
-    fn cube(lo: [f32; 3], hi: [f32; 3]) -> Vec<[[f32; 3]; 3]> {
+    pub(crate) fn cube(lo: [f32; 3], hi: [f32; 3]) -> Vec<[[f32; 3]; 3]> {
         let c = |i: usize| {
             [
                 if i & 1 == 0 { lo[0] } else { hi[0] },
@@ -666,6 +666,7 @@ mod tests {
         director.add_breakables(&list);
         w.insert_resource(LevelScript {
             shakes: Default::default(),
+            panel_states: Vec::new(),
             director,
             dispensers: vec![],
             hidden: Default::default(),

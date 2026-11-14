@@ -141,21 +141,43 @@ impl Pawn {
 
     /// Advance by `dt` seconds.
     pub fn step(&mut self, dt: f32, input: &MoveInput, world: &dyn World) -> Vec<Event> {
+        self.step_pushed(dt, input, None, world)
+    }
+
+    /// Advance by `dt` seconds, with `push` (Unreal units a second
+    /// squared, across the floor) as the acceleration in place of the
+    /// one the input's sticks would give: a script moving the body, as
+    /// the original's `PlayerMove` does by setting `NewAccel` itself
+    /// (`CTPlayer.UsingItem`).
+    pub fn step_pushed(
+        &mut self,
+        dt: f32,
+        input: &MoveInput,
+        push: Option<Vec3>,
+        world: &dyn World,
+    ) -> Vec<Event> {
         let mut events = Vec::new();
         let mut left = dt.max(0.0);
         while left > 1e-6 {
             let t = left.min(MAX_STEP);
-            self.sub_step(t, input, world, &mut events);
+            self.sub_step(t, input, push, world, &mut events);
             left -= t;
         }
         events
     }
 
-    fn sub_step(&mut self, dt: f32, input: &MoveInput, world: &dyn World, events: &mut Vec<Event>) {
+    fn sub_step(
+        &mut self,
+        dt: f32,
+        input: &MoveInput,
+        push: Option<Vec3>,
+        world: &dyn World,
+        events: &mut Vec<Event>,
+    ) {
         let old_z = self.location.z;
         let (fwd, right) = axes(input.yaw);
         let wish = (fwd * input.forward + right * input.strafe).clamp_length(1.0);
-        let accel = wish * self.params.accel_rate;
+        let accel = push.unwrap_or(wish * self.params.accel_rate);
 
         // Jump: only from the ground, not crouched, and once per key press.
         let jump_pressed = input.jump && !self.jump_was_down;

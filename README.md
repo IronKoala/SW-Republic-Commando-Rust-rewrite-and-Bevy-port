@@ -445,6 +445,17 @@ copy of the game.
   does (not yet seen or heard on Windows); the effect on your own body
   isn't done. Settings: `[bacta]` in
   `data/scripts/scripts.toml`, `[use_panel]` in `data/ui/hud.toml`.
+  Consoles, door locks and demolition charges can be used by the player
+  too, as in the original (since 2026-11-13; tested in the cloud, not yet
+  on Windows): aim at one you're allowed to use and its prompt, its
+  squad marker's icon in the ring and its clock ("00:10") show; hold Use
+  and you are walked into place and turned to it, the hands slice or set
+  the charge, and when the time is up the console is sliced, the door
+  opens or the charge is set. Aim at a set charge and press Use to push
+  the plunger. Letting go stops (consoles, slice locks and charges keep
+  their progress). Some items are for the squad only, as in the original
+  (geo_01b's entrance console and breach lock). See "The player uses
+  consoles, door locks and charges" in docs/DESIGN.md.
   Enemy spawners now follow the scripts too (tested in the cloud sandbox
   with the real files, not yet on Windows or by playing): the level's
   events switch them on and off, scripts can stop or refill them, and
